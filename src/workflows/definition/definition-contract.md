@@ -233,3 +233,27 @@ explicit configured project/task policy. Existing v1 preview and `EditedCandidat
 remain v1-only. Automatic GUI preparation from current edits, training and resume
 are not implemented. See the [preparation contract](../../tools/candidate_prepare/candidate-prepare-contract.md)
 and [console contract](../../tools/candidate_console/console-contract.md#reusable-capture-consumption).
+
+## Source-owned reusable native training
+
+Version 2 also admits the existing four-stage candidate graph when the document
+supplies sparse `training_settings` and exactly one managed
+`native-training.settings` external. Tuning consumes the same proposal and
+validation results through `validated-candidate-to-tuning`. Old declarations
+remain three-stage and retain their canonical bytes and semantic identities.
+
+Only `training_settings` accepts JSON-shaped dict/list literals. Keys must be
+literal unique strings; expansion, comprehensions, computed expressions,
+nonfinite numbers and executable constructors inside settings are refused before
+model construction. The native settings parser validates supplied controls,
+including the prohibition on explicit `require_probe_runner=False`. Omission,
+explicit null and supplied values remain distinct recursively. Frozen document
+objects do not freeze nested mappings; consumers revalidate at each boundary.
+
+The authored mapping does not acquire native defaults. Preparation reconciles
+its output restriction, inserting only `launch.allowed_output_types` when absent
+(including explicit null), and refuses conflicts. External `health_checks_config`
+is unsupported in reusable capture; task-composed Health and existing inline
+startup controls remain available. Native v1 external Health support is unchanged.
+Source validation does not load selected task plugins, bind runtime verifiers or
+discover hardware; importing native schemas can import torch.

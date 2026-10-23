@@ -1,13 +1,11 @@
 """Admit one fresh native training run before any candidate node is constructed."""
 
-import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.ordering import resolve_ordering
 from agent.schemas.proposal import ProposalInput
-from agent.utils.proposer_preflight import UNCONSTRAINED_TRAIN_PORTION, UNCONSTRAINED_TRIAL_PORTION
 from core.durable_io import publish_bytes_write_once
 from core.hardware_context import get_or_create as get_hardware_context
 from core.run_invariants import ensure_run_invariants
@@ -16,7 +14,11 @@ from execute_tools.dataset_config import DataScope
 from execute_tools.evaluation_execution import candidate_evaluation_executor
 from execute_tools.health_checks.launch_policy import validate_formal_launch
 from execute_tools.model_output_retention import require_local_output_inventory
-from workflows.candidate_training_settings import CandidateTrainingSettings
+from workflows.candidate_training_settings import (
+    CandidateTrainingSettings,
+    parse_training_settings,
+    proposal_training_values,
+)
 from workflows.constraint_disclosure import workflow_constraint_context
 from workflows.definition import ExternalSource, ProtocolRequest
 from workflows.llm_config import WorkflowLLMConfig
@@ -55,28 +57,10 @@ def reconcile_constraints(
 
 def reconcile_proposal(seed: ProposalInput, admitted: TrainingAdmission) -> ProposalInput:
     """Preserve explicit values, filling only omitted native launch facts."""
-    launch = admitted.settings.launch
     bindings = admitted.bindings
-    values = {
-        name: getattr(launch, name)
-        for name in (
-            "trial_time_budget_minutes",
-            "formal_time_budget_minutes",
-            "workflow_parameter_rules",
-            "sampling_seed",
-            "is_trial",
-            "allowed_output_types",
-            "baseline_isolation",
-        )
-    }
+    values = proposal_training_values(admitted.settings)
     values.update(
         data_scope=bindings.data_scope if bindings.data_scope is not None else DataScope.default(),
-        trial_portion=UNCONSTRAINED_TRIAL_PORTION
-        if launch.trial_portion is None
-        else launch.trial_portion,
-        train_portion=UNCONSTRAINED_TRAIN_PORTION
-        if launch.train_portion is None
-        else launch.train_portion,
         enable_structured_health_feedback=bindings.enable_structured_health_feedback,
         vram_budget_gb=bindings.active_vram_budget_gb,
     )
@@ -110,13 +94,7 @@ def admit_training(
     )
     control = Path(initial.workspace) / "candidate_run"
     payload = (control / f"input_{index:03}.snapshot").read_bytes()
-    settings = CandidateTrainingSettings.model_validate_json(payload)
-    # Dataclass omission remains distinguishable here: false cannot disable a real launch.
-    if (
-        "require_probe_runner" in json.loads(payload).get("launch", {})
-        and not settings.launch.require_probe_runner
-    ):
-        raise ValueError("require_probe_runner cannot be disabled for native training")
+    settings = parse_training_settings(payload)
     root = str((Path(request.preview.project_root) / definition.task.data_root).resolve())
     if settings.launch.data_dir is not None and Path(settings.launch.data_dir).resolve() != Path(
         root

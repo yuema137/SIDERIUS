@@ -675,14 +675,14 @@ def test_public_tune_routes_match_actual_native_tuner_input(training_request, tr
     assert route in training_request.selected_constructor_routes
 
 
-def test_four_stage_reusable_declaration_refuses(training_request):
-    """The existing reusable-preparation graph owner cannot admit training version 2."""
-    from workflows.definition.candidate import candidate_nodes
+def test_four_stage_reusable_requires_source_owned_settings(training_request):
+    """A v1 settings file cannot silently become a reusable source-owned input."""
+    from workflows.definition import ReusableWorkflowDocument
     from workflows.definition.models import ReusableWorkflowDefinition
 
     payload = training_request.preview.document.definition.model_dump(mode="json")
     payload["schema_version"] = 2
     payload["task"].pop("workspace")
     reusable = ReusableWorkflowDefinition.model_validate_json(json.dumps(payload))
-    with pytest.raises(ValueError, match="schema version 1"):
-        candidate_nodes(reusable)
+    with pytest.raises(ValueError, match="source-owned training_settings"):
+        ReusableWorkflowDocument(definition=reusable)

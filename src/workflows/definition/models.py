@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
 
 from agent.schemas.output_types import OutputTypeName
 
@@ -115,7 +115,7 @@ class ReusableTaskReferences(DeclarationModel):
 
 class ManagedCandidateBinding(DeclarationModel):
     id: Identifier
-    contract: Literal["proposal.input", "storage"]
+    contract: Literal["proposal.input", "storage", "native-training.settings"]
     kind: Literal["managed_candidate"] = "managed_candidate"
 
 
@@ -150,6 +150,47 @@ class ReusableWorkflowDocument(DeclarationModel):
     preparation_options: CandidatePreparationOptions = Field(
         default_factory=CandidatePreparationOptions
     )
+
+    training_settings: dict[str, JsonValue] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def validate_training(self) -> Self:
+        settings_bindings = [
+            item
+            for item in self.definition.externals
+            if item.contract == "native-training.settings"
+        ]
+        tuning = any(node.capability == "tuning" for node in self.definition.nodes)
+        if self.training_settings is None:
+            if settings_bindings or tuning:
+                raise ValueError("Reusable tuning requires source-owned training_settings")
+            return self
+        if (
+            not tuning
+            or len(settings_bindings) != 1
+            or not isinstance(settings_bindings[0], ManagedCandidateBinding)
+        ):
+            raise ValueError(
+                "training_settings requires one tuning node and managed settings binding"
+            )
+        from workflows.candidate_training_settings import (
+            effective_training_settings,
+            parse_training_settings,
+        )
+
+        from .candidate import candidate_nodes
+
+        candidate_nodes(self.definition)
+        settings = parse_training_settings(
+            effective_training_settings(
+                self.training_settings, self.preparation_options.allowed_output_types
+            )
+        )
+        if settings.health_checks_config is not None:
+            raise ValueError("Reusable training does not capture external health_checks_config")
+        return self
 
     @model_validator(mode="after")
     def validate_positions(self) -> Self:
