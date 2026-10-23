@@ -1,5 +1,6 @@
 """Claim a fresh workspace and delegate supervision to workspace_sandbox."""
 
+import os
 import sys
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -8,7 +9,6 @@ from pydantic import TypeAdapter
 
 from core.durable_io import publish_bytes_write_once
 from execute_tools.impl_attempts import impl_attempt_dir
-from tools.workflow_preview import preview_workflow
 from tools.workflow_preview.files import observe_file
 from tools.workspace_sandbox.profile import SandboxProfile
 from tools.workspace_sandbox.runner import ExecutionResult, run
@@ -16,6 +16,7 @@ from tools.workspace_sandbox.runner import ExecutionResult, run
 from .admission import admit_input_paths
 from .layout import candidate_proposal_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .preflight import fresh_preview, require_credentials
 
 
 def publish(path: Path, value: CandidateRunRequest | CandidateRunReceipt) -> None:
@@ -82,15 +83,9 @@ def launch_candidate(
         if invocation_id is None
         else TypeAdapter(UUID).validate_python(invocation_id, strict=True)
     )
-    observed = preview_workflow(request.preview)
+    observed = fresh_preview(request)
     definition = request.preview.document.definition
-    if request.declaration_digest != definition.declaration_digest():
-        raise ValueError("stale workflow declaration")
-    if (
-        request.files != observed.files
-        or request.selected_constructor_routes != observed.selected_constructor_routes
-    ):
-        raise ValueError("stale selected files or constructor routes")
+    require_credentials(observed.selected_constructor_routes, request.environment_names, os.environ)
     captures = []
     for expected in observed.files:
         actual, payload = observe_file(Path(expected.path), expected.reference)

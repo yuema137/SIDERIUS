@@ -28,13 +28,15 @@ pytestmark = pytest.mark.skipif(
 
 def test_native_http_flow_survives_console_exit(console_config, tmp_path):
     credentials = tmp_path / "credentials.json"
-    credentials.write_text('{"EXPLICIT_TEST_KEY":"bound-value"}')
+    credentials.write_text(
+        '{"EXPLICIT_TEST_KEY":"bound-value","OPENAI_API_KEY":"offline-test-key"}'
+    )
     credentials.chmod(0o600)
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     task = console_config.tasks[0].model_copy(
-        update={"candidate_environment_names": ("EXPLICIT_TEST_KEY",)}
+        update={"candidate_environment_names": ("EXPLICIT_TEST_KEY", "OPENAI_API_KEY")}
     )
     config = console_config.model_copy(
         update={

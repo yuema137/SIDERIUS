@@ -41,14 +41,16 @@ def test_stale_review_refused_before_workspace_claim(prepared, change):
 def test_competing_launches_have_one_writer(prepared, monkeypatch):
     """A lost mkdir claim must not overwrite the winner's snapshots or receipt."""
     barrier = Barrier(2)
-    real_preview = launch_module.preview_workflow
+    from tools.candidate_worker import preflight
+
+    real_preview = preflight.preview_workflow
 
     def together(request):
         result = real_preview(request)
         barrier.wait(timeout=10)
         return result
 
-    monkeypatch.setattr(launch_module, "preview_workflow", together)
+    monkeypatch.setattr(preflight, "preview_workflow", together)
     monkeypatch.setattr(
         launch_module,
         "run",
@@ -213,7 +215,9 @@ def test_interrupted_runner_preserves_partial_outputs_without_success(prepared, 
 
 def test_workspace_populated_after_preview_is_refused(prepared, monkeypatch):
     """A successful claim cannot bless content created after the preview check."""
-    real_preview = launch_module.preview_workflow
+    from tools.candidate_worker import preflight
+
+    real_preview = preflight.preview_workflow
 
     def changed(request):
         observed = real_preview(request)
@@ -222,7 +226,7 @@ def test_workspace_populated_after_preview_is_refused(prepared, monkeypatch):
         (workspace / "unexpected.txt").write_text("preserve me")
         return observed
 
-    monkeypatch.setattr(launch_module, "preview_workflow", changed)
+    monkeypatch.setattr(preflight, "preview_workflow", changed)
     monkeypatch.setattr(launch_module, "run", lambda *_: pytest.fail("must not execute"))
     receipt = launch_candidate(prepared)
     assert receipt.status == "failed"

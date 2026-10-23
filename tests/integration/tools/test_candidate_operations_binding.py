@@ -34,7 +34,9 @@ def test_competing_stores_bind_only_their_own_native_result(
     if kind == "candidate":
         submission = CandidateOperation(
             request_id=uuid4(),
-            request=prepared.model_copy(update={"environment_names": ("EXPLICIT_TEST_KEY",)}),
+            request=prepared.model_copy(
+                update={"environment_names": ("EXPLICIT_TEST_KEY", "OPENAI_API_KEY")}
+            ),
         )
         harness = native_submitter(tmp_path, Path(prepared.preview.project_root))
         command = [sys.executable, str(harness)]
@@ -59,7 +61,11 @@ def test_competing_stores_bind_only_their_own_native_result(
                     "--request",
                     str(request_file),
                 ],
-                env={**environment((), {}), "EXPLICIT_TEST_KEY": "bound-value"},
+                env={
+                    **environment((), {}),
+                    "EXPLICIT_TEST_KEY": "bound-value",
+                    "OPENAI_API_KEY": "offline-test-key",
+                },
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )

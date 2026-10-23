@@ -77,6 +77,16 @@ loss guarantee is added. Readers walk directories with `O_NOFOLLOW`, open only
 fixed names, reject nonregular files and decode at most 4 MiB of JSON. No arbitrary
 artifact path, tree listing or receipt-provided log path is accepted.
 
+New candidate submissions, after matching existing-ID lookup and store availability,
+use the native [shared preflight](../candidate_worker/candidate-worker-contract.md#credential-admission)
+to reobserve selected files/routes and check all declared environment bindings
+against the supplied mapping before record claim or spawn. The operation child
+rechecks at native launch across the asynchronous dispatch gap. Existing matching
+admissions return before either freshness or value checks, preserving observation
+when inputs change or credentials disappear. Store lock/directories may already
+exist on refusal; no new operation record, worker or native workspace is claimed.
+The existing environment filter remains the forwarding authority.
+
 ## Detached process and environment
 
 `process.spawn` executes this interpreter with fixed `-m
