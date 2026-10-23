@@ -67,11 +67,6 @@ def resolve_tuner_health_config_source(
     return operator_config
 
 
-# ---------------------------------------------------------------------------
-# L6c — Loss promotion to the global library
-# ---------------------------------------------------------------------------
-
-
 def workflow_lock_identity(
     launch: WorkflowLaunchConfig, llm_config: WorkflowLLMConfig
 ) -> LockLaunchIdentity:

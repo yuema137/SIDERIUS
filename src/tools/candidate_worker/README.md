@@ -69,10 +69,11 @@ checkout's frozen environment:
 
 The equivalent Python call is `launch_candidate(request)`. Inspect
 `<workspace>/candidate_run/receipt.json` and `worker.log`; the receipt identifies
-the three native output files and the native usage-ledger location. `accepted`
+the native output files and usage-ledger location. `accepted`
 and `rejected` both mean candidate validation completed, and the CLI exits zero
 for both. Check `validation_passed` before treating the candidate as accepted.
-Other terminal statuses exit nonzero. An absent terminal receipt means completion
+Four-stage `completed` also exits zero; it means the tuner returned. Failure,
+timeout and interruption exit nonzero. An absent terminal receipt means completion
 is unknown; the workspace is preserved and cannot be automatically replayed.
 
 You can read reported LLM tokens while or after a direct run, without an operation
