@@ -310,7 +310,7 @@ class TestDeferredScope:
         )
         # And the derivation is genuinely wired, not merely absent:
         assert "build_model_input" in body
-        assert "expected_output_shape" in body
+        assert "validate_model_output" in body
 
 
 # ---------------------------------------------------------------------------

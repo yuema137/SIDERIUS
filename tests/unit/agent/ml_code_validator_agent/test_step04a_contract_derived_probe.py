@@ -171,7 +171,7 @@ def test_the_same_candidate_is_rejected_under_the_tidmad_declaration(tmp_path):
     )
     assert inst_ok is False
     assert err is not None
-    assert "(1, 256, 64)" in err, f"the error does not name the declared shape: {err}"
+    assert "fixed extent 256" in err, f"the error does not name the declared extent: {err}"
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +238,6 @@ def test_continuous_contract_with_a_classifier_declaration_fails_closed(tmp_path
     )
     assert (inst_ok, grad_ok, otype_ok) == (False, False, False)
     assert err is not None
-    assert "Probe construction failed" in err
     assert "no class-alphabet axis" in err or "class cardinality" in err
 
     # The helper raises the typed error rather than returning a shape.

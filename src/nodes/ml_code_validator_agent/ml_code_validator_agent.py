@@ -69,7 +69,6 @@ from agent.skills.model_io_probe_skill import (
     build_model_input,
     candidate_probe_extent,
     declared_output_tensor,
-    expected_output_shape,
     probe_config_kwargs,
 )
 from core.generated_artifact_name import validate_generated_artifact_name
@@ -661,9 +660,6 @@ def _check_instantiation_and_gradient(
         probe_input = torch.randint(0, _LEGACY_CLASSIFIER_PROBE_CLASSES, (1, extent))
     else:
         try:
-            expected_shape = expected_output_shape(
-                model_io_contract, declared_type, symbolic=probe_extent
-            )
             probe_input = build_model_input(model_io_contract, symbolic=probe_extent)
         except ProbeConstructionError as e:
             return (
@@ -692,7 +688,14 @@ def _check_instantiation_and_gradient(
             realized_trainable,
         )
 
-    if tuple(out.shape) != expected_shape:
+    if model_io_contract is not None:
+        from agent.skills.model_output_geometry import validate_model_output
+
+        try:
+            validate_model_output(model_io_contract, declared_type, probe_input, out)
+        except ProbeConstructionError as exc:
+            return False, False, False, str(exc), realized_total, realized_trainable
+    elif tuple(out.shape) != expected_shape:
         return (
             False,
             False,

@@ -23,8 +23,6 @@ import ast
 import subprocess
 import sys
 
-import pytest
-
 from agent.schemas.model_io_contract import (
     AxisRole,
     Dimension,
@@ -33,10 +31,8 @@ from agent.schemas.model_io_contract import (
     TensorAxis,
     TensorContract,
 )
-from agent.skills.model_io_probe_skill import realize_shape
 from nodes.ml_model_implementor.ml_model_implementor import (
     _assemble_test,
-    _render_axis_extents,
 )
 
 
@@ -122,8 +118,6 @@ def test_generated_test_executes_against_a_tabular_float_plugin(tmp_path):
     model_name = "demo_tabular"
     test_src = _assemble_test(model_name, contract)
 
-    assert "torch.rand((2, 4))" in test_src
-    assert "(2, 2)" in test_src
     ast.parse(test_src)
 
     models = tmp_path / "models"
@@ -141,29 +135,20 @@ def test_generated_test_executes_against_a_tabular_float_plugin(tmp_path):
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
 
 
-def test_rank4_fixed_axes_render_literally():
-    """A ``[B,3,144,144]`` input renders its fixed axes as literals.
-
-    HOW THIS FAILS: collapse the renderer back to the 2-D legacy shape and
-    the rank-4 tuple disappears from the generated source.
-    """
-    src = _assemble_test("demo_img", _rank4_image_contract())
-    assert "torch.rand((2, 3, 144, 144))" in src
-    assert "torch.rand((1, 3, 144, 144))" in src
-
-
-@pytest.mark.parametrize("contract_fn", [_tabular_classifier_contract, _rank4_image_contract])
-def test_renderer_agrees_with_realize_shape(contract_fn):
-    """The source-code renderer and ``realize_shape`` realize ONE geometry.
-
-    The renderer deliberately mirrors ``realize_shape``'s three-rule per-axis
-    precedence; this test is what makes that mirroring a checked fact instead
-    of a docstring claim. HOW THIS FAILS: change either side's precedence
-    (e.g. batch-role before fixed) and the evaluated tuples diverge.
-    """
-    seg = 7
-    contract = contract_fn()
-    for tensor in (contract.input, contract.output):
-        rendered = _render_axis_extents(tensor, batch_literal=2)
-        evaluated = tuple(seg if e == "config.segmentation_size" else int(e) for e in rendered)
-        assert evaluated == realize_shape(tensor, batch=2, symbolic=seg)
+def test_rank4_fixed_axes_execute_with_the_declared_geometry(tmp_path):
+    """Generated tests must feed full image tensors, not legacy sequences."""
+    source = _TABULAR_PLUGIN.replace("Linear(4, 2)", "Linear(3, 37)").replace(
+        "return self.linear(x)",
+        "assert tuple(x.shape[1:]) == (3, 144, 144)\n"
+        "        return self.linear(x.mean(dim=(2, 3)))",
+    )
+    (tmp_path / "demo_img.py").write_text(source)
+    generated = tmp_path / "test_demo_img.py"
+    generated.write_text(_assemble_test("demo_img", _rank4_image_contract()))
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", str(generated), "-q"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

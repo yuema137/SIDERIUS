@@ -169,7 +169,7 @@ a failure diagnostic. Pytest retains its ordinary filesystem side effects.
   3. **Description valid** — `description.md` exists and has >50 chars.
   4. **Config fields scalar** — every value in `config_fields` is `int`, `float`, or `bool`.
   5. **Forbidden patterns** — AST scan rejects Python `for` / `while` loops over the time dimension inside `forward(...)`. Runs even when the plugin failed to import (catches static issues independent of importability).
-  6. **In-process instantiation** — build `PLUGIN_CONFIG_CLASS(**probe_config_kwargs(PLUGIN_CONFIG_CLASS))` + `PLUGIN_MODEL_CLASS(config)`, run a forward pass on a probe input and assert the output shape its declared contract requires. Both are built by `agent/skills/model_io_probe_skill.py` from `model_io_contract`: rank, axis order, class cardinality and input dtype are contract-owned, while the batch extent and the realization of a symbolic axis (`T = 64`) are Step-04 probe recipes and deliberately NOT task config.
+  6. **In-process instantiation** — build `PLUGIN_CONFIG_CLASS(**probe_config_kwargs(PLUGIN_CONFIG_CLASS, model_io_contract))` + `PLUGIN_MODEL_CLASS(config)`, run a forward pass on a probe input and assert the output shape its declared contract requires. Input construction uses `agent/skills/model_io_probe_skill.py`; observed output validation uses `agent/skills/model_output_geometry.py`. Fixed extents, rank, dtype, finiteness, batch consistency and shared symbols are enforced. Independent output symbols bind from the observed output, never the input recipe extent. Input fallback extents are probe recipes, not task configuration.
 
      The config kwargs come from that same recipe module (C12-P / F-12e-G1). **A generated config class may legitimately declare required fields**, so "`PLUGIN_CONFIG_CLASS()` must succeed with zero arguments" is not a valid generic invariant: since `ml_model_implementor` stopped inventing a `segmentation_size` default, a candidate whose baseline declared no size carries that field as REQUIRED, and check 6 used to reject it here with an opaque Pydantic string before the tuner could state the task's own named refusal. `probe_config_kwargs` returns `{}` for every candidate that declares its own defaults — byte-identical to the previous call — and supplies the probe's symbolic extent only for a framework-template field the class declares required. This node deliberately knows nothing about *which* fields those are: it asks the shared authority and splats. Re-spelling the rule here would recreate the implementor/validator divergence that recipe module exists to prevent.
   7. **Gradient flow** — `loss.backward()` succeeds + all trainable parameters have non-`None` `.grad`.
@@ -196,15 +196,17 @@ An optional task-owned input provider supplies semantically valid synthetic
 inputs to the implementor, generated tests and validator. See the
 [task-owned probe contract](../../agent/skills/task_model_probe.md) for declaration,
 identity transport and setup-error handling. Without that capability, existing
-random-input recipes remain unchanged.
+generic input construction applies.
 
 The shared `model_io_probe_skill` owns probe geometry. Temporal
 candidates are checked at their validated `segmentation_size`; required lengths
 use the fixed input contract when one exists. A fixed contract/config conflict
 is reported explicitly before the model forward pass. The synthetic length 64
 is only a fallback when no length is declared, never a requirement that every
-model support length 64. Config, input and expected output use the same extent.
-Non-temporal contracts retain their own geometry. The check does not change
+model support length 64. Config and synthetic input share that extent. Output validation binds shared
+symbols from the observed input and independent symbols from the observed output
+through `model_output_geometry`; it does not assign the input extent to unrelated
+output dimensions. Non-temporal contracts retain their own geometry. The check does not change
 training configuration or certify model quality.
 
 ## Native training lifecycle boundary

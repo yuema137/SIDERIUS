@@ -1,0 +1,52 @@
+"""Render candidate self-tests using the same probe owners as live validation."""
+
+from agent.schemas.model_io_contract import ModelIOContract
+
+
+def render_model_probe_test(model_name: str, contract: ModelIOContract) -> str:
+    """Serialize the declared contract, never a guessed concrete output shape."""
+    return f"""import os
+import sys
+import torch
+
+from agent.schemas.model_io_contract import ModelIOContract
+from agent.skills.model_io_probe_skill import (
+    build_model_input, candidate_probe_extent, probe_config_kwargs,
+)
+from agent.skills.model_output_geometry import validate_model_output
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "models"))
+from {model_name} import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS, PLUGIN_OUTPUT_TYPE
+
+CONTRACT = ModelIOContract.model_validate_json({contract.model_dump_json()!r})
+
+
+def _config():
+    return PLUGIN_CONFIG_CLASS(**probe_config_kwargs(PLUGIN_CONFIG_CLASS, CONTRACT))
+
+
+def test_forward_shape():
+    config = _config()
+    model = PLUGIN_MODEL_CLASS(config)
+    model.eval()
+    for batch in (1, 2):
+        x = build_model_input(CONTRACT, batch=batch,
+                              symbolic=candidate_probe_extent(config, CONTRACT))
+        with torch.no_grad():
+            out = model(x)
+        validate_model_output(CONTRACT, PLUGIN_OUTPUT_TYPE, x, out)
+
+
+def test_forward_gradient():
+    config = _config()
+    model = PLUGIN_MODEL_CLASS(config)
+    model.train()
+    x = build_model_input(CONTRACT, symbolic=candidate_probe_extent(config, CONTRACT))
+    out = model(x)
+    validate_model_output(CONTRACT, PLUGIN_OUTPUT_TYPE, x, out)
+    out.sum().backward()
+
+
+def test_config_instantiation():
+    _config()
+"""

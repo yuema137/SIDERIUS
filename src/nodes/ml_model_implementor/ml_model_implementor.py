@@ -51,8 +51,6 @@ from agent.skills.model_io_probe_skill import (
     build_model_input,
     candidate_probe_extent,
     declared_output_tensor,
-    expected_output_shape,
-    input_index_extent,
     probe_config_kwargs,
 )
 from core.capability_registry import (
@@ -264,13 +262,18 @@ def _smoke_test_plugin(
             expected = (1, _LEGACY_SELF_CHECK_CLASSES, T) if declared == "classifier" else (1, T)
         else:
             try:
-                expected = expected_output_shape(model_io_contract, declared, symbolic=probe_extent)
                 x = build_model_input(model_io_contract, symbolic=probe_extent)
             except ProbeConstructionError as exc:
                 return f"Self-check could not be constructed from the task contract: {exc}"
 
         with torch.no_grad():
             out = model(x)
+
+        if model_io_contract is not None:
+            from agent.skills.model_output_geometry import validate_model_output
+
+            validate_model_output(model_io_contract, declared, x, out)
+            return None
 
         if tuple(out.shape) != tuple(expected):
             return (
@@ -1636,92 +1639,6 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     )
 
 
-def _render_axis_extents(tensor, batch_literal: int) -> list[str]:
-    """Render each axis of a tensor contract as a SOURCE-CODE extent.
-
-    arXiv F-S5-LIVE-2. This mirrors ``model_io_probe_skill.realize_shape``'s
-    per-axis precedence EXACTLY — (1) a ``fixed`` extent is a declared fact,
-    rendered as its literal; (2) a batch-role axis is the probe batch,
-    rendered as the given literal; (3) anything else is symbolic, rendered as
-    the plugin's own runtime knob ``config.segmentation_size`` (the legacy
-    template's semantics for ``T``, kept because the generated test runs
-    against the CANDIDATE's config, not a recipe constant). The agreement is
-    not left to prose: a test evaluates these expressions and compares them
-    against ``realize_shape`` itself.
-    """
-    from agent.schemas.model_io_contract import AxisRole
-
-    out: list[str] = []
-    for axis in tensor.axes:
-        if axis.dimension.fixed is not None:
-            out.append(str(int(axis.dimension.fixed)))
-        elif axis.role == AxisRole.BATCH:
-            out.append(str(int(batch_literal)))
-        else:
-            out.append("config.segmentation_size")
-    return out
-
-
-def _render_shape_tuple(extents: list[str]) -> str:
-    """A Python tuple expression for the rendered extents (rank-1 safe)."""
-    if len(extents) == 1:
-        return f"({extents[0]},)"
-    return f"({', '.join(extents)})"
-
-
-def _render_test_input_expr(
-    model_io_contract: ModelIOContract, index_extent: int, batch_literal: int
-) -> str:
-    """The generated test's input-construction EXPRESSION, from the contract.
-
-    arXiv F-S5-LIVE-2 — the live quickstart witness proved the hardcoded
-    legacy form (``torch.randint(0, C, (2, config.segmentation_size))``)
-    deterministically fails every correct candidate of a non-legacy
-    ``model_io`` task (``mat1 and mat2 must have the same dtype, but got
-    Long and Float``), while the validator's direct probe was already
-    contract-aware. The dtype comes from the SAME Step-03 authority the
-    probe skill uses. ``int64`` renders without an explicit ``dtype=`` so
-    the TIDMAD generated test retains its established form (the §15.1 row-1
-    and C0 byte-baseline tests pin that rendering).
-    """
-    from execute_tools.model_input_dtype import resolve_contract_input_dtype
-
-    shape = _render_shape_tuple(_render_axis_extents(model_io_contract.input, batch_literal))
-    dtype = resolve_contract_input_dtype(model_io_contract.input.dtype)
-    name = str(dtype).removeprefix("torch.")
-    if name.startswith("int"):
-        if name == "int64":
-            return f"torch.randint(0, {index_extent}, {shape})"
-        return f"torch.randint(0, {index_extent}, {shape}, dtype=torch.{name})"
-    if name == "float32":
-        return f"torch.rand({shape})"
-    return f"torch.rand({shape}, dtype=torch.{name})"
-
-
-def _render_expected_output_exprs(model_io_contract: ModelIOContract) -> tuple[str, str]:
-    """The generated test's expected-shape expressions (classifier, else).
-
-    Rendered from ``declared_output_tensor`` — the SAME authority the
-    validator's in-process probe judges shapes with — so the generated test
-    and the validator cannot disagree about what a correct candidate emits.
-    A contract with no class alphabet has an unreachable classifier branch
-    (``_render_output_contract`` refuses classifier plugins there); it
-    renders as the else expression so the file stays valid Python.
-    """
-    from agent.skills.model_io_probe_skill import declared_output_tensor
-
-    else_expr = _render_shape_tuple(
-        _render_axis_extents(declared_output_tensor(model_io_contract, "regressor"), 2)
-    )
-    try:
-        classifier_expr = _render_shape_tuple(
-            _render_axis_extents(declared_output_tensor(model_io_contract, "classifier"), 2)
-        )
-    except Exception:
-        classifier_expr = else_expr
-    return classifier_expr, else_expr
-
-
 def _assemble_test(
     model_name: str,
     model_io_contract: ModelIOContract | None = None,
@@ -1729,33 +1646,12 @@ def _assemble_test(
     config_declares_segmentation_size: bool = True,
     model_probe_context: ModelProbeContext | None = None,
 ) -> str:
-    """Render the candidate's own test file.
+    """Render self-tests through the shared output-contract validator.
 
-    Step 04a: the class count and the index range the generated test uses are
-    rendered from the task's Model-I/O contract instead of being fixed at 256.
-    Without a contract the shipped text is reproduced exactly (§15.1 row 1).
-
-    arXiv F-S5-LIVE-2 extends the same rule to the test's GEOMETRY: the input
-    tensor expression and both expected-shape expressions are rendered from
-    the contract, through the probe skill's own authorities. The legacy
-    (``None``) path fills the placeholders with the shipped literals, and the
-    shipped TIDMAD contract renders those SAME bytes — both facts are pinned
-    (the C0 golden and the legacy==tidmad parity test).
-
-    ``index_extent`` and ``num_classes`` differ only for a task that declares
-    no class alphabet: there the classifier branch of the generated test is
-    unreachable, because ``_render_output_contract`` has already refused to
-    assemble a classifier plugin under such a contract.
-
-    Args:
-        config_declares_segmentation_size: whether the assembled plugin's
-            config class carries a ``segmentation_size`` DEFAULT. C12-P /
-            F-12e-G1: a candidate whose baseline declared no size gets a
-            required field instead of an invented default, and the generated
-            test — which ``ml_code_validator_agent`` actually runs under
-            pytest — must therefore state the probe size it wants rather than
-            construct "with defaults" that no longer exist. ``True`` renders
-            ``PLUGIN_CONFIG_CLASS()`` byte-for-byte as before.
+    Task-owned contexts use their fixture and bounded worker where declared.
+    Contract-aware generic tests serialize the contract and validate observed
+    outputs; they never render independent symbols as segmentation_size.
+    Only the absent-contract path retains the legacy literal template.
     """
     if model_probe_context is not None:
         from agent.skills.task_model_validation import render_task_model_test
@@ -1763,18 +1659,16 @@ def _assemble_test(
         if model_io_contract is None:
             raise ModelProbeSetupError("task-owned generated tests require a model I/O contract")
         return render_task_model_test(model_name, model_io_contract, model_probe_context)
-    if model_io_contract is None:
-        index_extent = _LEGACY_SELF_CHECK_CLASSES
-        num_classes = _LEGACY_SELF_CHECK_CLASSES
-        input_expr_b2 = f"torch.randint(0, {index_extent}, (2, config.segmentation_size))"
-        input_expr_b1 = f"torch.randint(0, {index_extent}, (1, config.segmentation_size))"
-        expected_classifier = f"(2, {num_classes}, config.segmentation_size)"
-        expected_else = "(2, config.segmentation_size)"
-    else:
-        index_extent = input_index_extent(model_io_contract)
-        input_expr_b2 = _render_test_input_expr(model_io_contract, index_extent, 2)
-        input_expr_b1 = _render_test_input_expr(model_io_contract, index_extent, 1)
-        expected_classifier, expected_else = _render_expected_output_exprs(model_io_contract)
+    if model_io_contract is not None:
+        from agent.skills.model_probe_test import render_model_probe_test
+
+        return render_model_probe_test(model_name, model_io_contract)
+    index_extent = _LEGACY_SELF_CHECK_CLASSES
+    num_classes = _LEGACY_SELF_CHECK_CLASSES
+    input_expr_b2 = f"torch.randint(0, {index_extent}, (2, config.segmentation_size))"
+    input_expr_b1 = f"torch.randint(0, {index_extent}, (1, config.segmentation_size))"
+    expected_classifier = f"(2, {num_classes}, config.segmentation_size)"
+    expected_else = "(2, config.segmentation_size)"
     # Rendered from the SAME table `probe_config_kwargs` supplies from, so the
     # source text this node writes into the candidate's test file cannot drift
     # from the kwargs the two in-process probes actually pass. (C12-P /

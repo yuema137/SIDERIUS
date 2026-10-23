@@ -27,18 +27,15 @@ def _validate_binding(contract: ModelIOContract, declaration: ModelProbeContract
         return
     axes = [
         axis
-        for tensor in (contract.input, contract.output)
-        for axis in tensor.axes
+        for axis in contract.input.axes
         if axis.role != AxisRole.BATCH and axis.dimension.fixed is None
     ]
     symbols = {axis.dimension.symbolic for axis in axes}
     if len(symbols) != 1 or None in symbols:
         raise ModelProbeSetupError(
-            "symbolic_extent_config_field requires exactly one shared non-batch symbolic "
+            "symbolic_extent_config_field requires exactly one input non-batch symbolic "
             "dimension and no dynamic axes; fixed dimensions are never overridden"
         )
-    if not any(axis.dimension.symbolic in symbols for axis in contract.input.axes):
-        raise ModelProbeSetupError("probe symbolic extent must occur in the input contract")
 
 
 def resolve_probe_declaration(

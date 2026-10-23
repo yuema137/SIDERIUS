@@ -160,7 +160,8 @@ class TestRung65A:
         assert varied["probe_index_extent"] == 16
         assert varied["plugin_forward_comment"].endswith("output [B, 16, T] float32")
         assert varied["plugin_output_comment"] == "[B, 16, T] → 16-class classification"
-        assert "(2, 16, config.segmentation_size)" in varied["generated_test"]
+        # Generated execution with this cardinality is covered by
+        # test_the_generated_test_executes_against_a_16_class_plugin.
         assert '"classifier" must emit [B, 16, T]' in varied["review_prompt"]
 
     def test_the_unvaried_consumers_are_unchanged(self):

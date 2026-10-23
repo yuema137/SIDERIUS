@@ -76,8 +76,6 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
 )
 from agent.skills.model_io_probe_skill import (
     build_model_input,
-    declared_output_tensor,
-    output_without_class_axis,
     realize_shape,
 )
 from agent.skills.training_skill.estimator import (
@@ -314,11 +312,10 @@ def _contract_target_shape(
         # `hybrid`, or a value the shipped projection does not recognise:
         # no canonical tensor semantic, so no contract-owned fact to derive.
         return None
-    return realize_shape(
-        declared_output_tensor(model_io_contract, declared_output_type),
-        batch=batch_size,
-        symbolic=seg_size,
-    )
+    from agent.skills.model_output_geometry import resolve_output_shape
+
+    input_shape = realize_shape(model_io_contract.input, batch=batch_size, symbolic=seg_size)
+    return resolve_output_shape(model_io_contract, declared_output_type, input_shape)
 
 
 def _probe_input_tensor(
@@ -359,9 +356,10 @@ def _class_index_target_tensor(
     before Step 05b — legacy, byte-identical, untouched.
     """
     if model_io_contract is not None:
-        shape = realize_shape(
-            output_without_class_axis(model_io_contract), batch=batch_size, symbolic=seg_size
-        )
+        from agent.skills.model_output_geometry import resolve_output_shape
+
+        input_shape = realize_shape(model_io_contract.input, batch=batch_size, symbolic=seg_size)
+        shape = resolve_output_shape(model_io_contract, "regressor", input_shape)
         return torch.zeros(shape, dtype=torch.long)
     return torch.zeros((batch_size, seg_size), dtype=torch.long)
 

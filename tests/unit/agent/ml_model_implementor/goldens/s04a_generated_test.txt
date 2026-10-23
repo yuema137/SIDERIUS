@@ -1,41 +1,44 @@
-import torch
-import pytest
-import sys
 import os
+import sys
+import torch
+
+from agent.schemas.model_io_contract import ModelIOContract
+from agent.skills.model_io_probe_skill import (
+    build_model_input, candidate_probe_extent, probe_config_kwargs,
+)
+from agent.skills.model_output_geometry import validate_model_output
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "models"))
 from s04a_baseline_classifier import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS, PLUGIN_OUTPUT_TYPE
 
+CONTRACT = ModelIOContract.model_validate_json('{"input":{"axes":[{"dimension":{"fixed":null,"symbolic":"B","dynamic":false},"role":"batch"},{"dimension":{"fixed":null,"symbolic":"T","dynamic":false},"role":"temporal"}],"dtype":{"admissible":["int64","int32"]}},"output":{"axes":[{"dimension":{"fixed":null,"symbolic":"B","dynamic":false},"role":"batch"},{"dimension":{"fixed":7,"symbolic":null,"dynamic":false},"role":"class"},{"dimension":{"fixed":null,"symbolic":"T","dynamic":false},"role":"temporal"}],"dtype":{"admissible":["float32"]}}}')
+
+
+def _config():
+    return PLUGIN_CONFIG_CLASS(**probe_config_kwargs(PLUGIN_CONFIG_CLASS, CONTRACT))
+
 
 def test_forward_shape():
-    config = PLUGIN_CONFIG_CLASS()
+    config = _config()
     model = PLUGIN_MODEL_CLASS(config)
     model.eval()
-    x = torch.randint(0, 7, (2, config.segmentation_size))
-    with torch.no_grad():
-        out = model(x)
-    # Expected shape follows the plugin's DECLARED contract, so a regressor
-    # is not judged against the classifier shape (V21 PR A3). The class count
-    # is rendered from the task's Model-I/O contract (Step 04a), not fixed.
-    expected = (
-        (2, 7, config.segmentation_size)
-        if PLUGIN_OUTPUT_TYPE == "classifier"
-        else (2, config.segmentation_size)
-    )
-    assert out.shape == expected, f"Expected {expected}, got {out.shape}"
+    for batch in (1, 2):
+        x = build_model_input(CONTRACT, batch=batch,
+                              symbolic=candidate_probe_extent(config, CONTRACT))
+        with torch.no_grad():
+            out = model(x)
+        validate_model_output(CONTRACT, PLUGIN_OUTPUT_TYPE, x, out)
 
 
-def test_forward_no_nan():
-    config = PLUGIN_CONFIG_CLASS()
+def test_forward_gradient():
+    config = _config()
     model = PLUGIN_MODEL_CLASS(config)
-    model.eval()
-    x = torch.randint(0, 7, (1, config.segmentation_size))
-    with torch.no_grad():
-        out = model(x)
-    assert not torch.isnan(out).any(), "Forward pass produced NaN values"
+    model.train()
+    x = build_model_input(CONTRACT, symbolic=candidate_probe_extent(config, CONTRACT))
+    out = model(x)
+    validate_model_output(CONTRACT, PLUGIN_OUTPUT_TYPE, x, out)
+    out.sum().backward()
 
 
 def test_config_instantiation():
-    config = PLUGIN_CONFIG_CLASS()
-    assert config.segmentation_size > 0
-    assert config.batch_size >= 1
+    _config()

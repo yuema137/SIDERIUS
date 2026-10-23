@@ -64,8 +64,10 @@ not override tensor contracts or authorize arbitrary model dimensions.
 The implementor smoke check, generated pytest and direct/isolated validator
 checks share the same provider and geometry selection. Smoke uses evaluation
 mode without gradients; validator/generated pytest use training mode and require
-a successful backward pass. Finite output and the expected output shape are
-required. These checks do not certify model quality or resource suitability.
+a successful backward pass. Finite output, admissible output dtype and declared output geometry are
+required. `model_output_geometry` binds shared symbols from each actual input
+and independent output symbols from each observed output; synthetic input
+extents never constrain independent output axes. These checks do not certify model quality or resource suitability.
 
 `ModelProbeSetupError` identifies provider, declaration or source-identity
 failures. It escapes model repair and validator LLM review, bypasses proposal

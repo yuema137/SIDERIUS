@@ -151,8 +151,6 @@ def test_the_generated_test_executes_against_a_16_class_plugin(tmp_path):
     plugin_src = _assemble_plugin(inp, _SIXTEEN_CLASS_CODE)
     test_src = _assemble_test(model_name, tidmad_model_io(num_classes=16))
 
-    assert "(2, 16, config.segmentation_size)" in test_src
-    assert "torch.randint(0, 16," in test_src
     ast.parse(test_src)
 
     (tmp_path / f"{model_name}.py").write_text(plugin_src)
@@ -216,7 +214,7 @@ def test_the_self_check_reports_an_unrealizable_contract_as_an_error(tmp_path):
 
     error = _smoke_test_plugin(plugin_src, inp.model_name, regressor_model_io())
     assert error is not None
-    assert "task contract" in error
+    assert "Refusing to guess" in error
 
 
 def test_tidmad_self_check_is_unchanged_between_the_two_paths(tmp_path):
