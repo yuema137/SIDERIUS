@@ -171,3 +171,23 @@ prepare→explicit candidate→fresh CLI receipt/log reachability, using a test-
 fake provider and actual generated CPU validation. Those tests qualify plumbing,
 not real LLM behavior, GPU, training or scientific outcomes. Existing paper,
 workflow, prompt, task and experiment defaults are unchanged.
+
+## Prepared request accessor
+
+`read_prepared_candidate(config, operation_id) -> PreparedCandidate` is the public
+read-only bridge for callers that need to review or launch an existing preparation.
+It requires a verified `prepared` receipt through `read_operation`, loads the saved
+`CandidatePreparationRequest`, and returns that request alongside the candidate
+request, raw candidate-file SHA256, native preparation UUID, receipt SHA256 and
+composition fingerprint. It derives fixed paths from the saved request, never
+accepts a receipt-supplied arbitrary file path, and uses bounded no-follow reads.
+
+The native preparation bundle verifier checks control/index identity, fixed file
+observations, profile bytes, supported declaration, fresh selected bindings/routes
+and complete candidate request equality. Original selected manifest/profile bytes
+must still match their captured observations. Changed candidate advice/declaration,
+foreign bundle substitution and symlink aliases refuse. The accessor neither
+publishes files nor requires the candidate workspace to remain empty. It does not
+claim complete arbitrary code/dependency immutability or execution readiness.
+Console task authorization is a separate consumer policy, not an operation-store
+rule; known-ID native monitoring does not require a console task choice.
