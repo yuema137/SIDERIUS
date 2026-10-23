@@ -423,3 +423,50 @@ Tokens are not applicable for both preparation variants, after integrity checks.
 Old prepare/candidate serialized records and request digests are unchanged by this
 variant. New reusable top receipts carry the invocation UUID; legacy receipts omit
 only that new field when absent, preserving all historical null fields.
+
+## Captured native chain operation
+
+`NativeChainOperation(kind="native_chain")` carries an A-owned capture path and
+SHA-256, an explicitly created empty envelope, read-only roots, network/devices,
+environment names, timeout and read bounds. Candidate roots also allowlist chain
+envelopes. The capture's workspace must be exactly `envelope/workspace`, absent
+until native shell admission; neither operation review nor claim creates it.
+Capture/pin bytes use A's reader and its exact captured limit, at most 16 MiB.
+Operation JSON remains limited to 4 MiB. Observation controls explicitly bound
+indices to 1000 and evidence to 1 MiB; they introduce no scientific defaults.
+
+`review --store-config FILE --request FILE` returns a typed admission without
+claiming or launching. Submit repeats review after existing-ID recovery. Review
+uses the exact interpreter and a subprocess cwd to invoke A's real `check admit`;
+server cwd is unchanged. Full resolved native routes use existing credential
+policy, including interpretation and tuning. Only names/requirements persist.
+Captured settings are not rewritten into a candidate loop or another scheduler.
+The native shell remains the sole scheduler. Capture source/config/package edits
+may refuse admission or a subsequent native iteration; capture is not portable
+snapshot replay.
+
+Each stored chain admission retains workspace, final index, run name, recipe,
+input digests and exact checkout/Git metadata directories. The detached child
+compares a fresh admission, exclusively creates `.native-chain-operation` in the
+empty envelope, verifies its identity and dispatches the original captured shell
+with exact capture controls. Claim collisions refuse before dispatch; partial
+claims are never reused or removed. Original files and linked-worktree Git
+metadata are mounted read-only at original paths. The envelope is the only
+writable project mount; the host operation store is never mounted. Git alternates
+and GIT_* environment injection are unsupported. Missing sandbox support has no
+unsandboxed fallback.
+
+`run_observed` adds supervision evidence without changing legacy `run`: actual
+shell result, shared-owner group cleanup and direct-child reaping. Only a proven
+pre-spawn failure is safe pre-dispatch failure; post-spawn exceptions are unknown.
+A sampled present/unknown group remains unresolved even if it exits later.
+The private host `native-chain-terminal.json` is bound by Completion. It is not a
+scientific receipt: `receipt_available` stays false. Terminal identity, proven
+cleanup and wrapper exit govern release, separately from scientific evidence.
+Missing/modified host terminal or contradictory pre-dispatch completion blocks
+release. Failed/timeout shell outcomes remain visible even when lifecycle finishes.
+Both log kinds read the inherited private operation log for this kind. Token
+aggregation returns a typed `not_supported` error. Same UUID recovery reads only
+stored identity and evidence, even after original capture deletion and key loss.
+No resume, cancellation, GUI launch, token aggregation or scientific qualification
+is added by this code-consumer boundary.

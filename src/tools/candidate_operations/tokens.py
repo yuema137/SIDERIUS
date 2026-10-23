@@ -26,6 +26,8 @@ def read_operation_tokens(
     if snapshot.reason == "integrity_failure":
         raise OperationFailure("integrity", "operation evidence could not be verified")
     record = load_record(config, operation_id)
+    if record.submission.kind == "native_chain":
+        raise OperationFailure("not_supported", "native chain token aggregation is not supported")
     if record.submission.kind == "prepare" or record.submission.kind == "prepare_reusable":
         return CandidateTokenSnapshot(
             observed_at=snapshot.observed_at,

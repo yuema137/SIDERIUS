@@ -63,6 +63,8 @@ def validate_config(config: OperationStoreConfig) -> OperationStoreConfig:
 
 
 def native_directory(submission: OperationSubmission) -> Path:
+    if submission.kind == "native_chain":
+        raise OperationFailure("kind", "chain has no native receipt directory")
     if submission.kind == "prepare":
         return canonical(submission.request.output_dir) / "preparation"
     if submission.kind == "prepare_reusable":
@@ -89,7 +91,14 @@ def validate_submission(
 ) -> OperationSubmission:
     submission = SUBMISSION.validate_json(SUBMISSION.dump_json(submission))
     state = canonical(config.state_root)
-    if submission.kind == "prepare":
+    if submission.kind == "native_chain":
+        request = submission.request
+        SandboxProfile.environment_keys(request.environment_names)
+        if any(name.startswith("GIT_") for name in request.environment_names):
+            raise OperationFailure("environment", "Git environment overrides are unsupported")
+        outputs = ((canonical(request.envelope), config.candidate_roots),)
+        inputs = (request.capture_path, *request.read_only)
+    elif submission.kind == "prepare":
         request = submission.request
         SandboxProfile.environment_keys(request.candidate_environment_names)
         outputs = (

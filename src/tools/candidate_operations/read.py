@@ -28,6 +28,7 @@ from .models import (
     ReusablePreparationExpectation,
     SpawnFailure,
 )
+from .native_chain_read import read_native_chain_operation
 from .process import observe
 from .store import load_record, native_directory, now, operation_path, validate_config
 
@@ -49,6 +50,8 @@ def bound(record: OperationRecord, marker: ProcessIdentity | Completion | SpawnF
 
 def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
     submission = record.submission
+    if submission.kind == "native_chain":
+        raise OperationFailure("kind", "chain has no native scientific receipt")
     if submission.kind == "prepare_reusable":
         return read_reusable_terminal(
             submission.request,
@@ -116,6 +119,8 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
                 process=process,
                 reason="spawn_failed",
             )
+        if record.submission.kind == "native_chain":
+            return read_native_chain_operation(record, process, completion)
         native = native_receipt(record)
         if (
             completion is not None

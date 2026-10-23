@@ -1,6 +1,7 @@
 """Public durable admission and one detached dispatch; never replay an existing ID."""
 
 import hashlib
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 from uuid import uuid4
@@ -23,6 +24,8 @@ from .models import (
     ReusablePreparationExpectation,
     SpawnFailure,
 )
+from .native_chain import review_native_chain_operation
+from .native_chain_models import NativeChainAdmission
 from .process import environment, runtime_identity, spawn
 from .read import releasable
 from .reusable import verify_reusable_operation
@@ -62,8 +65,13 @@ def capture_inputs(
 
 
 def _admitted_inputs(
-    config: OperationStoreConfig, submission: OperationSubmission
+    config: OperationStoreConfig,
+    submission: OperationSubmission,
+    chain_admission: NativeChainAdmission | None = None,
 ) -> tuple[FileObservation, ...]:
+    if submission.kind == "native_chain":
+        assert chain_admission is not None
+        return chain_admission.input_files
     if submission.kind != "prepare_reusable":
         return capture_inputs(submission)
     try:
@@ -126,7 +134,23 @@ def submit_operation(
             except ValueError as error:
                 # This boundary emits only names from the candidate credential policy.
                 raise OperationFailure("credentials", str(error)) from error
-        names = submission.request.environment_names if submission.kind == "candidate" else ()
+        chain_admission = None
+        if submission.kind == "native_chain":
+            try:
+                chain_admission = review_native_chain_operation(
+                    config,
+                    submission,
+                    launch_environment=launch_environment,
+                )
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                raise OperationFailure(
+                    "native_chain_admission", "native chain capture or launch binding refused"
+                ) from error
+        names = (
+            submission.request.environment_names
+            if submission.kind == "candidate" or submission.kind == "native_chain"
+            else ()
+        )
         env = environment(names, launch_environment)
         record = OperationRecord(
             native_id=uuid4(),
@@ -134,7 +158,8 @@ def submit_operation(
             request_digest=digest(submission),
             config=config,
             runtime=runtime_identity(),
-            inputs=_admitted_inputs(config, submission),
+            inputs=_admitted_inputs(config, submission, chain_admission),
+            native_chain_admission=chain_admission,
             admitted_at=now(),
         )
         compare_reusable_expectation(record, expected_reusable_inputs)
