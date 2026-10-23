@@ -139,6 +139,7 @@ try {
   await rename(metadata.source + '.saved', metadata.source); await rename(metadata.credential + '.saved', metadata.credential);
   await page.locator('nav a[href="#workflow"]').click(); await page.locator('#capture-check').click();
   await page.locator('#capture-finish').waitFor(); await page.locator('#capture-finish').click();
+  await page.locator('#capture-task').selectOption('synthetic');
   await page.locator('#capture-refresh').click(); await open(metadata.captures[1]);
   assert.match(await page.locator('#capture-source').textContent(), /differs/);
   await page.screenshot({path: join(evidence, 'capture-review.png'), fullPage: true});
