@@ -14,7 +14,7 @@
   };
   const projection = () => Object.freeze({projectId: project, candidateEnabled,
     savedSha256: base?.sha256 || null, dirty: pending, sourceDirty,
-    sourceAvailable, conflict: !!conflict});
+    sourceAvailable, reusableSource: base?.document?.definition?.schema_version === 2, saving, conflict: !!conflict});
   window.workflowEditor = Object.freeze({get state() { return projection(); }});
   function controls() {
     window.dispatchEvent(new CustomEvent('workflow-editor-state', {detail: projection()}));

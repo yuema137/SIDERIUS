@@ -166,3 +166,51 @@ def test_recovery_rejects_changed_run_metadata(fresh, monkeypatch):
         )
         with pytest.raises(OperationFailure, match="retained selection"):
             adapter.prepare("fresh", changed)
+
+
+def test_source_task_escape_refused_before_content_reader(fresh, monkeypatch):
+    import hashlib
+
+    from workflows.definition import (
+        ReusableWorkflowDocument,
+        parse_workflow_source,
+        render_workflow_source,
+    )
+
+    adapter, selection, project = fresh
+    document = parse_workflow_source(project.source_file.read_text()).model_dump()
+    forbidden = project.project_root / "unconfigured.yaml"
+    forbidden.write_text("not authorized to read this content")
+    document["definition"]["task"]["manifest"] = str(forbidden)
+    project.source_file.write_text(
+        render_workflow_source(ReusableWorkflowDocument.model_validate(document))
+    )
+    changed = selection.model_copy(
+        update={
+            "expected_source_sha256": hashlib.sha256(project.source_file.read_bytes()).hexdigest()
+        }
+    )
+    monkeypatch.setattr(
+        "tools.candidate_prepare.admission.observe_file",
+        lambda *args: pytest.fail("read external content before configured policy"),
+    )
+    with pytest.raises(OperationFailure, match="policy"):
+        adapter.review("fresh", changed)
+
+
+def test_submit_failure_is_not_presubmit_refusal(fresh, monkeypatch):
+    from tests.unit.tools.candidate_console.test_http import client
+
+    adapter, selection, _ = fresh
+    review = adapter.review("fresh", selection)
+
+    def fail(*args, **kwargs):
+        raise OperationFailure("busy", "fixture owner already entered")
+
+    monkeypatch.setattr("tools.candidate_console.reusable_preparation.submit_operation", fail)
+    response = client(adapter.console.config).post(
+        "/api/editor/fresh/reusable-preparations/prepare",
+        json=intent(review).model_dump(mode="json"),
+    )
+    assert response.status_code == 409
+    assert "admission_not_attempted" not in response.json()["error"]

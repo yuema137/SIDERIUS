@@ -12,7 +12,9 @@
   <script src="/app.js" defer></script>
   <script src="/editor.js" defer></script>
   <script src="/navigation.js" defer></script>
+  <script src="/reusable-intents.js" defer></script>
   <script src="/reusable-run.js" defer></script>
+  <script src="/new-run.js" defer></script>
 </head>
 <body>
 <header><div class="brand">SIDERIUS <span>Local candidate console</span></div><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p>
@@ -107,12 +109,25 @@
     <pre id="editor-diff"></pre>
     <p>Every edit invalidates review. Save writes exactly the reviewed bytes.</p>
   </details>
+  <section class="card" aria-labelledby="new-run-heading">
+    <h2 id="new-run-heading">New run</h2>
+    <p id="new-run-prerequisites">Select a runnable project and save source edits.</p>
+    <label for="new-run-task">Configured task and resources</label><select id="new-run-task"><option value="">Choose task and resources</option></select>
+    <label for="new-run-name">Run name</label><input id="new-run-name" type="text" value="candidate" maxlength="128">
+    <button id="new-run-review" disabled>Review preparation</button>
+    <p id="new-run-status" role="status"></p><details open><summary>Selected source, inputs and resource limits</summary><pre id="new-run-details"></pre></details>
+    <button id="new-run-prepare" disabled>Prepare saved source</button>
+    <section id="new-run-intent" hidden aria-label="Retained preparation operation">
+      <p id="new-run-operation-status" role="status"></p><p id="new-run-operation-id" class="mono"></p>
+      <div class="actions"><button id="new-run-check" disabled>Check status</button><button id="new-run-retry" disabled>Retry same preparation</button><a id="new-run-monitor">Monitor preparation</a><button id="new-run-open" disabled>Open prepared run</button><button id="new-run-dismiss" disabled>Dismiss terminal or refused preparation</button></div>
+    </section>
+  </section>
   <section class="card" aria-labelledby="capture-heading">
     <h2 id="capture-heading">Prepared run</h2>
     <p>Open a prepared capture, review its saved inputs, then start a candidate. Current edits apply to future captures.</p>
     <label for="capture-task">Configured task</label><select id="capture-task" disabled></select>
     <div class="actions"><button id="capture-refresh" disabled>Refresh prepared runs</button><button id="capture-more" hidden disabled>More runs</button></div>
-    <p id="capture-guidance">Prepare a run with Python or CLI, then refresh here. <a href="https://github.com/yuema137/SIDERIUS/tree/master/src/tools/candidate_prepare">Preparation instructions</a></p>
+    <p id="capture-guidance">Use New run above to prepare saved reusable source, or refresh existing prepared runs.</p>
     <label for="capture-run">Prepared capture</label><select id="capture-run" disabled><option value="">Choose a prepared run</option></select>
     <button id="capture-open" disabled>Open prepared run</button>
     <p id="capture-status" role="status">Connect and select a runnable project.</p>

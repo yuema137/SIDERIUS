@@ -56,6 +56,7 @@ try {
   await page.locator('#capture-status').filter({hasText: 'not enabled'}).waitFor();
   assert.equal(await page.locator('#capture-open').isDisabled(), true);
   await page.locator('#editor-project').selectOption('capture');
+  await page.locator('#capture-task').selectOption('synthetic');
   await open(metadata.captures[0]);
   assert.match(await page.locator('#capture-summary').textContent(), /hypothesis → build → check/);
   assert.match(await page.locator('#capture-details').textContent(), /Prefer a small interpretable baseline/);

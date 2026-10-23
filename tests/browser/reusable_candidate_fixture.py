@@ -24,7 +24,7 @@ from tools.candidate_prepare import prepare_reusable_candidate
 from tools.workflow_authoring.models import Project
 
 
-def setup(root: Path, origin: str, endpoint: str) -> None:
+def setup(root: Path, origin: str, endpoint: str, captures_count: int = 3) -> None:
     selected = selection.__wrapped__(root)
     config = console_config.__wrapped__(selected, root)
     # Fail closed both at effective SDK URL and proxy transport. This provider
@@ -77,7 +77,7 @@ def setup(root: Path, origin: str, endpoint: str) -> None:
         recovery_directory=root / "recovery",
     )
     captures = []
-    for _ in range(3):
+    for _ in range(captures_count):
         current = request.model_copy(update={"run_id": uuid4()})
         prepared = prepare_reusable_candidate(current)
         assert prepared.status == "prepared", prepared.error
@@ -160,11 +160,12 @@ def main():
     parser.add_argument("root", type=Path)
     parser.add_argument("--origin")
     parser.add_argument("--endpoint")
+    parser.add_argument("--captures-count", type=int, default=3)
     args = parser.parse_args()
     if args.mode == "provider":
         provider(args.root)
     elif args.mode == "setup":
-        setup(args.root, args.origin, args.endpoint)
+        setup(args.root, args.origin, args.endpoint, args.captures_count)
     elif args.mode == "headless":
         headless(args.root)
     else:
