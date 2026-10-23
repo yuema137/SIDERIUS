@@ -1,7 +1,9 @@
 """Actual public review + shell + two native pseudo children, without API/GPU work.
 
-Run from a clean exact checkout with working bubblewrap namespaces. The local
-integration environment must grant bubblewrap its normal namespace capability.
+Run from a clean exact checkout with working bubblewrap namespaces and readable
+GPU hardware facts (no GPU execution). The existing pseudo preflight snapshot
+requires nonzero device memory; CPU-only hosts explicitly skip this witness.
+The local environment must grant bubblewrap its normal namespace capability.
 """
 
 import hashlib
@@ -241,6 +243,17 @@ def _native_handler_witnesses(capture_path, tmp_path, monkeypatch):
 
 
 def test_public_capture_two_native_iterations(tmp_path, monkeypatch):
+    import shutil
+
+    from core.hardware_context import inspect_gpu_runtime
+
+    if shutil.which("bwrap") is None:
+        pytest.skip("actual sandbox witness requires bubblewrap")
+    hardware = inspect_gpu_runtime().hardware
+    if not hardware.device_available or hardware.usable_cap_bytes <= 0:
+        pytest.skip(
+            "native pseudo preflight currently requires readable nonzero GPU memory facts; no GPU execution"
+        )
     root = Path(__file__).resolve().parents[3]
     inputs = tmp_path / "inputs"
     inputs.mkdir()
