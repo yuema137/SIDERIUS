@@ -52,14 +52,36 @@ even when using the default models.
 
    Open `http://127.0.0.1:8740`. If the local forwarding port differs, configure
    `browser_origin` to that exact local address before starting the server.
-5. Paste the token from your private file into the page. Select a task, fill the
-   run name/advice, and inspect the manifest, data, model profile and output parents
-   shown before **Prepare**. Prepare chooses separate UUID child paths. Review
-   the resolved workspace, models and resource policy. **Launch candidate** starts code execution and may call paid
-   APIs. Preparation never launches automatically.
-6. Copy the operation ID to reopen status, logs and the **Reported LLM tokens**
-   table later, including operations created through Python or the operation CLI. Reenter the token after reload;
-   the page retains IDs but does not store the token.
+5. Open **Home**, paste the console token, and select **Connect**. The connection
+   stays available while you switch between Home, Workflow Editor and Slow control.
+   Reloading or opening a new tab requires Connect again; the password field clears
+   immediately and the token stays only in this document's memory.
+6. To generate a candidate from the server's configured task, expand **Prepare
+   configured task** on Home. Select a task, fill the run name and optional advice,
+   and expand **Configured paths** to inspect the inputs and output parents.
+   **Prepare request** creates separate UUID child paths. Review the resolved
+   workspace, task, models, credential blockers and resource policy before
+   **Launch candidate**, which starts code execution and may call paid APIs.
+   Native Prepare generates its configured candidate independently of the declaration
+   selected in Workflow Editor. Preparation never launches automatically.
+7. To observe an existing operation, choose **Slow control** and enter its complete
+   operation UUID. You can also open a link such as
+   `http://127.0.0.1:8740/#slow-control/22222222-2222-4222-8222-222222222222`
+   (replace the example UUID), then Connect. No task or editor project selection
+   is needed. The optional remembered ID is labelled **Last opened on this browser**;
+   it is not a list of discovered operations. Expand Operation facts, Reported
+   token table, or Activity and logs when needed.
+8. To author a configured declaration, choose **Workflow Editor**. Select a node
+   to inspect its supported bindings; expand **References** for task and external
+   locations, or **Advanced → Source** for exact Python bytes. Review opens the
+   exact diff; Save writes those reviewed bytes. Switching views retains pending
+   edits and review state. A real page exit with pending edits uses the browser's
+   unsaved-change guard. Saving does not run the declaration.
+
+The entry URLs are `/#home`, `/#workflow` and `/#slow-control`. An old
+`/editor.html` link redirects to `/#workflow` before asking for credentials.
+Connection sharing applies within one document; separate tabs/windows connect
+independently.
 
 ## Credentials
 

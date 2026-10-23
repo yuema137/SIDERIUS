@@ -99,7 +99,7 @@ try {
     await theme.focus();
   }
   async function capture(label) {
-    for (const width of [1440, 390]) {
+    for (const width of [1440, 720, 390]) {
       await page.setViewportSize({width, height: 1000});
       for (const mode of ['light', 'dark']) {
         await theme.selectOption(mode);
@@ -154,8 +154,8 @@ try {
   await page.evaluate(key => localStorage.setItem(key, 'invalid-value'), key);
   await page.reload(); assert.equal(await theme.inputValue(), 'system'); assert.equal(await applied(), 'light');
 
-  await page.locator('#editor-token').fill(metadata.token);
-  await page.locator('#editor-connect button').click();
+  await page.locator('#token').fill(metadata.token);
+  await page.locator('#access-form button').click();
   await page.getByText('Opened supported declaration.', {exact: false}).waitFor();
   await page.locator('#editor-inspector select').selectOption({label: 'other'});
   const snapshot = () => page.evaluate(() => ({
@@ -180,6 +180,7 @@ try {
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   await retainEditor('reviewed-source');
   const source = page.locator('#editor-source');
+  await page.locator('#editor-advanced > summary').click();
   await source.fill((await source.inputValue()) + '# unsaved theme fixture\n');
   await retainEditor('source-unsaved');
   await source.fill('invalid Python !!!');
@@ -187,8 +188,10 @@ try {
   await waitUntil(async () => (await page.locator('#editor-diagnostics').textContent()).length > 0);
   await retainEditor('review-error');
 
+  page.once('dialog', dialog => dialog.accept());
   await page.goto(metadata.origin);
   await capture('console-empty');
+  await page.locator('#configured-task > summary').click();
   const operation = '22222222-2222-4222-8222-222222222222';
   let tokenError = false;
   await page.route('**/api/**', async route => {
@@ -206,6 +209,8 @@ try {
   await page.locator('#token').fill('theme-fixture'); await page.locator('#access-form button').click();
   await page.getByText('Connected. Observations', {exact: false}).waitFor();
   await page.locator('#run-name').fill('unsaved-run-fixture');
+  await page.locator('nav a[href="#slow-control"]').click();
+  await page.getByText('Reported token table', {exact: true}).click();
   await page.locator('#operation-id').fill(operation); await page.locator('#monitor-button').click();
   await page.locator('#tokens-status').filter({hasText: 'Partial evidence'}).waitFor();
   const monitor = () => page.evaluate(() => ({run: document.querySelector('#run-name').value, task: document.querySelector('#task').value, operation: document.querySelector('#operation-id').value, rows: document.querySelector('#token-rows').textContent, timers: window.themeTimerCount, launch: document.querySelector('#launch-button').disabled}));

@@ -123,8 +123,8 @@ on every API. Mutation requests require the exact browser Origin; GET rejects a
 supplied foreign Origin. Missing/null mutation Origin fails. No cookies or CORS.
 Authentication precedes body receive/JSON decoding/business validation. Authorized
 JSON mutation bodies are buffered to at most 256 KiB using actual received bytes,
-not Content-Length. Non-JSON returns415; oversized returns413. Only fixed `/`,
-`/app.js`, `/styles.css` assets are unauthenticated; no filesystem directory mount
+not Content-Length. Non-JSON returns415; oversized returns413. Only `/` and the exact static allowlist in `app.py` are unauthenticated; no
+filesystem directory mount
 or interactive API documentation exists. Other errors use
 `{"error":{"code":"...","message":"..."}}`: auth401, Host/Origin403,
 missing operation/resource404, invalid fields422, busy/conflict/stale/integrity/
@@ -153,7 +153,7 @@ does not erase an older stored preference.
 
 Theme changes only update the root `data-theme` attribute: no reload, API calls,
 new polling timers, draft/source mutation or review invalidation. Existing
-operation IDs, graph selection and editor state retain their owners. Both pages
+operation IDs, graph selection and editor state retain their owners. All shell views
 use the same tokens for controls, warnings, disabled states, focus and selected
 HTML graph nodes. These console/editor surfaces currently render declarations
 as HTML nodes/text connections and reported usage as a table. The theme browser
@@ -226,8 +226,9 @@ refuses recovery/output-root overlap. No source is required when selection is
 absent. `CandidateConsole` retains only native operation policy; `editor.py`
 constructs separate `WorkflowAuthoring` services and routes.
 
-`/editor.html`, `/editor.js` and `/editor.css` are static assets. Browser state and
-requests are isolated from the operation monitor. `GET /api/editor/projects`
+`/editor.html`, `/editor.js` and `/editor.css` are static assets. The editor shares
+the persistent shell and memory-only session with the operation monitor; its
+source/review policy remains owned by `editor.js`. `GET /api/editor/projects`
 returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
 `POST /api/editor/{project_id}/review` validates `ReviewRequest`; `POST
 /api/editor/{project_id}/save` validates `SaveRequest`. The existing console
@@ -246,8 +247,10 @@ No JavaScript contract inventory or alternate graph schema is authoritative.
 Source/form/base changes invalidate Review. Unreviewed inspector edits disable
 the source textarea until Review synchronizes the rendered proposal, preventing
 a stale source buffer from silently replacing form changes. Source edits disable
-the stale inspector until successful Review projects the source. Project selection/reconnect clears prior source, graph, conflict and actionable
-controls before loading; failed loads cannot adopt an old project conflict.
+the stale inspector until successful Review projects the source. Explicit project
+selection clears prior source, graph, conflict and actionable controls before
+loading; reconnect retains pending drafts and reviewed bytes. Failed loads cannot
+adopt an old project conflict.
 Async replies are fenced by selected project and local edit generation; Save sends exact reviewed bytes/hash.
 Conflict handling preserves the pending proposal and requires explicit discard
 or new-base selection followed by review. A connection failure retains proposal
@@ -295,3 +298,62 @@ must match its admitted source/context/review identities; replay retains the
 original capture even after the authoring file or workspace changes. Corrupt
 existing admissions fail closed. Clients must retain the same UUID on ambiguous
 responses and may inspect it through the existing monitor.
+
+
+## Persistent views, routing and session
+
+`index.html` owns a single document with persistent Home, Workflow and Slow control
+sections. `navigation.js` owns `/#home`, `/#workflow`, `/#slow-control` and
+`/#slow-control/<UUID>`. Empty fragments use Home. Complete UUID validation
+precedes operation selection; invalid routes show a local error and suspend
+operation polling without mutating a native request. Bare Slow control retains
+selection; repeated identical UUIDs do not reset the monitor epoch/log cursor.
+Back/Forward and internal links hide inactive sections with `hidden`, update
+`aria-current`, and focus the active heading on explicit fragment changes.
+Polling/theme changes never focus the document. Controllers and DOM are not
+reconstructed. `/editor.html` is only an external compatibility entry: its
+external `editor-entry.js` replaces the document with `/#workflow`, with a plain
+link fallback and no credential form.
+
+`session.js` exclusively owns the Bearer token in closure memory. It exposes
+same-origin API requests and connection/revision notifications, never a token
+getter. The single `access-form` captures and immediately clears the password
+input. Requests use Authorization, cache no-store and credentials omit; POST
+payloads retain their existing owners. No cookie, storage, URL, history payload,
+event, cross-tab channel or document-transfer mechanism carries credentials.
+Theme enum and optional last-operation UUID remain the only persisted values.
+Reload/new tab requires Connect again.
+
+Connect validates through the explicit deep-link operation GET, otherwise choices
+GET. Operation 404/409 means unavailable data and does not reject valid access.
+A session revision fences prior-connection replies, including old 401s. Current
+401 disables effectful controls and labels observations unconfirmed, preserving
+drafts, reviewed bytes and submitted UUID/body identities. Editor action eligibility
+is derived from the shared session in `editor.js:controls`; request-producing
+handlers also refuse disconnected actions. Explicit conflict Discard/Rebase remain
+local and usable, but do not restore network actions until authenticated reconnect. Reconnect only refreshes
+reads; POSTs never retry automatically. Initial editor/project reads that span a
+reconnect restart for the new revision without replacing a loaded pending draft.
+Editor projects load only on Workflow entry. Choices/project failures remain local;
+known-operation reads need neither task choices nor editor configuration. The one
+existing visible-document two-second polling loop retains its cursor/epoch owners.
+
+Home's configured-task flow is a secondary disclosure independent of the editor
+selection. Prepared workspace, identity, routes, limits, devices/network and
+credential blockers remain visible before explicit Launch within that flow.
+Workflow references and Advanced → Source start collapsed; successful Review
+opens the exact diff. Disclosure toggles do not change edit mode or reviewed bytes.
+Unsupported-source status and Inspect source remain visible; conflicts retain
+visible summary/actions. A `beforeunload` guard applies only to a real document
+exit with pending editor changes. Slow control shows operation identity, native
+state, observed time and token quality; facts, token rows and logs are disclosures.
+It infers neither scientific success nor complete billing.
+
+Navigation qualification: `tests/browser/console_navigation.mjs` uses the same
+explicit environment as the editor gate. Its temporary synthetic observations
+cover direct operation reads without editor access, invalid UUID refusal,
+remembered-ID precedence, history/cursor/poller preservation, failed project
+isolation, connection races/401 and pending-draft/reload behavior. Existing editor,
+console and theme browser harnesses exercise the shared shell and disclosures.
+These are local browser witnesses; they do not qualify native execution, complete
+circuit editing, results, resume or production deployment.

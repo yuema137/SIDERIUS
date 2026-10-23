@@ -267,3 +267,18 @@ def test_tokens_route_auth_uuid_and_sanitized_integrity(console_config, monkeypa
     failure = api.get(url)
     assert failure.status_code == 409 and failure.json()["error"]["code"] == "integrity"
     assert "DO-NOT-ECHO" not in failure.text and "/secret/path" not in failure.text
+
+
+def test_navigation_assets_keep_exact_static_security_boundary(console_config):
+    """Missing shell dependencies break navigation; a wildcard leaks adjacent files."""
+    api = client(console_config)
+    for name in ("session.js", "navigation.js", "editor-entry.js"):
+        response = api.get("/" + name, headers={"Authorization": ""})
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        assert "script-src 'self'" in response.headers["content-security-policy"]
+        assert response.headers["x-frame-options"] == "DENY"
+        assert api.get("/" + name, headers={"Host": "evil.invalid"}).status_code == 403
+    assert api.get("/session.js.map").status_code == 404
+    assert api.get("/../console-contract.md").status_code == 404
+    assert api.get("/api/choices", headers={"Authorization": ""}).status_code == 401

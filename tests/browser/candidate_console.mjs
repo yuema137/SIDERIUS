@@ -32,6 +32,8 @@ const screenshots = process.env.CONSOLE_SCREENSHOT_DIR || await mkdtemp(join(tmp
 await mkdir(screenshots, { recursive: true });
 const server = createServer(async (req, res) => {
   const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/theme.js': ['theme.js', 'text/javascript'], '/theme.css': ['theme.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
+  for (const name of ['session.js', 'navigation.js', 'editor.js', 'editor-entry.js']) files['/' + name] = [name, 'text/javascript'];
+  files['/editor.css'] = ['editor.css', 'text/css'];
   const file = files[req.url];
   if (!file) { res.writeHead(404); res.end(); return; }
   try {
@@ -105,20 +107,29 @@ try {
     return reply(status(url.pathname.split('/')[3]));
   });
   await page.goto(origin.origin);
+  await page.locator('#configured-task > summary').click();
   // Keyboard connect proves associated labels, native submit and focus navigation.
   await page.getByLabel('Console token', { exact: true }).focus();
   await page.keyboard.type('browser-fixture-token'); await page.keyboard.press('Tab'); await page.keyboard.press('Enter');
-  await page.getByText('Connected. Observations', { exact: false }).waitFor();
+  await page.getByText('Connected. Observations', { exact: false }).waitFor({state: 'attached'});
   await page.getByLabel('Run name', { exact: true }).fill('browser-offline');
   await page.getByText('Optional stage advice', { exact: true }).click();
   await page.getByLabel('Proposal advice', { exact: true }).fill(hostile);
   await page.getByRole('button', { name: 'Prepare request', exact: true }).dblclick();
-  await page.getByText('Submission outcome is unconfirmed or refused:', { exact: false }).waitFor();
+  await page.getByText('Submission outcome is unconfirmed or refused:', { exact: false }).waitFor({state: 'attached'});
   assert.equal(requests.filter(item => item.method === 'POST').length, 1);
   assert.equal(await page.getByLabel('Run name', { exact: true }).isDisabled(), true);
+  const uncertainId = await page.locator('#prepare-id').textContent();
+  await page.locator('nav a[href="#slow-control"]').click();
+  await page.locator('nav a[href="#home"]').click();
+  await page.locator('#token').fill('browser-fixture-token');
+  await page.locator('#access-form button').click();
+  await page.getByText('Connected. Observations', {exact: false}).waitFor();
+  assert.equal(await page.locator('#prepare-id').textContent(), uncertainId);
+  assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'Reconnect/navigation retain uncertain submission without retrying');
   await page.getByRole('button', { name: 'Retry same preparation', exact: true }).click();
-  await page.getByText('Prepared request loaded.', { exact: false }).waitFor();
-  await page.locator('#tokens-status').filter({ hasText: 'Not applicable to preparation' }).waitFor();
+  await page.getByText('Prepared request loaded.', { exact: false }).waitFor({state: 'attached'});
+  await page.locator('#tokens-status').filter({ hasText: 'Not applicable to preparation' }).waitFor({state: 'attached'});
   const preps = requests.filter(item => item.path === '/api/preparations');
   assert.equal(preps.length, 2); assert.deepEqual(preps[0].body, preps[1].body);
   assert.equal(requests.filter(item => item.path === '/api/candidates').length, 0);
@@ -132,21 +143,24 @@ try {
   }
   await page.setViewportSize({ width:1440, height:900 });
   await page.getByRole('button', { name: 'Launch candidate', exact: true }).dblclick();
-  await page.getByText('No automatic retry will occur.', { exact: false }).waitFor();
+  await page.getByText('No automatic retry will occur.', { exact: false }).waitFor({state: 'attached'});
   await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).click();
-  await page.getByText('Store is busy while the preparation wrapper finishes.', { exact: false }).waitFor();
+  await page.getByText('Store is busy while the preparation wrapper finishes.', { exact: false }).waitFor({state: 'attached'});
   assert.equal(await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).isEnabled(), true);
   assert.ok((await page.locator('#review-status').textContent()).includes('Prepared request loaded.'));
   await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).click();
-  await page.getByText('Candidate submission observed:', { exact: false }).waitFor();
+  await page.getByText('Candidate submission observed:', { exact: false }).waitFor({state: 'attached'});
   const launches = requests.filter(item => item.path === '/api/candidates');
   assert.equal(launches.length, 3);
   assert.deepEqual(launches[0].body, launches[1].body); assert.deepEqual(launches[1].body, launches[2].body);
-  await page.locator('#monitor-status').filter({ hasText: 'Native: rejected' }).waitFor();
+  await page.locator('nav a[href="#slow-control"]').click();
+  await page.getByText('Reported token table', {exact: true}).click();
+  await page.getByText('Activity and logs', {exact: true}).click();
+  await page.locator('#monitor-status').filter({ hasText: 'Native: rejected' }).waitFor({state: 'attached'});
   assert.equal(await page.locator('#log img').count(), 0);
   assert.ok((await page.locator('#log').textContent()).includes(hostile));
   await page.waitForTimeout(2200); assert.ok(logOffsets.includes(73), 'Log cursor must use returned byte offset.');
-  await page.locator('#tokens-status').filter({ hasText: 'Partial evidence' }).waitFor();
+  await page.locator('#tokens-status').filter({ hasText: 'Partial evidence' }).waitFor({state: 'attached'});
   assert.equal(await page.locator('#token-rows tr').count(), 2);
   assert.ok((await page.locator('#token-rows').textContent()).includes('100 · 1 missing'));
   assert.ok((await page.locator('#token-rows').textContent()).includes('Unavailable · 1 missing'));
@@ -155,12 +169,12 @@ try {
   await page.waitForTimeout(2200);
   assert.equal(await page.locator('#token-rows').textContent(), tokenText, 'Polling replaces token sums.');
   tokenFailure = true; nativeState = 'unknown';
-  await page.locator('#tokens-status').filter({ hasText: 'Reported tokens stale' }).waitFor();
-  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor();
+  await page.locator('#tokens-status').filter({ hasText: 'Reported tokens stale' }).waitFor({state: 'attached'});
+  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor({state: 'attached'});
   assert.equal(await page.locator('#token-rows').textContent(), tokenText, 'Token-only failure retains same-run table.');
   assert.ok(logOffsets.filter(offset => offset === 73).length >= 2, 'Logs continue during token-only failure.');
   tokenFailure = false;
-  await page.locator('#tokens-status').filter({ hasText: 'Partial evidence' }).waitFor();
+  await page.locator('#tokens-status').filter({ hasText: 'Partial evidence' }).waitFor({state: 'attached'});
   for (const [name, width, height, zoom] of [['tokens-desktop',1440,900,1], ['tokens-mobile',390,844,1], ['tokens-200-percent',1440,900,2]]) {
     await page.setViewportSize({ width: width / zoom, height: height / zoom });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${name}: page overflow`);
@@ -179,23 +193,23 @@ try {
   assert.equal(await page.locator('#token-rows tr').count(), 0, 'Selection clears old table immediately.');
   await page.evaluate(() => { window.oldTokenPaint = false; new MutationObserver(() => { if (document.querySelector('#token-rows').textContent.includes('OLD-RUN-IDENTITY')) window.oldTokenPaint = true; }).observe(document.querySelector('#token-rows'), { childList: true, subtree: true }); });
   delayedTokenId = null; releaseTokens();
-  await page.locator('#token-rows tr').first().waitFor();
+  await page.locator('#token-rows tr').first().waitFor({state: 'attached'});
   assert.equal(await page.evaluate(() => window.oldTokenPaint), false, 'Epoch fence rejects old token response.');
   assert.ok(!(await page.locator('#token-rows').textContent()).includes('OLD-RUN-IDENTITY'));
   const mutations = requests.filter(item => item.method === 'POST').length;
   nativeState = 'unknown';
   await page.getByLabel('Operation UUID', { exact: true }).fill(known);
   await page.getByRole('button', { name: 'Read operation', exact: true }).click();
-  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor();
+  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor({state: 'attached'});
   nativeState = 'completed'; finishing = true;
   await page.getByRole('button', { name: 'Read operation', exact: true }).click();
-  await page.locator('#monitor-status').filter({ hasText: 'Finishing:' }).waitFor();
+  await page.locator('#monitor-status').filter({ hasText: 'Finishing:' }).waitFor({state: 'attached'});
   assert.ok((await page.locator('#monitor-status').textContent()).includes('Native result is available; the wrapper is still finishing.'));
   assert.ok((await page.locator('#operation-facts').textContent()).includes('alive:'));
   assert.ok((await page.locator('#operation-facts').textContent()).includes('Native receipt availabletrue'));
   disconnected = true;
   await page.getByRole('button', { name: 'Read operation', exact: true }).click();
-  await page.locator('#monitor-status').filter({ hasText: 'Observation stale' }).waitFor();
+  await page.locator('#monitor-status').filter({ hasText: 'Observation stale' }).waitFor({state: 'attached'});
   disconnected = false;
   finishing = false; nativeState = 'unknown';
   await page.reload();
@@ -205,17 +219,19 @@ try {
   assert.equal(new URL(page.url()).search, '');
   await page.getByLabel('Console token', { exact: true }).fill('browser-fixture-token');
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
-  await page.getByText('Connected. Observations', { exact: false }).waitFor();
+  await page.getByText('Connected. Observations', { exact: false }).waitFor({state: 'attached'});
   await page.getByRole('button', { name: 'Read operation', exact: true }).click();
-  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor();
+  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor({state: 'attached'});
   assert.equal(requests.filter(item => item.method === 'POST').length, mutations, 'Reconnect must be GET-only.');
+  await page.locator('nav a[href="#home"]').click();
+  await page.locator('#configured-task > summary').click();
   // Fresh preparation and stale review refuse a second launch until reviewed again.
   finishing = false; nativeState = 'completed'; staleLaunch = true;
   await page.getByLabel('Run name', { exact: true }).fill('second-run');
   await page.getByRole('button', { name: 'Prepare request', exact: true }).click();
-  await page.getByText('Prepared request loaded.', { exact: false }).waitFor();
+  await page.getByText('Prepared request loaded.', { exact: false }).waitFor({state: 'attached'});
   await page.getByRole('button', { name: 'Launch candidate', exact: true }).click();
-  await page.getByText('Launch refused.', { exact: false }).waitFor();
+  await page.getByText('Launch refused.', { exact: false }).waitFor({state: 'attached'});
   await page.waitForTimeout(2200);
   assert.equal(await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).isDisabled(), true);
   assert.ok((await page.locator('#launch-status').textContent()).includes(hostile));
@@ -228,7 +244,7 @@ try {
   assert.ok(frozenReview.includes('second-run')); assert.equal(await page.locator('#review').textContent(), '');
   assert.ok((await page.locator('#configured-paths').textContent()).includes('/fixture/llm.json'));
   await page.getByRole('button', { name: 'Prepare request', exact: true }).click();
-  await page.locator('#review-status').filter({ hasText: 'Launch blocked' }).waitFor();
+  await page.locator('#review-status').filter({ hasText: 'Launch blocked' }).waitFor({state: 'attached'});
   assert.equal(await page.getByRole('button', { name: 'Launch candidate', exact: true }).isDisabled(), true);
   assert.ok((await page.locator('#review').textContent()).includes('GEMINI_API_KEY'));
   const blockedReview = await page.locator('#review').textContent();
@@ -248,7 +264,7 @@ try {
 
   readinessBlocked = false;
   await page.getByRole('button', { name: 'Refresh readiness', exact: true }).click();
-  await page.locator('#review-status').filter({ hasText: 'Name presence checked' }).waitFor();
+  await page.locator('#review-status').filter({ hasText: 'Name presence checked' }).waitFor({state: 'attached'});
   assert.equal(await page.getByRole('button', { name: 'Launch candidate', exact: true }).isEnabled(), true);
   assert.equal(faults.length, 0, faults.join('\n'));
   console.log(`PASS: real ${browser.version()} interactions; UUID retries, explicit launch, stale/unknown/rejected/finishing, escaped text, byte cursor, GET-only reopen, memory-only token, reported-token replacement/null/partial/stale/epoch fencing and readiness blockers/refresh plus eleven screenshots (${screenshots}).`);

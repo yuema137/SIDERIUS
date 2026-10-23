@@ -28,12 +28,34 @@ try {
     try { await page.goto(metadata.origin + '/editor.html'); break; }
     catch (error) { if (tries >= 20) throw error; await new Promise(resolve => setTimeout(resolve, 100)); }
   }
-  await page.locator('#editor-token').fill(metadata.token);
-  await page.locator('#editor-connect button').click();
+  await page.locator('#token').fill(metadata.token);
+  await page.locator('#access-form button').click();
   await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported')); 
   const source = page.locator('#editor-source');
+  assert.equal(await source.isVisible(), false);
+  assert.equal(new URL(page.url()).hash, '#workflow');
+  await page.locator('#editor-advanced > summary').click();
   const original = await source.inputValue();
   await page.locator('#editor-inspector select').selectOption({label: 'other'});
+  const posts = []; page.on('request', request => { if (request.method() === 'POST') posts.push(request.url()); });
+  const editorSnapshot = () => page.evaluate(() => ({
+    text: ['editor-source', 'editor-revision', 'editor-diff', 'editor-pending'].map(id => {
+      const element = document.getElementById(id); return [element.value, element.textContent];
+    }),
+    fields: [...document.querySelectorAll('#editor-inspector select, #editor-references input')]
+      .map(element => [element.value, element.disabled]),
+    project: document.getElementById('editor-project').value,
+    selected: document.querySelector('.editor-node[aria-pressed="true"]')?.dataset.node,
+    saveDisabled: document.getElementById('editor-save').disabled,
+  }));
+  async function retainAcrossViews() {
+    const before = await editorSnapshot(), count = posts.length;
+    for (const view of ['slow-control', 'home', 'workflow']) await page.locator(`nav a[href="#${view}"]`).click();
+    assert.deepEqual(await editorSnapshot(), before);
+    assert.equal(posts.length, count, 'Navigation never submits');
+    assert.equal(await page.locator('#token').inputValue(), '');
+  }
+  await retainAcrossViews();
   // A source edit cannot silently replace an unrendered inspector proposal.
   assert.equal(await source.isDisabled(), true);
   await assert.rejects(source.fill(original + '# attempted source switch\n', {timeout: 100}));
@@ -56,9 +78,12 @@ try {
   await waitUntil(async () => (await page.locator('#editor-graph button').count()) === 2);
   // Review a GUI proposal, then external write: save must conflict and retain it.
   await source.fill((await source.inputValue()).replace('old.json', 'gui.json'));
+  await retainAcrossViews();
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   const pending = await source.inputValue();
+  await retainAcrossViews();
+  assert.equal(await page.locator('#editor-review-disclosure').getAttribute('open'), '');
   await writeFile(metadata.source, agent.replace('old.json', 'agent.json'));
   await page.locator('#editor-save').click();
   await page.locator('#editor-conflict').waitFor({state: 'visible'});
@@ -121,6 +146,7 @@ try {
   assert.equal(await page.getByLabel('external:build_store', {exact: true}).count(), 0);
   assert.equal(await page.getByLabel('external:check_store', {exact: true}).count(), 0);
   assert.match(await page.locator('#editor-references').textContent(), /external:initial.*managed/);
+  await page.getByText('References', {exact: true}).click();
   await page.getByLabel('task.manifest', {exact: true}).fill('edited-task.yaml');
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
@@ -144,6 +170,93 @@ try {
     allowed_output_types: ['regressor'],
   });
   assert.deepEqual(reusable.positions, [{node: 'build', x: 120, y: -30}]);
+  // Regression: explicit local conflict resolution must not restore network
+  // actions after 401. Native schemas cannot catch this browser/session defect.
+  const editorRequests = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.startsWith('/api/editor/')) editorRequests.push(request.method());
+  });
+  async function disconnectedConflict(action) {
+    const baseline = await source.inputValue();
+    await source.fill(baseline + `# pending ${action} fixture\n`);
+    await page.locator('#editor-review').click();
+    await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
+    const proposal = await source.inputValue();
+    const external = baseline + `# external ${action} fixture\n`;
+    await writeFile(metadata.reusable_source, external);
+    await page.locator('#editor-save').click();
+    await page.locator('#editor-conflict').waitFor({state: 'visible'});
+    await page.route('**/api/choices', route => route.fulfill({status: 401, json: {error: {message: 'Expired fixture'}}}));
+    await page.evaluate(() => window.consoleSession.request('choices').catch(() => {}));
+    assert.equal(await page.evaluate(() => window.consoleSession.connected), false);
+    assert.equal(await source.inputValue(), proposal, '401 preserves the pending proposal');
+    assert.equal(await page.locator('#editor-conflict').isVisible(), true);
+    const calls = editorRequests.length;
+    await page.locator(`#editor-${action}`).click();
+    const resolved = action === 'discard' ? external : proposal;
+    assert.equal(await source.inputValue(), resolved, 'Only explicit local conflict action changes the proposal');
+    await page.locator('#editor-graph button').first().click(); // render must retain the session gate.
+    for (const name of ['review', 'save', 'refresh', 'project']) {
+      assert.equal(await page.locator(`#editor-${name}`).isDisabled(), true, `${action}: ${name} requires reconnect`);
+    }
+    // Dispatch bypasses disabled HTML controls, so this assertion proves handlers
+    // also refuse requests rather than depending solely on button presentation.
+    await page.evaluate(() => {
+      for (const name of ['review', 'save', 'refresh']) document.getElementById('editor-' + name).dispatchEvent(new Event('click'));
+      document.getElementById('editor-project').dispatchEvent(new Event('change'));
+    });
+    await page.waitForTimeout(100);
+    assert.equal(editorRequests.length, calls, `${action}: disconnected actions produce no editor request`);
+    assert.equal(await source.inputValue(), resolved, 'Refused actions preserve locally resolved bytes');
+    await page.unroute('**/api/choices');
+    const mutations = posts.length;
+    await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
+    await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
+    assert.equal(await source.inputValue(), resolved, 'Reconnect preserves local conflict resolution');
+    assert.equal(posts.length, mutations, 'Reconnect does not retry a review/save');
+    assert.equal(await page.locator('#editor-review').isDisabled(), false);
+    assert.equal(await page.locator('#editor-refresh').isDisabled(), false);
+    assert.equal(await page.locator('#editor-save').isDisabled(), true, 'Conflict resolution still needs a new review');
+    await page.locator('#editor-review').click();
+    await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
+    await page.locator('#editor-save').click();
+    await waitUntil(async () => !(await page.locator('#editor-pending').textContent()).includes('Pending'));
+  }
+  await disconnectedConflict('discard');
+  await disconnectedConflict('rebase');
+  // Save's handler needs the same gate even when an exact review is retained.
+  await source.fill((await source.inputValue()) + '# reviewed before disconnect\n');
+  await page.locator('#editor-review').click();
+  await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
+  const reviewedBeforeDisconnect = await editorSnapshot();
+  await page.route('**/api/choices', route => route.fulfill({status: 401, json: {error: {message: 'Expired fixture'}}}));
+  await page.evaluate(() => window.consoleSession.request('choices').catch(() => {}));
+  const beforeRefusedSave = editorRequests.length;
+  await page.locator('#editor-save').dispatchEvent('click');
+  await page.waitForTimeout(100);
+  assert.equal(editorRequests.length, beforeRefusedSave, 'Retained review cannot submit Save before reconnect');
+  await page.unroute('**/api/choices');
+  await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
+  await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
+  assert.deepEqual(await editorSnapshot(), reviewedBeforeDisconnect, 'Reconnect restores the retained review without reset');
+  // Re-rendering a selected node must preserve Save's transient pending gate.
+  let finishSave;
+  const heldSave = new Promise(resolve => { finishSave = resolve; });
+  let heldSubmissions = 0;
+  await page.route('**/api/editor/reusable/save', async route => {
+    heldSubmissions++; const response = await route.fetch(); await heldSave; await route.fulfill({response});
+  });
+  await page.locator('#editor-save').click();
+  await waitUntil(() => heldSubmissions === 1);
+  try {
+    await page.locator('#editor-graph button').first().click();
+    assert.equal(await page.locator('#editor-save').isDisabled(), true, 'Node render cannot enable pending Save');
+    await page.locator('#editor-save').dispatchEvent('click');
+    await page.waitForTimeout(100);
+    assert.equal(heldSubmissions, 1, 'Pending Save cannot resubmit');
+  } finally { finishSave(); }
+  await waitUntil(async () => !(await page.locator('#editor-pending').textContent()).includes('Pending'));
+  await page.unroute('**/api/editor/reusable/save');
   assert.deepEqual(faults, []);
-  console.log('PASS: real API inspector → graph → Python diff → exact disk save/reload; agent refresh; two retained conflicts/reconciliation; stale review fence; inert hostile text; reusable managed roles and preparation options survive real edit/review/save/reload.');
+  console.log('PASS: real API inspector → graph → Python diff → exact disk save/reload; agent refresh; two retained conflicts/reconciliation; stale review fence; inert hostile text; reusable managed roles/options; disconnected conflict discard/rebase and retained-review handler gates survive reconnect without requests or draft loss.');
 } finally { if (browser) await browser.close(); server.kill('SIGTERM'); lines.close(); }
