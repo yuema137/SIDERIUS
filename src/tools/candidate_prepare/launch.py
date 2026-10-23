@@ -3,9 +3,9 @@
 import hashlib
 import sys
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from core.durable_io import publish_bytes_write_once
 from tools.candidate_worker.models import CandidateRunRequest
@@ -114,14 +114,21 @@ def reconcile(
     )
 
 
-def prepare_candidate(request: CandidatePreparationRequest) -> CandidatePreparationReceipt:
+def prepare_candidate(
+    request: CandidatePreparationRequest, *, invocation_id: UUID | None = None
+) -> CandidatePreparationReceipt:
     """Prepare one fresh bundle; preserve partial files on failure and never launch it."""
     request = CandidatePreparationRequest.model_validate_json(request.model_dump_json())
+    identity = (
+        uuid4()
+        if invocation_id is None
+        else TypeAdapter(UUID).validate_python(invocation_id, strict=True)
+    )
     captures = admit(request)
     output = Path(request.output_dir)
     control_dir = output / "preparation"
     control = PreparationControl(
-        preparation_id=uuid4(), request=request, sources=tuple(item for item, _ in captures)
+        preparation_id=identity, request=request, sources=tuple(item for item, _ in captures)
     )
     initial = CandidatePreparationReceipt(
         preparation_id=control.preparation_id,

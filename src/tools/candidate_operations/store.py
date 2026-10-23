@@ -1,0 +1,186 @@
+"""Store validation, immutable requests and serialized single-operation admission."""
+
+import fcntl
+import hashlib
+import json
+import os
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import UUID
+
+from tools.workflow_preview.files import resolve_location
+from tools.workspace_sandbox.profile import SandboxProfile, runtime_roots
+
+from .files import canonical, directory, overlap, private, private_directory, publish, read_model
+from .models import (
+    SUBMISSION,
+    ActiveOperation,
+    OperationFailure,
+    OperationRecord,
+    OperationStoreConfig,
+    OperationSubmission,
+)
+
+
+def now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def digest(submission: OperationSubmission) -> str:
+    content = {"kind": submission.kind, "request": submission.request.model_dump(mode="json")}
+    return hashlib.sha256(
+        json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def validate_config(config: OperationStoreConfig) -> OperationStoreConfig:
+    config = OperationStoreConfig.model_validate_json(config.model_dump_json())
+    state = canonical(config.state_root)
+    roots = tuple(canonical(root) for root in (*config.preparation_roots, *config.candidate_roots))
+    if not all(root.is_dir() for root in roots):
+        raise OperationFailure("path", "allowed output roots must exist as directories")
+    if any(overlap(state, root) for root in runtime_roots()):
+        raise OperationFailure("path", "operation state overlaps runtime/source")
+    return config
+
+
+def native_directory(submission: OperationSubmission) -> Path:
+    if submission.kind == "prepare":
+        return canonical(submission.request.output_dir) / "preparation"
+    request = submission.request
+    project = canonical(request.preview.project_root)
+    workspace = resolve_location(
+        project, request.preview.document.definition.task.workspace, "workspace"
+    )
+    canonical(str(workspace))
+    # Check the original spelling as well: resolve_location alone follows aliases.
+    original = project / request.preview.document.definition.task.workspace
+    if original != workspace:
+        raise OperationFailure("path", "candidate workspace must have canonical ancestry")
+    return workspace / "candidate_run"
+
+
+def validate_submission(
+    config: OperationStoreConfig, submission: OperationSubmission
+) -> OperationSubmission:
+    submission = SUBMISSION.validate_json(SUBMISSION.dump_json(submission))
+    state = canonical(config.state_root)
+    if submission.kind == "prepare":
+        request = submission.request
+        SandboxProfile.environment_keys(request.candidate_environment_names)
+        outputs = (
+            (canonical(request.output_dir), config.preparation_roots),
+            (canonical(request.candidate_workspace), config.candidate_roots),
+        )
+        inputs = (
+            request.task_manifest,
+            request.llm_config_file,
+            request.data_root,
+            *request.task_read_only,
+        )
+    else:
+        request = submission.request
+        SandboxProfile.environment_keys(request.environment_names)
+        outputs = ((native_directory(submission).parent, config.candidate_roots),)
+        project = canonical(request.preview.project_root)
+        task = request.preview.document.definition.task
+        inputs = (
+            str(project),
+            str(resolve_location(project, task.data_root, "data")),
+            str(resolve_location(project, task.manifest, "manifest")),
+            *(item.path for item in request.files),
+            *request.read_only,
+        )
+    for output, roots in outputs:
+        if not any(
+            output.is_relative_to(canonical(root)) and output != canonical(root) for root in roots
+        ):
+            raise OperationFailure("path", "native destination is outside configured roots")
+        if overlap(state, output):
+            raise OperationFailure("path", "operation state overlaps native destination")
+    if any(overlap(state, canonical(value)) for value in inputs):
+        raise OperationFailure("path", "operation state overlaps selected inputs")
+    return submission
+
+
+@contextmanager
+def locked_store(config: OperationStoreConfig, *, create: bool = True) -> Iterator[Path]:
+    root = canonical(config.state_root)
+    private_directory(root, create=create)
+    private_directory(root / "operations", create=create)
+    with directory(root) as descriptor:
+        lock = os.open(
+            "admission.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=descriptor
+        )
+    try:
+        private(os.fstat(lock), directory=False)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield root
+    finally:
+        os.close(lock)
+
+
+def operation_path(config: OperationStoreConfig, operation_id: UUID) -> Path:
+    if not isinstance(operation_id, UUID):
+        raise OperationFailure("operation_id", "operation_id must be a UUID")
+    root = canonical(config.state_root)
+    private_directory(root)
+    private_directory(root / "operations")
+    path = root / "operations" / str(operation_id)
+    private_directory(path)
+    return path
+
+
+def load_record(config: OperationStoreConfig, operation_id: UUID) -> OperationRecord:
+    path = operation_path(config, operation_id)
+    record = read_model(path / "request.json", OperationRecord, private_file=True)
+    if record.submission.request_id != operation_id or record.request_digest != digest(
+        record.submission
+    ):
+        raise OperationFailure("integrity", "operation request identity mismatch")
+    if record.config != config:
+        raise OperationFailure(
+            "integrity", "store configuration differs from admitted configuration"
+        )
+    validate_submission(config, record.submission)
+    return record
+
+
+def existing(
+    config: OperationStoreConfig, submission: OperationSubmission
+) -> OperationRecord | None:
+    path = Path(config.state_root) / "operations" / str(submission.request_id)
+    if not os.path.lexists(path):
+        return None
+    record = load_record(config, submission.request_id)
+    if record.request_digest != digest(submission):
+        raise OperationFailure("conflict", "request_id already identifies different content")
+    return record
+
+
+def claim(root: Path, record: OperationRecord) -> Path:
+    path = root / "operations" / str(record.submission.request_id)
+    with directory(path.parent) as descriptor:
+        os.mkdir(path.name, 0o700, dir_fd=descriptor)
+    publish(path / "request.json", record)
+    publish(
+        root / "active.json",
+        ActiveOperation(operation_id=record.submission.request_id),
+        replace=True,
+    )
+    return path
+
+
+def require_available(root: Path, releasable: Callable[[UUID], bool]) -> None:
+    """Check all claims, including a crash before publishing the derived active pointer."""
+    with directory(root / "operations") as descriptor:
+        names = os.listdir(descriptor)
+    for name in names:
+        try:
+            operation_id = UUID(name)
+        except ValueError as error:
+            raise OperationFailure("integrity", "unrecognized operation directory") from error
+        if str(operation_id) != name or not releasable(operation_id):
+            raise OperationFailure("busy", "store has an active or unresolved operation")

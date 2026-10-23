@@ -1,9 +1,15 @@
 # Native candidate preparation contract
 
-`CandidatePreparationRequest` and `prepare_candidate(request) ->
+`CandidatePreparationRequest` and `prepare_candidate(request, *, invocation_id=None) ->
 CandidatePreparationReceipt` are the shared Python/JSON operation. The CLI
 `python -m tools.candidate_prepare --request PATH` decodes the same request and
 returns zero only for `prepared`. It never launches the worker.
+
+Python callers may supply a strict UUID `invocation_id` to bind an admitted
+operation to the native preparation identity. It is validated before filesystem
+effects and becomes the existing `preparation_id`; omission preserves native
+`uuid4()` generation. The request/receipt schemas, CLI and exclusive output claim
+are unchanged. A losing claim cannot publish a receipt with its supplied identity.
 
 ## Admission
 
