@@ -11,17 +11,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 from tools.native_chain.models import NativeChainDeclaration, NativeChainRunBinding
 
 
-def test_public_capture_two_native_iterations(tmp_path):
-    root = Path(__file__).resolve().parents[3]
-    inputs = tmp_path / "inputs"
-    inputs.mkdir()
-    data = tmp_path / "data"
-    data.mkdir()
+def _task_manifest(root, inputs):
     # The built-in pseudo bridge emits the existing token-model fixture. Give
     # it that declared I/O contract rather than Quickstart's float/tabular one.
     from tests.helpers.composed_manifest import write_complete_manifest
@@ -47,7 +43,7 @@ def test_public_capture_two_native_iterations(tmp_path):
             {
                 "partition_count": 20,
                 "anchor_selection_files": [4, 7, 9],
-                "health_peek_files": [],
+                "health_peek_files": [4, 7, 9],
                 "topology": {
                     "modality": "token_sequence",
                     "class_cardinality": 256,
@@ -88,6 +84,65 @@ def test_public_capture_two_native_iterations(tmp_path):
             }
         )
     )
+    return manifest
+
+
+def _admission_witnesses(capture_path, declaration, control, tmp_path):
+    from tools.native_chain.check import admit, load_capture, verify_dispatch
+    from tools.native_chain.models import NativeChainCaptureReference, NativeChainDispatch
+
+    reference = NativeChainCaptureReference(
+        path=capture_path, sha256=control[3], input_max_bytes=16777216
+    )
+    capture = load_capture(reference)
+    shell = (*declaration.shell_arguments(), *control)
+    with pytest.raises(ValueError, match="shell_arguments_changed"):
+        admit(reference, (*shell, "--max_epochs", "2"))
+    with pytest.raises(ValueError, match="iteration_out_of_range"):
+        verify_dispatch(
+            NativeChainDispatch(capture=reference, iteration=3, argv=capture.iteration_one_argv)
+        )
+    with pytest.raises(ValueError, match="dispatch_arguments_changed"):
+        verify_dispatch(
+            NativeChainDispatch(capture=reference, iteration=2, argv=capture.iteration_one_argv)
+        )
+    workspace = declaration.run.workspace
+    workspace.mkdir()
+    with pytest.raises(ValueError, match="workspace_not_fresh"):
+        admit(reference, shell)
+    workspace.rmdir()
+    workspace.symlink_to(tmp_path / "missing-target")
+    with pytest.raises(ValueError):
+        admit(reference, shell)
+    workspace.unlink()
+    original = capture.source_path.read_bytes()
+    capture.source_path.write_bytes(original + b" ")
+    with pytest.raises(ValueError, match="source_changed"):
+        load_capture(reference)
+    capture.source_path.write_bytes(original)
+    with pytest.raises(ValueError, match="capture_digest_changed"):
+        load_capture(reference.model_copy(update={"sha256": "0" * 64}))
+    with pytest.raises(ValueError, match="input_too_large"):
+        load_capture(reference.model_copy(update={"input_max_bytes": 1}))
+    malformed = tmp_path / "malformed.json"
+    malformed.write_bytes(b"{broken")
+    with pytest.raises(ValueError):
+        load_capture(
+            NativeChainCaptureReference(
+                path=malformed,
+                sha256=hashlib.sha256(malformed.read_bytes()).hexdigest(),
+                input_max_bytes=16777216,
+            )
+        )
+
+
+def test_public_capture_two_native_iterations(tmp_path):
+    root = Path(__file__).resolve().parents[3]
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    data = tmp_path / "data"
+    data.mkdir()
+    manifest = _task_manifest(root, inputs)
     workspace = tmp_path / "run"
     declaration = NativeChainDeclaration(
         working_directory=root,
@@ -150,6 +205,7 @@ def test_public_capture_two_native_iterations(tmp_path):
         "--chain_capture_input_max_bytes",
         "16777216",
     )
+    _admission_witnesses(capture, declaration, control, tmp_path)
     command = ["bash", "scripts/launch/run_chain.sh", *declaration.shell_arguments(), *control]
     dry = subprocess.run(
         [*command, "--dry-run"], cwd=root, env=env, capture_output=True, text=True, timeout=120

@@ -154,3 +154,39 @@ def test_git_inspection_failure_is_capture_refusal(context, monkeypatch):
         context.check_launch(
             WorkflowLaunchConfig(start_iteration=2, source_paths=[]), RestoredState()
         )
+
+
+def test_token_fixture_dataset_and_codec_match_declared_model_contract(tmp_path, monkeypatch):
+    import torch
+
+    from execute_tools.evaluation_metric import MetricSpec
+    from execute_tools.task_data_path import ScopeBuildRequest
+    from tests.fixtures import native_chain_task as fixture
+
+    task = fixture.NativeChainTask()
+    scope = task.build_eval_scope(
+        ScopeBuildRequest(
+            round_kind="trial", selection_strategy="snapshot", portion=1, max_samples=3
+        )
+    )
+    inputs, targets = task.validation_dataset(scope, None).tensors
+    assert inputs.shape == targets.shape == (3, 8)
+    assert inputs.dtype == targets.dtype == torch.int64
+    assert inputs.min() >= 0 and inputs.max() < 256
+    logits = torch.nn.functional.one_hot(targets, 256).float().transpose(1, 2)
+    request = SimpleNamespace(
+        task_scope=scope, output_dir=str(tmp_path), deliverable_dir=str(tmp_path)
+    )
+    monkeypatch.setattr(fixture, "deliverable_name", lambda request: "tokens.json")
+    task.write_deliverable(logits, request)
+    payload = task.read_evaluation_payload(request)
+    spec = MetricSpec.model_validate_json(
+        (
+            Path(__file__).resolve().parents[4]
+            / "examples/quickstart/declared/metric_accuracy.json"
+        ).read_text()
+    )
+    metric = fixture.TokenAccuracy(spec)
+    assert metric._compute(None, evaluation_payload=payload, task_scope=scope)[0] == 1.0
+    payload[0][0] = (payload[0][0] + 1) % 256
+    assert metric._compute(None, evaluation_payload=payload, task_scope=scope)[0] < 1.0
