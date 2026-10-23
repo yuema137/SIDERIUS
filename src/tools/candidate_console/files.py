@@ -73,16 +73,19 @@ def token(value: str) -> str:
     return text
 
 
+def credential_values(value: str | None) -> dict[str, str]:
+    """Read the selected private JSON source; callers must never expose values."""
+    if value is None:
+        return {}
+    return TypeAdapter(dict[str, str]).validate_json(private_bytes(value), strict=True)
+
+
 def credentials(value: str | None, names: tuple[str, ...]) -> dict[str, str]:
     if not names:
         return {}
     try:
-        values = (
-            {}
-            if value is None
-            else TypeAdapter(dict[str, str]).validate_json(private_bytes(value), strict=True)
-        )
-    except (OSError, ValueError) as error:
+        values = credential_values(value)
+    except (OSError, ValueError, OperationFailure) as error:
         raise OperationFailure("credentials", "configured credentials are unavailable") from error
     missing = [name for name in names if not values.get(name)]
     if missing:

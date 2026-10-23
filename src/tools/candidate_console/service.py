@@ -34,6 +34,7 @@ from .models import (
     StatusView,
     TaskChoice,
 )
+from .readiness import credential_readiness
 
 
 def preparation_request(
@@ -60,6 +61,11 @@ class CandidateConsole:
             ChoiceView(
                 task_id=t.task_id,
                 label=t.label,
+                task_manifest=t.task_manifest,
+                data_root=t.data_root,
+                llm_config_file=t.llm_config_file,
+                preparation_root=t.preparation_root,
+                candidate_root=t.candidate_root,
                 preparation_timeout_seconds=t.preparation_timeout_seconds,
                 candidate_timeout_seconds=t.candidate_timeout_seconds,
             )
@@ -109,6 +115,7 @@ class CandidateConsole:
         prepared, task = self.resolve_prepared_context(selection)
         saved, request = prepared.preparation_request, prepared.request
         return PreparedReview(
+            credential_readiness=credential_readiness(request, self.config.credential_file),
             prepare_operation_id=prepared.prepare_operation_id,
             prepared_digest=prepared.request_sha256,
             task_id=task.task_id,

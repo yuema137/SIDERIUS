@@ -255,3 +255,24 @@ def test_external_outside_prepared_mount_refuses_before_preview(edited, monkeypa
         adapter.review(project.project_id, selected)
     assert refused.value.detail.code == "unsupported"
     assert "explicit read-only mount" in str(refused.value.__cause__)
+
+
+def test_edited_readiness_does_not_change_review_identity_or_precede_digest(edited, monkeypatch):
+    """Readiness is ephemeral, and stale edited launch refuses before private access."""
+    adapter, project, selection = edited
+    first = adapter.review(project.project_id, selection)
+    assert first.credential_readiness.ready
+    Path(adapter.console.config.credential_file).write_text("{}")
+    second = adapter.review(project.project_id, selection)
+    assert second.review_digest == first.review_digest
+    assert not second.credential_readiness.ready
+    assert "credential_readiness" not in second.envelope.model_dump_json()
+    monkeypatch.setattr(
+        "tools.candidate_console.files.private_bytes",
+        lambda *a: pytest.fail("private read before digest"),
+    )
+    with pytest.raises(OperationFailure, match="reviewed bindings changed"):
+        adapter.launch(
+            project.project_id,
+            launch_selection(first).model_copy(update={"expected_review_digest": "0" * 64}),
+        )

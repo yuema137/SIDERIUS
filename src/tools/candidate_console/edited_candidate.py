@@ -27,7 +27,8 @@ from tools.workflow_preview.models import FileObservation, PreviewModel, Workflo
 from workflows.definition import TaskReferences
 
 from .files import credentials
-from .models import PreparedSelection, RouteView
+from .models import CredentialReadiness, PreparedSelection, RouteView
+from .readiness import credential_readiness
 from .service import CandidateConsole
 
 
@@ -66,6 +67,7 @@ class EditedRunEffects(PreviewModel):
 
 
 class EditedRunReview(PreviewModel):
+    credential_readiness: CredentialReadiness | None = None
     selection: EditedRunSelection
     source_origin: str
     reviewed_context: ReviewedContext
@@ -90,6 +92,17 @@ class EditedCandidate:
         )
 
     def review(self, project_id: str, selection: EditedRunSelection) -> EditedRunReview:
+        review = self._checked_review(project_id, selection)
+        return review.model_copy(
+            update={
+                "credential_readiness": credential_readiness(
+                    review.envelope.request, self.console.config.credential_file
+                )
+            }
+        )
+
+    def _checked_review(self, project_id: str, selection: EditedRunSelection) -> EditedRunReview:
+        """Verify bindings without reading credentials, including during launch identity checks."""
         try:
             return self._review(project_id, selection)
         except OperationFailure:
@@ -228,7 +241,7 @@ class EditedCandidate:
                     "conflict", "operation ID identifies another reviewed capture"
                 )
             return submit_operation(store, prior, launch_environment={})
-        review = self.review(
+        review = self._checked_review(
             project_id,
             EditedRunSelection(
                 prepare_operation_id=selection.prepare_operation_id,

@@ -24,6 +24,8 @@
         <fieldset id="draft" disabled>
           <label for="task">Task</label><select id="task" required><option value="">Connect to load tasks</option></select>
           <p id="limits" class="muted"></p>
+          <dl id="configured-paths" class="facts"></dl>
+          <p>Prepare creates separate child paths under these output parents. Review the resolved workspace before Launch.</p>
           <label for="run-name">Run name</label><input id="run-name" required maxlength="128" autocomplete="off">
           <details><summary>Optional stage advice</summary>
             <label for="proposal-advice">Proposal advice</label><textarea id="proposal-advice" maxlength="32768" rows="3"></textarea>
@@ -38,6 +40,7 @@
     <section class="card" aria-labelledby="review-heading">
       <p class="eyebrow">2 · Review and launch</p><h2 id="review-heading">Prepared request</h2>
       <p id="review-status" role="status">The concrete request appears after preparation completes.</p>
+      <button id="refresh-review" type="button" disabled>Refresh readiness</button>
       <div id="review"></div>
       <p class="warning">Launching runs configured task code and may call paid model APIs. Review the task, routes and resource policy before proceeding.</p>
       <button id="launch-button" type="button" disabled>Launch candidate</button><p id="launch-status" role="status">No candidate launch submitted.</p><p id="candidate-id" class="mono"></p>

@@ -36,6 +36,7 @@
   }
   function limits() {
     const task = choices.find(item => item.task_id === $('task').value);
+    facts($('configured-paths'), task ? [ ['Task manifest', task.task_manifest], ['Data root', task.data_root], ['Model profile', task.llm_config_file], ['Preparation output parent', task.preparation_root], ['Candidate output parent', task.candidate_root] ] : []);
     say('limits', task ? `Preparation limit: ${task.preparation_timeout_seconds}s · Candidate limit: ${task.candidate_timeout_seconds}s` : '');
   }
   function controls() {
@@ -43,8 +44,9 @@
     $('prepare-button').disabled = !connected || !!preparation?.pending || !!preparation?.accepted;
     say('prepare-button', preparation ? (preparation.pending ? 'Submitting preparation…' : preparation.accepted ? 'Preparation submitted' : 'Retry same preparation') : 'Prepare request');
     $('new-preparation').disabled = !connected || !!preparation?.pending || !!launch?.pending;
-    $('launch-button').disabled = !connected || !review || !!launch?.pending || !!launch?.accepted;
+    $('launch-button').disabled = !connected || !review || !review.credential_readiness?.ready || !!launch?.pending || !!launch?.accepted;
     say('launch-button', launch ? (launch.pending ? 'Submitting candidate…' : launch.accepted ? 'Candidate submitted' : 'Retry same candidate launch') : 'Launch candidate');
+    $('refresh-review').disabled = !connected || !review || !!launch?.pending || !!launch?.accepted;
     $('monitor-button').disabled = !connected;
   }
   $('task').addEventListener('change', limits);
@@ -103,6 +105,7 @@
     const finishing = status.finishing ? ' · Finishing: Native result is available; the wrapper is still finishing.' : '';
     return `State: ${status.state}${native}${finishing}`;
   }
+  $('refresh-review').addEventListener('click', async () => { review = null; controls(); await readPreparation(); });
   async function readPreparation() {
     if (!preparation?.accepted || preparation.reviewBlocked || review) return;
     const current = preparation, currentGeneration = generation;
@@ -121,15 +124,22 @@
           ['Proposal advice', result.proposal_advice || '(none)'], ['Implementation advice', result.implementation_advice || '(none)'], ['Validation advice', result.validation_advice || '(none)'],
           ['Task manifest', result.task_manifest], ['Data root', result.data_root], ['Candidate workspace', result.candidate_workspace],
           ['Preparation timeout', result.preparation_timeout_seconds + 's'], ['Candidate timeout', result.candidate_timeout_seconds + 's'],
-          ['Network', result.network], ['Devices', result.devices.join(', ') || '(none)'], ['Environment names', result.environment_names.join(', ') || '(none)'], ['Read-only paths', result.read_only.join('\n') || '(none)'] ]);
-        say('review-status', 'Prepared request loaded. Review the concrete facts before launching.'); controls();
+          ['Network', result.network], ['Devices', result.devices.join(', ') || '(none)'], ['Environment names', result.environment_names.join(', ') || '(none)'], ['Read-only paths', result.read_only.join('\n') || '(none)'],
+          ['Required provider names', result.credential_readiness.required_names.join(', ') || '(none)'],
+          ['Omitted from candidate_environment_names', result.credential_readiness.omitted_names.join(', ') || '(none)'],
+          ['Unresolved credential routes', result.credential_readiness.unresolved_routes.join(', ') || '(none)'],
+          ['Selected credential_file', result.credential_readiness.file_status],
+          ['Present names', result.credential_readiness.present_names.join(', ') || '(none)'],
+          ['Missing or empty names', result.credential_readiness.missing_names.join(', ') || '(none)'],
+          ['Repair', result.credential_readiness.instructions.join('\n') || '(none)'] ]);
+        say('review-status', 'Prepared request loaded. ' + (result.credential_readiness.ready ? 'Name presence checked; review before launching. This does not verify provider access or billing.' : 'Launch blocked. Follow the repair instructions, then Refresh readiness.')); controls();
       }
     } catch (error) {
       if (current === preparation) say('prepare-status', 'Observation stale or review unavailable: ' + error.message + '. This does not establish whether the operation stopped.');
     }
   }
   $('launch-button').addEventListener('click', async () => {
-    if (!connected || !review || launch?.pending || launch?.accepted) return;
+    if (!connected || !review || !review.credential_readiness?.ready || launch?.pending || launch?.accepted) return;
     if (!launch) {
       const id = crypto.randomUUID();
       launch = { id, pending: false, accepted: false, payload: { candidate_operation_id: id, prepare_operation_id: review.prepare_operation_id, expected_prepared_digest: review.prepared_digest } };

@@ -103,6 +103,11 @@ class ChoiceView(PreviewModel):
     label: str
     preparation_timeout_seconds: float
     candidate_timeout_seconds: float
+    task_manifest: str
+    data_root: str
+    llm_config_file: str
+    preparation_root: str
+    candidate_root: str
 
 
 class RouteView(PreviewModel):
@@ -111,7 +116,21 @@ class RouteView(PreviewModel):
     model: str | None
 
 
+class CredentialReadiness(PreviewModel):
+    """Ephemeral name-only facts; never admission or provider authentication."""
+
+    required_names: tuple[str, ...]
+    omitted_names: tuple[str, ...]
+    unresolved_routes: tuple[str, ...]
+    present_names: tuple[str, ...]
+    missing_names: tuple[str, ...]
+    file_status: Literal["not_needed", "not_selected", "readable", "unavailable"]
+    ready: bool
+    instructions: tuple[str, ...]
+
+
 class PreparedReview(PreviewModel):
+    credential_readiness: CredentialReadiness
     prepare_operation_id: UUID
     prepared_digest: str
     task_id: str

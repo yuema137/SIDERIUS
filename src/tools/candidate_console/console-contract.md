@@ -75,6 +75,30 @@ immutability. Repeated UUID/request submission retains native idempotency. If
 current files changed, inspect the known operation ID rather than creating an
 automatic new launch.
 
+Choices expose configured manifest, data root, LLM profile and preparation/candidate
+output parents without reading credentials or composing tasks. Prepare selects
+separate UUID children; browser paths are observations, not editable run inputs.
+
+Both prepared and edited native review APIs add `credential_readiness` after
+verified configured/prepared association (edited review also verifies saved source
+and bindings). This ephemeral projection reuses worker `credential_requirements`
+and the strict selected private JSON reader. It returns required/omitted provider
+names, unresolved route node names, present/missing required or declared names,
+`file_status` (`not_needed`, `not_selected`, `readable`, `unavailable`), a `ready`
+boolean and bounded repair instructions. No file is read when there are no names
+to check. Missing/empty extra declared names also block readiness. Invalid or
+removed files after startup remain reviewable with unavailable status; startup
+`check` still validates configured credential file shape and permissions.
+
+Readiness is absent from native requests, records and review envelope digests.
+No values, lengths, hashes, profile payloads or arbitrary private-file errors are
+serialized. No environment/dotenv fallback or provider authentication occurs.
+Prepared UI renders name-only readiness and disables Launch for known blockers;
+Refresh readiness rereads review, without launching. Edited review exposes the
+same additive API field for its future launch UI; that UI is not delivered here.
+Launch checks identity before reading private credentials afresh. Monitoring and
+initial choices do not read credential files; backend admission remains authoritative.
+
 Review exposes stage names, safe route provider/model names, advice, selected task/
 data/workspace paths and resource/time policy, never raw bridge_arguments/profile.
 Status preserves observed_at, native state, process observation, finishing,
@@ -231,13 +255,13 @@ The adapter resolves the same verified prepared policy as `CandidateConsole`.
 Task manifest, data root, workspace and prepared LLM config observation must match
 that context. Actual saved node IDs, explicit input locations and routes come from
 source. Selected inputs require the existing native read-only/runtime roots.
-Review observes bindings, without credentials or native execution. Native payload
+Review observes bindings and then name-only credential readiness, without native execution. Native payload
 and scientific validation remain launch-time work.
 
 A canonical internal envelope binds full candidate request, captured source and
 project/preparation provenance. HTTP returns the digest and curated effects,
-excluding raw bridge arguments and source payload. Launch reconstructs review
-before loading credentials. An existing candidate UUID is looked up first and
+excluding raw bridge arguments and source payload. Launch reconstructs bindings and
+compares the review digest before loading credentials. Readiness is outside that digest. An existing candidate UUID is looked up first and
 must match its admitted source/context/review identities; replay retains the
 original capture even after the authoring file or workspace changes. Corrupt
 existing admissions fail closed. Clients must retain the same UUID on ambiguous
