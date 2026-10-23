@@ -24,6 +24,16 @@ from .models import CandidatePreparationRequest
 
 
 def prepare_native(request: CandidatePreparationRequest) -> str:
+    """Legacy fixed declaration with shared native payload construction."""
+    fingerprint = prepare_payloads(request)
+    publish_bytes_write_once(
+        str(Path(request.output_dir) / "workflow.json"),
+        (candidate_document(request).model_dump_json(indent=2) + "\n").encode(),
+    )
+    return fingerprint
+
+
+def prepare_payloads(request: CandidatePreparationRequest) -> str:
     """Compose the selected task and save exact native inputs without a provider."""
     output = Path(request.output_dir)
     config_bytes = (output / "preparation/llm.snapshot").read_bytes()
@@ -77,7 +87,6 @@ def prepare_native(request: CandidatePreparationRequest) -> str:
             ("interpretation.json", interpretation),
             ("proposal.json", proposal),
             ("storage.json", attempt.storage),
-            ("workflow.json", candidate_document(request)),
         )
         for name, record in records:
             publish_bytes_write_once(

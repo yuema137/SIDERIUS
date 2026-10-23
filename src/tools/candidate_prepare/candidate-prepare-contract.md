@@ -133,9 +133,9 @@ same verifier, so rereading after launch cannot replay preparation effects.
 ReusableWorkflowDocument and ReusableCandidateLocations, and returns a
 ResolvedReusableCandidate containing a revalidated v1 WorkflowDocument plus
 CandidatePreparationOptions. It is exported alongside the unchanged legacy
-preparation API, but no preparation/launch caller invokes it in this slice.
+preparation API, and managed reusable preparation invokes it as described below.
 It performs no reads, path traversal, allocation, native imports, payload
-validation, provider work or publication. It does not prepare or launch v2.
+validation, provider work or publication. The pure function itself does not prepare or launch v2.
 
 ReusableCandidateLocations requires explicit manifest, data_root, workspace and
 an externals tuple of ResolvedExternalLocation(binding, location). IDs must be
@@ -158,3 +158,128 @@ fixed names and graph remain unchanged. The resulting v1 declaration alone is
 insufficient to launch: no native inputs, observations, request, receipt, run
 identity or parent bundle verification are created. Those remain a separate
 bounded integration responsibility.
+
+## Managed reusable preparation
+
+`ReusableCandidatePreparationRequest` and
+`prepare_reusable_candidate(request) -> ReusablePreparationReceipt` implement
+managed-only reusable preparation. CLI mutually exclusive `--reusable-request`
+and legacy `--request` call their respective typed Python owners. Professional
+and Assistant setup both use these owners; neither has another backend.
+`preflight_reusable_candidate(request) -> ReusablePreparationPlan` is inert
+read-only admission, not a reusable execution authorization. Preparation captures
+again internally and never accepts a caller's stale plan.
+
+Required reusable selections: canonical absolute `source_path`, `project_root`,
+existing `runs_root`, expected lowercase SHA-256, explicit UUID `run_id`, plus
+legacy run_name/config/timeouts/task mounts/future sandbox policy. Source owns
+task references and all preparation options. Relative task paths resolve once
+against project_root. A's resolver owns graph/role validation and mapping;
+preparation rejects every literal external before allocation. v1 optional
+literal handling and legacy PreparationControl serialization are unchanged.
+
+`reusable_admission.capture` reads original source once as a bounded regular
+no-follow file, using the restricted parser's source limit. Those same bytes
+supply parse/hash/snapshot. Native artifact reads use a preparation-local 16 MiB
+bound; this does not import the independent operation store's private-file or
+error contract. Canonical path admission and safe reads reject aliases. Parent
+origin rechecks detect drift without replacing captured bytes. Existing task
+manifest/profile observations are retained; this is not a snapshot of every
+imported dependency. The existing admission policy now accepts an explicit
+future parent only for the reusable envelope's actual children and validates
+the envelope itself against protected/input/data/mount roots. Legacy defaults
+still require existing destination parents.
+
+The exclusive `runs_root/<run_id>` claim precedes all publications. The losing
+caller writes nothing. `binding.json` stores `ReusableBindingCapture`: original
+FileObservation, fixed snapshot path, project base, reusable semantic digest,
+resolved native selections, A locations, and input observations. Exact original
+bytes live only in `workflow.py.snapshot`, not another serialized source string.
+`inputs/` contains the native bundle; sibling `workspace/` stays absent. UUID
+run_id identifies this envelope, preparation_id identifies the offline child,
+and the eventual worker run_id is separately owned. They are not interchangeable.
+
+`ReusablePreparationControl` adds an explicit reusable kind and binding path/hash
+beside the unchanged legacy type. `reusable_child` is a separate explicit module
+entrypoint. The sandbox supervisor is shared with legacy preparation; only exact
+parent binding/snapshot files are mounted read-only, never their envelope parent.
+The child verifies capture/control, binds generated library, and calls shared
+`native.prepare_payloads`. Legacy `prepare_native` separately publishes its fixed
+`candidate_document`; reusable publishes A's resolved authored graph plus canonical
+`workflow.resolved.py`. `REUSABLE_FILES` adds that source to unchanged NATIVE_FILES.
+
+`reusable_verify` receives retained parent plan/source/control. It compares exact
+saved parent bytes and child index/control identity, independently reruns A
+resolution, verifies the complete artifact index, canonical derived source,
+profile bytes and composition fingerprint linkage. Narrow inert projections
+check native proposal storage and advice/output types. Existing StorageConfig,
+candidate_proposal_dir and impl_attempt_storage own the two concrete native
+storage destinations. Native child/worker still own full scientific decoding.
+Source options are independently checked against native selections, including
+implementation/validation advice outside v1 graph equality. Shared build_candidate
+uses existing preview/config owners for observations, routes and worker policy;
+multiple storage aliases retain distinct observation references.
+
+CandidateRunRequest.workflow_source captures the derived v1 source with its
+resolved origin path/hash and reviewed_context=None. The unchanged worker source
+validator checks equality with the v1 preview. Parent publishes preview/request
+only after bundle checks and rechecks capture/input/publication bytes before
+receipt. `inputs/preparation/receipt.json` remains the native preparation receipt;
+top-level `receipt.json` is published last with binding/request/preview digests.
+Statuses are prepared/failed/timed_out/interrupted. Failures preserve partial
+evidence and attempt terminal receipts without overwrite. Late failures may
+leave request-shaped diagnostics: only a prepared top-level receipt with matching
+digests establishes reusable success. Missing receipt is unknown. Collision is
+not retry/resume, and there is no auto-cleanup or ID substitution.
+
+The guarantee is coherence of original capture, binding and request at successful
+publication. Mutable sibling hashes are not a later independent trust anchor.
+Direct existing worker launch validates resolved-v1 inputs, not original-v2
+provenance. B exposes no standalone arbitrary-path provenance verifier. A future
+GUI/operation consumer must retain expected receipt/binding identity, safely
+verify original capture and source options/resolution, check final request bytes,
+and bind that selection into operation/review identity before launch. Such an
+adapter, run registry, resume, literal materialization, training and GUI changes
+are outside this operation.
+
+
+## Reusable request recipe
+
+A coding agent or Python caller constructs the strict request from explicit
+operator choices. Compute the expected source identity and allocate a fresh UUID
+programmatically; do not ask the operator to transcribe or compare digest strings.
+The preparation owner reobserves the source and refuses drift before allocation.
+For example, in the selected checkout's frozen environment:
+
+```python
+import hashlib
+from pathlib import Path
+from uuid import uuid4
+
+from tools.candidate_prepare import ReusableCandidatePreparationRequest
+
+project = Path("/projects/my-task").resolve()
+source = project / "workflow.py"
+request = ReusableCandidatePreparationRequest(
+    source_path=str(source),
+    project_root=str(project),
+    expected_source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+    runs_root="/runs/my-task",  # Existing, outside task/data mounts.
+    run_id=uuid4(),
+    run_name="candidate",
+    llm_config_file=str(project / "llm.json"),
+    preparation_timeout_seconds=60.0,
+    candidate_timeout_seconds=600.0,
+    task_read_only=(str(project / "package"),),
+    candidate_network=True,
+    candidate_devices=(),
+    candidate_environment_names=("OPENAI_API_KEY",),
+)
+(project / "reusable-request.json").write_text(request.model_dump_json(indent=2))
+```
+
+Substitute the operator's selected paths, budgets and enabled provider names;
+no example choice creates scientific defaults or launch permission. The API's
+receipt digests are machine-consumed integrity fields. A later provenance-aware
+consumer must validate them against caller-retained expected identity as specified
+above; the human-facing success signal is prepared status and CLI exit zero.

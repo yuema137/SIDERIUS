@@ -111,3 +111,20 @@ Before calling local inference readiness complete, check the task's
 [output inventory requirement](../../reference/model-output-retention.md).
 Workflow and direct tuner startup enforce that route-specific prerequisite;
 a composition-only review does not certify it or the eventual output files.
+
+## Reusable three-node candidates
+
+When the user selects a reusable proposal/implementation/validation candidate,
+Professional and Assistant routes both use
+`tools.candidate_prepare.prepare_reusable_candidate` or
+`python -m tools.candidate_prepare --reusable-request PATH`. Author source and
+request in the external project; follow the
+[shared preparation contract](../../../src/tools/candidate_prepare/candidate-prepare-contract.md#managed-reusable-preparation)
+and [operator steps](../../../src/tools/candidate_prepare/README.md#prepare-several-runs-from-one-workflow).
+Keep task references/advice in authored v2 source and allocate an explicit fresh
+UUID under the selected runs root. Do not edit generated v1 input or pass an
+existing envelope as resume. Check the top-level prepared receipt and digests;
+partial requests are diagnostics. Preparation is offline but imports trusted task
+code. It grants no effectful launch budget. Direct worker launch checks resolved-v1
+inputs only; a future consumer must verify original-v2 provenance before offering
+reusable launch. Do not claim current GUI selection or resume support from this API.

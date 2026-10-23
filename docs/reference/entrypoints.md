@@ -27,6 +27,7 @@ the flags that decide *what a run is*.
 | you want to | use |
 |---|---|
 | inspect or explicitly probe a forensic snapshot | `python -m tools.runtime_replay`; see the [replay contract](runtime-replay.md) |
+| prepare a fresh candidate from reusable authored v2 source | `python -m tools.candidate_prepare --reusable-request PATH`; [preparation contract](../../src/tools/candidate_prepare/candidate-prepare-contract.md#managed-reusable-preparation), no launch/resume |
 | run the full multi-iteration agent loop | `scripts/launch/run_chain.sh` |
 | launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
 | run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |
@@ -386,3 +387,14 @@ checks selected names before generation. Independent staging and promotion paths
 check before copying. Archived schemas remain readable but do not grant live
 execution eligibility. This rule does not certify generated source code or
 protect against malicious pre-existing symlinks under destination directories.
+
+## Professional and Assistant reusable candidate setup
+
+Both routes use `tools.candidate_prepare.prepare_reusable_candidate` and its
+`--reusable-request` CLI. Professional callers author external project files;
+Assistant callers help author the same files and explicit selections. Source
+owns task references/advice; request owns fresh run identity and runtime policy.
+The [preparation contract](../../src/tools/candidate_prepare/candidate-prepare-contract.md#managed-reusable-preparation)
+owns managed-only support, failure receipts and the authored-v2 versus generated-v1
+publication boundary. This does not replace native chain entrypoints or add
+reusable GUI launch or resume.

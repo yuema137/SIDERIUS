@@ -32,7 +32,9 @@ def absent_destination(path: Path) -> None:
         raise ValueError(f"destination must be absent with an existing directory parent: {path}")
 
 
-def admit(request: CandidatePreparationRequest) -> tuple[tuple[FileObservation, bytes], ...]:
+def admit(
+    request: CandidatePreparationRequest, *, future_parent: Path | None = None
+) -> tuple[tuple[FileObservation, bytes], ...]:
     """Validate selected paths and both policies without creating either destination."""
     manifest, config, data, output, workspace = map(
         canonical,
@@ -63,8 +65,14 @@ def admit(request: CandidatePreparationRequest) -> tuple[tuple[FileObservation, 
         Path("/sys"),
         Path("/sandbox-home"),
     )
-    for destination in (output, workspace):
-        absent_destination(destination)
+    destinations = (
+        (output, workspace) if future_parent is None else (output, workspace, future_parent)
+    )
+    for destination in destinations:
+        if future_parent is None or destination == future_parent:
+            absent_destination(destination)
+        elif destination.parent != future_parent or os.path.lexists(destination):
+            raise ValueError("future destinations must be absent children of the envelope")
         inspect_workspace(destination, data, (manifest, config))
         if any(overlap(destination, root) for root in protected):
             raise ValueError(
