@@ -52,11 +52,58 @@ try {
   let navigationCount = 0; page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigationCount++; });
   const theme = page.getByRole('combobox', {name: 'Color theme', exact: true});
   const applied = () => page.locator('html').getAttribute('data-theme');
+  // Tokens alone cannot detect filters or selectors that alter rendered controls.
+  async function renderedButtonContrast(mode) {
+    const buttons = page.locator('button:enabled');
+    for (const button of await buttons.all()) {
+      if (!(await button.isVisible())) continue;
+      const name = await button.textContent();
+      for (const state of ['normal', 'hover', 'focus']) {
+        await page.mouse.move(0, 0);
+        await theme.focus();
+        if (state === 'hover') await button.hover();
+        if (state === 'focus') {
+          await page.keyboard.press('Tab'); // Establish keyboard focus visibility.
+          await button.focus();
+        }
+        const appearance = await button.evaluate(element => {
+          const style = getComputedStyle(element);
+          const luminance = color => {
+            const channels = color.match(/[\d.]+/g).slice(0, 3).map(Number)
+              .map(value => value / 255)
+              .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+            return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+          };
+          const ratio = (fg, bg) => {
+            const a = luminance(fg), b = luminance(bg);
+            return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+          };
+          let parent = element.parentElement;
+          while (parent && getComputedStyle(parent).backgroundColor === 'rgba(0, 0, 0, 0)') parent = parent.parentElement;
+          return {
+            text: ratio(style.color, style.backgroundColor), filter: style.filter,
+            focusVisible: element.matches(':focus-visible'), outlineStyle: style.outlineStyle,
+            outline: ratio(style.outlineColor, getComputedStyle(parent).backgroundColor),
+          };
+        });
+        assert.equal(appearance.filter, 'none', `${mode}/${name}/${state}: color filters require rendered contrast accounting`);
+        assert.ok(appearance.text >= 4.5, `${mode}/${name}/${state}: text contrast ${appearance.text}`);
+        if (state === 'focus') {
+          assert.equal(appearance.focusVisible, true);
+          assert.notEqual(appearance.outlineStyle, 'none');
+          assert.ok(appearance.outline >= 3, `${mode}/${name}: focus contrast ${appearance.outline}`);
+        }
+      }
+    }
+    await page.mouse.move(0, 0);
+    await theme.focus();
+  }
   async function capture(label) {
     for (const width of [1440, 390]) {
       await page.setViewportSize({width, height: 1000});
       for (const mode of ['light', 'dark']) {
         await theme.selectOption(mode);
+        await renderedButtonContrast(mode);
         // Actual shared foreground/background roles must retain readable contrast.
         const contrast = await page.evaluate(() => {
           const styles = getComputedStyle(document.documentElement);
@@ -190,7 +237,27 @@ try {
   assert.equal(await deniedPage.locator('html').getAttribute('data-theme'), 'dark');
   assert.deepEqual(faults, []);
   await denied.close();
-  console.log(`PASS: theme preferences, keyboard/focus, denied storage, retained inspector/source/review/monitor identities; no theme API calls/reloads/new timers; fixture screenshots ${screenshots}`);
+
+  // A denied write cannot replace an older readable persisted preference.
+  const writeDenied = await browser.newContext({colorScheme: 'dark'});
+  const writeDeniedPage = await writeDenied.newPage();
+  writeDeniedPage.on('pageerror', error => faults.push(error.message));
+  await writeDeniedPage.goto(metadata.origin);
+  await writeDeniedPage.getByRole('combobox', {name: 'Color theme', exact: true}).selectOption('light');
+  await writeDenied.addInitScript(() => {
+    Storage.prototype.setItem = () => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+  });
+  await writeDeniedPage.reload();
+  const writeDeniedTheme = writeDeniedPage.getByRole('combobox', {name: 'Color theme', exact: true});
+  await writeDeniedTheme.selectOption('dark');
+  assert.equal(await writeDeniedPage.locator('html').getAttribute('data-theme'), 'dark');
+  assert.equal(await writeDeniedPage.evaluate(key => localStorage.getItem(key), key), 'light');
+  await writeDeniedPage.reload();
+  assert.equal(await writeDeniedTheme.inputValue(), 'light');
+  assert.equal(await writeDeniedPage.locator('html').getAttribute('data-theme'), 'light');
+  assert.deepEqual(faults, []);
+  await writeDenied.close();
+  console.log(`PASS: rendered normal/hover/focus button contrast, theme preferences, keyboard/focus, read/write-denied storage and preserved old preference, retained inspector/source/review/monitor identities; no theme API calls/reloads/new timers; fixture screenshots ${screenshots}`);
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM'); lines.close();

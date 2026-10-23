@@ -28,6 +28,10 @@
   border-radius: .7rem;
 }
 
+.editor-node:not(:disabled):hover {
+  background: var(--hover);
+}
+
 .editor-node[aria-pressed="true"] {
   border: 2px solid var(--focus);
   background: var(--hover);

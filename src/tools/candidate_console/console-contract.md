@@ -147,14 +147,17 @@ CSP. The native `Color theme` select exposes System (initial default), Light and
 Dark. System follows `prefers-color-scheme` changes; explicit selections take
 precedence. Only the validated enum is stored in `siderius.console.theme`.
 Invalid stored values use System. Storage read/write denial leaves selection
-working in page memory, with System fallback on future loads.
+working in page memory. Future loads reuse any readable previously stored enum;
+missing, invalid or unreadable preferences fall back to System. A failed write
+does not erase an older stored preference.
 
 Theme changes only update the root `data-theme` attribute: no reload, API calls,
 new polling timers, draft/source mutation or review invalidation. Existing
 operation IDs, graph selection and editor state retain their owners. Both pages
 use the same tokens for controls, warnings, disabled states, focus and selected
-HTML graph nodes. Current graphs use HTML nodes/text connections and reported
-usage uses a table; there is no SVG/canvas/chart renderer to redraw.
+HTML graph nodes. These console/editor surfaces currently render declarations
+as HTML nodes/text connections and reported usage as a table. The theme browser
+gate qualifies those surfaces; it makes no claim about other or future renderers.
 
 Theme browser gate: with this checkout's frozen `EDITOR_PYTHON`, existing
 `CONSOLE_PLAYWRIGHT_MODULE`, `CONSOLE_BROWSER_EXECUTABLE` and optional

@@ -296,5 +296,5 @@ footer {
 }
 
 a { color: var(--primary); }
-button:not(:disabled):hover { filter: brightness(1.08); }
+button:not(:disabled):hover { background: var(--primary-hover); }
 button.secondary:not(:disabled):hover { background: var(--hover); }

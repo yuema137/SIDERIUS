@@ -11,6 +11,7 @@
   --control: #ffffff;
   --hover: #e5effc;
   --primary: #176fcb;
+  --primary-hover: #0b5cad;
   --on-primary: #ffffff;
   --secondary: #087d70;
   --focus: #176fcb;
@@ -37,6 +38,7 @@
   --control: #12233b;
   --hover: #1c3553;
   --primary: #72b7ff;
+  --primary-hover: #91c7ff;
   --on-primary: #061321;
   --secondary: #77e1cd;
   --focus: #72b7ff;
