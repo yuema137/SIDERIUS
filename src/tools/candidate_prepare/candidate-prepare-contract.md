@@ -343,3 +343,16 @@ no example choice creates scientific defaults or launch permission. The API's
 receipt digests are machine-consumed integrity fields. The retained-selection
 consumer validates them against caller-retained expected identity as specified
 above; the human-facing success signal is prepared status and CLI exit zero.
+
+
+### Policy preinspection of a retained capture
+
+`inspect_current_reusable_binding(envelope)` selects current exact receipt bytes;
+`inspect_reusable_binding(selection)` inspects caller-retained identity. Both return
+`ReusableBindingInspection` (selection, binding, receipt and control), reusing the
+full verifier's prefix: bounded regular-file reads, canonical UUID/fixed paths,
+complete prepared receipt, receipt-to-binding digest, and control request/sources
+matching the binding. They do not read external observation contents or certify
+complete preparation. Callers must apply external path/resource policy and then
+invoke full retained verification or the operation builder with the same selection.
+These are Python owner seams, not arbitrary-path HTTP endpoints.
