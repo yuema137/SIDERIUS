@@ -52,7 +52,7 @@ def _write_durably(fd: int, payload: bytes) -> None:
         os.fsync(handle.fileno())
 
 
-def publish_bytes_atomically(path: str, payload: bytes) -> None:
+def publish_bytes_atomically(path: str, payload: bytes, *, mode: int | None = None) -> None:
     """Replace ``path`` with ``payload`` atomically (temp + fsync + ``os.replace``).
 
     Raises:
@@ -60,8 +60,12 @@ def publish_bytes_atomically(path: str, payload: bytes) -> None:
             previous version of ``path`` (if any) is untouched and the temp
             file is removed.
     """
+    if mode is not None and (mode < 0 or mode > 0o777):
+        raise ValueError("mode must contain ordinary permission bits only")
     fd, tmp_path = _open_temp_beside(path)
     try:
+        if mode is not None:
+            os.fchmod(fd, mode)
         _write_durably(fd, payload)
         os.replace(tmp_path, path)
     finally:
