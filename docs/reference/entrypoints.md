@@ -405,8 +405,17 @@ The [operation contract](../../src/tools/candidate_operations/candidate-operatio
 owns configured containment, original-v2 verification at admission/dispatch and
 exact-UUID recovery without relaunch. Current source edits affect future captures;
 retry uses the unchanged saved submission. Prepared inputs, admitted operation and
-native terminal validation are different states. Candidate outputs do not imply
-training or scientific scoring. This does not replace native chain entrypoints or
+native terminal validation are different states. Three-stage candidate outputs do not imply training or scientific scoring.
+Four-stage native completion requires inspecting its scores and termination evidence. This does not replace native chain entrypoints or
 add resume. The configured console can explicitly prepare saved reusable source
-and select, review and launch an existing three-stage capture through the
+and select, review and launch a three-stage or source-declared four-stage capture through the
 [New run and prepared-run flow](../../src/tools/candidate_console/README.md#prepare-saved-source-or-open-an-existing-run).
+
+
+Reusable four-stage source owns sparse `training_settings` and one managed
+`native-training.settings` binding. Professional and Assistant callers edit that
+same source; the GUI [training inspector](../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
+provides budgets, epoch ceilings, portions, independent seeds and retention.
+Preparation creates a matching seed/settings pair; explicit launch invokes the
+existing native tuner. Native completion is distinct from scientific validity,
+and neither this route nor offline tests establish historical replay parity.

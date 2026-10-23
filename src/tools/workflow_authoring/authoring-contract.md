@@ -48,3 +48,17 @@ renders managed_candidate externals as read-only managed roles; it never creates
 a location editor or location key for them. Unsupported preparation options have
 no structured editor and remain intact through other edits. Review/save remain
 inert declaration operations; reusable preparation/launch is not implemented.
+
+## Native training inspector
+
+Source/read and review projections include optional typed `training` presentation
+values for reusable four-stage documents. The native settings parser and effective
+ingress projection own values; the inspector only names supported presentation
+controls. `document.training_settings` remains sparse. Unset removes a key, null
+is explicit, and a supplied value remains authored. Numeric blanks block review
+without becoming zero/null. Epoch controls are ceilings, independent of parameter
+rules and native planning. Sampling and training base seeds have separate controls.
+Nested workflow parameter rules are read-only in the inspector and editable in
+Source; untouched rules and advanced fields survive edits. Task rules are resolved
+later by native owners. All controls participate in the existing source-dirty,
+review, save, conflict and generation fences; launch payloads carry no overrides.

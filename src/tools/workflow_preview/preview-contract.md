@@ -164,4 +164,4 @@ routing. Preview parses only the optional Health-file reference from settings,
 observes its canonical project-relative/absolute path under
 `training.health_checks_config`, and otherwise leaves full settings validation
 to child-side native admission. No native task/plugin schema is imported for
-this reference projection. Version-2 preparation remains three-stage-only.
+this reference projection. Version-2 preparation may resolve source-declared training into this v1 path.

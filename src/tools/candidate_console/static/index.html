@@ -66,7 +66,7 @@
   <section class="card">
     <label>Project <select id="editor-project" disabled></select></label>
     <button id="editor-inspect" type="button" hidden>Inspect source</button><p id="editor-status" role="status">Connect to open a configured project.</p>
-    <p class="warning">Declaration only. Saving does not run this graph or change native Prepare. Referenced resources are not checked.</p>
+    <p class="warning">Saving updates source for future New run captures. It does not launch a run or change existing captures. Referenced resources are not checked.</p>
   </section>
   <section class="card">
     <div class="actions">
@@ -160,6 +160,6 @@
     <p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre></details>
   </section>
 </section></main>
-<footer>Candidate generation and validation · Training and scientific scoring are not included.</footer>
+<footer>Candidate generation and validation, with native training when declared. Inspect native outputs for scientific results.</footer>
 </body>
 </html>

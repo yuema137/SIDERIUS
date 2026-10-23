@@ -32,6 +32,7 @@ from .models import (
     SourceView,
 )
 from .options import binding_options
+from .training import training_inspector
 
 
 def digest(payload: bytes) -> str:
@@ -136,6 +137,7 @@ class WorkflowAuthoring:
             sha256=digest(payload),
             document=document,
             binding_options=binding_options(document),
+            training=training_inspector(document),
         )
 
     def read(self) -> SourceView:
@@ -181,6 +183,7 @@ class WorkflowAuthoring:
             diff=diff,
             document=document,
             binding_options=binding_options(document),
+            training=training_inspector(document),
         )
         try:
             self._base(current_payload, request.expected_sha256)

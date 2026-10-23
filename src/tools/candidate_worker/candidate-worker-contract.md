@@ -221,9 +221,9 @@ proposal and validator; `settings` must reference an external
 `native-training.settings` file. `prepare_tuning_request` exposes these three
 values and the internal admitted context/storage, then delegates to
 `workflows.tuner_preparation.prepare_native_tuner_input`. There is no reflective
-protocol executor. Version-2 reusable preparation remains three-node-only and
-refuses the four-stage shape during resolution. No GUI authoring or launch
-support is claimed.
+protocol executor. Version-2 reusable preparation resolves source-owned training
+settings and the matching seed into this same v1 worker path. The console uses
+that preparation owner; it does not define another tuning lifecycle.
 
 `CandidateTrainingSettings` wraps `WorkflowLaunchConfig` with the seven native
 startup controls. `SUPPORTED_LAUNCH_FIELDS`, `INACTIVE_LAUNCH_FIELDS` and

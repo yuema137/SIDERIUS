@@ -511,3 +511,23 @@ HTTP parity and refusal ordering. `tests/browser/new_run.mjs` uses the existing
 explicit browser environment and real offline preparation/native candidate worker
 with guarded local deterministic provider. It does not qualify real model quality,
 training, API access or GPU execution.
+
+## Source-declared native training
+
+The same saved-source New run / retained-capture controllers accept reusable
+four-stage declarations. Settings are edited in the tuning inspector or source,
+then reviewed and saved; neither NewRunSelection nor launch payloads add overrides.
+The source hash binds sparse authored presence. Preparation resolves settings and
+seed through native owners; launch invokes the existing native tuner. Old three-stage
+source is never automatically upgraded. The inspector labels epoch ceilings and
+separate sampling/training seeds, exposes omission/null/value, preserves advanced
+rules and disables numeric/checkbox/default/null controls while source is dirty.
+Invalid numeric drafts survive node navigation and block Review/Save until repaired
+or explicitly replaced by default/null. Read-only rule summaries disclose task
+constraints are still runtime-owned. Set `CONSOLE_TRAINING=1` for the four-stage
+mode of the existing `tests/browser/new_run.mjs` command.
+
+Offline browser and code witnesses exercise detached operations, native admission,
+protocol/staging and terminal output verification with provider, measurement and
+tuner effects substituted. They establish transport and artifact integrity, not
+real scientific training, historical replay, API access or GPU qualification.

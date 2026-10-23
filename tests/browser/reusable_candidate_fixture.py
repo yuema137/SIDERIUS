@@ -24,7 +24,9 @@ from tools.candidate_prepare import prepare_reusable_candidate
 from tools.workflow_authoring.models import Project
 
 
-def setup(root: Path, origin: str, endpoint: str, captures_count: int = 3) -> None:
+def setup(
+    root: Path, origin: str, endpoint: str, captures_count: int = 3, training: bool = False
+) -> None:
     selected = selection.__wrapped__(root)
     config = console_config.__wrapped__(selected, root)
     # Fail closed both at effective SDK URL and proxy transport. This provider
@@ -69,6 +71,11 @@ def setup(root: Path, origin: str, endpoint: str, captures_count: int = 3) -> No
             "candidate_environment_names": tuple(environment),
         }
     )
+    if training:
+        from tests.unit.tools.candidate_prepare.test_reusable_training import add_training
+
+        request = add_training(request)
+        (root / "training-fixture").touch()
     (root / "recovery").mkdir(mode=0o700)
     project = Project(
         project_id="capture",
@@ -163,20 +170,41 @@ def headless(root: Path) -> None:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("provider", "setup", "serve", "headless"))
+    parser.add_argument(
+        "mode", choices=("provider", "setup", "serve", "headless", "verify-training")
+    )
     parser.add_argument("root", type=Path)
     parser.add_argument("--origin")
     parser.add_argument("--endpoint")
     parser.add_argument("--captures-count", type=int, default=3)
+    parser.add_argument("--training", action="store_true")
     args = parser.parse_args()
     if args.mode == "provider":
         provider(args.root)
     elif args.mode == "setup":
-        setup(args.root, args.origin, args.endpoint, args.captures_count)
+        setup(args.root, args.origin, args.endpoint, args.captures_count, args.training)
+    elif args.mode == "verify-training":
+        from tests.browser.reusable_training_fixture import code_equivalent
+
+        code_equivalent(args.root)
+        from tools.candidate_worker.models import CandidateRunReceipt
+        from tools.candidate_worker.training_evidence import verify_training_evidence
+
+        receipts = list((args.root / "runs").glob("*/workspace/candidate_run/receipt.json"))
+        assert receipts
+        for path in receipts:
+            receipt = CandidateRunReceipt.model_validate_json(path.read_bytes())
+            assert receipt.status == "completed"
+            verify_training_evidence(receipt)
+        print("native training output verified after editor closure", flush=True)
     elif args.mode == "headless":
         headless(args.root)
     else:
         config = ConsoleConfig.model_validate_json((args.root / "console.json").read_bytes())
+        if (args.root / "training-fixture").exists():
+            from tests.browser.reusable_training_fixture import install_operation_fixture
+
+            install_operation_fixture()
         uvicorn.run(
             create_app(config),
             host="127.0.0.1",

@@ -134,12 +134,12 @@
     const version = ++generation, revision = session.revision; review = null; $('summary').replaceChildren(); $('details').textContent = ''; controls();
     try {
       const value = await api('/review', selected); if (!current(version, revision)) return; review = value;
-      $('summary').textContent = `${value.run_name} · ${value.task_label} · Propose → Implement → Validate. Nodes: ${value.nodes.map(item => item[0]).join(' → ')}. ${value.credential_readiness.ready ? 'Configured credentials ready (presence only).' : value.credential_readiness.instructions.join(' ')}`;
+      $('summary').textContent = `${value.run_name} · ${value.task_label} · Captured workflow. Nodes: ${value.nodes.map(item => item[0]).join(' → ')}. ${value.credential_readiness.ready ? 'Configured credentials ready (presence only).' : value.credential_readiness.instructions.join(' ')}`;
       const routes = value.routes.map(route => `${route.node_id}: ${route.provider || 'unresolved'} / ${route.model || 'unresolved'}`).join('\n');
       $('details').textContent = `Task manifest: ${value.task_manifest}\nDataset: ${value.data_root}\nLLM config: ${value.llm_config_file}\nInputs: ${value.inputs}\nWorkspace: ${value.workspace}\nRoutes:\n${routes}\nTimeout: ${value.candidate_timeout_seconds} s\nNetwork: ${value.network}\nDevices: ${value.devices.join(', ') || 'none'}\nEnvironment names: ${value.environment_names.join(', ') || 'none'}\nRead-only paths:\n${value.read_only.join('\n')}\nOutput types: ${value.allowed_output_types?.join(', ') || 'unconstrained'}\nProposal advice: ${value.proposal_advice || 'none'}\nImplementation advice: ${value.implementation_advice || 'none'}\nValidation advice: ${value.validation_advice || 'none'}\nSource: ${value.source_path}\nSource version: ${value.source_sha256}\nComposition: ${value.composition_fingerprint}\nRequest: ${value.request_digest}`;
       const workspace = document.createElement('p'); workspace.textContent = 'Output workspace: ' + value.workspace; $('summary').append(workspace);
       const routeSummary = document.createElement('p'); routeSummary.textContent = 'Model routes: ' + value.routes.map(route => `${route.node_id} → ${route.provider || '?'} / ${route.model || '?'}`).join('; '); $('summary').append(routeSummary);
-      status('Capture reviewed. Launch runs the captured inputs and configured model routes; no training.');
+      status('Capture reviewed. Launch runs the captured stages, inputs and configured model routes.');
     } catch (error) { if (!error.stale && current(version, revision)) status(error.message); }
     controls();
   });

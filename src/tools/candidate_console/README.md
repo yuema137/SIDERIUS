@@ -2,8 +2,9 @@
 
 Prepare, review and explicitly launch one candidate from a configured scientific
 task, then reopen its native status, logs and reported LLM tokens by operation ID.
-The candidate runs Propose → Implement → Validate. This page does not train models or report scientific
-scores.
+The candidate runs Propose → Implement → Validate, with optional native Tune
+when the saved reusable source declares it. Inspect native outputs for scientific
+results; completion alone does not certify them.
 
 You need a synced checkout, a working [workspace sandbox](../workspace_sandbox/README.md),
 an existing task manifest, data directory and LLM profile. Keep configuration,
@@ -108,7 +109,8 @@ See the [reusable configuration contract](console-contract.md#reusable-capture-c
    **Review capture**. Check model routes and credential readiness. Existing runs
    made through Python or CLI can instead be selected from **Prepared run**.
 5. Select **Launch captured run** explicitly. This runs Propose → Implement →
-   Validate with the captured inputs and may call paid model APIs. Current source
+   Validate and, when declared, native Tune with the captured inputs. It may call
+   paid model APIs and use configured training resources. Current source
    edits remain separate. Follow **Monitor operation** for validation outcome;
    prepared inputs alone do not mean a candidate was accepted.
 
@@ -124,7 +126,7 @@ While the server is live, an admitted preparation can be recovered even if its
 original source or credential file disappears. Restart still validates configured
 resources. Source changes during preparation can make it fail; inspect and preserve
 that operation's evidence. A successfully prepared capture remains independent of
-later editor changes. Training and resume are not available in this reusable GUI flow.
+later editor changes. Resume is not available in this reusable GUI flow.
 
 ## Credentials
 
@@ -215,3 +217,29 @@ optional [Workflow Editor](../workflow_authoring/README.md). It has its own sour
 review/save flow. Saving changes the source available to a subsequent New run;
 it never changes an existing captured run.
 Existing console configurations need no editor project to monitor operations.
+
+## Edit reusable training settings
+
+Start from the [four-stage source example](../../../examples/workflow_declarations/reusable_training.py)
+in your external project. Set its task references and output restriction for your
+task; choose an installed planner strategy explicitly in the external LLM profile
+(for example the native `tune.planner_strategy: native-timing-v1`). The example's
+budgets and diagnostic settings are demonstration choices, not scientific defaults.
+
+Select **fit / tuning** in Workflow Editor. The small inspector edits trial/formal
+budget minutes, epoch ceilings, portions, sampling seed, training base seed and
+retention flags. **Use native default** removes the key; **None** explicitly stores
+null where supported. Empty numbers block review; zero is validated by the native
+owner. Sampling and training seeds are independent. Epoch ceilings constrain native
+planning rather than specifying final epochs. Outer candidate timeout remains seconds.
+
+Review shows inherited values and supplied parameter rules. Edit advanced controls
+and rules in Source; unrelated inspector changes preserve them. Review and Save,
+then use **New run** and **Launch captured run** as described above. Each capture
+keeps its own settings; edits affect future captures.
+
+External Health configuration files are not captured by reusable training.
+Task-composed Health and native startup controls remain available. After completion,
+inspect scores, Health and termination reason in the
+[native outputs](../candidate_worker/README.md); completion means the tuner returned.
+See the [contract](console-contract.md) for exact field semantics and qualification limits.

@@ -137,7 +137,8 @@ judging the result. Infrastructure aborts return `failed` and retain that file.
 The model directory contains native run settings, records and any requested
 retained outputs. Independent operation reads detect missing or replaced native
 output after completion. Existing three-stage requests and receipts keep their
-serialization. The GUI and reusable preparation currently author only three-stage
-requests; this training mode is for direct Python/JSON callers. See the
+serialization. Reusable source and GUI callers can also prepare four-stage requests
+with [source-owned settings](../candidate_console/README.md#edit-reusable-training-settings);
+preparation derives the matching seed. Direct v1 callers still own seed/settings consistency. See the
 [training contract](candidate-worker-contract.md#fresh-native-training-schema-version-1)
 for supported controls, inactive defaults and integrity boundaries.
