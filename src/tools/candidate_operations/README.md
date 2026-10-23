@@ -65,7 +65,11 @@ before candidate execution.
    `completed` means a validated native receipt exists. Read `receipt.status`:
    preparation can be `prepared`, while a candidate can be `accepted` or
    `rejected`; both can fail, time out or be interrupted. Acceptance means native
-   candidate validation passed, not training or scientific scoring. To execute a
+   candidate validation passed, not training or scientific scoring. A direct
+   [four-stage candidate request](../candidate_worker/README.md#add-native-training)
+   can instead return native `completed`: the tuner returned, which does not
+   establish scientific validity. Read its native output for scores and Health
+   results. To execute a
    legacy prepared bundle, review its `candidate_request_path`, wrap that file with
    `kind: "candidate"` and a new UUID, then submit explicitly.
 

@@ -16,7 +16,7 @@ only the claim winner can publish records with that invocation identity.
 
 ## Selected inputs and task authority
 
-The parent revalidates the exact supported three-node graph, canonical selected
+The parent revalidates the supported three- or four-node graph, canonical selected
 paths, bytes/size hashes, declaration digest and constructor routes against the
 request. Canvas positions do not enter declaration identity. It exclusively
 creates `candidate_run/` in an absent/empty workspace; losers cannot publish
@@ -51,7 +51,7 @@ catalogued native optional context/task-ref/provider/model schemas are decoded;
 protocol arguments must agree with native seed/task/constructor authorities.
 Unused externals and result injection are unsupported.
 
-Constraint disclosure may be incomplete. Claimed task rules/objective must agree
+For the three-stage mode, constraint disclosure may be incomplete. Claimed task rules/objective must agree
 with composition, workflow rules with the seed, and duplicated time/VRAM facts
 with seed declarations. Known execution sections compare duplicated budgets including explicit nulls.
 Populated overrides, timing and execution controls without a worker authority
@@ -212,3 +212,83 @@ provided. This is an additive request metadata format change, not byte parity
 with older newly written requests. Existing persisted bytes that omit the field
 remain readable and retain their old operation identity; prepared artifact hashes
 continue to describe the actual stored bytes.
+
+## Fresh native training (schema version 1)
+
+The executable fourth node is `tuning`, using `validated-candidate-to-tuning`.
+Its `proposal` and `validation` result arguments must reference this graph's
+proposal and validator; `settings` must reference an external
+`native-training.settings` file. `prepare_tuning_request` exposes these three
+values and the internal admitted context/storage, then delegates to
+`workflows.tuner_preparation.prepare_native_tuner_input`. There is no reflective
+protocol executor. Version-2 reusable preparation remains three-node-only and
+refuses the four-stage shape during resolution. No GUI authoring or launch
+support is claimed.
+
+`CandidateTrainingSettings` wraps `WorkflowLaunchConfig` with the seven native
+startup controls. `SUPPORTED_LAUNCH_FIELDS`, `INACTIVE_LAUNCH_FIELDS` and
+`MANAGED_LAUNCH_FIELDS` are the closed ownership census. Defaults come from the
+direct workflow, not automatic CLI host-profile resolution. Inactive history,
+outer iteration/retry, omitted-stage/advice, raw `plan_overrides`, cooperative
+allocation, and chain-incumbent controls must equal their native defaults.
+Those defaults do not activate omitted phases or outer retries. Tuning advice,
+ordinary budgets, epoch limits, typed frozen portions, retention, parameter
+rules and runtime controls use the native owners. `data_dir` must match the
+selected root; `require_probe_runner` resolves to true and explicit false is
+refused. Trial/formal time budgets are finite positive minutes or null. Zero
+is refused at this ingress because the historical forecast/measured paths do
+not share zero semantics; their existing behavior is unchanged.
+
+Known native scalar, schedule, formal-policy, scope, order and deadline checks
+run before proposer construction. Runtime-verifier identity, measurement
+capability, hardware and root invariants use their established owners.
+Candidate/model-dependent checks still run at native tuner admission. The
+standard workflow shares only scope/Health preparation and lock projection;
+its seed validation and launch self-test still precede lock publication.
+
+An explicit `health_checks_config` is project-relative (or absolute), observed
+as `training.health_checks_config`, snapshotted and rechecked in the child.
+The canonical original path reaches the tuner, not the snapshot or effective
+Health output. Dataset contents and arbitrary plugin assets are not recursively
+snapshotted. Read-only task/dependency admission remains required.
+
+The worker reconciles the captured `ProposalInput` against admitted controls.
+Omitted fields can be filled; explicit values, including null time budgets,
+must agree. Hardware null means unresolved and is populated from the live
+hardware owner; a supplied hardware object must agree. Known conflicting
+constraint sections refuse; incomplete context is completed from
+`workflow_constraint_context`. Implementation and validation external context
+bindings are checked against that same result. The admitted proposal is saved
+before its first call; resolved settings are saved to
+`candidate_run/training_settings.json`.
+
+Passed validation returns typed in-memory outputs to training. Missing model
+or loss sources refuse before construction/staging. The shared construction
+owner admits the model; `stage_native_plugins` stages only the native tuner
+destination. No global capability publication or model/loss promotion occurs.
+The public tuner owns its entire training/scoring/Health lifecycle.
+
+The first three `native_output_paths` retain their legacy ordering. The fourth
+is `<workspace>/<run_name>/iteration_001/<model_name>/run_output_<run_name>.json`.
+That native model directory also owns run configuration, records and retained
+outputs under existing native naming/inventory rules. The receipt is an index,
+not a second recursive artifact inventory; retention follows the native flags.
+`completed` means the tuner returned, not scientific validity or scoreability.
+An infrastructure abort returns `failed` while retaining its native output.
+Rejected validation still returns three records and `rejected`. Parent timeout,
+interruption or process failure overrides a child's reported completion.
+
+The optional `training_output` receipt field contains the model name and native
+output SHA-256. It is omitted entirely for legacy receipts. Reconcile and later
+`candidate_operations` reads reach the same inert fixed-path/identity/digest
+verifier. An operation completion marker pins the whole receipt digest, so
+editing both output and receipt is also refused after completion. Without a
+trusted completion marker these files provide internal consistency, not an
+external tamper-proof signature. Missing or replaced output causes an integrity
+refusal. Status readers import no task/plugin runtime to perform this check.
+
+`examples/workflow_declarations/native_training.py` writes a matched synthetic
+seed/settings pair and both Python-model-derived workflow and serialized
+request. It performs no launch. Offline tests qualify propagation/admission and
+artifact reading, not real LLM behavior, scientific training, GUI readiness,
+resume, historical-profile parity or paper reproduction.

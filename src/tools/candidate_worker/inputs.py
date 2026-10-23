@@ -1,7 +1,7 @@
 """Reconcile captured native inputs with the selected task and managed storage.
 
 Imported only after the child binds its generated library. This is a closed
-three-node boundary, not an arbitrary protocol executor.
+candidate boundary with optional native training, not an arbitrary protocol executor.
 """
 
 import json
