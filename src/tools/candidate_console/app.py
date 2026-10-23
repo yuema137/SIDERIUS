@@ -81,6 +81,10 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     def status(operation_id: UUID):
         return service.status(operation_id)
 
+    @app.get("/api/operations/{operation_id}/tokens")
+    def tokens(operation_id: UUID):
+        return service.tokens(operation_id)
+
     @app.get("/api/operations/{operation_id}/log")
     def log(
         operation_id: UUID,

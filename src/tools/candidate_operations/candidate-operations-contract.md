@@ -191,3 +191,24 @@ publishes files nor requires the candidate workspace to remain empty. It does no
 claim complete arbitrary code/dependency immutability or execution readiness.
 Console task authorization is a separate consumer policy, not an operation-store
 rule; known-ID native monitoring does not require a console task choice.
+
+
+## Reported-token accessor
+
+`read_operation_tokens(config, operation_id) -> CandidateTokenSnapshot` is a
+read-only adapter to the native [token projection](../candidate_worker/candidate-worker-contract.md#reported-token-read-projection).
+It revalidates configuration and calls `read_operation` first; an integrity-failure
+verdict refuses before ledger access, including marker identity, terminal receipt
+digest and contradictory pre-dispatch completion. It does not replace or reinterpret
+status/process semantics. Unknown process observation alone permits verified usage.
+
+Preparation returns not-applicable without ledger access. For candidates, the
+adapter derives workspace/root from saved validated submission and configured roots,
+never receipt paths. Even without final receipt it compares saved request equality
+and launch run ID against the admitted native nonce through the inert shared native
+record verifier. Missing request/launch gives unavailable publication evidence;
+changed/corrupt records refuse. The direct native reader verifies the optional final
+receipt and supplies the one arithmetic/quality projection. Multiple observational
+reads are not an atomic transaction. No credential read, task-choice authorization,
+submission, provider call, native launch or writes occur. Existing status-reader
+missing-final-receipt early return and all native statuses remain unchanged.

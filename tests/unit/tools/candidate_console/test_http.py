@@ -222,3 +222,48 @@ def test_config_loader_refuses_symlink_swap_after_canonical_check(
     monkeypatch.setattr(files, "canonical", swapped)
     with pytest.raises(OSError):
         load_config(str(config_path))
+
+
+def test_tokens_route_auth_uuid_and_sanitized_integrity(console_config, monkeypatch):
+    """Every boundary refusal precedes reader access; valid GET reaches only token service."""
+    from tools.candidate_operations.models import OperationFailure
+    from tools.candidate_worker.token_models import CandidateTokenSnapshot
+
+    calls = []
+
+    def tokens(config, operation_id):
+        calls.append(operation_id)
+        if len(calls) > 1:
+            raise OperationFailure("integrity", "/secret/path raw ledger extra DO-NOT-ECHO")
+        return CandidateTokenSnapshot(
+            observed_at="2026-10-22T12:00:00Z",
+            availability="unavailable",
+            reason="native_evidence_unavailable",
+        )
+
+    monkeypatch.setattr("tools.candidate_console.service.read_operation_tokens", tokens)
+    api = client(console_config)
+    operation_id = uuid4()
+    url = f"/api/operations/{operation_id}/tokens"
+    for headers, expected in (
+        ({"Authorization": ""}, 401),
+        ({"Authorization": "Bearer wrong"}, 401),
+        ({"Host": "evil.invalid"}, 403),
+        ({"Origin": "null"}, 403),
+    ):
+        assert api.get(url, headers=headers).status_code == expected
+    assert api.get("/api/operations/DO-NOT-ECHO/tokens").status_code == 422
+    assert not calls
+    response = api.get(url)
+    assert response.status_code == 200 and response.json()["availability"] == "unavailable"
+    assert calls == [operation_id]
+    assert (
+        response.headers["cache-control"] == "no-store"
+        and "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    )
+    assert not any(
+        key in response.json() for key in ("workspace", "ledger_path", "extra", "components")
+    )
+    failure = api.get(url)
+    assert failure.status_code == 409 and failure.json()["error"]["code"] == "integrity"
+    assert "DO-NOT-ECHO" not in failure.text and "/secret/path" not in failure.text

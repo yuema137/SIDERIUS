@@ -54,6 +54,14 @@ try {
   const hostile = '<img src=x onerror="window.hostile=true">';
   const known = '22222222-2222-4222-8222-222222222222';
   const logOffsets = [];
+  let tokenFailure = false, delayedTokenId = null, releaseTokens, tokenSeen;
+  let delayTokens, tokenDelaySeen;
+  const otherKnown = '33333333-3333-4333-8333-333333333333';
+  const tokenSnapshot = id => ({ run_id: id, run_name: 'fixture', observed_at: '2026-10-22T12:00:00Z', last_valid_usage_at: '2026-10-22T11:59:00Z',
+    availability: id === preparation?.operation_id ? 'not_applicable' : 'available', reason: id === preparation?.operation_id ? 'preparation_not_applicable' : 'reported_responses',
+    quality: { partial: true }, groups: id === preparation?.operation_id ? [] : [
+      { provider: id === known ? 'OLD-RUN-IDENTITY' : 'fake', requested_model: hostile, served_model: 'served-model', response_rows: 2, reported_input_tokens: 100, reported_output_tokens: 25, reported_total_tokens: 130, missing_input_rows: 1, missing_output_rows: 0, missing_total_rows: 1 },
+      { provider: 'fake', requested_model: 'missing-usage', served_model: null, response_rows: 1, reported_input_tokens: null, reported_output_tokens: null, reported_total_tokens: null, missing_input_rows: 1, missing_output_rows: 1, missing_total_rows: 1 }] });
   const status = id => ({ operation_id: id, kind: id === preparation?.operation_id ? 'prepare' : 'candidate', request_digest: 'a'.repeat(64), observed_at: '2026-10-22T12:00:00Z', state: nativeState,
     process: { status: finishing ? 'alive' : 'exited', reason: hostile }, finishing, receipt_available: nativeState === 'completed', native_status: nativeState === 'completed' ? (id === preparation?.operation_id ? 'prepared' : 'rejected') : null,
     native_id: 'native-fixture', validation_passed: false, reason: hostile });
@@ -83,6 +91,12 @@ try {
       if (busyCandidate) { busyCandidate = false; return reply({ error: { code: 'busy', message: 'Store is busy while the preparation wrapper finishes.' } }, 409); }
       return reply({ operation_id: candidate.candidate_operation_id, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'now', observation: 'existing' }, 202);
     }
+    if (url.pathname.endsWith('/tokens')) {
+      const id = url.pathname.split('/')[3], snapshot = tokenSnapshot(id);
+      if (id === delayedTokenId) { tokenSeen(); await delayTokens; }
+      if (tokenFailure) return reply({ error: { code: 'integrity', message: 'Token-only fixture read failed' } }, 409);
+      return reply(snapshot);
+    }
     if (url.pathname.endsWith('/log')) {
       const offset = Number(url.searchParams.get('offset')); logOffsets.push(offset);
       return reply({ operation_id: url.pathname.split('/')[3], kind: url.searchParams.get('kind'), offset, next_offset: 73, observed_size: 73, missing: false, truncated: false, text: offset === 0 ? 'Native rejected · 🧪 ' + hostile : '' });
@@ -103,6 +117,7 @@ try {
   assert.equal(await page.getByLabel('Run name', { exact: true }).isDisabled(), true);
   await page.getByRole('button', { name: 'Retry same preparation', exact: true }).click();
   await page.getByText('Prepared request loaded.', { exact: false }).waitFor();
+  await page.locator('#tokens-status').filter({ hasText: 'Not applicable to preparation' }).waitFor();
   const preps = requests.filter(item => item.path === '/api/preparations');
   assert.equal(preps.length, 2); assert.deepEqual(preps[0].body, preps[1].body);
   assert.equal(requests.filter(item => item.path === '/api/candidates').length, 0);
@@ -130,6 +145,42 @@ try {
   assert.equal(await page.locator('#log img').count(), 0);
   assert.ok((await page.locator('#log').textContent()).includes(hostile));
   await page.waitForTimeout(2200); assert.ok(logOffsets.includes(73), 'Log cursor must use returned byte offset.');
+  await page.locator('#tokens-status').filter({ hasText: 'Partial evidence' }).waitFor();
+  assert.equal(await page.locator('#token-rows tr').count(), 2);
+  assert.ok((await page.locator('#token-rows').textContent()).includes('100 · 1 missing'));
+  assert.ok((await page.locator('#token-rows').textContent()).includes('Unavailable · 1 missing'));
+  assert.equal(await page.locator('#token-rows img').count(), 0);
+  const tokenText = await page.locator('#token-rows').textContent();
+  await page.waitForTimeout(2200);
+  assert.equal(await page.locator('#token-rows').textContent(), tokenText, 'Polling replaces token sums.');
+  tokenFailure = true; nativeState = 'unknown';
+  await page.locator('#tokens-status').filter({ hasText: 'Reported tokens stale' }).waitFor();
+  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor();
+  assert.equal(await page.locator('#token-rows').textContent(), tokenText, 'Token-only failure retains same-run table.');
+  assert.ok(logOffsets.filter(offset => offset === 73).length >= 2, 'Logs continue during token-only failure.');
+  tokenFailure = false;
+  await page.locator('#tokens-status').filter({ hasText: 'Partial evidence' }).waitFor();
+  for (const [name, width, height, zoom] of [['tokens-desktop',1440,900,1], ['tokens-mobile',390,844,1], ['tokens-200-percent',1440,900,2]]) {
+    await page.setViewportSize({ width: width / zoom, height: height / zoom });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${name}: page overflow`);
+    await page.screenshot({ path: join(screenshots, name + '.png'), fullPage: true });
+  }
+  await page.setViewportSize({ width:1440, height:900 });
+  // A delayed old run response cannot paint the newly selected run, even transiently.
+  delayedTokenId = known;
+  delayTokens = new Promise(resolve => { releaseTokens = resolve; });
+  tokenDelaySeen = new Promise(resolve => { tokenSeen = resolve; });
+  await page.getByLabel('Operation UUID', { exact: true }).fill(known);
+  await page.getByRole('button', { name: 'Read operation', exact: true }).click();
+  await tokenDelaySeen;
+  await page.getByLabel('Operation UUID', { exact: true }).fill(otherKnown);
+  await page.getByRole('button', { name: 'Read operation', exact: true }).click();
+  assert.equal(await page.locator('#token-rows tr').count(), 0, 'Selection clears old table immediately.');
+  await page.evaluate(() => { window.oldTokenPaint = false; new MutationObserver(() => { if (document.querySelector('#token-rows').textContent.includes('OLD-RUN-IDENTITY')) window.oldTokenPaint = true; }).observe(document.querySelector('#token-rows'), { childList: true, subtree: true }); });
+  delayedTokenId = null; releaseTokens();
+  await page.locator('#token-rows tr').first().waitFor();
+  assert.equal(await page.evaluate(() => window.oldTokenPaint), false, 'Epoch fence rejects old token response.');
+  assert.ok(!(await page.locator('#token-rows').textContent()).includes('OLD-RUN-IDENTITY'));
   const mutations = requests.filter(item => item.method === 'POST').length;
   nativeState = 'unknown';
   await page.getByLabel('Operation UUID', { exact: true }).fill(known);
@@ -174,7 +225,7 @@ try {
   await page.getByLabel('Run name', { exact: true }).fill('edited-draft');
   assert.ok(frozenReview.includes('second-run')); assert.equal(await page.locator('#review').textContent(), '');
   assert.equal(faults.length, 0, faults.join('\n'));
-  console.log(`PASS: real ${browser.version()} interactions; UUID retries, explicit launch, stale/unknown/rejected/finishing, escaped text, byte cursor, GET-only reopen, memory-only token, four responsive screenshots (${screenshots}).`);
+  console.log(`PASS: real ${browser.version()} interactions; UUID retries, explicit launch, stale/unknown/rejected/finishing, escaped text, byte cursor, GET-only reopen, memory-only token, reported-token replacement/null/partial/stale/epoch fencing and seven responsive screenshots (${screenshots}).`);
   await context.close();
 } finally {
   if (browser) await browser.close();

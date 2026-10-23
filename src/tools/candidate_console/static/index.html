@@ -47,6 +47,13 @@
     <p>Enter an operation UUID from this console or code. Reading an operation never launches or restarts it. Closing the page does not stop an admitted operation.</p>
     <form id="monitor-form" class="actions"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" disabled>Read operation</button></form>
     <p id="monitor-status" role="status">No operation selected.</p><dl id="operation-facts" class="facts"></dl>
+    <h3 id="tokens-heading">Reported LLM tokens</h3>
+    <p id="tokens-status" role="status">No operation selected.</p>
+    <p id="tokens-times" class="muted"></p>
+    <div class="token-table" role="region" aria-labelledby="tokens-heading" tabindex="0" hidden>
+      <table><thead><tr><th scope="col">Provider</th><th scope="col">Requested model</th><th scope="col">Served model</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Total</th><th scope="col">Responses</th></tr></thead><tbody id="token-rows"></tbody></table>
+    </div>
+    <p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
     <div class="actions"><label for="log-kind">Log source</label><select id="log-kind"><option value="native">Native</option><option value="operation">Operation</option></select></div>
     <p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre>
   </section>

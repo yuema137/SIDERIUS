@@ -12,11 +12,13 @@ from tools.candidate_operations import (
     PrepareOperation,
     read_operation,
     read_operation_log,
+    read_operation_tokens,
     read_prepared_candidate,
     submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
+from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.models import CandidateRunReceipt
 
 from .config import validate_config
@@ -169,6 +171,9 @@ class CandidateConsole:
             if isinstance(receipt, CandidateRunReceipt)
             else None,
         )
+
+    def tokens(self, operation_id: UUID) -> CandidateTokenSnapshot:
+        return read_operation_tokens(self.config.operation_store, operation_id)
 
     def log(self, request: LogReadRequest) -> LogChunk:
         return read_operation_log(self.config.operation_store, request)

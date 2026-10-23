@@ -75,6 +75,28 @@ for both. Check `validation_passed` before treating the candidate as accepted.
 Other terminal statuses exit nonzero. An absent terminal receipt means completion
 is unknown; the workspace is preserved and cannot be automatically replayed.
 
+You can read reported LLM tokens while or after a direct run, without an operation
+store or console. Use the run ID from its launch receipt and an existing allowed
+root containing the workspace:
+
+```python
+from tools.candidate_worker import CandidateTokenReadRequest, read_candidate_tokens
+
+snapshot = read_candidate_tokens(CandidateTokenReadRequest(
+    allowed_workspace_root="/projects/my-task",
+    workspace="/projects/my-task/workspace",
+    expected_run_id="RUN_ID_FROM_LAUNCH",
+))
+print(snapshot.model_dump_json(indent=2))
+```
+
+This read performs no provider calls or task execution. Groups preserve requested
+and served model identity. Each token field sums only the values actually reported;
+missing values remain null with a missing-row count. An empty table means no
+reported responses were observed. Partial evidence is labeled, and missing usage
+does not establish zero billing. For a code-submitted operation UUID, use the
+[operation reader or console](../candidate_operations/README.md).
+
 A fresh workspace generates a new candidate through native eligibility rules.
 Merely declaring a model plugin does not make it an already validated reuse
 offer. This tool does not seed a capability index, invent descriptions or tests,

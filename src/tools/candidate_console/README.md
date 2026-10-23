@@ -1,8 +1,8 @@
 # Local candidate console
 
 Prepare, review and explicitly launch one candidate from a configured scientific
-task, then reopen its native status and logs by operation ID. The candidate runs
-Propose → Implement → Validate. This page does not train models or report scientific
+task, then reopen its native status, logs and reported LLM tokens by operation ID.
+The candidate runs Propose → Implement → Validate. This page does not train models or report scientific
 scores.
 
 You need a synced checkout, a working [workspace sandbox](../workspace_sandbox/README.md),
@@ -44,9 +44,18 @@ using its own `.venv/bin/python`.
    run name/advice, and click **Prepare**. Review the task, paths, models and
    resource policy. **Launch candidate** starts code execution and may call paid
    APIs. Preparation never launches automatically.
-6. Copy the operation ID to reopen status and logs later, including operations
-   created through Python or the operation CLI. Reenter the token after reload;
+6. Copy the operation ID to reopen status, logs and the **Reported LLM tokens**
+   table later, including operations created through Python or the operation CLI. Reenter the token after reload;
    the page retains IDs but does not store the token.
+
+The table groups provider reports by requested and served model. A missing field
+shows **Unavailable**; a known value shows its reported sum and any missing-row
+count. Partial or stale observations remain labeled. These are observed provider
+reports; missing or unrecorded usage may exist, so the table does not establish
+complete billing. Preparation has no applicable token table. Known operation IDs
+can be read even when the current task choices differ; the admitted operation
+store configuration must still match. Direct runs without an operation ID use the
+[native Python reader](../candidate_worker/README.md).
 
 Closing the page, tunnel or HTTP server does not cancel an admitted operation.
 A disconnected view is stale, not stopped. Native timeouts and sandbox cleanup
