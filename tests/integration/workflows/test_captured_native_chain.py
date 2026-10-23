@@ -29,14 +29,14 @@ def test_public_capture_two_native_iterations(tmp_path):
     manifest = write_complete_manifest(
         inputs,
         task_data_path={
-            "module": "tests.fixtures.native_chain_task",
+            "file": str(root / "tests/fixtures/native_chain_task.py"),
             "symbol": "NativeChainTask",
             "id": "native_chain_tokens",
         },
         metric={
             "declaration": "../../examples/quickstart/declared/metric_accuracy.json",
             "implementation": {
-                "module": "tests.fixtures.native_chain_task",
+                "file": str(root / "tests/fixtures/native_chain_task.py"),
                 "symbol": "TokenAccuracy",
             },
         },
