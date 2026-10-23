@@ -80,3 +80,54 @@ and run paths for another attempt; this tool does not overwrite or resume bundle
 
 See the [technical contract](candidate-prepare-contract.md) for exact fields,
 artifact ownership and the limits of source identity checks.
+
+## Prepare several runs from one workflow
+
+Use this route when you want to keep one authored workflow and create a fresh
+set of inputs for each run. Both Professional users and coding assistants use
+`prepare_reusable_candidate` or the same `--reusable-request` CLI. The assistant
+helps write your external project files; it does not use a different backend.
+
+1. Copy the [managed reusable example](../../../examples/workflow_declarations/managed_reusable_candidate.py)
+   to your external project as `workflow.py`. Edit its task manifest and data
+   references and its `preparation_options`. Relative task references resolve
+   against the `project_root` you select below. This first preparation route
+   accepts managed proposal/storage bindings only; optional literal bindings
+   remain unsupported and fail before any run directory is created.
+2. Choose a runs directory outside the framework and outside your task/data
+   mounts, a run name, an LLM configuration and the future execution limits.
+   Have your coding assistant or Python integration create
+   `/projects/my-task/reusable-request.json` using the
+   [request construction recipe](candidate-prepare-contract.md#reusable-request-recipe).
+   It records those choices and the selected source automatically. Advice stays
+   in `workflow.py`; credential values stay in the launch environment.
+3. Prepare without launching:
+
+   ```bash
+   .venv/bin/python -m tools.candidate_prepare --reusable-request /projects/my-task/reusable-request.json
+   ```
+
+   The Python equivalent is
+   `prepare_reusable_candidate(ReusableCandidatePreparationRequest.model_validate_json(payload))`.
+   `preflight_reusable_candidate(request)` performs read-only admission, without
+   task imports or directory creation; preparation always repeats it freshly.
+4. Check the top-level `receipt.json` in the newly reported run directory.
+   Success is `status: "prepared"` and CLI exit zero. `workflow.py.snapshot`
+   contains your exact authored v2 bytes; `binding.json` identifies their selected
+   project base and native inputs. `inputs/workflow.resolved.py` is generated v1
+   input for the existing worker. Edit your authored source for future runs,
+   never the generated files. `workspace/` remains absent.
+
+For another preparation, keep the source unchanged and have the caller create
+a fresh run request. Reusing an existing run refuses without modifying its
+directory, even after failure.
+Failures preserve diagnostic evidence; partial candidate requests are not proof
+of successful reusable preparation. A missing receipt means unknown completion.
+An edit during preparation fails; an edit after success affects future captures.
+
+Preparation checks original capture, binding and resolved request together at
+publication. Direct worker launch of `inputs/candidate_request.json` validates
+the resolved v1 inputs; it does **not** verify their relationship to the original
+v2 source. A future GUI/operation adapter must verify that relationship before offering
+reusable launch.
+This route does not launch, resume, or accept a scientific candidate.

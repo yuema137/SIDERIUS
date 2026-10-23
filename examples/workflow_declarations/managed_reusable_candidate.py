@@ -1,0 +1,116 @@
+# Copy into an external project and edit task references/options before preparation.
+# Generated workflow declaration; comments and formatting are not preserved.
+from workflows.definition import (
+    ArgumentBinding,
+    CandidatePreparationOptions,
+    ExternalRequest,
+    ExternalSource,
+    ManagedCandidateBinding,
+    NodeInstance,
+    NodePosition,
+    ProtocolRequest,
+    ResultSource,
+    ReusableTaskReferences,
+    ReusableWorkflowDefinition,
+    ReusableWorkflowDocument,
+)
+
+document = ReusableWorkflowDocument(
+    definition=ReusableWorkflowDefinition(
+        schema_version=2,
+        task=ReusableTaskReferences(
+            manifest="task.yaml",
+            data_root="data",
+        ),
+        externals=(
+            ManagedCandidateBinding(
+                id="initial",
+                contract="proposal.input",
+                kind="managed_candidate",
+            ),
+            ManagedCandidateBinding(
+                id="build_store",
+                contract="storage",
+                kind="managed_candidate",
+            ),
+            ManagedCandidateBinding(
+                id="check_store",
+                contract="storage",
+                kind="managed_candidate",
+            ),
+        ),
+        nodes=(
+            NodeInstance(
+                id="hypothesis",
+                capability="proposal",
+                request=ExternalRequest(
+                    kind="external",
+                    binding="initial",
+                ),
+            ),
+            NodeInstance(
+                id="build",
+                capability="implementation",
+                request=ProtocolRequest(
+                    kind="protocol",
+                    protocol="proposal-to-implementation",
+                    arguments=(
+                        ArgumentBinding(
+                            name="storage",
+                            source=ExternalSource(
+                                kind="external",
+                                binding="build_store",
+                            ),
+                        ),
+                        ArgumentBinding(
+                            name="output",
+                            source=ResultSource(
+                                kind="result",
+                                node="hypothesis",
+                                port="result",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            NodeInstance(
+                id="check",
+                capability="validation",
+                request=ProtocolRequest(
+                    kind="protocol",
+                    protocol="implementation-to-validation",
+                    arguments=(
+                        ArgumentBinding(
+                            name="output",
+                            source=ResultSource(
+                                kind="result",
+                                node="build",
+                                port="result",
+                            ),
+                        ),
+                        ArgumentBinding(
+                            name="storage",
+                            source=ExternalSource(
+                                kind="external",
+                                binding="check_store",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    ),
+    positions=(
+        NodePosition(
+            node="build",
+            x=120.0,
+            y=-30.0,
+        ),
+    ),
+    preparation_options=CandidatePreparationOptions(
+        proposal_advice="Prefer a small interpretable baseline",
+        implementation_advice="Keep diagnostics explicit",
+        validation_advice="Inspect held-out residuals",
+        allowed_output_types=("regressor",),
+    ),
+)
