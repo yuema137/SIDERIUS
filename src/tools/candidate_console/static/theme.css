@@ -1,0 +1,62 @@
+/* Shared presentation roles. No task, draft or operation state belongs here. */
+:root {
+  color-scheme: light;
+  --bg: #f2f6fc;
+  --panel: #ffffff;
+  --raised: #e8eef8;
+  --text: #12243a;
+  --muted: #536981;
+  --border: #c3cedc;
+  --control-border: #7b8fa7;
+  --control: #ffffff;
+  --hover: #e5effc;
+  --primary: #176fcb;
+  --on-primary: #ffffff;
+  --secondary: #087d70;
+  --focus: #176fcb;
+  --error: #b12535;
+  --warning: #885500;
+  --warning-bg: #fff4db;
+  --success: #187345;
+  --disabled: #e5ebf2;
+  --grid: #c3cedc;
+  --edge: #536981;
+  --port: #087d70;
+  --series-1: #176fcb;
+  --series-2: #087d70;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #08111f;
+  --panel: #0f1c2f;
+  --raised: #12233b;
+  --text: #eef6ff;
+  --muted: #a4b7cf;
+  --border: #344b66;
+  --control-border: #7b93b1;
+  --control: #12233b;
+  --hover: #1c3553;
+  --primary: #72b7ff;
+  --on-primary: #061321;
+  --secondary: #77e1cd;
+  --focus: #72b7ff;
+  --error: #ff9eaa;
+  --warning: #f1cb80;
+  --warning-bg: #302919;
+  --success: #87dfaf;
+  --disabled: #23344b;
+  --grid: #344b66;
+  --edge: #a4b7cf;
+  --port: #77e1cd;
+  --series-1: #72b7ff;
+  --series-2: #77e1cd;
+}
+
+.theme-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.theme-control label { margin: 0; }
+.theme-control select { width: auto; min-height: 44px; }

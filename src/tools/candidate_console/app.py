@@ -116,6 +116,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
         types = {
             "app.js": "text/javascript",
             "styles.css": "text/css",
+            "theme.css": "text/css",
+            "theme.js": "text/javascript",
             "editor.html": "text/html",
             "editor.js": "text/javascript",
             "editor.css": "text/css",
