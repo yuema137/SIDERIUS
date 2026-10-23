@@ -44,8 +44,8 @@ from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
 from workflows.model_exploration import (
     _commit_candidate_capabilities,
     _promote_loss_to_global,
-    _register_plugin,
 )
+from workflows.plugin_staging import stage_native_plugins
 from workflows.task_composition import (
     bind_run_task_composition,
     build_task_composition_ref,
@@ -196,7 +196,7 @@ def _admit(proposal, composition, storage):
     assert verdict.passed, verdict.error_message
     _commit_candidate_capabilities(output)
     workspace, run_name = storage.local.workspace, storage.local.run_name
-    _register_plugin(
+    stage_native_plugins(
         output, MODEL, get_plugin_dir(workspace, run_name), get_loss_dir(workspace, run_name)
     )
     _promote_loss_to_global(output)

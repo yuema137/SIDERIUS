@@ -20,6 +20,7 @@ into here one iteration at a time.
 | `model_exploration.py` | `run_workflow(*, launch, workspace, run_name, …) -> list[HyperparamTuningOutput]` — THE workflow: per iteration interpret → workflow-selected scientific evidence stage → propose → implement → validate → tune. Also a module CLI (`python src/workflows/model_exploration.py --help`) accepting `--task_composition` |
 | `scientific_evidence_stage.py` | Workflow-owned optional traversal of the independent Data Analysis and Literature Review capabilities in either `analysis_then_literature` or `literature_then_analysis` order. Nodes never call each other. |
 | `task_composition.py` | `compose_run_task_bindings(manifest_path) -> RunTaskComposition` (resolve the manifest) · `bind_run_task_composition(composition, *, physical_data_root)` (the run-scoped binding contextmanager) · `verify_composition_is_bound` · `active_composition_fingerprint` / `active_task_manifest_path` |
+| `plugin_staging.py` | Internal `stage_native_plugins(ImplementorOutput, model_name, dest_plugin_dirs, dest_loss_dirs=None) -> None`: model/loss staging composition using native copy/binding/registration owners |
 | `tuner_preparation.py` | Internal `prepare_native_tuner_input(...) -> HyperparamTuningInput`: native launch/bindings/iteration context projection into the validator-to-tuner protocol |
 | `run_config.py` | `WorkflowLaunchConfig` — the pure-transit launch config |
 | `llm_config.py` | `WorkflowLLMConfig` — per-node LLM routing, loaded from a `--llm_config` JSON |
@@ -126,6 +127,38 @@ No identity is frozen or migrated, and no historical profile is qualified by
 input mapping tests. Professional Python/CLI and reviewed Assistant launches
 continue through `run_workflow`; GUI candidate execution remains three-node.
 This internal boundary alone does not provide candidate-worker training.
+
+## Native plugin staging
+
+`plugin_staging.stage_native_plugins` owns the native model/loss staging
+composition. `run_workflow` constructs the destination lists (tuner first,
+chain second) and calls it once after admission and capability commit, before
+early loss/model promotion and tuner input preparation. Caller-owned destinations
+and successful staging do not establish training readiness or launch a tuner.
+The module is independently importable without the workflow orchestrator.
+
+Generated loss name validation precedes model staging. Existing
+`stage_model_source` retains declared package source or copies a generated model
+and forensic sentinel, then copies descriptions. Missing model source returns
+before any loss or model registration; missing description only warns. Generated
+losses copy to each supplied loss destination and register from the first file,
+with the original contract snapshot, before model registration from its primary
+source. Reused/builtin losses skip propagation. Missing loss source warns and
+model registration continues. Native registrars retain their registry authority.
+
+Copy and loss-registration exceptions propagate with prior partial effects.
+Ordinary thrown model-registration errors warn; package failures rethrow. A normal
+loader `None` remains distinct from an exception. No rollback or destination
+validation is added: empty model destinations may still stage loss; a present
+generated loss with empty loss destinations raises `IndexError` after model
+staging. These unsupported inputs retain their existing behavior.
+
+The staging module joins the estimator source assembly, alongside the still
+covered orchestrator. Assembly and derived composition/run-lock identities change;
+name/version/arithmetic and scientific defaults do not. Frozen staging effects
+and N1 non-identity input payloads remain unchanged. Historical external profiles
+still require final-pair qualification; this extraction does not migrate locks or
+prove compatible resume, artifact replay or scientific equivalence.
 
 ## Candidate attempt storage and accounting
 

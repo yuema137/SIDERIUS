@@ -1,0 +1,22 @@
+{
+  "base": "a46153c744ee3924c82d0a78f2e2490ef9609ae3",
+  "capture_command": ".venv/bin/python -m pytest tests/unit/workflows/test_native_plugin_staging.py -q",
+  "normalization": "Explicit tmp_path root replaced by <ROOT> in stdout; relative effect paths. __pycache__ excluded, all application files under four effect roots included.",
+  "production_sha256": {
+    "src/workflows/model_exploration.py": "0fa14650b23f61b1bab7627c0d4ab49926f99ffda6000b0efa625fb1b45f8eaa",
+    "src/workflows/plugin_staging.py": "be84d1b49ba46e4907c04baf9e8aee24707160ca49292267e3b316e45e7bf5ff"
+  },
+  "fixture_sha256": "d6fbd0435453c49f01e585f6cef8a22e533c7979661b144ecf07b8424902422b",
+  "native_identity": {
+    "name": "registered-state-v1",
+    "version": "1",
+    "content_sha256": "af320089e9971a94547fad29b9b0544dab4debc4c0dabefc6c38267801cf9dbe",
+    "assembly_sha256": "be629db29b36ee30b1e04d4b1cd23f08857f7c1e0e17f154d744499582cf39f3"
+  },
+  "quickstart_fingerprint": "d5a98638480c1db5bc2194a6cd7df15178263eab3bf08985496481c5b1883cd0",
+  "input_sha256": {
+    "tuner/losses/native_staging_loss.py": "58c45536cbe43bea470afc49f020f358e4ee7e7b9e075a7ad947a2a1b5422851",
+    "tuner/plugins/test_regressor_plugin_c6/description.md": "2bb1be280eb897980355be7afcca91b7b9a29cae8973777f5a193d61fa899750",
+    "tuner/plugins/test_regressor_plugin_c6.py": "1119ae3ab389feee8aa0ffa47b7aafb61a6059d6987cb2e0656e4da0e0ba28b3"
+  }
+}

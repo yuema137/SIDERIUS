@@ -10,6 +10,7 @@ import pytest
 
 from tests.unit.workflows import test_model_exploration as workflow_tests
 from tests.unit.workflows.test_model_exploration import workflow_env as workflow_env
+from tests.unit.workflows.test_native_plugin_staging import staging_state as staging_state
 from workflows import model_exploration, tuner_preparation
 from workflows.run_config import WorkflowLaunchConfig
 
@@ -49,7 +50,7 @@ def test_native_input_boundary_preserves_lifecycle_order(
     monkeypatch.setattr(
         model_exploration, "_commit_candidate_capabilities", lambda *_args: events.append("commit")
     )
-    monkeypatch.setattr(model_exploration, "_register_plugin", stage)
+    monkeypatch.setattr(model_exploration, "stage_native_plugins", stage)
     monkeypatch.setattr(
         model_exploration, "_promote_loss_to_global", lambda *_args: events.append("promote_loss")
     )
@@ -138,3 +139,102 @@ def test_native_input_boundary_preserves_lifecycle_order(
             assert events == prefix + ["task_load", "tuner"] + (
                 ["promote_loss"] if outcome == "accepted" else []
             )
+
+
+def test_workflow_executes_shared_staging_before_promotion_and_tuner(
+    workflow_env, tmp_path, monkeypatch, staging_state
+):
+    """A bypassed owner or chain-selected origin fails before promotion/input construction."""
+    from ml_models import loss_models_sandbox, plugin_loader
+    from tests.unit.workflows.test_native_plugin_staging import (
+        LOSS,
+        MODEL,
+        make_implementation,
+    )
+    from workflows.plugin_staging import stage_native_plugins
+
+    implementation = make_implementation(tmp_path)
+    source = Path(implementation.model_file_path)
+    source.write_text(source.read_text().replace(MODEL, "gated_tcn"))
+    implementation = implementation.model_copy(update={"model_type": "gated_tcn"})
+    workflow_env["impl"].return_value.run.return_value = implementation
+    events, destinations = [], []
+
+    def commit(output):
+        # Capability publication can make membership true before staging.
+        plugin_loader.register_model_in_memory(output.model_file_path)
+        assert plugin_loader._PLUGIN_MODEL_ORIGINS["gated_tcn"][1] == str(source)
+
+    def stage(output, model_name, dest_plugin_dirs, *, dest_loss_dirs):
+        assert output is implementation
+        assert model_name == "gated_tcn"
+        assert len(dest_plugin_dirs) == len(dest_loss_dirs) == 2
+        assert Path(dest_plugin_dirs[0]).is_relative_to(
+            Path(workflow_env["workspace"]) / "n2_staging"
+        )
+        assert not Path(dest_plugin_dirs[1]).is_relative_to(
+            Path(workflow_env["workspace"]) / "n2_staging"
+        )
+        stage_native_plugins(output, model_name, dest_plugin_dirs, dest_loss_dirs)
+        destinations.extend(dest_plugin_dirs)
+        for directory in dest_plugin_dirs:
+            assert (Path(directory) / "gated_tcn.py").read_bytes() == source.read_bytes()
+            assert (Path(directory) / "gated_tcn/description.md").read_bytes() == Path(
+                output.description_file_path
+            ).read_bytes()
+        for directory in dest_loss_dirs:
+            assert (Path(directory) / f"{LOSS}.py").read_bytes() == Path(
+                output.loss_provenance.loss_file_path
+            ).read_bytes()
+        events.append("stage")
+
+    def assert_origin():
+        assert len(destinations) == 2
+        assert plugin_loader._PLUGIN_MODEL_ORIGINS["gated_tcn"][1] == str(
+            Path(destinations[0]) / "gated_tcn.py"
+        )
+        assert LOSS in loss_models_sandbox.LOSS_REGISTRY
+
+    def promote_loss(*_args):
+        assert_origin()
+        events.append("promote_loss")
+
+    def promote_model(*_args):
+        assert_origin()
+        events.append("promote_model")
+
+    builder = model_exploration.prepare_native_tuner_input
+
+    def prepare(**kwargs):
+        assert_origin()
+        events.append("input")
+        return builder(**kwargs)
+
+    output = workflow_env["tune"].return_value.run.return_value
+
+    def tune(_input):
+        assert_origin()
+        events.append("tuner")
+        return output
+
+    monkeypatch.setattr(
+        model_exploration, "_admit_generated_model_construction", lambda *_args: None
+    )
+    monkeypatch.setattr(model_exploration, "_commit_candidate_capabilities", commit)
+    monkeypatch.setattr(model_exploration, "stage_native_plugins", stage)
+    monkeypatch.setattr(model_exploration, "_promote_loss_to_global", promote_loss)
+    monkeypatch.setattr(model_exploration, "_promote_model_to_global", promote_model)
+    monkeypatch.setattr(model_exploration, "prepare_native_tuner_input", prepare)
+    workflow_env["tune"].return_value.run.side_effect = tune
+    workflow_tests.run_workflow(
+        launch=WorkflowLaunchConfig(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            max_proposal_attempts=1,
+            max_impl_attempts=1,
+        ),
+        workspace=workflow_env["workspace"],
+        run_name="n2_staging",
+    )
+    assert events == ["stage", "promote_loss", "promote_model", "input", "tuner", "promote_loss"]

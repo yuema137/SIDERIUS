@@ -1,0 +1,97 @@
+{
+  "return": null,
+  "exception": null,
+  "events": [
+    [
+      "copy",
+      "source/model.py",
+      "workspace/plugin_source_sentinel/test_regressor_plugin_c6.py"
+    ],
+    [
+      "copy",
+      "source/model.py",
+      "tuner/plugins/test_regressor_plugin_c6.py"
+    ],
+    [
+      "copy",
+      "source/model.py",
+      "chain/plugins/test_regressor_plugin_c6.py"
+    ],
+    [
+      "copy",
+      "source/description.md",
+      "tuner/plugins/test_regressor_plugin_c6/description.md"
+    ],
+    [
+      "copy",
+      "source/description.md",
+      "chain/plugins/test_regressor_plugin_c6/description.md"
+    ],
+    [
+      "copy",
+      "source/loss.py",
+      "tuner/losses/native_staging_loss.py"
+    ],
+    [
+      "copy",
+      "source/loss.py",
+      "chain/losses/native_staging_loss.py"
+    ],
+    [
+      "loss_registry",
+      "tuner/losses/native_staging_loss.py",
+      "native_staging_loss",
+      false
+    ],
+    [
+      "model_registry",
+      "tuner/plugins/test_regressor_plugin_c6.py",
+      "test_regressor_plugin_c6",
+      true
+    ]
+  ],
+  "files": {
+    "workspace/plugin_source_sentinel/test_regressor_plugin_c6.py": {
+      "text": "import torch\nimport torch.nn as nn\nfrom pydantic import BaseModel, Field\n\nPLUGIN_MODEL_TYPE = \"test_regressor_plugin_c6\"\nPLUGIN_OUTPUT_TYPE = \"regressor\"\n\nclass TestRegressorConfig(BaseModel):\n    model_type: str = \"test_regressor_plugin_c6\"\n    segmentation_size: int = Field(default=1000, ge=100)\n    batch_size: int = 1\n\nclass TestRegressorModel(nn.Module):\n    def __init__(self, config):\n        super().__init__()\n        # Fixed small projection \u2014 doesn't scale with T. The forward\n        # pass is illustrative only; register-plugin tests don't run\n        # it. A real plugin would map seg_size -> seg_size, but doing\n        # so here would (correctly!) trip construction admission\n        # at representative_T=16000 because nn.Linear(T, T) is O(T\u00b2).\n        self.proj = nn.Linear(8, 8)\n\n    def forward(self, x):\n        return x.float().mean(dim=-1, keepdim=True).expand(-1, x.shape[-1])\n\nPLUGIN_CONFIG_CLASS = TestRegressorConfig\nPLUGIN_MODEL_CLASS  = TestRegressorModel\n",
+      "sha256": "1119ae3ab389feee8aa0ffa47b7aafb61a6059d6987cb2e0656e4da0e0ba28b3"
+    },
+    "tuner/losses/native_staging_loss.py": {
+      "text": "from pydantic import BaseModel\nfrom torch import nn\nPLUGIN_LOSS_TYPE = \"native_staging_loss\"\nPLUGIN_LOSS_TARGET_DTYPE = \"float\"\nPLUGIN_LOSS_REDUCTION = \"mean\"\nclass NativeLossConfig(BaseModel): pass\nclass NativeLoss(nn.Module):\n    def forward(self, inputs, targets): return ((inputs-targets)**2).mean()\nPLUGIN_LOSS_CONFIG_CLASS = NativeLossConfig\nPLUGIN_LOSS_CLASS = NativeLoss\n",
+      "sha256": "58c45536cbe43bea470afc49f020f358e4ee7e7b9e075a7ad947a2a1b5422851"
+    },
+    "tuner/plugins/test_regressor_plugin_c6/description.md": {
+      "text": "# Native staging model\n",
+      "sha256": "2bb1be280eb897980355be7afcca91b7b9a29cae8973777f5a193d61fa899750"
+    },
+    "tuner/plugins/test_regressor_plugin_c6.py": {
+      "text": "import torch\nimport torch.nn as nn\nfrom pydantic import BaseModel, Field\n\nPLUGIN_MODEL_TYPE = \"test_regressor_plugin_c6\"\nPLUGIN_OUTPUT_TYPE = \"regressor\"\n\nclass TestRegressorConfig(BaseModel):\n    model_type: str = \"test_regressor_plugin_c6\"\n    segmentation_size: int = Field(default=1000, ge=100)\n    batch_size: int = 1\n\nclass TestRegressorModel(nn.Module):\n    def __init__(self, config):\n        super().__init__()\n        # Fixed small projection \u2014 doesn't scale with T. The forward\n        # pass is illustrative only; register-plugin tests don't run\n        # it. A real plugin would map seg_size -> seg_size, but doing\n        # so here would (correctly!) trip construction admission\n        # at representative_T=16000 because nn.Linear(T, T) is O(T\u00b2).\n        self.proj = nn.Linear(8, 8)\n\n    def forward(self, x):\n        return x.float().mean(dim=-1, keepdim=True).expand(-1, x.shape[-1])\n\nPLUGIN_CONFIG_CLASS = TestRegressorConfig\nPLUGIN_MODEL_CLASS  = TestRegressorModel\n",
+      "sha256": "1119ae3ab389feee8aa0ffa47b7aafb61a6059d6987cb2e0656e4da0e0ba28b3"
+    },
+    "chain/losses/native_staging_loss.py": {
+      "text": "from pydantic import BaseModel\nfrom torch import nn\nPLUGIN_LOSS_TYPE = \"native_staging_loss\"\nPLUGIN_LOSS_TARGET_DTYPE = \"float\"\nPLUGIN_LOSS_REDUCTION = \"mean\"\nclass NativeLossConfig(BaseModel): pass\nclass NativeLoss(nn.Module):\n    def forward(self, inputs, targets): return ((inputs-targets)**2).mean()\nPLUGIN_LOSS_CONFIG_CLASS = NativeLossConfig\nPLUGIN_LOSS_CLASS = NativeLoss\n",
+      "sha256": "58c45536cbe43bea470afc49f020f358e4ee7e7b9e075a7ad947a2a1b5422851"
+    },
+    "chain/plugins/test_regressor_plugin_c6/description.md": {
+      "text": "# Native staging model\n",
+      "sha256": "2bb1be280eb897980355be7afcca91b7b9a29cae8973777f5a193d61fa899750"
+    },
+    "chain/plugins/test_regressor_plugin_c6.py": {
+      "text": "import torch\nimport torch.nn as nn\nfrom pydantic import BaseModel, Field\n\nPLUGIN_MODEL_TYPE = \"test_regressor_plugin_c6\"\nPLUGIN_OUTPUT_TYPE = \"regressor\"\n\nclass TestRegressorConfig(BaseModel):\n    model_type: str = \"test_regressor_plugin_c6\"\n    segmentation_size: int = Field(default=1000, ge=100)\n    batch_size: int = 1\n\nclass TestRegressorModel(nn.Module):\n    def __init__(self, config):\n        super().__init__()\n        # Fixed small projection \u2014 doesn't scale with T. The forward\n        # pass is illustrative only; register-plugin tests don't run\n        # it. A real plugin would map seg_size -> seg_size, but doing\n        # so here would (correctly!) trip construction admission\n        # at representative_T=16000 because nn.Linear(T, T) is O(T\u00b2).\n        self.proj = nn.Linear(8, 8)\n\n    def forward(self, x):\n        return x.float().mean(dim=-1, keepdim=True).expand(-1, x.shape[-1])\n\nPLUGIN_CONFIG_CLASS = TestRegressorConfig\nPLUGIN_MODEL_CLASS  = TestRegressorModel\n",
+      "sha256": "1119ae3ab389feee8aa0ffa47b7aafb61a6059d6987cb2e0656e4da0e0ba28b3"
+    }
+  },
+  "stdout": "    [DEBUG] Plugin source saved to sentinel: <ROOT>/workspace/plugin_source_sentinel/test_regressor_plugin_c6.py\n    Plugin registered \u2192 <ROOT>/tuner/plugins/test_regressor_plugin_c6.py\n    Plugin registered \u2192 <ROOT>/chain/plugins/test_regressor_plugin_c6.py\n    Description registered \u2192 <ROOT>/tuner/plugins/test_regressor_plugin_c6/description.md\n    Description registered \u2192 <ROOT>/chain/plugins/test_regressor_plugin_c6/description.md\n    Loss plugin registered \u2192 <ROOT>/tuner/losses/native_staging_loss.py\n    Loss plugin registered \u2192 <ROOT>/chain/losses/native_staging_loss.py\n    Loss 'native_staging_loss' added to in-memory LOSS_REGISTRY\n    Model 'test_regressor_plugin_c6' added to registries (model_type='test_regressor_plugin_c6')\n",
+  "model": {
+    "class": "siderius_plugin_test_regressor_plugin_c6.TestRegressorModel",
+    "config": "siderius_plugin_test_regressor_plugin_c6.TestRegressorConfig",
+    "output": "regressor",
+    "origin": "tuner/plugins/test_regressor_plugin_c6.py"
+  },
+  "loss": {
+    "class": "siderius_loss_plugin_native_staging_loss.NativeLoss",
+    "config": "siderius_loss_plugin_native_staging_loss.NativeLossConfig",
+    "dtype": "float",
+    "reduction": "mean",
+    "contract": null
+  }
+}

@@ -209,7 +209,7 @@ def _run_with_sentinels(workspace: str, composition):
         MockValid = stack.enter_context(patch("workflows.model_exploration.MLCodeValidatorAgent"))
         MockTune = stack.enter_context(patch("workflows.model_exploration.HyperparamTuningAgent"))
         stack.enter_context(
-            patch("workflows.model_exploration._register_plugin", return_value=None)
+            patch("workflows.model_exploration.stage_native_plugins", return_value=None)
         )
         stack.enter_context(
             patch("workflows.model_exploration._promote_model_to_global", return_value=None)
@@ -348,7 +348,7 @@ def test_off_default_parity_no_silent_activation(tmp_path, propagation_compositi
         MockValid = stack.enter_context(patch("workflows.model_exploration.MLCodeValidatorAgent"))
         MockTune = stack.enter_context(patch("workflows.model_exploration.HyperparamTuningAgent"))
         stack.enter_context(
-            patch("workflows.model_exploration._register_plugin", return_value=None)
+            patch("workflows.model_exploration.stage_native_plugins", return_value=None)
         )
         stack.enter_context(
             patch("workflows.model_exploration._promote_model_to_global", return_value=None)

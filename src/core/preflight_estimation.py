@@ -105,6 +105,7 @@ def estimation_assembly_digest() -> str:
             "agent/schemas/hyperparam_tuning.py",
             "workflows/model_exploration.py",
             "workflows/tuner_preparation.py",
+            "workflows/plugin_staging.py",
             "workflows/proposal_pipeline.py",
             "workflows/candidate_requests.py",
             "workflows/attempt_storage.py",

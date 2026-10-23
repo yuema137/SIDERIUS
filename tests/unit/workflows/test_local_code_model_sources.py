@@ -28,13 +28,15 @@ from tests.helpers.local_code_model import MODEL_TYPE, make_package
 from tests.unit.agent.ml_model_implementor.test_model_branch_b import _branch_b_input
 from tests.unit.core.test_local_code_transport import bind_workspace
 from tests.unit.core.test_resume import _plugin_src, isolated_registries
+from tests.unit.workflows.test_native_plugin_staging import staging_state as staging_state
 from workflows import model_exploration as workflow
+from workflows.plugin_staging import stage_native_plugins
 
 pytestmark = pytest.mark.usefixtures("isolated_registries")
 
 
 def test_declared_registration_keeps_source_but_still_propagates_loss_and_checks_construction(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, staging_state
 ):
     proposal_name = MODEL_TYPE
     package, binding = make_package(tmp_path / "task")
@@ -62,7 +64,14 @@ def test_declared_registration_keeps_source_but_still_propagates_loss_and_checks
             contract_snapshot=expected_snapshot,
         ),
     )
-    construction, losses = [], []
+    construction, losses, registration_order = [], [], []
+    real_register = register_model_in_memory
+
+    def observe_registration(path):
+        registration_order.append((path, bool(losses)))
+        return real_register(path)
+
+    monkeypatch.setattr("workflows.plugin_staging.register_model_in_memory", observe_registration)
     monkeypatch.setattr(
         "core.runtime_control.construction_memory.admit_construction",
         lambda **kw: construction.append(kw),
@@ -75,9 +84,13 @@ def test_declared_registration_keeps_source_but_still_propagates_loss_and_checks
     loss_destination = tmp_path / "workspace/losses/iter_001"
     with bind_code_package(package), bind_run_model_plugins(binding):
         workflow._admit_generated_model_construction(implementation, proposal_name)
-        workflow._register_plugin(
+        stage_native_plugins(
             implementation, proposal_name, [str(p) for p in destinations], str(loss_destination)
         )
+        from ml_models.plugin_loader import _PLUGIN_MODEL_ORIGINS
+
+        assert registration_order == [(str(package.root / "model.py"), True)]
+        assert _PLUGIN_MODEL_ORIGINS[MODEL_TYPE][1] == str(package.root / "model.py")
         workflow._promote_model_to_global(implementation)
     assert len(construction) == 1
     assert construction[0]["model_class"].__module__.endswith("._helper")
@@ -128,7 +141,7 @@ def test_existing_index_row_uses_relocated_declaration_without_rewrite_or_new_of
         assert workflow._cleanup_stale_registry_entries(registry) == (0, [])
         result = agent.run(inp)
         workflow._admit_generated_model_construction(result, inp.model_name)
-        workflow._register_plugin(result, inp.model_name, [str(destination)])
+        stage_native_plugins(result, inp.model_name, [str(destination)])
     assert result.model_type == MODEL_TYPE
     assert len(construction) == 1
     assert not (destination / "new_proposal_label.py").exists()

@@ -192,7 +192,7 @@ def _run_iteration(workspace: str, tune_output, **override_kwargs):
         MockValid = stack.enter_context(patch("workflows.model_exploration.MLCodeValidatorAgent"))
         MockTune = stack.enter_context(patch("workflows.model_exploration.HyperparamTuningAgent"))
         stack.enter_context(
-            patch("workflows.model_exploration._register_plugin", return_value=None)
+            patch("workflows.model_exploration.stage_native_plugins", return_value=None)
         )
         stack.enter_context(
             patch("workflows.model_exploration._promote_model_to_global", return_value=None)

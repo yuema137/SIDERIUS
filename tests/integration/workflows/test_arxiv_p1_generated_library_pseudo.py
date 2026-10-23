@@ -20,7 +20,7 @@ comparison RED.
 
 Harness modeled on ``test_chain_incumbent_pseudo.py``: agents mocked at the
 class boundary so ``run_workflow``'s OWN body — the production wiring P1
-repointed — executes for real. ``_register_plugin`` alone stays patched: it
+repointed — executes for real. ``stage_native_plugins`` alone stays patched: it
 is the workspace-scoped half (already tmp-rooted, out of P1 scope) and
 needs a full sandbox layout this bounded probe does not build.
 
@@ -338,7 +338,7 @@ def test_fresh_run_writes_the_library_not_the_checkout(tmp_path, monkeypatch, ca
         # The workspace-scoped mirror half (out of P1 scope; needs a full
         # sandbox layout). The FOUR P1 families all stay REAL.
         stack.enter_context(
-            patch("workflows.model_exploration._register_plugin", return_value=None)
+            patch("workflows.model_exploration.stage_native_plugins", return_value=None)
         )
         MockInterp.return_value.run.return_value = _INTERP_OUT
         MockPropose.return_value.run.return_value = _proposal_out()

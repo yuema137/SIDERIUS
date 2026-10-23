@@ -259,7 +259,7 @@ def _run_iter_2(workspace: str, iter2_tune_output, *, enable_gates: bool):
         MockTune = stack.enter_context(patch("workflows.model_exploration.HyperparamTuningAgent"))
         # Avoid touching real plugin registries in this pseudo test.
         stack.enter_context(
-            patch("workflows.model_exploration._register_plugin", return_value=None)
+            patch("workflows.model_exploration.stage_native_plugins", return_value=None)
         )
         stack.enter_context(
             patch("workflows.model_exploration._promote_model_to_global", return_value=None)

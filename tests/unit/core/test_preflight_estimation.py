@@ -209,6 +209,7 @@ def test_archived_evidence_is_readable_but_new_evidence_requires_identity():
         "run_context",
         "proposal_pipeline",
         "tuner_preparation",
+        "plugin_staging",
     ],
 )
 def test_extracted_candidate_helpers_remain_in_assembly_identity(monkeypatch, helper_name):
@@ -239,15 +240,16 @@ def test_generated_name_guard_bytes_remain_in_assembly_identity(monkeypatch):
     assert providers.estimation_assembly_digest() != before
 
 
+@pytest.mark.parametrize("helper_name", ["tuner_preparation", "plugin_staging"])
 def test_tuner_helper_change_invalidates_real_identity_and_unqualified_profile(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, helper_name
 ):
     """A relocated helper must change real provenance and refuse an old qualifier.
 
     Unlike the generic refusal test, this mutates source bytes at the existing
     file-read seam and leaves the digest algorithm and identity owners intact.
     """
-    helper = Path(providers.__file__).resolve().parents[1] / "workflows/tuner_preparation.py"
+    helper = Path(providers.__file__).resolve().parents[1] / f"workflows/{helper_name}.py"
     native_before = providers.resolve_preflight_estimator().identity()
     external = profile(tmp_path)
     original_read = Path.read_bytes
