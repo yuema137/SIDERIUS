@@ -7,7 +7,7 @@ three-node boundary, not an arbitrary protocol executor.
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import TypeAdapter
 
@@ -24,6 +24,9 @@ from workflows.task_composition import RunTaskComposition, build_task_compositio
 
 from .layout import candidate_proposal_dir
 from .models import CandidateRunRequest
+
+if TYPE_CHECKING:
+    from .training_admission import TrainingAdmission
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,7 @@ def materialize(
     workspace: Path,
     composition: RunTaskComposition,
     config: WorkflowLLMConfig,
+    admitted: "TrainingAdmission | None" = None,
 ) -> NativeInputs:
     definition = request.preview.document.definition
     control = workspace / "candidate_run"
@@ -145,7 +149,12 @@ def materialize(
         not Path(debug).is_absolute() or not Path(debug).resolve().is_relative_to(control / "debug")
     ):
         raise ValueError("debug prompt path must be inside candidate_run/debug")
-    check_constraints(seed, ref)
+    if admitted is None:
+        check_constraints(seed, ref)
+    else:
+        from .training_admission import reconcile_proposal
+
+        seed = reconcile_proposal(seed, admitted)
     validator = config.get("validate")
     provider = TypeAdapter(Literal["gemini", "openai", "deepseek"]).validate_python(
         validator.get("provider", VALIDATE.provider)
@@ -161,6 +170,12 @@ def materialize(
     }
     externals = {item.id: item for item in definition.externals}
     used = {proposal_request.binding}
+    if admitted is not None:
+        tuning = nodes["tuning"].request
+        assert isinstance(tuning, ProtocolRequest)
+        source = next(arg.source for arg in tuning.arguments if arg.name == "settings")
+        assert isinstance(source, ExternalSource)
+        used.add(source.binding)
     for role in ("implementation", "validation"):
         protocol = nodes[role].request
         assert isinstance(protocol, ProtocolRequest)
@@ -183,6 +198,11 @@ def materialize(
                     "llm_provider": provider,
                     "llm_model_id": model,
                 }[argument.name]
+                if argument.name == "constraint_context" and admitted is not None:
+                    from .training_admission import reconcile_constraints
+
+                    reconcile_constraints(value, seed.constraint_context)
+                    continue
                 if value != authority:
                     raise ValueError(f"protocol {argument.name} disagrees with resolved authority")
     if used != set(externals):

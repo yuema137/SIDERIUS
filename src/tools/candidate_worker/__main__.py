@@ -13,7 +13,7 @@ def main() -> int:
     args = parser.parse_args()
     receipt = launch_candidate(CandidateRunRequest.model_validate_json(args.request.read_bytes()))
     print(receipt.model_dump_json(indent=2))
-    return 0 if receipt.status in {"accepted", "rejected"} else 1
+    return 0 if receipt.status in {"accepted", "rejected", "completed"} else 1
 
 
 if __name__ == "__main__":

@@ -180,6 +180,7 @@ from workflows.plugin_staging import stage_native_plugins
 from workflows.run_bindings import WorkflowRunBindings
 from workflows.run_config import (
     WorkflowLaunchConfig,
+    active_vram_budget,
     validate_launch_trial_overrides,
 )
 from workflows.run_context import bind_agent_run_context
@@ -1927,11 +1928,7 @@ def run_workflow(
     # Pick the active VRAM budget per WS-B doc §4.2: trial preferred (the
     # Proposer's baseline is almost always trial-sized), fall back to
     # formal, else None (→ PHYSICAL regime rendered from the physical cap).
-    active_vram_budget_gb: float | None = (
-        launch.trial_vram_budget_gb
-        if launch.trial_vram_budget_gb is not None
-        else launch.formal_vram_budget_gb
-    )
+    active_vram_budget_gb = active_vram_budget(launch)
     print(
         f"  Hardware      : {hardware_ctx.device_name} "
         f"({hardware_ctx.total_memory_gb:.2f} GB total, "

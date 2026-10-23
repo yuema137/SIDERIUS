@@ -35,6 +35,9 @@ CONTRACTS = MappingProxyType(
         "implementation.output": "agent.schemas.implementor.ImplementorOutput",
         "validation.input": "agent.schemas.validator.ValidatorInput",
         "validation.output": "agent.schemas.validator.ValidatorOutput",
+        "tuning.input": "agent.schemas.hyperparam_tuning.HyperparamTuningInput",
+        "tuning.output": "agent.schemas.hyperparam_tuning.HyperparamTuningOutput",
+        "native-training.settings": "workflows.candidate_training_settings.CandidateTrainingSettings",
         "storage": "agent.schemas.storage.StorageConfig",
         "optional.constraint-context": "agent.schemas.constraint_disclosure.ConstraintContext | None",
         "optional.task-composition-ref": "agent.schemas.hyperparam_tuning.TaskCompositionRef | None",
@@ -47,12 +50,22 @@ CAPABILITIES = MappingProxyType(
     {
         "proposal": CapabilityContract("proposal.input", "proposal.output"),
         "implementation": CapabilityContract("implementation.input", "implementation.output"),
+        "tuning": CapabilityContract("tuning.input", "tuning.output"),
         "validation": CapabilityContract("validation.input", "validation.output"),
     }
 )
 
 PROTOCOLS = MappingProxyType(
     {
+        "validated-candidate-to-tuning": ProtocolContract(
+            "tools.candidate_worker.training.prepare_tuning_request",
+            "tuning.input",
+            (
+                ArgumentContract("validation", "validation.output"),
+                ArgumentContract("proposal", "proposal.output"),
+                ArgumentContract("settings", "native-training.settings"),
+            ),
+        ),
         "proposal-to-implementation": ProtocolContract(
             "agent.schemas.protocols.ml_model_propose_to_ml_model_impl.local_full_spec",
             "implementation.input",

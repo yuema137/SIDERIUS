@@ -1,10 +1,13 @@
-"""Native sequencing only; no training, retry controller or promotion."""
+"""Fresh native candidate sequencing; optional tuning delegates to its native owner."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
+from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
+from agent.schemas.validator import ValidatorOutput
 from core.durable_io import publish_bytes_write_once
 from core.generated_artifact_name import validate_generated_artifact_name
 from nodes.ml_code_validator_agent.ml_code_validator_agent import MLCodeValidatorAgent
@@ -21,13 +24,21 @@ from .inputs import NativeInputs, materialize
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
-def sequence(
+@dataclass(frozen=True)
+class CandidatePhaseResult:
+    proposal: ProposalOutput
+    implementation: ImplementorOutput
+    validation: ValidatorOutput
+    receipt: CandidateRunReceipt
+
+
+def run_candidate_phases(
     request: CandidateRunRequest,
     initial: CandidateRunReceipt,
     inputs: NativeInputs,
     config: WorkflowLLMConfig,
     implementor_blocks,
-) -> CandidateRunReceipt:
+) -> CandidatePhaseResult:
     seed = inputs.proposal
     attempt = inputs.attempt
     assert seed.storage.local is not None and seed.task_composition_ref is not None
@@ -108,7 +119,7 @@ def sequence(
     validated = validator.run(validation)
     validation_path = Path(attempt.impl_dir) / f"validation_{request.run_name}.json"
     capture_record(validation_path, validated)
-    return initial.model_copy(
+    receipt = initial.model_copy(
         update={
             "status": "accepted" if validated.passed else "rejected",
             "validation_passed": validated.passed,
@@ -123,6 +134,13 @@ def sequence(
             ),
         }
     )
+
+    return CandidatePhaseResult(proposal, implemented, validated, receipt)
+
+
+def sequence(request, initial, inputs, config, implementor_blocks) -> CandidateRunReceipt:
+    """Preserve the legacy three-stage receipt surface."""
+    return run_candidate_phases(request, initial, inputs, config, implementor_blocks).receipt
 
 
 def execute_native(
@@ -142,5 +160,15 @@ def execute_native(
         Path(request.preview.project_root) / request.preview.document.definition.task.data_root
     ).resolve()
     with bind_run_task_composition(composition, physical_data_root=str(data)):
+        if any(node.capability == "tuning" for node in request.preview.document.definition.nodes):
+            from .training import execute_training
+            from .training_admission import admit_training
+
+            admitted = admit_training(request, initial, composition, config)
+            inputs = materialize(request, Path(initial.workspace), composition, config, admitted)
+            phases = run_candidate_phases(
+                request, initial, inputs, config, composition.implementor_blocks
+            )
+            return execute_training(phases, admitted)
         inputs = materialize(request, Path(initial.workspace), composition, config)
         return sequence(request, initial, inputs, config, composition.implementor_blocks)

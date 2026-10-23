@@ -24,7 +24,11 @@ def publish(path: Path, value: CandidateRunRequest | CandidateRunReceipt) -> Non
 
 
 def reconcile(
-    initial: CandidateRunReceipt, result: ExecutionResult, child_path: Path
+    initial: CandidateRunReceipt,
+    result: ExecutionResult,
+    child_path: Path,
+    *,
+    training: bool = False,
 ) -> CandidateRunReceipt:
     """A child result never overrides timeout or failed process completion."""
     if result.status != "completed":
@@ -45,13 +49,18 @@ def reconcile(
         ):
             if getattr(child, name) != getattr(initial, name):
                 raise ValueError(f"child receipt changed {name}")
-        if child.status not in {"accepted", "rejected"}:
+        has_training_output = training and child.status in {"completed", "failed"}
+        allowed = {"rejected", "completed", "failed"} if training else {"accepted", "rejected"}
+        if child.status not in allowed:
             raise ValueError("child did not report terminal candidate validation")
-        if (
-            child.validation_passed != (child.status == "accepted")
-            or len(child.native_output_paths) != 3
-        ):
+        if child.validation_passed != (child.status != "rejected") or len(
+            child.native_output_paths
+        ) != (4 if has_training_output else 3):
             raise ValueError("inconsistent native validation receipt")
+        if has_training_output:
+            from .training_evidence import verify_training_evidence
+
+            verify_training_evidence(child)
         proposal_dir = candidate_proposal_dir(Path(initial.workspace), initial.run_name)
         implementation_dir = Path(impl_attempt_dir(str(proposal_dir), 1))
         expected_paths = (
@@ -62,7 +71,7 @@ def reconcile(
         if (
             child.proposal_storage != str(proposal_dir)
             or child.implementation_storage != str(implementation_dir)
-            or child.native_output_paths != expected_paths
+            or child.native_output_paths[:3] != expected_paths
             or not child.candidate_id
             or not child.composition_fingerprint
             or not all(Path(path).is_file() for path in expected_paths)
@@ -136,7 +145,12 @@ def launch_candidate(
             profile,
             [sys.executable, "-m", "tools.candidate_worker.child", str(control / "request.json")],
         )
-        terminal = reconcile(initial, result, control / "child.json")
+        terminal = reconcile(
+            initial,
+            result,
+            control / "child.json",
+            training=any(node.capability == "tuning" for node in definition.nodes),
+        )
     except KeyboardInterrupt:
         terminal = initial.model_copy(
             update={"status": "interrupted", "error": "worker interrupted"}

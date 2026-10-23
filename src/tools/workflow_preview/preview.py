@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from tools.setup_review.route_models import LLMRoute
 from tools.setup_review.routes import NodeRouteRole, node_llm_routes
 from workflows.definition.candidate import candidate_nodes
@@ -13,14 +15,23 @@ from .files import inspect_workspace, observe_file, resolve_location
 from .models import FileObservation, WorkflowBindings, WorkflowPreview, WorkflowPreviewRequest
 
 
+class HealthReference(BaseModel):
+    """Inert nested-file projection; full training admission belongs to the child."""
+
+    health_checks_config: str | None = None
+
+
 def _selected_routes(config: WorkflowLLMConfig, nodes: dict[str, str]) -> tuple[LLMRoute, ...]:
     selected = []
     roles: tuple[tuple[str, NodeRouteRole], ...] = (
         ("proposal", "propose"),
         ("implementation", "implement"),
         ("validation", "validate"),
+        ("tuning", "tune"),
     )
     for capability, role in roles:
+        if capability not in nodes:
+            continue
         routes = node_llm_routes(config, role)
         names = {
             route.name: f"{nodes[capability]}.{route.name.partition('.')[2] or 'main'}"
@@ -67,9 +78,20 @@ def observe_bindings(
     ]
     observations = []
     config = WorkflowLLMConfig.default() if request.llm_config_file is None else None
+    training_references = {
+        f"external.{item.id}"
+        for item in definition.externals
+        if item.contract == "native-training.settings"
+    }
     for reference, path in paths:
         observation, content = read_file(path, reference)
         observations.append(observation)
+        if reference in training_references:
+            health = HealthReference.model_validate_json(content).health_checks_config
+            if health is not None:
+                ref = "training.health_checks_config"
+                health_observation, _ = read_file(resolve_location(project, health, ref), ref)
+                observations.append(health_observation)
         if reference == "llm_config":
             config = parse_config(content)
     assert config is not None
@@ -83,7 +105,11 @@ def observe_bindings(
         inactive_roles=tuple(
             name
             for name in WorkflowLLMConfig.model_fields
-            if name not in {"propose", "implement", "validate_model"}
+            if name
+            not in (
+                {"propose", "implement", "validate_model"}
+                | ({"tune"} if "tuning" in nodes else set())
+            )
         ),
     )
 

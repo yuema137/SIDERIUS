@@ -2,6 +2,7 @@
 
 from .models import (
     ExternalRequest,
+    ExternalSource,
     ProtocolRequest,
     ResultSource,
     ReusableWorkflowDefinition,
@@ -11,7 +12,8 @@ from .models import (
 
 def candidate_nodes(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> dict[str, str]:
     nodes = {node.capability: node for node in definition.nodes}
-    if len(definition.nodes) != 3 or set(nodes) != {"proposal", "implementation", "validation"}:
+    expected = {"proposal", "implementation", "validation"}
+    if set(nodes) not in (expected, expected | {"tuning"}) or len(nodes) != len(definition.nodes):
         raise ValueError(
             "Unsupported preview: requires exactly one proposal, implementation and validation"
         )
@@ -28,4 +30,22 @@ def candidate_nodes(definition: WorkflowDefinition | ReusableWorkflowDefinition)
         source = next(arg.source for arg in request.arguments if arg.name == "output")
         if not isinstance(source, ResultSource) or source.node != nodes[upstream].id:
             raise ValueError(f"Unsupported preview: {node.id}.output must use {nodes[upstream].id}")
+    if "tuning" in nodes:
+        if isinstance(definition, ReusableWorkflowDefinition):
+            raise ValueError(
+                "four-stage native training requires schema version 1; reusable preparation is unsupported"
+            )
+        request = nodes["tuning"].request
+        if (
+            not isinstance(request, ProtocolRequest)
+            or request.protocol != "validated-candidate-to-tuning"
+        ):
+            raise ValueError("tuning requires validated-candidate-to-tuning")
+        arguments = {arg.name: arg.source for arg in request.arguments}
+        for role in ("proposal", "validation"):
+            source = arguments[role]
+            if not isinstance(source, ResultSource) or source.node != nodes[role].id:
+                raise ValueError(f"tuning.{role} must use this candidate's {role}")
+        if not isinstance(arguments["settings"], ExternalSource):
+            raise ValueError("tuning.settings requires an external settings file")
     return {role: node.id for role, node in nodes.items()}

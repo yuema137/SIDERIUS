@@ -132,7 +132,7 @@ def _literature_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> 
     return [main, search]
 
 
-NodeRouteRole = Literal["interpret", "implement", "validate", "data_analysis", "propose"]
+NodeRouteRole = Literal["interpret", "implement", "validate", "data_analysis", "propose", "tune"]
 
 
 def node_llm_routes(
@@ -146,6 +146,8 @@ def node_llm_routes(
     Names use the role namespace. A caller representing node instances must
     rename both names and sharing references into that instance's namespace.
     """
+    if role == "tune":
+        return _tuner_routes(config, state)
     if role == "propose":
         return _proposer_routes(config, state)
     defaults = {
@@ -218,6 +220,6 @@ def standard_llm_routes(
                 node_state = "task_dependent"
         routes.extend(node_llm_routes(config, node, state=node_state))
     routes.extend(node_llm_routes(config, "propose", state=state))
-    routes.extend(_tuner_routes(config, state))
+    routes.extend(node_llm_routes(config, "tune", state=state))
     routes.extend(_literature_routes(config, state if literature_enabled else "disabled"))
     return routes

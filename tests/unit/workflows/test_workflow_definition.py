@@ -165,15 +165,23 @@ assert not any(n.startswith(('agent.', 'nodes.', 'torch')) and n not in {'agent.
 
 def test_catalog_matches_exact_native_protocol_signatures():
     from agent.schemas.constraint_disclosure import ConstraintContext
-    from agent.schemas.hyperparam_tuning import TaskCompositionRef
+    from agent.schemas.hyperparam_tuning import (
+        HyperparamTuningInput,
+        HyperparamTuningOutput,
+        TaskCompositionRef,
+    )
     from agent.schemas.implementor import ImplementorInput, ImplementorOutput
     from agent.schemas.proposal import ProposalInput, ProposalOutput
     from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
     from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
     from agent.schemas.storage import StorageConfig
     from agent.schemas.validator import ValidatorInput, ValidatorOutput
+    from workflows.candidate_training_settings import CandidateTrainingSettings
 
     native = {
+        "tuning.input": HyperparamTuningInput,
+        "tuning.output": HyperparamTuningOutput,
+        "native-training.settings": CandidateTrainingSettings,
         "proposal.input": ProposalInput,
         "proposal.output": ProposalOutput,
         "implementation.input": ImplementorInput,

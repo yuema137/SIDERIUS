@@ -61,6 +61,13 @@ class CandidateRunRequest(PreviewModel):
         return value
 
 
+class TrainingOutputEvidence(PreviewModel):
+    """Native output identity and digest committed into the terminal receipt."""
+
+    model_name: str
+    output_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class CandidateRunReceipt(PreviewModel):
     """Execution index; native records remain the authority for node data."""
 
@@ -68,7 +75,9 @@ class CandidateRunReceipt(PreviewModel):
     run_name: str
     workspace: str
     declaration_digest: str
-    status: Literal["launched", "accepted", "rejected", "failed", "timed_out", "interrupted"]
+    status: Literal[
+        "launched", "accepted", "rejected", "failed", "timed_out", "interrupted", "completed"
+    ]
     node_ids: tuple[str, ...]
     selected_constructor_routes: tuple[LLMRoute, ...]
     ledger_path: str
@@ -80,3 +89,6 @@ class CandidateRunReceipt(PreviewModel):
     native_output_paths: tuple[str, ...] = ()
     validation_passed: bool | None = None
     error: str | None = None
+    training_output: TrainingOutputEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )

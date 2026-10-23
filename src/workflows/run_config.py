@@ -340,3 +340,12 @@ def bind_runtime_verifier_launch(launch: WorkflowLaunchConfig) -> WorkflowLaunch
     if identity == launch.runtime_verifier_identity:
         return launch
     return replace(launch, runtime_verifier_identity=identity)
+
+
+def active_vram_budget(launch: WorkflowLaunchConfig) -> float | None:
+    """The proposer uses the trial ceiling when declared, otherwise formal."""
+    return (
+        launch.trial_vram_budget_gb
+        if launch.trial_vram_budget_gb is not None
+        else launch.formal_vram_budget_gb
+    )
