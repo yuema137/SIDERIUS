@@ -314,6 +314,18 @@ setup_py_env_passthrough
 # (inspect_run_state auto-resume) and every lilab child.
 enforce_source_tree_authority
 
+# Machine transport uses only the same argument builders as native dispatch.
+if [ -n "$CHAIN_EXPORT_FD" ] || [ -n "$CHAIN_EXPORT_ITERATION" ]; then
+    if ! [[ "$CHAIN_EXPORT_FD" =~ ^[0-9]+$ && "$CHAIN_EXPORT_ITERATION" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Native chain refused: invalid_export_controls" >&2
+        exit 78
+    fi
+    build_source_paths "$CHAIN_EXPORT_ITERATION"
+    build_app_args "$CHAIN_EXPORT_ITERATION"
+    printf '%s\0' "${APP_ARGS[@]}" >&"$CHAIN_EXPORT_FD"
+    exit 0
+fi
+
 # --- 13.B: Auto-resume + safety guard + idempotency ---
 
 resolve_start_iter() {

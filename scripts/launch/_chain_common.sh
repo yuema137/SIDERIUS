@@ -293,9 +293,14 @@ MEM="48G"
 GPUS=1
 CPUS=8
 
+CHAIN_EXPORT_FD=""
+CHAIN_EXPORT_ITERATION=""
+
 parse_chain_args() {
     while [[ $# -gt 0 ]]; do
       case $1 in
+        --chain_export_fd)        CHAIN_EXPORT_FD="$2"; shift 2 ;;
+        --chain_export_iteration) CHAIN_EXPORT_ITERATION="$2"; shift 2 ;;
         --workspace)              WORKSPACE="$2"; shift 2 ;;
         --run_name)               RUN_NAME="$2"; shift 2 ;;
         --num_iterations)         NUM_ITERATIONS="$2"; shift 2 ;;
