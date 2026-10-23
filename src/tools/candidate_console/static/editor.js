@@ -3,7 +3,7 @@
   'use strict';
   const $ = id => document.getElementById(`editor-${id}`);
   let project = '', generation = 0, base = null, graph = null;
-  let options = [], selected = null, pending = false, sourceDirty = false, mode = 'source', reviewed = null, conflict = null;
+  let options = [], selected = null, pending = false, sourceDirty = false, mode = 'source', reviewed = null, conflict = null, saving = false;
   const clone = value => JSON.parse(JSON.stringify(value));
   const status = message => { $('status').textContent = message; };
   const current = (id, version) => project === id && generation === version;
@@ -11,15 +11,22 @@
     const element = document.createElement(tag); element.textContent = text;
     if (parent) parent.append(element); return element;
   };
+  function controls() {
+    const connected = window.consoleSession.connected;
+    $('project').disabled = !connected || !$('project').options.length;
+    $('review').disabled = !connected || !graph;
+    $('refresh').disabled = !connected || !project;
+    $('save').disabled = !connected || saving || !reviewed || reviewed.source !== $('source').value;
+  }
   function invalidate() {
-    generation++; reviewed = null; $('save').disabled = true; $('diff').textContent = '';
+    generation++; reviewed = null; controls(); $('diff').textContent = '';
     $('pending').textContent = pending ? (mode === 'document' ? 'Pending inspector edits · Review changes to update Python source before editing it.' : 'Pending source edits · not saved') : 'No pending edits.';
   }
   function changed() { pending = true; $('source').disabled = mode === 'document'; invalidate(); }
   const api = (path, body) => window.consoleSession.request('editor/' + path, body);
   function diagnostic(items = []) { $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}`).join('\n'); }
   function showConflict(value) {
-    conflict = value; reviewed = null; $('save').disabled = true;
+    conflict = value; reviewed = null; controls();
     $('conflict').hidden = false; $('rebase').disabled = !value.document;
     $('current').textContent = value.source;
     $('conflict-diff').textContent = 'Current disk file version: ' + value.sha256.slice(0, 12) + '\n--- Current disk source\n+++ Pending proposal\n' + value.source.split('\n').map(line => '- ' + line).join('\n') + '\n' + $('source').value.split('\n').map(line => '+ ' + line).join('\n');
@@ -32,7 +39,6 @@
     invalidate(); diagnostic(value.diagnostics); render();
     $('path').textContent = value.source_path;
     $('revision').textContent = 'File version: ' + value.sha256.slice(0, 12);
-    $('review').disabled = !graph; $('refresh').disabled = false;
     $('inspect').hidden = !!graph;
     status(graph ? 'Opened supported declaration. References remain literal.' : 'Unsupported source is read-only. Repair externally, then refresh.');
   }
@@ -88,7 +94,7 @@
       }
     }
   }
-  function render() { renderGraph(); renderInspector(); if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-references input')) input.disabled = true; }
+  function render() { renderGraph(); renderInspector(); if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-references input')) input.disabled = true; controls(); }
   function resetProjectState() {
     pending = false; sourceDirty = false; mode = 'source';
     base = null; graph = null; conflict = null; reviewed = null; options = []; selected = null;
@@ -96,10 +102,10 @@
     $('source').value = ''; $('source').disabled = true;
     $('current').textContent = ''; $('conflict-diff').textContent = '';
     $('path').textContent = ''; $('revision').textContent = '';
-    $('review').disabled = true; $('refresh').disabled = !project;
     invalidate(); diagnostic(); render(); status('Opening selected project…');
   }
   async function refresh(ask = true) {
+    if (!window.consoleSession.connected) return;
     if (pending && ask && !window.confirm('Discard pending edits and refresh from disk?')) return;
     const id = project; invalidate(); const version = generation;
     try { const value = await api(encodeURIComponent(id)); if (current(id, version)) adopt(value); }
@@ -113,20 +119,17 @@
       const choices = await api('projects');
       $('project').replaceChildren();
       choices.forEach(choice => { const entry = node('option', choice.project_id, $('project')); entry.value = choice.project_id; });
-      projectsLoaded = true; $('project').disabled = choices.length === 0;
+      projectsLoaded = true;
       project = choices[0]?.project_id || ''; resetProjectState();
       if (project) await refresh(false); else status('No editor projects configured. Monitoring remains available.');
     } catch (error) { if (!error.stale) status(error.message); }
     finally { if (loadingRevision === revision) loadingRevision = null; }
   }
-  function connection(state) {
-    for (const name of ['review', 'save', 'refresh', 'project']) {
-      if (!state.connected) $(name).disabled = true;
-    }
-    if (!state.connected) return;
+  function connection() {
+    controls();
+    if (!window.consoleSession.connected) return;
     if (projectsLoaded) {
       if (!base && project && !pending) void refresh(false);
-      $('project').disabled = !$('project').options.length; $('review').disabled = !graph; $('refresh').disabled = !project; $('save').disabled = !reviewed;
     } else if (window.consoleNavigation?.view === 'workflow') void openProjects();
   }
   window.consoleSession.subscribe(connection);
@@ -134,13 +137,14 @@
   window.addEventListener('beforeunload', event => { if (pending) { event.preventDefault(); event.returnValue = ''; } });
   $('inspect').addEventListener('click', () => { $('advanced').open = true; $('source').focus(); });
   $('project').addEventListener('change', () => {
+    if (!window.consoleSession.connected) { $('project').value = project; return; }
     if (pending && !window.confirm('Discard pending edits and change project?')) { $('project').value = project; return; }
     project = $('project').value; resetProjectState(); refresh(false);
   });
   $('refresh').addEventListener('click', () => refresh());
   $('source').addEventListener('input', () => { mode = 'source'; sourceDirty = true; changed(); for (const input of document.querySelectorAll('#editor-inspector select, #editor-references input')) input.disabled = true; });
   $('review').addEventListener('click', async () => {
-    if (!base?.document) return;
+    if (!window.consoleSession.connected || !base?.document) return;
     const id = project, version = generation;
     const proposal = mode === 'document' ? {kind: 'document', document: clone(graph)} : {kind: 'source', source: $('source').value};
     try {
@@ -152,7 +156,7 @@
       options = value.binding_options; selected = graph.definition.nodes.some(n => n.id === selected) ? selected : graph.definition.nodes[0]?.id;
       reviewed = {source: value.source, sha256: value.sha256, base: base.sha256};
       $('review-disclosure').open = true;
-      $('diff').textContent = value.diff || '(No source changes)'; diagnostic(); render(); $('save').disabled = false;
+      $('diff').textContent = value.diff || '(No source changes)'; diagnostic(); render();
       status('Declaration validated. Inspect the exact Python diff, then save.');
     } catch (error) {
       if (error.stale) return;
@@ -163,9 +167,9 @@
     }
   });
   $('save').addEventListener('click', async () => {
-    if (!reviewed || reviewed.source !== $('source').value) return;
+    if (!window.consoleSession.connected || saving || !reviewed || reviewed.source !== $('source').value) return;
     const id = project, version = generation, exact = {...reviewed};
-    $('save').disabled = true;
+    saving = true; controls();
     try {
       const saved = await api(`${encodeURIComponent(id)}/save`, {source: exact.source, proposal_sha256: exact.sha256, expected_sha256: exact.base});
       if (!current(id, version)) return;
@@ -178,7 +182,7 @@
       if (error.value?.current) showConflict(error.value.current);
       status(error.message + ' Save is unconfirmed; pending proposal retained. Refresh to inspect disk.');
       reviewed = null;
-    }
+    } finally { saving = false; controls(); }
   });
   $('discard').addEventListener('click', () => { if (conflict) adopt(conflict); });
   $('rebase').addEventListener('click', () => {

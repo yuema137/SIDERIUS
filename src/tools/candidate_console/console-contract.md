@@ -328,7 +328,10 @@ Connect validates through the explicit deep-link operation GET, otherwise choice
 GET. Operation 404/409 means unavailable data and does not reject valid access.
 A session revision fences prior-connection replies, including old 401s. Current
 401 disables effectful controls and labels observations unconfirmed, preserving
-drafts, reviewed bytes and submitted UUID/body identities. Reconnect only refreshes
+drafts, reviewed bytes and submitted UUID/body identities. Editor action eligibility
+is derived from the shared session in `editor.js:controls`; request-producing
+handlers also refuse disconnected actions. Explicit conflict Discard/Rebase remain
+local and usable, but do not restore network actions until authenticated reconnect. Reconnect only refreshes
 reads; POSTs never retry automatically. Initial editor/project reads that span a
 reconnect restart for the new revision without replacing a loaded pending draft.
 Editor projects load only on Workflow entry. Choices/project failures remain local;
