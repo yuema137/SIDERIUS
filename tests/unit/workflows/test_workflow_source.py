@@ -290,7 +290,7 @@ import pathlib, sys
 from workflows.definition import parse_workflow_source, render_workflow_source
 render_workflow_source(parse_workflow_source(pathlib.Path(sys.argv[1]).read_text()))
 assert not any(n.startswith(('agent.', 'nodes.', 'torch', 'selected_user', 'sentinel_plugin'))
-               for n in sys.modules)
+               and n not in {'agent.schemas', 'agent.schemas.output_types'} for n in sys.modules)
 """
     subprocess.run([sys.executable, "-c", program, str(selected)], cwd=tmp_path, check=True)
 

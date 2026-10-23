@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING
 from .catalog import CAPABILITIES, CONTRACTS, PROTOCOLS
 
 if TYPE_CHECKING:
-    from .models import WorkflowDefinition
+    from .models import NodeInstance, NodePosition, ReusableWorkflowDefinition, WorkflowDefinition
 
 
-def validate_definition(definition: "WorkflowDefinition") -> None:
+def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefinition") -> None:
     from .models import ExternalRequest, ExternalSource
 
     externals = {item.id: item for item in definition.externals}
@@ -74,3 +74,15 @@ def validate_definition(definition: "WorkflowDefinition") -> None:
         if not ready:
             raise ValueError("Cycles and feedback are unsupported in this declaration version")
         pending = {node: sources - ready for node, sources in pending.items() if node not in ready}
+
+
+def validate_positions(
+    nodes: tuple["NodeInstance", ...], positions: tuple["NodePosition", ...]
+) -> None:
+    """One layout-reference check for both declaration formats."""
+    node_ids = {node.id for node in nodes}
+    seen: set[str] = set()
+    for position in positions:
+        if position.node not in node_ids or position.node in seen:
+            raise ValueError(f"Unknown or duplicate layout node: {position.node}")
+        seen.add(position.node)

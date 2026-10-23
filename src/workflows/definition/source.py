@@ -13,17 +13,24 @@ from pydantic_core import PydanticSerializationError
 
 from .models import (
     ArgumentBinding,
+    AuthoredWorkflowDocument,
+    CandidatePreparationOptions,
     DeclarationModel,
     ExternalBinding,
     ExternalRequest,
     ExternalSource,
+    ManagedCandidateBinding,
     NodeInstance,
     NodePosition,
     ProtocolRequest,
     ResultSource,
+    ReusableTaskReferences,
+    ReusableWorkflowDefinition,
+    ReusableWorkflowDocument,
     TaskReferences,
     WorkflowDefinition,
     WorkflowDocument,
+    revalidate_document,
 )
 
 MAX_INPUT_BYTES = 1024 * 1024
@@ -34,6 +41,11 @@ MAX_AST_DEPTH = 64
 _CONSTRUCTORS: dict[str, type[DeclarationModel]] = {
     model.__name__: model
     for model in (
+        CandidatePreparationOptions,
+        ManagedCandidateBinding,
+        ReusableTaskReferences,
+        ReusableWorkflowDefinition,
+        ReusableWorkflowDocument,
         TaskReferences,
         ExternalBinding,
         ExternalSource,
@@ -175,9 +187,9 @@ def _module_declaration(module: ast.Module) -> tuple[set[str], ast.Call]:
     if (
         not isinstance(root, ast.Call)
         or not isinstance(root.func, ast.Name)
-        or root.func.id != "WorkflowDocument"
+        or root.func.id not in {"WorkflowDocument", "ReusableWorkflowDocument"}
     ):
-        _fail("unsupported", "The root must be WorkflowDocument", root)
+        _fail("unsupported", "The root must be WorkflowDocument or ReusableWorkflowDocument", root)
     return names, root
 
 
@@ -237,7 +249,7 @@ def _construct(node: ast.expr) -> object:
     raise AssertionError("Constructor traversal requires prevalidated AST")
 
 
-def parse_workflow_source(source: str) -> WorkflowDocument:
+def parse_workflow_source(source: str) -> AuthoredWorkflowDocument:
     """Parse the restricted dedicated module without executing selected source."""
     try:
         size = len(source.encode("utf-8"))
@@ -258,7 +270,7 @@ def parse_workflow_source(source: str) -> WorkflowDocument:
     imported, root = _module_declaration(module)
     _check_value(root, imported)
     document = _construct(root)
-    assert isinstance(document, WorkflowDocument)
+    assert isinstance(document, (WorkflowDocument, ReusableWorkflowDocument))
     return document
 
 
@@ -281,15 +293,30 @@ def _render_value(value: object, depth: int) -> str:
     raise AssertionError("Renderer requires a revalidated declaration")
 
 
-def render_workflow_source(document: WorkflowDocument) -> str:
+def render_workflow_source(document: AuthoredWorkflowDocument) -> str:
     """Return canonical complete source, revalidating unchecked model instances."""
     try:
-        validated = WorkflowDocument.model_validate_json(document.model_dump_json(warnings=False))
+        validated = revalidate_document(document)
     except ValidationError as error:
         _validation_error(error)
     except PydanticSerializationError:
         _fail("validation", "Declaration cannot be serialized for revalidation")
-    imports = "\n".join(f"    {name}," for name in _CONSTRUCTORS)
+    constructors = _CONSTRUCTORS
+    if isinstance(validated, WorkflowDocument):
+        # Keep the v1 canonical source byte-identical as its allowlist grows.
+        constructors = {
+            name: model
+            for name, model in constructors.items()
+            if name
+            not in {
+                "CandidatePreparationOptions",
+                "ManagedCandidateBinding",
+                "ReusableTaskReferences",
+                "ReusableWorkflowDefinition",
+                "ReusableWorkflowDocument",
+            }
+        }
+    imports = "\n".join(f"    {name}," for name in constructors)
     source = (
         "# Generated workflow declaration; comments and formatting are not preserved.\n"
         f"from workflows.definition import (\n{imports}\n)\n\n"

@@ -88,7 +88,13 @@
       }
     }
     for (const key of Object.keys(graph.definition.task)) field($('references'), `task.${key}`, graph.definition.task[key], value => { graph.definition.task[key] = value; });
-    for (const external of graph.definition.externals) field($('references'), `external:${external.id}`, external.location, value => { external.location = value; });
+    for (const external of graph.definition.externals) {
+      if (external.kind === 'managed_candidate') {
+        node('p', `external:${external.id} · ${external.contract} · managed (read-only)`, $('references'));
+      } else {
+        field($('references'), `external:${external.id}`, external.location, value => { external.location = value; });
+      }
+    }
   }
   function render() { renderGraph(); renderInspector(); if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-references input')) input.disabled = true; }
   function resetProjectState() {

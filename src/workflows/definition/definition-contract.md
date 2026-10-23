@@ -108,19 +108,21 @@ requires separate integration and experiment-owned historical configuration.
 
 ## Static Python source bridge
 
-`parse_workflow_source(source: str) -> WorkflowDocument` and
-`render_workflow_source(document: WorkflowDocument) -> str` convert a dedicated
+`parse_workflow_source(source: str) -> AuthoredWorkflowDocument` and
+`render_workflow_source(document: AuthoredWorkflowDocument) -> str` convert a dedicated
 source module and the existing document model. The construction example above
 also performs JSON/report operations; those extra statements are not accepted
 in a dedicated source module.
 
 Accepted modules contain optional initial docstring/comments, exactly one
 absolute `from workflows.definition import ...` and one ordinary single-target
-`document = WorkflowDocument(...)` assignment. Imports contain unique bare names
+`document = WorkflowDocument(...)` or `document = ReusableWorkflowDocument(...)` assignment. Imports contain unique bare names
 from this explicit allowlist: `TaskReferences`, `ExternalBinding`,
 `ExternalSource`, `ResultSource`, `ArgumentBinding`, `ExternalRequest`,
 `ProtocolRequest`, `NodeInstance`, `WorkflowDefinition`, `NodePosition`,
-`WorkflowDocument`. Imported unused constructors are allowed; referenced
+`WorkflowDocument`, `ReusableTaskReferences`, `ManagedCandidateBinding`,
+`CandidatePreparationOptions`, `ReusableWorkflowDefinition`,
+`ReusableWorkflowDocument`. Imported unused constructors are allowed; referenced
 constructors must be imported. Aliases, wildcard and relative imports fail.
 
 Only imported bare constructors with unique known keyword arguments, literal
@@ -171,7 +173,7 @@ conflict handling and immutable launches are separate work.
 
 `python -m workflows.definition to-json --input PATH` reads restricted Python
 source and prints indented `WorkflowDocument` JSON. `to-python --input PATH`
-reads existing document JSON through `WorkflowDocument.model_validate_json` and
+reads either document variant through the validated `AuthoredWorkflowDocument` union and
 prints canonical source through the same renderer. Both require an explicit
 UTF-8 input file; there is no stdin mode, format inference, output-path argument,
 in-place edit or overwrite flag. JSON input shares the 1 MiB byte limit. Reads
@@ -190,3 +192,38 @@ the input can truncate it before Python starts. Display output or use a distinct
 new candidate path and review before replacing source. This utility provides no
 GUI semantic writer, project publication/backup, revision conflict handling,
 watcher or immutable execution binding.
+
+## Reusable declaration format (v2)
+
+`ReusableWorkflowDefinition.schema_version = 2` and the unchanged
+`WorkflowDefinition.schema_version = 1` version declaration formats, not execution
+support. `AuthoredWorkflowDocument` explicitly unites `WorkflowDocument` and
+`ReusableWorkflowDocument`. Revalidation dispatches on the validated variant;
+no reusable value is coerced through the v1 model. Both formats share graph and
+layout validation, and inspection always reports `execution_ready=False`.
+
+`ReusableTaskReferences` declares manifest and data_root without a workspace.
+A reusable external is either the unchanged literal `ExternalBinding` or a
+`ManagedCandidateBinding(id, contract, kind="managed_candidate")`. Managed
+contracts are proposal.input or storage and have no location. Graph validity
+still permits unused externals and repeated capabilities; the shared pure
+`candidate.candidate_nodes` separately checks the supported three-node subset.
+
+`ReusableWorkflowDocument` adds `preparation_options: CandidatePreparationOptions`.
+proposal_advice, implementation_advice and validation_advice default to None;
+allowed_output_types is None or a nonempty tuple of OutputTypeName from the small
+`agent.schemas.output_types` owner. None retains native default ownership. No
+native payload schemas, task plugins, providers or runtime constructors load at
+this boundary. Its `declaration_digest()` includes canonical definition and
+preparation options and excludes positions. Exact source bytes/comments are not
+captured as identity here. v1 digest and canonical rendering are unchanged.
+
+The restricted source bridge and offline conversion CLI accept both formats.
+Canonical structured editing preserves values and tuple ordering, not comments
+or formatting. The reusable example is
+`examples/workflow_declarations/reusable_candidate.py`. Its explicit optional
+literal and distinct managed storage aliases are declaration choices, not
+prepared payloads. Pure resolution is owned by
+`tools.candidate_prepare.resolution`; reusable preparation and launch are not
+implemented. Existing v1 preview/launch requests remain v1-only and the editor's
+launch review explicitly refuses reusable declarations.

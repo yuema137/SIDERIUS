@@ -1,12 +1,17 @@
 """GUI choices derive exclusively from the native typed catalog."""
 
-from workflows.definition import ExternalRequest, ExternalSource, ResultSource, WorkflowDocument
+from workflows.definition import (
+    AuthoredWorkflowDocument,
+    ExternalRequest,
+    ExternalSource,
+    ResultSource,
+)
 from workflows.definition.catalog import CAPABILITIES, PROTOCOLS
 
 from .models import BindingChoice, BindingOptions
 
 
-def binding_options(document: WorkflowDocument) -> tuple[BindingOptions, ...]:
+def binding_options(document: AuthoredWorkflowDocument) -> tuple[BindingOptions, ...]:
     definition = document.definition
 
     def choices(contract: str, results: bool) -> tuple[BindingChoice, ...]:

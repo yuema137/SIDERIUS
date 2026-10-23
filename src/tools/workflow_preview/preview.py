@@ -5,34 +5,12 @@ from pathlib import Path
 
 from tools.setup_review.route_models import LLMRoute
 from tools.setup_review.routes import NodeRouteRole, node_llm_routes
-from workflows.definition import ExternalRequest, ProtocolRequest, ResultSource, WorkflowDefinition
+from workflows.definition.candidate import candidate_nodes
 from workflows.llm_config import WorkflowLLMConfig
 
 from .config import parse_config
 from .files import inspect_workspace, observe_file, resolve_location
 from .models import FileObservation, WorkflowBindings, WorkflowPreview, WorkflowPreviewRequest
-
-
-def _candidate_nodes(definition: WorkflowDefinition) -> dict[str, str]:
-    nodes = {node.capability: node for node in definition.nodes}
-    if len(definition.nodes) != 3 or set(nodes) != {"proposal", "implementation", "validation"}:
-        raise ValueError(
-            "Unsupported preview: requires exactly one proposal, implementation and validation"
-        )
-    if not isinstance(nodes["proposal"].request, ExternalRequest):
-        raise ValueError("Unsupported preview: proposal requires an external request")
-    for role, upstream, protocol in (
-        ("implementation", "proposal", "proposal-to-implementation"),
-        ("validation", "implementation", "implementation-to-validation"),
-    ):
-        node = nodes[role]
-        request = node.request
-        if not isinstance(request, ProtocolRequest) or request.protocol != protocol:
-            raise ValueError(f"Unsupported preview: {node.id} requires {protocol}")
-        source = next(arg.source for arg in request.arguments if arg.name == "output")
-        if not isinstance(source, ResultSource) or source.node != nodes[upstream].id:
-            raise ValueError(f"Unsupported preview: {node.id}.output must use {nodes[upstream].id}")
-    return {role: node.id for role, node in nodes.items()}
 
 
 def _selected_routes(config: WorkflowLLMConfig, nodes: dict[str, str]) -> tuple[LLMRoute, ...]:
@@ -71,7 +49,7 @@ def observe_bindings(
     read_file = observe_file if read_file is None else read_file
     request = WorkflowPreviewRequest.model_validate_json(request.model_dump_json())
     definition = request.document.definition
-    nodes = _candidate_nodes(definition)
+    nodes = candidate_nodes(definition)
     project = Path(request.project_root).resolve()
     if not project.is_dir():
         raise ValueError(f"project_root must be an existing directory: {project}")
