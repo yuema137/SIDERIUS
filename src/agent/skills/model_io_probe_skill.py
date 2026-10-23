@@ -287,7 +287,7 @@ def realize_shape(
         One concrete shape, in the contract's own axis order.
 
     Raises:
-        ProbeConstructionError: a supplied extent is not positive, or
+        ProbeConstructionError: a supplied extent is not a positive integer (excluding bool), or
             ``symbolic`` is supplied for a tensor declaring more than one
             DISTINCT non-batch symbolic name — one scalar cannot say what
             two independent alignments should each be, and guessing would
@@ -317,10 +317,11 @@ def realize_shape(
 
 def _positive_extent(value: int, name: str) -> int:
     """A caller-supplied extent, or a typed refusal — never a fallback."""
-    if value <= 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ProbeConstructionError(
             f"realize_shape received {name}={value!r}, which is not a positive "
-            "extent. Refusing to substitute the Step-04 probe default: a probe "
+            "integer extent (booleans are not accepted). Refusing to substitute "
+            "the Step-04 probe default: a probe "
             "silently realized at a size the caller did not ask for describes a "
             "different tensor than the one under test."
         )
