@@ -134,6 +134,8 @@ The shared builder checks the captured workflow and returns a submission for you
 to save and retry safely. An edit to your current source does not change that selected run.
 Direct worker launch checks only the generated v1 inputs; use the operation route
 when launching a retained reusable capture. Preparing alone does not launch,
-resume, or accept a scientific candidate. To select and launch an existing capture
-in the browser, configure the [console prepared-run flow](../candidate_console/README.md#open-a-prepared-reusable-workflow).
-Automatic GUI preparation, training and resume remain unavailable.
+resume, or accept a scientific candidate. To prepare saved reusable source or
+open an existing capture in the browser, follow the
+[console New run and prepared-run steps](../candidate_console/README.md#prepare-saved-source-or-open-an-existing-run).
+Preparation never launches automatically. Training and resume are not yet
+available through this reusable workflow route.

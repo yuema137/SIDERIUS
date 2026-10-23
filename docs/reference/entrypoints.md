@@ -407,6 +407,6 @@ exact-UUID recovery without relaunch. Current source edits affect future capture
 retry uses the unchanged saved submission. Prepared inputs, admitted operation and
 native terminal validation are different states. Candidate outputs do not imply
 training or scientific scoring. This does not replace native chain entrypoints or
-add automatic GUI preparation or resume. Existing captures can also be selected,
-reviewed and explicitly launched through the configured
-[console Prepared run flow](../../src/tools/candidate_console/README.md#open-a-prepared-reusable-workflow).
+add resume. The configured console can explicitly prepare saved reusable source
+and select, review and launch an existing three-stage capture through the
+[New run and prepared-run flow](../../src/tools/candidate_console/README.md#prepare-saved-source-or-open-an-existing-run).

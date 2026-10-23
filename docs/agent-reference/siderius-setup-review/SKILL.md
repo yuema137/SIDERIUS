@@ -135,5 +135,8 @@ launch checks resolved-v1 inputs only. Do not hash CLI stdout or require human
 digest bookkeeping. Recovery retries the same saved UUID/payload, never a newly
 selected/reconstructed request. Distinguish captured source from current edits,
 prepared from admitted from native accepted/rejected, and candidate outputs from
-training/scientific results. Do not claim reusable GUI selection, automatic GUI
-preparation or resume support from this API.
+training/scientific results. For browser preparation and retained-capture
+selection, follow the [console saved-source steps](../../../src/tools/candidate_console/README.md#prepare-saved-source-or-open-an-existing-run).
+The GUI uses the same preparation and operation owners; preparation and candidate
+launch remain separate explicit actions. Reusable training and resume are not
+supported by this route.

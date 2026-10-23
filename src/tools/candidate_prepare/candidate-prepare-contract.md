@@ -235,9 +235,11 @@ not retry/resume, and there is no auto-cleanup or ID substitution.
 The preparation guarantee is coherence of original capture, binding and request
 at successful publication. Later original-v2 provenance verification is provided
 by the retained-selection API below and consumed by candidate operations.
-Direct worker launch still validates resolved-v1 inputs only. GUI preparation/
-selection/launch, resume, literal materialization and training remain outside
-this preparation API.
+Direct worker launch still validates resolved-v1 inputs only. GUI adapters consume
+this preparation API and retained-selection verification through the
+[console contract](../candidate_console/console-contract.md#new-run-from-saved-reusable-source);
+this owner does not implement UI behavior. Resume, literal materialization and
+training remain unsupported by reusable preparation.
 
 ## Retained reusable selection verification
 
