@@ -25,7 +25,7 @@ def native_fixture(admitted):
     control = Path(submission.request.output_dir) / "preparation"
     control.mkdir(parents=True)
     saved = PreparationControl(
-        preparation_id=uuid4(), request=submission.request, sources=record.inputs
+        preparation_id=record.native_id, request=submission.request, sources=record.inputs
     )
     publish_native(control / "request.json", saved)
     receipt = CandidatePreparationReceipt(
@@ -90,3 +90,15 @@ def test_byte_offsets_truncation_missing_and_symlink_escape(admitted, tmp_path):
     control.symlink_to(control.parent / "moved", target_is_directory=True)
     with pytest.raises(OSError):
         read_operation_log(config, query)
+
+
+def test_missing_native_nonce_fails_closed(admitted):
+    """Old operation records cannot synthesize a fresh native ownership token at read time."""
+    import json
+
+    config, submission, _, path, _, _ = native_fixture(admitted)
+    record = json.loads((path / "request.json").read_text())
+    del record["native_id"]
+    (path / "request.json").write_text(json.dumps(record))
+    with pytest.raises(ValueError):
+        read_operation(config, submission.request_id)

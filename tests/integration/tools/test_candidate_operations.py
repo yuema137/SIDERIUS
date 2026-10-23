@@ -35,7 +35,7 @@ from tools.candidate_operations.submit import capture_inputs
 from tools.candidate_prepare.models import PreparationControl, CandidatePreparationReceipt
 from tools.candidate_prepare.launch import publish
 
-def prepare(request):
+def prepare(request, *, invocation_id):
     root = Path(request.output_dir).parent
     with (root / 'calls').open('a') as stream:
         stream.write('called\\n')
@@ -46,7 +46,7 @@ def prepare(request):
     control.mkdir(parents=True)
     from tools.candidate_operations import PrepareOperation
     sources = capture_inputs(PrepareOperation(request_id=uuid4(), request=request))
-    saved = PreparationControl(preparation_id=uuid4(), request=request, sources=sources)
+    saved = PreparationControl(preparation_id=invocation_id, request=request, sources=sources)
     publish(control / 'request.json', saved)
     receipt = CandidatePreparationReceipt(preparation_id=saved.preparation_id, status='prepared',
         output_dir=request.output_dir, request_path=str(control / 'request.json'),

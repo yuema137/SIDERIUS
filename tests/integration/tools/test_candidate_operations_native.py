@@ -17,6 +17,7 @@ from tests.unit.tools.candidate_worker.test_native import Provider
 from tools.candidate_operations import CandidateOperation, read_operation
 from tools.candidate_operations.process import environment
 from tools.candidate_operations.read import releasable
+from tools.candidate_operations.store import load_record
 from tools.candidate_worker import CandidateRunRequest
 
 pytestmark = pytest.mark.skipif(
@@ -69,48 +70,7 @@ def test_native_prepare_then_candidate_after_submitter_exit(admitted, tmp_path, 
     assert request.run_name == preparation.request.run_name
     assert not Path(preparation.request.candidate_workspace).exists()
 
-    # Test-only provider substitution inside the actual native sandbox. No production switch.
-    bundle = Path(preparation.request.output_dir)
-    provider = bundle / "offline_provider.py"
-    provider.write_text(f"""import builtins, os, runpy, sys
-from typing import ClassVar
-{inspect.getsource(Provider)}
-Provider.reject = {reject!r}
-assert os.environ['EXPLICIT_TEST_KEY'] == 'bound-value'
-assert 'UNRELATED_SENTINEL' not in os.environ
-original = builtins.__import__
-def offline(name, globals=None, locals=None, fromlist=(), level=0):
-    result = original(name, globals, locals, fromlist, level)
-    if name == 'agent.llm_bridge':
-        sys.modules[name].LLMBridge = Provider
-    return result
-builtins.__import__ = offline
-sys.argv = ['tools.candidate_worker.child', sys.argv[1]]
-runpy.run_module('tools.candidate_worker.child', run_name='__main__')
-""")
-    operation = tmp_path / "native_operation.py"
-    operation.write_text(f"""import importlib, os, sys
-from pathlib import Path
-from tools.candidate_operations.child import execute
-from tools.workspace_sandbox.runner import run
-assert os.environ['EXPLICIT_TEST_KEY'] == 'bound-value'
-assert 'UNRELATED_SENTINEL' not in os.environ
-def supervised(profile, argv):
-    return run(profile, [sys.executable, {str(provider)!r}, argv[-1]])
-importlib.import_module('tools.candidate_worker.launch').run = supervised
-raise SystemExit(execute(Path(sys.argv[1])))
-""")
-    submitter = tmp_path / "native_submitter.py"
-    submitter.write_text(f"""import runpy
-from tools.candidate_operations import process
-original = process.subprocess.Popen
-def spawn(argv, **kwargs):
-    if 'tools.candidate_operations.child' in argv:
-        argv = [argv[0], {str(operation)!r}, argv[-1]]
-    return original(argv, **kwargs)
-process.subprocess.Popen = spawn
-runpy.run_module('tools.candidate_operations', run_name='__main__')
-""")
+    submitter = native_submitter(tmp_path, Path(preparation.request.output_dir), reject)
     candidate = CandidateOperation(request_id=uuid4(), request=request)
     envelope = tmp_path / "candidate.json"
     envelope.write_text(candidate.model_dump_json())
@@ -153,6 +113,44 @@ runpy.run_module('tools.candidate_operations', run_name='__main__')
     for path in (Path(config.state_root) / "operations" / str(candidate.request_id)).iterdir():
         assert "bound-value" not in path.read_text() and "do-not-pass" not in path.read_text()
 
+    for old in (preparation, candidate):
+        old_nonce = load_record(config, old.request_id).native_id
+        # Both a new UUID and the same caller UUID in another store need fresh native identity.
+        for same_id in (False, True):
+            other = config.model_copy(
+                update={"state_root": str(tmp_path / f"stale-{old.kind}-{same_id}")}
+            )
+            stale = old if same_id else old.model_copy(update={"request_id": uuid4()})
+            other_file = tmp_path / f"stale-store-{old.kind}-{same_id}.json"
+            other_file.write_text(other.model_dump_json())
+            stale_file = tmp_path / f"stale-request-{old.kind}-{same_id}.json"
+            stale_file.write_text(stale.model_dump_json())
+            cli(
+                other_file,
+                "submit",
+                "--request",
+                str(stale_file),
+                harness=submitter if old.kind == "candidate" else None,
+                env=source_env,
+            )
+            wait_for(
+                lambda other=other, stale=stale: (
+                    read_operation(other, stale.request_id).process.status == "exited"
+                )
+            )
+            assert read_operation(other, stale.request_id).state == "unknown"
+            assert not releasable(other, stale.request_id)
+            assert load_record(other, stale.request_id).native_id != old_nonce
+        original_file = tmp_path / f"same-{old.kind}.json"
+        original_file.write_text(old.model_dump_json())
+        assert (
+            json.loads(cli(config_path, "submit", "--request", str(original_file)).stdout)[
+                "observation"
+            ]
+            == "existing"
+        )
+        assert load_record(config, old.request_id).native_id == old_nonce
+
 
 def test_native_timeout_is_preserved_by_detached_reader(admitted, tmp_path):
     config, preparation, _ = admitted
@@ -169,3 +167,48 @@ def test_native_timeout_is_preserved_by_detached_reader(admitted, tmp_path):
     wait_for(lambda: releasable(config, preparation.request_id), timeout=15)
     status = read_operation(config, preparation.request_id)
     assert status.state == "completed" and status.receipt.status == "timed_out"
+
+
+def native_submitter(tmp_path, bundle, reject=False):
+    # Test-only provider substitution inside the actual native sandbox. No production switch.
+    provider = bundle / "offline_provider.py"
+    provider.write_text(f"""import builtins, os, runpy, sys
+from typing import ClassVar
+{inspect.getsource(Provider)}
+Provider.reject = {reject!r}
+assert os.environ['EXPLICIT_TEST_KEY'] == 'bound-value'
+assert 'UNRELATED_SENTINEL' not in os.environ
+original = builtins.__import__
+def offline(name, globals=None, locals=None, fromlist=(), level=0):
+    result = original(name, globals, locals, fromlist, level)
+    if name == 'agent.llm_bridge':
+        sys.modules[name].LLMBridge = Provider
+    return result
+builtins.__import__ = offline
+sys.argv = ['tools.candidate_worker.child', sys.argv[1]]
+runpy.run_module('tools.candidate_worker.child', run_name='__main__')
+""")
+    operation = tmp_path / "native_operation.py"
+    operation.write_text(f"""import importlib, os, sys
+from pathlib import Path
+from tools.candidate_operations.child import execute
+from tools.workspace_sandbox.runner import run
+assert os.environ['EXPLICIT_TEST_KEY'] == 'bound-value'
+assert 'UNRELATED_SENTINEL' not in os.environ
+def supervised(profile, argv):
+    return run(profile, [sys.executable, {str(provider)!r}, argv[-1]])
+importlib.import_module('tools.candidate_worker.launch').run = supervised
+raise SystemExit(execute(Path(sys.argv[1])))
+""")
+    submitter = tmp_path / "native_submitter.py"
+    submitter.write_text(f"""import runpy
+from tools.candidate_operations import process
+original = process.subprocess.Popen
+def spawn(argv, **kwargs):
+    if 'tools.candidate_operations.child' in argv:
+        argv = [argv[0], {str(operation)!r}, argv[-1]]
+    return original(argv, **kwargs)
+process.subprocess.Popen = spawn
+runpy.run_module('tools.candidate_operations', run_name='__main__')
+""")
+    return submitter

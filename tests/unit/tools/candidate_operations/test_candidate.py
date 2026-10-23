@@ -43,6 +43,7 @@ def test_rejected_receipt_remains_rejected_and_launch_mismatch_is_unknown(prepar
     )
     submission = CandidateOperation(request_id=uuid4(), request=prepared)
     record = OperationRecord(
+        native_id=uuid4(),
         submission=submission,
         request_digest=digest(submission),
         config=config,
@@ -56,7 +57,7 @@ def test_rejected_receipt_remains_rejected_and_launch_mismatch_is_unknown(prepar
     control = workspace / "candidate_run"
     control.mkdir(parents=True)
     initial = CandidateRunReceipt(
-        run_id="native-id",
+        run_id=record.native_id.hex,
         run_name=prepared.run_name,
         workspace=str(workspace),
         declaration_digest=prepared.declaration_digest,
@@ -76,3 +77,45 @@ def test_rejected_receipt_remains_rejected_and_launch_mismatch_is_unknown(prepar
         rejected.model_copy(update={"run_id": "forged"}).model_dump_json()
     )
     assert read_operation(config, submission.request_id).state == "unknown"
+
+
+@pytest.mark.parametrize("kind", ["prepare", "candidate"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_native_identity_binding_preserves_default_and_validates_before_effects(
+    selection, prepared, monkeypatch, kind, explicit
+):
+    """Native UUID ownership/default formatting persists; invalid injection cannot claim paths."""
+    import importlib
+
+    from tools.workspace_sandbox.runner import ExecutionResult
+
+    module = importlib.import_module(
+        f"tools.candidate_{'prepare' if kind == 'prepare' else 'worker'}.launch"
+    )
+    request = selection if kind == "prepare" else prepared
+    invoke = module.prepare_candidate if kind == "prepare" else module.launch_candidate
+    destination = Path(
+        selection.output_dir
+        if kind == "prepare"
+        else prepared.preview.document.definition.task.workspace
+    )
+    with pytest.raises(ValueError):
+        invoke(request, invocation_id="not-a-UUID")
+    assert not destination.exists()
+    identity = uuid4()
+
+    def generated():
+        assert not explicit, "explicit native identity must not regenerate"
+        return identity
+
+    monkeypatch.setattr(module, "uuid4", generated)
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda *_: ExecutionResult(status="timed_out", returncode=124, elapsed_seconds=0.1),
+    )
+    receipt = invoke(request, **({"invocation_id": identity} if explicit else {}))
+    assert receipt.status == "timed_out"
+    assert (receipt.preparation_id if kind == "prepare" else receipt.run_id) == (
+        identity if kind == "prepare" else identity.hex
+    )

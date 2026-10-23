@@ -57,7 +57,10 @@ state_root/
 ```
 
 `request.json` holds the validated submission, digest, exact store config,
-source/runtime identity, selected input observations and UTC admission time.
+source/runtime identity, selected input observations, UTC admission time and a
+required fresh `native_id` UUID. This native invocation nonce is generated once
+per new admission and is distinct from the caller UUID, including across stores.
+Existing-ID submission reuses it; readers never generate a missing nonce.
 `active.json` is a derived pointer. Every earlier operation directory must be
 proven releasable before another UUID is admitted. This includes orphan directories
 left by crashes before request or active-pointer publication. No partial directory
@@ -96,7 +99,10 @@ credential discovery is absent. Explicit credential binding remains the caller's
 obligation. A stronger no-dotenv policy belongs in a separate native-owner change.
 Arbitrary trusted plugin output is not universally redacted; state is not a vault.
 
-The operation process calls `prepare_candidate` or `launch_candidate` directly.
+The operation process calls `prepare_candidate` or `launch_candidate` directly
+with keyword-only `invocation_id=record.native_id`. Native launchers validate the
+UUID before effects and use it in their existing preparation UUID / run-ID hex
+fields; direct callers that omit it still receive native uuid4 identities.
 Native timeout, process-group supervision, artifacts, storage, accounting and
 scientific semantics remain unchanged. Production code adds no signals or cleanup
 ladder. Start-new-session isolates terminal process-group signals but does not
@@ -133,11 +139,17 @@ raise; corrupt markers/native artifacts yield unknown. `child.json` is never a
 terminal authority.
 
 Preparation reads fixed `output_dir/preparation/{request.json,receipt.json}` and
-checks saved request, preparation UUID, source observations and fixed paths.
+checks saved request, preparation UUID against the admitted native nonce, source
+observations and fixed paths.
 Candidate reads fixed `workspace/candidate_run/{request.json,launch.json,receipt.json}`
-and checks saved request, run/declaration/node/route identity and fixed log/ledger
+and checks saved request, run ID against the admitted native nonce (hex format),
+declaration/node/route identity and fixed log/ledger
 paths. The native parent's receipt owns validation result semantics; this reader
 does not rerun reconciliation, compose tasks, rank models or reinterpret metrics.
+An identical old native request/receipt cannot satisfy a new admission: its
+native nonce differs. Under cross-store races the native exclusive directory
+claim still selects the winner; a loser cannot inherit the winner's receipt and
+remains unknown/nonreleasable. This is ownership binding, not global admission.
 No automatic retry, resume, cancellation, force-clear, attachment, queue, HTTP or
 cross-store resource/spend admission is supplied.
 

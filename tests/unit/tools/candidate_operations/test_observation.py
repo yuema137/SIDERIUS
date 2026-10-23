@@ -49,7 +49,7 @@ def test_native_exception_is_unknown_and_keeps_slot(admitted, monkeypatch):
         path = claim(root, record)
     calls = []
 
-    def dispatched(_):
+    def dispatched(_, *, invocation_id):
         calls.append(1)
         raise OSError("secret must not appear in completion")
 

@@ -2,7 +2,9 @@
 
 import sys
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+from pydantic import TypeAdapter
 
 from core.durable_io import publish_bytes_write_once
 from execute_tools.impl_attempts import impl_attempt_dir
@@ -69,9 +71,16 @@ def reconcile(
         return initial.model_copy(update={"status": "failed", "error": str(error)})
 
 
-def launch_candidate(request: CandidateRunRequest) -> CandidateRunReceipt:
+def launch_candidate(
+    request: CandidateRunRequest, *, invocation_id: UUID | None = None
+) -> CandidateRunReceipt:
     """Run precisely one chain; failures preserve the claimed workspace."""
     request = CandidateRunRequest.model_validate_json(request.model_dump_json())
+    identity = (
+        uuid4()
+        if invocation_id is None
+        else TypeAdapter(UUID).validate_python(invocation_id, strict=True)
+    )
     observed = preview_workflow(request.preview)
     definition = request.preview.document.definition
     if request.declaration_digest != definition.declaration_digest():
@@ -93,7 +102,7 @@ def launch_candidate(request: CandidateRunRequest) -> CandidateRunReceipt:
     control = workspace / "candidate_run"
     control.mkdir()
     initial = CandidateRunReceipt(
-        run_id=uuid4().hex,
+        run_id=identity.hex,
         run_name=request.run_name,
         workspace=str(workspace),
         declaration_digest=request.declaration_digest,

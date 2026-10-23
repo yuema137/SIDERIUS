@@ -71,7 +71,8 @@ before candidate execution.
 
 Only one operation may occupy a store. `active` means its wrapper process was
 observed alive. `unknown` means evidence is insufficient; it blocks new admission
-and is never automatically retried. Preserve the records for investigation.
+and is never automatically retried. A new operation cannot reuse an older
+operation's receipt at the same output path. Preserve the records for investigation.
 A completed operation also keeps its slot until its process is observed exited.
 There is no cancellation, queue or recovery command.
 

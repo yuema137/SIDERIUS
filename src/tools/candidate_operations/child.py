@@ -29,9 +29,9 @@ def execute(path: Path) -> int:
             raise ValueError("operation runtime binding changed")
         entered = True
         if record.submission.kind == "prepare":
-            prepare_candidate(record.submission.request)
+            prepare_candidate(record.submission.request, invocation_id=record.native_id)
         else:
-            launch_candidate(record.submission.request)
+            launch_candidate(record.submission.request, invocation_id=record.native_id)
         native = native_receipt(record)
         if native is None:
             raise ValueError("native invocation returned without final receipt")

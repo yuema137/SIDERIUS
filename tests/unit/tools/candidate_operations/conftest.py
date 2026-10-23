@@ -19,6 +19,7 @@ def admitted(selection, tmp_path):
     )
     submission = PrepareOperation(request_id=uuid4(), request=selection)
     record = OperationRecord(
+        native_id=uuid4(),
         submission=submission,
         request_digest=digest(submission),
         config=config,

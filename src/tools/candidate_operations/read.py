@@ -52,6 +52,7 @@ def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
         saved = read_model(control / "request.json", PreparationControl)
         if (
             saved.request != submission.request
+            or saved.preparation_id != record.native_id
             or saved.preparation_id != receipt.preparation_id
             or receipt.output_dir != str(control.parent)
             or receipt.request_path != str(control / "request.json")
@@ -67,6 +68,7 @@ def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
         request = submission.request
         if (
             saved != request
+            or initial.run_id != record.native_id.hex
             or initial.status != "launched"
             or receipt.status == "launched"
             or initial.workspace != str(control.parent)

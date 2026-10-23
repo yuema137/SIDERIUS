@@ -3,6 +3,7 @@
 import hashlib
 from collections.abc import Mapping
 from pathlib import Path
+from uuid import uuid4
 
 from tools.workflow_preview.models import FileObservation
 
@@ -72,6 +73,7 @@ def submit_operation(
         names = submission.request.environment_names if submission.kind == "candidate" else ()
         env = environment(names, launch_environment)
         record = OperationRecord(
+            native_id=uuid4(),
             submission=submission,
             request_digest=digest(submission),
             config=config,

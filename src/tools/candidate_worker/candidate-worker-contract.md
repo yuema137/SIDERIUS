@@ -1,11 +1,18 @@
 # Native candidate execution contract
 
-`CandidateRunRequest` and `launch_candidate` are the common JSON/Python boundary.
+`CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None)`
+are the common JSON/Python boundary.
 The CLI decodes the same request and calls that function. The parent imports
 inert declaration/preview/routing schemas; it does not compose a task or import
 native node implementations. `child` verifies captured inputs, binds generated
 library discovery to its workspace, and only then imports `native` and task
 consumers. Each launch gets a fresh interpreter through the existing sandbox.
+
+Python callers may supply a strict UUID `invocation_id`, validated before any
+filesystem effects. The native launch uses its hex form as the existing `run_id`
+for artifacts and accounting. Omission preserves native `uuid4().hex` generation.
+Request/receipt schemas, CLI behavior and exclusive claim ownership are unchanged;
+only the claim winner can publish records with that invocation identity.
 
 ## Selected inputs and task authority
 

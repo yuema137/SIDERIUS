@@ -42,6 +42,7 @@ class RuntimeIdentity(PreviewModel):
 
 
 class OperationRecord(PreviewModel):
+    native_id: UUID
     submission: OperationSubmission
     request_digest: str
     config: OperationStoreConfig
