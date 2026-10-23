@@ -69,6 +69,27 @@ before candidate execution.
    prepared bundle, review its `candidate_request_path`, wrap that file with
    `kind: "candidate"` and a new UUID, then submit explicitly.
 
+For reported LLM tokens, Python callers can use the same stored operation UUID:
+
+```python
+from pathlib import Path
+from uuid import UUID
+from tools.candidate_operations import OperationStoreConfig, read_operation_tokens
+
+config = OperationStoreConfig.model_validate_json(Path("store.json").read_bytes())
+snapshot = read_operation_tokens(config, UUID("YOUR_OPERATION_UUID"))
+print(snapshot.model_dump_json(indent=2))
+```
+
+Replace the UUID with your submitted operation ID. Candidate results group the
+observed provider reports by requested and served model; preparation returns
+not applicable. Missing fields remain null, partial reads are labeled and repeated
+reads replace the snapshot. Missing or unrecorded usage may exist; these sums do
+not establish complete billing. You can also paste a code-submitted operation ID
+into the [local console](../candidate_console/README.md) to see the table, status
+and logs. No matching console task choice is needed for known-ID monitoring;
+use the same admitted operation store configuration.
+
 Only one operation may occupy a store. `active` means its wrapper process was
 observed alive. `unknown` means evidence is insufficient; it blocks new admission
 and is never automatically retried. A new operation cannot reuse an older

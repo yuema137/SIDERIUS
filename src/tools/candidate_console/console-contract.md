@@ -54,7 +54,7 @@ names are passed; native environment validation rejects reserved names.
 ## Python policy and request binding
 
 `CandidateConsole(config)` exposes `choices()`, `prepare(PrepareSelection)`,
-`review(PreparedSelection)`, `launch(LaunchSelection)`, `status(UUID)` and
+`review(PreparedSelection)`, `launch(LaunchSelection)`, `status(UUID)`, `tokens(UUID)` and
 `log(LogReadRequest)`. Methods return typed curated views/native handles and log
 chunks, independent of FastAPI. PrepareSelection contains operation_id, task_id,
 run_name and three optional advice strings (maximum 32768 characters each).
@@ -66,7 +66,7 @@ The shared `preparation_request` builder reconstructs the complete native reques
 from each configured choice, saved editable values and deterministic UUID paths.
 Review/launch require exactly one full equality match before credential access or
 submission. Changed/removed/ambiguous configuration does not migrate a preparation.
-Code-created preparations obey the same launch policy; status/log reads do not
+Code-created preparations obey the same launch policy; status/log/token reads do not
 require a matching TaskChoice. The public prepared accessor verifies the complete
 native artifact/request association without writes or empty-workspace admission.
 Launch compares the reviewed digest and submits the accessor's typed native
@@ -90,6 +90,7 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | GET /api/preparations/{UUID}/review | PreparedReview |
 | POST /api/candidates | LaunchSelection → OperationHandle, 202 |
 | GET /api/operations/{UUID} | StatusView |
+| GET /api/operations/{UUID}/tokens | CandidateTokenSnapshot, read-only fixed native projection |
 | GET /api/operations/{UUID}/log | kind=native or operation, offset>=0, max_bytes=1..65536 → LogChunk |
 
 Outer ASGI RequestBoundary checks exact Host (configured bind/browser authorities),
@@ -133,3 +134,31 @@ it proves browser interaction, not native execution/security. Browser/process
 socket support may require a host execution context. Missing tooling is a missing
 gate, not a pass. Screenshots cover desktop/tablet/mobile and a 200% equivalent
 CSS viewport; they do not claim browser-chrome zoom automation.
+
+
+## Reported-token monitor
+
+`CandidateConsole.tokens(UUID)` calls the public `read_operation_tokens` adapter,
+which binds admitted request, native nonce and operation integrity before reading
+usage. The authenticated GET accepts only operation UUID, no browser workspace
+path or task choice. Preparation returns explicit not-applicable; native publication
+pending returns unavailable and recovers on later reads. Identity corruption
+returns sanitized integrity failure before ledger access. Unknown wrapper process
+observation alone does not hide valid token evidence. Token data contains no raw
+ledger rows/extras/components, credentials, prompts or receipt paths.
+
+The existing visible-page two-second poll reads tokens independently of status/log
+success. Snapshot rows replace the table; failed reads retain only the selected
+operation's last table with a stale label. Operation selection clears the previous
+table immediately, and the existing monitor epoch fences delayed responses.
+Null fields show Unavailable; reported zero remains 0, with independent missing
+counts in input/output/total cells. Partial evidence and read/last-valid-usage UTC
+are separate labels. Model identities use textContent inside a responsive,
+keyboard-focusable scrolling table. The fixed coverage note always remains visible.
+No additional poller, persisted snapshot, cursor or billing authority is added.
+
+The native [projection contract](../candidate_worker/candidate-worker-contract.md#reported-token-read-projection)
+owns arithmetic, quality, limits and evidence semantics. Focused HTTP tests prove
+route reachability, auth/Host/Origin/UUID checks before reader entry, no-store/CSP
+and sanitized failures. The browser harness adds null/partial/stale token views,
+replacement polling, token-only failure isolation and old-run epoch fencing.

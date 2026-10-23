@@ -123,3 +123,60 @@ def test_accessor_refuses_resource_alias_after_prepare(prepared, tmp_path):
     data.symlink_to(other, target_is_directory=True)
     with pytest.raises(OperationFailure):
         service.review(PreparedSelection(prepare_operation_id=selection.operation_id))
+
+
+def test_known_code_candidate_tokens_ignore_task_choices_and_credentials(prepared, monkeypatch):
+    """Known code-submitted UUID monitoring needs no currently matching task policy."""
+    from tests.unit.tools.candidate_worker.test_tokens import row
+    from tools.candidate_operations import CandidateOperation, submit_operation
+    from tools.candidate_operations.store import load_record
+    from tools.candidate_worker.models import CandidateRunReceipt
+
+    service, preparation, _ = prepared
+    assert service.tokens(preparation.operation_id).availability == "not_applicable"
+    saved = read_prepared_candidate(service.config.operation_store, preparation.operation_id)
+    # The prepared wrapper is deliberately unobserved; a separate state store admits this code UUID.
+    config = service.config.operation_store.model_copy(
+        update={"state_root": service.config.operation_store.state_root + "-code"}
+    )
+    submission = CandidateOperation(request_id=uuid4(), request=saved.request)
+    submit_operation(config, submission, launch_environment={})
+    record = load_record(config, submission.request_id)
+    workspace = Path(saved.preparation_request.candidate_workspace)
+    control = workspace / "candidate_run"
+    control.mkdir(parents=True)
+    initial = CandidateRunReceipt(
+        run_id=record.native_id.hex,
+        run_name=saved.request.run_name,
+        workspace=str(workspace),
+        declaration_digest=saved.request.declaration_digest,
+        status="launched",
+        node_ids=tuple(n.id for n in saved.request.preview.document.definition.nodes),
+        selected_constructor_routes=saved.request.selected_constructor_routes,
+        ledger_path=str(workspace / "token_usage.jsonl"),
+        log_path=str(control / "worker.log"),
+    )
+    (control / "request.json").write_text(saved.request.model_dump_json())
+    (control / "launch.json").write_text(initial.model_dump_json())
+    (workspace / "token_usage.jsonl").write_bytes(
+        row(run_id=initial.run_id, run_name=initial.run_name)
+    )
+    other = CandidateConsole(
+        service.config.model_copy(
+            update={
+                "operation_store": config,
+                "tasks": (
+                    service.config.tasks[0].model_copy(
+                        update={"candidate_environment_names": ("DIFFERENT_KEY",)}
+                    ),
+                ),
+            }
+        )
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("monitor cannot dispatch or read credentials")
+
+    monkeypatch.setattr("tools.candidate_console.service.credentials", forbidden)
+    monkeypatch.setattr("tools.candidate_console.service.submit_operation", forbidden)
+    assert other.tokens(submission.request_id).groups[0].response_rows == 1

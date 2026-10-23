@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 
 from tools.candidate_prepare.models import CandidatePreparationReceipt, PreparationControl
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
+from tools.candidate_worker.records import verify_candidate_records
 
 from .files import read_bytes, read_model
 from .models import (
@@ -65,34 +66,14 @@ def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
         receipt = CandidateRunReceipt.model_validate_json(payload)
         initial = read_model(control / "launch.json", CandidateRunReceipt)
         saved = read_model(control / "request.json", CandidateRunRequest)
-        request = submission.request
-        if (
-            saved != request
-            or initial.run_id != record.native_id.hex
-            or initial.status != "launched"
-            or receipt.status == "launched"
-            or initial.workspace != str(control.parent)
-            or initial.run_name != request.run_name
-            or initial.declaration_digest != request.declaration_digest
-            or initial.node_ids
-            != tuple(node.id for node in request.preview.document.definition.nodes)
-            or initial.selected_constructor_routes != request.selected_constructor_routes
-            or initial.log_path != str(control / "worker.log")
-            or initial.ledger_path != str(control.parent / "token_usage.jsonl")
-        ):
-            raise OperationFailure("integrity", "native candidate launch mismatch")
-        for name in (
-            "run_id",
-            "run_name",
-            "workspace",
-            "declaration_digest",
-            "node_ids",
-            "selected_constructor_routes",
-            "ledger_path",
-            "log_path",
-        ):
-            if getattr(receipt, name) != getattr(initial, name):
-                raise OperationFailure("integrity", "native candidate receipt identity mismatch")
+        verify_candidate_records(
+            saved,
+            initial,
+            expected_request=submission.request,
+            expected_run_id=record.native_id.hex,
+            workspace=control.parent,
+            receipt=receipt,
+        )
     return receipt, hashlib.sha256(payload).hexdigest()
 
 

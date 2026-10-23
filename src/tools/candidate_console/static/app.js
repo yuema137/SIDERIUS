@@ -151,6 +151,8 @@
   });
   function setMonitor(id) {
     monitorEpoch++; monitorId = id; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
+    $('token-rows').replaceChildren(); document.querySelector('.token-table').hidden = true; say('tokens-times', '');
+    say('tokens-status', 'Reading reported tokens…');
     say('monitor-status', 'Reading operation ' + id + '…');
   }
   $('monitor-form').addEventListener('submit', async event => {
@@ -180,10 +182,39 @@
       if (epoch === monitorEpoch) say('monitor-status', 'Observation stale or unavailable: ' + error.message + '. Last displayed facts are retained; disconnection does not mean stopped.');
     }
   }
+  function tokenCell(value, missing) {
+    return (value === null ? 'Unavailable' : String(value)) + (missing ? ` · ${missing} missing` : '');
+  }
+  async function readTokens() {
+    if (!monitorId) return;
+    const id = monitorId, epoch = monitorEpoch;
+    try {
+      const snapshot = await api(`operations/${id}/tokens`);
+      if (epoch !== monitorEpoch) return;
+      const rows = snapshot.groups.map(group => {
+        const row = document.createElement('tr');
+        for (const value of [group.provider, group.requested_model, group.served_model === null ? 'Unavailable' : group.served_model,
+          tokenCell(group.reported_input_tokens, group.missing_input_rows), tokenCell(group.reported_output_tokens, group.missing_output_rows),
+          tokenCell(group.reported_total_tokens, group.missing_total_rows), String(group.response_rows)]) {
+          const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
+        }
+        return row;
+      });
+      $('token-rows').replaceChildren(...rows);
+      document.querySelector('.token-table').hidden = rows.length === 0;
+      const messages = { reported_responses: 'Reported response observations.', no_reported_responses: 'No reported responses observed.',
+        native_evidence_unavailable: 'Native evidence not available yet.', usage_unavailable: 'Reported usage is unavailable.',
+        preparation_not_applicable: 'Not applicable to preparation operations.' };
+      say('tokens-status', (snapshot.quality.partial ? 'Partial evidence: known sums only. ' : '') + messages[snapshot.reason]);
+      say('tokens-times', `Read at: ${snapshot.observed_at} · Last valid usage: ${snapshot.last_valid_usage_at || 'Unavailable'}`);
+    } catch (error) {
+      if (epoch === monitorEpoch) say('tokens-status', 'Reported tokens stale or unavailable: ' + error.message + '. Last observations for this operation are retained. Disconnection does not mean zero usage or stopped.');
+    }
+  }
   async function poll() {
     if (!connected || document.hidden || polling) return;
     polling = true;
-    try { await Promise.all([readPreparation(), readMonitor()]); } finally { polling = false; }
+    try { await Promise.all([readPreparation(), readMonitor(), readTokens()]); } finally { polling = false; }
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) void poll(); });
   setInterval(() => { void poll(); }, 2000);

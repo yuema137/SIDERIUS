@@ -266,3 +266,30 @@ footer {
   overflow-wrap: anywhere;
   min-width: 0;
 }
+
+
+.token-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.token-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .9rem;
+}
+
+.token-table th, .token-table td {
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #dce4ec;
+  min-width: 100px;
+  max-width: 240px;
+  overflow-wrap: anywhere;
+}
+
+.token-table th {
+  background: #f4f7fa;
+}

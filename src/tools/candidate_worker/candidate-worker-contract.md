@@ -134,3 +134,44 @@ The pure `layout.candidate_proposal_dir(workspace, run_name)` owns the fixed fir
 proposal slot used by materialization and parent receipt reconciliation. It does
 not create directories. Implementation storage continues to use
 `workflows.attempt_storage.impl_attempt_storage` and the existing attempt owner.
+
+## Reported-token read projection
+
+`read_candidate_tokens(CandidateTokenReadRequest) -> CandidateTokenSnapshot` is
+an inert Python API, also for direct native CLI/Python runs without an operation
+store. The strict frozen request declares canonical absolute
+`allowed_workspace_root`, `workspace` (strict descendant) and `expected_run_id`.
+The API revalidates the request and refuses symlink components/nonregular files.
+It reads only fixed request/launch, optional final receipt and usage-ledger files;
+no preview, composition, providers, native nodes or generated code are loaded.
+`records.verify_candidate_records` shares identity comparisons with the operation
+reader; launch reconciliation and acceptance remain execution-owned.
+
+Missing request/launch is `native_evidence_unavailable`; a missing ledger is
+`usage_unavailable`, including terminal runs. Malformed/foreign control records
+refuse. A final receipt is optional while running, but if present must verify.
+Snapshots have no competing lifecycle status. Native receipt / operation status
+remain their respective owners.
+
+Groups preserve `(provider, requested_model, served_model)` exactly, including
+empty strings and absent served identity. Nonmarker responses require non-null
+provider and requested model. Marker shapes have all three identities and all
+counts null, independent of label. Each token field sums only its own reported
+values, returns null if none were reported, and counts missing fields separately.
+Known zero stays zero. Equal retry rows remain separate observations. Totals are
+never derived from input/output. No raw rows, extras, components or paths are
+returned. Empty/marker-only evidence means “No reported responses observed,” not
+zero billing. Every snapshot carries “Observed provider reports; missing or
+unrecorded usage may exist.”
+
+The reader opens one ledger descriptor, captures size and reads at most that
+prefix: 4 MiB, 10,000 complete lines, 64 KiB per line, 256 model groups and
+256 UTF-8 bytes per identity string. Oversize rows/identities or excess groups
+are excluded and flagged. Byte/row limits disclose truncation; partial trailing
+lines are ignored; short reads/observed shrink are partial. Invalid, negative or
+foreign-run complete rows are excluded, with trustworthy sums retained and
+labeled partial. Invalid/naive timestamps mark partial without discarding count
+arithmetic; `last_valid_usage_at` is the latest accepted response timestamp
+converted to UTC. Append after capture belongs to the next read. No atomic
+whole-run completeness, same-size replacement detection, deduplication, cache,
+quota, dollar cost or exactly-once/provider billing claim is made.
