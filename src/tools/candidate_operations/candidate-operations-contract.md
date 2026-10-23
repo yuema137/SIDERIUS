@@ -470,3 +470,28 @@ aggregation returns a typed `not_supported` error. Same UUID recovery reads only
 stored identity and evidence, even after original capture deletion and key loss.
 No resume, cancellation, GUI launch, token aggregation or scientific qualification
 is added by this code-consumer boundary.
+
+The chain snapshot's `native_chain.evidence` reports bounded current checkpoint
+observations, distinct from immutable `native_chain.terminal.evidence`. Active
+observations cannot complete lifecycle. Final reads compare current observation
+with terminal evidence; changed/disappeared evidence reports integrity_failure,
+while trustworthy cleanup still permits lifecycle release. Manifest and artifact
+verification flags remain distinct: legacy unverified artifacts never become
+verified. `no_records` remains its own native status. Scores and formal-evidence
+counts come only from validated HyperparamTuningOutput and its existing role
+owner. No metric arithmetic or interpretation of human detail strings is added.
+
+Directory discovery, per-file bytes, aggregate retained bytes and emitted evidence
+are bounded. Limits produce `limit_exceeded` with no truncated checkpoint list.
+Artifact paths must remain canonical within the scheduled iteration; aliases and
+escapes refuse. A reads each bounded artifact once; the shared manifest verifier
+hashes supplied bytes and HyperparamTuningOutput parses those same bytes. Existing
+verifier callers retain their file behavior. The legacy inspector now delegates
+its original unbounded chain projection to `tools.native_chain.inspection`, with
+unchanged human display and next-iteration semantics. The new strict observation
+path does not silently impose new bounds on the legacy inspector.
+
+Only the native `.token_run_id` sidecar is read (at most 256 bytes), validated as
+`run_name-YYYYMMDDTHHMMSS-pid`, and retained with its byte digest. It is distinct
+from operation/native invocation UUIDs. No invented token-to-checkpoint binding
+or token-row aggregation is supplied. Missing sidecar remains unavailable.

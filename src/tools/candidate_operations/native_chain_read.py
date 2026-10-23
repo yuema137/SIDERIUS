@@ -4,10 +4,31 @@ import hashlib
 import os
 from pathlib import Path
 
+from tools.native_chain.observation import (
+    NativeChainEvidence,
+    ObservationBounds,
+    observe_native_chain,
+)
+
 from .files import encode, read_bytes
 from .models import Completion, OperationRecord, OperationSnapshot, ProcessObservation
 from .native_chain_models import NativeChainObservation, NativeChainTerminal
 from .store import now
+
+
+def chain_evidence(record: OperationRecord) -> NativeChainEvidence:
+    assert record.submission.kind == "native_chain" and record.native_chain_admission is not None
+    request = record.submission.request
+    admission = record.native_chain_admission
+    return observe_native_chain(
+        Path(admission.workspace),
+        admission.run_name,
+        ObservationBounds(
+            final_iteration=admission.final_iteration,
+            input_max_bytes=request.input_max_bytes,
+            max_observation_bytes=request.max_observation_bytes,
+        ),
+    )
 
 
 def read_native_chain_operation(
@@ -48,6 +69,11 @@ def read_native_chain_operation(
                 state = "completed"
             else:
                 reason = "native_chain_cleanup_unresolved"
+    evidence = chain_evidence(record)
+    if terminal is not None and evidence != terminal.evidence:
+        evidence = NativeChainEvidence(
+            availability="integrity_failure", anomalies=("changed_after_terminal",)
+        )
     return OperationSnapshot(
         operation_id=record.submission.request_id,
         kind="native_chain",
@@ -57,5 +83,7 @@ def read_native_chain_operation(
         process=process,
         reason=reason,
         finishing=state == "completed" and process.status == "alive",
-        native_chain=NativeChainObservation(admission=admission, terminal=terminal),
+        native_chain=NativeChainObservation(
+            admission=admission, terminal=terminal, evidence=evidence
+        ),
     )

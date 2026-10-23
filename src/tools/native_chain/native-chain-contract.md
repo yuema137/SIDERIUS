@@ -43,3 +43,15 @@ Native-specific refusals escape package/scientific failure handlers before
 iteration directory, token and restoration artifacts can precede this final check.
 No arbitrary graph, detached operation, GUI, Slurm capture, effectful resume or
 writer lease is introduced.
+
+## Read-only checkpoint consumers
+
+`inspection.py` owns the former inspector's legacy IterationReport chain reader,
+including display details and valid no_records→PARTIAL projection. Existing
+inspector CLI defaults and next-iteration behavior remain unchanged.
+`observation.py` adds an explicit strict bounded projection for detached operations:
+canonical scheduled workspace/indices, no-follow files, no artifact escape,
+iteration-count/directory/aggregate-byte limits and native token sidecar only.
+It verifies and parses the same output bytes through the existing manifest and
+HyperparamTuningOutput owners. It never controls native scheduling or resume.
+Legacy manifests expose separate false verification flags, never invented trust.

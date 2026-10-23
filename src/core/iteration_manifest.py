@@ -251,6 +251,7 @@ def verify_iteration_manifest(
     iter_idx: int,
     manifest_path: str,
     output_path: str | None,
+    output_bytes: bytes | None = None,
 ) -> ManifestVerdict:
     """The replay-integrity predicate, shared by every verifier.
 
@@ -266,7 +267,8 @@ def verify_iteration_manifest(
        hash to it; mismatch → problem, match → ``artifact_verified``.
 
     ``output_path`` is only consulted under rule 3; pass ``None`` for a
-    manifest that names no artifact.
+    manifest that names no artifact. Supplied ``output_bytes`` are verified directly
+    without opening or checking output_path; callers parse those same bounded bytes.
     """
     label = f"iter {iter_idx:03d}"
     recorded_digest = manifest.get(MANIFEST_DIGEST_KEY)
@@ -304,7 +306,7 @@ def verify_iteration_manifest(
             )
         return ManifestVerdict(False, False, None)
 
-    if output_path is None or not os.path.isfile(output_path):
+    if output_bytes is None and (output_path is None or not os.path.isfile(output_path)):
         return ManifestVerdict(
             manifest_verified=manifest_verified,
             artifact_verified=False,
@@ -314,7 +316,11 @@ def verify_iteration_manifest(
             ),
             expected_artifact_sha256=str(recorded_sha),
         )
-    actual_sha = sha256_file(output_path)
+    if output_bytes is not None:
+        actual_sha = hashlib.sha256(output_bytes).hexdigest()
+    else:
+        assert output_path is not None
+        actual_sha = sha256_file(output_path)
     if actual_sha != recorded_sha:
         return ManifestVerdict(
             manifest_verified=manifest_verified,

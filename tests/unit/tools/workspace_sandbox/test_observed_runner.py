@@ -44,3 +44,16 @@ def test_observed_runner_never_invents_cleanup(monkeypatch, cleanup, failure):
         assert result.cleanup.final.status == cleanup
         assert result.execution.status == ("timed_out" if failure == "timeout" else "completed")
     assert ("cleanup", cleanup) in calls
+
+
+@pytest.mark.parametrize("stage", ["build", "spawn"])
+def test_proven_pre_spawn_failure_is_distinct(monkeypatch, stage):
+    def refused(*args, **kwargs):
+        raise OSError("private command")
+
+    monkeypatch.setattr(
+        runner, "build_command", refused if stage == "build" else lambda *a: (["exact"], {})
+    )
+    monkeypatch.setattr(runner.subprocess, "Popen", refused)
+    with pytest.raises(runner.ObservedSpawnFailure, match="not created"):
+        runner.run_observed(SimpleNamespace(timeout_seconds=7), ["exact"])

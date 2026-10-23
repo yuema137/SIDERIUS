@@ -23,6 +23,7 @@ from .native_chain_models import (
     NativeChainOperationRequest,
     NativeChainTerminal,
 )
+from .native_chain_read import chain_evidence
 from .process import environment, runtime_identity
 from .store import digest, validate_config, validate_submission
 
@@ -281,6 +282,7 @@ def execute_native_chain(record: OperationRecord, path: Path) -> Completion:
             workspace=fresh.workspace,
             runtime_digest=hashlib.sha256(encode(record.runtime)).hexdigest(),
             supervision=supervision,
+            evidence=chain_evidence(record),
         )
         payload = encode(terminal)
         publish(path / "native-chain-terminal.json", terminal)

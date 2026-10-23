@@ -62,7 +62,7 @@ before candidate execution.
      --kind native --offset 0 --limit 65536
    ```
 
-   `completed` means a validated native receipt exists. Read `receipt.status`:
+   For preparation and candidate kinds, `completed` means a validated native receipt exists. Read `receipt.status`:
    preparation can be `prepared`, while a candidate can be `accepted` or
    `rejected`; both can fail, time out or be interrupted. Acceptance means native
    candidate validation passed, not training or scientific scoring. A direct
@@ -170,3 +170,23 @@ the current file size reports truncation and restarts at zero. Same-size log
 replacement cannot be detected by this cursor. The
 [technical contract](candidate-operations-contract.md) defines integrity checks,
 credential limits and deployment boundaries.
+
+## Run a captured native chain
+
+For a captured native chain, first create a dedicated empty envelope under an
+allowed candidate root. Declare its absent `workspace` child in the native-chain
+source and create the capture using the [native-chain route](../native_chain/README.md).
+Save a `NativeChainOperation` request outside that envelope with the capture path
+and digest, explicit sandbox mounts/limits, and observation bounds. Review it with:
+
+```sh
+.venv/bin/python -m tools.candidate_operations review --store-config store.json --request chain-operation.json
+.venv/bin/python -m tools.candidate_operations submit --store-config store.json --request chain-operation.json
+```
+
+Retain the request UUID for retries. Existing status and log commands keep working
+after submission exits. Read shell outcome, cleanup and checkpoint verification
+separately: a completed process is not a scientific success. The native shell
+schedules iterations; this route does not resume existing workspaces. See the
+[operation contract](candidate-operations-contract.md#captured-native-chain-operation)
+for request fields, byte limits, recovery and evidence meanings.

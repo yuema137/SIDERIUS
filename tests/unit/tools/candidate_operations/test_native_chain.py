@@ -174,3 +174,62 @@ def test_predispatch_completion_cannot_override_terminal(chain):
     )
     assert read_operation(record.config, record.submission.request_id).reason == "integrity_failure"
     assert not releasable(record.config, record.submission.request_id)
+
+
+@pytest.mark.parametrize("failure", ["pre_spawn", "post_spawn"])
+def test_dispatch_classifies_only_proven_pre_spawn_failure(chain, monkeypatch, failure):
+    from tools.candidate_operations.native_chain import execute_native_chain
+    from tools.workspace_sandbox.runner import ObservedSpawnFailure
+
+    record, path = chain
+    monkeypatch.setattr(
+        "tools.candidate_operations.native_chain.review_native_chain_operation",
+        lambda *a, **k: record.native_chain_admission,
+    )
+    monkeypatch.setattr("tools.candidate_operations.native_chain.captured", lambda *a: None)
+    monkeypatch.setattr("tools.candidate_operations.native_chain.sandbox_profile", lambda *a: None)
+    monkeypatch.setattr("tools.candidate_operations.native_chain.shell_arguments", lambda *a: ())
+
+    def failed(*args):
+        raise (
+            ObservedSpawnFailure("not created")
+            if failure == "pre_spawn"
+            else OSError("after spawn")
+        )
+
+    monkeypatch.setattr("tools.candidate_operations.native_chain.run_observed", failed)
+    completion = execute_native_chain(record, path)
+    assert completion.outcome == ("pre_dispatch_failure" if failure == "pre_spawn" else "unknown")
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_review_cli_bounds_subprocess_failures(chain, monkeypatch, capsys, timeout):
+    import subprocess
+
+    from tools.candidate_operations.__main__ import main
+
+    record, path = chain
+    config_path = path / "cli-config.json"
+    request_path = path / "cli-request.json"
+    config_path.write_text(record.config.model_dump_json())
+    request_path.write_text(record.submission.model_dump_json())
+
+    def failed(*args, **kwargs):
+        if timeout:
+            raise subprocess.TimeoutExpired(["private-scientific-argv"], 1)
+        raise subprocess.CalledProcessError(78, ["private-scientific-argv"])
+
+    monkeypatch.setattr(
+        "tools.candidate_operations.native_chain._review_native_chain_operation", failed
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["operation", "review", "--store-config", str(config_path), "--request", str(request_path)],
+    )
+    assert main() == 2
+    error = capsys.readouterr().err
+    assert (
+        "native_chain_admission" in error
+        and "private-scientific-argv" not in error
+        and "Traceback" not in error
+    )
