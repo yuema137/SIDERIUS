@@ -13,7 +13,17 @@ from uuid import UUID
 from tools.workflow_preview.files import resolve_location
 from tools.workspace_sandbox.profile import SandboxProfile, runtime_roots
 
-from .files import canonical, directory, overlap, private, private_directory, publish, read_model
+from .files import (
+    canonical,
+    directory,
+    encode,
+    overlap,
+    private,
+    private_directory,
+    publish,
+    publish_encoded,
+    read_model,
+)
 from .models import (
     SUBMISSION,
     ActiveOperation,
@@ -161,10 +171,11 @@ def existing(
 
 
 def claim(root: Path, record: OperationRecord) -> Path:
+    payload = encode(record)
     path = root / "operations" / str(record.submission.request_id)
     with directory(path.parent) as descriptor:
         os.mkdir(path.name, 0o700, dir_fd=descriptor)
-    publish(path / "request.json", record)
+    publish_encoded(path / "request.json", payload)
     publish(
         root / "active.json",
         ActiveOperation(operation_id=record.submission.request_id),

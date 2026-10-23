@@ -4,8 +4,9 @@ import os
 from pathlib import Path
 
 import pytest
+from pydantic import RootModel
 
-from tools.candidate_operations.files import JSON_LIMIT, read_bytes
+from tools.candidate_operations.files import JSON_LIMIT, encode, read_bytes
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_operations.store import (
     claim,
@@ -16,6 +17,16 @@ from tools.candidate_operations.store import (
     validate_config,
     validate_submission,
 )
+
+
+def test_record_encoding_limit_counts_utf8_bytes_and_trailing_newline():
+    """The writer must admit exactly 4 MiB, but refuse even one extra UTF-8 byte."""
+    content = "é" * ((JSON_LIMIT - 4) // 2) + "x"
+    expected = b'"' + content.encode() + b'"\n'
+    assert len(expected) == JSON_LIMIT
+    assert encode(RootModel[str](content)) == expected
+    with pytest.raises(OperationFailure, match="4 MiB"):
+        encode(RootModel[str](content + "x"))
 
 
 def test_immutable_idempotency_conflict_and_unknown_slot(admitted):

@@ -102,10 +102,20 @@ def read_model[Model: BaseModel](
     return model.model_validate_json(read_bytes(path, private_file=private_file))
 
 
-def publish(path: Path, model: BaseModel, *, replace: bool = False) -> None:
+def encode(model: BaseModel) -> bytes:
+    """Encode a record once, refusing bytes that the bounded reader cannot load."""
     payload = (model.model_dump_json(indent=2) + "\n").encode()
     if len(payload) > JSON_LIMIT:
         raise OperationFailure("record_size", "JSON record exceeds 4 MiB")
+    return payload
+
+
+def publish(path: Path, model: BaseModel, *, replace: bool = False) -> None:
+    publish_encoded(path, encode(model), replace=replace)
+
+
+def publish_encoded(path: Path, payload: bytes, *, replace: bool = False) -> None:
+    """Publish bytes already admitted by encode through the private directory owner."""
     with directory(path.parent) as descriptor:
         private(os.fstat(descriptor), directory=True)
         # Keep the existing durable publisher while pinning its target directory.
