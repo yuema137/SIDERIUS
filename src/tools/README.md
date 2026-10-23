@@ -29,3 +29,7 @@ declaration. It does not launch the workflow or certify task/environment readine
 [Detached candidate operations](candidate_operations/README.md) submit native
 preparation or candidate execution and let a later command inspect the result.
 They use an explicit private local store and preserve native outcome semantics.
+
+The [local candidate console](candidate_console/README.md) adds an authenticated
+loopback page for configured preparation, review, explicit launch and known-ID
+monitoring of those operations.

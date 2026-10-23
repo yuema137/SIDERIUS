@@ -1,0 +1,182 @@
+/** Real Chromium interaction against fixed static assets and intercepted API fixtures.
+ * Required external inputs (no downloads or dependency installation):
+ * CONSOLE_PLAYWRIGHT_MODULE: absolute installed playwright or playwright-core module.
+ * CONSOLE_BROWSER_EXECUTABLE: absolute compatible Chromium executable.
+ * CONSOLE_TEST_ORIGIN: http://127.0.0.1:<unused port>; this test starts a static server.
+ * Optional CONSOLE_SCREENSHOT_DIR: artifact directory (default: fresh OS temp directory).
+ * Run from any directory: node /path/to/checkout/tests/browser/candidate_console.mjs
+ * Requires a host that permits Chromium/local socket creation. No native execution.
+ */
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { readFile, mkdir, mkdtemp, access } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+for (const name of ['CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_TEST_ORIGIN']) {
+  assert.ok(process.env[name], `Set ${name} explicitly; see this file's runner contract.`);
+}
+for (const name of ['CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) {
+  assert.ok(isAbsolute(process.env[name]), `${name} must be absolute.`);
+  await access(process.env[name]);
+}
+const origin = new URL(process.env.CONSOLE_TEST_ORIGIN);
+assert.equal(origin.protocol, 'http:'); assert.equal(origin.hostname, '127.0.0.1');
+assert.ok(origin.port && Number(origin.port) >= 1024); assert.equal(origin.pathname, '/');
+assert.equal(origin.username + origin.password + origin.search + origin.hash, '');
+const assets = join(dirname(fileURLToPath(import.meta.url)), '../../src/tools/candidate_console/static');
+const screenshots = process.env.CONSOLE_SCREENSHOT_DIR || await mkdtemp(join(tmpdir(), 'siderius-console-browser-'));
+await mkdir(screenshots, { recursive: true });
+const server = createServer(async (req, res) => {
+  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'] };
+  const file = files[req.url];
+  if (!file) { res.writeHead(404); res.end(); return; }
+  try {
+    res.writeHead(200, { 'Content-Type': file[1], 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'" });
+    res.end(await readFile(join(assets, file[0])));
+  } catch { res.writeHead(500); res.end(); }
+});
+await new Promise((resolve, reject) => { server.once('error', reject); server.listen(Number(origin.port), '127.0.0.1', resolve); });
+const { chromium } = require(process.env.CONSOLE_PLAYWRIGHT_MODULE);
+let browser;
+try {
+  browser = await chromium.launch({ headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  const faults = [];
+  page.on('pageerror', error => faults.push(error.message));
+  const requests = [];
+  let preparation, candidate, dropPreparation = true, dropCandidate = true, staleLaunch = false, busyCandidate = true;
+  let nativeState = 'completed', finishing = false, disconnected = false;
+  const hostile = '<img src=x onerror="window.hostile=true">';
+  const known = '22222222-2222-4222-8222-222222222222';
+  const logOffsets = [];
+  const status = id => ({ operation_id: id, kind: id === preparation?.operation_id ? 'prepare' : 'candidate', request_digest: 'a'.repeat(64), observed_at: '2026-10-22T12:00:00Z', state: nativeState,
+    process: { status: finishing ? 'alive' : 'exited', reason: hostile }, finishing, receipt_available: nativeState === 'completed', native_status: nativeState === 'completed' ? (id === preparation?.operation_id ? 'prepared' : 'rejected') : null,
+    native_id: 'native-fixture', validation_passed: false, reason: hostile });
+  await page.route('**/*', async route => {
+    const url = new URL(route.request().url());
+    if (url.origin !== origin.origin) { await route.abort(); return; }
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return; }
+    const request = route.request();
+    assert.equal(request.headers().authorization, 'Bearer browser-fixture-token');
+    requests.push({ method: request.method(), path: url.pathname, body: request.postDataJSON() });
+    const reply = (body, code = 200) => route.fulfill({ status: code, contentType: 'application/json', body: JSON.stringify(body) });
+    if (disconnected) { await route.abort(); return; }
+    if (url.pathname === '/api/choices') return reply([{ task_id: 'synthetic', label: 'Synthetic ' + hostile, preparation_timeout_seconds: 120, candidate_timeout_seconds: 300 }]);
+    if (url.pathname === '/api/preparations') {
+      preparation = request.postDataJSON();
+      if (dropPreparation) { dropPreparation = false; await route.abort(); return; }
+      return reply({ operation_id: preparation.operation_id, kind: 'prepare', request_digest: 'a'.repeat(64), observed_at: 'now', observation: 'existing' }, 202);
+    }
+    if (url.pathname.endsWith('/review')) return reply({ prepare_operation_id: preparation.operation_id, prepared_digest: 'b'.repeat(64), task_id: 'synthetic', task_label: 'Synthetic ' + hostile, run_name: preparation.run_name,
+      composition_fingerprint: 'c'.repeat(64), stages: ['propose', 'implement', 'validate'], routes: [{ node_id: 'propose', provider: 'fake', model: 'offline' }],
+      proposal_advice: preparation.proposal_advice, implementation_advice: null, validation_advice: null, task_manifest: '/external/' + 'long-path/'.repeat(20) + 'task.json', data_root: '/external/data', candidate_workspace: '/external/candidate',
+      preparation_timeout_seconds: 120, candidate_timeout_seconds: 300, network: 'none', devices: [], environment_names: [], read_only: ['/external/dependency'] });
+    if (url.pathname === '/api/candidates') {
+      candidate = request.postDataJSON();
+      if (staleLaunch) return reply({ error: { code: 'stale_review', message: 'Review changed ' + hostile } }, 409);
+      if (dropCandidate) { dropCandidate = false; await route.abort(); return; }
+      if (busyCandidate) { busyCandidate = false; return reply({ error: { code: 'busy', message: 'Store is busy while the preparation wrapper finishes.' } }, 409); }
+      return reply({ operation_id: candidate.candidate_operation_id, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'now', observation: 'existing' }, 202);
+    }
+    if (url.pathname.endsWith('/log')) {
+      const offset = Number(url.searchParams.get('offset')); logOffsets.push(offset);
+      return reply({ operation_id: url.pathname.split('/')[3], kind: url.searchParams.get('kind'), offset, next_offset: 73, observed_size: 73, missing: false, truncated: false, text: offset === 0 ? 'Native rejected · 🧪 ' + hostile : '' });
+    }
+    return reply(status(url.pathname.split('/')[3]));
+  });
+  await page.goto(origin.origin);
+  // Keyboard connect proves associated labels, native submit and focus navigation.
+  await page.getByLabel('Console token', { exact: true }).focus();
+  await page.keyboard.type('browser-fixture-token'); await page.keyboard.press('Tab'); await page.keyboard.press('Enter');
+  await page.getByText('Connected. Observations', { exact: false }).waitFor();
+  await page.getByLabel('Run name', { exact: true }).fill('browser-offline');
+  await page.getByText('Optional stage advice', { exact: true }).click();
+  await page.getByLabel('Proposal advice', { exact: true }).fill(hostile);
+  await page.getByRole('button', { name: 'Prepare request', exact: true }).dblclick();
+  await page.getByText('Submission outcome is unconfirmed or refused:', { exact: false }).waitFor();
+  assert.equal(requests.filter(item => item.method === 'POST').length, 1);
+  assert.equal(await page.getByLabel('Run name', { exact: true }).isDisabled(), true);
+  await page.getByRole('button', { name: 'Retry same preparation', exact: true }).click();
+  await page.getByText('Prepared request loaded.', { exact: false }).waitFor();
+  const preps = requests.filter(item => item.path === '/api/preparations');
+  assert.equal(preps.length, 2); assert.deepEqual(preps[0].body, preps[1].body);
+  assert.equal(requests.filter(item => item.path === '/api/candidates').length, 0);
+  assert.equal(await page.locator('#review img').count(), 0);
+  assert.ok((await page.locator('#review').textContent()).includes(hostile));
+  for (const [name, width, height, zoom] of [['desktop',1440,900,1], ['compact',1024,768,1], ['mobile',390,844,1], ['desktop-200-percent',1440,900,2]]) {
+    // 200% desktop zoom is qualified at its equivalent CSS viewport.
+    await page.setViewportSize({ width: width / zoom, height: height / zoom });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${name}: page overflows horizontally`);
+    await page.screenshot({ path: join(screenshots, name + '.png'), fullPage: true });
+  }
+  await page.setViewportSize({ width:1440, height:900 });
+  await page.getByRole('button', { name: 'Launch candidate', exact: true }).dblclick();
+  await page.getByText('No automatic retry will occur.', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).click();
+  await page.getByText('Store is busy while the preparation wrapper finishes.', { exact: false }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).isEnabled(), true);
+  assert.ok((await page.locator('#review-status').textContent()).includes('Prepared request loaded.'));
+  await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).click();
+  await page.getByText('Candidate submission observed:', { exact: false }).waitFor();
+  const launches = requests.filter(item => item.path === '/api/candidates');
+  assert.equal(launches.length, 3);
+  assert.deepEqual(launches[0].body, launches[1].body); assert.deepEqual(launches[1].body, launches[2].body);
+  await page.locator('#monitor-status').filter({ hasText: 'Native: rejected' }).waitFor();
+  assert.equal(await page.locator('#log img').count(), 0);
+  assert.ok((await page.locator('#log').textContent()).includes(hostile));
+  await page.waitForTimeout(2200); assert.ok(logOffsets.includes(73), 'Log cursor must use returned byte offset.');
+  const mutations = requests.filter(item => item.method === 'POST').length;
+  nativeState = 'unknown';
+  await page.getByLabel('Operation UUID', { exact: true }).fill(known);
+  await page.getByRole('button', { name: 'Read operation', exact: true }).click();
+  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor();
+  nativeState = 'completed'; finishing = true;
+  await page.getByRole('button', { name: 'Read operation', exact: true }).click();
+  await page.locator('#monitor-status').filter({ hasText: 'Finishing:' }).waitFor();
+  assert.ok((await page.locator('#monitor-status').textContent()).includes('Native result is available; the wrapper is still finishing.'));
+  assert.ok((await page.locator('#operation-facts').textContent()).includes('alive:'));
+  assert.ok((await page.locator('#operation-facts').textContent()).includes('Native receipt availabletrue'));
+  disconnected = true;
+  await page.getByRole('button', { name: 'Read operation', exact: true }).click();
+  await page.locator('#monitor-status').filter({ hasText: 'Observation stale' }).waitFor();
+  disconnected = false;
+  finishing = false; nativeState = 'unknown';
+  await page.reload();
+  assert.equal(await page.getByLabel('Console token', { exact: true }).inputValue(), '');
+  assert.equal(await page.getByLabel('Operation UUID', { exact: true }).inputValue(), known);
+  assert.equal(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }).includes('browser-fixture-token')), false);
+  assert.equal(new URL(page.url()).search, '');
+  await page.getByLabel('Console token', { exact: true }).fill('browser-fixture-token');
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByText('Connected. Observations', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Read operation', exact: true }).click();
+  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor();
+  assert.equal(requests.filter(item => item.method === 'POST').length, mutations, 'Reconnect must be GET-only.');
+  // Fresh preparation and stale review refuse a second launch until reviewed again.
+  finishing = false; nativeState = 'completed'; staleLaunch = true;
+  await page.getByLabel('Run name', { exact: true }).fill('second-run');
+  await page.getByRole('button', { name: 'Prepare request', exact: true }).click();
+  await page.getByText('Prepared request loaded.', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Launch candidate', exact: true }).click();
+  await page.getByText('Launch refused.', { exact: false }).waitFor();
+  await page.waitForTimeout(2200);
+  assert.equal(await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).isDisabled(), true);
+  assert.ok((await page.locator('#launch-status').textContent()).includes(hostile));
+  assert.equal(await page.evaluate(() => window.hostile), undefined);
+  assert.equal(await page.locator('img').count(), 0);
+  const frozenReview = await page.locator('#review').textContent();
+  await page.getByRole('button', { name: 'New preparation', exact: true }).click();
+  await page.getByLabel('Run name', { exact: true }).fill('edited-draft');
+  assert.ok(frozenReview.includes('second-run')); assert.equal(await page.locator('#review').textContent(), '');
+  assert.equal(faults.length, 0, faults.join('\n'));
+  console.log(`PASS: real ${browser.version()} interactions; UUID retries, explicit launch, stale/unknown/rejected/finishing, escaped text, byte cursor, GET-only reopen, memory-only token, four responsive screenshots (${screenshots}).`);
+  await context.close();
+} finally {
+  if (browser) await browser.close();
+  await new Promise(resolve => server.close(resolve));
+}

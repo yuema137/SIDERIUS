@@ -116,3 +116,13 @@ owners; scoped admission/reconciliation tests; real sandbox checks for offline
 mounts/import order, timeout and prepared-bundle worker integration. Fake provider
 worker checks prove native plumbing and CPU validation, not real model quality.
 No paid LLM, training, scoring, GPU or full GUI claim follows from preparation.
+
+## Shared inert bundle verification
+
+`bundle.verify_bundle(control, read_bytes=...)` owns reconciliation of the fixed
+prepared artifacts and construction of the expected candidate request. It returns
+that request, observed workflow bindings and composition fingerprint without
+publishing, importing task/node implementations or inspecting candidate workspace
+emptiness. `launch.reconcile` retains source verification, absent-workspace checks
+and publication. Public operation readers supply confined bounded reads to the
+same verifier, so rereading after launch cannot replay preparation effects.

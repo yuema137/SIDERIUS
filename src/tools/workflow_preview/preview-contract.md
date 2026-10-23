@@ -145,3 +145,13 @@ configuration semantics rather than the complete first-run defaults.
   }
 }
 ```
+
+`preview.observe_bindings(request, read_file=...) -> WorkflowBindings` is the
+inert observation seam used by preparation reconciliation and its read-only
+operation accessor. It observes selected files/routes and resolves project/data/
+workspace locations without admitting workspace lifecycle. `preview_workflow`
+still requires absent/empty, separated workspace and returns `WorkflowPreview`.
+Observation reads now precede that final workspace check; they have no write or
+execution effects. Semantic preview fields remain unchanged; JSON field ordering
+is not an identity guarantee. An optional file reader lets the operation owner
+apply its existing bounded no-follow read policy.

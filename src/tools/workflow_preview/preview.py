@@ -1,5 +1,6 @@
 """Observe one declared native candidate chain, without executing its payloads."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 from tools.setup_review.route_models import LLMRoute
@@ -9,7 +10,7 @@ from workflows.llm_config import WorkflowLLMConfig
 
 from .config import parse_config
 from .files import inspect_workspace, observe_file, resolve_location
-from .models import WorkflowPreview, WorkflowPreviewRequest
+from .models import FileObservation, WorkflowBindings, WorkflowPreview, WorkflowPreviewRequest
 
 
 def _candidate_nodes(definition: WorkflowDefinition) -> dict[str, str]:
@@ -61,8 +62,13 @@ def _selected_routes(config: WorkflowLLMConfig, nodes: dict[str, str]) -> tuple[
     return tuple(selected)
 
 
-def preview_workflow(request: WorkflowPreviewRequest) -> WorkflowPreview:
+def observe_bindings(
+    request: WorkflowPreviewRequest,
+    *,
+    read_file: Callable[[Path, str], tuple[FileObservation, bytes]] | None = None,
+) -> WorkflowBindings:
     """Common Python/JSON boundary; even unchecked Pydantic copies are revalidated."""
+    read_file = observe_file if read_file is None else read_file
     request = WorkflowPreviewRequest.model_validate_json(request.model_dump_json())
     definition = request.document.definition
     nodes = _candidate_nodes(definition)
@@ -81,20 +87,18 @@ def preview_workflow(request: WorkflowPreviewRequest) -> WorkflowPreview:
         (reference, resolve_location(project, location, reference))
         for reference, location in locations
     ]
-    workspace_state = inspect_workspace(workspace, data, tuple(path for _, path in paths))
     observations = []
     config = WorkflowLLMConfig.default() if request.llm_config_file is None else None
     for reference, path in paths:
-        observation, content = observe_file(path, reference)
+        observation, content = read_file(path, reference)
         observations.append(observation)
         if reference == "llm_config":
             config = parse_config(content)
     assert config is not None
-    return WorkflowPreview(
+    return WorkflowBindings(
         project_root=str(project),
         data_root=str(data),
         workspace=str(workspace),
-        workspace_state=workspace_state,
         files=tuple(observations),
         config_source="workflow_default" if request.llm_config_file is None else "explicit_file",
         selected_constructor_routes=_selected_routes(config, nodes),
@@ -104,3 +108,14 @@ def preview_workflow(request: WorkflowPreviewRequest) -> WorkflowPreview:
             if name not in {"propose", "implement", "validate_model"}
         ),
     )
+
+
+def preview_workflow(request: WorkflowPreviewRequest) -> WorkflowPreview:
+    """Observe bindings and preserve the public absent/empty workspace admission."""
+    bindings = observe_bindings(request)
+    state = inspect_workspace(
+        Path(bindings.workspace),
+        Path(bindings.data_root),
+        tuple(Path(item.path) for item in bindings.files),
+    )
+    return WorkflowPreview(**bindings.model_dump(), workspace_state=state)

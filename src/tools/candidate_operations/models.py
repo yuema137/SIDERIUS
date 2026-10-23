@@ -131,3 +131,13 @@ class OperationFailure(ValueError):
     def __init__(self, code: str, message: str):
         self.detail = OperationError(code=code, message=message)
         super().__init__(message)
+
+
+class PreparedCandidate(PreviewModel):
+    prepare_operation_id: UUID
+    preparation_request: CandidatePreparationRequest
+    request: CandidateRunRequest
+    request_sha256: str
+    preparation_id: UUID
+    receipt_sha256: str | None
+    composition_fingerprint: str

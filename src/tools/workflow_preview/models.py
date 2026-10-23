@@ -42,17 +42,22 @@ class FileObservation(PreviewModel):
     size_bytes: int
 
 
-class WorkflowPreview(PreviewModel):
-    status: Literal["bindings_observed"] = "bindings_observed"
-    execution_ready: Literal[False] = False
+class WorkflowBindings(PreviewModel):
+    """Inert input observations; does not admit or inspect workspace lifecycle."""
+
     project_root: str
     data_root: str
     workspace: str
-    workspace_state: Literal["absent", "empty"]
     files: tuple[FileObservation, ...]
     config_source: Literal["workflow_default", "explicit_file"]
     selected_constructor_routes: tuple[LLMRoute, ...]
     inactive_roles: tuple[str, ...]
+
+
+class WorkflowPreview(WorkflowBindings):
+    status: Literal["bindings_observed"] = "bindings_observed"
+    execution_ready: Literal[False] = False
+    workspace_state: Literal["absent", "empty"]
     pending_checks: tuple[str, ...] = (
         "Native external payload validation and reconciliation with selected routes, task and storage",
         "Task composition, plugin imports, dependency closure and scientific identity",
