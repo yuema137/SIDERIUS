@@ -4,7 +4,8 @@ Full payload equality catches dropped/swapped forwarding that schema validation
 cannot detect. Expectations were captured from run_workflow before extraction;
 only the pytest temporary root is normalized. The source-derived composition
 fingerprint is checked separately against the real binding and persisted lock;
-every other payload field is compared exactly. Node effects use existing seams.
+the verifier source-content digest is likewise checked against its source owner.
+Every other payload field is compared exactly. Node effects use existing seams.
 """
 
 import json
@@ -222,6 +223,17 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
         baseline_fingerprint == "7f8103588d30aa06fdecd1d3c81e318dee7a7b3733838174829f7770843f9fd6"
     )
     assert actual_fingerprint == workflow_env["composition"].semantic_fingerprint
+    if case == "split_routes":
+        # The shared VRAM selector changed this fixture provider's declared source.
+        # Preserve the oracle bytes and compare only that honest source-derived digest
+        # separately; every other verifier identity field remains in full equality.
+        actual_content = payload["runtime_verifier_identity"].pop("content_sha256")
+        baseline_content = expected["runtime_verifier_identity"].pop("content_sha256")
+        assert (
+            baseline_content == "bda92755c56c34ad817e387230b08ffcff0233d3dd7574bd9269a54c307568e6"
+        )
+        assert actual_content == profile.identity().content_sha256
+        assert actual.runtime_verifier_identity == profile.identity()
     assert payload == expected
     from core.preflight_estimation import estimation_assembly_digest
 

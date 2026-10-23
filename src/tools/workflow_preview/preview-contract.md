@@ -11,8 +11,10 @@ executor, task validator, advice binding or digest-pinning API is introduced.
 
 The strict request contains `document: WorkflowDocument`, an explicit absolute
 `project_root: str`, and optional `llm_config_file: str | None`. Definition v1
-is unchanged. `preview.py` requires exactly one node of each capability:
-`proposal`, `implementation`, `validation`. Proposal uses an `ExternalRequest`;
+retains its existing three-stage form and additionally accepts the four-stage
+[native training shape](../candidate_worker/candidate-worker-contract.md#fresh-native-training-schema-version-1).
+`preview.py` requires exactly one `proposal`, `implementation`, `validation`,
+and optionally one `tuning`. Proposal uses an `ExternalRequest`;
 implementation uses `proposal-to-implementation` with that proposal's result;
 validation uses `implementation-to-validation` with that implementation's result.
 Native declaration validation still owns binding types and required arguments.
@@ -155,3 +157,11 @@ Observation reads now precede that final workspace check; they have no write or
 execution effects. Semantic preview fields remain unchanged; JSON field ordering
 is not an identity guarantee. An optional file reader lets the operation owner
 apply its existing bounded no-follow read policy.
+
+For four-stage declarations, tune routes delegate to the public `node_llm_routes`
+role `tune`, preserving planner/reflector sharing and transport from standard
+routing. Preview parses only the optional Health-file reference from settings,
+observes its canonical project-relative/absolute path under
+`training.health_checks_config`, and otherwise leaves full settings validation
+to child-side native admission. No native task/plugin schema is imported for
+this reference projection. Version-2 preparation remains three-stage-only.

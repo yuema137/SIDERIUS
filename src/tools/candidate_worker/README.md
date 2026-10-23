@@ -1,6 +1,6 @@
 # Run one native candidate
 
-This developer tool runs one proposal → implementation → validation chain in a
+This developer tool runs one proposal → implementation → validation chain, optionally followed by native training, in a
 fresh workspace and leaves the native node records for inspection. Python and
 the synchronous CLI use the same launch boundary. It requires Linux,
 [bubblewrap](../workspace_sandbox/README.md), an installed SIDERIUS environment,
@@ -69,10 +69,11 @@ checkout's frozen environment:
 
 The equivalent Python call is `launch_candidate(request)`. Inspect
 `<workspace>/candidate_run/receipt.json` and `worker.log`; the receipt identifies
-the three native output files and the native usage-ledger location. `accepted`
+the native output files and usage-ledger location. `accepted`
 and `rejected` both mean candidate validation completed, and the CLI exits zero
 for both. Check `validation_passed` before treating the candidate as accepted.
-Other terminal statuses exit nonzero. An absent terminal receipt means completion
+Four-stage `completed` also exits zero; it means the tuner returned. Failure,
+timeout and interruption exit nonzero. An absent terminal receipt means completion
 is unknown; the workspace is preserved and cannot be automatically replayed.
 
 You can read reported LLM tokens while or after a direct run, without an operation
@@ -100,8 +101,43 @@ does not establish zero billing. For a code-submitted operation UUID, use the
 A fresh workspace generates a new candidate through native eligibility rules.
 Merely declaring a model plugin does not make it an already validated reuse
 offer. This tool does not seed a capability index, invent descriptions or tests,
-or promote candidates. It also does not train, score, iterate, resume or prepare
-the seed for you. Native schema/provider retries can make more than one request;
+or promote candidates. The three-stage mode stops at validation; the four-stage
+mode below trains and scores through the native tuner. Neither mode adds an outer
+iteration loop, resumes a run, or prepares the seed for you. Native schema/provider retries can make more than one request;
 the worker timeout bounds the entire child process, not API cost or memory.
 See the [execution contract](candidate-worker-contract.md) for exact checks,
 artifact ownership, provenance and limitations.
+
+## Add native training
+
+The four-stage API accepts a training settings file beside a matching proposal
+seed. Start with the portable [synthetic input example](../../../examples/workflow_declarations/native_training.py).
+Generate the [Quickstart data](../../../examples/quickstart/README.md) first, then
+write inputs into an external directory separate from both data and workspace:
+
+```bash
+.venv/bin/python examples/workflow_declarations/native_training.py \
+  --project /projects/native-inputs \
+  --data /projects/quickstart-data \
+  --workspace /projects/native-run
+```
+
+This writes `settings.json`, `seed.json`, `storage.json`, `workflow.json`,
+`llm.json` and `candidate_request.json`; it makes no provider calls and starts
+no training. Edit the example's typed settings and seed together before
+generating a new request. In particular, an explicit null budget in an existing
+seed cannot be replaced by a non-null settings budget. The example declares
+two trial minutes and five formal minutes, diagnostic results and explicit
+`native-timing-v1` planning; these are demonstration choices. Review `llm.json`,
+resource limits and the captured routes before using the launch command above.
+
+A four-stage `completed` receipt means the native tuner returned. Inspect the
+fourth output file for scores, Health results and termination reason before
+judging the result. Infrastructure aborts return `failed` and retain that file.
+The model directory contains native run settings, records and any requested
+retained outputs. Independent operation reads detect missing or replaced native
+output after completion. Existing three-stage requests and receipts keep their
+serialization. The GUI and reusable preparation currently author only three-stage
+requests; this training mode is for direct Python/JSON callers. See the
+[training contract](candidate-worker-contract.md#fresh-native-training-schema-version-1)
+for supported controls, inactive defaults and integrity boundaries.

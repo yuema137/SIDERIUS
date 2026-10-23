@@ -44,3 +44,17 @@ def verify_candidate_records(
         ):
             if getattr(receipt, name) != getattr(initial, name):
                 raise ValueError("native candidate receipt identity mismatch")
+
+        if any(node.capability == "tuning" for node in saved.preview.document.definition.nodes):
+            if (
+                receipt.status == "completed"
+                or receipt.training_output is not None
+                or (receipt.status == "failed" and receipt.native_output_paths)
+            ):
+                from .training_evidence import verify_training_evidence
+
+                verify_training_evidence(receipt)
+            elif receipt.status == "accepted":
+                raise ValueError("four-stage native receipt cannot end at accepted")
+        elif receipt.status == "completed" or receipt.training_output is not None:
+            raise ValueError("three-stage receipt cannot claim native training")

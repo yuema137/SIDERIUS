@@ -104,6 +104,8 @@ def estimation_assembly_digest() -> str:
             "nodes/ml_hyperparameter_tune_agent/feedback.py",
             "agent/schemas/hyperparam_tuning.py",
             "workflows/model_exploration.py",
+            "workflows/training_startup.py",
+            "workflows/construction_admission.py",
             "workflows/tuner_preparation.py",
             "workflows/plugin_staging.py",
             "workflows/proposal_pipeline.py",
