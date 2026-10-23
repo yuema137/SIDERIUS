@@ -155,3 +155,30 @@ Both real supervision functions are independently bounded against their
 95 AST branch nodes / 277 lines: this change does not claim to reduce that
 existing protected-process complexity. Further supervision features require
 responsibility extraction; the facade cannot hide growth in its implementation.
+
+## Pseudo composed inference and scoring
+
+`StubSandbox.execute_inference` and `execute_scoring` accept optional
+`task_scopes`, matching the wrappers' production call surface. They delegate
+scope configuration transport to `execute_tools.scope_artifact.task_scope_argv`;
+they do not interpret opaque scopes. The owner is a no-op without a training
+scope; otherwise it requires a bound task-data-path capability and invokes the
+task's codec to write training/evaluation artifacts under the sandbox configs
+directory. Binding/codec errors propagate from these stub methods. The real
+scoring method retains its ordinary-error result envelope.
+
+Pseudo execution still launches no child, produces no scientific deliverable,
+and consumes the existing seeded synthetic result stream. Fixed inference
+timings, absent runtime verification, training-cache merge order, legacy
+SampleSet scope checks and saved `_pseudo_origin` provenance remain in force.
+Caller regression: `tests/unit/core/test_stub_composed_scope.py`.
+
+Before scope artifact writes, pseudo execution requires `exp_id` to pass the
+existing `validate_generated_artifact_name` component rule. Calls with no
+training scope retain the legacy pseudo API without an `exp_id` path check.
+
+`verifier_provider.verifier_assembly_digest` includes the entire
+`sandbox_executor.py`; changes confined to its pseudo methods still change the
+runtime assembly identity. Historical runtime profiles can therefore refuse a
+new build until separately qualified. Synthetic parity does not establish
+historical campaign, paper, or resume compatibility.
