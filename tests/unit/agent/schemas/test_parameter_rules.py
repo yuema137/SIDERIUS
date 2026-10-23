@@ -172,13 +172,25 @@ def test_one_rule_kind_is_required() -> None:
         {"predicate": "even_integer"},
     ],
 )
-def test_parameter_rule_survives_parent_model_dump_revalidation(rule: dict) -> None:
+@pytest.mark.parametrize("exclude_none", [False, True])
+def test_parameter_rule_survives_parent_model_dump_revalidation(
+    rule: dict, exclude_none: bool
+) -> None:
     """Catches inactive null fields breaking a typed fan-in's full-model revalidation."""
     rules = ParameterRules.model_validate({"model_config.segmentation_size": rule})
 
-    assert set(rules.model_dump()["rules"]["model_config.segmentation_size"]) == set(rule)
-    assert ParameterRules.model_validate(rules.model_dump()) == rules
-    assert ParameterRules.model_validate_json(rules.model_dump_json()) == rules
+    dumped = rules.model_dump(exclude_none=exclude_none)
+    assert set(dumped["rules"]["model_config.segmentation_size"]) == set(rule)
+    assert ParameterRules.model_validate(dumped) == rules
+    # Native run invariant construction uses JSON mode with null filtering.
+    assert (
+        ParameterRules.model_validate(rules.model_dump(mode="json", exclude_none=exclude_none))
+        == rules
+    )
+    assert (
+        ParameterRules.model_validate_json(rules.model_dump_json(exclude_none=exclude_none))
+        == rules
+    )
 
 
 def test_multiple_or_empty_rule_kind_declarations_remain_invalid() -> None:
