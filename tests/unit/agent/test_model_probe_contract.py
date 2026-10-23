@@ -62,7 +62,6 @@ def test_declared_fixture_receives_actual_config_and_aligned_output(monkeypatch)
     monkeypatch.setattr("agent.skills.task_model_probe._resolved_provider", resolver)
     cases = task_model_probe_cases(None, contract(), "denoiser", candidate_config=candidate)
     assert cases[0].input.shape == (1, 137, 3)
-    assert cases[0].expected_output_shape == (1, 137, 3)
     assert seen[0].candidate_config == {"nodes": 11}
     assert candidate.model_dump() == before
 
@@ -91,9 +90,18 @@ def test_missing_config_binding_fails_clearly():
         )
 
 
-def test_multiple_symbols_do_not_silently_share_extent():
+def test_output_only_symbol_does_not_block_input_extent_binding():
     declared = contract().model_dump()
     declared["output"]["axes"][1]["dimension"]["symbolic"] = "Q"
+    _, extent, _ = resolve_probe_declaration(
+        task(), ModelIOContract.model_validate(declared), Candidate()
+    )
+    assert extent == 137
+
+
+def test_multiple_input_symbols_do_not_silently_share_extent():
+    declared = contract().model_dump()
+    declared["input"]["axes"][2]["dimension"] = {"symbolic": "Q"}
     with pytest.raises(ModelProbeSetupError, match="exactly one"):
         resolve_probe_declaration(task(), ModelIOContract.model_validate(declared), Candidate())
 

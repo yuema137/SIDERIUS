@@ -130,7 +130,6 @@ def legal_probe_batches(
 @dataclass(frozen=True)
 class ModelProbeCase:
     input: torch.Tensor
-    expected_output_shape: tuple[int, ...]
     description: str = ""
 
 
@@ -193,15 +192,10 @@ def task_model_probe_cases(
                     input=value.detach().clone(),
                     description=(
                         f"; task probe input shape={shape}, expected output="
-                        f"{realize_shape(output_tensor, batch=batch, symbolic=symbolic)}, "
+                        f"{output_tensor.render_shape()}, "
                         f"candidate fields={config_values}"
                         if declaration is not None
                         else ""
-                    ),
-                    expected_output_shape=realize_shape(
-                        output_tensor,
-                        batch=batch,
-                        symbolic=symbolic,
                     ),
                 )
             )

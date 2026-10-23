@@ -451,8 +451,11 @@ def expected_output_shape(
     *,
     symbolic: int | None = None,
 ) -> tuple[int, ...]:
-    """The concrete probe shape for :func:`declared_output_tensor`."""
-    return realize_shape(declared_output_tensor(contract, declared_output_type), symbolic=symbolic)
+    """Resolve output geometry from the realized input; never invent output extents."""
+    from agent.skills.model_output_geometry import resolve_output_shape
+
+    input_shape = realize_shape(contract.input, symbolic=symbolic)
+    return resolve_output_shape(contract, declared_output_type, input_shape)
 
 
 # ---------------------------------------------------------------------------

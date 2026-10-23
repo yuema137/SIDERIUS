@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import inspect
 import textwrap
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -111,22 +110,43 @@ class TestComposedRuntimeDtype:
         ("admissible", "expected"),
         [(("int64", "int32"), torch.int64), (("int32", "int64"), torch.int32)],
     )
-    def test_generated_and_live_probes_match_training_boundary(self, admissible, expected):
+    def test_generated_and_live_probes_match_training_boundary(
+        self, tmp_path, admissible, expected
+    ):
         from agent.skills.model_io_probe_skill import build_model_input
-        from nodes.ml_model_implementor.ml_model_implementor import _render_test_input_expr
+        from agent.skills.task_model_validation import run_task_model_tests
+        from nodes.ml_model_implementor.ml_model_implementor import _assemble_test
 
         contract = _contract(*admissible)
         training_dtype = resolve_input_dtype(
             "generated_model", contract, site_preference=TRAINING_SITE_DTYPE
         )
         live_probe = build_model_input(contract, batch=2, symbolic=8)
-        rendered_probe = eval(
-            _render_test_input_expr(contract, index_extent=16, batch_literal=2),
-            {"torch": torch, "config": SimpleNamespace(segmentation_size=8)},
-        )
+        models = tmp_path / "models"
+        models.mkdir()
+        (models / "dtype_probe.py").write_text(f"""import torch
+from pydantic import BaseModel
+class Config(BaseModel):
+    segmentation_size: int = 8
+class Model(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.bias = torch.nn.Parameter(torch.ones(()))
+    def forward(self, x):
+        assert x.dtype == {expected}
+        return self.bias.expand(x.shape[0], 256, x.shape[1])
+PLUGIN_MODEL_CLASS = Model
+PLUGIN_CONFIG_CLASS = Config
+PLUGIN_OUTPUT_TYPE = "classifier"
+""")
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        generated = tests / "test_dtype_probe.py"
+        generated.write_text(_assemble_test("dtype_probe", contract))
+        passed, output = run_task_model_tests(str(generated))
+        assert passed, output
         assert training_dtype is expected
         assert live_probe.dtype is expected
-        assert rendered_probe.dtype is expected
 
 
 class TestRung3BDtypeRequirement:

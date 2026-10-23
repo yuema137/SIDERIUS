@@ -300,3 +300,7 @@ in the external workspace, referenced by the compact record. The inference
 observation does not replace the subsequent training requirement-table entry.
 Historical consumers explicitly choose `static_only` in exp and qualify their
 arithmetic/rendering providers; native behavior does not infer historical mode.
+
+### Independent output geometry
+
+Generic synthetic targets are resolved from fixed output dimensions and input-bound symbols through `model_output_geometry.resolve_output_shape`. Unbound independent output symbols or dynamic output axes raise `ProbeConstructionError`; no segmentation-size guess is permitted. Tasks requiring these geometries supply both task-owned input and target samples through the existing real-sample path. This changes neither their target semantics nor the resource budget.

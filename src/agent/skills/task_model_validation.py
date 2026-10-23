@@ -39,6 +39,7 @@ def check_task_model(
         )
     except ProbeConstructionError as exc:
         return False, False, False, f"Candidate probe cannot be constructed: {exc}"
+    assert contract is not None  # task_model_probe_cases rejects absent contracts
     for case in cases:
         try:
             with torch.set_grad_enabled(gradients):
@@ -46,17 +47,12 @@ def check_task_model(
         except Exception as exc:
             raise_if_code_package_failure(exc)
             return False, False, False, f"Forward pass failed: {exc}{case.description}"
-        if (
-            not isinstance(output, torch.Tensor)
-            or tuple(output.shape) != case.expected_output_shape
-            or not torch.isfinite(output).all()
-        ):
-            return (
-                False,
-                False,
-                False,
-                (f"Forward must return a finite tensor with shape {case.expected_output_shape}"),
-            )
+        from agent.skills.model_output_geometry import validate_model_output
+
+        try:
+            validate_model_output(contract, output_type, case.input, output)
+        except ProbeConstructionError as exc:
+            return False, False, False, f"{exc}{case.description}"
         if gradients:
             try:
                 model.zero_grad(set_to_none=True)
