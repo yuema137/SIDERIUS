@@ -17,7 +17,7 @@ from .admission import verify_sources
 from .models import PreparedArtifacts
 from .resolution import resolve_reusable_candidate
 from .reusable_admission import safe_bytes
-from .reusable_models import REUSABLE_FILES, ReusableBindingCapture, ReusablePreparationControl
+from .reusable_models import ReusableBindingCapture, ReusablePreparationControl, reusable_files
 
 
 def execute(request_path: Path) -> None:
@@ -64,8 +64,9 @@ def execute(request_path: Path) -> None:
             raise ValueError(f"changed input snapshot: {name}")
     bind_generated_library_to_workspace(str(output))
     from .native import prepare_payloads
+    from .reusable_training import settings_payload
 
-    fingerprint = prepare_payloads(control.request)
+    fingerprint = prepare_payloads(control.request, training_payload=settings_payload(document))
     publish_bytes_write_once(
         str(output / "workflow.json"), (resolved.document.model_dump_json(indent=2) + "\n").encode()
     )
@@ -79,7 +80,8 @@ def execute(request_path: Path) -> None:
         control_sha256=hashlib.sha256(payload).hexdigest(),
         composition_fingerprint=fingerprint,
         files=tuple(
-            observation(output / name, name, safe_bytes(output / name)) for name in REUSABLE_FILES
+            observation(output / name, name, safe_bytes(output / name))
+            for name in reusable_files(document)
         ),
     )
     publish_bytes_write_once(

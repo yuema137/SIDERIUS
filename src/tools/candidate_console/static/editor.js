@@ -4,6 +4,8 @@
   const $ = id => document.getElementById(`editor-${id}`);
   let candidateEnabled = false, sourceAvailable = false;
   let project = '', generation = 0, base = null, graph = null;
+  let training = null;
+  const trainingDrafts = new Map();
   let options = [], selected = null, pending = false, sourceDirty = false, mode = 'source', reviewed = null, conflict = null, saving = false;
   const clone = value => JSON.parse(JSON.stringify(value));
   const status = message => { $('status').textContent = message; };
@@ -20,9 +22,10 @@
     window.dispatchEvent(new CustomEvent('workflow-editor-state', {detail: projection()}));
     const connected = window.consoleSession.connected;
     $('project').disabled = !connected || !$('project').options.length;
-    $('review').disabled = !connected || !graph;
+    const invalidTraining = trainingDrafts.size > 0;
+    $('review').disabled = !connected || !graph || invalidTraining;
     $('refresh').disabled = !connected || !project;
-    $('save').disabled = !connected || saving || !reviewed || reviewed.source !== $('source').value;
+    $('save').disabled = !connected || saving || !reviewed || reviewed.source !== $('source').value || invalidTraining;
   }
   function invalidate() {
     generation++; reviewed = null; controls(); $('diff').textContent = '';
@@ -39,7 +42,8 @@
     status('Source changed. Pending proposal preserved; inspect current source before choosing a new base.');
   }
   function adopt(value) {
-    sourceAvailable = true; base = value; graph = value.document ? clone(value.document) : null; options = value.binding_options;
+    trainingDrafts.clear();
+    sourceAvailable = true; base = value; graph = value.document ? clone(value.document) : null; options = value.binding_options; training = value.training;
     $('source').value = value.source; $('source').disabled = !graph; mode = 'source'; sourceDirty = false; pending = false; conflict = null;
     $('conflict').hidden = true; selected = graph?.definition.nodes.some(n => n.id === selected) ? selected : graph?.definition.nodes[0]?.id;
     invalidate(); diagnostic(value.diagnostics); render();
@@ -68,12 +72,58 @@
     input.value = value; wrapper.append(input);
     input.addEventListener('input', () => { update(input.value); mode = 'document'; changed(); });
   }
+  function renderTraining() {
+    const parent = node('fieldset', '', $('inspector'));
+    node('legend', 'Native training settings', parent);
+    node('p', 'Epochs are ceilings; native planning resolves epochs. Task-owned rules may further constrain this run.', parent);
+    node('p', `Preparation output restriction: ${JSON.stringify(training.allowed_output_types)}`, parent);
+    const launch = () => (graph.training_settings.launch ||= {});
+    const edit = () => { mode = 'document'; changed(); };
+    for (const control of training.controls) {
+      const wrapper = node('label', control.label, parent);
+      const modeSelect = node('select', '', wrapper);
+      modeSelect.dataset.trainingMode = control.name;
+      for (const [value, title] of [['unset', 'Use native default'], ['supplied', 'Set value'], ...(control.nullable ? [['null', 'None']] : [])]) {
+        const option = node('option', title, modeSelect); option.value = value;
+      }
+      const supplied = graph.training_settings.launch || {};
+      modeSelect.value = !Object.hasOwn(supplied, control.name) ? 'unset' : supplied[control.name] === null ? 'null' : 'supplied';
+      const input = node('input', '', wrapper); input.dataset.training = control.name;
+      input.type = control.kind === 'boolean' ? 'checkbox' : 'number';
+      if (input.type === 'number') input.step = control.kind === 'integer' ? '1' : 'any';
+      const value = modeSelect.value === 'supplied' ? supplied[control.name] : control.effective;
+      if (input.type === 'checkbox') input.checked = value === true; else input.value = value ?? '';
+      if (trainingDrafts.has(control.name)) { modeSelect.value = 'supplied'; input.value = trainingDrafts.get(control.name); input.setCustomValidity('Enter a valid number, or choose default / None.'); }
+      input.disabled = modeSelect.value !== 'supplied';
+      node('small', `Native preview: ${JSON.stringify(control.effective)} (updated on review)`, wrapper);
+      const setValue = () => {
+        input.setCustomValidity('');
+        if (input.type === 'checkbox') launch()[control.name] = input.checked;
+        else if (input.value.trim() !== '' && Number.isFinite(input.valueAsNumber) && input.checkValidity()) launch()[control.name] = input.valueAsNumber;
+        else { trainingDrafts.set(control.name, input.value); input.setCustomValidity('Enter a valid number, or choose default / None.'); status('Empty numbers are not saved. Enter a value or select default / None.'); return false; }
+        trainingDrafts.delete(control.name); return true;
+      };
+      modeSelect.addEventListener('change', () => {
+        input.disabled = modeSelect.value !== 'supplied'; input.setCustomValidity(''); trainingDrafts.delete(control.name);
+        if (modeSelect.value === 'unset') delete launch()[control.name];
+        else if (modeSelect.value === 'null') launch()[control.name] = null;
+        else setValue();
+        edit();
+      });
+      input.addEventListener('input', () => { setValue(); edit(); });
+    }
+    node('p', 'Workflow parameter rules (exact / range / allowed / predicate):', parent);
+    node('pre', JSON.stringify(graph.training_settings.launch?.workflow_parameter_rules ?? null, null, 2), parent);
+    const advanced = node('button', 'Edit advanced settings and rules in source', parent); advanced.type = 'button';
+    advanced.addEventListener('click', () => { $('advanced').open = true; $('source').focus(); if (mode === 'document') status('Review inspector edits first to update the source.'); });
+  }
   function renderInspector() {
     $('inspector').replaceChildren(); $('references').replaceChildren();
     if (!graph) return;
     const item = graph.definition.nodes.find(n => n.id === selected);
     if (item) {
       node('p', `${item.id} · ${item.capability}`, $('inspector'));
+      if (item.capability === 'tuning' && training) renderTraining();
       for (const option of options.filter(entry => entry.node === item.id)) {
         const label = node('label', option.argument || 'Request binding', $('inspector'));
         const select = document.createElement('select'); label.append(select);
@@ -100,10 +150,11 @@
       }
     }
   }
-  function render() { renderGraph(); renderInspector(); if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-references input')) input.disabled = true; controls(); }
+  function render() { renderGraph(); renderInspector(); if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) input.disabled = true; controls(); }
   function resetProjectState() {
     sourceAvailable = false; pending = false; sourceDirty = false; mode = 'source';
-    base = null; graph = null; conflict = null; reviewed = null; options = []; selected = null;
+    trainingDrafts.clear();
+    base = null; graph = null; conflict = null; reviewed = null; options = []; training = null; selected = null;
     $('conflict').hidden = true; $('rebase').disabled = true;
     $('source').value = ''; $('source').disabled = true;
     $('current').textContent = ''; $('conflict-diff').textContent = '';
@@ -148,7 +199,7 @@
     project = $('project').value; candidateEnabled = $('project').selectedOptions[0]?.dataset.runnable === 'true'; resetProjectState(); refresh(false);
   });
   $('refresh').addEventListener('click', () => refresh());
-  $('source').addEventListener('input', () => { mode = 'source'; sourceDirty = true; changed(); for (const input of document.querySelectorAll('#editor-inspector select, #editor-references input')) input.disabled = true; });
+  $('source').addEventListener('input', () => { mode = 'source'; sourceDirty = true; changed(); for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) input.disabled = true; });
   $('review').addEventListener('click', async () => {
     if (!window.consoleSession.connected || !base?.document) return;
     const id = project, version = generation;
@@ -159,7 +210,7 @@
       $('source').value = value.source; $('source').disabled = false; graph = clone(value.document); mode = 'source'; sourceDirty = false;
       // Choices depend on actual new nodes/externals: refresh projection through
       // the reviewed document using server-derived options returned by review.
-      options = value.binding_options; selected = graph.definition.nodes.some(n => n.id === selected) ? selected : graph.definition.nodes[0]?.id;
+      options = value.binding_options; training = value.training; selected = graph.definition.nodes.some(n => n.id === selected) ? selected : graph.definition.nodes[0]?.id;
       reviewed = {source: value.source, sha256: value.sha256, base: base.sha256};
       $('review-disclosure').open = true;
       $('diff').textContent = value.diff || '(No source changes)'; diagnostic(); render();
@@ -167,7 +218,7 @@
     } catch (error) {
       if (error.stale) return;
       if (!current(id, version)) return;
-      if (error.value?.proposal) { const proposal = error.value.proposal; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); options = proposal.binding_options; mode = 'source'; sourceDirty = false; render(); }
+      if (error.value?.proposal) { const proposal = error.value.proposal; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); options = proposal.binding_options; training = proposal.training; mode = 'source'; sourceDirty = false; render(); }
       if (error.value?.current) showConflict(error.value.current);
       diagnostic(error.value?.diagnostics); status(error.message);
     }

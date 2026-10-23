@@ -264,3 +264,61 @@ def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
         "storage",
     ]
     assert reviewed.document.definition.externals[1].location == "edited-storage.json"
+
+
+def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path):
+    """Losing sparse read/review/save transport corrupts independent rule/null controls."""
+    from tests.unit.workflows.test_reusable_training import training_document
+    from tools.workflow_authoring.models import DocumentProposal
+    from workflows.definition import parse_workflow_source, render_workflow_source
+
+    supplied = {
+        "launch": {
+            "formal_time_budget_minutes": None,
+            "workflow_parameter_rules": {
+                "rules": {
+                    "train_config.epochs": {"range": {"min": 1, "max": 3}},
+                    "train_config.max_steps": {"exact": None},
+                }
+            },
+        }
+    }
+    source = tmp_path / "workflow.py"
+    source.write_text(render_workflow_source(training_document(supplied)))
+    recovery = tmp_path / "recovery"
+    recovery.mkdir(mode=0o700)
+    author = WorkflowAuthoring(
+        Project(
+            project_id="training",
+            project_root=tmp_path,
+            source_file=source,
+            recovery_directory=recovery,
+        )
+    )
+    view = author.read()
+    assert view.training.allowed_output_types == ("regressor",)
+    controls = {c.name: c for c in view.training.controls}
+    assert controls["formal_time_budget_minutes"].state == "null"
+    assert controls["formal_time_budget_minutes"].nullable
+    assert controls["sampling_seed"].state == "unset"
+    assert view.document.training_settings == supplied
+    document = view.document.model_copy(deep=True)
+    document.training_settings["launch"]["sampling_seed"] = 31
+    review = author.review(
+        ReviewRequest(
+            expected_sha256=view.sha256,
+            proposal=DocumentProposal(kind="document", document=document),
+        )
+    )
+    assert (
+        review.training.workflow_parameter_rules == supplied["launch"]["workflow_parameter_rules"]
+    )
+    assert next(c for c in review.training.controls if c.name == "sampling_seed").effective == 31
+    author.save(
+        SaveRequest(
+            expected_sha256=view.sha256, proposal_sha256=review.sha256, source=review.source
+        )
+    )
+    saved = parse_workflow_source(source.read_text())
+    assert saved.training_settings == {"launch": {**supplied["launch"], "sampling_seed": 31}}
+    assert "train_base_seed" not in saved.training_settings["launch"]

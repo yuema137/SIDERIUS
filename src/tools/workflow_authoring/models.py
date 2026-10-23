@@ -9,6 +9,8 @@ from workflows.definition import AuthoredWorkflowDocument
 from workflows.definition.models import Source
 from workflows.definition.source import SourceDiagnostic
 
+from .training import TrainingInspector
+
 MAX_SOURCE_BYTES = 32 * 1024
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
@@ -64,6 +66,7 @@ class BindingOptions(Model):
 
 
 class SourceView(Model):
+    training: TrainingInspector | None = None
     project_id: str
     source_path: str
     source: str
@@ -75,6 +78,7 @@ class SourceView(Model):
 
 
 class ReviewView(Model):
+    training: TrainingInspector | None = None
     binding_options: tuple[BindingOptions, ...]
     source: str
     sha256: Digest

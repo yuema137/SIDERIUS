@@ -10,6 +10,7 @@ import {tmpdir} from 'node:os';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+const training = process.env.CONSOLE_TRAINING === '1';
 const checkout = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const evidence = process.env.CONSOLE_EVIDENCE_DIR || await mkdtemp(join(tmpdir(), 'siderius-reusable-browser-'));
@@ -32,7 +33,7 @@ try {
   provider = start('provider', root);
   const lines = createInterface({input: provider.stdout});
   const endpoint = await new Promise(resolve => lines.once('line', line => resolve(JSON.parse(line).endpoint))); lines.close();
-  metadata = JSON.parse((await completed(start('setup', root, '--origin', origin, '--endpoint', endpoint, '--captures-count', '0'))).trim().split('\n').at(-1));
+  metadata = JSON.parse((await completed(start('setup', root, '--origin', origin, '--endpoint', endpoint, '--captures-count', '0', ...(training ? ['--training'] : [])))).trim().split('\n').at(-1));
   server = start('serve', root);
   async function ready() { await until(async () => { try {return (await fetch(origin + '/')).ok;} catch {return false;} }); }
   await ready();
@@ -49,8 +50,38 @@ try {
   assert.equal(await page.locator('#new-run-task').inputValue(), '', 'No implicit first task');
   assert.equal(requests.length, 0);
   await page.locator('#editor-advanced').evaluate(el => {el.open = true;});
+  if (training) {
+    await page.locator('[data-node="fit"].editor-node').click();
+    assert.ok((await page.locator('#editor-inspector pre').textContent()).includes('"exact": null'));
+    await page.locator('[data-training-mode="sampling_seed"]').selectOption('supplied');
+    await page.locator('[data-training="sampling_seed"]').fill('31');
+    await page.locator('[data-training-mode="formal_time_budget_minutes"]').selectOption('null');
+    await page.locator('[data-training-mode="formal_time_budget_minutes"]').selectOption('supplied');
+    await page.locator('[data-training="formal_time_budget_minutes"]').fill('');
+    await page.locator('.editor-node').first().click();
+    assert.equal(await page.locator('#editor-review').isDisabled(), true, 'Supplied-from-null invalid draft survives navigation');
+    await page.locator('[data-node="fit"].editor-node').click();
+    assert.equal(await page.locator('[data-training-mode="formal_time_budget_minutes"]').inputValue(), 'supplied');
+    assert.equal(await page.locator('[data-training="formal_time_budget_minutes"]').inputValue(), '');
+    await page.locator('[data-training="formal_time_budget_minutes"]').fill('19');
+    await page.locator('[data-training="trial_time_budget_minutes"]').fill('');
+    assert.equal(await page.locator('#editor-review').isDisabled(), true, 'Blank is not zero or null');
+    await page.locator('.editor-node').first().click();
+    assert.equal(await page.locator('#editor-review').isDisabled(), true, 'Invalid draft survives node navigation');
+    await page.locator('[data-node="fit"].editor-node').click();
+    assert.equal(await page.locator('[data-training="trial_time_budget_minutes"]').inputValue(), '');
+    await page.locator('[data-training="trial_time_budget_minutes"]').fill('7');
+    await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
+    await page.locator('#editor-status').filter({hasText: 'Saved reviewed bytes'}).waitFor();
+    const coded = (await readFile(metadata.source, 'utf8')).replace("'train_base_seed': 23", "'train_base_seed': 29");
+    await writeFile(metadata.source, coded);
+    await page.locator('#editor-refresh').click();
+    await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
+    assert.equal(await page.locator('[data-training="train_base_seed"]').inputValue(), '29');
+  }
   const source = await page.locator('#editor-source').inputValue();
   await page.locator('#editor-source').fill(source + '\n# saved by new run browser\n');
+  if (training) assert.equal(await page.locator('[data-training="sampling_seed"]').isDisabled(), true);
   await page.locator('#new-run-task').selectOption('synthetic');
   assert.equal(await page.locator('#new-run-review').isDisabled(), true);
   await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
@@ -212,12 +243,25 @@ try {
   assert.equal(await page.locator('#capture-launch').isDisabled(), true, 'Preparation does not imply credential readiness');
   await rename(metadata.credential + '.saved', metadata.credential);
   await page.locator('#capture-review').click(); await page.locator('#capture-status').filter({hasText: 'Capture reviewed'}).waitFor();
-  await until(() => page.locator('#capture-launch').isEnabled());
+  await until(async () => { await page.locator('#new-run-check').click(); return page.locator('#capture-launch').isEnabled(); });
   await page.locator('#capture-launch').click();
-  await until(async () => {await page.locator('#capture-check').click(); return (await page.locator('#capture-operation-status').textContent()).includes('Native accepted');}, 90000);
+  await delay(500);
+  assert.ok(!(await page.locator('#capture-operation-status').textContent()).includes('admission'), await page.locator('#capture-operation-status').textContent());
+  await until(async () => {await page.locator('#capture-check').click(); return (await page.locator('#capture-operation-status').textContent()).includes(training ? 'Native completed' : 'Native accepted');}, 90000);
   assert.equal((await readdir(join(metadata.state, 'operations'))).length, 2);
   assert.equal(await page.evaluate(() => localStorage.getItem('siderius.reusable-preparation.v1')), retained);
   await page.screenshot({path: join(evidence, 'new-run-completed.png'), fullPage: true});
+  if (training) {
+    const observed = JSON.parse(await readFile(join(envelope, 'workspace/candidate_run/offline_training_observed.json')));
+    assert.equal(observed.proposal.sampling_seed, 31);
+    assert.equal(observed.tuner.sampling_seed, 31);
+    assert.equal(observed.tuner.train_base_seed, 29);
+    assert.equal(observed.tuner.trial_time_budget_minutes, 7);
+    assert.equal(observed.tuner.formal_time_budget_minutes, 19);
+    assert.equal(observed.tuner.trial_portion, 0.2);
+    const captured = JSON.parse(await readFile(join(envelope, 'inputs/training_settings.json')));
+    assert.deepEqual(captured.launch.workflow_parameter_rules.rules['train_config.max_steps'], {exact: null});
+  }
   // Both controllers use exact-record conservative release evidence.
   const coordinatorResult = await page.evaluate(() => {
     const c = window.reusableIntents;
@@ -241,6 +285,7 @@ try {
   });
   assert.ok(coordinatorResult.every(Boolean));
   assert.deepEqual(faults, []);
+  if (training) { await context.close(); await completed(start("verify-training", root)); }
   await writeFile(join(evidence, 'result.json'), JSON.stringify({result: 'PASS', root, preparation: admitted.operation_id, run: selection.run_id, checks: coordinatorResult.length, faults}, null, 2));
   console.log(JSON.stringify({result: 'PASS', evidence}));
 } catch (error) {
@@ -250,6 +295,7 @@ try {
       await writeFile(join(evidence, 'failure-ui.json'), JSON.stringify(await page.evaluate(() => ({
         editor: window.workflowEditor?.state,
         capture: document.getElementById('capture-status')?.textContent,
+        operation: document.getElementById('capture-operation-status')?.textContent,
         preparation: document.getElementById('new-run-operation-status')?.textContent,
         status: document.getElementById('new-run-status')?.textContent
       })), null, 2));

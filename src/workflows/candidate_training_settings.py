@@ -5,11 +5,12 @@ CLI host-profile resolution. Inactive defaults are carrier placeholders, not
 instructions to execute omitted history, retries or analysis phases.
 """
 
+import json
 import math
 from dataclasses import fields
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import OrderStrategy
@@ -203,3 +204,68 @@ class CandidateTrainingSettings(BaseModel):
             watchdog_enabled=self.launch.runtime_watchdog_enabled,
         )
         return self
+
+
+def parse_training_settings(payload: str | bytes) -> CandidateTrainingSettings:
+    """Validate inert ingress, preserving omission of the managed probe requirement."""
+    settings = CandidateTrainingSettings.model_validate_json(payload)
+    if (
+        "require_probe_runner" in json.loads(payload).get("launch", {})
+        and not settings.launch.require_probe_runner
+    ):
+        raise ValueError("require_probe_runner cannot be disabled for native training")
+    return settings
+
+
+def proposal_training_values(settings: CandidateTrainingSettings) -> dict[str, object]:
+    """Preparation-known native proposal facts; hardware/disclosure stay runtime-owned."""
+    from agent.utils.proposer_preflight import (
+        UNCONSTRAINED_TRAIN_PORTION,
+        UNCONSTRAINED_TRIAL_PORTION,
+    )
+    from workflows.run_config import active_vram_budget
+
+    launch = settings.launch
+    values = {
+        name: getattr(launch, name)
+        for name in (
+            "trial_time_budget_minutes",
+            "formal_time_budget_minutes",
+            "workflow_parameter_rules",
+            "sampling_seed",
+            "is_trial",
+            "allowed_output_types",
+            "baseline_isolation",
+        )
+    }
+    values.update(
+        data_scope=settings.data_scope if settings.data_scope is not None else DataScope.default(),
+        trial_portion=UNCONSTRAINED_TRIAL_PORTION
+        if launch.trial_portion is None
+        else launch.trial_portion,
+        train_portion=UNCONSTRAINED_TRAIN_PORTION
+        if launch.train_portion is None
+        else launch.train_portion,
+        enable_structured_health_feedback=settings.enable_structured_health_feedback,
+        vram_budget_gb=active_vram_budget(launch),
+    )
+    return values
+
+
+def effective_training_settings(
+    authored: dict[str, JsonValue], allowed_output_types: tuple[str, ...] | None
+) -> bytes:
+    """Bind preparation-owned output selection while retaining every authored presence."""
+    settings = parse_training_settings(json.dumps(authored, allow_nan=False))
+    # Copy through JSON so nested authored state is never mutated.
+    value = json.loads(json.dumps(authored, allow_nan=False))
+    launch = value.setdefault("launch", {})
+    if (
+        "allowed_output_types" in launch
+        and settings.launch.allowed_output_types != allowed_output_types
+    ):
+        raise ValueError("training allowed_output_types disagrees with preparation options")
+    launch.setdefault("allowed_output_types", allowed_output_types)
+    payload = (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    parse_training_settings(payload)
+    return payload

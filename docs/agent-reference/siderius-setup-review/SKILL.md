@@ -112,7 +112,7 @@ Before calling local inference readiness complete, check the task's
 Workflow and direct tuner startup enforce that route-specific prerequisite;
 a composition-only review does not certify it or the eventual output files.
 
-## Reusable three-node candidates
+## Reusable candidates and native training
 
 When the user selects a reusable proposal/implementation/validation candidate,
 Professional and Assistant routes both use
@@ -138,5 +138,7 @@ prepared from admitted from native accepted/rejected, and candidate outputs from
 training/scientific results. For browser preparation and retained-capture
 selection, follow the [console saved-source steps](../../../src/tools/candidate_console/README.md#prepare-saved-source-or-open-an-existing-run).
 The GUI uses the same preparation and operation owners; preparation and candidate
-launch remain separate explicit actions. Reusable training and resume are not
-supported by this route.
+launch remain separate explicit actions. Source-declared native training uses the
+[training inspector](../../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
+or ordinary source editing. Keep sparse settings in saved source; completion is
+not scientific validity. Resume remains unsupported.

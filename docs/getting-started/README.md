@@ -63,7 +63,9 @@ and output directory before execution. An optional
 ## Open the optional candidate console
 
 The browser console prepares, reviews and launches **one candidate:
-Propose → Implement → Validate**. It does not train or score models. Create the
+Propose → Implement → Validate**, followed by native Tune when declared in
+saved reusable source. Use the [training inspector guide](../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
+to configure that fourth stage. Completion is not a scientific success verdict. Create the
 external project with your coding agent first: the browser does not create
 projects or edit the console's task configuration.
 

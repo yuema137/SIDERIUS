@@ -1,0 +1,79 @@
+"""Small presentation projection; native settings remain the only default authority."""
+
+from typing import Literal, get_args, get_type_hints
+
+from pydantic import BaseModel, ConfigDict, JsonValue
+
+from workflows.definition import AuthoredWorkflowDocument, ReusableWorkflowDocument
+
+# Presentation only: no copied defaults, validation constraints or execution policy.
+CONTROLS = (
+    ("trial_time_budget_minutes", "Trial budget (minutes)", "number"),
+    ("formal_time_budget_minutes", "Formal budget (minutes)", "number"),
+    ("trial_max_epochs", "Trial epoch ceiling", "integer"),
+    ("formal_max_epochs", "Formal epoch ceiling", "integer"),
+    ("trial_portion", "Trial portion", "number"),
+    ("train_portion", "Training portion", "number"),
+    ("formal_portion", "Formal portion", "number"),
+    ("sampling_seed", "Sampling seed", "integer"),
+    ("train_base_seed", "Training base seed", "integer"),
+    ("retain_training_checkpoints", "Retain training checkpoints", "boolean"),
+    ("retain_model_outputs", "Retain model outputs", "boolean"),
+)
+
+
+class TrainingControl(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: str
+    label: str
+    kind: str
+    nullable: bool
+    state: Literal["unset", "null", "supplied"]
+    effective: JsonValue
+
+
+class TrainingInspector(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    controls: tuple[TrainingControl, ...]
+    allowed_output_types: tuple[str, ...] | None
+    workflow_parameter_rules: JsonValue = None
+
+
+def training_inspector(document: AuthoredWorkflowDocument) -> TrainingInspector | None:
+    """Preview validated native values without expanding the authored document."""
+    if not isinstance(document, ReusableWorkflowDocument) or document.training_settings is None:
+        return None
+    from workflows.candidate_training_settings import (
+        effective_training_settings,
+        parse_training_settings,
+    )
+    from workflows.run_config import WorkflowLaunchConfig
+
+    settings = parse_training_settings(
+        effective_training_settings(
+            document.training_settings, document.preparation_options.allowed_output_types
+        )
+    )
+    authored = document.training_settings.get("launch", {})
+    assert isinstance(authored, dict)
+    annotations = get_type_hints(WorkflowLaunchConfig)
+    effective = settings.model_dump(mode="json")["launch"]
+    return TrainingInspector(
+        allowed_output_types=settings.launch.allowed_output_types,
+        controls=tuple(
+            TrainingControl(
+                name=name,
+                label=label,
+                kind=kind,
+                nullable=type(None) in get_args(annotations[name]),
+                state="unset"
+                if name not in authored
+                else "null"
+                if authored[name] is None
+                else "supplied",
+                effective=effective[name],
+            )
+            for name, label, kind in CONTROLS
+        ),
+        workflow_parameter_rules=authored.get("workflow_parameter_rules"),
+    )

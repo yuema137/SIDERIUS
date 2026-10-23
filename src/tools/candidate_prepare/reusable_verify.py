@@ -18,7 +18,7 @@ from .bundle import build_candidate
 from .models import CompositionIdentity, PreparedArtifacts
 from .resolution import resolve_reusable_candidate
 from .reusable_admission import observation, safe_bytes
-from .reusable_models import REUSABLE_FILES, ReusablePreparationControl, ReusablePreparationPlan
+from .reusable_models import ReusablePreparationControl, ReusablePreparationPlan, reusable_files
 
 
 class AdviceProjection(BaseModel):
@@ -116,7 +116,9 @@ def verify_reusable_bundle(
         payload = read_bytes(path)
         return observation(path, reference, payload), payload
 
-    if index.files != tuple(observe(output / name, name)[0] for name in REUSABLE_FILES):
+    if index.files != tuple(
+        observe(output / name, name)[0] for name in reusable_files(plan.document)
+    ):
         raise ValueError("child index disagrees with exact reusable artifact set")
     profile = observe(output / "llm.json", "llm_config")[0]
     if (profile.sha256, profile.size_bytes) != (
@@ -125,6 +127,9 @@ def verify_reusable_bundle(
     ):
         raise ValueError("saved profile differs from selected bytes")
     verify_payloads(plan, index.composition_fingerprint, read_bytes)
+    from .reusable_training import verify_training_payloads
+
+    verify_training_payloads(plan.document, output, read_bytes)
     candidate, bindings = build_candidate(binding.request, document, observe)
     values = candidate.model_dump()
     values["workflow_source"] = WorkflowSourceSnapshot(

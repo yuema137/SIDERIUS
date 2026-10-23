@@ -137,5 +137,13 @@ when launching a retained reusable capture. Preparing alone does not launch,
 resume, or accept a scientific candidate. To prepare saved reusable source or
 open an existing capture in the browser, follow the
 [console New run and prepared-run steps](../candidate_console/README.md#prepare-saved-source-or-open-an-existing-run).
-Preparation never launches automatically. Training and resume are not yet
-available through this reusable workflow route.
+Preparation never launches automatically. Source-declared native training is
+supported; resume remains unavailable.
+
+
+For native training, start with the [four-stage reusable source](../../../examples/workflow_declarations/reusable_training.py).
+Edit training settings in saved source or the
+[training inspector](../candidate_console/README.md#edit-reusable-training-settings).
+Preparation generates `inputs/training_settings.json` for the native worker;
+do not edit generated inputs. External Health configuration files are not captured.
+See the [contract](candidate-prepare-contract.md) for settings and capture semantics.

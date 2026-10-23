@@ -66,14 +66,17 @@ def _check_roles(document: ReusableWorkflowDocument, proposal_id: str) -> None:
             continue
         for argument in request.arguments:
             if not isinstance(argument.source, ExternalSource):
-                if argument.name != "output":
+                if argument.name not in {"output", "proposal", "validation"}:
                     raise ValueError("Reusable candidate optional/storage roles require externals")
                 continue
             external = externals[argument.source.binding]
             if isinstance(external, ManagedCandidateBinding):
-                if external.contract != "storage" or argument.name != "storage":
+                if (external.contract, argument.name) not in {
+                    ("storage", "storage"),
+                    ("native-training.settings", "settings"),
+                }:
                     raise ValueError("Misrouted managed candidate binding")
-            elif external.contract in {"storage", "proposal.input"}:
+            elif external.contract in {"storage", "proposal.input", "native-training.settings"}:
                 raise ValueError("Literal proposal/storage bindings cannot be resolved")
             elif external.contract not in {
                 "optional.constraint-context",

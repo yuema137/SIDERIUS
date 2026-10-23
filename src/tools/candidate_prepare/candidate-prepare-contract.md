@@ -238,8 +238,8 @@ by the retained-selection API below and consumed by candidate operations.
 Direct worker launch still validates resolved-v1 inputs only. GUI adapters consume
 this preparation API and retained-selection verification through the
 [console contract](../candidate_console/console-contract.md#new-run-from-saved-reusable-source);
-this owner does not implement UI behavior. Resume, literal materialization and
-training remain unsupported by reusable preparation.
+this owner does not implement UI behavior. Resume and literal materialization
+remain unsupported by reusable preparation.
 
 ## Retained reusable selection verification
 
@@ -403,3 +403,30 @@ checks may occur; manifest/config content reads, imports and writes do not.
 then calls full admission. Console fresh review/prepare uses this projection to
 reject unconfigured task/resource references before full external-content preflight.
 It is not a full admission or a reusable authorization token.
+
+
+## Reusable native training inputs
+
+A supported fourth tuning node pairs with one managed `native-training.settings`
+external and sparse document `training_settings`. The role maps only to
+`inputs/training_settings.json`. Native settings validation refuses unsupported
+controls and explicit disabled probe requirements. Non-null external Health config
+is refused before content reads; source/manifest/config observation census is unchanged.
+
+`effective_training_settings` preserves authored keys and inserts only absent
+`launch.allowed_output_types` from preparation options, including explicit null.
+An explicit conflict refuses. Original source remains sparse. `reusable_files`
+returns unchanged `REUSABLE_FILES` for three-stage mode and adds only that settings
+file for four-stage mode. Child and parent use the same census; parent independently
+regenerates settings bytes and expected proposal facts from retained source.
+
+Native-owned `proposal_training_values` projects budgets, rules, sampling seed,
+trial identity, output types, baseline isolation, supplied/default data scope,
+portions, structured Health feedback and active VRAM. Managed seeds explicitly
+serialize these, including null, while omitting runtime hardware and constraint
+context. Worker reconciliation remains authoritative and rejects explicit v1
+conflicts. Training base seed stays in settings and reaches the native tuner.
+Retained selection repeats these checks without needing current source. Child
+hash repair cannot legitimize substituted settings/seed facts. Terminal operation
+reads verify the native output digest and identity, not every checkpoint or
+scientific success. No outer loops, resume or historical defaults are added.

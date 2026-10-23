@@ -205,16 +205,16 @@ layout validation, and inspection always reports `execution_ready=False`.
 `ReusableTaskReferences` declares manifest and data_root without a workspace.
 A reusable external is either the unchanged literal `ExternalBinding` or a
 `ManagedCandidateBinding(id, contract, kind="managed_candidate")`. Managed
-contracts are proposal.input or storage and have no location. Graph validity
+contracts are proposal.input, storage or native-training.settings and have no location. Graph validity
 still permits unused externals and repeated capabilities; the shared pure
-`candidate.candidate_nodes` separately checks the supported three-node subset.
+`candidate.candidate_nodes` separately checks the supported three- or four-node candidate subset.
 
 `ReusableWorkflowDocument` adds `preparation_options: CandidatePreparationOptions`.
 proposal_advice, implementation_advice and validation_advice default to None;
 allowed_output_types is None or a nonempty tuple of OutputTypeName from the small
-`agent.schemas.output_types` owner. None retains native default ownership. No
-native payload schemas, task plugins, providers or runtime constructors load at
-this boundary. Its `declaration_digest()` includes canonical definition and
+`agent.schemas.output_types` owner. None retains native default ownership. Without training settings, no native payload schemas load at this boundary.
+Training settings load the existing native validator lazily; task plugins,
+providers and runtime constructors remain unexecuted. Its `declaration_digest()` includes canonical definition and
 preparation options and excludes positions. Exact source bytes/comments are not
 captured as identity here. v1 digest and canonical rendering are unchanged.
 
@@ -230,6 +230,30 @@ by `prepare_reusable_candidate` / `--reusable-request`; retained selection and
 v2 snapshots resolve to generated v1 worker inputs without coercing the authored
 model. The console's `ReusableCandidate` consumes already prepared captures under
 explicit configured project/task policy. Existing v1 preview and `EditedCandidate`
-remain v1-only. Automatic GUI preparation from current edits, training and resume
-are not implemented. See the [preparation contract](../../tools/candidate_prepare/candidate-prepare-contract.md)
+remain v1-only. The console prepares saved reusable source, including declared
+training; unsaved edits cannot run. Resume is not implemented. See the [preparation contract](../../tools/candidate_prepare/candidate-prepare-contract.md)
 and [console contract](../../tools/candidate_console/console-contract.md#reusable-capture-consumption).
+
+## Source-owned reusable native training
+
+Version 2 also admits the existing four-stage candidate graph when the document
+supplies sparse `training_settings` and exactly one managed
+`native-training.settings` external. Tuning consumes the same proposal and
+validation results through `validated-candidate-to-tuning`. Old declarations
+remain three-stage and retain their canonical bytes and semantic identities.
+
+Only `training_settings` accepts JSON-shaped dict/list literals. Keys must be
+literal unique strings; expansion, comprehensions, computed expressions,
+nonfinite numbers and executable constructors inside settings are refused before
+model construction. The native settings parser validates supplied controls,
+including the prohibition on explicit `require_probe_runner=False`. Omission,
+explicit null and supplied values remain distinct recursively. Frozen document
+objects do not freeze nested mappings; consumers revalidate at each boundary.
+
+The authored mapping does not acquire native defaults. Preparation reconciles
+its output restriction, inserting only `launch.allowed_output_types` when absent
+(including explicit null), and refuses conflicts. External `health_checks_config`
+is unsupported in reusable capture; task-composed Health and existing inline
+startup controls remain available. Native v1 external Health support is unchanged.
+Source validation does not load selected task plugins, bind runtime verifiers or
+discover hardware; importing native schemas can import torch.

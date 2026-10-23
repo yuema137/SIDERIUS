@@ -206,7 +206,10 @@ def _check_value(node: ast.expr, imported: set[str]) -> None:
             if keyword.arg is None or keyword.arg in seen or keyword.arg not in fields:
                 _fail("unsupported", "Unknown, duplicate or expanded constructor keyword", keyword)
             seen.add(keyword.arg)
-            _check_value(keyword.value, imported)
+            if keyword.arg == "training_settings":
+                _check_json_value(keyword.value)
+            else:
+                _check_value(keyword.value, imported)
         return
     if isinstance(node, ast.Tuple):
         for element in node.elts:
@@ -231,6 +234,27 @@ def _check_value(node: ast.expr, imported: set[str]) -> None:
     _fail("unsupported", "Unsupported declaration expression", node)
 
 
+def _check_json_value(node: ast.expr) -> None:
+    """Only inert JSON-shaped literals, with duplicate keys refused before construction."""
+    if isinstance(node, ast.Dict):
+        keys: set[str] = set()
+        for key, value in zip(node.keys, node.values, strict=True):
+            if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                _fail("unsupported", "JSON mappings require literal string keys", node)
+            if key.value in keys:
+                _fail("unsupported", "Duplicate JSON mapping key", key)
+            keys.add(key.value)
+            _check_json_value(value)
+        return
+    if isinstance(node, ast.List):
+        for value in node.elts:
+            _check_json_value(value)
+        return
+    if not isinstance(node, (ast.Constant, ast.UnaryOp)):
+        _fail("unsupported", "Training settings require inert JSON literals", node)
+    _check_value(node, set())
+
+
 def _construct(node: ast.expr) -> object:
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         values = {keyword.arg: _construct(keyword.value) for keyword in node.keywords}
@@ -238,6 +262,14 @@ def _construct(node: ast.expr) -> object:
             return _CONSTRUCTORS[node.func.id](**values)  # type: ignore[arg-type]
         except ValidationError as error:
             _validation_error(error, node)
+    if isinstance(node, ast.Dict):
+        return {
+            _construct(key): _construct(value)
+            for key, value in zip(node.keys, node.values, strict=True)
+            if key is not None
+        }
+    if isinstance(node, ast.List):
+        return [_construct(value) for value in node.elts]
     if isinstance(node, ast.Tuple):
         return tuple(_construct(element) for element in node.elts)
     if isinstance(node, ast.UnaryOp) and isinstance(node.operand, ast.Constant):
@@ -281,6 +313,7 @@ def _render_value(value: object, depth: int) -> str:
         fields = [
             f"{child_indent}{name}={_render_value(getattr(value, name), depth + 1)},"
             for name in type(value).model_fields
+            if not (name == "training_settings" and getattr(value, name) is None)
         ]
         return f"{type(value).__name__}(\n" + "\n".join(fields) + f"\n{indentation})"
     if isinstance(value, tuple):
@@ -288,6 +321,16 @@ def _render_value(value: object, depth: int) -> str:
             return "()"
         elements = [f"{child_indent}{_render_value(item, depth + 1)}," for item in value]
         return "(\n" + "\n".join(elements) + f"\n{indentation})"
+    if isinstance(value, dict):
+        if not value:
+            return "{}"
+        elements = [
+            f"{child_indent}{key!r}: {_render_value(item, depth + 1)},"
+            for key, item in value.items()
+        ]
+        return "{\n" + "\n".join(elements) + f"\n{indentation}}}"
+    if isinstance(value, list):
+        return "[" + ", ".join(_render_value(item, depth + 1) for item in value) + "]"
     if value is None or type(value) in (str, int, bool, float):
         return repr(value)
     raise AssertionError("Renderer requires a revalidated declaration")

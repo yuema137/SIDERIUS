@@ -1,6 +1,10 @@
 """Child-only native assembly; imported after generated-library binding."""
 
+import json
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from pydantic import TypeAdapter
 
 from agent.schemas.interpretation import InterpretationInput
 from agent.schemas.proposal import ProposalInput
@@ -22,6 +26,20 @@ from workflows.task_composition import (
 from .declaration import candidate_document
 from .models import CandidatePreparationRequest
 
+if TYPE_CHECKING:
+    from workflows.candidate_training_settings import CandidateTrainingSettings
+
+
+def _training_seed_bytes(proposal: ProposalInput, settings: "CandidateTrainingSettings") -> bytes:
+    """Serialize all known controls, including native fields that normally omit null."""
+    from workflows.candidate_training_settings import proposal_training_values
+
+    values = proposal.model_dump(mode="json", exclude={"hardware_context", "constraint_context"})
+    values.update(
+        TypeAdapter(dict[str, object]).dump_python(proposal_training_values(settings), mode="json")
+    )
+    return (json.dumps(values, indent=2, ensure_ascii=False) + "\n").encode()
+
 
 def prepare_native(request: CandidatePreparationRequest) -> str:
     """Legacy fixed declaration with shared native payload construction."""
@@ -33,9 +51,16 @@ def prepare_native(request: CandidatePreparationRequest) -> str:
     return fingerprint
 
 
-def prepare_payloads(request: CandidatePreparationRequest) -> str:
+def prepare_payloads(
+    request: CandidatePreparationRequest, *, training_payload: bytes | None = None
+) -> str:
     """Compose the selected task and save exact native inputs without a provider."""
     output = Path(request.output_dir)
+    training = None
+    if training_payload is not None:
+        from workflows.candidate_training_settings import parse_training_settings
+
+        training = parse_training_settings(training_payload)
     config_bytes = (output / "preparation/llm.snapshot").read_bytes()
     config = parse_config(config_bytes)
     composition = compose_run_task_bindings(request.task_manifest)
@@ -80,6 +105,10 @@ def prepare_payloads(request: CandidatePreparationRequest) -> str:
             proposal_blocks=composition.proposal_blocks,
             allowed_output_types=request.allowed_output_types,
         )
+        if training is not None:
+            from workflows.candidate_training_settings import proposal_training_values
+
+            values.update(proposal_training_values(training))
         proposal = ProposalInput.model_validate(values)
         attempt = impl_attempt_storage(str(proposal_dir), request.run_name, 1)
         records = (
@@ -89,8 +118,11 @@ def prepare_payloads(request: CandidatePreparationRequest) -> str:
             ("storage.json", attempt.storage),
         )
         for name, record in records:
-            publish_bytes_write_once(
-                str(output / name), (record.model_dump_json(indent=2) + "\n").encode()
-            )
+            payload = (record.model_dump_json(indent=2) + "\n").encode()
+            if name == "proposal.json" and training is not None:
+                payload = _training_seed_bytes(proposal, training)
+            publish_bytes_write_once(str(output / name), payload)
+        if training_payload is not None:
+            publish_bytes_write_once(str(output / "training_settings.json"), training_payload)
         publish_bytes_write_once(str(output / "llm.json"), config_bytes)
         return ref.semantic_fingerprint

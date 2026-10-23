@@ -103,6 +103,13 @@ class ReusablePreparationReceipt(PreviewModel):
 REUSABLE_FILES = (*NATIVE_FILES, "workflow.resolved.py")
 
 
+def reusable_files(document: ReusableWorkflowDocument) -> tuple[str, ...]:
+    """Only source-declared training adds an artifact; retain the legacy census exactly."""
+    if document.training_settings is None:
+        return REUSABLE_FILES
+    return (*REUSABLE_FILES, "training_settings.json")
+
+
 class ReusablePreparedSelection(PreviewModel):
     """Caller-retained identity of exact published receipt bytes, not a live lookup."""
 
