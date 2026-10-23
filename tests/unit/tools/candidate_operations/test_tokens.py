@@ -29,7 +29,7 @@ def candidate(prepared, tmp_path, monkeypatch):
     )
     monkeypatch.setattr("tools.candidate_operations.submit.spawn", lambda *args: None)
     submission = CandidateOperation(request_id=uuid4(), request=prepared)
-    submit_operation(config, submission, launch_environment={})
+    submit_operation(config, submission, launch_environment={"OPENAI_API_KEY": "offline-test-key"})
     record = load_record(config, submission.request_id)
     query, initial, control, ledger = native_fixture(prepared, tmp_path)
     initial = initial.model_copy(update={"run_id": record.native_id.hex})

@@ -37,7 +37,9 @@ def test_oversized_candidate_refuses_before_claim_and_leaves_store_available(
         request=prepared.model_copy(update={"implementation_advice": "x" * JSON_LIMIT}),
     )
     with pytest.raises(OperationFailure, match="4 MiB") as failure:
-        submit_operation(config, oversized, launch_environment={})
+        submit_operation(
+            config, oversized, launch_environment={"OPENAI_API_KEY": "offline-test-key"}
+        )
     assert failure.value.detail.code == "record_size"
     root = Path(config.state_root)
     assert not (root / "operations" / str(oversized.request_id)).exists()
@@ -45,7 +47,9 @@ def test_oversized_candidate_refuses_before_claim_and_leaves_store_available(
     spawn.assert_not_called()
 
     supported = CandidateOperation(request_id=uuid4(), request=prepared)
-    handle = submit_operation(config, supported, launch_environment={})
+    handle = submit_operation(
+        config, supported, launch_environment={"OPENAI_API_KEY": "offline-test-key"}
+    )
     assert handle.operation_id == supported.request_id
     assert handle.observation == "operation_failed"
     spawn.assert_called_once()

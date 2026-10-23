@@ -15,6 +15,7 @@ REPO = Path(__file__).resolve().parents[4]
 
 @pytest.fixture
 def prepared(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-test-key")
     project = tmp_path / "project"
     project.mkdir()
     (project / "data").mkdir()
@@ -158,7 +159,7 @@ def _prepare_request(
         network=False,
         devices=(),
         read_only=(str(project), str(REPO)),
-        environment_names=(),
+        environment_names=("OPENAI_API_KEY",),
     )
 
 

@@ -20,6 +20,19 @@ from workflows.definition import WorkflowDocument, render_workflow_source
 
 
 @pytest.fixture
+def selection(selection):
+    return selection.model_copy(update={"candidate_environment_names": ("OPENAI_API_KEY",)})
+
+
+@pytest.fixture
+def console_config(console_config, tmp_path):
+    credentials = tmp_path / "offline-credentials.json"
+    credentials.write_text(json.dumps({"OPENAI_API_KEY": "offline-test-key"}))
+    credentials.chmod(0o600)
+    return console_config.model_copy(update={"credential_file": str(credentials)})
+
+
+@pytest.fixture
 def edited(prepared, tmp_path, monkeypatch):
     console, selection, _ = prepared
     monkeypatch.setattr("tools.candidate_operations.submit.releasable", lambda *a: True)
@@ -178,7 +191,9 @@ def test_legacy_persisted_record_load_and_retry_keep_old_digest(edited):
         request_id=uuid4(), request=CandidateRunRequest.model_validate_json(json.dumps(fields))
     )
     config = adapter.console.config.operation_store
-    first = submit_operation(config, submission, launch_environment={})
+    first = submit_operation(
+        config, submission, launch_environment={"OPENAI_API_KEY": "offline-test-key"}
+    )
     record = Path(config.state_root) / "operations" / str(first.operation_id) / "request.json"
     saved = json.loads(record.read_text())
     saved["submission"]["request"].pop("workflow_source")

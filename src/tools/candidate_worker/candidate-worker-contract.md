@@ -60,6 +60,24 @@ are declarations, not measurements certified by this worker. Future training
 budgets are not training admission. Scope, sampling, allowed outputs, parameter
 locks, reasoning stages and proposal advice remain native input values.
 
+## Credential admission
+
+Before a new workspace claim, `preflight.fresh_preview` reobserves the selected
+files, declaration digest and constructor routes through the preview owner.
+Native launch consumes that observation and retains its input-byte capture/recheck.
+`preflight.credential_requirements` projects registry-backed required names using
+`setup_review.environment.credential_name_checks`; disabled and pseudo routes
+are excluded, repeated proposer stages share one required name, and unknown live
+transports remain unresolved.
+
+New launches refuse unresolved routes, required names omitted from
+`environment_names`, or any declared name absent/empty in the actual process
+environment. Extra declared runtime names are required too. Errors and the typed
+policy contain names only. This checks local binding presence; it does not prove
+provider authentication, network access or quota. The sandbox remains the owner
+of environment forwarding. No request validator, historical reader, offline
+preparation, dotenv behavior or general `LLMBridge` constructor policy changes.
+
 ## Native sequence and persistence
 
 One immutable run ID, run name and logical iteration 1 reach the proposer

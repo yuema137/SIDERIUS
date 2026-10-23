@@ -5,10 +5,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from uuid import uuid4
 
+from tools.candidate_worker.preflight import fresh_preview, require_credentials
 from tools.workflow_preview.models import FileObservation
 
 from .files import publish, read_bytes
 from .models import (
+    OperationFailure,
     OperationHandle,
     OperationRecord,
     OperationStoreConfig,
@@ -70,6 +72,22 @@ def submit_operation(
                 observation="existing",
             )
         require_available(root, lambda operation_id: releasable(config, operation_id))
+        if submission.kind == "candidate":
+            try:
+                observed = fresh_preview(submission.request)
+            except (OSError, ValueError) as error:
+                raise OperationFailure(
+                    "candidate_preflight", "candidate inputs or routes changed; review again"
+                ) from error
+            try:
+                require_credentials(
+                    observed.selected_constructor_routes,
+                    submission.request.environment_names,
+                    launch_environment,
+                )
+            except ValueError as error:
+                # This boundary emits only names from the candidate credential policy.
+                raise OperationFailure("credentials", str(error)) from error
         names = submission.request.environment_names if submission.kind == "candidate" else ()
         env = environment(names, launch_environment)
         record = OperationRecord(

@@ -139,8 +139,11 @@ def test_known_code_candidate_tokens_ignore_task_choices_and_credentials(prepare
     config = service.config.operation_store.model_copy(
         update={"state_root": service.config.operation_store.state_root + "-code"}
     )
-    submission = CandidateOperation(request_id=uuid4(), request=saved.request)
-    submit_operation(config, submission, launch_environment={})
+    submission = CandidateOperation(
+        request_id=uuid4(),
+        request=saved.request.model_copy(update={"environment_names": ("OPENAI_API_KEY",)}),
+    )
+    submit_operation(config, submission, launch_environment={"OPENAI_API_KEY": "offline-test-key"})
     record = load_record(config, submission.request_id)
     workspace = Path(saved.preparation_request.candidate_workspace)
     control = workspace / "candidate_run"
@@ -156,7 +159,7 @@ def test_known_code_candidate_tokens_ignore_task_choices_and_credentials(prepare
         ledger_path=str(workspace / "token_usage.jsonl"),
         log_path=str(control / "worker.log"),
     )
-    (control / "request.json").write_text(saved.request.model_dump_json())
+    (control / "request.json").write_text(submission.request.model_dump_json())
     (control / "launch.json").write_text(initial.model_dump_json())
     (workspace / "token_usage.jsonl").write_bytes(
         row(run_id=initial.run_id, run_name=initial.run_name)

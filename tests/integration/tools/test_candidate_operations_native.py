@@ -49,7 +49,7 @@ def test_native_prepare_then_candidate_after_submitter_exit(admitted, tmp_path, 
     preparation = preparation.model_copy(
         update={
             "request": preparation.request.model_copy(
-                update={"candidate_environment_names": ("EXPLICIT_TEST_KEY",)}
+                update={"candidate_environment_names": ("EXPLICIT_TEST_KEY", "OPENAI_API_KEY")}
             )
         }
     )
@@ -77,6 +77,7 @@ def test_native_prepare_then_candidate_after_submitter_exit(admitted, tmp_path, 
     source_env = {
         **environment((), {}),
         "EXPLICIT_TEST_KEY": "bound-value",
+        "OPENAI_API_KEY": "offline-test-key",
         "UNRELATED_SENTINEL": "do-not-pass",
     }
     result = cli(
@@ -125,6 +126,20 @@ def test_native_prepare_then_candidate_after_submitter_exit(admitted, tmp_path, 
             other_file.write_text(other.model_dump_json())
             stale_file = tmp_path / f"stale-request-{old.kind}-{same_id}.json"
             stale_file.write_text(stale.model_dump_json())
+            if old.kind == "candidate":
+                # New admission now refuses a populated native workspace before claim.
+                with pytest.raises(subprocess.CalledProcessError) as refused:
+                    cli(
+                        other_file,
+                        "submit",
+                        "--request",
+                        str(stale_file),
+                        harness=submitter,
+                        env=source_env,
+                    )
+                assert json.loads(refused.value.stderr)["code"] == "candidate_preflight"
+                assert not (Path(other.state_root) / "operations" / str(stale.request_id)).exists()
+                continue
             cli(
                 other_file,
                 "submit",
