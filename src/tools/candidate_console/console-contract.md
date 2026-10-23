@@ -162,3 +162,58 @@ owns arithmetic, quality, limits and evidence semantics. Focused HTTP tests prov
 route reachability, auth/Host/Origin/UUID checks before reader entry, no-store/CSP
 and sanitized failures. The browser harness adds null/partial/stale token views,
 replacement polling, token-only failure isolation and old-run epoch fencing.
+
+
+## Optional ordinary-file Editor
+
+`ConsoleConfig.editor_projects` defaults to an empty tuple. Each typed `Project`
+selects `project_id`, explicit absolute `project_root`, `source_file` and
+`recovery_directory`. Configuration check admits those resources inertly and
+refuses recovery/output-root overlap. No source is required when selection is
+absent. `CandidateConsole` retains only native operation policy; `editor.py`
+constructs separate `WorkflowAuthoring` services and routes.
+
+`/editor.html`, `/editor.js` and `/editor.css` are static assets. Browser state and
+requests are isolated from the operation monitor. `GET /api/editor/projects`
+returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
+`POST /api/editor/{project_id}/review` validates `ReviewRequest`; `POST
+/api/editor/{project_id}/save` validates `SaveRequest`. The existing console
+Bearer token, origin, host and 256 KiB wire-body admission apply to every API
+route. Browser requests select project IDs and never filesystem destinations.
+The [authoring contract](../workflow_authoring/authoring-contract.md) owns source
+limits, exact-byte review/save, mode preservation, recovery and race boundaries.
+Domain conflicts return bounded current source/diagnostics and, on a stale
+Review, the rendered pending proposal/diff. Unsupported-source and parser
+failures do not execute selected Python. Unexpected filesystem failures report
+an unavailable resource without forwarding exception text.
+
+Editor task/external fields and existing request/protocol argument choices use
+the native declaration document and a typed projection of the existing catalog.
+No JavaScript contract inventory or alternate graph schema is authoritative.
+Source/form/base changes invalidate Review. Unreviewed inspector edits disable
+the source textarea until Review synchronizes the rendered proposal, preventing
+a stale source buffer from silently replacing form changes. Source edits disable
+the stale inspector until successful Review projects the source. Project selection/reconnect clears prior source, graph, conflict and actionable
+controls before loading; failed loads cannot adopt an old project conflict.
+Async replies are fenced by selected project and local edit generation; Save sends exact reviewed bytes/hash.
+Conflict handling preserves the pending proposal and requires explicit discard
+or new-base selection followed by review. A connection failure retains proposal
+and reports unconfirmed save. Source/labels/diffs render as text.
+
+The Editor has no Run/Prepare button. Native Prepare still generates its fixed
+chain; declaration saves establish neither scientific readiness nor immutable
+runtime closure. Source inspection never opens referenced resources.
+
+Qualification: targeted `tests/unit/tools/test_workflow_authoring.py` and
+`tests/unit/tools/candidate_console/test_editor.py`; real browser:
+
+```bash
+EDITOR_PYTHON="$PWD/.venv/bin/python" \
+CONSOLE_PLAYWRIGHT_MODULE=/absolute/installed/playwright \
+CONSOLE_BROWSER_EXECUTABLE=/absolute/installed/chromium \
+node tests/browser/workflow_editor.mjs
+```
+
+The browser test launches a temporary real API/project on its own ephemeral port
+and closes it; no provider, GPU or native operation runs. Existing browser
+qualification for operations remains separately owned.

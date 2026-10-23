@@ -13,7 +13,7 @@ using its own `.venv/bin/python`.
 1. Create separate preparation and candidate output directories. Write an absolute
    path configuration file using the [configuration example](console-contract.md#configuration).
    Select the task paths, profile, resource policy and time limits there. Browser
-   users can change only the run name and three advice fields.
+   users can change the native run name and three advice fields.
 2. Create the access token file at the path selected by `auth_token_file`:
 
    ```bash
@@ -69,3 +69,8 @@ plugins. Review and launch require an unchanged preparation matching exactly one
 configured task; changing configuration requires restart and can require a fresh
 preparation. See the [console contract](console-contract.md) for the Python/API
 interface, security boundary and qualification commands.
+
+To edit an ordinary workflow declaration alongside a coding agent, configure the
+optional [Workflow Editor](../workflow_authoring/README.md). It has its own source
+review/save flow. Saving a declaration does not change what native Prepare executes.
+Existing console configurations need no editor project to monitor operations.

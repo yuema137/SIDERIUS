@@ -9,6 +9,7 @@ from agent.schemas.output_types import OutputTypeName
 from tools.candidate_operations import OperationStoreConfig
 from tools.candidate_operations.models import ProcessObservation
 from tools.candidate_prepare.models import CandidatePreparationRequest
+from tools.workflow_authoring.models import Project
 from tools.workflow_preview.models import PreviewModel
 from tools.workspace_sandbox.profile import SandboxProfile
 
@@ -45,6 +46,7 @@ class ConsoleConfig(PreviewModel):
     browser_origin: str
     auth_token_file: str
     credential_file: str | None = None
+    editor_projects: tuple[Project, ...] = ()
 
     @model_validator(mode="after")
     def origins_and_ids(self):
@@ -61,6 +63,10 @@ class ConsoleConfig(PreviewModel):
             raise ValueError("browser_origin must be an exact loopback HTTP origin with port")
         if len({task.task_id for task in self.tasks}) != len(self.tasks):
             raise ValueError("task IDs must be unique")
+        if len({project.project_id for project in self.editor_projects}) != len(
+            self.editor_projects
+        ):
+            raise ValueError("editor project IDs must be unique")
         return self
 
 
