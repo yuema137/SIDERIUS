@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import Field, TypeAdapter
 
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
+from tools.candidate_prepare.reusable_models import ReusablePreparedSelection
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.workflow_preview.models import FileObservation, PreviewModel
 
@@ -26,6 +27,7 @@ class CandidateOperation(PreviewModel):
     kind: Literal["candidate"] = "candidate"
     request_id: UUID
     request: CandidateRunRequest
+    reusable_preparation: ReusablePreparedSelection | None = None
 
 
 OperationSubmission = Annotated[PrepareOperation | CandidateOperation, Field(discriminator="kind")]

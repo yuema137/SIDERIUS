@@ -14,6 +14,7 @@ from .models import (
 )
 from .prepared import read_prepared_candidate
 from .read import lookup_operation_request, read_operation
+from .reusable import build_reusable_operation
 from .submit import submit_operation
 from .tokens import read_operation_tokens
 
@@ -27,6 +28,7 @@ __all__ = [
     "OperationSubmission",
     "PrepareOperation",
     "PreparedCandidate",
+    "build_reusable_operation",
     "lookup_operation_request",
     "read_operation",
     "read_operation_log",

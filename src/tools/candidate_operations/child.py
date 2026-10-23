@@ -11,6 +11,7 @@ from .files import canonical, publish, read_model
 from .models import Completion, OperationRecord
 from .process import current_identity, runtime_identity
 from .read import native_receipt
+from .reusable import verify_reusable_operation
 from .store import load_record
 
 
@@ -24,9 +25,16 @@ def execute(path: Path) -> int:
         raise ValueError("operation directory disagrees with request")
     publish(path / "process.json", current_identity(record))
     entered = False
+    pre_dispatch_reason = "runtime_binding_failed"
     try:
         if runtime_identity() != record.runtime:
             raise ValueError("operation runtime binding changed")
+        if (
+            record.submission.kind == "candidate"
+            and record.submission.reusable_preparation is not None
+        ):
+            pre_dispatch_reason = "reusable_preparation_failed"
+            verify_reusable_operation(record.config, record.submission)
         entered = True
         if record.submission.kind == "prepare":
             prepare_candidate(record.submission.request, invocation_id=record.native_id)
@@ -48,7 +56,7 @@ def execute(path: Path) -> int:
             operation_id=record.submission.request_id,
             request_digest=record.request_digest,
             outcome="unknown" if entered else "pre_dispatch_failure",
-            reason="native_outcome_unresolved" if entered else "runtime_binding_failed",
+            reason="native_outcome_unresolved" if entered else pre_dispatch_reason,
         )
     publish(path / "completion.json", completion)
     return 0 if completion.outcome == "native" else 1

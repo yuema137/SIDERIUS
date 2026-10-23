@@ -32,6 +32,7 @@ from .models import (
     OperationStoreConfig,
     OperationSubmission,
 )
+from .reusable import validate_selection_root
 
 
 def now() -> str:
@@ -42,6 +43,8 @@ def digest(submission: OperationSubmission) -> str:
     content = {"kind": submission.kind, "request": submission.request.model_dump(mode="json")}
     if submission.kind == "candidate" and submission.request.workflow_source is None:
         content["request"].pop("workflow_source")
+    if submission.kind == "candidate" and submission.reusable_preparation is not None:
+        content["reusable_preparation"] = submission.reusable_preparation.model_dump(mode="json")
     return hashlib.sha256(
         json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -93,6 +96,8 @@ def validate_submission(
             *request.task_read_only,
         )
     else:
+        if submission.reusable_preparation is not None:
+            validate_selection_root(config, submission.reusable_preparation)
         request = submission.request
         SandboxProfile.environment_keys(request.environment_names)
         outputs = ((native_directory(submission).parent, config.candidate_roots),)
