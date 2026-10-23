@@ -4,9 +4,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from .models import WorkflowDocument
+from .models import AuthoredWorkflowDocument
 from .source import (
     MAX_INPUT_BYTES,
     SourceDiagnostic,
@@ -31,7 +31,7 @@ def _convert(command: str, content: str) -> str:
     if command == "to-json":
         return parse_workflow_source(content).model_dump_json(indent=2) + "\n"
     try:
-        document = WorkflowDocument.model_validate_json(content)
+        document = TypeAdapter(AuthoredWorkflowDocument).validate_json(content)
     except ValidationError as error:
         _validation_error(error)
     return render_workflow_source(document)

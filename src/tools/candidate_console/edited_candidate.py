@@ -24,7 +24,7 @@ from tools.workflow_authoring.service import WorkflowAuthoring
 from tools.workflow_preview import preview_workflow
 from tools.workflow_preview.files import resolve_location
 from tools.workflow_preview.models import FileObservation, PreviewModel, WorkflowPreviewRequest
-from workflows.definition import TaskReferences
+from workflows.definition import ReusableWorkflowDocument, TaskReferences
 
 from .files import credentials
 from .models import CredentialReadiness, PreparedSelection, RouteView
@@ -123,6 +123,10 @@ class EditedCandidate:
             raise OperationFailure("stale_review", "saved source changed; review again")
         if source.document is None:
             raise OperationFailure("unsupported", "source is not a supported declaration")
+        if isinstance(source.document, ReusableWorkflowDocument):
+            raise OperationFailure(
+                "unsupported", "reusable declarations cannot be previewed or launched yet"
+            )
         template = prepared.request
         original_root = Path(template.preview.project_root)
         if template.preview.llm_config_file is None:

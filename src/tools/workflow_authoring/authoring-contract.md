@@ -1,7 +1,7 @@
 # Ordinary-file authoring contract
 
 `WorkflowAuthoring(Project)` owns inert read/review/save of one configured source.
-`WorkflowDocument`, its native catalog and the source bridge own declaration
+`AuthoredWorkflowDocument` (v1 or reusable v2), its native catalog and the source bridge own declaration
 semantics. Referenced files are never resolved or imported. Recovery copies do
 not authorize execution and are never a source revision/publication system.
 
@@ -40,3 +40,11 @@ and absent from recovery. Later read cannot prove that window did not occur.
 A → B → A with identical final bytes is an unchanged content base, not edit
 history or runtime identity. No force save, automatic merge, source execution,
 scientific readiness checks or native launch changes belong to this owner.
+
+Reusable documents round-trip through source/document proposals and read/review
+response models without adding a workspace or discarding preparation_options.
+Binding choices derive from the same catalog for either variant. The browser
+renders managed_candidate externals as read-only managed roles; it never creates
+a location editor or location key for them. Unsupported preparation options have
+no structured editor and remain intact through other edits. Review/save remain
+inert declaration operations; reusable preparation/launch is not implemented.

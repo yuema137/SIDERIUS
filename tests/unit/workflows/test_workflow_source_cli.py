@@ -118,3 +118,19 @@ def test_cli_rejects_output_path_option(tmp_path):
     assert (result.returncode, result.stdout) == (2, "")
     assert not output.exists()
     assert source.read_text() == SMALL_SOURCE
+
+
+def test_reusable_cli_json_dispatch_preserves_options(tmp_path):
+    """The second root must also survive CLI JSON dispatch without v1 coercion."""
+    from tests.unit.workflows.reusable_fixture import EXAMPLE, reusable
+    from workflows.definition import parse_workflow_source
+
+    source = tmp_path / "reusable.py"
+    source.write_text(EXAMPLE.read_text())
+    result = run_cli(tmp_path, "to-json", source)
+    assert (result.returncode, result.stderr) == (0, "")
+    encoded = tmp_path / "reusable.json"
+    encoded.write_text(result.stdout)
+    rendered = run_cli(tmp_path, "to-python", encoded)
+    assert (rendered.returncode, rendered.stderr) == (0, "")
+    assert parse_workflow_source(rendered.stdout) == reusable()

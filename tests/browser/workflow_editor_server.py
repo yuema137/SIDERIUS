@@ -10,6 +10,7 @@ import uvicorn
 from tests.unit.tools.candidate_console.conftest import console_config
 from tests.unit.tools.candidate_prepare.conftest import selection
 from tests.unit.tools.test_workflow_authoring import SOURCE
+from tests.unit.workflows.reusable_fixture import EXAMPLE
 from tools.candidate_console.app import create_app
 from tools.workflow_authoring.models import Project
 
@@ -27,6 +28,8 @@ def main() -> None:
         )
         other_source = root / "other.py"
         other_source.write_text(SOURCE)
+        reusable_source = root / "reusable.py"
+        reusable_source.write_text(EXAMPLE.read_text())
         recovery = root / "recovery"
         recovery.mkdir(mode=0o700)
         with socket.socket() as sock:
@@ -50,6 +53,12 @@ def main() -> None:
                         source_file=other_source,
                         recovery_directory=recovery,
                     ),
+                    Project(
+                        project_id="reusable",
+                        project_root=root,
+                        source_file=reusable_source,
+                        recovery_directory=recovery,
+                    ),
                 ),
             }
         )
@@ -58,6 +67,7 @@ def main() -> None:
                 {
                     "origin": origin,
                     "source": str(source),
+                    "reusable_source": str(reusable_source),
                     "token": Path(config.auth_token_file).read_text(),
                 }
             ),

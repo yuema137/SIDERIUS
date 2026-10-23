@@ -276,3 +276,23 @@ def test_edited_readiness_does_not_change_review_identity_or_precede_digest(edit
             project.project_id,
             launch_selection(first).model_copy(update={"expected_review_digest": "0" * 64}),
         )
+
+
+def test_reusable_saved_source_refuses_legacy_launch_before_preview(edited, monkeypatch):
+    """The actual edited-run entry must refuse v2 before any input observation."""
+    from tests.unit.workflows.reusable_fixture import EXAMPLE
+
+    adapter, project, selection = edited
+    project.source_file.write_text(EXAMPLE.read_text())
+    selected = EditedRunSelection(
+        prepare_operation_id=selection.prepare_operation_id,
+        expected_source_sha256=WorkflowAuthoring(project).read().sha256,
+    )
+    monkeypatch.setattr(
+        "tools.candidate_console.edited_candidate.preview_workflow",
+        lambda *args: pytest.fail("v2 reached legacy preview"),
+    )
+    with pytest.raises(OperationFailure) as error:
+        adapter.review(project.project_id, selected)
+    assert error.value.detail.code == "unsupported"
+    assert "reusable declarations" in str(error.value)

@@ -6,6 +6,8 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from agent.schemas.output_types import OutputTypeName
+
 Identifier = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$", max_length=100)]
 Location = Annotated[str, StringConstraints(min_length=1, pattern=r"^[^\x00]+$")]
 
@@ -98,13 +100,84 @@ class WorkflowDocument(DeclarationModel):
 
     @model_validator(mode="after")
     def validate_positions(self) -> Self:
-        node_ids = {node.id for node in self.definition.nodes}
-        seen = set()
-        for position in self.positions:
-            if position.node not in node_ids or position.node in seen:
-                raise ValueError(f"Unknown or duplicate layout node: {position.node}")
-            seen.add(position.node)
+        from .validation import validate_positions
+
+        validate_positions(self.definition.nodes, self.positions)
         return self
+
+
+class ReusableTaskReferences(DeclarationModel):
+    """Authored locations only; a reusable declaration owns no workspace."""
+
+    manifest: Location
+    data_root: Location
+
+
+class ManagedCandidateBinding(DeclarationModel):
+    id: Identifier
+    contract: Literal["proposal.input", "storage"]
+    kind: Literal["managed_candidate"] = "managed_candidate"
+
+
+class CandidatePreparationOptions(DeclarationModel):
+    """Inert preparation selections; no native payloads or execution defaults."""
+
+    proposal_advice: str | None = None
+    implementation_advice: str | None = None
+    validation_advice: str | None = None
+    allowed_output_types: tuple[OutputTypeName, ...] | None = Field(default=None, min_length=1)
+
+
+class ReusableWorkflowDefinition(DeclarationModel):
+    """Version 2 describes reusable declarations, not arbitrary executable graphs."""
+
+    schema_version: Literal[2] = 2
+    task: ReusableTaskReferences
+    externals: tuple[ExternalBinding | ManagedCandidateBinding, ...] = ()
+    nodes: tuple[NodeInstance, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_connections(self) -> Self:
+        from .validation import validate_definition
+
+        validate_definition(self)
+        return self
+
+
+class ReusableWorkflowDocument(DeclarationModel):
+    definition: ReusableWorkflowDefinition
+    positions: tuple[NodePosition, ...] = ()
+    preparation_options: CandidatePreparationOptions = Field(
+        default_factory=CandidatePreparationOptions
+    )
+
+    @model_validator(mode="after")
+    def validate_positions(self) -> Self:
+        from .validation import validate_positions
+
+        validate_positions(self.definition.nodes, self.positions)
+        return self
+
+    def declaration_digest(self) -> str:
+        """Semantic identity includes options but excludes layout and source bytes."""
+        canonical = json.dumps(
+            self.model_dump(mode="json", exclude={"positions"}),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+AuthoredWorkflowDocument = WorkflowDocument | ReusableWorkflowDocument
+
+
+def revalidate_document(document: AuthoredWorkflowDocument) -> AuthoredWorkflowDocument:
+    """Revalidate by the explicit variant, including unchecked copied instances."""
+    if isinstance(document, ReusableWorkflowDocument):
+        return ReusableWorkflowDocument.model_validate_json(
+            document.model_dump_json(warnings=False)
+        )
+    return WorkflowDocument.model_validate_json(document.model_dump_json(warnings=False))
 
 
 class DeclarationReport(DeclarationModel):
@@ -120,7 +193,7 @@ class DeclarationReport(DeclarationModel):
     )
 
 
-def inspect_declaration(document: WorkflowDocument) -> DeclarationReport:
+def inspect_declaration(document: AuthoredWorkflowDocument) -> DeclarationReport:
     """Revalidate even an instance made through Pydantic's unchecked copy APIs."""
-    WorkflowDocument.model_validate_json(document.model_dump_json())
+    revalidate_document(document)
     return DeclarationReport()

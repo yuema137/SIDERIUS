@@ -113,6 +113,37 @@ try {
   assert.equal(await page.locator('#editor-revision').textContent(), '');
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
+  // Reusable declarations use the real canonical authoring path; managed roles
+  // have no editable location, while all unsupported preparation choices survive.
+  await page.locator('#editor-project').selectOption('reusable');
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  assert.equal(await page.getByLabel('external:initial', {exact: true}).count(), 0);
+  assert.equal(await page.getByLabel('external:build_store', {exact: true}).count(), 0);
+  assert.equal(await page.getByLabel('external:check_store', {exact: true}).count(), 0);
+  assert.match(await page.locator('#editor-references').textContent(), /external:initial.*managed/);
+  await page.getByLabel('task.manifest', {exact: true}).fill('edited-task.yaml');
+  await page.locator('#editor-review').click();
+  await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
+  await page.locator('#editor-save').click();
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await page.locator('#editor-refresh').click();
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  const reusable = JSON.parse(execFileSync(process.env.EDITOR_PYTHON, ['-c', 'import sys; from pathlib import Path; from workflows.definition import parse_workflow_source; print(parse_workflow_source(Path(sys.argv[1]).read_text()).model_dump_json())', metadata.reusable_source], {cwd: root, encoding: 'utf8'}));
+  assert.equal(reusable.definition.schema_version, 2);
+  assert.equal(reusable.definition.task.manifest, 'edited-task.yaml');
+  assert.equal('workspace' in reusable.definition.task, false);
+  assert.deepEqual(reusable.definition.externals.slice(0, 3), [
+    {id: 'initial', contract: 'proposal.input', kind: 'managed_candidate'},
+    {id: 'build_store', contract: 'storage', kind: 'managed_candidate'},
+    {id: 'check_store', contract: 'storage', kind: 'managed_candidate'},
+  ]);
+  assert.equal(reusable.definition.externals[3].location, 'context.json');
+  assert.deepEqual(reusable.preparation_options, {
+    proposal_advice: 'Prefer a small interpretable baseline',
+    implementation_advice: 'Keep diagnostics explicit', validation_advice: 'Inspect held-out residuals',
+    allowed_output_types: ['regressor'],
+  });
+  assert.deepEqual(reusable.positions, [{node: 'build', x: 120, y: -30}]);
   assert.deepEqual(faults, []);
-  console.log('PASS: real API inspector → graph → Python diff → exact disk save/reload; agent refresh; two retained conflicts/reconciliation; stale review fence; inert hostile text.');
+  console.log('PASS: real API inspector → graph → Python diff → exact disk save/reload; agent refresh; two retained conflicts/reconciliation; stale review fence; inert hostile text; reusable managed roles and preparation options survive real edit/review/save/reload.');
 } finally { if (browser) await browser.close(); server.kill('SIGTERM'); lines.close(); }

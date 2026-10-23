@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from workflows.definition import WorkflowDocument
+from workflows.definition import AuthoredWorkflowDocument
 from workflows.definition.models import Source
 from workflows.definition.source import SourceDiagnostic
 
@@ -38,7 +38,7 @@ class SourceProposal(Model):
 
 class DocumentProposal(Model):
     kind: Literal["document"]
-    document: WorkflowDocument
+    document: AuthoredWorkflowDocument
 
 
 class ReviewRequest(Model):
@@ -68,7 +68,7 @@ class SourceView(Model):
     source_path: str
     source: str
     sha256: Digest
-    document: WorkflowDocument | None
+    document: AuthoredWorkflowDocument | None
     diagnostics: tuple[SourceDiagnostic, ...] = ()
     binding_options: tuple[BindingOptions, ...] = ()
     status: Literal["declaration_only"] = "declaration_only"
@@ -79,7 +79,7 @@ class ReviewView(Model):
     source: str
     sha256: Digest
     diff: str
-    document: WorkflowDocument
+    document: AuthoredWorkflowDocument
 
 
 class SaveView(Model):

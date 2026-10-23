@@ -2,18 +2,25 @@
 
 from .models import (
     ArgumentBinding,
+    AuthoredWorkflowDocument,
+    CandidatePreparationOptions,
     DeclarationReport,
     ExternalBinding,
     ExternalRequest,
     ExternalSource,
+    ManagedCandidateBinding,
     NodeInstance,
     NodePosition,
     ProtocolRequest,
     ResultSource,
+    ReusableTaskReferences,
+    ReusableWorkflowDefinition,
+    ReusableWorkflowDocument,
     TaskReferences,
     WorkflowDefinition,
     WorkflowDocument,
     inspect_declaration,
+    revalidate_document,
 )
 from .source import (
     SourceDiagnostic,
@@ -24,14 +31,20 @@ from .source import (
 
 __all__ = [
     "ArgumentBinding",
+    "AuthoredWorkflowDocument",
+    "CandidatePreparationOptions",
     "DeclarationReport",
     "ExternalBinding",
     "ExternalRequest",
     "ExternalSource",
+    "ManagedCandidateBinding",
     "NodeInstance",
     "NodePosition",
     "ProtocolRequest",
     "ResultSource",
+    "ReusableTaskReferences",
+    "ReusableWorkflowDefinition",
+    "ReusableWorkflowDocument",
     "SourceDiagnostic",
     "TaskReferences",
     "WorkflowDefinition",
@@ -40,4 +53,5 @@ __all__ = [
     "inspect_declaration",
     "parse_workflow_source",
     "render_workflow_source",
+    "revalidate_document",
 ]

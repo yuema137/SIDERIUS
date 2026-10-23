@@ -158,7 +158,7 @@ def test_import_does_not_load_native_runtime_or_resolve_external_files():
 import sys
 from workflows.definition import WorkflowDefinition
 WorkflowDefinition.model_validate_json(sys.argv[1])
-assert not any(n.startswith(('agent.', 'nodes.', 'torch')) for n in sys.modules)
+assert not any(n.startswith(('agent.', 'nodes.', 'torch')) and n not in {'agent.schemas', 'agent.schemas.output_types'} for n in sys.modules)
 """
     subprocess.run([sys.executable, "-c", program, definition().model_dump_json()], check=True)
 
