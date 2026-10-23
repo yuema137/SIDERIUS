@@ -27,3 +27,21 @@ them invalidates the capture. Copied bytes are an audit record, not portable rep
 Data contents, credentials and successful scientific execution are not certified.
 
 See [the contract](native-chain-contract.md) for the typed boundary and limitations.
+
+To launch the captured chain, use exactly `shell_argv` from `capture.json` as
+arguments to `bash scripts/launch/run_chain.sh`, then add:
+
+```text
+--expected_chain_capture /external/review/capture.json
+--expected_chain_capture_sha256 <SHA-256 of that file's exact bytes>
+--chain_capture_input_max_bytes 16777216
+```
+
+Keep the same input limit as the review request. Run from the captured checkout.
+Add `--dry-run` to verify and print commands without creating run artifacts.
+The launcher checks the capture before the first dispatch and again before each
+iteration. It also checks the settings actually resolved inside each native
+child before agent work. A mismatch exits 78 and stops the chain; earlier
+iterations remain intact. An in-child mismatch may leave an iteration directory
+or token file. Existing workspaces, including empty ones, require a different
+launch route; captured mode does not resume them.

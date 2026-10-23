@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, Field, model_validator
 
+from core.generated_artifact_name import validate_generated_artifact_name
 from tools.setup_review.composition_models import TaskCheckSettings
 from tools.setup_review.environment_models import EnvironmentPreviewReport
 from workflows.reviewed_launch_binding import BindingModel, Digest, InputFilePin
@@ -68,6 +69,7 @@ class NativeChainRunBinding(BindingModel):
 
     @model_validator(mode="after")
     def meaningful_name(self):
+        validate_generated_artifact_name(self.run_name, field="run_name")
         if not self.run_name.strip():
             raise ValueError("blank_run_name")
         return self

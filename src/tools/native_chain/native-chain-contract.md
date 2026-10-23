@@ -21,3 +21,25 @@ review may leave private task/environment diagnostics but never a successful
 partial capture or native run artifacts. Sandbox failure has no unsandboxed fallback.
 Package identity and file closure retain existing owner limitations; datasets are
 observed external resources. Concurrent same-user mutation is not made atomic.
+
+## Enforcement
+
+`check.admit` runs after exact-source probing and before resume inspection or
+workspace creation. It binds the exact shell vector after removing only paired
+capture controls and optional `--dry-run`; it refuses every existing workspace,
+including dangling symlinks. Each dispatch regenerates standard argv through
+that same shell export owner for its scheduled index and rechecks original files
+and installation. Capture-only refusal 78 returns directly from the shell loop,
+including when a child returns it; it writes no scientific stop record.
+
+`iteration` invokes the existing native main once with `NativeChainLaunchContext`.
+`LaunchExpectations` owns shared entry/composition/runtime/invariant comparisons;
+setup review retains its serialized fields and receipt behavior. Native final
+comparison copies the observed complete projection and substitutes exactly
+`start_iteration` and actual `RestoredState.resolved_source_paths`; added/missing
+or changed other fields refuse. No executable config is reconstructed from JSON.
+Native-specific refusals escape package/scientific failure handlers before
+`run_workflow`; unrelated exceptions keep native behavior. Composition imports,
+iteration directory, token and restoration artifacts can precede this final check.
+No arbitrary graph, detached operation, GUI, Slurm capture, effectful resume or
+writer lease is introduced.

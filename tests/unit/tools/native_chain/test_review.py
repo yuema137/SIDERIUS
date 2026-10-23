@@ -68,3 +68,42 @@ def test_export_limit_and_index_are_enforced(tmp_path):
         export_argv(item, 1, 2)
     with pytest.raises(ValueError, match="iteration_out_of_range"):
         export_argv(item, 3, 1048576)
+
+
+def test_parser_values_are_not_exposed(tmp_path, capsys):
+    from tools.native_chain.models import NativeChainReviewRequest
+    from tools.native_chain.review import review
+    from tools.setup_review.composition_models import TaskCheckSettings
+
+    source = tmp_path / "source.json"
+    source.write_text(declaration(tmp_path, "--max_epochs", "PRIVATE_SENTINEL").model_dump_json())
+    request = NativeChainReviewRequest(
+        source=source,
+        output=tmp_path / "report",
+        read_only=(),
+        task_check=TaskCheckSettings(timeout_seconds=10),
+        input_max_bytes=1048576,
+    )
+    with pytest.raises(ValueError, match="standard_arguments_refused"):
+        review(request)
+    assert "PRIVATE_SENTINEL" not in capsys.readouterr().err
+    assert not request.output.exists()
+
+
+def test_workspace_cannot_be_under_data_root(tmp_path):
+    from tools.native_chain.models import NativeChainReviewRequest
+    from tools.native_chain.review import review
+    from tools.setup_review.composition_models import TaskCheckSettings
+
+    source = tmp_path / "source.json"
+    source.write_text(declaration(tmp_path).model_dump_json())
+    request = NativeChainReviewRequest(
+        source=source,
+        output=tmp_path / "report",
+        read_only=(),
+        task_check=TaskCheckSettings(timeout_seconds=10),
+        input_max_bytes=1048576,
+    )
+    with pytest.raises(ValueError, match="workspace_overlap"):
+        review(request)
+    assert not request.output.exists()

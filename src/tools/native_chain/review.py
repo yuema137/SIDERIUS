@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import os
 import subprocess
 import tempfile
+from contextlib import redirect_stderr
 from pathlib import Path
 
 from core.durable_io import publish_bytes_write_once
@@ -97,8 +99,18 @@ def review(request: NativeChainReviewRequest) -> NativeChainCapture:
     # Existing parser/normalizer owns locating data. Do not initialize a task here.
     from workflows.standard_cli import build_parser, normalize_args
 
-    args = normalize_args(build_parser().parse_args(argv))
-    if _overlap(request.output, Path(args.data_dir).resolve()):
+    try:
+        with redirect_stderr(io.StringIO()):
+            args = normalize_args(build_parser().parse_args(argv))
+    except SystemExit as error:
+        raise NativeChainRefusal("standard_arguments_refused") from error
+    data = Path(args.data_dir).resolve()
+    if any(
+        _overlap(workspace, path)
+        for path in (data, request.source, declaration.working_directory, *request.read_only)
+    ):
+        raise NativeChainRefusal("workspace_overlap")
+    if _overlap(request.output, data):
         raise NativeChainRefusal("output_overlap")
     request.output.mkdir(mode=0o700)
     report = check_task(
