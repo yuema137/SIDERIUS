@@ -44,6 +44,9 @@ class LaunchExpectations(BindingModel):
             raise ReviewedLaunchRefusal("manifest_locator_changed")
         if Path(args.workspace).resolve() != Path(self.workspace).resolve():
             raise ReviewedLaunchRefusal("workspace_changed")
+        self.check_binding()
+
+    def check_binding(self) -> None:
         verify_binding(self.binding)
 
     def check_composition(self, composition) -> None:

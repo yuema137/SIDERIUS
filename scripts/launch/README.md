@@ -2,7 +2,8 @@
 
 Maintained chain launcher, shared argument construction, source-authority
 probe, and auto-resume inspection. Use an explicit checkout and its own
-`.venv`; #431 probe transport remains outside this infrastructure change.
+`.venv`. The launcher verifies that its Python environment imports that checkout
+before inspecting run state or starting an iteration.
 
 For an optional fresh foreground chain whose selected settings are checked
 again at launch and before every iteration, use the

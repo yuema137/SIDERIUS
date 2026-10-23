@@ -1,9 +1,11 @@
 """Native capture policy over shared, receipt-free launch expectations."""
 
+import subprocess
 from contextlib import contextmanager
 
 from pydantic import Field
 
+from core.file_identity import FileIdentityError
 from workflows.launch_expectations import LaunchExpectations
 from workflows.reviewed_launch_binding import (
     InputFilePin,
@@ -42,6 +44,15 @@ class NativeChainLaunchContext(LaunchExpectations):
             if args.run_name != self.run_name:
                 raise ReviewedLaunchRefusal("run_name_changed")
 
+    def check_binding(self) -> None:
+        # Only input-verification I/O is translated; scientific code is outside.
+        try:
+            verify_binding(self.binding)
+            if file_pin(self.source_pin.path, self.binding.file_max_bytes) != self.source_pin:
+                raise ReviewedLaunchRefusal("source_changed")
+        except (OSError, FileIdentityError, subprocess.CalledProcessError) as error:
+            raise ReviewedLaunchRefusal("input_verification_unavailable") from error
+
     def check_composition(self, composition) -> None:
         with _native_refusals():
             super().check_composition(composition)
@@ -70,6 +81,4 @@ class NativeChainLaunchContext(LaunchExpectations):
             expected["start_iteration"] = self.iteration
             expected["source_paths"] = paths
             self.check_projection(launch, expected)
-            verify_binding(self.binding)
-            if file_pin(self.source_pin.path, self.binding.file_max_bytes) != self.source_pin:
-                raise ReviewedLaunchRefusal("source_changed")
+            self.check_binding()

@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 from tools.native_chain.models import NativeChainDeclaration, NativeChainRunBinding
 
 
@@ -20,6 +22,72 @@ def test_public_capture_two_native_iterations(tmp_path):
     inputs.mkdir()
     data = tmp_path / "data"
     data.mkdir()
+    # The built-in pseudo bridge emits the existing token-model fixture. Give
+    # it that declared I/O contract rather than Quickstart's float/tabular one.
+    from tests.helpers.composed_manifest import write_complete_manifest
+
+    manifest = write_complete_manifest(
+        inputs,
+        task_data_path={
+            "module": "tests.fixtures.native_chain_task",
+            "symbol": "NativeChainTask",
+            "id": "native_chain_tokens",
+        },
+        metric={
+            "declaration": "../../examples/quickstart/declared/metric_accuracy.json",
+            "implementation": {
+                "module": "tests.fixtures.native_chain_task",
+                "symbol": "TokenAccuracy",
+            },
+        },
+        model_plugins=None,
+    )
+    (inputs / "examples/quickstart/declared/dataset_profile.json").write_text(
+        json.dumps(
+            {
+                "partition_count": 20,
+                "anchor_selection_files": [4, 7, 9],
+                "health_peek_files": [],
+                "topology": {
+                    "modality": "token_sequence",
+                    "class_cardinality": 256,
+                    "sequence_length": 8,
+                },
+            }
+        )
+    )
+    task_config = inputs / "examples/quickstart/declared/task_config.yaml"
+    task_config.write_text(
+        yaml.safe_dump(
+            {
+                "task_description": "Synthetic token-model pseudo lifecycle; no scientific data or training.",
+                "forward_contract": {
+                    "segmentation_applicability": "not_applicable",
+                    "model_io": {
+                        "input": {
+                            "axes": [
+                                {"role": "batch", "dimension": {"symbolic": "B"}},
+                                {"dimension": {"fixed": 8}},
+                            ],
+                            "dtype": {"admissible": ["int64"]},
+                        },
+                        "output": {
+                            "axes": [
+                                {"role": "batch", "dimension": {"symbolic": "B"}},
+                                {"role": "class", "dimension": {"fixed": 256}},
+                                {"dimension": {"fixed": 8}},
+                            ],
+                            "dtype": {"admissible": ["float32"]},
+                        },
+                    },
+                    "input_description": "eight integer tokens",
+                    "output_description": "256 logits per token",
+                    "task_type": "classification",
+                    "output_head_note": "Unnormalized logits.",
+                },
+            }
+        )
+    )
     workspace = tmp_path / "run"
     declaration = NativeChainDeclaration(
         working_directory=root,
@@ -28,7 +96,7 @@ def test_public_capture_two_native_iterations(tmp_path):
         ),
         chain_args=(
             "--task_composition",
-            "configs/task_composition/quickstart.yaml",
+            str(manifest),
             "--data_dir",
             str(data),
             "--llm_config",
@@ -55,7 +123,7 @@ def test_public_capture_two_native_iterations(tmp_path):
             dict(
                 source=str(source),
                 output=str(output),
-                read_only=[],
+                read_only=[str(inputs)],
                 task_check=dict(timeout_seconds=60),
                 input_max_bytes=16777216,
             )

@@ -133,3 +133,24 @@ def test_wrapper_does_not_convert_native_scientific_errors(context, monkeypatch)
     monkeypatch.setattr("workflows.run_one_iteration.main", scientific)
     with pytest.raises(ValueError, match="scientific failure"):
         iteration.main()
+
+
+def test_missing_pinned_source_is_capture_refusal(context):
+    Path(context.source_pin.path).unlink()
+    with pytest.raises(NativeChainCaptureRefusal, match="input_verification_unavailable"):
+        context.check_launch(
+            WorkflowLaunchConfig(start_iteration=2, source_paths=[]), RestoredState()
+        )
+
+
+def test_git_inspection_failure_is_capture_refusal(context, monkeypatch):
+    import subprocess
+
+    def unavailable():
+        raise subprocess.CalledProcessError(128, ["git"])
+
+    monkeypatch.setattr("workflows.reviewed_launch_binding.installation_pin", unavailable)
+    with pytest.raises(NativeChainCaptureRefusal, match="input_verification_unavailable"):
+        context.check_launch(
+            WorkflowLaunchConfig(start_iteration=2, source_paths=[]), RestoredState()
+        )

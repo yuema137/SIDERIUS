@@ -157,6 +157,7 @@ CHECK_ERRORS = (
     OSError,
     ValueError,
     subprocess.TimeoutExpired,
+    subprocess.CalledProcessError,
 )
 
 
