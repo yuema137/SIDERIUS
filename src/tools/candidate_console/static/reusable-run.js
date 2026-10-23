@@ -102,13 +102,16 @@
       if ($('task').value !== previous) invalidate();
       if (!$('task').value) status(tasks.some(task => task.reusable_runs_root)
         ? 'Choose a task to list prepared runs.' : 'Reusable captures are not configured for any task.');
-      else if (editor.candidateEnabled) await list();
+      else if (editor.candidateEnabled && !selected) await list();
     } catch (error) { if (!error.stale) { tasksRevision = null; status(error.message); } }
     controls();
   }
   window.addEventListener('workflow-editor-state', event => {
     const previous = editor; editor = event.detail;
-    if (previous.savedSha256 !== editor.savedSha256 || previous.saving !== editor.saving) generation++;
+    if (previous.savedSha256 !== editor.savedSha256 || previous.saving !== editor.saving) {
+      generation++;
+      if (session.connected && editor.sourceAvailable && !editor.saving && !selected) void list();
+    }
     if (previous.projectId !== editor.projectId) { invalidate(); $('run').replaceChildren(option('', 'Choose a prepared run')); if (session.connected) void list(); }
     if (!editor.candidateEnabled && editor.projectId) status('This project is editable but not enabled for candidate runs.');
     controls();
@@ -174,12 +177,17 @@
     document.getElementById('capture-heading').scrollIntoView({block: 'start'});
     invalidate(); handoffGeneration = generation; tasksRevision = session.revision;
     const version = generation, revision = session.revision;
-    $('task').replaceChildren(option(context.task, context.task));
+    if (![...$('task').options].some(item => item.value === context.task)) {
+      $('task').append(option(context.task, context.task));
+    }
+    $('task').value = context.task;
     $('run').replaceChildren(option(context.run, context.run));
     try {
       const value = await api('/select', {task_id: context.task, run_id: context.run}, context.project);
       if (!current(version, revision)) return;
       selected = value; status('Prepared run opened. Explicitly Review capture, then Launch.');
+      tasksRevision = null;
+      void loadTasks();
     } catch (error) { if (!error.stale && current(version, revision)) status(error.message); }
     controls();
   }});

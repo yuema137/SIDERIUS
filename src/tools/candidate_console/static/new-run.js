@@ -40,6 +40,7 @@
     generation++;
     review = null;
     $('details').textContent = '';
+    status('Inputs changed. Review preparation again.');
     controls();
   }
   function retained() {

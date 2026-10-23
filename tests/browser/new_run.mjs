@@ -167,6 +167,7 @@ try {
   await page.locator('#capture-refresh').click(); await until(() => listWaiting);
   await page.locator('#new-run-open').click(); await page.locator('#capture-status').filter({hasText: 'Prepared run opened'}).waitFor();
   releaseList(); await delay(100); await page.unroute(/\/reusable-captures\?/);
+  await page.locator('#capture-task option[value="alternative"]').waitFor({state: 'attached'});
   assert.equal(await page.locator('#capture-run').inputValue(), selection.run_id);
   assert.equal(await page.locator('#capture-launch').isDisabled(), true, 'Open never reviews or launches implicitly');
   // Old selection/review replies cannot override a later explicit handoff.

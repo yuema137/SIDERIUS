@@ -105,7 +105,14 @@ def setup(root: Path, origin: str, endpoint: str, captures_count: int = 3) -> No
     config = config.model_copy(
         update={
             "operation_store": store,
-            "tasks": (task,),
+            "tasks": (task,)
+            if captures_count
+            else (
+                task,
+                task.model_copy(
+                    update={"task_id": "alternative", "label": "Alternative configured choice"}
+                ),
+            ),
             "credential_file": str(private),
             "editor_projects": (project, project.model_copy(update={"project_id": "disabled"})),
             "runnable_editor_projects": ("capture",),
