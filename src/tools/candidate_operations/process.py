@@ -1,0 +1,134 @@
+"""Exact-environment spawning and read-only Linux process identity observation."""
+
+import os
+import subprocess
+import sys
+from collections.abc import Mapping
+from pathlib import Path
+
+from core.layout import checkout_root, package_root
+from tools.workspace_sandbox.profile import SandboxProfile
+
+from .files import directory, private
+from .models import (
+    OperationFailure,
+    OperationRecord,
+    ProcessIdentity,
+    ProcessObservation,
+    RuntimeIdentity,
+)
+
+
+def environment(names: tuple[str, ...], source: Mapping[str, str]) -> dict[str, str]:
+    SandboxProfile.environment_keys(names)
+    missing = tuple(name for name in names if not source.get(name))
+    if missing:
+        raise OperationFailure(
+            "environment", "missing required environment names: " + ", ".join(missing)
+        )
+    if any("\0" in source[name] for name in names):
+        raise OperationFailure("environment", "environment values must not contain NUL")
+    return {
+        "PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        **{name: source[name] for name in names},
+    }
+
+
+def runtime_identity() -> RuntimeIdentity:
+    checkout = checkout_root()
+    revision = None
+    if checkout is not None:
+        result = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            env=environment((), {}),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0:
+            revision = result.stdout.strip()
+    return RuntimeIdentity(
+        executable=sys.executable,
+        resolved_executable=str(Path(sys.executable).resolve()),
+        environment=str(Path(sys.prefix).resolve()),
+        source=str(checkout or package_root()),
+        revision=revision,
+    )
+
+
+def _boot_id() -> str:
+    return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+
+
+def _stat(pid: int) -> tuple[str, int]:
+    payload = Path(f"/proc/{pid}/stat").read_text()
+    prefix, fields = payload.rsplit(")", 1)
+    if int(prefix.split("(", 1)[0]) != pid:
+        raise ValueError("process identity mismatch")
+    values = fields.split()
+    if len(values) < 20 or len(values[0]) != 1:
+        raise ValueError("malformed process stat")
+    return values[0], int(values[19])
+
+
+def current_identity(record: OperationRecord) -> ProcessIdentity:
+    _, ticks = _stat(os.getpid())
+    return ProcessIdentity(
+        operation_id=record.submission.request_id,
+        request_digest=record.request_digest,
+        boot_id=_boot_id(),
+        pid=os.getpid(),
+        start_ticks=ticks,
+    )
+
+
+def observe(identity: ProcessIdentity) -> ProcessObservation:
+    try:
+        boot = _boot_id()
+    except OSError:
+        return ProcessObservation(status="unknown", reason="boot_unobservable")
+    try:
+        if boot != identity.boot_id:
+            return ProcessObservation(status="exited", reason="different_boot")
+        state, ticks = _stat(identity.pid)
+        if ticks != identity.start_ticks:
+            return ProcessObservation(status="exited", reason="pid_reused")
+        if state in {"Z", "X", "x"}:
+            return ProcessObservation(status="exited", reason="zombie_or_dead")
+        return ProcessObservation(status="alive", reason="matching_identity")
+    except FileNotFoundError:
+        # A missing /proc root is not positive evidence that the process exited.
+        if Path("/proc/self/stat").is_file():
+            return ProcessObservation(status="exited", reason="pid_absent")
+        return ProcessObservation(status="unknown", reason="proc_unavailable")
+    except (OSError, ValueError, IndexError):
+        return ProcessObservation(status="unknown", reason="identity_unobservable")
+
+
+def spawn(path: Path, env: dict[str, str]) -> subprocess.Popen:
+    with directory(path) as descriptor:
+        log = os.open(
+            "operation.log",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=descriptor,
+        )
+    try:
+        private(os.fstat(log), directory=False)
+        return subprocess.Popen(
+            [sys.executable, "-m", "tools.candidate_operations.child", str(path)],
+            env=env,
+            cwd=str(path),
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            close_fds=True,
+            start_new_session=True,
+        )
+    finally:
+        os.close(log)
