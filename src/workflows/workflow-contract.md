@@ -20,6 +20,7 @@ into here one iteration at a time.
 | `model_exploration.py` | `run_workflow(*, launch, workspace, run_name, …) -> list[HyperparamTuningOutput]` — THE workflow: per iteration interpret → workflow-selected scientific evidence stage → propose → implement → validate → tune. Also a module CLI (`python src/workflows/model_exploration.py --help`) accepting `--task_composition` |
 | `scientific_evidence_stage.py` | Workflow-owned optional traversal of the independent Data Analysis and Literature Review capabilities in either `analysis_then_literature` or `literature_then_analysis` order. Nodes never call each other. |
 | `task_composition.py` | `compose_run_task_bindings(manifest_path) -> RunTaskComposition` (resolve the manifest) · `bind_run_task_composition(composition, *, physical_data_root)` (the run-scoped binding contextmanager) · `verify_composition_is_bound` · `active_composition_fingerprint` / `active_task_manifest_path` |
+| `tuner_preparation.py` | Internal `prepare_native_tuner_input(...) -> HyperparamTuningInput`: native launch/bindings/iteration context projection into the validator-to-tuner protocol |
 | `run_config.py` | `WorkflowLaunchConfig` — the pure-transit launch config |
 | `llm_config.py` | `WorkflowLLMConfig` — per-node LLM routing, loaded from a `--llm_config` JSON |
 | `run_bindings.py` | `WorkflowRunBindings` — run-scoped authorities settled at startup; refuses mutable chain state by construction |
@@ -96,6 +97,35 @@ helper's source. A changed assembly changes the task composition fingerprint;
 this extraction does not authorize resuming a workspace with an older identity.
 Historical estimator profiles must explicitly qualify the selected assembly.
 Prompt-render parity on frozen inputs does not establish full historical replay.
+
+## Native tuner input preparation
+
+`prepare_native_tuner_input` consumes typed validator/proposal outputs, tuner
+storage, `WorkflowLaunchConfig`, established `WorkflowRunBindings`, the existing
+`RunInvariants` object, current constraints and the formal incumbent. It calls
+`local_validated_model` once with explicit named arguments; that protocol remains
+the node-output mapping authority. Standard tuner routing uses the existing
+resolver, including its distinction between omitted and empty tuner blocks.
+Missing routing bindings violate the existing startup precondition; no fallback
+configuration is invented. Transit-only portions restore schema-derived defaults;
+`frozen_portion_overrides` still owns executed portion locks and conflicts.
+
+The helper forwards the original operator Health source, including `None`,
+measurement capability, task projection and lock-derived identities. It then
+conditionally replaces human advice and loads/renders the bound task description.
+Protocol failures precede advice enrichment and task loading; exceptions propagate.
+The helper does not stage files, promote capabilities or execute an agent.
+`run_workflow` calls it after admission, capability commit, dual staging and early
+loss/model promotion, immediately before tuner construction and execution. Late
+loss promotion and infrastructure-abort handling remain workflow-owned.
+
+Both this helper and the orchestrator belong to the preflight estimator assembly.
+Relocation therefore changes the real estimator assembly and task composition
+fingerprint; old locks/reuse and unqualified historical profiles may refuse.
+No identity is frozen or migrated, and no historical profile is qualified by
+input mapping tests. Professional Python/CLI and reviewed Assistant launches
+continue through `run_workflow`; GUI candidate execution remains three-node.
+This internal boundary alone does not provide candidate-worker training.
 
 ## Candidate attempt storage and accounting
 

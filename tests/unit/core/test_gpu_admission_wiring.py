@@ -394,7 +394,7 @@ class TestTheProtocolHopIsNotSkipped:
     def test_run_workflow_accepts_and_forwards_the_field(self, field):
         # Step 09.5a C3: these are transit configuration, so the workflow
         # forwards them as `field=launch.field`. Same forwarding invariant.
-        src = code_only(REPO_ROOT / "src/workflows" / "model_exploration.py")
+        src = code_only(REPO_ROOT / "src/workflows" / "tuner_preparation.py")
         assert f"{field}=launch.{field}" in src or f"{field}={field}" in src
 
     def test_no_field_is_declared_on_the_schema_without_reaching_the_protocol(self):

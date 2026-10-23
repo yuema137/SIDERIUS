@@ -202,7 +202,14 @@ def test_archived_evidence_is_readable_but_new_evidence_requires_identity():
 
 
 @pytest.mark.parametrize(
-    "helper_name", ["candidate_requests", "attempt_storage", "run_context", "proposal_pipeline"]
+    "helper_name",
+    [
+        "candidate_requests",
+        "attempt_storage",
+        "run_context",
+        "proposal_pipeline",
+        "tuner_preparation",
+    ],
 )
 def test_extracted_candidate_helpers_remain_in_assembly_identity(monkeypatch, helper_name):
     """Moving request code out of the workflow must not remove its source coverage."""
@@ -230,3 +237,30 @@ def test_generated_name_guard_bytes_remain_in_assembly_identity(monkeypatch):
 
     monkeypatch.setattr(Path, "read_bytes", changed_read)
     assert providers.estimation_assembly_digest() != before
+
+
+def test_tuner_helper_change_invalidates_real_identity_and_unqualified_profile(
+    tmp_path, monkeypatch
+):
+    """A relocated helper must change real provenance and refuse an old qualifier.
+
+    Unlike the generic refusal test, this mutates source bytes at the existing
+    file-read seam and leaves the digest algorithm and identity owners intact.
+    """
+    helper = Path(providers.__file__).resolve().parents[1] / "workflows/tuner_preparation.py"
+    native_before = providers.resolve_preflight_estimator().identity()
+    external = profile(tmp_path)
+    original_read = Path.read_bytes
+
+    def changed_read(path):
+        content = original_read(path)
+        return content + b"\n# changed tuner input mapping\n" if path == helper else content
+
+    monkeypatch.setattr(Path, "read_bytes", changed_read)
+    native_after = providers.resolve_preflight_estimator().identity()
+    assert native_after.assembly_sha256 != native_before.assembly_sha256
+    assert native_after.model_dump(exclude={"assembly_sha256"}) == native_before.model_dump(
+        exclude={"assembly_sha256"}
+    )
+    with pytest.raises(ValueError, match="not qualified"):
+        external.identity()

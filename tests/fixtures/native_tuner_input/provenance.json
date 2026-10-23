@@ -1,0 +1,17 @@
+{
+  "baseline_native_preflight_estimator_identity": {
+    "assembly_sha256": "d4d5b51fa5df26fc7332fec1aeef68a4fac1413dd14ea55335cfc57ba756ecb2",
+    "content_sha256": "af320089e9971a94547fad29b9b0544dab4debc4c0dabefc6c38267801cf9dbe",
+    "name": "registered-state-v1",
+    "version": "1"
+  },
+  "capture_boundary": "Actual run_workflow input to HyperparamTuningAgent.run; real node protocol, node effects mocked at workflow_env seams.",
+  "normalization": "Only the explicit pytest tmp_path root replaced with <TMP>.",
+  "payload_sha256": {
+    "controls.json": "59704fb2755a9885de3883a5b780867cf7f3140dabd52f935900e4bf704edbdc",
+    "empty.json": "39b570ab95edb26c012623233bfa936241de0fc94447d3e894c9d778af988cad",
+    "omitted.json": "409a3ae81f318a231d73673907aff089f66e6f03b6e86f09f36c1afe4ab930d3",
+    "split_routes.json": "3ae6fdb1901fd457aa5e6acfc4485cb10e20e89356061b53a1e374c98cdb876c"
+  },
+  "source_revision": "4131a74df19ea7c627b39cb0d766fa13cc7b874d"
+}

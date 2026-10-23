@@ -31,6 +31,7 @@ NEW_STRUCTURAL_SURFACE = (
     "src/workflows/run_bindings.py",
     "src/workflows/run_config.py",
     "src/workflows/strategy_modes.py",
+    "src/workflows/tuner_preparation.py",
 )
 
 TASK_NAMES = ("tidmad", "pets", "davis", "oxford")
@@ -48,7 +49,11 @@ class TestNoCompatibilityWrapper:
 
         retired = launch_config_field_names()
         offenders: dict[str, int] = {}
-        for rel in ("src/workflows/model_exploration.py", "src/workflows/run_bindings.py"):
+        for rel in (
+            "src/workflows/model_exploration.py",
+            "src/workflows/run_bindings.py",
+            "src/workflows/tuner_preparation.py",
+        ):
             tree = ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))
             for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
                 declared = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
