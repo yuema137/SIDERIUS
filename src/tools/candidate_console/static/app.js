@@ -2,29 +2,14 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  let token = '', choices = [], preparation = null, review = null, launch = null;
+  let choices = [], preparation = null, review = null, launch = null;
   let monitorId = '', cursor = 0, logText = '', polling = false, connected = false;
-  let monitorEpoch = 0, generation = 0;
-  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let monitorEpoch = 0, generation = 0, invalidRoute = false;
   const say = (id, value) => { if (document.getElementById(id).textContent !== value) document.getElementById(id).textContent = value; };
   const remember = id => { try { localStorage.setItem('siderius.operation_id', id); } catch { /* Storage may be unavailable. */ } };
-  try { $('operation-id').value = localStorage.getItem('siderius.operation_id') || ''; } catch { /* Optional convenience. */ }
+  try { $('operation-id').value = localStorage.getItem('siderius.operation_id') || ''; if ($('operation-id').value) say('remembered-operation', 'Last opened on this browser.'); } catch { /* Optional convenience. */ }
 
-  async function api(path, body) {
-    const response = await fetch('/api/' + path, {
-      method: body === undefined ? 'GET' : 'POST', cache: 'no-store', credentials: 'omit',
-      headers: { Authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) })
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      const error = new Error(result.error?.message || 'The console refused this request.');
-      error.status = response.status;
-      error.code = result.error?.code;
-      throw error;
-    }
-    return result;
-  }
+  const api = (path, body) => window.consoleSession.request(path, body);
   function facts(element, rows) {
     element.replaceChildren();
     for (const [label, value] of rows) {
@@ -40,8 +25,8 @@
     say('limits', task ? `Preparation limit: ${task.preparation_timeout_seconds}s · Candidate limit: ${task.candidate_timeout_seconds}s` : '');
   }
   function controls() {
-    $('draft').disabled = !connected || preparation !== null;
-    $('prepare-button').disabled = !connected || !!preparation?.pending || !!preparation?.accepted;
+    $('draft').disabled = !connected || !choices.length || preparation !== null;
+    $('prepare-button').disabled = !connected || !choices.length || !!preparation?.pending || !!preparation?.accepted;
     say('prepare-button', preparation ? (preparation.pending ? 'Submitting preparation…' : preparation.accepted ? 'Preparation submitted' : 'Retry same preparation') : 'Prepare request');
     $('new-preparation').disabled = !connected || !!preparation?.pending || !!launch?.pending;
     $('launch-button').disabled = !connected || !review || !review.credential_readiness?.ready || !!launch?.pending || !!launch?.accepted;
@@ -50,16 +35,15 @@
     $('monitor-button').disabled = !connected;
   }
   $('task').addEventListener('change', limits);
-  $('access-form').addEventListener('submit', async event => {
-    event.preventDefault();
-    token = $('token').value.trim(); $('token').value = '';
-    connected = false; controls(); say('access-status', 'Connecting…');
+  async function loadChoices() {
+    const selectedTask = $('task').value;
     try {
       choices = await api('choices');
       $('task').replaceChildren();
       for (const task of choices) {
         const option = document.createElement('option'); option.value = task.task_id; option.textContent = task.label; $('task').append(option);
       }
+      if (choices.some(task => task.task_id === selectedTask)) $('task').value = selectedTask;
       if (preparation) {
         const submittedTask = preparation.payload.task_id;
         if (!choices.some(task => task.task_id === submittedTask)) {
@@ -67,10 +51,28 @@
         }
         document.getElementById("task").value = submittedTask;
       }
-      connected = true; limits(); say('access-status', 'Connected. Observations refresh every 2 seconds while this page is visible.');
-      await poll();
-    } catch (error) { say('access-status', 'Connection failed: ' + error.message); }
+      limits();
+    } catch (error) {
+      if (!error.stale) say('prepare-status', 'Configured tasks unavailable: ' + error.message);
+    }
     controls();
+  }
+  window.consoleSession.subscribe(state => {
+    connected = state.connected; monitorEpoch++;
+    controls();
+    if (connected) { if (window.consoleNavigation?.view !== 'slow-control') void loadChoices(); void poll(); }
+    else {
+      if (monitorId) say('monitor-status', 'Observation unconfirmed. Reconnect to refresh; last displayed facts are retained.');
+      if (preparation?.pending) say('prepare-status', 'Submission unconfirmed after connection change. Read this UUID or retry the same frozen request.');
+      if (launch?.pending) say('launch-status', 'Submission unconfirmed after connection change. Read this UUID or retry the same frozen request.');
+    }
+  });
+  window.addEventListener('console-view', event => {
+    invalidRoute = !event.detail.valid;
+    if (invalidRoute) { monitorEpoch++; return; }
+    if (event.detail.operation) setMonitor(event.detail.operation);
+    if (connected && event.detail.view === 'home' && !choices.length) void loadChoices();
+    if (connected) void poll();
   });
   $('new-preparation').addEventListener('click', () => {
     generation++; preparation = null; review = null; launch = null;
@@ -97,6 +99,7 @@
       say('prepare-status', 'Preparation submission observed: ' + handle.observation + '. Reading native status…');
       setMonitor(current.id); await poll();
     } catch (error) {
+      if (error.stale) return;
       say('prepare-status', 'Submission outcome is unconfirmed or refused: ' + error.message + '. Read this UUID or retry the same request; use New preparation to change inputs.');
     } finally { current.pending = false; controls(); }
   });
@@ -135,6 +138,7 @@
         say('review-status', 'Prepared request loaded. ' + (result.credential_readiness.ready ? 'Name presence checked; review before launching. This does not verify provider access or billing.' : 'Launch blocked. Follow the repair instructions, then Refresh readiness.')); controls();
       }
     } catch (error) {
+      if (error.stale) return;
       if (current === preparation) say('prepare-status', 'Observation stale or review unavailable: ' + error.message + '. This does not establish whether the operation stopped.');
     }
   }
@@ -151,6 +155,7 @@
       const handle = await api('candidates', current.payload); current.accepted = true;
       say('launch-status', 'Candidate submission observed: ' + handle.observation + '. Read status below for the native outcome.'); setMonitor(current.id); await poll();
     } catch (error) {
+      if (error.stale) return;
       if (['stale_review', 'integrity', 'task_policy', 'conflict', 'not_prepared'].includes(error.code)) {
         preparation.reviewBlocked = true;
         review = null;
@@ -160,15 +165,18 @@
     } finally { current.pending = false; controls(); }
   });
   function setMonitor(id) {
+    if (monitorId.toLowerCase() === id.toLowerCase()) return;
     monitorEpoch++; monitorId = id; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
     $('token-rows').replaceChildren(); document.querySelector('.token-table').hidden = true; say('tokens-times', '');
+    say('remembered-operation', '');
+    say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: Unavailable');
     say('tokens-status', 'Reading reported tokens…');
     say('monitor-status', 'Reading operation ' + id + '…');
   }
   $('monitor-form').addEventListener('submit', async event => {
     event.preventDefault(); const id = $('operation-id').value.trim();
-    if (!uuid.test(id)) { say('monitor-status', 'Enter a complete operation UUID.'); $('operation-id').focus(); return; }
-    setMonitor(id); await poll();
+    if (!window.consoleNavigation.isOperationId(id)) { say('monitor-status', 'Enter a complete operation UUID.'); $('operation-id').focus(); return; }
+    setMonitor(id); location.hash = 'slow-control/' + id; await poll();
   });
   $('log-kind').addEventListener('change', () => { monitorEpoch++; cursor = 0; logText = ''; say('log', ''); void poll(); });
   async function readMonitor() {
@@ -178,6 +186,7 @@
       const status = await api('operations/' + id);
       if (epoch !== monitorEpoch) return;
       say('monitor-status', describe(status));
+      say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: ' + (status.observed_at || 'Unavailable'));
       facts($('operation-facts'), [['Operation UUID', status.operation_id], ['Kind', status.kind], ['Observed at', status.observed_at],
         ['Process observation', `${status.process.status}: ${status.process.reason || '(no reason supplied)'}`], ['Native ID', status.native_id],
         ['Validation passed', status.validation_passed === null ? 'Not available' : String(status.validation_passed)], ['Reason', status.reason || '(none)'], ['Native receipt available', String(status.receipt_available)]]);
@@ -189,6 +198,7 @@
       say('log', logText);
       say('log-status', chunk.missing ? 'Log not available yet.' : `Log observed: ${chunk.observed_size} source bytes · Next byte offset: ${cursor}`);
     } catch (error) {
+      if (error.stale) return;
       if (epoch === monitorEpoch) say('monitor-status', 'Observation stale or unavailable: ' + error.message + '. Last displayed facts are retained; disconnection does not mean stopped.');
     }
   }
@@ -218,11 +228,12 @@
       say('tokens-status', (snapshot.quality.partial ? 'Partial evidence: known sums only. ' : '') + messages[snapshot.reason]);
       say('tokens-times', `Read at: ${snapshot.observed_at} · Last valid usage: ${snapshot.last_valid_usage_at || 'Unavailable'}`);
     } catch (error) {
+      if (error.stale) return;
       if (epoch === monitorEpoch) say('tokens-status', 'Reported tokens stale or unavailable: ' + error.message + '. Last observations for this operation are retained. Disconnection does not mean zero usage or stopped.');
     }
   }
   async function poll() {
-    if (!connected || document.hidden || polling) return;
+    if (!connected || document.hidden || polling || invalidRoute) return;
     polling = true;
     try { await Promise.all([readPreparation(), readMonitor(), readTokens()]); } finally { polling = false; }
   }

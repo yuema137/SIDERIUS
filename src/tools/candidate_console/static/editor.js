@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(`editor-${id}`);
-  let token = '', project = '', generation = 0, base = null, graph = null;
+  let project = '', generation = 0, base = null, graph = null;
   let options = [], selected = null, pending = false, sourceDirty = false, mode = 'source', reviewed = null, conflict = null;
   const clone = value => JSON.parse(JSON.stringify(value));
   const status = message => { $('status').textContent = message; };
@@ -16,16 +16,7 @@
     $('pending').textContent = pending ? (mode === 'document' ? 'Pending inspector edits · Review changes to update Python source before editing it.' : 'Pending source edits · not saved') : 'No pending edits.';
   }
   function changed() { pending = true; $('source').disabled = mode === 'document'; invalidate(); }
-  async function api(path, body) {
-    const response = await fetch(`/api/editor/${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : {'Content-Type': 'application/json'}) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) })
-    });
-    const value = await response.json();
-    if (!response.ok) { const error = new Error(value.error?.message || 'Editor request failed.'); error.value = value; throw error; }
-    return value;
-  }
+  const api = (path, body) => window.consoleSession.request('editor/' + path, body);
   function diagnostic(items = []) { $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}`).join('\n'); }
   function showConflict(value) {
     conflict = value; reviewed = null; $('save').disabled = true;
@@ -42,6 +33,7 @@
     $('path').textContent = value.source_path;
     $('revision').textContent = 'File version: ' + value.sha256.slice(0, 12);
     $('review').disabled = !graph; $('refresh').disabled = false;
+    $('inspect').hidden = !!graph;
     status(graph ? 'Opened supported declaration. References remain literal.' : 'Unsupported source is read-only. Repair externally, then refresh.');
   }
   function renderGraph() {
@@ -111,19 +103,36 @@
     if (pending && ask && !window.confirm('Discard pending edits and refresh from disk?')) return;
     const id = project; invalidate(); const version = generation;
     try { const value = await api(encodeURIComponent(id)); if (current(id, version)) adopt(value); }
-    catch (error) { if (current(id, version)) status(error.message + ' Pending state retained.'); }
+    catch (error) { if (error.stale) return; if (current(id, version)) status(error.message + ' Pending state retained.'); }
   }
-  $('connect').addEventListener('submit', async event => {
-    event.preventDefault(); if (pending && !window.confirm('Discard pending edits after connecting to the selected project?')) return; token = $('token').value; generation++; const version = generation;
+  let projectsLoaded = false, loadingRevision = null;
+  async function openProjects() {
+    if (!window.consoleSession.connected || projectsLoaded || loadingRevision === window.consoleSession.revision) return;
+    const revision = window.consoleSession.revision; loadingRevision = revision;
     try {
-      const choices = await api('projects'); if (generation !== version) return;
+      const choices = await api('projects');
       $('project').replaceChildren();
       choices.forEach(choice => { const entry = node('option', choice.project_id, $('project')); entry.value = choice.project_id; });
-      $('project').disabled = choices.length === 0; project = choices[0]?.project_id || '';
-      resetProjectState();
-      if (project) { await refresh(false); } else status('No editor projects configured. Candidate console and monitoring remain available.');
-    } catch (error) { if (generation === version) status(error.message); }
-  });
+      projectsLoaded = true; $('project').disabled = choices.length === 0;
+      project = choices[0]?.project_id || ''; resetProjectState();
+      if (project) await refresh(false); else status('No editor projects configured. Monitoring remains available.');
+    } catch (error) { if (!error.stale) status(error.message); }
+    finally { if (loadingRevision === revision) loadingRevision = null; }
+  }
+  function connection(state) {
+    for (const name of ['review', 'save', 'refresh', 'project']) {
+      if (!state.connected) $(name).disabled = true;
+    }
+    if (!state.connected) return;
+    if (projectsLoaded) {
+      if (!base && project && !pending) void refresh(false);
+      $('project').disabled = !$('project').options.length; $('review').disabled = !graph; $('refresh').disabled = !project; $('save').disabled = !reviewed;
+    } else if (window.consoleNavigation?.view === 'workflow') void openProjects();
+  }
+  window.consoleSession.subscribe(connection);
+  window.addEventListener('console-view', event => { if (event.detail.view === 'workflow') void openProjects(); });
+  window.addEventListener('beforeunload', event => { if (pending) { event.preventDefault(); event.returnValue = ''; } });
+  $('inspect').addEventListener('click', () => { $('advanced').open = true; $('source').focus(); });
   $('project').addEventListener('change', () => {
     if (pending && !window.confirm('Discard pending edits and change project?')) { $('project').value = project; return; }
     project = $('project').value; resetProjectState(); refresh(false);
@@ -142,9 +151,11 @@
       // the reviewed document using server-derived options returned by review.
       options = value.binding_options; selected = graph.definition.nodes.some(n => n.id === selected) ? selected : graph.definition.nodes[0]?.id;
       reviewed = {source: value.source, sha256: value.sha256, base: base.sha256};
+      $('review-disclosure').open = true;
       $('diff').textContent = value.diff || '(No source changes)'; diagnostic(); render(); $('save').disabled = false;
       status('Declaration validated. Inspect the exact Python diff, then save.');
     } catch (error) {
+      if (error.stale) return;
       if (!current(id, version)) return;
       if (error.value?.proposal) { const proposal = error.value.proposal; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); options = proposal.binding_options; mode = 'source'; sourceDirty = false; render(); }
       if (error.value?.current) showConflict(error.value.current);
@@ -162,6 +173,7 @@
       if (value.sha256 !== saved.sha256) { showConflict(value); status('Save completed, then source changed again. Pending reviewed bytes retained.'); return; }
       adopt(value); status(saved.unchanged ? 'Source unchanged; confirmed from disk.' : 'Saved reviewed bytes and reloaded from disk. Recovery copies preserved.');
     } catch (error) {
+      if (error.stale) return;
       if (!current(id, version)) return;
       if (error.value?.current) showConflict(error.value.current);
       status(error.message + ' Save is unconfirmed; pending proposal retained. Refresh to inspect disk.');

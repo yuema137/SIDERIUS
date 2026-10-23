@@ -28,12 +28,34 @@ try {
     try { await page.goto(metadata.origin + '/editor.html'); break; }
     catch (error) { if (tries >= 20) throw error; await new Promise(resolve => setTimeout(resolve, 100)); }
   }
-  await page.locator('#editor-token').fill(metadata.token);
-  await page.locator('#editor-connect button').click();
+  await page.locator('#token').fill(metadata.token);
+  await page.locator('#access-form button').click();
   await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported')); 
   const source = page.locator('#editor-source');
+  assert.equal(await source.isVisible(), false);
+  assert.equal(new URL(page.url()).hash, '#workflow');
+  await page.locator('#editor-advanced > summary').click();
   const original = await source.inputValue();
   await page.locator('#editor-inspector select').selectOption({label: 'other'});
+  const posts = []; page.on('request', request => { if (request.method() === 'POST') posts.push(request.url()); });
+  const editorSnapshot = () => page.evaluate(() => ({
+    text: ['editor-source', 'editor-revision', 'editor-diff', 'editor-pending'].map(id => {
+      const element = document.getElementById(id); return [element.value, element.textContent];
+    }),
+    fields: [...document.querySelectorAll('#editor-inspector select, #editor-references input')]
+      .map(element => [element.value, element.disabled]),
+    project: document.getElementById('editor-project').value,
+    selected: document.querySelector('.editor-node[aria-pressed="true"]')?.dataset.node,
+    saveDisabled: document.getElementById('editor-save').disabled,
+  }));
+  async function retainAcrossViews() {
+    const before = await editorSnapshot(), count = posts.length;
+    for (const view of ['slow-control', 'home', 'workflow']) await page.locator(`nav a[href="#${view}"]`).click();
+    assert.deepEqual(await editorSnapshot(), before);
+    assert.equal(posts.length, count, 'Navigation never submits');
+    assert.equal(await page.locator('#token').inputValue(), '');
+  }
+  await retainAcrossViews();
   // A source edit cannot silently replace an unrendered inspector proposal.
   assert.equal(await source.isDisabled(), true);
   await assert.rejects(source.fill(original + '# attempted source switch\n', {timeout: 100}));
@@ -56,9 +78,12 @@ try {
   await waitUntil(async () => (await page.locator('#editor-graph button').count()) === 2);
   // Review a GUI proposal, then external write: save must conflict and retain it.
   await source.fill((await source.inputValue()).replace('old.json', 'gui.json'));
+  await retainAcrossViews();
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   const pending = await source.inputValue();
+  await retainAcrossViews();
+  assert.equal(await page.locator('#editor-review-disclosure').getAttribute('open'), '');
   await writeFile(metadata.source, agent.replace('old.json', 'agent.json'));
   await page.locator('#editor-save').click();
   await page.locator('#editor-conflict').waitFor({state: 'visible'});
@@ -121,6 +146,7 @@ try {
   assert.equal(await page.getByLabel('external:build_store', {exact: true}).count(), 0);
   assert.equal(await page.getByLabel('external:check_store', {exact: true}).count(), 0);
   assert.match(await page.locator('#editor-references').textContent(), /external:initial.*managed/);
+  await page.getByText('References', {exact: true}).click();
   await page.getByLabel('task.manifest', {exact: true}).fill('edited-task.yaml');
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));

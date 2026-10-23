@@ -7,20 +7,27 @@
   <script src="/theme.js"></script>
   <link rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/editor.css">
+  <script src="/session.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/editor.js" defer></script>
+  <script src="/navigation.js" defer></script>
 </head>
 <body>
 <header><div class="brand">SIDERIUS <span>Local candidate console</span></div><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p>
   <div class="theme-control"><label for="theme-preference">Color theme</label><select id="theme-preference"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
 </header>
-<nav class="actions"><a href="/editor.html">Workflow Editor</a></nav>
+<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#slow-control">Slow control</a></nav>
 <main>
+<p id="route-status" role="status"></p>
   <section class="card" aria-labelledby="access-heading">
     <h1 id="access-heading">Connect to the console</h1>
     <p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p>
     <form id="access-form" class="actions"><div class="grow"><label for="token">Console token</label><input id="token" type="password" autocomplete="off" required></div><button type="submit">Connect</button></form>
     <p id="access-status" role="status">Not connected.</p>
   </section>
+  <section id="view-home" data-view="home"><h1 tabindex="-1">Home</h1><p><a href="#workflow">Open workflow</a> · <a href="#slow-control">Open known operation</a></p>
+<details id="configured-task"><summary>Prepare configured task</summary><p>Native Prepare generates its configured candidate. It does not run the selected editor declaration.</p>
   <div class="columns">
     <section class="card" aria-labelledby="prepare-heading">
       <p class="eyebrow">1 · Prepare</p><h2 id="prepare-heading">Configured task</h2>
@@ -28,7 +35,7 @@
         <fieldset id="draft" disabled>
           <label for="task">Task</label><select id="task" required><option value="">Connect to load tasks</option></select>
           <p id="limits" class="muted"></p>
-          <dl id="configured-paths" class="facts"></dl>
+          <details><summary>Configured paths</summary><dl id="configured-paths" class="facts"></dl></details>
           <p>Prepare creates separate child paths under these output parents. Review the resolved workspace before Launch.</p>
           <label for="run-name">Run name</label><input id="run-name" required maxlength="128" autocomplete="off">
           <details><summary>Optional stage advice</summary>
@@ -50,22 +57,73 @@
       <button id="launch-button" type="button" disabled>Launch candidate</button><p id="launch-status" role="status">No candidate launch submitted.</p><p id="candidate-id" class="mono"></p>
     </section>
   </div>
+  </details></section>
+<section id="view-workflow" data-view="workflow" hidden><h1 tabindex="-1">Workflow builder</h1>
+  <section class="card">
+    <label>Project <select id="editor-project" disabled></select></label>
+    <button id="editor-inspect" type="button" hidden>Inspect source</button><p id="editor-status" role="status">Connect to open a configured project.</p>
+    <p class="warning">Declaration only. Saving does not run this graph or change native Prepare. Referenced resources are not checked.</p>
+  </section>
+  <section class="card">
+    <div class="actions">
+      <button id="editor-refresh" disabled>Refresh from disk</button>
+      <button id="editor-review" disabled>Review changes</button>
+      <button id="editor-save" disabled>Save reviewed source</button>
+    </div>
+    <p id="editor-pending">No pending edits.</p>
+    <div id="editor-conflict" hidden>
+      <h2>Source changed on disk</h2>
+      <p>Inspect current source and its difference from your proposal. Your pending edits are preserved.</p>
+      <details open><summary>Current source and conflict diff</summary><pre id="editor-current"></pre>
+      <pre id="editor-conflict-diff"></pre></details>
+      <button id="editor-discard">Discard my edits and reload</button>
+      <button id="editor-rebase">Edit my proposal against current source</button>
+    </div>
+  </section>
+  <div class="editor-workspace">
+    <section class="card">
+      <h2>Declaration graph</h2>
+      <div id="editor-graph"></div>
+      <h3>Connections</h3>
+      <ul id="editor-edges"></ul>
+    </section>
+    <section class="card">
+      <h2>Selected node</h2>
+      <div id="editor-inspector"></div>
+
+    </section>
+  </div>
+  <details class="card"><summary>References</summary><div id="editor-references"></div></details>
+  <details class="card" id="editor-advanced"><summary>Advanced → Source</summary>
+    <p id="editor-path" class="mono"></p><p id="editor-revision" class="mono"></p>
+    <h2>Python source</h2>
+    <p>Source edits may add supported nodes. Review validates and projects the graph. After inspector edits, review first to update this panel before typing source changes. Inspector edits use canonical Python rendering; inspect formatting and comment changes in the diff.</p>
+    <textarea id="editor-source" rows="18" spellcheck="false" disabled aria-label="Python source"></textarea>
+    <pre id="editor-diagnostics" role="status"></pre>
+  </details>
+  <details class="card" id="editor-review-disclosure"><summary>Review exact Python changes</summary>
+    <pre id="editor-diff"></pre>
+    <p>Every edit invalidates review. Save writes exactly the reviewed bytes.</p>
+  </details>
+  <footer>Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</footer>
+</section>
+<section id="view-slow-control" data-view="slow-control" hidden><h1 tabindex="-1">Slow control</h1>
   <section class="card" aria-labelledby="monitor-heading">
     <p class="eyebrow">3 · Observe any known operation</p><h2 id="monitor-heading">Status and logs</h2>
     <p>Enter an operation UUID from this console or code. Reading an operation never launches or restarts it. Closing the page does not stop an admitted operation.</p>
     <form id="monitor-form" class="actions"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" disabled>Read operation</button></form>
-    <p id="monitor-status" role="status">No operation selected.</p><dl id="operation-facts" class="facts"></dl>
+    <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="operation-observed" class="muted"></p><details><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
     <h3 id="tokens-heading">Reported LLM tokens</h3>
     <p id="tokens-status" role="status">No operation selected.</p>
     <p id="tokens-times" class="muted"></p>
-    <div class="token-table" role="region" aria-labelledby="tokens-heading" tabindex="0" hidden>
+    <details><summary>Reported token table</summary><div class="token-table" role="region" aria-labelledby="tokens-heading" tabindex="0" hidden>
       <table><thead><tr><th scope="col">Provider</th><th scope="col">Requested model</th><th scope="col">Served model</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Total</th><th scope="col">Responses</th></tr></thead><tbody id="token-rows"></tbody></table>
     </div>
-    <p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
-    <div class="actions"><label for="log-kind">Log source</label><select id="log-kind"><option value="native">Native</option><option value="operation">Operation</option></select></div>
-    <p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre>
+    </details><p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
+    <details><summary>Activity and logs</summary><div class="actions"><label for="log-kind">Log source</label><select id="log-kind"><option value="native">Native</option><option value="operation">Operation</option></select></div>
+    <p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre></details>
   </section>
-</main>
+</section></main>
 <footer>Candidate generation and validation · Training and scientific scoring are not included.</footer>
 </body>
 </html>

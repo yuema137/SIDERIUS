@@ -298,3 +298,11 @@ footer {
 a { color: var(--primary); }
 button:not(:disabled):hover { background: var(--primary-hover); }
 button.secondary:not(:disabled):hover { background: var(--hover); }
+
+[hidden] { display: none !important; }
+nav { padding: 0 32px; }
+nav a { padding: 10px; }
+nav a[aria-current="page"] { font-weight: 700; text-decoration-thickness: 3px; }
+summary { cursor: pointer; padding: 8px 0; font-weight: 600; }
+[data-view] { min-width: 0; }
+@media (max-width: 800px) { nav { padding: 0 16px; } }
