@@ -25,6 +25,7 @@ class TaskChoice(PreviewModel):
     task_read_only: tuple[str, ...] = ()
     preparation_root: str
     candidate_root: str
+    reusable_runs_root: str | None = None
     preparation_timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
     candidate_timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
     candidate_network: bool
@@ -108,6 +109,7 @@ class ChoiceView(PreviewModel):
     llm_config_file: str
     preparation_root: str
     candidate_root: str
+    reusable_runs_root: str | None = None
 
 
 class RouteView(PreviewModel):

@@ -15,6 +15,7 @@ from .resolution import resolve_reusable_candidate
 from .reusable_admission import observation, reusable_locations, safe_bytes
 from .reusable_models import (
     ReusableBindingCapture,
+    ReusableBindingInspection,
     ReusablePreparationControl,
     ReusablePreparationPlan,
     ReusablePreparationReceipt,
@@ -48,19 +49,8 @@ def _hashed(reader: CapturedBytes, path: Path, expected: str | None) -> bytes:
 
 
 def _plan(
-    envelope: Path, receipt: ReusablePreparationReceipt, reader: CapturedBytes
+    envelope: Path, binding: ReusableBindingCapture, reader: CapturedBytes
 ) -> tuple[ReusablePreparationPlan, bytes]:
-    binding = ReusableBindingCapture.model_validate_json(
-        _hashed(reader, envelope / "binding.json", receipt.binding_sha256)
-    )
-    if (
-        binding.run_id != receipt.run_id
-        or binding.envelope != str(envelope)
-        or binding.snapshot_path != str(envelope / "workflow.py.snapshot")
-        or binding.request.output_dir != str(envelope / "inputs")
-        or binding.request.candidate_workspace != str(envelope / "workspace")
-    ):
-        raise ValueError("binding disagrees with fixed envelope identity or destinations")
     source = reader(envelope / "workflow.py.snapshot")
     if len(source) > MAX_INPUT_BYTES:
         raise ValueError("captured source exceeds source limit")
@@ -85,9 +75,9 @@ def _plan(
     ), source
 
 
-def _verify(
+def _inspect(
     selection: ReusablePreparedSelection, reader: CapturedBytes
-) -> VerifiedReusablePreparation:
+) -> ReusableBindingInspection:
     envelope = canonical(selection.envelope)
     run_id = UUID(envelope.name)
     if str(run_id) != envelope.name:
@@ -108,17 +98,63 @@ def _verify(
         or receipt.error is not None
     ):
         raise ValueError("receipt is not a complete prepared selection at fixed paths")
-    plan, source = _plan(envelope, receipt, reader)
+    binding = ReusableBindingCapture.model_validate_json(
+        _hashed(reader, envelope / "binding.json", receipt.binding_sha256)
+    )
+    if (
+        binding.run_id != receipt.run_id
+        or binding.envelope != str(envelope)
+        or binding.snapshot_path != str(envelope / "workflow.py.snapshot")
+        or binding.request.output_dir != str(envelope / "inputs")
+        or binding.request.candidate_workspace != str(envelope / "workspace")
+    ):
+        raise ValueError("binding disagrees with fixed envelope identity or destinations")
     control = ReusablePreparationControl.model_validate_json(
         reader(output / "preparation/request.json")
     )
     if (
-        control.request != plan.binding.request
-        or control.sources != plan.binding.sources
+        control.request != binding.request
+        or control.sources != binding.sources
         or control.binding_path != receipt.binding_path
         or control.binding_sha256 != receipt.binding_sha256
     ):
         raise ValueError("saved preparation control disagrees with pinned binding")
+    return ReusableBindingInspection(
+        selection=selection, binding=binding, receipt=receipt, control=control
+    )
+
+
+def inspect_reusable_binding(
+    selection: ReusablePreparedSelection,
+) -> ReusableBindingInspection:
+    """Inspect fixed capture metadata only, without reading external observations.
+
+    This is a policy preinspection, not certification of preparation. Retain the
+    selection and call the complete verifier after checking external path policy.
+    """
+    selection = ReusablePreparedSelection.model_validate_json(selection.model_dump_json())
+    return _inspect(selection, CapturedBytes())
+
+
+def inspect_current_reusable_binding(envelope: str) -> ReusableBindingInspection:
+    """Select current receipt bytes for policy preinspection; does not certify them."""
+    reader = CapturedBytes()
+    path = canonical(envelope)
+    selection = ReusablePreparedSelection(
+        envelope=str(path),
+        expected_receipt_sha256=hashlib.sha256(reader(path / "receipt.json")).hexdigest(),
+    )
+    return _inspect(selection, reader)
+
+
+def _verify(
+    selection: ReusablePreparedSelection, reader: CapturedBytes
+) -> VerifiedReusablePreparation:
+    inspected = _inspect(selection, reader)
+    envelope = Path(selection.envelope)
+    output = envelope / "inputs"
+    receipt, control = inspected.receipt, inspected.control
+    plan, source = _plan(envelope, inspected.binding, reader)
     verify_sources(control, read_file=reader.observe)
     expected, bindings, fingerprint = verify_reusable_bundle(
         plan, source, control, read_bytes=reader

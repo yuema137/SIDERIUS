@@ -224,6 +224,12 @@ or formatting. The reusable example is
 `examples/workflow_declarations/reusable_candidate.py`. Its explicit optional
 literal and distinct managed storage aliases are declaration choices, not
 prepared payloads. Pure resolution is owned by
-`tools.candidate_prepare.resolution`; reusable preparation and launch are not
-implemented. Existing v1 preview/launch requests remain v1-only and the editor's
-launch review explicitly refuses reusable declarations.
+`tools.candidate_prepare.resolution`. Managed-only reusable preparation is implemented
+by `prepare_reusable_candidate` / `--reusable-request`; retained selection and
+`build_reusable_operation` launch through the existing operation owner. Authored
+v2 snapshots resolve to generated v1 worker inputs without coercing the authored
+model. The console's `ReusableCandidate` consumes already prepared captures under
+explicit configured project/task policy. Existing v1 preview and `EditedCandidate`
+remain v1-only. Automatic GUI preparation from current edits, training and resume
+are not implemented. See the [preparation contract](../../tools/candidate_prepare/candidate-prepare-contract.md)
+and [console contract](../../tools/candidate_console/console-contract.md#reusable-capture-consumption).

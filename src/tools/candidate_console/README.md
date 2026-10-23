@@ -83,6 +83,45 @@ The entry URLs are `/#home`, `/#workflow` and `/#slow-control`. An old
 Connection sharing applies within one document; separate tabs/windows connect
 independently.
 
+## Open a prepared reusable workflow
+
+First [prepare your reusable workflow with Python or CLI](../candidate_prepare/README.md#prepare-several-runs-from-one-workflow).
+Preparation saves the source and inputs in a fresh `runs/<UUID>/` directory;
+its `workspace/` child is reserved for candidate output and must remain absent
+until launch. Keep this runs directory outside the checkout. The console consumes
+these existing captures; it does not create a new reusable run from editor changes.
+
+Ask the operator to configure the authored project in `editor_projects`, enable
+its ID in `runnable_editor_projects`, and set the selected task's
+`reusable_runs_root` to that existing runs parent. Include that parent in both
+`operation_store.preparation_roots` and `candidate_roots` explicitly. The console
+never expands those permissions automatically. Restart after configuration changes.
+The task paths and runtime policy must match the preparation request. See the
+[reusable configuration contract](console-contract.md#reusable-capture-consumption).
+
+1. Connect and open **Workflow Editor**. In **Prepared run**, select the configured
+   task, refresh the list, choose a capture, then **Open prepared run**.
+2. Choose **Review capture**. Check the saved source version, task, output workspace,
+   model routes and credential readiness. Expand **Captured resources and version**
+   for the dataset, LLM config, advice, time limits and resource permissions.
+3. Choose **Launch captured run**. This runs Propose → Implement → Validate using
+   that capture. Saving or leaving unsaved editor changes does not retarget it.
+   An older capture remains explicitly labelled separately from current edits.
+4. Follow **Monitor operation** to Slow control. Prepared inputs and an admitted
+   operation do not mean native validation has accepted the candidate.
+
+The browser retains the exact launch intent before sending it. If storage fails,
+launch is not sent. After a lost response or reconnect, use **Check status** or
+**Retry same operation**; reopening the page never submits automatically. Keep the
+same operation UUID while its outcome is uncertain. A confirmed completed operation
+can be dismissed. An initial request explicitly refused before admission can be
+discarded and reviewed again; ambiguous or restored requests remain retained.
+
+While the server is live, an admitted operation can be recovered even if its
+capture, authored source or credential file disappears. Restart still validates
+configured resources; restore required files before restarting the server.
+Automatic GUI preparation, training and resume are not available.
+
 ## Credentials
 
 The two private files have different jobs:

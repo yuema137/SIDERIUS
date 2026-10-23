@@ -321,7 +321,10 @@ getter. The single `access-form` captures and immediately clears the password
 input. Requests use Authorization, cache no-store and credentials omit; POST
 payloads retain their existing owners. No cookie, storage, URL, history payload,
 event, cross-tab channel or document-transfer mechanism carries credentials.
-Theme enum and optional last-operation UUID remain the only persisted values.
+Theme enum, optional last-operation UUID and the versioned exact reusable launch
+intent are persisted. The launch intent contains only origin/project navigation
+context, retained preparation identity, request digest and operation UUID; never
+source bytes, native requests or credentials.
 Reload/new tab requires Connect again.
 
 Connect validates through the explicit deep-link operation GET, otherwise choices
@@ -357,3 +360,78 @@ isolation, connection races/401 and pending-draft/reload behavior. Existing edit
 console and theme browser harnesses exercise the shared shell and disclosures.
 These are local browser witnesses; they do not qualify native execution, complete
 circuit editing, results, resume or production deployment.
+
+
+## Reusable capture consumption
+
+`TaskChoice.reusable_runs_root: str | None = None` opts a task into discovery.
+The configured existing canonical parent must lie within both explicitly supplied
+operation-store preparation and candidate roots, and remain separate from state
+and editor recovery. No roots are added automatically. The field is excluded from
+legacy `preparation_request`; legacy separate destination mapping is unchanged.
+`runnable_editor_projects` remains the project execution opt-in.
+
+`ReusableCandidate(console)` is the shared Python and HTTP adapter. Models live in
+`reusable_models.py`; `reusable_policy.py` owns console admission comparisons.
+GET `/api/editor/{project_id}/reusable-captures?task_id=...&cursor=...&limit=25`
+enumerates direct canonical UUID names in lexical order, not creation order. Limit
+is 1–100; memory and metadata reads are page bounded. Directory enumeration is a
+single direct scan without a recursive index/watcher. Unavailable/malformed entries
+remain descriptors and cannot suppress other entries. Availability means metadata
+can be inspected under policy, not complete preparation or native acceptance.
+
+POST suffixes `/select`, `/review`, `/launch` use `ReusableCaptureChoice`,
+`ReusableCaptureSelection`, `ReusableCaptureLaunch` respectively. Select receives
+only task ID and run UUID; the server derives the path. A retained selection must
+match that exact derived path before reads. Preparation-owned binding inspection
+checks bounded receipt/binding/control metadata before console compares project,
+original source path, task manifest, data root, original LLM config, read-only
+paths, both timeouts, network, devices, environment names and every control source
+path. Current authored source bytes are never re-read for capture selection.
+Configured output restriction None is unconstrained; otherwise exact tuple equality
+is required, including order. Captured advice/run name remain captured inputs.
+
+Complete preparation verification and B2 builder remain mandatory after policy.
+Review exposes curated paths, graph/routes, advice/resources, source/composition
+identity and name-only credential readiness. `operation_request_digest` publicly
+aliases the existing operation digest; no new serialization or UUID-dependent
+identity is introduced. Fresh launch rechecks policy and retained capture, compares
+digest, then reads credentials and calls `submit_operation`. B2 admission/dispatch
+rechecks remain unchanged. Credentials are excluded from review identity.
+
+Launch looks up the candidate UUID before any project/task/capture/credential
+admission work. Existing kind, retained preparation selection and owner digest
+must match; recovery submits the durable record with an empty environment. It
+claims only admitted operation identity/status, not current project/source labels.
+Store-config equality and static containment remain enforced by the operation
+owner. Corrupt/conflicting lookup is not absence. Required configuration files
+are still validated at server startup; file-independent recovery is a live-service
+property, not permission to restart with missing required resources.
+
+`ReusableAdmissionNotAttempted` is raised only before entering `submit_operation`.
+HTTP adds `error.admission_not_attempted: true` for that exception. This certifies
+that dispatch did not call admission; it is not global proof a UUID can never be
+claimed by another caller. UI dismissal is offered only on the initial live POST
+receiving this signal. Restored, retried, conflicted or ambiguous requests never
+become dismissible through it. No operation-owner semantics or registry changes.
+
+`reusable-run.js` retains one exact launch intent in localStorage before POST and
+checks readback. Failure prevents POST. Pending intent is independent of current
+project/task/selection, so switching cannot overwrite it. Check/retry is explicit;
+reconnect never submits automatically. Completed or eligible initial refused intent
+requires explicit dismissal and storage readback confirmation. Monitor uses existing
+Slow-control status/log/token routes and native accepted/rejected states.
+
+Editor projects/source state are exposed through a read-only projection/event:
+project ID, enabled flag, saved digest, source availability, dirty draft and conflict
+facts. Draft changes update comparison only; project/task/capture changes fence
+reviews by generation. Session revision fences prior-connection replies. Disconnect
+clears review content and disables network actions while preserving editor drafts
+and pending operation identity. No Bearer token enters the projection/storage.
+
+Qualification: focused console reusable policy/order/HTTP/recovery tests and
+`tests/browser/reusable_candidate.mjs` using the same explicit Python/Playwright/
+Chromium environment as the editor gate plus optional `CONSOLE_EVIDENCE_DIR`.
+The real offline browser witness uses real preparation/HTTP/detached/native sandbox
+CPU validation and a local deterministic provider with fail-closed URL/proxy guards.
+It is not paid-provider, training, scientific-quality or production qualification.

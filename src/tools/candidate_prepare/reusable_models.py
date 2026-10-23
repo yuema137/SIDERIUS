@@ -84,6 +84,15 @@ class ReusablePreparedSelection(PreviewModel):
     expected_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class ReusableBindingInspection(PreviewModel):
+    """Pinned metadata only; full preparation verification is still required."""
+
+    selection: ReusablePreparedSelection
+    binding: ReusableBindingCapture
+    receipt: ReusablePreparationReceipt
+    control: ReusablePreparationControl
+
+
 class VerifiedReusablePreparation(PreviewModel):
     selection: ReusablePreparedSelection
     request: CandidateRunRequest
