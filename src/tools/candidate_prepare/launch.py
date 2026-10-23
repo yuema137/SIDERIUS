@@ -9,7 +9,7 @@ from pydantic import BaseModel, TypeAdapter
 from core.durable_io import publish_bytes_write_once
 from tools.workflow_preview import WorkflowPreview
 from tools.workspace_sandbox.profile import SandboxProfile
-from tools.workspace_sandbox.runner import run
+from tools.workspace_sandbox.runner import ExecutionResult, run
 
 from .admission import absent_destination, admit, canonical, verify_sources
 from .bundle import verify_bundle
@@ -90,35 +90,7 @@ def prepare_candidate(
         publish(control_dir / "request.json", control)
         for name, (_, payload) in zip(("manifest.snapshot", "llm.snapshot"), captures, strict=True):
             publish_bytes_write_once(str(control_dir / name), payload)
-        profile = SandboxProfile(
-            workspace=output,
-            read_only=tuple(
-                Path(path)
-                for path in sorted(
-                    set(
-                        (
-                            request.data_root,
-                            request.task_manifest,
-                            request.llm_config_file,
-                            *request.task_read_only,
-                        )
-                    )
-                )
-            ),
-            network=False,
-            devices=(),
-            environment_names=(),
-            timeout_seconds=request.preparation_timeout_seconds,
-        )
-        result = run(
-            profile,
-            [
-                sys.executable,
-                "-m",
-                "tools.candidate_prepare.child",
-                str(control_dir / "request.json"),
-            ],
-        )
+        result = supervise(request, "tools.candidate_prepare.child")
         if result.status == "completed":
             terminal = reconcile(control, initial)
         else:
@@ -140,3 +112,43 @@ def prepare_candidate(
     canonical(str(control_dir))
     publish(control_dir / "receipt.json", terminal)
     return terminal
+
+
+def supervise(
+    request: CandidatePreparationRequest,
+    module: str,
+    *,
+    extra_read_only: tuple[Path, ...] = (),
+) -> ExecutionResult:
+    """One native offline sandbox policy for both declaration formats."""
+    output = Path(request.output_dir)
+    profile = SandboxProfile(
+        workspace=output,
+        read_only=tuple(
+            Path(path)
+            for path in sorted(
+                set(
+                    (
+                        request.data_root,
+                        request.task_manifest,
+                        request.llm_config_file,
+                        *request.task_read_only,
+                        *(str(path) for path in extra_read_only),
+                    )
+                )
+            )
+        ),
+        network=False,
+        devices=(),
+        environment_names=(),
+        timeout_seconds=request.preparation_timeout_seconds,
+    )
+    return run(
+        profile,
+        [
+            sys.executable,
+            "-m",
+            module,
+            str(output / "preparation/request.json"),
+        ],
+    )

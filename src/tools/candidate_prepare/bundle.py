@@ -11,7 +11,13 @@ from workflows.definition import WorkflowDocument
 
 from .admission import canonical
 from .declaration import candidate_document
-from .models import NATIVE_FILES, PreparationControl, PreparedArtifacts, ProposalIdentity
+from .models import (
+    NATIVE_FILES,
+    CandidatePreparationRequest,
+    PreparationControl,
+    PreparedArtifacts,
+    ProposalIdentity,
+)
 
 
 def verify_bundle(
@@ -56,6 +62,17 @@ def verify_bundle(
     document = WorkflowDocument.model_validate_json(read_bytes(output / "workflow.json"))
     if document != candidate_document(request):
         raise ValueError("child changed supported declaration")
+    candidate, preview = build_candidate(request, document, observe)
+    return candidate, preview, index.composition_fingerprint
+
+
+def build_candidate(
+    request: CandidatePreparationRequest,
+    document: WorkflowDocument,
+    observe: Callable[[Path, str], tuple[FileObservation, bytes]],
+) -> tuple[CandidateRunRequest, WorkflowBindings]:
+    """Build the existing worker request from parent-verified declaration and observations."""
+    output = canonical(request.output_dir)
     preview_request = WorkflowPreviewRequest(
         document=document, project_root=str(output), llm_config_file="llm.json"
     )
@@ -86,4 +103,4 @@ def verify_bundle(
         implementation_advice=request.implementation_advice,
         validation_advice=request.validation_advice,
     )
-    return candidate, preview, index.composition_fingerprint
+    return candidate, preview
