@@ -139,6 +139,35 @@ polling and stale observation on disconnection. Known-ID monitoring is independe
 of draft/review. Server termination does not cancel detached native operations;
 OS/cgroup/host lifecycle limitations remain those of candidate_operations.
 
+## Presentation preferences
+
+`/theme.css` owns semantic colors shared by console and editor; `/theme.js`
+applies the initial theme before styles/body load under the existing self-only
+CSP. The native `Color theme` select exposes System (initial default), Light and
+Dark. System follows `prefers-color-scheme` changes; explicit selections take
+precedence. Only the validated enum is stored in `siderius.console.theme`.
+Invalid stored values use System. Storage read/write denial leaves selection
+working in page memory. Future loads reuse any readable previously stored enum;
+missing, invalid or unreadable preferences fall back to System. A failed write
+does not erase an older stored preference.
+
+Theme changes only update the root `data-theme` attribute: no reload, API calls,
+new polling timers, draft/source mutation or review invalidation. Existing
+operation IDs, graph selection and editor state retain their owners. Both pages
+use the same tokens for controls, warnings, disabled states, focus and selected
+HTML graph nodes. These console/editor surfaces currently render declarations
+as HTML nodes/text connections and reported usage as a table. The theme browser
+gate qualifies those surfaces; it makes no claim about other or future renderers.
+
+Theme browser gate: with this checkout's frozen `EDITOR_PYTHON`, existing
+`CONSOLE_PLAYWRIGHT_MODULE`, `CONSOLE_BROWSER_EXECUTABLE` and optional
+`CONSOLE_SCREENSHOT_DIR`, run `node tests/browser/console_themes.mjs`.
+It starts the temporary editor API fixture on an ephemeral loopback port and
+intercepts console observations; no native operations or provider calls run.
+It checks preference/system/keyboard/storage behavior, retained pending
+inspector/source/review and monitoring identity, contrast and desktop/narrow
+screenshots in each theme. Screenshot contents are synthetic fixtures.
+
 ## Validation
 
 Focused deterministic suites: `tests/unit/tools/candidate_console`, native

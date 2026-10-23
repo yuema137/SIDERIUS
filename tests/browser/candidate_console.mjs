@@ -31,7 +31,7 @@ const assets = join(dirname(fileURLToPath(import.meta.url)), '../../src/tools/ca
 const screenshots = process.env.CONSOLE_SCREENSHOT_DIR || await mkdtemp(join(tmpdir(), 'siderius-console-browser-'));
 await mkdir(screenshots, { recursive: true });
 const server = createServer(async (req, res) => {
-  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'] };
+  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/theme.js': ['theme.js', 'text/javascript'], '/theme.css': ['theme.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
   const file = files[req.url];
   if (!file) { res.writeHead(404); res.end(); return; }
   try {
@@ -231,13 +231,27 @@ try {
   await page.locator('#review-status').filter({ hasText: 'Launch blocked' }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Launch candidate', exact: true }).isDisabled(), true);
   assert.ok((await page.locator('#review').textContent()).includes('GEMINI_API_KEY'));
-  await page.screenshot({ path: join(screenshots, 'readiness-blocked.png'), fullPage: true });
+  const blockedReview = await page.locator('#review').textContent();
+  const blockedId = await page.locator('#prepare-id').textContent();
+  const blockedMutations = requests.filter(item => item.method === 'POST').length;
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({width, height: 900});
+    for (const mode of ['light', 'dark']) {
+      await page.getByRole('combobox', {name: 'Color theme', exact: true}).selectOption(mode);
+      assert.equal(await page.locator('#review').textContent(), blockedReview);
+      assert.equal(await page.locator('#prepare-id').textContent(), blockedId);
+      assert.equal(await page.locator('#launch-button').isDisabled(), true);
+      assert.equal(requests.filter(item => item.method === 'POST').length, blockedMutations);
+      await page.screenshot({path: join(screenshots, `readiness-blocked-${width}-${mode}.png`), fullPage: true});
+    }
+  }
+
   readinessBlocked = false;
   await page.getByRole('button', { name: 'Refresh readiness', exact: true }).click();
   await page.locator('#review-status').filter({ hasText: 'Name presence checked' }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Launch candidate', exact: true }).isEnabled(), true);
   assert.equal(faults.length, 0, faults.join('\n'));
-  console.log(`PASS: real ${browser.version()} interactions; UUID retries, explicit launch, stale/unknown/rejected/finishing, escaped text, byte cursor, GET-only reopen, memory-only token, reported-token replacement/null/partial/stale/epoch fencing and readiness blockers/refresh plus eight screenshots (${screenshots}).`);
+  console.log(`PASS: real ${browser.version()} interactions; UUID retries, explicit launch, stale/unknown/rejected/finishing, escaped text, byte cursor, GET-only reopen, memory-only token, reported-token replacement/null/partial/stale/epoch fencing and readiness blockers/refresh plus eleven screenshots (${screenshots}).`);
   await context.close();
 } finally {
   if (browser) await browser.close();
