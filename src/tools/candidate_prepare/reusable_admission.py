@@ -19,6 +19,7 @@ from .admission import absent_destination, admit, canonical, overlap
 from .models import CandidatePreparationRequest
 from .resolution import (
     ResolvedExternalLocation,
+    ResolvedReusableCandidate,
     ReusableCandidateLocations,
     resolve_reusable_candidate,
 )
@@ -115,7 +116,20 @@ def captured_request(
     )
 
 
-def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation:
+@dataclass(frozen=True)
+class ReusableSourceInspection:
+    """Source-only projection: path metadata may be inspected, external content is not read."""
+
+    observation: FileObservation
+    document: ReusableWorkflowDocument
+    locations: ReusableCandidateLocations
+    resolved: ResolvedReusableCandidate
+    request: CandidatePreparationRequest
+
+
+def _inspect_source(
+    request: ReusableCandidatePreparationRequest,
+) -> tuple[ReusableSourceInspection, bytes]:
     request = ReusableCandidatePreparationRequest.model_validate_json(request.model_dump_json())
     source, project, runs = map(
         canonical, (request.source_path, request.project_root, request.runs_root)
@@ -134,13 +148,28 @@ def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation
     locations = reusable_locations(document, project, envelope)
     resolved = resolve_reusable_candidate(document, locations)
     native = captured_request(request, document, locations)
-    captures = admit(native, future_parent=envelope)
     if overlap(envelope, source):
         raise ValueError("envelope overlaps authored source")
+    return ReusableSourceInspection(observed, document, locations, resolved, native), payload
+
+
+def inspect_reusable_source(
+    request: ReusableCandidatePreparationRequest,
+) -> ReusableSourceInspection:
+    """Read configured source once; resolve declarations without reading manifest/config."""
+    return _inspect_source(request)[0]
+
+
+def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation:
+    inspected, payload = _inspect_source(request)
+    observed, document, locations = inspected.observation, inspected.document, inspected.locations
+    native, resolved = inspected.request, inspected.resolved
+    envelope = Path(locations.workspace).parent
+    captures = admit(native, future_parent=envelope)
     binding = ReusableBindingCapture(
         run_id=request.run_id,
         envelope=str(envelope),
-        project_root=str(project),
+        project_root=str(canonical(request.project_root)),
         original_source=observed,
         snapshot_path=str(envelope / "workflow.py.snapshot"),
         reusable_semantic_digest=document.declaration_digest(),
