@@ -25,3 +25,7 @@ Its generated guide shows the selected Python and exact check/launch commands.
 The optional [run settings preview](setup_review/README.md) is also intended for
 operators: it writes offline JSON and HTML for a fresh standard single-iteration
 declaration. It does not launch the workflow or certify task/environment readiness.
+
+[Detached candidate operations](candidate_operations/README.md) submit native
+preparation or candidate execution and let a later command inspect the result.
+They use an explicit private local store and preserve native outcome semantics.

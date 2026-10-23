@@ -1,5 +1,6 @@
 """Detached local candidate operations; no native task imports or provider construction."""
 
+from .logs import read_operation_log
 from .models import (
     CandidateOperation,
     LogChunk,
@@ -23,5 +24,6 @@ __all__ = [
     "OperationSubmission",
     "PrepareOperation",
     "read_operation",
+    "read_operation_log",
     "submit_operation",
 ]

@@ -17,7 +17,11 @@ JSON_LIMIT = 4 * 1024 * 1024
 
 def canonical(value: str) -> Path:
     path = Path(value)
-    if not path.is_absolute() or str(path) != value or path != path.resolve():
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError, ValueError) as error:
+        raise OperationFailure("path", "cannot resolve selected path") from error
+    if not path.is_absolute() or str(path) != value or path != resolved:
         raise OperationFailure("path", "use canonical absolute paths without aliases")
     for component in (path, *path.parents):
         if component.is_symlink():

@@ -2,21 +2,16 @@
 
 import os
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 
-from tests.unit.tools.candidate_prepare.conftest import selection
-from tools.candidate_operations import OperationStoreConfig, PrepareOperation
 from tools.candidate_operations.files import JSON_LIMIT, read_bytes
-from tools.candidate_operations.models import OperationFailure, OperationRecord, RuntimeIdentity
+from tools.candidate_operations.models import OperationFailure
 from tools.candidate_operations.store import (
     claim,
-    digest,
     existing,
     load_record,
     locked_store,
-    now,
     require_available,
     validate_config,
     validate_submission,
