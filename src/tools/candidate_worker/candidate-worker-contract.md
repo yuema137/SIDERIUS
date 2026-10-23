@@ -189,3 +189,8 @@ snapshots refuse execution. Captures do not freeze trusted task/plugin deploymen
 Absent capture preserves ordinary native caller behavior and legacy operation
 digests; only the absent `workflow_source` key is omitted by the operation digest
 owner.
+Newly serialized requests include `workflow_source: null` when no source is
+provided. This is an additive request metadata format change, not byte parity
+with older newly written requests. Existing persisted bytes that omit the field
+remain readable and retain their old operation identity; prepared artifact hashes
+continue to describe the actual stored bytes.
