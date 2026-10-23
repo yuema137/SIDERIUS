@@ -125,9 +125,10 @@ Failures preserve diagnostic evidence; partial candidate requests are not proof
 of successful reusable preparation. A missing receipt means unknown completion.
 An edit during preparation fails; an edit after success affects future captures.
 
-Preparation checks original capture, binding and resolved request together at
-publication. Direct worker launch of `inputs/candidate_request.json` validates
-the resolved v1 inputs; it does **not** verify their relationship to the original
-v2 source. A future GUI/operation adapter must verify that relationship before offering
-reusable launch.
-This route does not launch, resume, or accept a scientific candidate.
+To execute one of these prepared runs, follow the
+[reusable operation steps](../candidate_operations/README.md#run-a-prepared-reusable-workflow).
+The shared builder checks the captured workflow and returns a submission for you
+to save and retry safely. An edit to your current source does not change that selected run.
+Direct worker launch checks only the generated v1 inputs; use the operation route
+when launching a retained reusable capture. Preparing alone does not launch,
+resume, or accept a scientific candidate. Reusable GUI launch remains pending.

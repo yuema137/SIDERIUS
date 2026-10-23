@@ -1,6 +1,7 @@
 """Parent verification against retained capture, never child-supplied authority."""
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -40,10 +41,12 @@ def encoded(model: BaseModel) -> bytes:
     return (model.model_dump_json(indent=2) + "\n").encode()
 
 
-def verify_payloads(plan: ReusablePreparationPlan, fingerprint: str) -> None:
+def verify_payloads(
+    plan: ReusablePreparationPlan, fingerprint: str, read_bytes: Callable[[Path], bytes]
+) -> None:
     request = plan.binding.request
     output = Path(request.output_dir)
-    proposal = ProposalProjection.model_validate_json(safe_bytes(output / "proposal.json"))
+    proposal = ProposalProjection.model_validate_json(read_bytes(output / "proposal.json"))
     proposal_dir = candidate_proposal_dir(Path(request.candidate_workspace), request.run_name)
     expected = StorageConfig(
         backend="local",
@@ -51,7 +54,7 @@ def verify_payloads(plan: ReusablePreparationPlan, fingerprint: str) -> None:
     )
     if proposal.storage != expected:
         raise ValueError("proposal storage differs from selected native destination")
-    storage = StorageConfig.model_validate_json(safe_bytes(output / "storage.json"))
+    storage = StorageConfig.model_validate_json(read_bytes(output / "storage.json"))
     if storage != impl_attempt_storage(str(proposal_dir), request.run_name, 1).storage:
         raise ValueError("attempt storage differs from selected native destination")
     if proposal.task_composition_ref.semantic_fingerprint != fingerprint:
@@ -79,6 +82,8 @@ def verify_reusable_bundle(
     plan: ReusablePreparationPlan,
     source: bytes,
     control: ReusablePreparationControl,
+    *,
+    read_bytes: Callable[[Path], bytes] = safe_bytes,
 ) -> tuple[CandidateRunRequest, WorkflowBindings, str]:
     """Internal verifier requires independent in-memory parent capture."""
     binding = plan.binding
@@ -88,19 +93,19 @@ def verify_reusable_bundle(
         (Path(binding.snapshot_path), source),
         (output / "preparation/request.json", encoded(control)),
     ):
-        if safe_bytes(path) != expected:
+        if read_bytes(path) != expected:
             raise ValueError(f"parent capture changed: {path.name}")
     resolved = resolve_reusable_candidate(plan.document, binding.locations)
     options = resolved.preparation_options.model_dump()
     if binding.request.model_dump(include=set(options)) != options:
         raise ValueError("native options differ from authored preparation options")
-    document = WorkflowDocument.model_validate_json(safe_bytes(output / "workflow.json"))
+    document = WorkflowDocument.model_validate_json(read_bytes(output / "workflow.json"))
     if document != resolved.document:
         raise ValueError("child changed resolved declaration")
     derived = render_workflow_source(resolved.document).encode()
-    if safe_bytes(output / "workflow.resolved.py") != derived:
+    if read_bytes(output / "workflow.resolved.py") != derived:
         raise ValueError("child changed derived source")
-    index = PreparedArtifacts.model_validate_json(safe_bytes(output / "preparation/child.json"))
+    index = PreparedArtifacts.model_validate_json(read_bytes(output / "preparation/child.json"))
     if (
         index.preparation_id != control.preparation_id
         or index.control_sha256 != hashlib.sha256(encoded(control)).hexdigest()
@@ -108,7 +113,7 @@ def verify_reusable_bundle(
         raise ValueError("child index disagrees with parent control identity")
 
     def observe(path: Path, reference: str) -> tuple[FileObservation, bytes]:
-        payload = safe_bytes(path)
+        payload = read_bytes(path)
         return observation(path, reference, payload), payload
 
     if index.files != tuple(observe(output / name, name)[0] for name in REUSABLE_FILES):
@@ -119,7 +124,7 @@ def verify_reusable_bundle(
         control.sources[1].size_bytes,
     ):
         raise ValueError("saved profile differs from selected bytes")
-    verify_payloads(plan, index.composition_fingerprint)
+    verify_payloads(plan, index.composition_fingerprint, read_bytes)
     candidate, bindings = build_candidate(binding.request, document, observe)
     values = candidate.model_dump()
     values["workflow_source"] = WorkflowSourceSnapshot(

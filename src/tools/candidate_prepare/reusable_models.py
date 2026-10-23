@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import Field, field_validator
 
 from core.generated_artifact_name import validate_generated_artifact_name
+from tools.candidate_worker.models import CandidateRunRequest
 from tools.workflow_preview.models import FileObservation, PreviewModel
 from workflows.definition import ReusableWorkflowDocument, WorkflowDocument
 
@@ -74,3 +75,19 @@ class ReusablePreparationReceipt(PreviewModel):
 
 
 REUSABLE_FILES = (*NATIVE_FILES, "workflow.resolved.py")
+
+
+class ReusablePreparedSelection(PreviewModel):
+    """Caller-retained identity of exact published receipt bytes, not a live lookup."""
+
+    envelope: str
+    expected_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class VerifiedReusablePreparation(PreviewModel):
+    selection: ReusablePreparedSelection
+    request: CandidateRunRequest
+    binding: ReusableBindingCapture
+    receipt: ReusablePreparationReceipt
+    preparation_id: UUID
+    composition_fingerprint: str

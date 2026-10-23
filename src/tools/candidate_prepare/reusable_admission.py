@@ -57,6 +57,35 @@ class CapturedPreparation:
     inputs: tuple[tuple[FileObservation, bytes], ...]
 
 
+def reusable_locations(
+    document: ReusableWorkflowDocument, project: Path, envelope: Path
+) -> ReusableCandidateLocations:
+    """Map captured task references and managed roles to the fixed run layout."""
+    if any(not isinstance(item, ManagedCandidateBinding) for item in document.definition.externals):
+        raise ValueError(
+            "reusable preparation supports managed externals only; literal externals are unsupported"
+        )
+    task = document.definition.task
+    manifest = resolve_location(project, task.manifest, "task.manifest")
+    data = resolve_location(project, task.data_root, "task.data_root")
+    return ReusableCandidateLocations(
+        manifest=str(manifest),
+        data_root=str(data),
+        workspace=str(envelope / "workspace"),
+        externals=tuple(
+            ResolvedExternalLocation(
+                binding=item.id,
+                location=str(
+                    envelope
+                    / "inputs"
+                    / ("proposal.json" if item.contract == "proposal.input" else "storage.json")
+                ),
+            )
+            for item in document.definition.externals
+        ),
+    )
+
+
 def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation:
     request = ReusableCandidatePreparationRequest.model_validate_json(request.model_dump_json())
     source, project, runs = map(
@@ -73,33 +102,11 @@ def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation
     document = parse_workflow_source(payload.decode("utf-8"))
     if not isinstance(document, ReusableWorkflowDocument):
         raise ValueError("reusable preparation requires a v2 source")
-    if any(not isinstance(item, ManagedCandidateBinding) for item in document.definition.externals):
-        raise ValueError(
-            "reusable preparation supports managed externals only; literal externals are unsupported"
-        )
-    task = document.definition.task
-    manifest = resolve_location(project, task.manifest, "task.manifest")
-    data = resolve_location(project, task.data_root, "task.data_root")
-    locations = ReusableCandidateLocations(
-        manifest=str(manifest),
-        data_root=str(data),
-        workspace=str(envelope / "workspace"),
-        externals=tuple(
-            ResolvedExternalLocation(
-                binding=item.id,
-                location=str(
-                    envelope
-                    / "inputs"
-                    / ("proposal.json" if item.contract == "proposal.input" else "storage.json")
-                ),
-            )
-            for item in document.definition.externals
-        ),
-    )
+    locations = reusable_locations(document, project, envelope)
     resolved = resolve_reusable_candidate(document, locations)
     native = CandidatePreparationRequest(
-        task_manifest=str(manifest),
-        data_root=str(data),
+        task_manifest=locations.manifest,
+        data_root=locations.data_root,
         output_dir=str(envelope / "inputs"),
         candidate_workspace=locations.workspace,
         **request.model_dump(

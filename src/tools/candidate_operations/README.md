@@ -66,8 +66,44 @@ before candidate execution.
    preparation can be `prepared`, while a candidate can be `accepted` or
    `rejected`; both can fail, time out or be interrupted. Acceptance means native
    candidate validation passed, not training or scientific scoring. To execute a
-   prepared bundle, review its `candidate_request_path`, wrap that file with
+   legacy prepared bundle, review its `candidate_request_path`, wrap that file with
    `kind: "candidate"` and a new UUID, then submit explicitly.
+
+## Run a prepared reusable workflow
+
+First [prepare your reusable workflow](../candidate_prepare/README.md#prepare-several-runs-from-one-workflow).
+Each prepared run has its own directory with captured source, inputs and a future
+workspace. You can launch that capture even after editing your source for future
+runs. The operation checks that the selected capture and native inputs still agree.
+
+1. In `store.json`, include your runs directory in both `preparation_roots` and
+   `candidate_roots`: the prepared inputs and future workspace are siblings inside
+   each run directory. Keep `state_root` separate.
+2. Use `select_reusable_preparation` and `build_reusable_operation`, following the
+   [Python construction recipe](candidate-operations-contract.md#shared-python-and-cli-recipe),
+   to select the reported prepared directory and save `reusable-submission.json`
+   outside it. Your coding assistant or integration can do this immediately after
+   preparation. Review the selected task, workspace, nodes, provider routes and
+   execution limits. These describe the captured workflow; current source edits
+   belong to later runs.
+3. Bind the chosen credentials and submit:
+
+   ```sh
+   .venv/bin/python -m tools.candidate_operations submit \
+     --store-config store.json --request reusable-submission.json
+   ```
+
+Use the status and log commands above with the returned operation ID. If the
+response is lost, resubmit the saved file unchanged: the same operation is
+returned without a second execution, even if preparation files later disappear.
+Changed preparation files refuse a new launch. Preserve run artifacts so status
+readers can continue to verify the native result.
+
+`prepared` means inputs exist; `starting` means an operation was admitted. A later
+native `accepted` means candidate validation passed and proposal, implementation
+and validation outputs are available. It does not mean training or scientific
+scoring ran. Professional and Assistant use this same Python/CLI route. Reusable
+GUI launch and resuming a previous run are not available through it.
 
 For reported LLM tokens, Python callers can use the same stored operation UUID:
 

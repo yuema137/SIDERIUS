@@ -19,6 +19,7 @@ from .models import (
 )
 from .process import environment, runtime_identity, spawn
 from .read import releasable
+from .reusable import verify_reusable_operation
 from .store import (
     claim,
     digest,
@@ -73,6 +74,7 @@ def submit_operation(
             )
         require_available(root, lambda operation_id: releasable(config, operation_id))
         if submission.kind == "candidate":
+            verify_reusable_operation(config, submission)
             try:
                 observed = fresh_preview(submission.request)
             except (OSError, ValueError) as error:

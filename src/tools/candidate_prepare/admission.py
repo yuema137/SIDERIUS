@@ -1,6 +1,7 @@
 """Read-only admission and source observations, before the exclusive output claim."""
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from tools.workflow_preview.config import parse_config
@@ -87,13 +88,17 @@ def admit(
     return captures
 
 
-def verify_sources(control: PreparationControl) -> None:
+def verify_sources(
+    control: PreparationControl,
+    *,
+    read_file: Callable[[Path, str], tuple[FileObservation, bytes]] = observe_file,
+) -> None:
     expected_paths = (control.request.task_manifest, control.request.llm_config_file)
     if tuple(item.path for item in control.sources) != expected_paths:
         raise ValueError("control source paths disagree with selections")
     if tuple(item.reference for item in control.sources) != ("task.manifest", "llm_config"):
         raise ValueError("control source references disagree with selections")
     for expected in control.sources:
-        actual, _ = observe_file(canonical(expected.path), expected.reference)
+        actual, _ = read_file(canonical(expected.path), expected.reference)
         if actual != expected:
             raise ValueError(f"selected input changed: {expected.reference}")
