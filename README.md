@@ -27,11 +27,22 @@ Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
 
 ## Quick start with your coding agent
 
+Before you start, you need **Python 3.12+ and uv**, your dataset location, and a
+project directory outside this checkout for your task, settings and results.
+Use this checkout's own `.venv/bin/python` after installation. Provider keys
+are needed for real model calls; offline setup checks need none.
+The optional browser console also needs the
+[Linux workspace sandbox](src/tools/workspace_sandbox/README.md).
+
+Follow [getting started](docs/getting-started/README.md) for the ordered setup,
+where to put credentials, and how to open the candidate console.
+
 Clone the repository and open it in your coding agent:
 
 ```bash
 git clone https://github.com/yuema137/SIDERIUS.git
 cd SIDERIUS
+uv sync --group dev --frozen
 ```
 
 **Both Professional and Assistant start with a short request.** They describe

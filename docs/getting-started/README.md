@@ -10,19 +10,78 @@ the choices and use your agent to read contracts, edit files and check the setup
 Both use the same framework; these names do not select a CLI flag or force a
 review. Handwritten setup is supported, but is not the recommended first route.
 
-1. Open the repository in your coding agent and describe your task and data
-   location. You do not need a prepared manifest or project layout.
-2. Let the agent follow [installation](installation.md), check the environment
-   and explain the provider keys you need to supply. Keep credentials outside
-   the repositories and notebooks.
-3. Agree on the prediction target, data splits, score and experiment budgets.
-   The agent creates the task and experiment in an external project and uses
-   [first-run checks](first-run.md) to inspect its saved command and configuration.
-   For an existing scientific task, it can start from a
+## Prepare your project
+
+1. Follow [installation](installation.md): use Python 3.12+ (this checkout pins
+   3.12) and uv, run
+   `uv sync --group dev --frozen` in this checkout, and use its `.venv/bin/python`.
+2. Open the checkout in your coding agent. Describe your research question,
+   dataset location and an external project directory. You do not need a
+   prepared manifest. Agree on the prediction target, splits, score and budgets;
+   the agent creates your [task package](../reference/task-composition.md) and
+   experiment files there. For an existing scientific task, start from a
    [companion tutorial](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md).
-4. Have your agent show the saved settings, command and output directory before
-   the first real run. You can optionally inspect an HTML report through
-   [setup review](../../src/tools/setup_review/README.md).
+3. Save a reviewed [LLM profile](../../configs/llm/README.md) in your project.
+   This JSON file selects the experiment's providers and models by role;
+   your coding agent's own model is a separate choice. Supply only credentials
+   required by those selected routes, using the launch route below.
+
+For example, keep task inputs and run outputs in your external project. These
+are example names; the browser does not generate this layout:
+
+```text
+/absolute/project/                 # outside the SIDERIUS checkout
+  task.yaml                        # task manifest; references your task plugins
+  task_plugins/                    # dataset/model/metric implementations
+  data/                            # existing dataset, or configure another external root
+  llm.json                         # saved provider/model profile
+  scripts/                         # reviewed experiment launch scripts
+  workspaces/                      # scientific run outputs
+  console.json                     # optional console paths, resources and time limits
+  preparations/                    # console only: create this output parent
+  candidates/                      # console only: create this separate output parent
+  operation-state/                 # console only: configured operation records
+```
+
+The task manifest defines the science; `console.json` connects those existing
+inputs to the console. The console creates fresh per-operation directories
+inside `preparations/` and `candidates/`; do not create those child workspaces
+yourself. Keep private token/key files outside version control, for example in
+a separate machine-owned directory.
+
+## Launch a research workflow from the CLI
+
+For training and scientific scores, use [first-run checks](first-run.md) and
+your external project's saved launch script. This route reads credentials from
+the launch process: use a trusted external shell-compatible credential file or
+managed injection, with the name-only check in the
+[API-key procedure](installation.md#api-keys). The console's JSON credential
+file is a different format. Have your agent show the saved settings, command
+and output directory before execution. An optional
+[setup review](../../src/tools/setup_review/README.md) produces an HTML report.
+
+## Open the optional candidate console
+
+The browser console prepares, reviews and launches **one candidate:
+Propose → Implement → Validate**. It does not train or score models. Create the
+external project with your coding agent first: the browser does not create
+projects or edit the console's task configuration.
+
+Follow the [console setup](../../src/tools/candidate_console/README.md) in order:
+check the Linux sandbox, configure existing task/data/profile paths and output
+parents, create private token/key files, then run `check` and `serve`. The
+[configuration example](../../src/tools/candidate_console/console-contract.md#configuration)
+lists all fields. The [credential instructions](../../src/tools/candidate_console/README.md#credentials)
+show the required JSON format: the console access token unlocks the page, while
+provider keys are read from its configured private file. Shell exports or a
+project `.env` do not satisfy that console binding.
+
+Open the printed address, enter the token and select a task. Click **Prepare**,
+review inputs, models and resources, then explicitly **Launch candidate** to
+run code and make any paid calls. Configuration checks and offline preparation
+do not prove provider access or candidate success. Keep the operation ID for
+status and logs. The optional Workflow Editor edits an existing source file;
+saving it does not change what native Prepare executes.
 
 The [Quickstart pack](../../examples/quickstart/README.md) offers a synthetic CPU
 check without provider calls. It checks installation and task contracts, not
