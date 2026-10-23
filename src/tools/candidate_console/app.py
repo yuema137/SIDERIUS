@@ -20,6 +20,7 @@ from .editor import editor_router
 from .files import token
 from .models import ConsoleConfig, LaunchSelection, PreparedSelection, PrepareSelection
 from .reusable_models import ReusableAdmissionNotAttempted
+from .reusable_preparation_routes import reusable_preparation_router
 from .reusable_routes import reusable_router
 from .service import CandidateConsole
 
@@ -37,6 +38,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     )
     app.include_router(edited_router(service))
     app.include_router(reusable_router(service))
+    app.include_router(reusable_preparation_router(service))
     app.add_middleware(RequestBoundary, config=service.config, token=token(config.auth_token_file))
 
     @app.exception_handler(RequestValidationError)
@@ -139,6 +141,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "editor.html": "text/html",
             "editor.js": "text/javascript",
             "reusable-run.js": "text/javascript",
+            "reusable-intents.js": "text/javascript",
+            "new-run.js": "text/javascript",
             "editor.css": "text/css",
         }
         if asset not in types:

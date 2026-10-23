@@ -256,9 +256,10 @@ Conflict handling preserves the pending proposal and requires explicit discard
 or new-base selection followed by review. A connection failure retains proposal
 and reports unconfirmed save. Source/labels/diffs render as text.
 
-The Editor has no Run/Prepare button. Native Prepare still generates its fixed
-chain; declaration saves establish neither scientific readiness nor immutable
-runtime closure. Source inspection never opens referenced resources.
+The editor source owner only reviews/saves files. The adjacent New run controller
+uses the saved-source preparation adapter described below; declaration saves
+establish neither scientific readiness nor immutable runtime closure. Editor
+source inspection never opens referenced resources.
 
 Qualification: targeted `tests/unit/tools/test_workflow_authoring.py` and
 `tests/unit/tools/candidate_console/test_editor.py`; real browser:
@@ -445,4 +446,68 @@ envelope `run_id`; candidate validation remains null. Logs and preparation token
 not-applicable state use existing operation accessors. The legacy preparation
 review action remains restricted to `kind="prepare"`. Code/CLI users select a
 successful reusable envelope through the existing configured prepared-capture
-flow. This monitor extension adds no New run route, form or job persistence.
+flow. The New run adapter below consumes this monitor without adding job persistence.
+
+
+## New run from saved reusable source
+
+`ReusablePreparation(console)` in `reusable_preparation.py` exposes
+`review(project_id, NewRunSelection)` and `prepare(project_id, NewRunIntent)`.
+POST `/api/editor/{project_id}/reusable-preparations/review` returns `NewRunReview`;
+POST `/prepare` returns existing `OperationHandle` with HTTP 202. Both use the
+same authentication/origin/body boundary and threadpool transport as capture APIs.
+Selection accepts only task_id, run_name, run_id, preparation_operation_id and
+expected_source_sha256. Intent adds native `ReusablePreparationExpectation`;
+no browser paths/resources, source bytes or credentials are accepted.
+
+Fresh review/prepare resolves configured project/task/root, builds the native
+request, invokes preparation-owned `inspect_reusable_source`, compares the shared
+`check_request_policy`, then performs full native preflight and rechecks policy.
+`None` output restriction is unconstrained; explicit tuples require exact equality.
+The source-only helper can inspect path metadata but reads only configured source
+content. Unconfigured task references fail before manifest/config content reads.
+Full preflight owns actual observations; owner request digest and ordered typed
+observations form the expectation. Review creates no directories or task imports.
+
+Prepare recovers durable UUID/expectation before mutable project/task/source policy.
+Known records also require retained run UUID/name/source digest to match native
+request metadata. GUI project/task labels are navigation context, not durable native
+admission fields. An exact recovery submits the durable operation with empty
+environment and same expectation. Unknown/corrupt/conflicting records are not absence.
+Absent UUIDs repeat fresh source policy/preflight, compare the retained expectation,
+then call submit; owner fresh-preclaim observation checks remain authoritative.
+Only console pre-submit failures get `admission_not_attempted`; recovery or submit
+failures never get that signal. Preparation never reads credentials.
+
+`new-run.js` requires saved parsed v2 source, enabled project, digest, no draft,
+conflict or save in flight. Task starts at an explicit blank placeholder. It allocates
+run/preparation UUIDs once for the current form and retains them across reviews.
+Editor projection adds `reusableSource` and `saving`. Generation/project/session
+fences invalidate stale task/review responses. Pending intent survives form/source
+changes. Successful preparation is not automatic candidate dispatch.
+
+`reusable-intents.js` coordinates only the candidate and preparation keys:
+`siderius.reusable-candidate.v1` (compatible payload) and
+`siderius.reusable-preparation.v1` (version/origin/project/exact NewRunIntent).
+Before dispatch/retry/state update/dismissal, stored serialization must equal the
+retained record. Readback failure prevents POST. Release evidence is in memory,
+requires matching kind/UUID/request digest, and is cleared by storage events.
+Completed/operation_failed plus exited process, or confirmed spawn_failed, permits
+release; finishing/unknown/alive does not. Only initial live pre-submit refusal
+permits refused-intent dismissal. Restored/retried/404/transport outcomes retain
+identity. Explicit removal rereads identity and confirms absence. This is advisory
+coordination, not atomic localStorage locking; the native store serializes effects.
+
+An inspected released preparation history may coexist with candidate launch.
+Explicit Open requires completed prepare_reusable with verified receipt and native
+prepared status; it calls B3's public `openPrepared` selection action, which fences
+older lists/selections/reviews and invokes server `/select`. Candidate Review and
+Launch stay explicit. A retained context for another editor project asks the user
+to select that project first. A standalone Slow-control UUID never guesses task.
+
+Qualification: `tests/unit/tools/candidate_console/test_new_run.py` owns fresh
+policy-before-read, isolated source/manifest/config drift, exact recovery metadata,
+HTTP parity and refusal ordering. `tests/browser/new_run.mjs` uses the existing
+explicit browser environment and real offline preparation/native candidate worker
+with guarded local deterministic provider. It does not qualify real model quality,
+training, API access or GPU execution.

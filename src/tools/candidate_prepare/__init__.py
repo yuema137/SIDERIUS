@@ -19,7 +19,7 @@ __all__ = [
     "resolve_reusable_candidate",
 ]
 
-from .reusable_admission import preflight_reusable_candidate
+from .reusable_admission import inspect_reusable_source, preflight_reusable_candidate
 from .reusable_launch import prepare_reusable_candidate
 from .reusable_models import (
     ReusableBindingCapture,
@@ -47,6 +47,7 @@ __all__ += [
     "ReusablePreparationReceipt",
     "ReusablePreparedSelection",
     "VerifiedReusablePreparation",
+    "inspect_reusable_source",
     "inspect_current_reusable_binding",
     "inspect_reusable_binding",
     "preflight_reusable_candidate",

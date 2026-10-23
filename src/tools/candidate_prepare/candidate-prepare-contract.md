@@ -388,3 +388,16 @@ A missing pinned top receipt raises; an inner receipt cannot replace it.
 This helper establishes historical preparation identity for operation monitoring.
 It deliberately does not certify current launch eligibility. B2/B3 still use the
 full retained verifier and reobserve external inputs before candidate launch.
+
+
+### Source-only preparation policy projection
+
+`inspect_reusable_source(request)` returns inert `ReusableSourceInspection`:
+source observation, parsed reusable document, resolved locations/document and typed
+native request. It shares the bounded regular/no-follow reader, parser, managed-only
+layout and resolver with `capture`. Canonicalization and destination/path metadata
+checks may occur; manifest/config content reads, imports and writes do not.
+`capture` retains the same internally captured source bytes for snapshot publication,
+then calls full admission. Console fresh review/prepare uses this projection to
+reject unconfigured task/resource references before full external-content preflight.
+It is not a full admission or a reusable authorization token.

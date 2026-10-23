@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import UUID
 
 from tools.candidate_operations.models import OperationFailure
+from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.candidate_prepare.reusable_models import ReusableBindingInspection
 from tools.workflow_authoring.models import Project
 
@@ -44,6 +45,17 @@ def check_capture_policy(
         project.source_file
     ):
         raise OperationFailure("task_policy", "capture belongs to another source or project")
+    check_request_policy(task, request)
+    # Even self-consistent binding/control metadata cannot authorize an external read.
+    if tuple((item.reference, item.path) for item in inspected.control.sources) != (
+        ("task.manifest", task.task_manifest),
+        ("llm_config", task.llm_config_file),
+    ):
+        raise OperationFailure("task_policy", "captured external observations differ from policy")
+
+
+def check_request_policy(task: TaskChoice, request: CandidatePreparationRequest) -> None:
+    """One resource/options comparison for source inspection and captured metadata."""
     fields = (
         "task_manifest",
         "data_root",
@@ -62,9 +74,3 @@ def check_capture_policy(
         and request.allowed_output_types != task.allowed_output_types
     ):
         raise OperationFailure("task_policy", "captured output restriction differs from policy")
-    # Even self-consistent binding/control metadata cannot authorize an external read.
-    if tuple((item.reference, item.path) for item in inspected.control.sources) != (
-        ("task.manifest", task.task_manifest),
-        ("llm_config", task.llm_config_file),
-    ):
-        raise OperationFailure("task_policy", "captured external observations differ from policy")

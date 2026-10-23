@@ -56,6 +56,7 @@ try {
   await page.locator('#capture-status').filter({hasText: 'not enabled'}).waitFor();
   assert.equal(await page.locator('#capture-open').isDisabled(), true);
   await page.locator('#editor-project').selectOption('capture');
+  await page.locator('#capture-task').selectOption('synthetic');
   await open(metadata.captures[0]);
   assert.match(await page.locator('#capture-summary').textContent(), /hypothesis → build → check/);
   assert.match(await page.locator('#capture-details').textContent(), /Prefer a small interpretable baseline/);
@@ -138,6 +139,7 @@ try {
   await rename(metadata.source + '.saved', metadata.source); await rename(metadata.credential + '.saved', metadata.credential);
   await page.locator('nav a[href="#workflow"]').click(); await page.locator('#capture-check').click();
   await page.locator('#capture-finish').waitFor(); await page.locator('#capture-finish').click();
+  await page.locator('#capture-task').selectOption('synthetic');
   await page.locator('#capture-refresh').click(); await open(metadata.captures[1]);
   assert.match(await page.locator('#capture-source').textContent(), /differs/);
   await page.screenshot({path: join(evidence, 'capture-review.png'), fullPage: true});
