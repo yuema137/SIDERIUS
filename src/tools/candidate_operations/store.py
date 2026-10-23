@@ -40,6 +40,8 @@ def now() -> str:
 
 def digest(submission: OperationSubmission) -> str:
     content = {"kind": submission.kind, "request": submission.request.model_dump(mode="json")}
+    if submission.kind == "candidate" and submission.request.workflow_source is None:
+        content["request"].pop("workflow_source")
     return hashlib.sha256(
         json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

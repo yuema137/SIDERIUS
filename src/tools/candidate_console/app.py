@@ -15,6 +15,7 @@ from tools.candidate_operations import LogReadRequest
 from tools.candidate_operations.models import OperationFailure
 
 from .boundary import RequestBoundary
+from .edited_routes import edited_router
 from .editor import editor_router
 from .files import token
 from .models import ConsoleConfig, LaunchSelection, PreparedSelection, PrepareSelection
@@ -29,7 +30,10 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     service = CandidateConsole(config)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.console = service
-    app.include_router(editor_router(service.config.editor_projects))
+    app.include_router(
+        editor_router(service.config.editor_projects, service.config.runnable_editor_projects)
+    )
+    app.include_router(edited_router(service))
     app.add_middleware(RequestBoundary, config=service.config, token=token(config.auth_token_file))
 
     @app.exception_handler(RequestValidationError)
@@ -50,7 +54,10 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             else {
                 "busy": "another operation is active or unresolved",
                 "conflict": "operation ID already identifies different content",
-                "stale_review": "prepared request changed; prepare and review again",
+                "stale_review": "reviewed source or bindings changed; review again",
+                "unsupported": "saved declaration bindings cannot be reviewed; inspect source and prepared context",
+                "context": "saved declaration differs from selected prepared context",
+                "editor_policy": "project is not enabled for candidate runs",
                 "task_policy": "preparation does not match the configured task policy",
                 "not_prepared": "preparation has no verified candidate to review",
             }.get(error.detail.code, "native operation could not be verified")

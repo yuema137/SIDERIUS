@@ -1,0 +1,46 @@
+{
+  "preview": {
+    "document": {
+      "definition": {
+        "schema_version": 1,
+        "task": {
+          "manifest": "task.yaml",
+          "data_root": "data",
+          "workspace": "/legacy/workspace"
+        },
+        "externals": [
+          {
+            "id": "seed",
+            "contract": "proposal.input",
+            "location": "seed.json"
+          }
+        ],
+        "nodes": [
+          {
+            "id": "propose",
+            "capability": "proposal",
+            "request": {
+              "kind": "external",
+              "binding": "seed"
+            }
+          }
+        ]
+      },
+      "positions": []
+    },
+    "project_root": "/legacy/project",
+    "llm_config_file": "llm.json"
+  },
+  "declaration_digest": "legacy",
+  "files": [],
+  "selected_constructor_routes": [],
+  "storage_policy": "managed_fresh",
+  "run_name": "legacy",
+  "timeout_seconds": 60.0,
+  "network": false,
+  "devices": [],
+  "read_only": [],
+  "environment_names": [],
+  "implementation_advice": null,
+  "validation_advice": null
+}

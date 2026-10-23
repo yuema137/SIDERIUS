@@ -1,12 +1,34 @@
 """Inert public launch contract: no native node or task imports."""
 
+from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from core.generated_artifact_name import validate_generated_artifact_name
 from tools.setup_review.route_models import LLMRoute
 from tools.workflow_preview.models import FileObservation, PreviewModel, WorkflowPreviewRequest
+
+
+class ReviewedContext(PreviewModel):
+    project_id: str
+    prepare_operation_id: UUID
+    prepared_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class WorkflowSourceSnapshot(PreviewModel):
+    origin_path: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source: str
+    reviewed_context: ReviewedContext | None = None
+
+    @field_validator("origin_path")
+    @classmethod
+    def absolute_origin(cls, value: str) -> str:
+        if not Path(value).is_absolute() or "\0" in value:
+            raise ValueError("source origin must be an absolute path")
+        return value
 
 
 class CandidateRunRequest(PreviewModel):
@@ -23,6 +45,14 @@ class CandidateRunRequest(PreviewModel):
     environment_names: tuple[str, ...]
     implementation_advice: str | None = None
     validation_advice: str | None = None
+    workflow_source: WorkflowSourceSnapshot | None = None
+
+    @model_validator(mode="after")
+    def source_binding(self):
+        from .source import validate_source
+
+        validate_source(self)
+        return self
 
     @field_validator("run_name")
     @classmethod

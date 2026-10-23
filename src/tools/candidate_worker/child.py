@@ -9,6 +9,7 @@ from tools.workflow_preview.files import observe_file
 
 from .launch import publish
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .source import verify_snapshot
 
 
 def execute(request_path: Path) -> CandidateRunReceipt:
@@ -18,6 +19,7 @@ def execute(request_path: Path) -> CandidateRunReceipt:
     workspace = Path(initial.workspace)
     if request_path != workspace / "candidate_run" / "request.json":
         raise ValueError("child request path disagrees with claimed workspace")
+    verify_snapshot(request, control)
     for index, expected in enumerate(request.files):
         current, _ = observe_file(Path(expected.path), expected.reference)
         snapshot, _ = observe_file(control / f"input_{index:03}.snapshot", expected.reference)

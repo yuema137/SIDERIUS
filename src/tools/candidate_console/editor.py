@@ -12,7 +12,9 @@ from tools.workflow_authoring.service import AuthoringError, WorkflowAuthoring
 from workflows.definition.source import WorkflowSourceError
 
 
-def editor_router(projects: tuple[Project, ...]) -> APIRouter:
+def editor_router(
+    projects: tuple[Project, ...], runnable_projects: tuple[str, ...] = ()
+) -> APIRouter:
     router = APIRouter(prefix="/api/editor")
     services = {project.project_id: WorkflowAuthoring(project) for project in projects}
 
@@ -57,7 +59,13 @@ def editor_router(projects: tuple[Project, ...]) -> APIRouter:
 
     @router.get("/projects")
     def choices():
-        return [{"project_id": project.project_id} for project in projects]
+        return [
+            {
+                "project_id": project.project_id,
+                "candidate_run_enabled": project.project_id in runnable_projects,
+            }
+            for project in projects
+        ]
 
     @router.get("/{project_id}")
     def read(project_id: str):

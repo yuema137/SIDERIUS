@@ -217,3 +217,28 @@ node tests/browser/workflow_editor.mjs
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
 qualification for operations remains separately owned.
+
+## Saved declaration candidate runs
+
+`runnable_editor_projects` defaults to empty and may name only configured
+`editor_projects`. `EditedCandidate` in `edited_candidate.py` is the shared
+Python adapter for POST `/api/editor/{project_id}/candidate-review` and
+`candidate-launch`. Selection contains only prepared operation UUID and expected
+saved-source SHA-256; launch adds expected review digest and caller-owned candidate
+operation UUID. Saving source never launches work.
+
+The adapter resolves the same verified prepared policy as `CandidateConsole`.
+Task manifest, data root, workspace and prepared LLM config observation must match
+that context. Actual saved node IDs, explicit input locations and routes come from
+source. Selected inputs require the existing native read-only/runtime roots.
+Review observes bindings, without credentials or native execution. Native payload
+and scientific validation remain launch-time work.
+
+A canonical internal envelope binds full candidate request, captured source and
+project/preparation provenance. HTTP returns the digest and curated effects,
+excluding raw bridge arguments and source payload. Launch reconstructs review
+before loading credentials. An existing candidate UUID is looked up first and
+must match its admitted source/context/review identities; replay retains the
+original capture even after the authoring file or workspace changes. Corrupt
+existing admissions fail closed. Clients must retain the same UUID on ambiguous
+responses and may inspect it through the existing monitor.

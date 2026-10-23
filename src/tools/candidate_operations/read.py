@@ -1,6 +1,7 @@
 """Project validated native outcomes without inventing a second workflow state."""
 
 import hashlib
+import os
 from pathlib import Path
 from uuid import UUID
 
@@ -18,6 +19,7 @@ from .models import (
     OperationRecord,
     OperationSnapshot,
     OperationStoreConfig,
+    OperationSubmission,
     ProcessIdentity,
     ProcessObservation,
     SpawnFailure,
@@ -170,3 +172,14 @@ def releasable(config: OperationStoreConfig, operation_id: UUID) -> bool:
     return (snapshot.state == "operation_failed" and snapshot.reason == "spawn_failed") or (
         snapshot.state in {"completed", "operation_failed"} and snapshot.process.status == "exited"
     )
+
+
+def lookup_operation_request(
+    config: OperationStoreConfig, operation_id: UUID
+) -> OperationSubmission | None:
+    """Return a verified admission, or None only when its directory is absent."""
+    config = validate_config(config)
+    path = Path(config.state_root) / "operations" / str(operation_id)
+    if not os.path.lexists(path):
+        return None
+    return load_record(config, operation_id).submission

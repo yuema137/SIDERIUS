@@ -47,6 +47,7 @@ class ConsoleConfig(PreviewModel):
     auth_token_file: str
     credential_file: str | None = None
     editor_projects: tuple[Project, ...] = ()
+    runnable_editor_projects: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def origins_and_ids(self):
@@ -67,6 +68,10 @@ class ConsoleConfig(PreviewModel):
             self.editor_projects
         ):
             raise ValueError("editor project IDs must be unique")
+        if len(set(self.runnable_editor_projects)) != len(self.runnable_editor_projects) or not set(
+            self.runnable_editor_projects
+        ).issubset({project.project_id for project in self.editor_projects}):
+            raise ValueError("runnable editor project IDs must be unique configured projects")
         return self
 
 

@@ -10,9 +10,10 @@ from core.durable_io import publish_bytes_write_once
 from execute_tools.impl_attempts import impl_attempt_dir
 from tools.workflow_preview import preview_workflow
 from tools.workflow_preview.files import observe_file
-from tools.workspace_sandbox.profile import SandboxProfile, runtime_roots
+from tools.workspace_sandbox.profile import SandboxProfile
 from tools.workspace_sandbox.runner import ExecutionResult, run
 
+from .admission import admit_input_paths
 from .layout import candidate_proposal_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
 
@@ -117,6 +118,11 @@ def launch_candidate(
         if any(path != control for path in workspace.iterdir()):
             raise ValueError("workspace became nonempty before exclusive claim")
         publish(control / "request.json", request)
+        if request.workflow_source is not None:
+            publish_bytes_write_once(
+                str(control / "workflow.py.snapshot"),
+                request.workflow_source.source.encode("utf-8"),
+            )
         for index, payload in enumerate(captures):
             publish_bytes_write_once(str(control / f"input_{index:03}.snapshot"), payload)
         profile = SandboxProfile(
@@ -127,10 +133,10 @@ def launch_candidate(
             environment_names=request.environment_names,
             timeout_seconds=request.timeout_seconds,
         )
-        roots = (*profile.read_only, *runtime_roots())
-        for path in (Path(observed.data_root), *(Path(item.path) for item in observed.files)):
-            if not any(path.is_relative_to(root) for root in roots):
-                raise ValueError(f"selected input needs an explicit read-only mount: {path}")
+        admit_input_paths(
+            (Path(observed.data_root), *(Path(item.path) for item in observed.files)),
+            request.read_only,
+        )
         result = run(
             profile,
             [sys.executable, "-m", "tools.candidate_worker.child", str(control / "request.json")],
