@@ -63,7 +63,7 @@ absent, have existing parents, and be separate from each other and all inputs.
    The future run directory remains absent.
 
 4. When you choose to execute, provide the selected credentials through your
-   [machine-owned launch environment](../../../../docs/getting-started/installation.md#api-keys)
+   [machine-owned launch environment](../../../docs/getting-started/installation.md#api-keys)
    and invoke the worker separately:
 
    ```bash
