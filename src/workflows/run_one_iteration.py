@@ -62,6 +62,7 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
 
 if TYPE_CHECKING:
+    from workflows.native_chain_binding import NativeChainLaunchContext
     from workflows.reviewed_launch import ReviewedLaunchContext
 
 from dotenv import load_dotenv
@@ -133,6 +134,7 @@ from workflows.launch_identity import (
     resolve_lit_review_enabled as resolve_lit_review_enabled,
 )
 from workflows.llm_config import WorkflowLLMConfig, resolve_standard_llm_config
+from workflows.native_chain_binding import NativeChainCaptureRefusal
 from workflows.run_config import WorkflowLaunchConfig, validate_launch_trial_overrides
 from workflows.runtime_settings import (
     build_required_profile_binding as build_required_profile_binding,
@@ -1153,10 +1155,18 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None, *, reviewed_setup: "ReviewedLaunchContext | None" = None):
+def main(
+    argv: list[str] | None = None,
+    *,
+    reviewed_setup: "ReviewedLaunchContext | None" = None,
+    chain_capture: "NativeChainLaunchContext | None" = None,
+):
+    if reviewed_setup is not None and chain_capture is not None:
+        raise ValueError("reviewed_setup and chain_capture are mutually exclusive")
     args = normalize_args(build_parser().parse_args(argv))
-    if reviewed_setup is not None:
-        reviewed_setup.check_entry(args)
+    expectations = chain_capture if chain_capture is not None else reviewed_setup
+    if expectations is not None:
+        expectations.check_entry(args)
     # Validate the resolved schedule before workspace binding, task imports or LLM work.
     try:
         validate_launch_trial_overrides(
@@ -1184,9 +1194,13 @@ def main(argv: list[str] | None = None, *, reviewed_setup: "ReviewedLaunchContex
     with ExitStack() as package_scope:
         package_scope.enter_context(root_code_scope())
         try:
+            if chain_capture is not None:
+                return _run_bound_iteration(args, package_scope, chain_capture=chain_capture)
             if reviewed_setup is not None:
                 return _run_bound_iteration(args, package_scope, reviewed_setup=reviewed_setup)
             return _run_bound_iteration(args, package_scope)
+        except NativeChainCaptureRefusal:
+            raise
         except Exception as exc:
             from workflows.package_failure import halt_on_package_failure
 
@@ -1204,8 +1218,11 @@ def _run_bound_iteration(
     package_scope: ExitStack,
     *,
     reviewed_setup: "ReviewedLaunchContext | None" = None,
+    chain_capture: "NativeChainLaunchContext | None" = None,
 ):
     """Run the existing lifecycle after root workspace/package decisions."""
+
+    expectations = chain_capture if chain_capture is not None else reviewed_setup
 
     # Both owners transitively load model registries. A cold launch must bind
     # its workspace first so discovery cannot import legacy checkout plugins.
@@ -1229,8 +1246,8 @@ def _run_bound_iteration(
             raise_if_code_package_failure(exc)
             preflight_composition_error = exc
 
-    if reviewed_setup is not None and preflight_composition_error is None:
-        reviewed_setup.check_composition(preflight_composition)
+    if expectations is not None and preflight_composition_error is None:
+        expectations.check_composition(preflight_composition)
 
     # Launch policy and invariants materialize Health before run activation.
     # They must see the same capture, without creating a transport sidecar.
@@ -1279,8 +1296,8 @@ def _run_bound_iteration(
     # and before any consumer reads the watchdog args. The banner goes to
     # STDERR: stdout is a parsed surface (the dry-run JSON, chain captures).
     watchdog_policy = (
-        reviewed_setup.resolve_watchdog(args)
-        if reviewed_setup is not None
+        expectations.resolve_watchdog(args)
+        if expectations is not None
         else resolve_watchdog_policy(args)
     )
     print(
@@ -1623,8 +1640,8 @@ def _run_bound_iteration(
         )
         sys.exit(1)
 
-    if reviewed_setup is not None:
-        reviewed_setup.check_invariants(expected_invariants, llm_config, launch_identity)
+    if expectations is not None:
+        expectations.check_invariants(expected_invariants, llm_config, launch_identity)
 
     from ml_models.plugin_binding import bind_run_model_plugins
 
@@ -1748,7 +1765,9 @@ def _run_bound_iteration(
                 resolved_paths=resolved_paths,
                 fixed_candidate_plan=fixed_candidate_plan,
             )
-            if reviewed_setup is not None:
+            if chain_capture is not None:
+                chain_capture.check_launch(launch_config, state)
+            elif reviewed_setup is not None:
                 reviewed_setup.check_launch(launch_config)
             results = run_workflow(
                 launch=launch_config,
@@ -1776,6 +1795,8 @@ def _run_bound_iteration(
                 sandbox_factory=sandbox_factory,
                 task_composition=run_composition,
             )
+    except NativeChainCaptureRefusal:
+        raise
     except LLMBridgeContextError as e:
         # §1.4.2 fail-fast contract. Telemetry-internal corruption (run_id
         # mismatch, backwards iter) means the audit log can no longer be

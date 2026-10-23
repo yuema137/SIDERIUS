@@ -29,6 +29,7 @@ the flags that decide *what a run is*.
 | inspect or explicitly probe a forensic snapshot | `python -m tools.runtime_replay`; see the [replay contract](runtime-replay.md) |
 | prepare a fresh candidate from reusable authored v2 source | `python -m tools.candidate_prepare --reusable-request PATH`; [preparation contract](../../src/tools/candidate_prepare/candidate-prepare-contract.md#managed-reusable-preparation), no launch/resume |
 | launch a retained reusable candidate capture | `build_reusable_operation(config, selection, request_id)` then existing `python -m tools.candidate_operations submit --store-config FILE --request FILE`; [operation contract](../../src/tools/candidate_operations/candidate-operations-contract.md#retained-reusable-candidate-operations) |
+| capture and enforce a fresh foreground native chain | `python -m tools.native_chain review --request PATH`, then `run_chain.sh` with paired `--expected_chain_capture` / `--expected_chain_capture_sha256` and `--chain_capture_input_max_bytes`; [capture contract](../../src/tools/native_chain/native-chain-contract.md) |
 | run the full multi-iteration agent loop | `scripts/launch/run_chain.sh` |
 | launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
 | run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |

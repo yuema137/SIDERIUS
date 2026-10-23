@@ -203,6 +203,12 @@ enforce_source_tree_authority() {
 submit_iteration_lilab() {
     local iter=$1
     local cmd=( "${PY_CMD[@]}" "$RUNNER" "${APP_ARGS[@]}" )
+    if [ -n "$EXPECTED_CHAIN_CAPTURE" ]; then
+        cmd=( "${PY_CMD[@]}" -m tools.native_chain.iteration dispatch
+            --capture "$EXPECTED_CHAIN_CAPTURE" --sha256 "$EXPECTED_CHAIN_CAPTURE_SHA256"
+            --input-max-bytes "$CHAIN_CAPTURE_INPUT_MAX_BYTES" --iteration "$iter"
+            -- "${APP_ARGS[@]}" )
+    fi
     if [ "$DRY_RUN" -eq 1 ]; then
         echo "  [DRY-RUN] would exec from $PROJECT_DIR:"
         printf '    '
@@ -278,6 +284,7 @@ submit_iteration() {
 PREV_JOB_ID=""
 SUBMITTED_JOBS=()
 
+ORIGINAL_CHAIN_ARGS=("$@")
 parse_chain_args "$@"
 load_advice_file
 if [ -z "$TASK_COMPOSITION" ]; then
@@ -313,6 +320,35 @@ setup_py_env_passthrough
 # this guard covers the submission node's own framework imports
 # (inspect_run_state auto-resume) and every lilab child.
 enforce_source_tree_authority
+
+# Machine transport uses only the same argument builders as native dispatch.
+if [ -n "$CHAIN_EXPORT_FD" ] || [ -n "$CHAIN_EXPORT_ITERATION" ]; then
+    if ! [[ "$CHAIN_EXPORT_FD" =~ ^[0-9]+$ && "$CHAIN_EXPORT_ITERATION" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Native chain refused: invalid_export_controls" >&2
+        exit 78
+    fi
+    build_source_paths "$CHAIN_EXPORT_ITERATION"
+    build_app_args "$CHAIN_EXPORT_ITERATION"
+    printf '%s\0' "${APP_ARGS[@]}" >&"$CHAIN_EXPORT_FD"
+    exit 0
+fi
+
+check_chain_capture() {
+    local action=$1
+    shift
+    "${PY_CMD[@]}" -m tools.native_chain.check "$action" \
+        --capture "$EXPECTED_CHAIN_CAPTURE" --sha256 "$EXPECTED_CHAIN_CAPTURE_SHA256" \
+        --input-max-bytes "$CHAIN_CAPTURE_INPUT_MAX_BYTES" "$@"
+}
+
+if [ -n "$EXPECTED_CHAIN_CAPTURE$EXPECTED_CHAIN_CAPTURE_SHA256$CHAIN_CAPTURE_INPUT_MAX_BYTES" ]; then
+    if [ -z "$EXPECTED_CHAIN_CAPTURE" ] || [ -z "$EXPECTED_CHAIN_CAPTURE_SHA256" ] || \
+            ! [[ "$CHAIN_CAPTURE_INPUT_MAX_BYTES" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Native chain refused: incomplete_capture_controls" >&2
+        exit 78
+    fi
+    check_chain_capture admit -- "${ORIGINAL_CHAIN_ARGS[@]}" || exit 78
+fi
 
 # --- 13.B: Auto-resume + safety guard + idempotency ---
 
