@@ -15,6 +15,12 @@ from .models import (
     WorkflowDocument,
     inspect_declaration,
 )
+from .source import (
+    SourceDiagnostic,
+    WorkflowSourceError,
+    parse_workflow_source,
+    render_workflow_source,
+)
 
 __all__ = [
     "ArgumentBinding",
@@ -26,8 +32,12 @@ __all__ = [
     "NodePosition",
     "ProtocolRequest",
     "ResultSource",
+    "SourceDiagnostic",
     "TaskReferences",
     "WorkflowDefinition",
     "WorkflowDocument",
+    "WorkflowSourceError",
     "inspect_declaration",
+    "parse_workflow_source",
+    "render_workflow_source",
 ]

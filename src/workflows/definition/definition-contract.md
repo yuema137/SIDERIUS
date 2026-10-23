@@ -105,3 +105,64 @@ This additive package is not imported by existing launchers or workflows.
 It changes no historical prompts, training defaults or paper execution paths.
 It does not promise that a future graph executor reproduces those paths; that
 requires separate integration and experiment-owned historical configuration.
+
+## Static Python source bridge
+
+`parse_workflow_source(source: str) -> WorkflowDocument` and
+`render_workflow_source(document: WorkflowDocument) -> str` convert a dedicated
+source module and the existing document model. The construction example above
+also performs JSON/report operations; those extra statements are not accepted
+in a dedicated source module.
+
+Accepted modules contain optional initial docstring/comments, exactly one
+absolute `from workflows.definition import ...` and one ordinary single-target
+`document = WorkflowDocument(...)` assignment. Imports contain unique bare names
+from this explicit allowlist: `TaskReferences`, `ExternalBinding`,
+`ExternalSource`, `ResultSource`, `ArgumentBinding`, `ExternalRequest`,
+`ProtocolRequest`, `NodeInstance`, `WorkflowDefinition`, `NodePosition`,
+`WorkflowDocument`. Imported unused constructors are allowed; referenced
+constructors must be imported. Aliases, wildcard and relative imports fail.
+
+Only imported bare constructors with unique known keyword arguments, literal
+strings/integers/finite floats/booleans/None, and literal tuples are accepted.
+Unary `+`/`-` is allowed only directly on numeric constants, excluding booleans.
+Lists, mappings, sets, starred values, positional arguments, expression names,
+attribute calls, arbitrary calls, arithmetic, f-strings, comprehensions, control
+flow and all other statements or expressions fail closed. Schema validation
+still determines which accepted literal values fit each field. The whole
+module shape, resource budgets and expression grammar are checked before any
+model construction. Native constructors remain the sole graph-validation owner.
+
+The bridge reads AST data; it never evaluates selected code, imports its module
+or referenced plugins, resolves locations, opens resources or starts processes.
+Admission limits are 1 MiB of UTF-8 source, 100,000 AST nodes and AST depth 64
+(module depth 1, including context/operator nodes). Resource inspection is
+iterative. Parser syntax/recursion and numeric conversion failures become bridge
+diagnostics. These are converter limits, not document-schema limits. Parsing
+runs in process and does not provide hostile-input memory/time isolation.
+
+`WorkflowSourceError` carries a nonempty tuple of frozen `SourceDiagnostic`
+models. Codes are `syntax`, `unsupported`, `limit` or `validation`. Optional
+`line`/`end_line` are one-based; `column`/`end_column` are zero-based UTF-8 byte
+offsets, with exclusive end positions. Missing whole-input spans are `None`.
+Validation points to the enclosing failing constructor and, where available,
+`field_path`; unknown location components are redacted. Diagnostics use fixed
+summaries, never raw values, arbitrary native validator messages or Pydantic
+input/context. No partial document is returned.
+
+Rendering revalidates through a JSON roundtrip before formatting, including
+unchecked Pydantic instances. It writes a fixed header/import order, all model
+fields in schema order including defaults, ordered tuples and a final newline.
+It verifies the generated text with the same parser and refuses output exceeding
+the bridge budgets. Parsing rendered output equals the revalidated document;
+rendering it again produces identical text. Omitted protocol arguments stay
+omitted. Positions survive conversion but remain outside the declaration digest.
+
+Canonical rendering discards original comments, docstrings and formatting. It
+proposes complete replacement text for a dedicated module, never a patch against
+arbitrary Python. Successful conversion and declaration digest equality do not
+certify runtime readiness, immutable dependency identity or scientific equivalence.
+For Python-authored projects source is authoritative and JSON is an explicit
+export; existing JSON callers keep their explicit authority. Launchers do not
+automatically select a representation. GUI saving, revision publication,
+conflict handling and immutable launches are separate work.
