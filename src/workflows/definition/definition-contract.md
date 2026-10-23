@@ -166,3 +166,27 @@ For Python-authored projects source is authoritative and JSON is an explicit
 export; existing JSON callers keep their explicit authority. Launchers do not
 automatically select a representation. GUI saving, revision publication,
 conflict handling and immutable launches are separate work.
+
+## Offline conversion CLI
+
+`python -m workflows.definition to-json --input PATH` reads restricted Python
+source and prints indented `WorkflowDocument` JSON. `to-python --input PATH`
+reads existing document JSON through `WorkflowDocument.model_validate_json` and
+prints canonical source through the same renderer. Both require an explicit
+UTF-8 input file; there is no stdin mode, format inference, output-path argument,
+in-place edit or overwrite flag. JSON input shares the 1 MiB byte limit. Reads
+are bounded to limit + 1 bytes before decoding or parsing.
+
+Exit 0 produces complete converted content on stdout without a banner. Syntax,
+unsupported source, model validation, limit, encoding or file-read failures exit
+2, emit a concise stderr diagnostic and no converted stdout bytes. JSON errors
+use the same sanitized validation summary/field-path policy; CLI I/O and encoding
+errors are reported separately. The library opens no paths. The CLI opens only
+its explicit input and never writes a project file, resolves declared locations
+or loads runtime/plugin modules.
+
+Shell redirection is outside the converter's ownership: redirecting stdout onto
+the input can truncate it before Python starts. Display output or use a distinct
+new candidate path and review before replacing source. This utility provides no
+GUI semantic writer, project publication/backup, revision conflict handling,
+watcher or immutable execution binding.
