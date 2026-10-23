@@ -158,7 +158,7 @@ def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries
     )
     root = checkout_root()
     assert root is not None
-    tree = ast.parse((root / "src/workflows/model_exploration.py").read_text())
+    tree = ast.parse((root / "src/workflows/tuner_preparation.py").read_text())
     calls = [
         node
         for node in ast.walk(tree)

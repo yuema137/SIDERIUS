@@ -402,11 +402,10 @@ class TestWorkflowKwargParity:
             assert name in schema_fields, f"{name} missing from HyperparamTuningInput"
 
     def test_workflow_forwards_watchdog_factor_into_protocol_call(self):
-        """run_workflow forwards its runtime_watchdog_safety_factor parameter
-        (same-named variable) into the local_validated_model(...) call."""
+        """The workflow input owner forwards the launch watchdog factor verbatim."""
         import ast
 
-        source_path = REPO_ROOT / "src/workflows" / "model_exploration.py"
+        source_path = REPO_ROOT / "src/workflows" / "tuner_preparation.py"
         tree = ast.parse(source_path.read_text())
         for node in ast.walk(tree):
             if (

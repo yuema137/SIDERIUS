@@ -1,0 +1,160 @@
+{
+  "allow_extreme_steps": true,
+  "attempts_per_formal_round": 4,
+  "attempts_per_round": 2,
+  "baseline_isolation": false,
+  "bypass_formal_time_budget_min_delta": 0.41,
+  "bypass_formal_time_budget_minutes": 13.0,
+  "candidate_id": null,
+  "cleanup_denoised": false,
+  "current_run_best_formal_score": null,
+  "data_analysis_enabled": false,
+  "data_dir": "<TMP>/data",
+  "data_scope": {
+    "file_indices": null
+  },
+  "degenerate_penalty_score": -7.0,
+  "disclose_execution_constraints": false,
+  "enable_chain_incumbent_formal_gates": true,
+  "enable_structured_health_feedback": false,
+  "eval_portion": 0.43,
+  "expected_planner_strategy": {
+    "assembly_sha256": "419a018c994132cc127c5562a9a234ddf5f67ce0ee7a1147657b07380a71e942",
+    "content_sha256": "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562",
+    "name": "native-timing-v1",
+    "version": "1"
+  },
+  "experiment_arm": "n1-distinct-arm",
+  "expert_advice": {
+    "constraints": [
+      "VRAM < 8 GB"
+    ],
+    "focus_areas": [
+      "receptive field"
+    ],
+    "freeform_notes": null,
+    "known_failures": [],
+    "rationale": "",
+    "suggested_directions": []
+  },
+  "file_index": 1,
+  "file_order_override": null,
+  "force_formal_round": false,
+  "formal_eval_portion": 0.73,
+  "formal_max_epochs": 9,
+  "formal_portion": 0.27,
+  "formal_round_strategy": "independent",
+  "formal_strategy": "snapshot",
+  "formal_time_admission_source": "forecast",
+  "formal_time_budget_minutes": 17.0,
+  "formal_train_portion": 0.61,
+  "formal_training_scope_source": "agent",
+  "formal_vram_budget_gb": 3.0,
+  "gpu_admission_enforcement": "enforce",
+  "gpu_admission_measurement_source": "n1-measurement",
+  "gpu_pair_ceiling_gib": 3.5,
+  "health_checks_config": null,
+  "health_feedback_history_max_entries_per_model": 13,
+  "health_feedback_history_window_iterations": 5,
+  "health_gate_enabled": true,
+  "health_gate_files": null,
+  "healthgate_mode": "observe_only",
+  "human_advice": "Keep this explicit advice.",
+  "is_trial": true,
+  "lit_review_config_sha256": null,
+  "lit_review_enabled": false,
+  "llm_model_id": "gpt-5.6-luna",
+  "llm_provider": "openai",
+  "max_epochs": 11,
+  "max_fail_rounds": 6,
+  "max_retries": null,
+  "max_rounds": 7,
+  "max_steps_per_attempt": 79,
+  "measurement_capability": null,
+  "min_formal_batch_size": 2,
+  "model_type": "gated_tcn",
+  "order_strategy_override": null,
+  "plan_overrides": {
+    "eval_portion": 0.43,
+    "train_portion": 0.32,
+    "trial_portion": 0.21
+  },
+  "planner_strategy": null,
+  "progress_bar": false,
+  "reasoning_effort": null,
+  "reflect_model_id": null,
+  "reflect_provider": null,
+  "reflect_reasoning_effort": null,
+  "result_authority": "diagnostic",
+  "resume": false,
+  "retain_model_outputs": true,
+  "retain_training_checkpoints": true,
+  "runtime_completion_policy": "verified-prediction-v1",
+  "runtime_formal_safety_factor": 1.37,
+  "runtime_safety_factor": 1.13,
+  "runtime_trial_safety_factor": 1.23,
+  "runtime_verification_max_wall_seconds": 31.0,
+  "runtime_watchdog_deadline_policy": "forecast-tightening-v1",
+  "runtime_watchdog_enabled": true,
+  "runtime_watchdog_floor_seconds": 19.0,
+  "runtime_watchdog_safety_factor": 1.47,
+  "sampling_seed": 137,
+  "scientific_evidence_order": "literature_then_analysis",
+  "seed_plugin_path": null,
+  "skip_formal_min_delta": 0.31,
+  "storage": {
+    "backend": "local",
+    "local": {
+      "run_name": "n1_parity",
+      "workspace": "<TMP>/workflow_output/n1_parity/iteration_001/gated_tcn"
+    },
+    "postgres": null
+  },
+  "task_composition_ref": {
+    "custom_loss_applicability": null,
+    "description_source_policy": "composed",
+    "objective": {
+      "alpha": null,
+      "beta": null,
+      "gamma": null,
+      "loss_name": null,
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "parameter_rules": {
+      "rules": {}
+    },
+    "segmentation_applicability": "not_applicable",
+    "semantic_fingerprint": "7f8103588d30aa06fdecd1d3c81e318dee7a7b3733838174829f7770843f9fd6",
+    "supervision_target": null,
+    "task_data_path_id": "quickstart_tabular",
+    "task_health_binding": "explicit_none",
+    "task_owned_custom_loss": null
+  },
+  "task_description": "Binary classification of tiny synthetic 4-feature vectors. Each sample is\nx in R^4 drawn uniformly from [-1, 1]; the label is 1 exactly when\nx0*x1 + sin(pi*x2) > x3, with 3% of labels deterministically flipped, so a\nperfect score is impossible by construction. The golden metric is accuracy\nover the held-out evaluation rows and HIGHER is better. The dataset is\n256 rows in 4 shards, regenerated bit-identically from a pinned seed \u2014\nthis task exists to demonstrate the SIDERIUS workflow mechanics on a CPU\nin seconds, not to be a benchmark.",
+  "train_base_seed": 241,
+  "train_portion": 0.32,
+  "train_validation_align": false,
+  "training_budget_reserve_fraction": 0.17,
+  "training_validation_portion": 0.19,
+  "trial_max_epochs": 3,
+  "trial_portion": 0.21,
+  "trial_time_admission_source": "forecast",
+  "trial_time_budget_minutes": 5.0,
+  "trial_vram_budget_gb": 2.0,
+  "validation_max_phase_seconds": 29.0,
+  "validation_max_portion": 0.23,
+  "validation_max_samples": 71,
+  "validation_max_train_samples": 173,
+  "vram_preflight_host_memory_limit_gb": 4.0,
+  "vram_preflight_total_timeout_seconds": 113.0,
+  "vram_probe_step_timeout_seconds": 37.0,
+  "workflow_parameter_rules": {
+    "rules": {
+      "model_config.segmentation_size": {
+        "exact": 40000
+      }
+    }
+  }
+}
