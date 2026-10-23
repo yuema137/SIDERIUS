@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from .files import canonical, private_bytes, token
+from .files import canonical, config_bytes, private_bytes, token
 from .models import ConsoleConfig
 
 
@@ -43,9 +43,4 @@ def validate_config(config: ConsoleConfig) -> ConsoleConfig:
 
 
 def load_config(path: str) -> ConsoleConfig:
-    source = canonical(path)
-    with source.open("rb") as stream:
-        payload = stream.read(256 * 1024 + 1)
-    if len(payload) > 256 * 1024:
-        raise ValueError("console configuration exceeds limit")
-    return validate_config(ConsoleConfig.model_validate_json(payload))
+    return validate_config(ConsoleConfig.model_validate_json(config_bytes(path)))

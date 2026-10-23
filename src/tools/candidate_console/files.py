@@ -20,7 +20,7 @@ def canonical(value: str) -> Path:
     return path
 
 
-def private_bytes(value: str) -> bytes:
+def _file_bytes(value: str, *, owner_only: bool) -> bytes:
     path = canonical(value)
     directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
     descriptor = None
@@ -35,8 +35,10 @@ def private_bytes(value: str) -> bytes:
         metadata = os.fstat(descriptor)
         if (
             not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_uid != os.getuid()
-            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or (
+                owner_only
+                and (metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o600)
+            )
             or metadata.st_size > LIMIT
         ):
             raise OperationFailure("configuration", "private file requires owner-only mode 600")
@@ -49,6 +51,14 @@ def private_bytes(value: str) -> bytes:
         os.close(directory)
         if descriptor is not None:
             os.close(descriptor)
+
+
+def private_bytes(value: str) -> bytes:
+    return _file_bytes(value, owner_only=True)
+
+
+def config_bytes(value: str) -> bytes:
+    return _file_bytes(value, owner_only=False)
 
 
 def token(value: str) -> str:

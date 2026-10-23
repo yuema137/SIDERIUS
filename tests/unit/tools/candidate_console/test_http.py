@@ -197,3 +197,28 @@ def test_concurrent_same_uuid_admits_once(console_config, monkeypatch):
     assert all(response.status_code == 202 for response in responses)
     assert {response.json()["observation"] for response in responses} == {"starting", "existing"}
     assert len(spawns) == 1
+
+
+def test_config_loader_refuses_symlink_swap_after_canonical_check(
+    console_config, tmp_path, monkeypatch
+):
+    from tools.candidate_console import files
+    from tools.candidate_console.config import load_config
+
+    config_path = tmp_path / "console.json"
+    config_path.write_text(console_config.model_dump_json())
+    assert load_config(str(config_path)) == console_config
+    replacement = tmp_path / "replacement.json"
+    replacement.write_text(console_config.model_dump_json())
+    original = files.canonical
+
+    def swapped(value):
+        path = original(value)
+        if path == config_path:
+            path.unlink()
+            path.symlink_to(replacement)
+        return path
+
+    monkeypatch.setattr(files, "canonical", swapped)
+    with pytest.raises(OSError):
+        load_config(str(config_path))

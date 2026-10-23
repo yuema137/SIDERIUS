@@ -67,7 +67,7 @@ agent = [
 nodes = ["*.md", "*/*.md"]
 ml_models = ["*.md", "*/description.md"]
 dashboard = ["static/*.html", "static/*.js", "static/*.css"]
-tools = ["ci/weights.json", "claude_hooks/templates/*.md"]
+tools = ["ci/weights.json", "claude_hooks/templates/*.md", "candidate_console/static/*.html", "candidate_console/static/*.js", "candidate_console/static/*.css"]
 
 [dependency-groups]
 dev = [

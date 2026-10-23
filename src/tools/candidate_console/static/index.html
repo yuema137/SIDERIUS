@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SIDERIUS · Candidate console</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<header><div class="brand">SIDERIUS <span>Local candidate console</span></div><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></header>
+<main>
+  <section class="card" aria-labelledby="access-heading">
+    <h1 id="access-heading">Connect to the console</h1>
+    <p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p>
+    <form id="access-form" class="actions"><div class="grow"><label for="token">Console token</label><input id="token" type="password" autocomplete="off" required></div><button type="submit">Connect</button></form>
+    <p id="access-status" role="status">Not connected.</p>
+  </section>
+  <div class="columns">
+    <section class="card" aria-labelledby="prepare-heading">
+      <p class="eyebrow">1 · Prepare</p><h2 id="prepare-heading">Configured task</h2>
+      <form id="prepare-form">
+        <fieldset id="draft" disabled>
+          <label for="task">Task</label><select id="task" required><option value="">Connect to load tasks</option></select>
+          <p id="limits" class="muted"></p>
+          <label for="run-name">Run name</label><input id="run-name" required maxlength="128" autocomplete="off">
+          <details><summary>Optional stage advice</summary>
+            <label for="proposal-advice">Proposal advice</label><textarea id="proposal-advice" maxlength="32768" rows="3"></textarea>
+            <label for="implementation-advice">Implementation advice</label><textarea id="implementation-advice" maxlength="32768" rows="3"></textarea>
+            <label for="validation-advice">Validation advice</label><textarea id="validation-advice" maxlength="32768" rows="3"></textarea>
+          </details>
+        </fieldset>
+        <div class="actions"><button id="prepare-button" type="submit" disabled>Prepare request</button><button id="new-preparation" type="button" class="secondary" disabled>New preparation</button></div>
+      </form>
+      <p id="prepare-status" role="status">No preparation submitted.</p><p id="prepare-id" class="mono"></p>
+    </section>
+    <section class="card" aria-labelledby="review-heading">
+      <p class="eyebrow">2 · Review and launch</p><h2 id="review-heading">Prepared request</h2>
+      <p id="review-status" role="status">The concrete request appears after preparation completes.</p>
+      <div id="review"></div>
+      <p class="warning">Launching runs configured task code and may call paid model APIs. Review the task, routes and resource policy before proceeding.</p>
+      <button id="launch-button" type="button" disabled>Launch candidate</button><p id="launch-status" role="status">No candidate launch submitted.</p><p id="candidate-id" class="mono"></p>
+    </section>
+  </div>
+  <section class="card" aria-labelledby="monitor-heading">
+    <p class="eyebrow">3 · Observe any known operation</p><h2 id="monitor-heading">Status and logs</h2>
+    <p>Enter an operation UUID from this console or code. Reading an operation never launches or restarts it. Closing the page does not stop an admitted operation.</p>
+    <form id="monitor-form" class="actions"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" disabled>Read operation</button></form>
+    <p id="monitor-status" role="status">No operation selected.</p><dl id="operation-facts" class="facts"></dl>
+    <div class="actions"><label for="log-kind">Log source</label><select id="log-kind"><option value="native">Native</option><option value="operation">Operation</option></select></div>
+    <p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre>
+  </section>
+</main>
+<footer>Candidate generation and validation · Training and scientific scoring are not included.</footer>
+</body>
+</html>
