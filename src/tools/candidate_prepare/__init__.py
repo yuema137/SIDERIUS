@@ -26,13 +26,20 @@ from .reusable_models import (
     ReusableCandidatePreparationRequest,
     ReusablePreparationPlan,
     ReusablePreparationReceipt,
+    ReusablePreparedSelection,
+    VerifiedReusablePreparation,
 )
+from .reusable_selection import select_reusable_preparation, verify_reusable_preparation
 
 __all__ += [
     "ReusableBindingCapture",
     "ReusableCandidatePreparationRequest",
     "ReusablePreparationPlan",
     "ReusablePreparationReceipt",
+    "ReusablePreparedSelection",
+    "VerifiedReusablePreparation",
     "preflight_reusable_candidate",
     "prepare_reusable_candidate",
+    "select_reusable_preparation",
+    "verify_reusable_preparation",
 ]
