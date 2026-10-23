@@ -2151,6 +2151,7 @@ class StubSandbox(TidmadSandbox):
         sample_set: dict | None = None,
         inference_batch: int | None = None,
         runtime_policy: dict | None = None,
+        task_scopes: object = None,
     ) -> dict[str, Any]:
         """Synthesise a successful inference result. No subprocess launch.
 
@@ -2158,8 +2159,12 @@ class StubSandbox(TidmadSandbox):
         mirrors ``TidmadSandbox.execute_inference``, timing fields included).
         ``runtime_policy`` accepted for RT2-D signature parity;
         ``runtime_verification=None`` is the explicit-absence shape.
+        Composed scopes use the production transport owner and task codec;
+        only scope configuration artifacts are written, never deliverables.
         """
         validate_generated_artifact_name(run_name, field="run_name")
+        if getattr(task_scopes, "training", None) is not None:
+            validate_generated_artifact_name(exp_id, field="exp_id")
         if sample_set is not None:
             try:
                 validate_sample_set(sample_set, scope=self.data_scope)
@@ -2170,6 +2175,7 @@ class StubSandbox(TidmadSandbox):
                     "process_startup_ms": None,
                     "subprocess_wall_ms": None,
                 }
+        task_scope_argv(self.dirs["configs"], exp_id, task_scopes)
         return {
             "status": "success",
             "message": "stub_inference_ok",
@@ -2187,6 +2193,7 @@ class StubSandbox(TidmadSandbox):
         m_cfg: dict,
         t_cfg: dict,
         l_cfg: dict,
+        task_scopes: object = None,
     ) -> dict[str, Any]:
         """Synthesise scoring + merge cached training results.
 
@@ -2194,8 +2201,13 @@ class StubSandbox(TidmadSandbox):
         training keys first, then scoring keys (so ``final_loss`` /
         ``loss_history`` / ``model_params`` from the cached trainer output
         appear alongside the synthetic ``denoising_score`` etc.).
+        Composed scopes use the same transport owner as production, without
+        launching the scorer or interpreting any scientific scope semantics.
         """
         validate_generated_artifact_name(run_name, field="run_name")
+        if getattr(task_scopes, "training", None) is not None:
+            validate_generated_artifact_name(exp_id, field="exp_id")
+        task_scope_argv(self.dirs["configs"], exp_id, task_scopes)
         results: dict[str, Any] = {}
         results.update(self._train_results_cache.get(exp_id, {}))
         results["denoising_score"] = self._rng.uniform(-3.0, -2.0)

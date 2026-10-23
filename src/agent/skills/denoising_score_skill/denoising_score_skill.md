@@ -42,3 +42,19 @@ measured per-segment constant. Estimates are planning evidence, not scores.
 shape, arithmetic, worker flooring, measured host constants, and unknown-host
 fallback. Wrapper call-shape and executor behavior belong to focused unit or
 integration tests; stubs are appropriate offline, not scientific evidence.
+
+## Pseudo execution and composed scopes
+
+`StubSandbox.execute_scoring` accepts optional `task_scopes` and invokes the
+production scope transport owner, `execute_tools.scope_artifact.task_scope_argv`.
+A present training scope requires its task-data-path binding; that task's codec
+serializes training/evaluation scope configuration artifacts. No training scope
+means no transport. Binding/codec failures propagate directly from the stub
+(the production scoring method catches ordinary transport errors). This does
+not launch scoring or evaluate a scientific metric: cached training results
+merge with the existing seeded synthetic scores, and saved records retain
+`_pseudo_origin = "stub_sandbox"`.
+
+Before scope artifact writes, pseudo execution requires `exp_id` to pass the
+existing `validate_generated_artifact_name` component rule. Calls with no
+training scope retain the legacy pseudo API without an `exp_id` path check.

@@ -69,3 +69,18 @@ instead of importing `SEGMENT_LENGTH`. It also accepts an optional
 
 **No CLI argument, default value or observable behaviour changed** — under
 TIDMAD the resolved value is the same 10,000,000.
+
+## Pseudo execution and composed scopes
+
+The wrapper forwards optional `task_scopes` unchanged to either sandbox.
+`StubSandbox.execute_inference` accepts it and invokes the same
+`execute_tools.scope_artifact.task_scope_argv` owner as production. When a
+training scope exists, the owner requires its task-data-path binding and uses
+that task's codec to write training/evaluation scope configuration artifacts.
+Codec/binding errors propagate directly from the stub. With no training scope,
+transport is a no-op. This does not run inference: timings remain synthetic,
+`runtime_verification` remains `None`, and no deliverable is produced.
+
+Before scope artifact writes, pseudo execution requires `exp_id` to pass the
+existing `validate_generated_artifact_name` component rule. Calls with no
+training scope retain the legacy pseudo API without an `exp_id` path check.
