@@ -177,6 +177,7 @@ from workflows.literature_config import (
 from workflows.llm_config import (
     WorkflowLLMConfig,
 )
+from workflows.plugin_staging import stage_native_plugins
 from workflows.run_bindings import WorkflowRunBindings
 from workflows.run_config import (
     WorkflowLaunchConfig,
@@ -1109,139 +1110,6 @@ def resolve_tuner_health_config_source(
     return operator_config
 
 
-def _register_plugin(
-    impl_output,
-    model_name: str,
-    dest_plugin_dirs: "list[str] | str",
-    dest_loss_dirs: "list[str] | str | None" = None,
-):
-    """
-    Mirror validated plugin files to one or more destination dirs.
-
-    Two destinations are typical in chain mode:
-
-      * **Tuner-scoped** dir at ``{tuning_dir}/plugins/{run_name}/`` — the
-        training/inference/scoring subprocess discovers plugins here via
-        ``SIDERIUS_PLUGIN_DIRS`` (docs/run_scoped_plugins.md, Phase 4).
-      * **Chain-canonical** dir at ``{workspace}/plugins/{run_name}/`` —
-        ``core.resume.restore_prior_state`` looks here when later iters of
-        the chain re-register prior plugins, and
-        ``ml_models.model_descriptions.get_model_description`` walks
-        ``{workspace}/plugins/iter_*/{model_type}/description.md`` to
-        resolve agent-generated model descriptions on the next iter.
-
-    Both dests receive identical files:
-
-      - ``{model_file_path}``       → ``{dest}/{model_name}.py``
-      - ``{description_file_path}`` → ``{dest}/{model_name}/description.md``
-
-    The first dest in the list is treated as the primary; its ``.py`` is
-    used to extend the in-process ``MODEL_REGISTRY`` /
-    ``PLUGIN_CONFIG_REGISTRY`` so the tuner's planner (same Python process
-    as the workflow) resolves the new model type without a re-scan.
-
-    Accepts a single string for back-compat with older call sites and tests.
-
-    L6a — loss-plugin propagation. When ``dest_loss_dirs`` is provided AND
-    ``impl_output.loss_provenance.action == "generated"``, the loss plugin
-    file at ``loss_provenance.loss_file_path`` is mirrored to each dest as
-    ``{dest}/{loss_name}.py``. Callers typically pass both a tuner-scoped
-    ``get_loss_dir(tuning_dir, run_name)`` (so the training subprocess's
-    ``SIDERIUS_LOSS_DIRS`` resolves the plugin) and a chain-canonical
-    ``get_loss_dir(workspace, run_name)`` (so resume / cross-iter Branch B
-    reuse can find the same plugin without re-traversing the per-attempt
-    tree). Pre-L6a, the implementor wrote the loss file to a per-attempt
-    ``{attempt_dir}/losses/`` directory that no subsequent code copied
-    anywhere, so training subprocesses could never load it. Defaults to
-    ``None`` for back-compat with all existing call sites and unit tests.
-    Skipped silently when ``loss_provenance is None`` (built-in loss path)
-    or when ``loss_provenance.action == "reused"`` (the chain-canonical
-    copy from the originating iter is expected to still exist).
-
-    Skips gracefully if source files don't exist (e.g. unit tests with mocks).
-    """
-    loss_prov = getattr(impl_output, "loss_provenance", None)
-    if dest_loss_dirs is not None and loss_prov is not None and loss_prov.action == "generated":
-        validate_generated_artifact_name(loss_prov.loss_name, field="loss_provenance.loss_name")
-    if isinstance(dest_plugin_dirs, str):
-        dest_plugin_dirs = [dest_plugin_dirs]
-
-    from workflows.plugin_staging import stage_model_source
-
-    source_available, primary_plugin = stage_model_source(
-        impl_output.model_file_path,
-        impl_output.description_file_path,
-        model_name,
-        dest_plugin_dirs,
-        model_type=getattr(impl_output, "model_type", model_name),
-    )
-    if not source_available:
-        return
-
-    # L6a — loss plugin propagation. Only mirror on "generated" so reused
-    # losses (Branch B) don't double-copy onto themselves on every iter.
-    loss_prov = getattr(impl_output, "loss_provenance", None)
-    if dest_loss_dirs is not None and loss_prov is not None and loss_prov.action == "generated":
-        if isinstance(dest_loss_dirs, str):
-            loss_dest_list = [dest_loss_dirs]
-        else:
-            loss_dest_list = list(dest_loss_dirs)
-        if not os.path.isfile(loss_prov.loss_file_path):
-            print(
-                f"    Warning: loss plugin file not found at "
-                f"{loss_prov.loss_file_path}, skipping loss registration"
-            )
-        else:
-            for d in loss_dest_list:
-                os.makedirs(d, exist_ok=True)
-                dest_loss = os.path.join(d, f"{loss_prov.loss_name}.py")
-                shutil.copy2(loss_prov.loss_file_path, dest_loss)
-                print(f"    Loss plugin registered → {dest_loss}")
-            # L6c — also register in-memory so in-process pre-flight
-            # (evaluate_vram_skill, evaluate_time_skill) resolves the plugin
-            # without depending on SIDERIUS_LOSS_DIRS. First dest is
-            # sufficient — same file regardless of dest. See
-            # docs/design/enable_loss_inventory.md § L6c.
-            from ml_models.loss_models_sandbox import register_loss_in_memory
-
-            # L6c bug-fix — loss_dest_list[0] is a DIRECTORY; the plugin
-            # file is at ``{dir}/{loss_name}.py``. Passing the directory
-            # caused ``spec_from_file_location`` to return None silently,
-            # leaving LOSS_REGISTRY empty and breaking every custom-loss
-            # pre-flight (in-process callers fell through to filesystem
-            # with no SIDERIUS_LOSS_DIRS set). Reconstruct the file path.
-            _loss_file_for_registry = os.path.join(loss_dest_list[0], f"{loss_prov.loss_name}.py")
-            _registered_loss = register_loss_in_memory(
-                _loss_file_for_registry,
-                loss_prov.contract_snapshot,
-            )
-            if _registered_loss is not None:
-                print(f"    Loss '{_registered_loss}' added to in-memory LOSS_REGISTRY")
-
-    if primary_plugin is None:
-        # ``dest_plugin_dirs`` was empty after normalization — the copy loop
-        # never ran, so there is nothing to register. Defensive guard; also
-        # narrows ``primary_plugin`` from ``str | None`` to ``str`` for the
-        # call below.
-        return
-
-    registered: str | None = None
-    try:
-        # Step 12 / PR-12a C6 — the PUBLIC registration authority.
-        # `workflows._add_plugin_to_registries` was a private duplicate of it:
-        # same `_load_plugin`, same three registries, same `model_type | None`
-        # return. Its only behavioural difference was the absence of the
-        # re-registration warning, which is strictly less visible.
-        registered = register_model_in_memory(primary_plugin)
-        if registered:
-            print(f"    Model '{model_name}' added to registries (model_type='{registered}')")
-    except Exception as e:
-        from core.local_code.failure import raise_if_code_package_failure
-
-        raise_if_code_package_failure(e)
-        print(f"    Warning: could not extend registries: {e}")
-
-
 # ---------------------------------------------------------------------------
 # L6c — Loss promotion to the global library
 # ---------------------------------------------------------------------------
@@ -1439,7 +1307,7 @@ def _promote_model_to_global(impl_output) -> None:
     promotions are neither duplicated nor overwritten.
 
     Mirrors :func:`_promote_loss_to_global` for the model surface. Called
-    by the workflow's iteration loop right after ``_register_plugin``
+    by the workflow's iteration loop right after ``stage_native_plugins``
     returns (early-promotion timing matches the issue-#92 fix for losses),
     so a future iteration or resume in the same workspace can resolve it
     through the capability index.
@@ -3183,6 +3051,7 @@ def run_workflow(
         # ``proposal: ProposalOutput | None`` to ``ProposalOutput`` for the
         # rest of the iteration body (tuning + cache update + score check).
         assert proposal is not None
+        assert impl_output is not None  # Successful validation requires implementor output.
 
         # --- Tune (set up storage + run-scoped plugin dir up front) ---
         validate_generated_artifact_name(proposal.model_name, field="model_name")
@@ -3218,7 +3087,7 @@ def run_workflow(
         # Branch B lookups. See docs/design/enable_loss_inventory.md § L6.
         tuner_loss_dir = get_loss_dir(tuning_dir, bindings.run_name)
         chain_loss_dir = get_loss_dir(bindings.workspace, bindings.run_name)
-        _register_plugin(
+        stage_native_plugins(
             impl_output,
             proposal.model_name,
             [tuner_plugin_dir, chain_plugin_dir],
@@ -3280,7 +3149,7 @@ def run_workflow(
             break
 
         # Issue #92 safety net — the primary promotion fires earlier
-        # (right after ``_register_plugin``) so the loss is globally
+        # (right after ``stage_native_plugins``) so the loss is globally
         # available before the tuner starts. This late call is kept as an
         # idempotent backstop in case the early call was skipped (e.g.
         # the file moved between calls, a concurrent process altered the

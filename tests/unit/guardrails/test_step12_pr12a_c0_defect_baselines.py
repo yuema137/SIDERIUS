@@ -180,7 +180,7 @@ STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
     # this week consumed to its ceiling by accumulation; deliberately NOT
     # split in a narrow lane.
     "src/workflows/model_exploration.py::run_workflow": (377, 144, 1743, 21),
-    "src/workflows/model_exploration.py::_register_plugin": (60, 19, 175, 4),
+    "src/workflows/plugin_staging.py::stage_native_plugins": (60, 19, 175, 4),
     "src/workflows/model_exploration.py::should_run_literature_review": (4, 0, 29, 2),
     (
         "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py::HyperparamTuningAgent.run"

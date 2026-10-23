@@ -17,7 +17,7 @@ from ml_models import loss_models_sandbox, loss_plugin_loader, plugin_loader
 from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
 from ml_models.models_sandbox import MODEL_REGISTRY
 from tests.unit.workflows.test_model_exploration import _REGRESSOR_PLUGIN_SRC
-from workflows import model_exploration as staging
+from workflows import plugin_staging as staging
 
 MODEL = "test_regressor_plugin_c6"
 LOSS = "native_staging_loss"
@@ -129,7 +129,7 @@ def test_generated_model_loss_effect_oracle(tmp_path, monkeypatch, capsys, stagi
     monkeypatch.setattr(shutil, "copy2", observed_copy)
     monkeypatch.setattr(staging, "register_model_in_memory", observed_model)
     monkeypatch.setattr(loss_models_sandbox, "register_loss_in_memory", observed_loss)
-    result = staging._register_plugin(
+    result = staging.stage_native_plugins(
         implementation, MODEL, destinations(tmp_path, "plugins"), destinations(tmp_path, "losses")
     )
     files = {}
@@ -179,9 +179,9 @@ def test_coupled_partial_effects(tmp_path, staging_state, case):
     if case == "empty_losses":
         losses = []
         with pytest.raises(IndexError):
-            staging._register_plugin(implementation, MODEL, models, losses)
+            staging.stage_native_plugins(implementation, MODEL, models, losses)
     else:
-        assert staging._register_plugin(implementation, MODEL, models, losses) is None
+        assert staging.stage_native_plugins(implementation, MODEL, models, losses) is None
     assert (MODEL in MODEL_REGISTRY) is False
     assert (LOSS in loss_models_sandbox.LOSS_REGISTRY) is (case == "empty_models")
     assert (tmp_path / "tuner/plugins" / f"{MODEL}.py").exists() is (case == "empty_losses")
@@ -208,7 +208,7 @@ def test_registration_exception_disposition(tmp_path, monkeypatch, capsys, stagi
     else:
         monkeypatch.setattr(staging, "register_model_in_memory", refuse)
     if failure == "ordinary_model":
-        staging._register_plugin(
+        staging.stage_native_plugins(
             implementation,
             MODEL,
             destinations(tmp_path, "plugins"),
@@ -220,7 +220,7 @@ def test_registration_exception_disposition(tmp_path, monkeypatch, capsys, stagi
         )
     else:
         with pytest.raises(type(error), match=str(error)) as caught:
-            staging._register_plugin(
+            staging.stage_native_plugins(
                 implementation,
                 MODEL,
                 destinations(tmp_path, "plugins"),

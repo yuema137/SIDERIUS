@@ -162,7 +162,7 @@ class TestWorkflowReachabilityAndThreading:
                 "workflows.model_exploration._admit_generated_model_construction",
                 side_effect=[refusal, None],
             ) as admit,
-            patch("workflows.model_exploration._register_plugin") as stage,
+            patch("workflows.model_exploration.stage_native_plugins") as stage,
             patch("workflows.model_exploration._promote_model_to_global") as promote_model,
             patch("workflows.model_exploration._promote_loss_to_global") as promote_loss,
             patch("core.capability_registry.CapabilityRegistry.register") as register_capability,
@@ -251,7 +251,7 @@ class TestWorkflowReachabilityAndThreading:
                 "workflows.model_exploration._admit_generated_model_construction",
                 side_effect=refusal,
             ),
-            patch("workflows.model_exploration._register_plugin") as stage,
+            patch("workflows.model_exploration.stage_native_plugins") as stage,
         ):
             interp.return_value.run.return_value = _make_interpretation_output()
             proposer.return_value.run.return_value = _make_proposal_output(model_name="candidate")

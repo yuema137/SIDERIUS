@@ -116,7 +116,7 @@ def _run_with_forced_retries(
         impl = stack.enter_context(patch("workflows.model_exploration.MLModelImplementor"))
         valid = stack.enter_context(patch("workflows.model_exploration.MLCodeValidatorAgent"))
         tune = stack.enter_context(patch("workflows.model_exploration.HyperparamTuningAgent"))
-        register = stack.enter_context(patch("workflows.model_exploration._register_plugin"))
+        register = stack.enter_context(patch("workflows.model_exploration.stage_native_plugins"))
         stack.enter_context(patch("workflows.model_exploration._promote_model_to_global"))
         stack.enter_context(patch("workflows.model_exploration._promote_loss_to_global"))
         interp.return_value.run.return_value = _make_interpretation_output()

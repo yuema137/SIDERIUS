@@ -12,9 +12,8 @@ from tests.unit.workflows.test_u6_impl_attempt_layout import _run_with_forced_re
 from workflows.model_exploration import (
     _promote_loss_to_global,
     _promote_model_to_global,
-    _register_plugin,
 )
-from workflows.plugin_staging import stage_model_source
+from workflows.plugin_staging import stage_model_source, stage_native_plugins
 
 
 @pytest.mark.parametrize("sink", ["staging", "registration", "model_promotion", "loss_promotion"])
@@ -43,7 +42,9 @@ def test_direct_sink_rejects_before_copy_directory_or_registry(tmp_path, monkeyp
                 model_type="safe_model",
             )
         elif sink == "registration":
-            _register_plugin(output, "safe_model", str(tmp_path / "dest"), str(tmp_path / "losses"))
+            stage_native_plugins(
+                output, "safe_model", str(tmp_path / "dest"), str(tmp_path / "losses")
+            )
         elif sink == "model_promotion":
             _promote_model_to_global(output)
         else:

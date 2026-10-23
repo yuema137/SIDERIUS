@@ -73,12 +73,12 @@ _STEP09A_ORDER = MetricOrder(shipped_spec())
 from workflows.data_analysis_stage import WorkflowAnalysisOutput
 from workflows.llm_config import NodeLLMConfig, TunerLLMConfig, WorkflowLLMConfig
 from workflows.model_exploration import (
-    _register_plugin,
     load_tuning_outputs,
     load_tuning_outputs_from_paths,
     run_workflow,
     tuning_outputs_to_summaries,
 )
+from workflows.plugin_staging import stage_native_plugins
 from workflows.run_config import WorkflowLaunchConfig, launch_config_field_names
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
@@ -1735,12 +1735,12 @@ class TestRunWorkflowGateExhaustionPropagation:
 
 
 # ---------------------------------------------------------------------------
-# _register_plugin tests (Phase 4 — docs/run_scoped_plugins.md)
+# stage_native_plugins tests (Phase 4 — docs/run_scoped_plugins.md)
 # ---------------------------------------------------------------------------
 
 
 class TestRegisterPlugin:
-    """Phase 4 contract: ``_register_plugin`` must copy the validated plugin
+    """Phase 4 contract: ``stage_native_plugins`` must copy the validated plugin
     into the *caller-supplied* ``dest_plugin_dir`` (the tuner's run-scoped
     plugin dir). Pre-Phase-4 it copied to the legacy global
     ``<repo>/agent_generated/models/``, which the training subprocess no
@@ -1749,7 +1749,7 @@ class TestRegisterPlugin:
     def _make_implementor_output_with_real_files(self, tmp_path, model_type="gated_tcn"):
         """Build an ImplementorOutput whose model_file_path /
         description_file_path point at real files inside tmp_path so
-        ``_register_plugin``'s ``shutil.copy2`` calls actually run."""
+        ``stage_native_plugins``'s ``shutil.copy2`` calls actually run."""
         src_models = tmp_path / "src" / "models"
         src_models.mkdir(parents=True)
         plugin_src = src_models / f"{model_type}.py"
@@ -1781,7 +1781,7 @@ class TestRegisterPlugin:
         nowhere else. This is the core Phase 4 promise."""
         impl = self._make_implementor_output_with_real_files(tmp_path)
         dest = tmp_path / "ws" / "plugins" / "tune_run"
-        _register_plugin(impl, "gated_tcn", str(dest))
+        stage_native_plugins(impl, "gated_tcn", str(dest))
 
         assert (dest / "gated_tcn.py").is_file()
         # And the file actually contains the source we wrote.
@@ -1790,7 +1790,7 @@ class TestRegisterPlugin:
     def test_writes_description_into_supplied_dest(self, tmp_path):
         impl = self._make_implementor_output_with_real_files(tmp_path)
         dest = tmp_path / "ws" / "plugins" / "tune_run"
-        _register_plugin(impl, "gated_tcn", str(dest))
+        stage_native_plugins(impl, "gated_tcn", str(dest))
 
         assert (dest / "gated_tcn" / "description.md").is_file()
         assert "Test plugin description" in (dest / "gated_tcn" / "description.md").read_text()
@@ -1805,23 +1805,23 @@ class TestRegisterPlugin:
         monkeypatch.chdir(tmp_path)
         impl = self._make_implementor_output_with_real_files(tmp_path)
         dest = tmp_path / "ws" / "plugins" / "tune_run"
-        _register_plugin(impl, "gated_tcn", str(dest))
+        stage_native_plugins(impl, "gated_tcn", str(dest))
 
         legacy = tmp_path / "agent_generated" / "models" / "gated_tcn.py"
         assert not legacy.exists(), (
-            f"_register_plugin wrote to the legacy global dir at {legacy} — "
+            f"stage_native_plugins wrote to the legacy global dir at {legacy} — "
             "this regresses Phase 4. The training subprocess no longer scans "
             "that path when SIDERIUS_PLUGIN_DIRS is set."
         )
 
     def test_creates_dest_dir_if_missing(self, tmp_path):
         """The workflow constructs ``dest_plugin_dir`` via ``get_plugin_dir``
-        and may call ``_register_plugin`` before the tuner's sandbox has
+        and may call ``stage_native_plugins`` before the tuner's sandbox has
         ``_ensure_dir``-ed it. The function must create the dir on its own."""
         impl = self._make_implementor_output_with_real_files(tmp_path)
         dest = tmp_path / "fresh" / "plugins" / "tune_run"
         assert not dest.exists()
-        _register_plugin(impl, "gated_tcn", str(dest))
+        stage_native_plugins(impl, "gated_tcn", str(dest))
         assert (dest / "gated_tcn.py").is_file()
 
     def test_skips_when_source_plugin_missing(self, tmp_path, capsys):
@@ -1838,7 +1838,7 @@ class TestRegisterPlugin:
             mathematical_definition="x",
         )
         dest = tmp_path / "ws" / "plugins" / "tune_run"
-        _register_plugin(impl, "ghost", str(dest))  # must not raise
+        stage_native_plugins(impl, "ghost", str(dest))  # must not raise
 
         captured = capsys.readouterr()
         assert "plugin file not found" in captured.out
@@ -1887,7 +1887,7 @@ class TestRegisterPlugin:
         impl = self._make_implementor_output_with_loss(tmp_path, action="generated")
         model_dest = tmp_path / "ws" / "plugins" / "tune_run"
         loss_dest = tmp_path / "ws" / "losses" / "tune_run"
-        _register_plugin(
+        stage_native_plugins(
             impl,
             "gated_tcn",
             str(model_dest),
@@ -1903,7 +1903,7 @@ class TestRegisterPlugin:
         model_dest = tmp_path / "ws" / "plugins" / "tune_run"
         tuner_loss_dest = tmp_path / "tuning_dir" / "losses" / "tune_run"
         chain_loss_dest = tmp_path / "ws" / "losses" / "tune_run"
-        _register_plugin(
+        stage_native_plugins(
             impl,
             "gated_tcn",
             str(model_dest),
@@ -1914,13 +1914,13 @@ class TestRegisterPlugin:
 
     def test_l6a_skips_loss_copy_when_reused(self, tmp_path):
         """Branch B / reused path: the implementor recorded an existing
-        plugin path; ``_register_plugin`` MUST NOT copy it. The chain-
+        plugin path; ``stage_native_plugins`` MUST NOT copy it. The chain-
         canonical copy from the originating iter is expected to still
         exist."""
         impl = self._make_implementor_output_with_loss(tmp_path, action="reused")
         model_dest = tmp_path / "ws" / "plugins" / "tune_run"
         loss_dest = tmp_path / "ws" / "losses" / "tune_run"
-        _register_plugin(
+        stage_native_plugins(
             impl,
             "gated_tcn",
             str(model_dest),
@@ -1934,7 +1934,7 @@ class TestRegisterPlugin:
         does not raise and the model copy still completes."""
         impl = self._make_implementor_output_with_loss(tmp_path, action="generated")
         model_dest = tmp_path / "ws" / "plugins" / "tune_run"
-        _register_plugin(impl, "gated_tcn", str(model_dest))  # no dest_loss_dirs
+        stage_native_plugins(impl, "gated_tcn", str(model_dest))  # no dest_loss_dirs
         assert (model_dest / "gated_tcn.py").is_file()  # model still copied
 
     def test_l6a_warns_when_loss_source_missing(self, tmp_path, capsys):
@@ -1953,7 +1953,7 @@ class TestRegisterPlugin:
         )
         model_dest = tmp_path / "ws" / "plugins" / "tune_run"
         loss_dest = tmp_path / "ws" / "losses" / "tune_run"
-        _register_plugin(
+        stage_native_plugins(
             impl,
             "gated_tcn",
             str(model_dest),
@@ -1964,7 +1964,7 @@ class TestRegisterPlugin:
         assert not (loss_dest / "ghost_loss.py").exists()
 
     def test_register_plugin_populates_loss_registry_with_file_not_dir(self, tmp_path):
-        """Regression guard for the L6c bug (2026-06-24): _register_plugin
+        """Regression guard for the L6c bug (2026-06-24): stage_native_plugins
         called register_loss_in_memory with the dest *directory* path
         instead of the dest *file* path. spec_from_file_location silently
         returned None for the directory, leaving LOSS_REGISTRY empty.
@@ -1974,7 +1974,7 @@ class TestRegisterPlugin:
         tuner reverting to a built-in loss.
 
         This test would have caught the bug immediately — it asserts that
-        after _register_plugin runs with a generated loss, LOSS_REGISTRY[name]
+        after stage_native_plugins runs with a generated loss, LOSS_REGISTRY[name]
         holds an actual class object, not None.
         """
         from ml_models.loss_models_sandbox import (
@@ -1988,7 +1988,7 @@ class TestRegisterPlugin:
         # Clear registry to ensure post-call state is from THIS call only.
         LOSS_REGISTRY.pop("expected_value_mse", None)
         LOSS_CONFIG_REGISTRY.pop("expected_value_mse", None)
-        _register_plugin(
+        stage_native_plugins(
             impl,
             "gated_tcn",
             str(model_dest),
@@ -1999,7 +1999,7 @@ class TestRegisterPlugin:
         # AND LOSS_REGISTRY must contain the loss class (not None, not missing).
         assert "expected_value_mse" in LOSS_REGISTRY, (
             f"register_loss_in_memory failed silently — LOSS_REGISTRY keys "
-            f"after _register_plugin: {sorted(LOSS_REGISTRY)}"
+            f"after stage_native_plugins: {sorted(LOSS_REGISTRY)}"
         )
         assert LOSS_REGISTRY["expected_value_mse"] is not None
         assert "expected_value_mse" in LOSS_CONFIG_REGISTRY
@@ -2215,7 +2215,7 @@ class TestRegisterModelInMemory:
 
 
 class TestRegisterPluginUsesHelper:
-    """End-to-end: ``_register_plugin`` (the workflow's caller) must drive
+    """End-to-end: ``stage_native_plugins`` (the workflow's caller) must drive
     all four registry surfaces via the helper."""
 
     def test_register_plugin_populates_all_four_surfaces(self, tmp_path, clean_registries):
@@ -2228,13 +2228,13 @@ class TestRegisterPluginUsesHelper:
             model_description="x",
             mathematical_definition="y=f(x)",
         )
-        # Materialise source files _register_plugin actually copies.
+        # Materialise source files stage_native_plugins actually copies.
         (tmp_path / "src_plugin.py").write_text(_REGRESSOR_PLUGIN_SRC)
         (tmp_path / "src_test.py").write_text("def test_noop(): pass\n")
         (tmp_path / "src_desc.md").write_text("desc\n")
 
         dest = tmp_path / "ws" / "plugins" / "run_x"
-        _register_plugin(impl, "test_regressor_plugin_c6", str(dest))
+        stage_native_plugins(impl, "test_regressor_plugin_c6", str(dest))
 
         from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
         from ml_models.models_sandbox import MODEL_REGISTRY
