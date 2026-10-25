@@ -12,7 +12,7 @@ from tools.candidate_worker.preflight import credential_requirements, require_cr
 from tools.native_chain.resume_checks import append_boundary
 
 from .files import JSON_LIMIT, encode
-from .models import OperationFailure, OperationStoreConfig
+from .models import OperationFailure, OperationRecord, OperationStoreConfig
 from .native_chain import captured
 from .native_chain_read import chain_context
 from .native_resume_lineage import read_lineage, require_closed
@@ -28,8 +28,12 @@ def review_locked(
     guard: LockedWriter,
     *,
     launch_environment: Mapping[str, str] | None = None,
+    record: OperationRecord | None = None,
 ) -> NativeResumeReview:
-    record = load_record(config, predecessor)
+    if record is None:
+        record = load_record(config, predecessor)
+    if record.config != config or record.submission.request_id != predecessor:
+        raise ValueError("resume_selected_record_changed")
     lineage = read_lineage(record)
     head = lineage.head
     if head.id != predecessor:
@@ -130,7 +134,9 @@ def review_native_chain_resume(
         config = validate_config(config)
         record = load_record(config, predecessor)
         with locked_registered_writer(Path(chain_context(record)[1].workspace)) as guard:
-            return review_locked(config, predecessor, guard, launch_environment=launch_environment)
+            return review_locked(
+                config, predecessor, guard, launch_environment=launch_environment, record=record
+            )
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         raise OperationFailure(
             "native_resume_admission",

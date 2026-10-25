@@ -563,3 +563,167 @@ def test_terminal_without_absent_cleanup_cannot_continue(history, cleanup):
     changed = node.terminal.model_copy(update={"supervision": supervision})
     with pytest.raises(ValueError, match="cleanup_unresolved"):
         require_closed(replace(node, terminal=changed), None)
+
+
+@pytest.mark.parametrize("case", ["missing_adoption", "intact", "no_child"])
+def test_earlier_adoption_authority(history, case):
+    from core.native_writer.resume import adoption_name
+
+    root, _, first, first_path, current = history
+    reserve(first, adopt=case != "no_child")
+    a = first.native_resume_admission
+    if case == "no_child":
+        done = Completion(
+            operation_id=first.submission.request_id,
+            request_digest=first.request_digest,
+            outcome="pre_dispatch_failure",
+            reason="native_resume_spawn_failed",
+        )
+        publish(first_path / "completion.json", done)
+    else:
+        row2 = (
+            current[0]
+            .checkpoints[0]
+            .model_copy(
+                update={"iteration": 2, "manifest_sha256": "e" * 64, "output_sha256": "f" * 64}
+            )
+        )
+        current[0] = current[0].model_copy(
+            update={
+                "checkpoints": (
+                    current[0].checkpoints[0],
+                    row2,
+                    NativeChainCheckpointObservation(iteration=3, integrity="missing"),
+                )
+            }
+        )
+        done = terminal(first, first_path, a.root_request, a.root_admission, current[0])
+    with locked_registered_writer(Path(a.root_admission.workspace)) as guard:
+        owner = guard.snapshot()
+    a2 = a.model_copy(
+        update={
+            "predecessor_operation_id": first.submission.request_id,
+            "predecessor_completion_digest": hashlib.sha256(encode(done)).hexdigest(),
+            "baseline_operation_id": a.baseline_operation_id
+            if case == "no_child"
+            else first.submission.request_id,
+            "baseline_terminal_digest": a.baseline_terminal_digest
+            if case == "no_child"
+            else done.terminal_digest,
+            "owner": owner,
+            "evidence": current[0],
+            "start_iteration": 2 if case == "no_child" else 3,
+        }
+    )
+    submission = NativeChainResumeOperation(
+        request_id=uuid4(),
+        request=NativeChainResumeRequest(
+            predecessor_operation_id=first.submission.request_id,
+            expected_review_digest=review_digest(a2),
+        ),
+    )
+    second = OperationRecord(
+        native_id=uuid4(),
+        submission=submission,
+        request_digest=digest(submission),
+        config=first.config,
+        runtime=first.runtime,
+        inputs=(),
+        admitted_at=now(),
+        native_resume_admission=a2,
+    )
+    with locked_store(second.config) as store:
+        second_path = claim(store, second)
+    exited(second, second_path)
+    reserve(second, adopt=True)
+    if case == "no_child":
+        # The valid later owner may append despite an unchanged no-child ancestor.
+        row2 = current[0].checkpoints[0].model_copy(update={"iteration": 2})
+        current[0] = current[0].model_copy(
+            update={"checkpoints": (current[0].checkpoints[0], row2)}
+        )
+    if case == "missing_adoption":
+        with locked_registered_writer(Path(a.root_admission.workspace)) as guard:
+            (guard.state.path / adoption_name(first.submission.request_id)).unlink()
+    observed = read_operation(root.config, root.submission.request_id)
+    assert observed.native_chain.evidence.availability == (
+        "integrity_failure" if case == "missing_adoption" else "available"
+    )
+
+
+def test_public_control_read_budget(history, monkeypatch):
+    import os
+    from contextlib import contextmanager
+
+    import tools.candidate_operations.files as files
+    import tools.candidate_operations.native_resume_lineage as lineage
+
+    root, _, first, first_path, _ = history
+    publish(
+        first_path / "completion.json",
+        Completion(
+            operation_id=first.submission.request_id,
+            request_digest=first.request_digest,
+            outcome="pre_dispatch_failure",
+            reason="fixture",
+        ),
+    )
+    for name in ("request.json", "process.json", "completion.json"):
+        path = first_path / name
+        raw = path.read_bytes()
+        path.write_bytes(raw + b" " * (files.JSON_LIMIT - len(raw)))
+    sizes = []
+    original = files.open_file
+
+    @contextmanager
+    def counted(path, **kwargs):
+        with original(path, **kwargs) as fd:
+            sizes.append((str(path), os.fstat(fd).st_size))
+            yield fd
+
+    monkeypatch.setattr(files, "open_file", counted)
+    monkeypatch.setattr(lineage, "open_file", counted)
+    observed = read_operation(root.config, first.submission.request_id)
+    assert observed.state == "operation_failed"
+    assert sum(size for _, size in sizes) <= 16 * 1024 * 1024
+
+
+def test_public_resume_review_reads_selected_request_once(history, monkeypatch):
+    import tools.candidate_operations.native_resume as review
+    from tools.candidate_operations.models import OperationFailure
+
+    root, _, _, _, _ = history
+    workspace = Path(root.native_chain_admission.workspace)
+    (workspace / "iter_001").mkdir()
+    loads = []
+    original = review.load_record
+
+    def counted(*args):
+        loads.append(args)
+        return original(*args)
+
+    def reached_capture(*args):
+        raise RuntimeError("fixture stops after bounded lineage reads")
+
+    monkeypatch.setattr(review, "load_record", counted)
+    monkeypatch.setattr(review, "captured", reached_capture)
+    with pytest.raises(OperationFailure) as error:
+        review.review_native_chain_resume(root.config, root.submission.request_id)
+    assert "fixture stops" in str(error.value.__cause__)
+    assert len(loads) == 1
+
+
+def test_unlinked_resume_wrapper_spawn_failure_remains_releasable(history):
+    from tools.candidate_operations.models import SpawnFailure
+
+    _, _, record, path, _ = history
+    (path / "process.json").unlink()
+    publish(
+        path / "spawn_failure.json",
+        SpawnFailure(
+            operation_id=record.submission.request_id,
+            request_digest=record.request_digest,
+        ),
+    )
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert (snapshot.state, snapshot.reason) == ("operation_failed", "spawn_failed")

@@ -47,12 +47,19 @@ def verified_current(lineage: ChainLineage) -> NativeChainEvidence:
             raise ValueError("resume_preserved_prefix_changed")
         # A reservation alone never permits even a new suffix. No-child links
         # can precede later adopted successors, whose own baseline is checked.
-        if (
-            lineage.adoptions[index] is None
-            and index == len(lineage.reservations) - 1
-            and current != admitted.evidence
-        ):
-            raise ValueError("resume_unadopted_science_changed")
+        if lineage.adoptions[index] is None:
+            # An earlier missing adoption cannot borrow authority from a later
+            # link. Genuine no-child links retain their unchanged baseline.
+            if child.terminal is not None:
+                boundary = child.terminal.evidence
+            elif index + 1 < len(lineage.reservations):
+                following = lineage.nodes[index + 2].record.native_resume_admission
+                assert following is not None
+                boundary = following.evidence
+            else:
+                boundary = current
+            if boundary != admitted.evidence:
+                raise ValueError("resume_unadopted_science_changed")
         if child.terminal is not None and not prefix_equal(
             admitted.evidence, child.terminal.evidence, reservation.start_iteration
         ):
@@ -66,6 +73,18 @@ def verified_current(lineage: ChainLineage) -> NativeChainEvidence:
 def read_resume_chain(record: OperationRecord) -> OperationSnapshot:
     lineage = read_lineage(record, allow_unlinked=True)
     selected = lineage.selected
+    if selected.spawn_failure is not None:
+        if selected.id in {node.id for node in lineage.nodes}:
+            raise ValueError("resume_linked_spawn_failure")
+        return OperationSnapshot(
+            operation_id=selected.id,
+            kind=record.submission.kind,
+            request_digest=record.request_digest,
+            observed_at=now(),
+            state="operation_failed",
+            process=selected.process,
+            reason="spawn_failed",
+        )
     if selected.id not in {node.id for node in lineage.nodes}:
         if selected.terminal is not None or (
             selected.completion is not None

@@ -19,6 +19,7 @@ from .models import (
     OperationStoreConfig,
     ProcessIdentity,
     ProcessObservation,
+    SpawnFailure,
 )
 from .native_chain_models import NativeChainFence, NativeChainTerminal
 from .native_chain_read import chain_context, validated_terminal
@@ -54,6 +55,7 @@ class ChainNode:
     completion: Completion | None
     completion_digest: str | None
     terminal: NativeChainTerminal | None
+    spawn_failure: SpawnFailure | None
 
     @property
     def id(self) -> UUID:
@@ -81,14 +83,17 @@ def load_node(
     identity = _optional(budget.read(path / "process.json"), ProcessIdentity)
     raw = budget.read(path / "completion.json")
     completion = _optional(raw, Completion)
-    for marker in (identity, completion):
+    failure = _optional(budget.read(path / "spawn_failure.json"), SpawnFailure)
+    for marker in (identity, completion, failure):
         if marker is not None and (
             marker.operation_id != operation_id or marker.request_digest != record.request_digest
         ):
             raise ValueError("resume_marker_identity")
-    if budget.read(path / "spawn_failure.json") is not None:
-        raise ValueError("resume_wrapper_never_started")
     terminal_raw = budget.read(path / "native-chain-terminal.json")
+    if failure is not None and (
+        identity is not None or completion is not None or terminal_raw is not None
+    ):
+        raise ValueError("resume_spawn_failure_contradiction")
     terminal = None
     if completion is not None and completion.outcome == "native_chain":
         if terminal_raw is None:
@@ -106,6 +111,7 @@ def load_node(
         completion,
         hashlib.sha256(raw).hexdigest() if raw is not None else None,
         terminal,
+        failure,
     )
 
 

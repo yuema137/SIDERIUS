@@ -100,6 +100,12 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
     process = ProcessObservation(status="unknown", reason="missing_identity")
     observed_at = now()
     try:
+        # Continuation owns one bounded read of all markers. Do not read them
+        # here first and then silently reset its aggregate budget.
+        if record.submission.kind in {"native_chain", "native_chain_resume"} and has_continuation(
+            record
+        ):
+            return read_resume_chain(record)
         identity = optional(path / "process.json", ProcessIdentity)
         failure = optional(path / "spawn_failure.json", SpawnFailure)
         completion = optional(path / "completion.json", Completion)
@@ -121,8 +127,6 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
                 reason="spawn_failed",
             )
         if record.submission.kind in {"native_chain", "native_chain_resume"}:
-            if has_continuation(record):
-                return read_resume_chain(record)
             return read_native_chain_operation(record, process, completion)
         native = native_receipt(record)
         if (
