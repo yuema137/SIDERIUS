@@ -1,9 +1,9 @@
 # Ordinary-file authoring contract
 
-`WorkflowAuthoring(Project)` owns inert read/review/save of one configured source.
+`WorkflowAuthoring(Project)` owns ordinary-file read/review/save of one configured source.
 `AuthoredWorkflowDocument` (v1 or reusable v2), its native catalog and the source bridge own declaration
-semantics. Ordinary source/document operations never resolve or import referenced
-files. Explicit task-reference review is the separate bounded inspection below. Recovery copies do
+semantics. Unbound source/document operations never resolve or import referenced files.
+Explicit task-reference selection enables the separate bounded inspection below. Recovery copies do
 not authorize execution and are never a source revision/publication system.
 
 `Project` selects an explicit normalized absolute project root, source file and
@@ -26,7 +26,7 @@ Save revalidates its typed request and exact proposal SHA-256. Under the stable
 adjacent `.SOURCE.authoring.lock` advisory lock, it captures and validates base
 bytes/mode, compares the expected digest, stores exact base and proposal recovery
 copies as SHA256.py, rechecks source bytes/mode, and atomically replaces source.
-Identical bytes are a no-op after base validation. Lock acquisition is nonblocking
+Identical bytes are a no-op after base validation and the final bytes/mode check. Lock acquisition is nonblocking
 and reports busy. Existing lock files must be owned single-link 0600 regular
 files and are never unlinked. Recovery directory selection cannot alter lock
 identity. Recovery copies are owner-only write-once files; preexisting same-hash
@@ -47,8 +47,8 @@ response models without adding a workspace or discarding preparation_options.
 Binding choices derive from the same catalog for either variant. The browser
 renders managed_candidate externals as read-only managed roles; it never creates
 a location editor or location key for them. Unsupported preparation options have
-no structured editor and remain intact through other edits. Review/save remain
-inert declaration operations for source/document proposals and unbound Save;
+no structured editor and remain intact through other edits. Unbound review/save remain
+inert declaration operations without explicit task-reference selection;
 reusable preparation/launch retain their candidate preparation/operation owners.
 
 ## Native training inspector
@@ -67,12 +67,13 @@ review, save, conflict and generation fences; launch payloads carry no overrides
 
 ## Bound-source publication boundary
 
-Inert read/review accepts the optional v2 TaskBinding declaration. Save currently
-refuses with `task_binding_unsupported` if either the current or proposed source
-is bound, before recovery/publication; identical bound bytes and pin removal also
-refuse. Keep the draft for later guarded publication. This is an explicitly
-unsupported boundary, not task-identity verification or executable approval.
-Unbound legacy Save retains its existing behavior.
+Inert read accepts the optional v2 TaskBinding declaration. Bound review and Save
+require explicit configured selection and findings acceptance. Unbound legacy
+Save retains its inert behavior and wire serialization; omitted new optional
+fields remain omitted. Pin removal, changed native identity and unresolved
+compatibility refuse publication. Reusable preparation still refuses all bound
+source until independent native enforcement lands; successful Save is not launch
+approval. Existing runs keep their captured original pins.
 
 ## Explicit task-reference inspection/review
 
@@ -85,7 +86,8 @@ The browser supplies no target path, factory, mount, environment or device polic
 
 `ReviewRequest.proposal` additionally accepts `TaskReferenceUpdateProposal`
 (`kind="task_references"`, selected_choice_id, expected_task_binding). Selection
-alone/read/source review remain inert. Only this explicit proposal reads the
+alone/read remain inert. This proposal, or a source/document proposal with explicit
+`ReviewRequest.task_reference_selection`, reads the
 configured LLM routing and invokes the existing setup-review composition child,
 without network/devices/caller environment or requested dataset/model/training/
 scoring/Health execution. See its returned limitations: trusted factories can
@@ -102,11 +104,37 @@ provider failure remains blocked, never substituted with a default provider.
 
 The proposal updates only selected manifest/data references and the accepted pin;
 it preserves nodes, bindings, options, settings and layout. No implicit remapping,
-default replacement or scientific compatibility policy exists here. A missing
-historical owner observation or changed binding is compatibility_unresolved and
-blocked; native facts and source diff do not certify scientific compatibility.
-Even a verified unchanged pin retains save_unsupported; save_supported and
-execution_ready are false. No canonical source/recovery/run is published. Only
-fresh local inspection scratch is written. A source change during inspection
-returns conflict with current bytes and inspectable proposal; final guarded Save
-and native preparation enforcement remain separate unsupported checkpoints.
+default replacement or scientific compatibility policy exists here. The current source must resolve to an unambiguous configured inspection policy;
+arbitrary source paths are never imported. Original-owner observations of both
+configured locations are required for relocation, unless the selected policy is
+already the current policy. Native identity compares the original semantic
+fingerprint and task_data_path_id, not readable package/revision labels. A changed
+native identity or unavailable original policy is compatibility_unresolved and
+blocked; native facts and text diff do not certify scientific migration safety.
+
+An unbound v2 may explicitly adopt the currently observed snapshot while retaining
+its managed graph, externals, preparation options and training settings. Findings
+mark this current_snapshot_adoption; it asserts no historical identity. Bound
+source/code/document edits with unchanged accepted native identity return an
+authored_changes finding for review of exact authored choices. Both can report
+save_supported=true; execution_ready remains false. Unsupported paths preserve
+the draft and canonical file. Explicit review writes only fresh inspection scratch;
+source bytes changing during inspection return conflict with current bytes and
+inspectable proposal.
+
+`SaveRequest.task_reference_acceptance` carries the exact configured selection,
+ordered `(code, reference)` acknowledgements for every reconstructed finding, and
+explicit `adopt_current_snapshot` intent when applicable. Save revalidates the
+source/proposal fences and reconstructs the review under its existing lock after
+recovery copies and before publication. Native inspection is repeated even for
+identical bytes. Any changed policy, observation, required finding or adoption
+intent refuses with a retained inspectable proposal. One shared final source
+bytes/mode comparison follows inspection for both no-op and replacement paths,
+so an external edit during a slow no-op check cannot report stale success. The
+existing atomic writer, recovery semantics and final noncooperating-writer window
+remain authoritative; no review-token registry or parallel writer exists.
+
+The existing HTTP and Python owners consume these fields. The browser does not
+yet provide selection/acceptance controls; no bound GUI authoring capability is
+claimed. Native preparation enforcement and arbitrary task migration remain
+separate unsupported checkpoints.

@@ -277,7 +277,9 @@ no readable version is inferred from a path, timestamp or identity-format label.
 Bound source is currently readable/convertible but not executable through
 reusable preparation. Preparation refuses it during source inspection, before
 external input reads or envelope creation, until native pin enforcement lands.
-Authoring Save likewise refuses current or proposed bound source, including an
-attempt to remove an existing pin. These explicit refusals prevent a declaration
-feature from being mistaken for enforced execution/publication. Existing unbound
+Authoring supports explicitly reviewed current-snapshot adoption and guarded
+publication while native identity remains unchanged, through its
+[publication owner](../../tools/workflow_authoring/authoring-contract.md#bound-source-publication-boundary).
+Pin removal and unresolved changed-task migration remain refused. Guarded
+publication does not establish executable preparation enforcement. Existing unbound
 paths and previously captured runs retain their original contracts.

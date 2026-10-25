@@ -3,6 +3,7 @@
 Each assertion names disk/state behavior not enforced by declaration schemas.
 """
 
+import hashlib
 import multiprocessing
 import os
 from pathlib import Path
@@ -328,7 +329,7 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     "current_bound,proposed_bound", [(False, True), (True, False), (True, True)]
 )
 def test_bound_save_refuses_including_pin_removal(editor, current_bound, proposed_bound):
-    """A1 cannot publish bound source, or bypass refusal by stripping an existing pin."""
+    """Direct Save cannot publish a bound document without explicit task acceptance."""
     from tests.unit.workflows.reusable_fixture import reusable
     from workflows.definition import TaskBinding, render_workflow_source
 
@@ -346,7 +347,15 @@ def test_bound_save_refuses_including_pin_removal(editor, current_bound, propose
     original = render_workflow_source(bound if current_bound else plain)
     editor.project.source_file.write_text(original)
     proposed = render_workflow_source(bound if proposed_bound else plain)
-    with pytest.raises(AuthoringError, match="Bound workflow Save is unsupported"):
-        editor.save(request(editor, proposed))
+    with pytest.raises(
+        AuthoringError, match="requires explicit task-reference findings acceptance"
+    ):
+        editor.save(
+            SaveRequest(
+                source=proposed,
+                expected_sha256=editor.read().sha256,
+                proposal_sha256=hashlib.sha256(proposed.encode()).hexdigest(),
+            )
+        )
     assert editor.project.source_file.read_text() == original
     assert not tuple(editor.project.recovery_directory.iterdir())

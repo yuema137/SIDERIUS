@@ -3,13 +3,13 @@
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from workflows.definition import AuthoredWorkflowDocument
 from workflows.definition.models import Source
 from workflows.definition.source import SourceDiagnostic
 
-from .task_models import TaskReferenceReview, TaskReferenceUpdateProposal
+from .task_models import TaskReferenceAcceptance, TaskReferenceReview, TaskReferenceUpdateProposal
 from .training import TrainingInspector
 
 MAX_SOURCE_BYTES = 32 * 1024
@@ -50,12 +50,27 @@ class ReviewRequest(Model):
         SourceProposal | DocumentProposal | TaskReferenceUpdateProposal,
         Field(discriminator="kind"),
     ]
+    task_reference_selection: TaskReferenceUpdateProposal | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def one_task_selection(self):
+        if (
+            isinstance(self.proposal, TaskReferenceUpdateProposal)
+            and self.task_reference_selection is not None
+        ):
+            raise ValueError("task-reference proposal already owns its selection")
+        return self
 
 
 class SaveRequest(SourceProposal):
     kind: Literal["source"] = "source"
     expected_sha256: Digest
     proposal_sha256: Digest
+    task_reference_acceptance: TaskReferenceAcceptance | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class BindingChoice(Model):
