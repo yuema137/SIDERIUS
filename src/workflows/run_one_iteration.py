@@ -1183,6 +1183,21 @@ def main(
         )
     except ValueError as exc:
         build_parser().error(str(exc))
+    from core.native_writer import iteration_owner
+
+    with iteration_owner(args.workspace, read_only=args.print_resolved_launch_config):
+        return _run_owned_iteration(
+            args, reviewed_setup=reviewed_setup, chain_capture=chain_capture
+        )
+
+
+def _run_owned_iteration(
+    args: argparse.Namespace,
+    *,
+    reviewed_setup: "ReviewedLaunchContext | None" = None,
+    chain_capture: "NativeChainLaunchContext | None" = None,
+):
+    """Keep all package/failure writes within the native writer lifetime."""
     # Generated-capability identity participates in the run-invariants lock,
     # so bind it before composition preflight, resume validation, or any
     # other operation that can build those invariants.
@@ -1987,4 +2002,10 @@ def _run_bound_iteration(
 
 
 if __name__ == "__main__":
-    main()
+    from core.native_writer import WriterRefusal
+
+    try:
+        main()
+    except WriterRefusal as error:
+        print(f"Native writer refused: {error}", file=sys.stderr)
+        sys.exit(78)

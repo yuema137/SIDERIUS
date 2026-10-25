@@ -37,3 +37,8 @@ child before agent work. A mismatch exits 78 and stops the chain; earlier
 iterations remain intact. An in-child mismatch may leave an iteration directory
 or token file. Existing workspaces, including empty ones, require a different
 launch route; captured mode does not resume them.
+
+Linux launches now exclude cooperating writers and retain a claim if cleanup is
+uncertain. Inspect it with `.venv/bin/python -m core.native_writer inspect
+--workspace /external/runs/run`. Keep unresolved claims intact; recovery is not
+yet supported. See [writer ownership](../../core/native_writer/README.md).

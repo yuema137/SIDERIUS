@@ -1,5 +1,8 @@
 """Single native child wrapper; iteration scheduling remains in run_chain.sh."""
 
+import sys
+
+from core.native_writer import WriterRefusal
 from tools.native_chain.check import (
     CHECK_ERRORS,
     launch_context,
@@ -28,6 +31,9 @@ def main() -> int:
         native_main(list(dispatch.argv), chain_capture=context)
     except NativeChainCaptureRefusal as error:
         print_refusal(error)
+        return 78
+    except WriterRefusal as error:
+        print(f"Native writer refused: {error}", file=sys.stderr)
         return 78
     return 0
 

@@ -41,8 +41,12 @@ or changed other fields refuse. No executable config is reconstructed from JSON.
 Native-specific refusals escape package/scientific failure handlers before
 `run_workflow`; unrelated exceptions keep native behavior. Composition imports,
 iteration directory, token and restoration artifacts can precede this final check.
-No arbitrary graph, detached operation, GUI, Slurm capture, effectful resume or
-writer lease is introduced.
+Effectful resume and Slurm capture remain unsupported. Fresh Linux captured launches
+consume [native writer ownership](../../core/native_writer/native-writer-contract.md)
+after admission and before history inspection or workspace writes. Registration
+binds this capture digest; uncertainty retains the claim even after the kernel lock
+becomes free. Direct entry cannot restart a registered workspace. Detached operations
+and GUI consumers use the same native owner inside their existing sandbox.
 
 ## Read-only checkpoint consumers
 
