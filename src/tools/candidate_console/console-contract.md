@@ -591,7 +591,10 @@ projects the public `NativeChainObservation` unchanged. Absent native_chain is
 omitted for legacy responses. Receipt-derived fields remain null and
 receipt_available false for chains. Current evidence and terminal-time evidence
 remain distinct; lifecycle completion is not scientific success. Token reads
-return409 with code `not_supported` and a fixed safe message. Status/log reads
+use the shared operation accessor and return one whole-chain cumulative snapshot,
+including continuations. They validate controls and available identity anchors
+without revalidating scientific output payloads; native-only scope/identity metadata
+discloses that boundary. Status/log reads
 never require configured choices, candidate tasks or editor selection.
 
 
@@ -610,9 +613,11 @@ No credential or launch payload enters persistent browser storage.
 Current evidence and terminal-time evidence are labeled separately. Missing
 terminal/checkpoints are unavailable, not zero/success. Mixed/no_records, timeout,
 unknown cleanup and invalid evidence retain their own fields. The existing app
-poll/cursor/epoch remains the only monitor loop. Native kind clears candidate
-token rows/times and suppresses later unsupported token reads; epoch/kind checks
-fence late candidate responses. Direct UUID navigation/reconnect needs no choice
+poll/cursor/epoch remains the only monitor loop. All supported operation kinds
+use the same token table; selecting another UUID clears prior rows/times/provenance,
+and epoch checks fence late responses. Native cumulative scope appears in the
+status line; identity provenance and scientific/billing limitations are in the
+expandable detail. Direct UUID navigation/reconnect needs no choice
 or editor fetch; the existing New run task loader is deferred to Workflow entry. Empty candidate choices disable Prepare with explanatory copy.
 
 `tests/browser/native_chain.mjs` uses the explicit Python/Playwright/Chromium and

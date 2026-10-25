@@ -198,22 +198,27 @@ def read_candidate_tokens(request: CandidateTokenReadRequest) -> CandidateTokenS
         workspace=workspace,
         receipt=receipt,
     )
+    return read_ledger_snapshot(workspace, initial.run_id, initial.run_name, observed_at)
+
+
+def read_ledger_snapshot(
+    workspace: Path, run_id: str, run_name: str, observed_at: str
+) -> CandidateTokenSnapshot:
+    """Read one fixed ledger after the caller verifies its native identity."""
     try:
         payload, quality = ledger_prefix(workspace / "token_usage.jsonl")
     except FileNotFoundError:
         return CandidateTokenSnapshot(
-            run_id=initial.run_id,
-            run_name=initial.run_name,
+            run_id=run_id,
+            run_name=run_name,
             observed_at=observed_at,
             availability="unavailable",
             reason="usage_unavailable",
         )
-    groups, quality, last = aggregate(
-        payload, run_id=initial.run_id, run_name=initial.run_name, quality=quality
-    )
+    groups, quality, last = aggregate(payload, run_id=run_id, run_name=run_name, quality=quality)
     return CandidateTokenSnapshot(
-        run_id=initial.run_id,
-        run_name=initial.run_name,
+        run_id=run_id,
+        run_name=run_name,
         observed_at=observed_at,
         availability="available",
         reason="reported_responses" if groups else "no_reported_responses",

@@ -139,7 +139,7 @@ def history(tmp_path, monkeypatch, request):
     evidence = NativeChainEvidence(
         availability="available",
         token_run_id="fixture-20261025T120000-123",
-        token_sidecar_sha256="b" * 64,
+        token_sidecar_sha256=hashlib.sha256(b"fixture-20261025T120000-123").hexdigest(),
         checkpoints=(
             NativeChainCheckpointObservation(
                 iteration=1,
