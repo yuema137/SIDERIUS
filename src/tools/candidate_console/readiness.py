@@ -51,3 +51,39 @@ def credential_readiness(request: CandidateRunRequest, path: str | None) -> Cred
         and status != "unavailable",
         instructions=tuple(instructions),
     )
+
+
+def named_credential_readiness(
+    required_names: tuple[str, ...], allowed_names: tuple[str, ...], path: str | None
+) -> CredentialReadiness:
+    """Project admission-owned names without inventing provider requirements."""
+    names = tuple(dict.fromkeys((*required_names, *allowed_names)))
+    omitted = tuple(name for name in required_names if name not in allowed_names)
+    status = "not_selected" if path is None else "readable"
+    values: dict[str, str] = {}
+    if not names:
+        status = "not_needed"
+    else:
+        try:
+            values = credential_values(path)
+        except (OSError, ValueError, OperationFailure):
+            status = "unavailable"
+    present = tuple(name for name in names if values.get(name))
+    missing = tuple(name for name in names if name not in present)
+    instructions = []
+    if omitted:
+        instructions.append("Add required names to this native choice's environment_names.")
+    if missing or status == "unavailable":
+        instructions.append(
+            "Supply nonempty named values in credential_file (private JSON, mode 600)."
+        )
+    return CredentialReadiness(
+        required_names=required_names,
+        omitted_names=omitted,
+        unresolved_routes=(),
+        present_names=present,
+        missing_names=missing,
+        file_status=status,
+        ready=not (omitted or missing) and status != "unavailable",
+        instructions=tuple(instructions),
+    )
