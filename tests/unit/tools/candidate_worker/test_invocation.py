@@ -17,6 +17,7 @@ def test_fixed_sequence_consumes_declared_invocations_and_native_context(
 ):
     """Fails if the actual worker bypasses a phase, loses enrichment, or rewrites records."""
     from core.hardware_context import HardwareContext
+    from tools.candidate_worker import inputs as materialization
     from tools.candidate_worker import phases
     from workflows.task_composition import (
         active_composition_fingerprint,
@@ -70,6 +71,42 @@ def test_fixed_sequence_consumes_declared_invocations_and_native_context(
             }
         )
     )
+    # Declaration IDs select instances; neither binding helper may assume role names.
+    document = request.preview.document.model_dump(mode="json")
+    renamed = {"propose": "idea_node", "implement": "build_node", "validate": "check_node"}
+    for node in document["definition"]["nodes"]:
+        node["id"] = renamed[node["id"]]
+        for argument in node["request"].get("arguments", []):
+            source = argument["source"]
+            if source["kind"] == "result":
+                source["node"] = renamed[source["node"]]
+    changed = type(request.preview.document).model_validate_json(json.dumps(document))
+    request = refresh(
+        request.model_copy(
+            update={"preview": request.preview.model_copy(update={"document": changed})}
+        )
+    )
+    selected = {}
+    proposal_binding = materialization.materialize_proposal
+    protocol_binding = materialization.reconcile_protocol_inputs
+
+    def proposal_inputs(payload, **kwargs):
+        selected["proposal_storage"] = kwargs["proposal_storage"]
+        selected["data_root"] = kwargs["data_root"]
+        return proposal_binding(payload, **kwargs)
+
+    def protocol_inputs(protocols, **kwargs):
+        selected["protocol_sources"] = [
+            argument.source.node
+            for protocol in protocols
+            for argument in protocol.arguments
+            if argument.name == "output"
+        ]
+        selected["attempt"] = kwargs["attempt"]
+        return protocol_binding(protocols, **kwargs)
+
+    monkeypatch.setattr(materialization, "materialize_proposal", proposal_inputs)
+    monkeypatch.setattr(materialization, "reconcile_protocol_inputs", protocol_inputs)
     composition = compose_run_task_bindings(request.preview.document.definition.task.manifest)
     seen, calls, originals = [], {}, {}
     for phase, agent_type in (
@@ -106,9 +143,9 @@ def test_fixed_sequence_consumes_declared_invocations_and_native_context(
     receipt = launch_candidate(request)
     assert receipt.status == "accepted", receipt.error
     assert [(context.node_id, phase) for context, phase in seen] == [
-        ("propose", "proposal"),
-        ("implement", "implementation"),
-        ("validate", "validation"),
+        ("idea_node", "proposal"),
+        ("build_node", "implementation"),
+        ("check_node", "validation"),
     ]
     assert all(
         (context.workspace, context.run_name, context.run_id, context.iteration, context.attempt)
@@ -118,6 +155,10 @@ def test_fixed_sequence_consumes_declared_invocations_and_native_context(
     proposal, implementation, validation = (
         calls[name] for name in ("proposal", "implementation", "validation")
     )
+    assert selected["protocol_sources"] == ["idea_node", "build_node"]
+    assert selected["proposal_storage"] == proposal.storage
+    assert selected["attempt"].storage == implementation.storage
+    assert selected["data_root"] == project / "data"
     assert implementation.task_composition_ref == proposal.task_composition_ref
     assert implementation.task_description == proposal.task_description
     assert implementation.forward_contract == proposal.forward_contract

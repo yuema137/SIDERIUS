@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from agent.schemas.storage import StorageConfig
 from workflows.definition.candidate import candidate_nodes
 from workflows.run_context import bind_agent_run_context
 
@@ -44,23 +45,42 @@ class FixedInvocationContext:
         and external-input reconciliation; candidate_nodes retains shape checks.
         """
         node_ids = candidate_nodes(request.preview.document.definition)
-        if self.phase != phase or self.node_id != node_ids[phase]:
+        self.require_resolved_binding(
+            initial,
+            run_name=request.run_name,
+            node_id=node_ids[phase],
+            phase=phase,
+            storage=inputs.proposal.storage if phase == "proposal" else inputs.attempt.storage,
+            implementation_directory=inputs.attempt.impl_dir,
+        )
+
+    def require_resolved_binding(
+        self,
+        initial: CandidateRunReceipt,
+        *,
+        run_name: str,
+        node_id: str,
+        phase: NativePhase,
+        storage: StorageConfig,
+        implementation_directory: str,
+    ) -> None:
+        """Compare explicit selected bindings without rediscovering a topology."""
+        if self.phase != phase or self.node_id != node_id:
             raise ValueError("native invocation node/phase binding disagrees")
         if (
             (self.workspace, self.run_id, self.run_name)
             != (initial.workspace, initial.run_id, initial.run_name)
-            or self.run_name != request.run_name
+            or self.run_name != run_name
             or self.node_id not in initial.node_ids
         ):
             raise ValueError("native invocation run binding disagrees")
-        storage = inputs.proposal.storage if phase == "proposal" else inputs.attempt.storage
         if (
             storage.backend != "local"
             or storage.local is None
             or (self.storage_workspace, self.storage_run_name)
             != (storage.local.workspace, storage.local.run_name)
             or self.storage_run_name != self.run_name
-            or (phase != "proposal" and self.storage_workspace != inputs.attempt.impl_dir)
+            or (phase != "proposal" and self.storage_workspace != implementation_directory)
         ):
             raise ValueError("native invocation storage binding disagrees")
 
@@ -82,17 +102,32 @@ def fixed_invocations(
     node_ids = candidate_nodes(request.preview.document.definition)
 
     def context(phase: NativePhase) -> FixedInvocationContext:
-        storage = inputs.proposal.storage if phase == "proposal" else inputs.attempt.storage
-        if storage.local is None:
-            raise ValueError("native invocation requires materialized local storage")
-        return FixedInvocationContext(
-            workspace=initial.workspace,
-            run_id=initial.run_id,
-            run_name=initial.run_name,
+        return invocation_from_storage(
+            initial,
             node_id=node_ids[phase],
             phase=phase,
-            storage_workspace=storage.local.workspace,
-            storage_run_name=storage.local.run_name,
+            storage=inputs.proposal.storage if phase == "proposal" else inputs.attempt.storage,
         )
 
     return context("proposal"), context("implementation"), context("validation")
+
+
+def invocation_from_storage(
+    initial: CandidateRunReceipt,
+    *,
+    node_id: str,
+    phase: NativePhase,
+    storage: StorageConfig,
+) -> FixedInvocationContext:
+    """Snapshot selected native storage; fixed_invocations owns fixed selection."""
+    if storage.local is None:
+        raise ValueError("native invocation requires materialized local storage")
+    return FixedInvocationContext(
+        workspace=initial.workspace,
+        run_id=initial.run_id,
+        run_name=initial.run_name,
+        node_id=node_id,
+        phase=phase,
+        storage_workspace=storage.local.workspace,
+        storage_run_name=storage.local.run_name,
+    )

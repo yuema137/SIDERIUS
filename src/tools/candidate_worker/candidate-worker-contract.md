@@ -311,3 +311,20 @@ seed/settings pair and both Python-model-derived workflow and serialized
 request. It performs no launch. Offline tests qualify propagation/admission and
 artifact reading, not real LLM behavior, scientific training, GUI readiness,
 resume, historical-profile parity or paper reproduction.
+
+### Explicit fixed input bindings
+
+`inputs.materialize` retains fixed `candidate_nodes` admission and selects nodes by
+those declared IDs. It passes captured proposal bytes, managed proposal storage,
+composed task, physical data root and control directory to `materialize_proposal`;
+`reconcile_protocol_inputs` receives the selected protocol requests and managed
+implementation attempt, returning the external IDs it consumed. The caller still
+refuses unused externals. Training reconciliation and native defaults are unchanged.
+
+`fixed_invocations` snapshots selected node/storage through `invocation_from_storage`.
+Each phase still calls `require_binding`, which selects the fixed declaration
+binding before `require_resolved_binding` checks node, phase, run and native storage.
+These internal helpers do not admit a new topology or bypass task/artifact owners.
+The worker still supports exactly one proposal/implementation/validation and its
+existing optional tuning path; no graph execution, new workspace layout or recovery
+is exposed by this refactor.
