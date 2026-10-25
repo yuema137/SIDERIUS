@@ -77,6 +77,7 @@ from core.local_code.failure import raise_if_code_package_failure
 from core.subprocess_env import subprocess_env
 from ml_models.plugin_loader import PLUGIN_LEGAL_OUTPUT_TYPES
 from nodes.llm_settings import VALIDATE, node_bridge_kwargs
+from nodes.ml_code_validator_agent.input_contract import render_input_contract
 from nodes.ml_code_validator_agent.source import (
     REQUIRED_PLUGIN_ATTRIBUTES,
     captured_plugin,
@@ -209,6 +210,10 @@ def _build_review_prompt(
         f"## Mathematical Definition\n\n{inp.mathematical_definition}\n\n",
         f"## Plugin Implementation\n\n```python\n{plugin_src}\n```\n\n",
     ]
+
+    declared_input = render_input_contract(inp.model_io_contract, inp.segmentation_applicability)
+    if declared_input:
+        parts.append(declared_input)
 
     if inst_err:
         parts.append(f"## Runtime Error (in-process forward/backward)\n\n```\n{inst_err}\n```\n\n")

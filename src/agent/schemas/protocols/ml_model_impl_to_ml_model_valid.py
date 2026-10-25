@@ -47,8 +47,10 @@ def local_all_fields(
                                  candidate was generated against, or None on
                                  the legacy prose-only path (Step 04a)
 
+      - segmentation_applicability: declared resource-probe applicability, or None
+
     Populates in ml-model-valid (ValidatorInput):
-      - all eight fields above
+      - all fields above
       - storage, llm_provider, llm_model_id: passed from the orchestrator
     """
     return ValidatorInput(
@@ -69,6 +71,7 @@ def local_all_fields(
         # never defaulted, so a contract that existed upstream cannot be
         # replaced by a plausible-looking substitute on the way down.
         model_io_contract=output.model_io_contract,
+        segmentation_applicability=output.segmentation_applicability,
         model_probe_context=output.model_probe_context,
         llm_provider=llm_provider,
         llm_model_id=(

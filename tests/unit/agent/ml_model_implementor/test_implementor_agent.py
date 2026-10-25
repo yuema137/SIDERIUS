@@ -38,6 +38,7 @@ Tests cover:
 import json
 import os
 import textwrap
+from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -293,7 +294,10 @@ class TestOutputCorrectness:
         output = agent_with_mocks.run(inp)
         assert output.mathematical_definition == inp.mathematical_definition
 
-    def test_step04a_emits_the_contract_it_generated_against(self, agent_with_mocks, inp):
+    @pytest.mark.parametrize("applicability", [None, "temporal", "not_applicable"])
+    def test_step04a_emits_the_contract_it_generated_against(
+        self, agent_with_mocks, inp, applicability
+    ):
         """The PRODUCER end of the Step-04a Model-I/O transport.
 
         ``test_step04a_model_io_transport.py`` proves the protocol carries
@@ -319,12 +323,28 @@ class TestOutputCorrectness:
 
         declared = tidmad_model_io()
         inp.forward_contract = forward_contract(declared)
+        inp.forward_contract.segmentation_applicability = applicability
 
         output = agent_with_mocks.run(inp)
 
         assert output.model_io_contract == declared
         assert output.model_io_contract is not None
         assert output.model_io_contract.class_cardinality == 256
+        from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
+
+        validator = local_all_fields(output, inp.storage)
+        assert output.segmentation_applicability == applicability
+        assert validator.segmentation_applicability == applicability
+        record = Path(inp.storage.local.workspace) / "implementor_unit_test.json"
+        for payload in (
+            json.loads(output.model_dump_json()),
+            json.loads(validator.model_dump_json()),
+            json.loads(record.read_text()),
+        ):
+            if applicability is None:
+                assert "segmentation_applicability" not in payload
+            else:
+                assert payload["segmentation_applicability"] == applicability
 
     def test_step04a_legacy_prose_only_input_emits_no_contract(self, agent_with_mocks, inp):
         """§15.1 row 1: a caller with no normalized contract stays legacy.

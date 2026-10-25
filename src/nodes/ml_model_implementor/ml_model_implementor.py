@@ -2143,6 +2143,7 @@ class MLModelImplementor:
                 # Omitting it here would silently drop the validator back to
                 # the legacy path for every reuse iteration.
                 model_io_contract=inp.forward_contract.model_io,
+                segmentation_applicability=inp.forward_contract.segmentation_applicability,
                 model_probe_context=(
                     inp.task_composition_ref.model_probe_context
                     if inp.task_composition_ref
@@ -2319,6 +2320,7 @@ class MLModelImplementor:
             # second read of the task config. `None` on the legacy
             # prose-only path, which the validator preserves unchanged.
             model_io_contract=inp.forward_contract.model_io,
+            segmentation_applicability=inp.forward_contract.segmentation_applicability,
             model_probe_context=(
                 inp.task_composition_ref.model_probe_context if inp.task_composition_ref else None
             ),
