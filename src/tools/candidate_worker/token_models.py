@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 COVERAGE_NOTE = "Observed provider reports; missing or unrecorded usage may exist."
 
@@ -60,3 +60,7 @@ class CandidateTokenSnapshot(TokenReadModel):
     groups: tuple[CandidateTokenGroup, ...] = ()
     quality: CandidateTokenQuality = CandidateTokenQuality()
     coverage_note: str = COVERAGE_NOTE
+    scope: Literal["chain_cumulative"] | None = Field(default=None, exclude_if=lambda v: v is None)
+    identity_basis: Literal["observed_sidecar", "retained_sidecar"] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )

@@ -13,6 +13,7 @@ from tools.candidate_worker.records import verify_candidate_records
 
 from .files import read_model
 from .models import OperationFailure, OperationStoreConfig
+from .native_tokens import read_native_tokens
 from .read import read_operation
 from .store import load_record, native_directory, validate_config
 
@@ -22,12 +23,12 @@ def read_operation_tokens(
 ) -> CandidateTokenSnapshot:
     """Read known operations without a task-choice match, new credentials or dispatch."""
     config = validate_config(config)
+    record = load_record(config, operation_id)
+    if record.submission.kind == "native_chain" or record.submission.kind == "native_chain_resume":
+        return read_native_tokens(record)
     snapshot = read_operation(config, operation_id)
     if snapshot.reason == "integrity_failure":
         raise OperationFailure("integrity", "operation evidence could not be verified")
-    record = load_record(config, operation_id)
-    if record.submission.kind == "native_chain" or record.submission.kind == "native_chain_resume":
-        raise OperationFailure("not_supported", "native chain token aggregation is not supported")
     if record.submission.kind == "prepare" or record.submission.kind == "prepare_reusable":
         return CandidateTokenSnapshot(
             observed_at=snapshot.observed_at,

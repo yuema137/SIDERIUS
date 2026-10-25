@@ -217,6 +217,22 @@ schedules iterations; this fresh-launch route does not reuse existing workspaces
 [operation contract](candidate-operations-contract.md#captured-native-chain-operation)
 for request fields, byte limits, recovery and evidence meanings.
 
+## Read reported tokens
+
+Read the same provider-reported counts shown in Slow control:
+
+```sh
+.venv/bin/python -m tools.candidate_operations tokens \
+  --store-config store.json --operation-id OPERATION_UUID
+```
+
+For a native chain, this covers the whole run, including continuations. Parent
+and continuation IDs show the same cumulative ledger; do not add them together.
+Missing counts stay unavailable. Token monitoring does not reread scientific
+result files or establish complete billing. The response identifies whether the
+run identity matches retained records or comes from the current run identity file.
+Professional, Assistant and GUI use this same reader.
+
 ## Continue a captured native chain
 
 Use this code/CLI route when a detached native chain ended after a verified

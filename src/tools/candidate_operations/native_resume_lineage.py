@@ -144,6 +144,22 @@ def require_closed(node: ChainNode, adoption: ResumeAdoption | None) -> None:
         raise ValueError("resume_no_trusted_terminal")
 
 
+def verify_root_fence(root: ChainNode, budget: ControlBudget) -> None:
+    """Verify the existing root binding before reading optional writer state."""
+    request, _ = chain_context(root.record)
+    fence_raw = budget.read(Path(request.envelope) / ".native-chain-operation/binding.json")
+    if fence_raw is None:
+        raise ValueError("resume_root_fence_missing")
+    fence = NativeChainFence.model_validate_json(fence_raw)
+    if fence != NativeChainFence(
+        operation_id=root.id,
+        request_digest=root.record.request_digest,
+        capture_sha256=request.capture_sha256,
+        envelope=request.envelope,
+    ):
+        raise ValueError("resume_root_fence_changed")
+
+
 def read_lineage(selected: OperationRecord, *, allow_unlinked: bool = False) -> ChainLineage:
     config = selected.config
     request, admission = chain_context(selected)
@@ -160,17 +176,7 @@ def read_lineage(selected: OperationRecord, *, allow_unlinked: bool = False) -> 
         admission,
     ):
         raise ValueError("resume_root_changed")
-    fence_raw = budget.read(Path(request.envelope) / ".native-chain-operation/binding.json")
-    if fence_raw is None:
-        raise ValueError("resume_root_fence_missing")
-    fence = NativeChainFence.model_validate_json(fence_raw)
-    if fence != NativeChainFence(
-        operation_id=root.id,
-        request_digest=root.record.request_digest,
-        capture_sha256=request.capture_sha256,
-        envelope=request.envelope,
-    ):
-        raise ValueError("resume_root_fence_changed")
+    verify_root_fence(root, budget)
     nodes, links, adoptions = [root], [], []
     state = WriterState(Path(admission.workspace), create=False)
     try:

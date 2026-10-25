@@ -2,7 +2,7 @@
 
 Prepare, review and explicitly launch one candidate from a configured scientific
 task, or launch an externally reviewed native iteration chain. Reopen status and
-logs by operation ID; candidate runs also expose reported LLM tokens.
+logs and reported LLM tokens by operation ID.
 The candidate runs Propose → Implement → Validate, with optional native Tune
 when the saved reusable source declares it. Inspect native outputs for scientific
 results; completion alone does not certify them.
@@ -152,8 +152,8 @@ The browser launches that configured recipe independently of the editor.
    submission. Follow **Open native Slow control** to see process state, shell
    outcome, cleanup and each checkpoint's native status and integrity separately.
    A completed process does not establish scientific success; `no_records`,
-   unavailable evidence and invalid evidence remain visible. Native-chain token
-   aggregation is not supported.
+   unavailable evidence and invalid evidence remain visible. The reported-token
+   table covers the whole native run, including continuations.
 4. If the response is lost, keep the displayed UUID. Reconnect to check it, or
    use **Retry same native launch** while admission remains unconfirmed. Neither
    navigation nor reconnect launches automatically. Reload the UUID's Slow control
@@ -232,7 +232,7 @@ For direct CLI or coding-agent launches, use the separate
 trusted shell-compatible external files or managed environment injection are
 supported there. Console JSON is not a shell/dotenv file.
 
-## Monitor a candidate
+## Monitor reported usage
 
 The table groups provider reports by requested and served model. A missing field
 shows **Unavailable**; a known value shows its reported sum and any missing-row
@@ -242,6 +242,11 @@ complete billing. Preparation has no applicable token table. Known operation IDs
 can be read even when the current task choices differ; the admitted operation
 store configuration must still match. Direct runs without an operation ID use the
 [native Python reader](../candidate_worker/README.md).
+
+For native chains, parent and continuation IDs show the same cumulative usage;
+do not add their tables together. Expand the table details for the identity source
+and limitations. Token monitoring does not reread scientific result files, and its
+counts do not establish scientific validity or complete billing.
 
 Closing the page, tunnel or HTTP server does not cancel an admitted operation.
 A disconnected view is stale, not stopped. Native timeouts and sandbox cleanup

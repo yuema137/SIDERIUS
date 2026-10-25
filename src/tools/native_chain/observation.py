@@ -14,6 +14,7 @@ from core.iteration_manifest import verify_iteration_manifest
 from core.native_observation import EvidenceReadBytes, ObservationPolicy, observation_policy
 from core.record_role import IterationFormalEvidence, formal_evidence_of
 from tools.native_chain.review import read_bytes
+from tools.native_chain.token_identity import parse_token_identity
 from tools.workflow_preview.models import PreviewModel
 
 CURRENT_OBSERVATION_POLICY: ObservationPolicy = 3
@@ -223,10 +224,7 @@ def observe_native_chain(
             previous = budget.file_limit
             budget.file_limit = min(previous, 256)
             raw = budget.read(token_path)
-            token_digest = hashlib.sha256(raw).hexdigest()
-            token = raw.decode().strip()
-            if not re.fullmatch(re.escape(run_name) + r"-\d{8}T\d{6}-[1-9]\d*", token):
-                raise ValueError("invalid native token id")
+            token, token_digest = parse_token_identity(raw, run_name)
         except FileNotFoundError:
             pass
         result = NativeChainEvidence(

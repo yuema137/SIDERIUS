@@ -19,6 +19,7 @@ from .native_chain import review_native_chain_operation
 from .native_resume import review_native_chain_resume
 from .read import read_operation
 from .submit import submit_operation
+from .tokens import read_operation_tokens
 
 
 def main() -> int:
@@ -26,7 +27,7 @@ def main() -> int:
         description="Submit or inspect one detached native candidate operation"
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("submit", "review", "review-resume", "status", "log"):
+    for name in ("submit", "review", "review-resume", "status", "log", "tokens"):
         command = commands.add_parser(name)
         command.add_argument("--store-config", required=True)
         if name in {"submit", "review"}:
@@ -54,6 +55,8 @@ def main() -> int:
                 result = submit_operation(config, submission, launch_environment=os.environ)
         elif args.command == "review-resume":
             result = review_native_chain_resume(config, UUID(args.operation_id))
+        elif args.command == "tokens":
+            result = read_operation_tokens(config, UUID(args.operation_id))
         elif args.command == "status":
             result = read_operation(config, UUID(args.operation_id))
         else:

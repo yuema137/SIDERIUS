@@ -217,7 +217,8 @@ rule; known-ID native monitoring does not require a console task choice.
 
 `read_operation_tokens(config, operation_id) -> CandidateTokenSnapshot` is a
 read-only adapter to the native [token projection](../candidate_worker/candidate-worker-contract.md#reported-token-read-projection).
-It revalidates configuration and calls `read_operation` first; an integrity-failure
+For candidate/preparation kinds it revalidates configuration and calls
+`read_operation` first; an integrity-failure
 verdict refuses before ledger access, including marker identity, terminal receipt
 digest and contradictory pre-dispatch completion. It does not replace or reinterpret
 status/process semantics. Unknown process observation alone permits verified usage.
@@ -232,6 +233,33 @@ receipt and supplies the one arithmetic/quality projection. Multiple observation
 reads are not an atomic transaction. No credential read, task-choice authorization,
 submission, provider call, native launch or writes occur. Existing status-reader
 missing-final-receipt early return and all native statuses remain unchanged.
+
+
+Native-chain kinds take a separate branch before full scientific status reads.
+They validate admitted records, bounded root fences and continuation controls via
+`native_resume_lineage`, then read the fixed 256-byte `.token_run_id` using the
+same parser/hash owner as checkpoint observation. Every retained terminal or
+admitted baseline identity anchor must match. Known retained integrity failures,
+invalid checkpoints, contradictory/unlinked terminal outcomes, tampered controls,
+aliases and nonregular files refuse. An expected pre-launch interval before writer
+state/identity exists is unavailable; an anchored identity disappearing refuses.
+Old limit-exceeded terminals may have no anchor: the current format-checked sidecar
+then supplies observed identity, never terminal-verified scientific evidence.
+
+One root `token_usage.jsonl` is read once using the existing candidate ledger
+bounds, grouping and quality rules. Parent and linked-successor UUIDs see the same
+current whole-chain cumulative usage; snapshots must not be added together.
+`scope=chain_cumulative` and `identity_basis=observed_sidecar|retained_sidecar`
+are native-only, omission-safe snapshot metadata. Candidate serialization remains
+unchanged. The CLI `tokens --store-config ... --operation-id ...`, Python accessor
+and authenticated HTTP endpoint call this same owner; the GUI renders that result.
+
+Token-only reads do not reverify scientific output files and cannot detect new
+scientific-file drift. The independent status reader retains that responsibility.
+Usage does not authorize launch/resume, certify science, reconstruct missing reports,
+prove complete billing or enforce a spend cap. Concurrent files are bounded snapshots,
+not an atomic ledger/sidecar transaction. Provenance and limits appear in secondary
+GUI detail text; missing identity/ledger never becomes a fabricated zero.
 
 
 ## Retained reusable candidate operations
@@ -470,11 +498,10 @@ scientific receipt: `receipt_available` stays false. Terminal identity, proven
 cleanup and wrapper exit govern release, separately from scientific evidence.
 Missing/modified host terminal or contradictory pre-dispatch completion blocks
 release. Failed/timeout shell outcomes remain visible even when lifecycle finishes.
-Both log kinds read the inherited private operation log for this kind. Token
-aggregation returns a typed `not_supported` error. Same UUID recovery reads only
+Both log kinds read the inherited private operation log for this kind. Reported tokens use the separate bounded accessor described above. Same UUID recovery reads only
 stored identity and evidence, even after original capture deletion and key loss.
-This fresh-launch boundary adds no cancellation, token aggregation or scientific
-qualification. Explicit continuation is described separately below.
+This fresh-launch boundary adds no cancellation or scientific qualification.
+Reported-token monitoring is the separate read-only accessor above. Explicit continuation is described separately below.
 
 The chain snapshot's `native_chain.evidence` reports bounded current checkpoint
 observations, distinct from immutable `native_chain.terminal.evidence`. Active
@@ -522,7 +549,8 @@ path does not silently impose new bounds on the legacy inspector.
 Only the native `.token_run_id` sidecar is read (at most 256 bytes), validated as
 `run_name-YYYYMMDDTHHMMSS-pid`, and retained with its byte digest. It is distinct
 from operation/native invocation UUIDs. No invented token-to-checkpoint binding
-or token-row aggregation is supplied. Missing sidecar remains unavailable.
+is supplied. Missing sidecar remains unavailable. The separate token accessor
+reads bounded ledger rows without reopening scientific outputs.
 
 Required `NativeChainOperationRequest` JSON fields are `capture_path`,
 `capture_sha256`, `envelope`, `read_only`, `network`, `devices`,
@@ -675,7 +703,8 @@ of aggregate usage rows. Native token identity is distinct from both operation U
 
 GUI continuation is not supplied. Professional and Assistant code/CLI consumers use
 this same request/read path. Existing native log behavior remains the selected
-operation's wrapper log; token aggregation remains unsupported for both native kinds.
+operation's wrapper log. Both native kinds share cumulative token monitoring
+through the separate reported-token accessor.
 
 ## Construct a native continuation
 

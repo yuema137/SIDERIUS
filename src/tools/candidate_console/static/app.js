@@ -4,7 +4,6 @@
   const $ = id => document.getElementById(id);
   let choices = [], preparation = null, review = null, launch = null;
   let monitorId = '', cursor = 0, logText = '', polling = false, connected = false;
-  let monitorKind = null;
   let monitorEpoch = 0, generation = 0, invalidRoute = false;
   const say = (id, value) => { if (document.getElementById(id).textContent !== value) document.getElementById(id).textContent = value; };
   const remember = id => { try { localStorage.setItem('siderius.operation_id', id); } catch { /* Storage may be unavailable. */ } };
@@ -168,8 +167,8 @@
   });
   function setMonitor(id) {
     if (monitorId.toLowerCase() === id.toLowerCase()) return;
-    monitorEpoch++; monitorKind = null; window.renderNativeChain(null); monitorId = id; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
-    $('token-rows').replaceChildren(); document.querySelector('.token-table').hidden = true; say('tokens-times', '');
+    monitorEpoch++; window.renderNativeChain(null); monitorId = id; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
+    $('token-rows').replaceChildren(); document.querySelector('.token-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
     say('remembered-operation', '');
     say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: Unavailable');
     say('tokens-status', 'Reading reported tokens…');
@@ -187,12 +186,7 @@
     try {
       const status = await api('operations/' + id);
       if (epoch !== monitorEpoch) return;
-      monitorKind = status.kind;
       window.renderNativeChain(status);
-      if (monitorKind === 'native_chain') {
-        $('token-rows').replaceChildren(); document.querySelector('.token-table').hidden = true; say('tokens-times', '');
-        say('tokens-status', 'Native-chain token aggregation is not supported.');
-      }
       say('monitor-status', describe(status));
       say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: ' + (status.observed_at || 'Unavailable'));
       facts($('operation-facts'), [['Operation UUID', status.operation_id], ['Kind', status.kind], ['Observed at', status.observed_at],
@@ -214,12 +208,11 @@
     return (value === null ? 'Unavailable' : String(value)) + (missing ? ` · ${missing} missing` : '');
   }
   async function readTokens() {
-    if (!monitorId || monitorKind === 'native_chain') return;
+    if (!monitorId) return;
     const id = monitorId, epoch = monitorEpoch;
     try {
       const snapshot = await api(`operations/${id}/tokens`);
       if (epoch !== monitorEpoch) return;
-      if (monitorKind === 'native_chain') return;
       const rows = snapshot.groups.map(group => {
         const row = document.createElement('tr');
         for (const value of [group.provider, group.requested_model, group.served_model === null ? 'Unavailable' : group.served_model,
@@ -234,11 +227,14 @@
       const messages = { reported_responses: 'Reported response observations.', no_reported_responses: 'No reported responses observed.',
         native_evidence_unavailable: 'Native evidence not available yet.', usage_unavailable: 'Reported usage is unavailable.',
         preparation_not_applicable: 'Not applicable to preparation operations.' };
-      say('tokens-status', (snapshot.quality.partial ? 'Partial evidence: known sums only. ' : '') + messages[snapshot.reason]);
+      say('tokens-status', (snapshot.quality.partial ? 'Partial evidence: known sums only. ' : '') + (snapshot.scope === 'chain_cumulative' ? 'Whole-run cumulative usage. ' : '') + messages[snapshot.reason]);
+      const identity = snapshot.identity_basis === 'retained_sidecar' ? 'Run identity matches retained records.' :
+        snapshot.identity_basis === 'observed_sidecar' ? 'Run identity comes from its current identity file; no matching identity was retained at completion.' : '';
+      say('tokens-provenance', snapshot.scope === 'chain_cumulative' ? `${snapshot.coverage_note} ${identity}` : snapshot.coverage_note);
       say('tokens-times', `Read at: ${snapshot.observed_at} · Last valid usage: ${snapshot.last_valid_usage_at || 'Unavailable'}`);
     } catch (error) {
       if (error.stale) return;
-      if (epoch === monitorEpoch && monitorKind !== 'native_chain') say('tokens-status', 'Reported tokens stale or unavailable: ' + error.message + '. Last observations for this operation are retained. Disconnection does not mean zero usage or stopped.');
+      if (epoch === monitorEpoch) say('tokens-status', 'Reported tokens stale or unavailable: ' + error.message + '. Last observations for this operation are retained. Disconnection does not mean zero usage or stopped.');
     }
   }
   async function poll() {
