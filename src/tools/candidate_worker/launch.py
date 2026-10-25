@@ -63,6 +63,8 @@ def reconcile(
         if graph_request is not None:
             verify_graph_trace(graph_request, initial, child)
             return child
+        if child.graph_trace is not None:
+            raise ValueError("fixed candidate receipt cannot contain graph evidence")
         has_training_output = training and child.status in {"completed", "failed"}
         allowed = {"rejected", "completed", "failed"} if training else {"accepted", "rejected"}
         if child.status not in allowed:

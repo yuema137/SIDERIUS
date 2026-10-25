@@ -16,6 +16,8 @@ def execute(request_path: Path) -> CandidateRunReceipt:
     request = CandidateRunRequest.model_validate_json(request_path.read_bytes())
     control = request_path.parent
     initial = CandidateRunReceipt.model_validate_json((control / "launch.json").read_bytes())
+    if initial.graph_trace is not None:
+        raise ValueError("launch receipt cannot contain graph evidence")
     workspace = Path(initial.workspace)
     if request_path != workspace / "candidate_run" / "request.json":
         raise ValueError("child request path disagrees with claimed workspace")

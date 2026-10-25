@@ -128,3 +128,41 @@ def test_final_overflow_is_honest_failure_without_partial_trace(prepared, monkey
 def test_fixed_serialization_omits_graph_fields(prepared):
     assert "execution_profile" not in prepared.preview.model_dump()
     assert "graph_trace" not in initial(prepared).model_dump()
+
+
+@pytest.mark.parametrize("target", ["launch", "fixed_terminal"])
+def test_shared_verifier_refuses_graph_trace_injection_on_fixed_request(prepared, target):
+    from tools.candidate_worker.graph_models import GraphTrace
+    from tools.candidate_worker.records import verify_candidate_records
+
+    launch = initial(prepared)
+    terminal = launch.model_copy(update={"status": "failed"})
+    if target == "launch":
+        launch = launch.model_copy(update={"graph_trace": GraphTrace(nodes=())})
+    else:
+        terminal = terminal.model_copy(update={"graph_trace": GraphTrace(nodes=())})
+    with pytest.raises(ValueError, match=r"launch mismatch|cannot contain graph"):
+        verify_candidate_records(
+            prepared,
+            launch,
+            expected_request=prepared,
+            expected_run_id=launch.run_id,
+            workspace=Path(launch.workspace),
+            receipt=terminal,
+        )
+
+
+def test_fixed_reconciliation_refuses_child_graph_evidence(prepared, tmp_path):
+    from tools.candidate_worker.graph_models import GraphTrace
+    from tools.candidate_worker.launch import reconcile
+    from tools.workspace_sandbox.runner import ExecutionResult
+
+    launch = initial(prepared)
+    child = launch.model_copy(update={"status": "accepted", "graph_trace": GraphTrace(nodes=())})
+    path = tmp_path / "child.json"
+    path.write_text(child.model_dump_json())
+    receipt = reconcile(
+        launch, ExecutionResult(status="completed", returncode=0, elapsed_seconds=0.0), path
+    )
+    assert receipt.status == "failed" and "cannot contain graph" in receipt.error
+    assert receipt.graph_trace is None
