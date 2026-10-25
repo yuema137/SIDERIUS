@@ -66,7 +66,11 @@ def execute(request_path: Path) -> None:
     from .native import prepare_payloads
     from .reusable_training import settings_payload
 
-    fingerprint = prepare_payloads(control.request, training_payload=settings_payload(document))
+    fingerprint = prepare_payloads(
+        control.request,
+        training_payload=settings_payload(document),
+        expected_task_binding=document.task_binding,
+    )
     publish_bytes_write_once(
         str(output / "workflow.json"), (resolved.document.model_dump_json(indent=2) + "\n").encode()
     )

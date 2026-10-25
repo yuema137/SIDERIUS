@@ -59,7 +59,8 @@ The existing review HTTP route accepts the typed task_references proposal;
 ordinary selections do not trigger composition. No new GUI selector/update button
 is provided in this slice. The HTTP/Python authoring backend supports explicitly
 accepted current-snapshot adoption and guarded unchanged-identity publication;
-the browser supplies no such acceptance controls. Bound preparation stays refused;
+the browser supplies no such acceptance controls. Reusable preparation independently
+enforces captured native pins; this adds no graphical selection/update controls.
 see the [authoring contract](../workflow_authoring/authoring-contract.md#explicit-task-reference-inspectionreview).
 
 ## Python policy and request binding
