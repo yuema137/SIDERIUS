@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.durable_io import publish_bytes_atomically, publish_bytes_write_once
+from workflows.definition import ReusableWorkflowDocument
 from workflows.definition.source import (
     WorkflowSourceError,
     parse_workflow_source,
@@ -241,10 +242,18 @@ class WorkflowAuthoring:
         payload = request.source.encode("utf-8")
         if digest(payload) != request.proposal_sha256:
             raise AuthoringError("proposal", "reviewed source hash does not match")
-        parse_workflow_source(request.source)
+        proposed = parse_workflow_source(request.source)
         with self._locked():
             previous, mode = self._read_bytes()
-            self._base(previous, request.expected_sha256)
+            current = self._base(previous, request.expected_sha256)
+            if any(
+                isinstance(document, ReusableWorkflowDocument) and document.task_binding is not None
+                for document in (current.document, proposed)
+            ):
+                raise AuthoringError(
+                    "task_binding_unsupported",
+                    "Bound workflow Save is unsupported until guarded task-reference publication is implemented; keep the reviewed draft",
+                )
             if previous == payload:
                 return SaveView(sha256=digest(payload), recovery_ids=(), unchanged=True)
             recovery = (self._recover(previous), self._recover(payload))

@@ -158,6 +158,10 @@ def _inspect_source(
     document = parse_workflow_source(payload.decode("utf-8"))
     if not isinstance(document, ReusableWorkflowDocument):
         raise ValueError("reusable preparation requires a v2 source")
+    if document.task_binding is not None:
+        raise ValueError(
+            "bound workflow preparation is unsupported until native task-binding enforcement is implemented"
+        )
     locations = reusable_locations(document, project, envelope)
     resolved = resolve_reusable_candidate(document, locations)
     native = captured_request(request, document, locations)

@@ -144,6 +144,16 @@ class ReusableWorkflowDefinition(DeclarationModel):
         return self
 
 
+class TaskBinding(DeclarationModel):
+    """Accepted native identity and readable labels; never a resolver or new hash."""
+
+    schema_version: Literal["siderius.task-binding/v1"] = "siderius.task-binding/v1"
+    package_id: str = Field(min_length=1, max_length=160)
+    revision: str = Field(min_length=1, max_length=160)
+    task_data_path_id: str = Field(min_length=1, max_length=160)
+    semantic_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ReusableWorkflowDocument(DeclarationModel):
     definition: ReusableWorkflowDefinition
     positions: tuple[NodePosition, ...] = ()
@@ -154,6 +164,7 @@ class ReusableWorkflowDocument(DeclarationModel):
     training_settings: dict[str, JsonValue] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    task_binding: TaskBinding | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_training(self) -> Self:

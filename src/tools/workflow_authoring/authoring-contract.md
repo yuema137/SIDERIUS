@@ -62,3 +62,12 @@ Nested workflow parameter rules are read-only in the inspector and editable in
 Source; untouched rules and advanced fields survive edits. Task rules are resolved
 later by native owners. All controls participate in the existing source-dirty,
 review, save, conflict and generation fences; launch payloads carry no overrides.
+
+## Bound-source publication boundary
+
+Inert read/review accepts the optional v2 TaskBinding declaration. Save currently
+refuses with `task_binding_unsupported` if either the current or proposed source
+is bound, before recovery/publication; identical bound bytes and pin removal also
+refuse. Keep the draft for later guarded publication. This is an explicitly
+unsupported boundary, not task-identity verification or executable approval.
+Unbound legacy Save retains its existing behavior.

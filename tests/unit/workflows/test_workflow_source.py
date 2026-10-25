@@ -406,3 +406,39 @@ def test_generated_source_must_satisfy_same_admission_limits(monkeypatch):
     with pytest.raises(WorkflowSourceError) as caught:
         render_workflow_source(small_document())
     assert caught.value.diagnostics[0].code == "limit"
+
+
+def test_bound_source_roundtrip_is_inert_in_fresh_process(tmp_path):
+    """Pin constructor must not resolve missing task resources or import their owner."""
+    from tests.unit.workflows.reusable_fixture import reusable
+    from workflows.definition import TaskBinding
+
+    pin = TaskBinding(
+        package_id="synthetic",
+        revision="local-1",
+        task_data_path_id="synthetic_path",
+        semantic_fingerprint="a" * 64,
+    )
+    document = reusable().model_copy(update={"task_binding": pin})
+    source = render_workflow_source(document)
+    assert parse_workflow_source(source) == document
+    assert "TaskBinding(" in source and "task_binding=" in source
+    assert document.declaration_digest() != reusable().declaration_digest()
+    path = tmp_path / "workflow.py"
+    path.write_text(source)
+    code = """
+import builtins, pathlib, sys
+real_import = builtins.__import__
+def inert(name, *args, **kwargs):
+    if name in {'workflows.task_composition', 'tools.setup_review.composition_child'}:
+        raise AssertionError('inert source composed task')
+    return real_import(name, *args, **kwargs)
+builtins.__import__ = inert
+from workflows.definition import parse_workflow_source, render_workflow_source
+source = pathlib.Path(sys.argv[1]).read_text()
+assert render_workflow_source(parse_workflow_source(source)) == source
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(path)], cwd=tmp_path, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr

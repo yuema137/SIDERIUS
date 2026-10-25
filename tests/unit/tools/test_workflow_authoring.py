@@ -322,3 +322,31 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     saved = parse_workflow_source(source.read_text())
     assert saved.training_settings == {"launch": {**supplied["launch"], "sampling_seed": 31}}
     assert "train_base_seed" not in saved.training_settings["launch"]
+
+
+@pytest.mark.parametrize(
+    "current_bound,proposed_bound", [(False, True), (True, False), (True, True)]
+)
+def test_bound_save_refuses_including_pin_removal(editor, current_bound, proposed_bound):
+    """A1 cannot publish bound source, or bypass refusal by stripping an existing pin."""
+    from tests.unit.workflows.reusable_fixture import reusable
+    from workflows.definition import TaskBinding, render_workflow_source
+
+    plain = reusable()
+    bound = plain.model_copy(
+        update={
+            "task_binding": TaskBinding(
+                package_id="synthetic",
+                revision="one",
+                task_data_path_id="synthetic_path",
+                semantic_fingerprint="a" * 64,
+            )
+        }
+    )
+    original = render_workflow_source(bound if current_bound else plain)
+    editor.project.source_file.write_text(original)
+    proposed = render_workflow_source(bound if proposed_bound else plain)
+    with pytest.raises(AuthoringError, match="Bound workflow Save is unsupported"):
+        editor.save(request(editor, proposed))
+    assert editor.project.source_file.read_text() == original
+    assert not tuple(editor.project.recovery_directory.iterdir())
