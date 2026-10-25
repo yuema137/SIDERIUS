@@ -484,7 +484,7 @@ owner. No metric arithmetic or interpretation of human detail strings is added.
 Directory discovery, per-file bytes, aggregate retained bytes and emitted evidence
 are bounded. Limits produce `limit_exceeded` with no truncated checkpoint list.
 Artifact paths must remain canonical within the scheduled iteration; aliases and
-escapes refuse. A reads each bounded artifact once; the shared manifest verifier
+escapes refuse. The observation reader reads each bounded artifact once; the shared manifest verifier
 hashes supplied bytes and HyperparamTuningOutput parses those same bytes. Existing
 verifier callers retain their file behavior. The legacy inspector now delegates
 its original unbounded chain projection to `tools.native_chain.inspection`, with
@@ -495,3 +495,60 @@ Only the native `.token_run_id` sidecar is read (at most 256 bytes), validated a
 `run_name-YYYYMMDDTHHMMSS-pid`, and retained with its byte digest. It is distinct
 from operation/native invocation UUIDs. No invented token-to-checkpoint binding
 or token-row aggregation is supplied. Missing sidecar remains unavailable.
+
+Required `NativeChainOperationRequest` JSON fields are `capture_path`,
+`capture_sha256`, `envelope`, `read_only`, `network`, `devices`,
+`environment_names`, `timeout_seconds`, `input_max_bytes`,
+`max_iterations_observed`, and `max_observation_bytes`. There are no implicit
+request defaults. `input_max_bytes` equals A's `launch_binding.file_max_bytes`
+and is strict positive <=16 MiB; `max_iterations_observed` is strict positive
+<=1000 and must cover the captured final iteration; `max_observation_bytes` is
+strict positive <=1 MiB. Enumeration permits at most twice the captured final
+index (iteration directory plus its native hardware file) plus the fixed
+recognized native control-name count. Unrecognized entries consume that same
+budget and remain explicit anomalies. This is distinct from reading those
+control files, which the checkpoint observer does not do.
+
+## Construct a native chain operation
+
+Save this complete recipe as an external `build_chain_operation.py`; replace
+capture/input/data paths and choose sandbox resources before invocation. It
+computes the capture identity automatically and preserves A's exact byte limit.
+Run once and retain the resulting `chain-operation.json` for UUID recovery.
+
+```python
+import hashlib
+from pathlib import Path
+from uuid import uuid4
+from tools.candidate_operations import NativeChainOperation, NativeChainOperationRequest
+from tools.native_chain.models import NativeChainCapture
+
+capture_path = Path("/absolute/external/review/capture.json")
+capture_bytes = capture_path.read_bytes()
+capture = NativeChainCapture.model_validate_json(capture_bytes)
+assert capture.environment.launch_binding is not None
+submission = NativeChainOperation(
+    request_id=uuid4(),  # Generate once; reuse the saved JSON for every retry.
+    request=NativeChainOperationRequest(
+        capture_path=str(capture_path),
+        capture_sha256=hashlib.sha256(capture_bytes).hexdigest(),
+        envelope=str(capture.declaration.run.workspace.parent),
+        read_only=("/absolute/external/task-inputs", "/absolute/external/data"),
+        network=False,
+        devices=(),
+        environment_names=(),  # Pseudo routes need no provider keys.
+        timeout_seconds=300,
+        input_max_bytes=capture.environment.launch_binding.file_max_bytes,
+        max_iterations_observed=capture.declaration.run.final_iteration,
+        max_observation_bytes=1048576,
+    ),
+)
+Path("chain-operation.json").write_text(submission.model_dump_json(indent=2))
+```
+
+The empty envelope must have been created before capture review. Its native
+workspace remains absent until native shell launch. The explicit 300-second
+timeout and 1 MiB observation budget are example caller choices. Configure
+provider environment names for enabled real routes. Explicit GPU device paths
+and read-only `/sys` may be needed to reproduce captured hardware facts; select
+the actual host paths, never bypass installation/hardware binding. No GUI or automatic capture builder is implied.

@@ -233,3 +233,146 @@ def test_review_cli_bounds_subprocess_failures(chain, monkeypatch, capsys, timeo
         and "private-scientific-argv" not in error
         and "Traceback" not in error
     )
+
+
+@pytest.mark.parametrize("route_name", ["interpret", "tune.reflector"])
+def test_admission_forwards_full_native_routes(chain, monkeypatch, route_name):
+    """A provider used only outside candidate stages must still block missing credentials."""
+    from types import SimpleNamespace as NS
+
+    from tools.candidate_operations.native_chain import review_native_chain_operation
+    from tools.candidate_worker.preflight import require_credentials
+    from tools.setup_review.route_models import LLMRoute, RouteTransport
+
+    record, _ = chain
+    route = LLMRoute(
+        name=route_name,
+        applicability="conditional",
+        bridge_arguments={},
+        transport=RouteTransport(
+            provider="gemini",
+            model_id="fixture",
+            base_url=None,
+            reasoning_effort=None,
+            max_retries=None,
+            request_timeout=1,
+            timeout_retries=0,
+        ),
+    )
+    routes = (
+        route,
+        LLMRoute(name="analysis", applicability="disabled", bridge_arguments={}, transport=None),
+        LLMRoute(name="implement", applicability="pseudo", bridge_arguments={}, transport=None),
+    )
+    admission = record.native_chain_admission
+    request = record.submission.request.model_copy(
+        update={"environment_names": ("GEMINI_API_KEY",)}
+    )
+    submission = record.submission.model_copy(update={"request": request})
+    capture = NS(
+        declaration=NS(
+            run=NS(workspace=Path(admission.workspace), final_iteration=2),
+            working_directory=Path(record.runtime.source),
+        ),
+        environment=NS(
+            launch_binding=NS(
+                installation=NS(source_root=record.runtime.source), file_max_bytes=16777216
+            ),
+            saved_task_check=NS(result=NS(task_settings=NS(llm_routes=routes))),
+        ),
+    )
+    monkeypatch.setattr("tools.candidate_operations.native_chain.captured", lambda *a: capture)
+    observed = []
+
+    def check(actual_routes, names, env):
+        observed.append(actual_routes)
+        require_credentials(actual_routes, names, env)
+
+    monkeypatch.setattr("tools.candidate_operations.native_chain.require_credentials", check)
+    with pytest.raises(ValueError, match="binding refused"):
+        review_native_chain_operation(record.config, submission, launch_environment={})
+    assert observed == [routes]
+
+
+def test_concurrent_persisted_stores_claim_one_envelope(chain, tmp_path):
+    """Actual concurrent exclusive mkdir prevents two store owners claiming one destination."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    record, _ = chain
+    second_config = record.config.model_copy(update={"state_root": str(tmp_path / "second-state")})
+    second = record.model_copy(
+        update={
+            "config": second_config,
+            "submission": record.submission.model_copy(update={"request_id": uuid4()}),
+        }
+    )
+    with locked_store(second_config) as root:
+        claim(root, second)
+    barrier = Barrier(2)
+
+    def attempt(owner):
+        barrier.wait(timeout=5)
+        try:
+            _fence(owner)
+            return owner.submission.request_id
+        except (OSError, ValueError):
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt, (record, second)))
+    assert sum(value is not None for value in results) == 1
+    binding = Path(record.submission.request.envelope) / ".native-chain-operation/binding.json"
+    import json
+
+    assert json.loads(binding.read_text())["operation_id"] == str(
+        next(value for value in results if value is not None)
+    )
+
+
+def test_changed_scientific_evidence_does_not_reopen_process_lifecycle(chain):
+    """Mutable checkpoint corruption is visible without pretending a cleaned child is live."""
+    import json
+
+    from core.iteration_manifest import manifest_self_digest
+    from tools.candidate_operations.native_chain_read import chain_evidence
+
+    record, path = chain
+    workspace = Path(record.native_chain_admission.workspace)
+    iteration = workspace / "iter_001"
+    iteration.mkdir(parents=True)
+    manifest = {"status": "no_records"}
+    manifest["manifest_sha256"] = manifest_self_digest(manifest)
+    artifact = iteration / "manifest.json"
+    artifact.write_text(json.dumps(manifest))
+    terminal = NativeChainTerminal(
+        operation_id=record.submission.request_id,
+        request_digest=record.request_digest,
+        capture_sha256="a" * 64,
+        envelope=record.submission.request.envelope,
+        workspace=str(workspace),
+        runtime_digest=hashlib.sha256(encode(record.runtime)).hexdigest(),
+        supervision=ObservedExecutionResult(
+            execution=ExecutionResult(status="failed", returncode=1, elapsed_seconds=1),
+            cleanup=GroupCleanup(required=False, final=GroupObservation(status="absent")),
+            direct_child_reaped=True,
+        ),
+        evidence=chain_evidence(record),
+    )
+    publish(path / "native-chain-terminal.json", terminal)
+    publish(
+        path / "completion.json",
+        Completion(
+            operation_id=record.submission.request_id,
+            request_digest=record.request_digest,
+            outcome="native_chain",
+            terminal_digest=hashlib.sha256(encode(terminal)).hexdigest(),
+            reason="native_chain_terminal",
+        ),
+    )
+    artifact.unlink()
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.state == "completed" and releasable(record.config, record.submission.request_id)
+    assert snapshot.native_chain.evidence.availability == "integrity_failure"
+    assert snapshot.native_chain.terminal.evidence.checkpoints[0].native_status == "no_records"
+    assert snapshot.native_chain.terminal.evidence.checkpoints[1].integrity == "missing"

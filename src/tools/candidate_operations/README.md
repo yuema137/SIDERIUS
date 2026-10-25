@@ -176,8 +176,25 @@ credential limits and deployment boundaries.
 For a captured native chain, first create a dedicated empty envelope under an
 allowed candidate root. Declare its absent `workspace` child in the native-chain
 source and create the capture using the [native-chain route](../native_chain/README.md).
-Save a `NativeChainOperation` request outside that envelope with the capture path
-and digest, explicit sandbox mounts/limits, and observation bounds. Review it with:
+The outer directory is the envelope; the native shell creates its `workspace`
+child. Ask your coding agent to use the
+[complete construction recipe](candidate-operations-contract.md#construct-a-native-chain-operation)
+to generate `chain-operation.json` outside the envelope. Review the capture path,
+task-input and data directories, timeout, observation limits and sandbox access
+with it. The recipe reads the reviewed capture and prepares the operation identity
+automatically.
+
+Reuse that saved JSON for retries; do not generate a new request to recover a lost
+submission response. For real provider routes, select the required credential
+names and bind their values using the credential instructions above.
+
+The sandbox must observe the same hardware facts as the capture. If the reviewed
+runtime requires GPU visibility, select the required character devices under
+`/dev` and read-only `/sys` access. Empty device access works only when that
+captured runtime can be verified without those devices. The operation adapter
+supplies the exact checkout, interpreter and Git metadata access.
+
+Review and submit the saved request:
 
 ```sh
 .venv/bin/python -m tools.candidate_operations review --store-config store.json --request chain-operation.json
