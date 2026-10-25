@@ -146,6 +146,14 @@ def code_equivalent(root: Path) -> None:
         == observations[1]["tuner"]["train_base_seed"]
         == 29
     )
+    for name in (
+        "trial_max_epochs",
+        "formal_max_epochs",
+        "formal_portion",
+        "retain_training_checkpoints",
+        "retain_model_outputs",
+    ):
+        assert observations[0]["tuner"][name] == observations[1]["tuner"][name], name
 
 
 if __name__ == "__main__":

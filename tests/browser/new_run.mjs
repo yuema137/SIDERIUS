@@ -11,6 +11,12 @@ import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 const training = process.env.CONSOLE_TRAINING === '1';
+// Deliberately differ from both fixture settings and native defaults.
+const editedTraining = {
+  trial_max_epochs: 5, formal_max_epochs: 11,
+  trial_portion: 0.25, train_portion: 0.45, formal_portion: 0.65,
+  retain_training_checkpoints: true, retain_model_outputs: true
+};
 const checkout = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const evidence = process.env.CONSOLE_EVIDENCE_DIR || await mkdtemp(join(tmpdir(), 'siderius-reusable-browser-'));
@@ -71,6 +77,19 @@ try {
     await page.locator('[data-node="fit"].editor-node').click();
     assert.equal(await page.locator('[data-training="trial_time_budget_minutes"]').inputValue(), '');
     await page.locator('[data-training="trial_time_budget_minutes"]').fill('7');
+    for (const [name, value] of Object.entries(editedTraining)) {
+      await page.locator(`[data-training-mode="${name}"]`).selectOption('supplied');
+      const input = page.locator(`[data-training="${name}"]`);
+      if (typeof value === 'boolean') await input.setChecked(value);
+      else await input.fill(String(value));
+    }
+    await page.locator('.editor-node').first().click();
+    await page.locator('[data-node="fit"].editor-node').click();
+    for (const [name, value] of Object.entries(editedTraining)) {
+      const input = page.locator(`[data-training="${name}"]`);
+      assert.equal(await page.locator(`[data-training-mode="${name}"]`).inputValue(), 'supplied');
+      assert.equal(typeof value === 'boolean' ? await input.isChecked() : Number(await input.inputValue()), value, name);
+    }
     await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
     await page.locator('#editor-status').filter({hasText: 'Saved reviewed bytes'}).waitFor();
     const coded = (await readFile(metadata.source, 'utf8')).replace("'train_base_seed': 23", "'train_base_seed': 29");
@@ -78,6 +97,11 @@ try {
     await page.locator('#editor-refresh').click();
     await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
     assert.equal(await page.locator('[data-training="train_base_seed"]').inputValue(), '29');
+    for (const [name, value] of Object.entries(editedTraining)) {
+      const input = page.locator(`[data-training="${name}"]`);
+      assert.equal(await page.locator(`[data-training-mode="${name}"]`).inputValue(), 'supplied');
+      assert.equal(typeof value === 'boolean' ? await input.isChecked() : Number(await input.inputValue()), value, `Reopened ${name}`);
+    }
   }
   const source = await page.locator('#editor-source').inputValue();
   await page.locator('#editor-source').fill(source + '\n# saved by new run browser\n');
@@ -258,9 +282,16 @@ try {
     assert.equal(observed.tuner.train_base_seed, 29);
     assert.equal(observed.tuner.trial_time_budget_minutes, 7);
     assert.equal(observed.tuner.formal_time_budget_minutes, 19);
-    assert.equal(observed.tuner.trial_portion, 0.2);
+    assert.equal(observed.proposal.trial_portion, 0.25);
+    assert.equal(observed.proposal.train_portion, 0.45);
+    for (const [name, value] of Object.entries(editedTraining)) {
+      assert.equal(observed.tuner[name], value, `Native tuner ${name}`);
+    }
     const captured = JSON.parse(await readFile(join(envelope, 'inputs/training_settings.json')));
-    assert.deepEqual(captured.launch.workflow_parameter_rules.rules['train_config.max_steps'], {exact: null});
+    for (const [name, value] of Object.entries(editedTraining)) {
+      assert.equal(captured.launch[name], value, `Captured ${name}`);
+    }
+    assert.deepEqual(captured.launch.workflow_parameter_rules.rules['train_config.lr_schedule'], {exact: null});
   }
   // Both controllers use exact-record conservative release evidence.
   const coordinatorResult = await page.evaluate(() => {

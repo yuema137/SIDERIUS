@@ -42,7 +42,7 @@ SETTINGS = {
         "workflow_parameter_rules": {
             "rules": {
                 "train_config.epochs": {"range": {"min": 1, "max": 3}},
-                "train_config.max_steps": {"exact": None},
+                "train_config.lr_schedule": {"exact": None},
             }
         },
     }
