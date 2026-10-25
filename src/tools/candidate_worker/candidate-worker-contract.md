@@ -85,6 +85,25 @@ One immutable run ID, run name and logical iteration 1 reach the proposer
 existing accounting helper. `WorkflowLLMConfig.get` owns constructor routing.
 Native retries remain native; the worker has no retry or replay loop.
 
+The sequence immediately consumes the three typed native calls in `phases.py`.
+Each call receives an immutable `FixedInvocationContext` constructed from
+`candidate_nodes`' declared node IDs, the launch receipt and already materialized
+native storage. It compares the expected phase/node, launch run/workspace and
+storage binding before agent construction, then uses that context to bind native
+accounting. Iteration and attempt remain fixed at 1. Implementation and validation
+share the existing `impl_001` storage slot and keep their separate record names.
+Node IDs remain internal invocation identities: they do not enter prompts,
+scientific candidate/model IDs or native filenames. Input reconciliation stays
+with `materialize`; artifact and record verification stay with their existing
+owners. The sequence owns receipt status, output ordering and optional tuning.
+
+These calls are internal fixed-candidate boundaries, not a scheduler or a new
+storage namespace. The supported topology remains exactly one proposer,
+implementor and validator, with optional tuning; repeated capabilities still
+refuse admission. Professional and Assistant use the same native execution
+boundary, and this extraction adds no executable authored-graph topology or
+new setup behavior.
+
 The proposer returns its own candidate ID. The worker checks implementation-bound
 schema eligibility, output types, generated name and unsupported historical
 experiment-source inheritance before implementation. The existing isolation
