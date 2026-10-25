@@ -59,6 +59,12 @@ def verify_payloads(
         raise ValueError("attempt storage differs from selected native destination")
     if proposal.task_composition_ref.semantic_fingerprint != fingerprint:
         raise ValueError("child fingerprint disagrees with native proposal")
+    accepted = plan.document.task_binding
+    if accepted is not None and (
+        proposal.task_composition_ref.semantic_fingerprint != accepted.semantic_fingerprint
+        or proposal.task_composition_ref.task_data_path_id != accepted.task_data_path_id
+    ):
+        raise ValueError("native proposal differs from parent-captured workflow task binding")
     advice = (
         [
             AdviceProjection(

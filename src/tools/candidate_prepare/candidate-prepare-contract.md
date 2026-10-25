@@ -431,10 +431,36 @@ hash repair cannot legitimize substituted settings/seed facts. Terminal operatio
 reads verify the native output digest and identity, not every checkpoint or
 scientific success. No outer loops, resume or historical defaults are added.
 
-### Bound reusable source (not yet executable)
+### Accepted task binding enforcement
 
-A v2 `TaskBinding` can be parsed inertly but reusable preparation currently
-refuses it in source-only inspection, before resolving task locations, reading
-manifest/config or creating a run envelope. Native pin enforcement is a separate
-integration checkpoint. No bound source is silently treated as unbound. Existing
-unbound requests and recovery of already admitted captures are unchanged.
+A v2 `TaskBinding` is optional; None/absence retains the exact legacy source,
+request/control/receipt and native payload contracts. Source-only inspection
+retains the declaration without importing task code or reading external contents.
+Full capture preserves the exact original source in the existing snapshot and
+its typed document in the parent plan; no second pin or identity registry is added.
+
+After verifying capture/control/snapshot identity, `reusable_child` forwards the
+captured document's pin to `native.prepare_payloads(expected_task_binding=None)`.
+The native owner composes once and constructs its existing `TaskCompositionRef`.
+Before proposal construction or any native payload write, a supplied pin must
+match both semantic_fingerprint and task_data_path_id. Package/revision labels
+are readable metadata, not another identity algorithm. Native mismatch fails the
+child; existing capture/worker diagnostics and failed receipts may remain, but
+no native proposal/storage payload or successful candidate request is published.
+This is preparation, never provider execution, training or launch approval.
+
+Parent `reusable_verify.verify_payloads` separately compares both raw proposal
+identity fields to the retained `plan.document.task_binding`, in addition to its
+existing child-index/proposal fingerprint linkage. Missing task_data_path_id is
+permitted by the inert projection for old unbound fixtures, but refuses a bound
+plan. A self-consistent forged child index/fingerprint cannot replace the accepted
+parent pin. Existing exact-byte snapshot/binding/control, artifact census/hash,
+profile/options/storage and receipt-last checks remain unchanged. No parent
+composition or extra observation child is introduced.
+
+Retained verification uses captured source, preserving old runs after current
+source edits. At actual launch the existing native worker materialize_proposal
+check compares the whole TaskCompositionRef against fresh composition; later task
+drift remains that owner's refusal. Native assembly fingerprints remain authoritative;
+a declaration of a readable version cannot suppress their mismatch. Arbitrary
+task migration and graphical task/version selection are separate capabilities.

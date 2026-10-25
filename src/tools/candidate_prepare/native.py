@@ -28,6 +28,7 @@ from .models import CandidatePreparationRequest
 
 if TYPE_CHECKING:
     from workflows.candidate_training_settings import CandidateTrainingSettings
+    from workflows.definition import TaskBinding
 
 
 def _training_seed_bytes(proposal: ProposalInput, settings: "CandidateTrainingSettings") -> bytes:
@@ -52,7 +53,10 @@ def prepare_native(request: CandidatePreparationRequest) -> str:
 
 
 def prepare_payloads(
-    request: CandidatePreparationRequest, *, training_payload: bytes | None = None
+    request: CandidatePreparationRequest,
+    *,
+    training_payload: bytes | None = None,
+    expected_task_binding: "TaskBinding | None" = None,
 ) -> str:
     """Compose the selected task and save exact native inputs without a provider."""
     output = Path(request.output_dir)
@@ -90,6 +94,11 @@ def prepare_payloads(
         )
         ref = build_task_composition_ref(composition)
         assert ref is not None
+        if expected_task_binding is not None and (
+            ref.semantic_fingerprint != expected_task_binding.semantic_fingerprint
+            or ref.task_data_path_id != expected_task_binding.task_data_path_id
+        ):
+            raise ValueError("native task composition differs from accepted workflow binding")
         proposal = local_full_context(
             interpretation,
             storage,

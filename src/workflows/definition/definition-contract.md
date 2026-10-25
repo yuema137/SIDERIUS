@@ -274,12 +274,13 @@ present binding participates in the existing document declaration digest. v1
 cannot carry this field and is never silently migrated. Old source stays unbound;
 no readable version is inferred from a path, timestamp or identity-format label.
 
-Bound source is currently readable/convertible but not executable through
-reusable preparation. Preparation refuses it during source inspection, before
-external input reads or envelope creation, until native pin enforcement lands.
+Bound source is readable/convertible. Reusable preparation retains its pin and
+independently enforces both accepted native identity fields before payload
+publication through the
+[preparation owner](../../tools/candidate_prepare/candidate-prepare-contract.md#accepted-task-binding-enforcement).
 Authoring supports explicitly reviewed current-snapshot adoption and guarded
 publication while native identity remains unchanged, through its
 [publication owner](../../tools/workflow_authoring/authoring-contract.md#bound-source-publication-boundary).
 Pin removal and unresolved changed-task migration remain refused. Guarded
-publication does not establish executable preparation enforcement. Existing unbound
+publication alone does not establish successful preparation or launch. Existing unbound
 paths and previously captured runs retain their original contracts.

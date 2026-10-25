@@ -79,6 +79,7 @@ NATIVE_FILES = (
 
 class CompositionIdentity(BaseModel):
     semantic_fingerprint: str
+    task_data_path_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ProposalIdentity(BaseModel):

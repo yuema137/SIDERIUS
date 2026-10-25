@@ -71,9 +71,9 @@ Inert read accepts the optional v2 TaskBinding declaration. Bound review and Sav
 require explicit configured selection and findings acceptance. Unbound legacy
 Save retains its inert behavior and wire serialization; omitted new optional
 fields remain omitted. Pin removal, changed native identity and unresolved
-compatibility refuse publication. Reusable preparation still refuses all bound
-source until independent native enforcement lands; successful Save is not launch
-approval. Existing runs keep their captured original pins.
+compatibility refuse publication. Reusable preparation independently enforces the captured pin through its
+[native owner](../candidate_prepare/candidate-prepare-contract.md#accepted-task-binding-enforcement);
+successful Save is not preparation or launch approval. Existing runs keep their captured original pins.
 
 ## Explicit task-reference inspection/review
 
@@ -136,5 +136,5 @@ remain authoritative; no review-token registry or parallel writer exists.
 
 The existing HTTP and Python owners consume these fields. The browser does not
 yet provide selection/acceptance controls; no bound GUI authoring capability is
-claimed. Native preparation enforcement and arbitrary task migration remain
-separate unsupported checkpoints.
+claimed. Native preparation enforcement is owned separately by candidate_prepare;
+arbitrary task migration remains unsupported.
