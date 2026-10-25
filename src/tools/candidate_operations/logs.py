@@ -13,7 +13,8 @@ def read_operation_log(config: OperationStoreConfig, request: LogReadRequest) ->
     record = load_record(config, request.operation_id)
     path = (
         operation_path(config, request.operation_id) / "operation.log"
-        if request.kind == "operation" or record.submission.kind == "native_chain"
+        if request.kind == "operation"
+        or record.submission.kind in {"native_chain", "native_chain_resume"}
         else native_directory(record.submission) / "worker.log"
     )
     try:

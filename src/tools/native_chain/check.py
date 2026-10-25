@@ -126,7 +126,7 @@ def launch_context(capture: NativeChainCapture, iteration: int) -> NativeChainLa
 
 def parse_check(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("admit", "resume-admit", "dispatch"))
+    parser.add_argument("command", choices=("admit", "resume-admit", "verify", "dispatch"))
     parser.add_argument("--capture", type=Path, required=True)
     parser.add_argument("--sha256", required=True)
     parser.add_argument("--input-max-bytes", type=int, required=True)
@@ -168,6 +168,10 @@ def main() -> int:
         args, reference, argv = parse_check()
         if args.command == "admit":
             admit(reference, argv)
+        elif args.command == "verify":
+            if argv:
+                raise NativeChainRefusal("unexpected_verification_arguments")
+            load_capture(reference)
         elif args.command == "resume-admit":
             from .resume_admit import admit_resume
 

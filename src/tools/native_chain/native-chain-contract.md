@@ -41,12 +41,23 @@ or changed other fields refuse. No executable config is reconstructed from JSON.
 Native-specific refusals escape package/scientific failure handlers before
 `run_workflow`; unrelated exceptions keep native behavior. Composition imports,
 iteration directory, token and restoration artifacts can precede this final check.
-Effectful resume and Slurm capture remain unsupported. Fresh Linux captured launches
+Slurm capture remains unsupported. Fresh Linux captured launches
 consume [native writer ownership](../../core/native_writer/native-writer-contract.md)
 after admission and before history inspection or workspace writes. Registration
 binds this capture digest; uncertainty retains the claim even after the kernel lock
 becomes free. Direct entry cannot restart a registered workspace. Detached operations
 and GUI consumers use the same native owner inside their existing sandbox.
+
+Explicit detached append continuation is owned by
+[candidate operations](../candidate_operations/candidate-operations-contract.md#captured-native-continuation).
+`resume_entry` verifies the original capture and narrow reserved projection,
+adopts the existing writer lock once, and invokes the same shell. Private
+`--chain_resume_predecessor`, `--chain_resume_successor` and
+`--chain_resume_reservation_sha256` controls require the original capture and a
+verified inherited adopted claim. `check resume-admit` compares the exact original
+shell vector with only the admitted start index changed. User chain arguments
+cannot inject these controls. Fresh admission remains absent-workspace only;
+per-iteration scientific export/dispatch verification is unchanged.
 
 ## Read-only checkpoint consumers
 

@@ -166,7 +166,11 @@ Create the workspace parent before launch. To inspect a selected workspace, run
 `.venv/bin/python -m core.native_writer inspect --workspace PATH`; this does not
 authorize a new launch. Registered captured workspaces cannot be restarted through
 the direct legacy CLI. Preserve `unresolved` or `invalid` ownership evidence and
-explain that verified recovery/effectful captured resume is not yet supported.
+use the [detached continuation admission](../../../src/tools/candidate_operations/candidate-operations-contract.md#captured-native-continuation)
+only for supported absent-next-slot histories. It requires an exited outer operation,
+confirmed cleanup, unchanged original capture/source and verified prefix; idle writer
+state alone is insufficient. Existing failed/partial slots and explicit stop states
+remain unsupported. Foreground-only/legacy runs lack this operation proof.
 Never delete coordination files, reclaim by missing PID, or describe a fresh
 destination as resume. See the [ownership contract](../../../src/core/native_writer/native-writer-contract.md).
 

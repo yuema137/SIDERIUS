@@ -67,9 +67,19 @@ class NativeChainTerminal(PreviewModel):
     )
 
 
+class NativeChainContinuation(PreviewModel):
+    root_operation_id: UUID
+    head_operation_id: UUID
+    head_state: Literal["active", "completed", "operation_failed", "unknown"]
+    lifecycle: Literal["reserved", "adopted", "no_child", "terminal"]
+
+
 class NativeChainObservation(PreviewModel):
     admission: NativeChainAdmission
     terminal: NativeChainTerminal | None = None
+    continuation: NativeChainContinuation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     evidence: NativeChainEvidence = Field(
         default_factory=lambda: NativeChainEvidence(availability="unavailable")
     )

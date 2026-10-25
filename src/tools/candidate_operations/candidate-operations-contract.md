@@ -468,8 +468,8 @@ release. Failed/timeout shell outcomes remain visible even when lifecycle finish
 Both log kinds read the inherited private operation log for this kind. Token
 aggregation returns a typed `not_supported` error. Same UUID recovery reads only
 stored identity and evidence, even after original capture deletion and key loss.
-No resume, cancellation, GUI launch, token aggregation or scientific qualification
-is added by this code-consumer boundary.
+This fresh-launch boundary adds no cancellation, token aggregation or scientific
+qualification. Explicit continuation is described separately below.
 
 The chain snapshot's `native_chain.evidence` reports bounded current checkpoint
 observations, distinct from immutable `native_chain.terminal.evidence`. Active
@@ -568,3 +568,126 @@ timeout and 1 MiB observation budget are example caller choices. Configure
 provider environment names for enabled real routes. Explicit GPU device paths
 and read-only `/sys` may be needed to reproduce captured hardware facts; select
 the actual host paths, never bypass installation/hardware binding. No GUI or automatic capture builder is implied.
+
+## Captured native continuation
+
+`review_native_chain_resume(config, predecessor_operation_id)` and CLI
+`review-resume --store-config PATH --operation-id UUID` inspect the unique tail
+of a registered detached native run. `NativeChainResumeOperation` has kind
+`native_chain_resume`, a new `request_id`, and a `NativeChainResumeRequest` containing
+only `predecessor_operation_id` and `expected_review_digest`. Scientific controls,
+capture, sandbox mounts, provider-name policy, timeout and observation bounds are
+inherited from the verified root request. No new launcher, scheduler or scientific
+configuration is reconstructed. The native shell remains the iteration owner.
+
+Admission requires an exited wrapper, a digest-bound host terminal with a reaped
+direct child and cleanup final `absent`, current policy-2 evidence matching that
+terminal, a consistent registered writer snapshot and a free kernel lock. The
+prefix must be contiguous, verified and restorable under native status semantics,
+with at least one completed iteration. Selection uses the existing next-index
+owner; the selected and all later iteration directories must be absent. A completed
+target reports `not_needed`. Existing failed/no_records/partial selected slots,
+first-iteration recovery, dangling history, unknown anomalies, STOP,
+chain_stopped.json and .chain_halted refuse. Ordinary fresh and legacy behavior
+is unchanged. Native restoration can still refuse incompatible plugin state;
+read-only admission does not run that mutating restoration.
+
+Source/install/input verification uses the original capture in its exact working
+directory. The initial capture and run must be created on this continuation-capable
+source; an older capture does not become resumable by upgrading its checkout.
+Foreground-only/legacy/Slurm runs are unsupported by this detached proof boundary.
+No force-fresh, automatic reclaim, stop clearing, parameter changes or new target
+is supplied. Deliberately escaped same-user daemon writers remain outside the
+cooperative supervision guarantee.
+
+`NativeResumeAdmission` persists root/predecessor/baseline operation identities,
+raw predecessor Completion and baseline terminal digests, original request and
+admission, typed writer snapshot, bounded scientific evidence, start index and
+store identity. Its review digest excludes timestamps and FD numbers. Repeated
+read-only reviews of unchanged state are stable. New-kind syntax validation is
+inert; same-ID lookup precedes fresh sources/credentials and never respawns,
+including after interruption, missing source or lost response.
+
+Host admission retains existing store locking and typed OperationRecord publication.
+The wrapper rechecks admission under the existing writer lock, then publishes
+`successor.<predecessor-UUID>.json` write-once inside the existing writable writer
+sidecar. The original envelope fence is never replaced. This shared physical
+reservation excludes a competing store as well as another UUID. Host and child do
+not transfer a descriptor across bubblewrap. The child verifies the same reservation,
+source, baseline and lock snapshot, publishes a permanent adoption marker, removes
+only exact prior owner metadata, and transfers the same held FD into the existing
+shell runner. It does not mount the host operation store. Core owns exclusion and
+single-use adoption; operations own cleanup/lineage admission. See the
+[writer contract](../../core/native_writer/native-writer-contract.md#explicit-successor-ownership-primitives).
+
+Any uncertain reservation publication, adoption transition or missing host receipt
+blocks further effects. An existing UUID is status retrieval only. An actual child
+always produces the existing observed terminal when supervision completes, including
+pre-scientific refusal. Only an `ObservedSpawnFailure` after confirmed reservation
+can produce `Completion(outcome="pre_dispatch_failure",
+reason="native_resume_spawn_failed")`: before publishing this narrow no-child proof,
+the wrapper reacquires the writer lock and checks the exact reservation, absent
+adoption, unchanged owner and unchanged scientific baseline. No cleanup terminal is
+fabricated. After that wrapper exits, a new explicit UUID may follow the no-effect
+leaf; generic pre-dispatch errors do not grant this permission. The failed leaf and
+its reservation remain immutable.
+
+Reads follow deterministic successor filenames from the root fence. They validate
+operation/config identities, Completion/terminal hashes, reservations and adoption
+records without scanning other stores. Limits are 64 successor links, 4096 bytes per
+writer record and 16 MiB aggregate host record bytes (charged before reads, including
+a conservative allowance for the initially loaded record). Existing 4 MiB record,
+16 MiB capture/input and 1 MiB scientific observation limits remain separate.
+Overflow, cycles, missing or contradictory linked records refuse; no truncation is
+presented as complete history. Root requests without successors retain the old
+terminal-policy comparison, including legacy policy-1 compatibility.
+
+`native_chain.terminal` remains the selected operation's immutable snapshot;
+`native_chain.evidence` is current workspace evidence. Optional `continuation`
+contains root/head operation IDs, head state and reserved/adopted/no-child/terminal
+lifecycle. Selected `OperationSnapshot.state` never becomes the successor's outcome.
+Without adoption, a reservation authorizes no scientific change. With adoption,
+only the previously absent suffix may change; every protected prefix and token
+sidecar identity must still match. A later terminal cannot launder altered prior
+checkpoints. At a terminal tail current evidence must match that terminal completely.
+Missing/unknown cleanup never grants another continuation. Token ledger append is
+allowed through its native producer; this observer does not read or promise integrity
+of aggregate usage rows. Native token identity is distinct from both operation UUIDs.
+
+GUI continuation is not supplied. Professional and Assistant code/CLI consumers use
+this same request/read path. Existing native log behavior remains the selected
+operation's wrapper log; token aggregation remains unsupported for both native kinds.
+
+## Construct a native continuation
+
+Run once from the original checkout after inspecting the completed operation. Save
+the request outside the scientific envelope and reuse it unchanged for response
+recovery. This code reviews eligibility and constructs a request; it does not launch.
+
+```python
+from pathlib import Path
+from uuid import UUID, uuid4
+from tools.candidate_operations import (
+    NativeChainResumeOperation, NativeChainResumeRequest, OperationStoreConfig,
+    review_native_chain_resume,
+)
+
+config = OperationStoreConfig.model_validate_json(Path("store.json").read_bytes())
+predecessor = UUID("PREVIOUS_OPERATION_UUID")
+review = review_native_chain_resume(config, predecessor)
+if review.eligibility != "ready":
+    raise RuntimeError("Original target already reached")
+request = NativeChainResumeOperation(
+    request_id=uuid4(),
+    request=NativeChainResumeRequest(
+        predecessor_operation_id=predecessor,
+        expected_review_digest=review.review_digest,
+    ),
+)
+Path("resume-operation.json").write_text(request.model_dump_json(indent=2))
+```
+
+Bind the original provider environment names and submit with the ordinary CLI or
+`submit_operation`. New credentials are checked only for new execution; status and
+identical same-ID recovery do not read their values. Source, writer or checkpoint
+changes after review refuse the new operation rather than changing its meaning.

@@ -85,8 +85,8 @@ resume admission must additionally establish that the outer operation is inactiv
 and its supervision cleanup proves absence. Claim state alone cannot grant reuse;
 an active outer operation must refuse even if its native claim is idle.
 
-Unresolved registration remains blocked until a future explicitly verified recovery
-procedure exists. Do not delete or rewrite control metadata, infer safety from a
+Unresolved registration remains blocked except through explicitly verified detached
+continuation admission. Do not delete or rewrite control metadata, infer safety from a
 missing PID, reconstruct a capture, or label a new workspace as resumed work.
 GUI, Professional and Assistant callers consume this same backend contract.
 
