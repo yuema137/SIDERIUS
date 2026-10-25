@@ -149,3 +149,13 @@ class TaskCheckReport(CheckModel):
     execution: ExecutionResult | None
     result: CompositionResult
     limitations: tuple[str, ...]
+
+
+class CompositionObservation(CheckModel):
+    """Same bounded child observation, without a fabricated CLI declaration/report."""
+
+    job: CompositionJob
+    sandbox: SandboxProfile
+    execution: ExecutionResult | None
+    result: CompositionResult
+    limitations: tuple[str, ...]

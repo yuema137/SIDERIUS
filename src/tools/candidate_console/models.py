@@ -13,6 +13,7 @@ from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.workflow_authoring.models import Project
 from tools.workflow_preview.models import PreviewModel
 from tools.workspace_sandbox.profile import SandboxProfile
+from workflows.definition import TaskBinding
 
 from .native_chain_models import NativeChainChoice
 from .readiness_models import CredentialReadiness as CredentialReadiness
@@ -36,6 +37,7 @@ class TaskChoice(PreviewModel):
     candidate_devices: tuple[str, ...]
     candidate_environment_names: tuple[str, ...]
     allowed_output_types: tuple[OutputTypeName, ...] | None = Field(default=None, min_length=1)
+    task_revision: TaskBinding | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("candidate_environment_names")
     @classmethod

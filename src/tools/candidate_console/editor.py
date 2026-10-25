@@ -1,22 +1,49 @@
 """Optional declaration editor routes, independent of native console execution."""
 
 from collections.abc import Callable
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
+from tools.setup_review.composition_models import TaskCheckSettings
 from tools.workflow_authoring.models import Project, ReviewRequest, SaveRequest
 from tools.workflow_authoring.service import AuthoringError, WorkflowAuthoring
+from tools.workflow_authoring.task_models import TaskReferenceTarget
 from workflows.definition.source import WorkflowSourceError
+
+from .models import TaskChoice
+
+
+def task_reference_targets(tasks: tuple[TaskChoice, ...]) -> tuple[TaskReferenceTarget, ...]:
+    """Project the existing curated choices; no independent task registry or resolver."""
+    return tuple(
+        TaskReferenceTarget(
+            choice_id=task.task_id,
+            binding=task.task_revision,
+            manifest=Path(task.task_manifest),
+            data_root=Path(task.data_root),
+            llm_config_file=Path(task.llm_config_file),
+            inspection_root=Path(task.preparation_root),
+            read_only=tuple(Path(path) for path in task.task_read_only),
+            settings=TaskCheckSettings(timeout_seconds=task.preparation_timeout_seconds),
+        )
+        for task in tasks
+        if task.task_revision is not None
+    )
 
 
 def editor_router(
-    projects: tuple[Project, ...], runnable_projects: tuple[str, ...] = ()
+    projects: tuple[Project, ...],
+    runnable_projects: tuple[str, ...] = (),
+    task_targets: tuple[TaskReferenceTarget, ...] = (),
 ) -> APIRouter:
     router = APIRouter(prefix="/api/editor")
-    services = {project.project_id: WorkflowAuthoring(project) for project in projects}
+    services = {
+        project.project_id: WorkflowAuthoring(project, task_targets) for project in projects
+    }
 
     def selected(project_id: str) -> WorkflowAuthoring:
         if project_id not in services:

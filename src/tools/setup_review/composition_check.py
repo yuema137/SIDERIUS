@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from core.durable_io import publish_bytes_write_once
 from tools.setup_review.composition_models import (
     CHILD_REQUEST_NAME,
     CompositionJob,
+    CompositionObservation,
     CompositionResult,
     TaskCheckReport,
     TaskCheckRequest,
 )
-from tools.setup_review.composition_paths import validate_check_locations
+from tools.setup_review.composition_paths import (
+    validate_check_locations,
+    validate_observation_locations,
+)
 from tools.setup_review.composition_render import render_task_check
 from tools.setup_review.composition_transport import manifest_digest, read_composition_result
 from tools.setup_review.inspection import inspect_parsed_declaration
@@ -81,6 +86,41 @@ def _execute(
     return execution, result
 
 
+def observe_composition(
+    job: CompositionJob, read_only: tuple[Path, ...], *, data_root: Path | None = None
+) -> CompositionObservation:
+    """Run the existing inspection child; callers supply trusted explicit source roots."""
+    job = CompositionJob.model_validate_json(job.model_dump_json())
+    scratch = Path(job.scratch)
+    validate_observation_locations(scratch, read_only, Path(job.manifest), data_root)
+    scratch.mkdir(mode=0o700)
+    request_path = scratch / CHILD_REQUEST_NAME
+    publish_bytes_write_once(str(request_path), (job.model_dump_json() + "\n").encode())
+    profile = SandboxProfile(
+        workspace=scratch,
+        read_only=(*read_only, request_path),
+        network=False,
+        devices=(),
+        environment_names=(),
+        timeout_seconds=job.settings.timeout_seconds,
+    )
+    execution, result = _execute(job, profile, str(request_path))
+    try:
+        if manifest_digest(job.manifest) != job.manifest_sha256:
+            raise ValueError(
+                "Selected manifest changed during the check; rerun with unchanged inputs"
+            )
+    except Exception as error:
+        result = CompositionResult.failed(job, "stale_manifest", error, task=result.task)
+    return CompositionObservation(
+        job=job,
+        sandbox=profile,
+        execution=execution,
+        result=result,
+        limitations=_limitations(job.task_settings is not None),
+    )
+
+
 def check_task(request: TaskCheckRequest) -> TaskCheckReport:
     """Compose in a bounded child and publish new local diagnostic artifacts."""
     declaration, args = inspect_parsed_declaration(request.setup, request.output)
@@ -96,35 +136,17 @@ def check_task(request: TaskCheckRequest) -> TaskCheckReport:
         if request.resolve_task_settings
         else None,
     )
-    request.scratch.mkdir(mode=0o700)
     request.output.mkdir(mode=0o700)
-    request_path = request.scratch / CHILD_REQUEST_NAME
-    publish_bytes_write_once(str(request_path), (job.model_dump_json() + "\n").encode())
-    profile = SandboxProfile(
-        workspace=request.scratch,
-        read_only=(*request.read_only, request_path),
-        network=False,
-        devices=(),
-        environment_names=(),
-        timeout_seconds=request.settings.timeout_seconds,
-    )
-    execution, result = _execute(job, profile, str(request_path))
-    try:
-        if manifest_digest(job.manifest) != job.manifest_sha256:
-            raise ValueError(
-                "Selected manifest changed during the check; rerun with unchanged inputs"
-            )
-    except Exception as error:
-        result = CompositionResult.failed(job, "stale_manifest", error, task=result.task)
+    observed = observe_composition(job, request.read_only)
     report = TaskCheckReport(
         declaration=declaration,
         request=request,
         job=job,
-        sandbox=profile,
+        sandbox=observed.sandbox,
         runtime_read_only_roots=tuple(str(path) for path in runtime_roots()),
-        execution=execution,
-        result=result,
-        limitations=_limitations(request.resolve_task_settings),
+        execution=observed.execution,
+        result=observed.result,
+        limitations=observed.limitations,
     )
     for name, payload in (
         ("report.json", report.model_dump_json(indent=2) + "\n"),

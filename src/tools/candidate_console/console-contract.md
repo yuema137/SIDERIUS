@@ -51,6 +51,15 @@ least 32 bytes; the operator must generate random bytes. Values never enter nati
 requests. Credentials are reread per launch and only configured native environment
 names are passed; native environment validation rejects reserved names.
 
+TaskChoice may optionally declare `task_revision: TaskBinding`. None/absence is
+omitted, preserving legacy configuration serialization. Versioned choices project
+to the shared authoring task-reference target policy; explicit review uses that
+configured native identity without creating a registry or guessing a version.
+The existing review HTTP route accepts the typed task_references proposal;
+ordinary selections do not trigger composition. No new GUI selector/update button
+is provided in this slice. Bound Save/preparation remain explicitly unsupported;
+see the [authoring contract](../workflow_authoring/authoring-contract.md#explicit-task-reference-inspectionreview).
+
 ## Python policy and request binding
 
 `CandidateConsole(config)` exposes `choices()`, `prepare(PrepareSelection)`,

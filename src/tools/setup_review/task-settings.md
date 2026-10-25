@@ -90,3 +90,20 @@ remain unresolved. No hardware names or local host profiles are inferred. The
 existing sandbox exposes only declared source/runtime roots; trusted factories
 can read/print those files. Child timeout and result byte bounds are not whole-host
 memory/disk quotas or a hostile-code security guarantee.
+
+## Shared explicit composition observation
+
+`composition_check.observe_composition(job, read_only, data_root=...)` is the
+bounded job runner shared by original `check_task` and explicit authoring task
+reference review. It uses the same CompositionJob/Result, no-network/no-device/
+no-caller-environment SandboxProfile, child bootstrap, bounded result transport,
+request/manifest identity checks, before/after manifest observation and limitations.
+It returns typed CompositionObservation, not a launch approval or scientific
+compatibility certificate. Selected trusted roots and fresh scratch locations
+share the existing inspection path owner; no caller-supplied returned source path
+is opened. Host dataset contents remain outside the requested inspection.
+
+Original check_task retains declaration/planner/task-settings/report ownership.
+Its output directory is now reserved before the shared runner claims scratch;
+both remain fresh-only, and no composition starts before output reservation.
+The runner writes only fresh scratch; ordinary inert parsing never calls it.

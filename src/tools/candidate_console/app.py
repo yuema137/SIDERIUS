@@ -16,7 +16,7 @@ from tools.candidate_operations.models import OperationFailure
 
 from .boundary import RequestBoundary
 from .edited_routes import edited_router
-from .editor import editor_router
+from .editor import editor_router, task_reference_targets
 from .files import token
 from .models import ConsoleConfig, LaunchSelection, PreparedSelection, PrepareSelection
 from .native_chain_routes import native_chain_router
@@ -35,7 +35,11 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.console = service
     app.include_router(
-        editor_router(service.config.editor_projects, service.config.runnable_editor_projects)
+        editor_router(
+            service.config.editor_projects,
+            service.config.runnable_editor_projects,
+            task_reference_targets(service.config.tasks),
+        )
     )
     app.include_router(edited_router(service))
     app.include_router(reusable_router(service))
