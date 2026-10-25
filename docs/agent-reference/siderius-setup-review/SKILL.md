@@ -161,6 +161,15 @@ iteration or produce a scientific semantic-review receipt. Launch remains a
 separate authorized action.
 Changing original bound inputs can refuse launch or a later iteration.
 
+Professional CLI and Assistant routes share the Linux native writer owner.
+Create the workspace parent before launch. To inspect a selected workspace, run
+`.venv/bin/python -m core.native_writer inspect --workspace PATH`; this does not
+authorize a new launch. Registered captured workspaces cannot be restarted through
+the direct legacy CLI. Preserve `unresolved` or `invalid` ownership evidence and
+explain that verified recovery/effectful captured resume is not yet supported.
+Never delete coordination files, reclaim by missing PID, or describe a fresh
+destination as resume. See the [ownership contract](../../../src/core/native_writer/native-writer-contract.md).
+
 For detached execution, follow the [operation steps](../../../src/tools/candidate_operations/README.md#run-a-captured-native-chain)
 and [construction recipe](../../../src/tools/candidate_operations/candidate-operations-contract.md#construct-a-native-chain-operation).
 Before capture review, create a dedicated empty envelope and declare its exact

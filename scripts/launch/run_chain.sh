@@ -223,6 +223,13 @@ submit_iteration_sdsc() {
     local iter=$1
     if [ "$DRY_RUN" -eq 0 ]; then
         mkdir -p "$WORKSPACE/logs"
+        # A compute job may start before the remaining sbatch submissions.
+        # It cannot inherit our FD; release the preflight lease and remove the
+        # private transport before Slurm exports the submitter environment.
+        if [ -n "${SIDERIUS_NATIVE_WRITER:-}" ]; then
+            "${PY_CMD[@]}" -m core.native_writer release-submission --workspace "$WORKSPACE" || return 78
+            unset SIDERIUS_NATIVE_WRITER
+        fi
     fi
     local sbatch_args=(
         --partition="$PARTITION"
@@ -348,6 +355,21 @@ if [ -n "$EXPECTED_CHAIN_CAPTURE$EXPECTED_CHAIN_CAPTURE_SHA256$CHAIN_CAPTURE_INP
         exit 78
     fi
     check_chain_capture admit -- "${ORIGINAL_CHAIN_ARGS[@]}" || exit 78
+fi
+
+# Acquire before history selection or workspace writes. Re-enter this exact
+# shell under the owner, preserving the native parser, argv and stop semantics.
+# Legacy non-Linux execution remains outside guarded-resume support.
+if [ "$DRY_RUN" -ne 1 ] && [ "$(uname -s)" = Linux ]; then
+    if [ -n "${SIDERIUS_NATIVE_WRITER:-}" ]; then
+        "${PY_CMD[@]}" -m core.native_writer check --workspace "$WORKSPACE" || exit 78
+    else
+        WRITER_ARGS=(launch --workspace "$WORKSPACE")
+        if [ -n "$EXPECTED_CHAIN_CAPTURE_SHA256" ]; then
+            WRITER_ARGS+=(--capture-sha256 "$EXPECTED_CHAIN_CAPTURE_SHA256")
+        fi
+        exec "${PY_CMD[@]}" -m core.native_writer "${WRITER_ARGS[@]}" -- /bin/bash "$0" "${ORIGINAL_CHAIN_ARGS[@]}"
+    fi
 fi
 
 # --- 13.B: Auto-resume + safety guard + idempotency ---

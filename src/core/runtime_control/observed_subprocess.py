@@ -13,6 +13,8 @@ import os
 import subprocess
 import time
 from collections.abc import Callable
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
@@ -95,6 +97,30 @@ class ProcessLifecycle(BaseModel):
     control_decision: ProcessControlDecision | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+
+
+_LIFECYCLE_OBSERVER: ContextVar[Callable[[ProcessLifecycle], None] | None] = ContextVar(
+    "process_lifecycle_observer", default=None
+)
+
+
+@contextmanager
+def observe_process_lifecycle(observer: Callable[[ProcessLifecycle], None]):
+    """Observe existing synchronous cleanup evidence without changing supervision."""
+    token = _LIFECYCLE_OBSERVER.set(observer)
+    try:
+        yield
+    finally:
+        _LIFECYCLE_OBSERVER.reset(token)
+
+
+def _notify_lifecycle(lifecycle: ProcessLifecycle) -> None:
+    observer = _LIFECYCLE_OBSERVER.get()
+    if observer is not None:
+        # Observation must not replace a primary subprocess exception. Owners
+        # persist uncertainty before I/O and retain their claim if reporting fails.
+        with suppress(Exception):
+            observer(lifecycle)
 
 
 class ProcessSupervisionError(RuntimeError):
@@ -455,6 +481,7 @@ def supervise_process(
         cleanup_errors=cleanup_errors,
         control_decision=final_control,
     )
+    _notify_lifecycle(lifecycle)
     if (
         final_control is not None
         and final_control.status == "stop"

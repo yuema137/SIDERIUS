@@ -10,12 +10,12 @@ For *steering* a live run (budgets, scope, refusal table), see
 
 ## The two-verb model
 
-Every launch is one of two things, decided by the workspace you point it at:
+The uncaptured native chain uses the workspace you point it at:
 
 | you point `--workspace` at | what happens |
 |---|---|
 | an empty or new directory | a **fresh** run |
-| a workspace with prior state, same declared semantics | a **resume** — the chain continues from the first incomplete iteration (auto-resume is on by default) |
+| a workspace with prior state, same declared semantics | a **resume** — the chain continues after the highest committed iteration (auto-resume is on by default) |
 | a workspace with prior state, *different* declared semantics | a **refusal at startup** — the invariants lock does not match |
 
 There is no third verb. You cannot "partially reuse" a workspace under changed
@@ -23,6 +23,16 @@ settings: if you want a different data scope, different health-gate enablement
 or a different health configuration, use a new workspace. Aggregate scores are
 only comparable within one scope and one health configuration, and the lock
 exists so that a workspace never silently mixes incomparable numbers.
+
+Captured native chains currently accept only fresh absent workspaces. Their Linux
+writer registration also blocks direct restarts. This applies equally to foreground,
+detached and GUI launches. Inspect ownership with
+`.venv/bin/python -m core.native_writer inspect --workspace /external/runs/run`.
+An `unresolved` result means cleanup could not be established; do not delete the
+claim or interpret a missing process as permission to resume. Verified recovery is
+not yet supported. See the [writer contract](../../src/core/native_writer/native-writer-contract.md).
+Create the workspace's parent before launching; ownership metadata occupies a
+private sibling directory there, outside scientific artifacts.
 
 ## What a chain workspace contains
 
@@ -108,11 +118,12 @@ replacement; there is no historical source guessing or metadata migration.
 
 ## What resume actually restores
 
-Auto-resume is **on by default**. Re-running the same command against the same
-workspace:
+For an uncaptured native chain, auto-resume is **on by default**. Re-running the
+same command against the same unregistered workspace:
 
 1. asks the inspector (`scripts/launch/inspect_run_state.py --next-iter`) for the
-   first incomplete iteration, judged from each `iter_NNN/manifest.json`;
+   iteration after the highest committed `iter_NNN/manifest.json`; incomplete
+   directories below a later committed iteration are not selected for repair;
 2. restores plugin classes from `plugins/iter_001 … iter_{N-1}` and seeds the
    new iteration with the prior iterations' output records — you do not pass
    them by hand;
