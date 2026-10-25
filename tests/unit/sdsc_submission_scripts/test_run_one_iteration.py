@@ -230,6 +230,22 @@ class TestArgparseSurface:
 
         assert "--workflow_parameter_rules is invalid" in capsys.readouterr().err
 
+    @pytest.mark.parametrize("field", ["num_epochs", "train_portion"])
+    def test_unknown_training_rule_refuses_before_planning(self, capsys, field):
+        """Issue #844: CLI must reject training locks the executor would discard."""
+        raw = json.dumps({f"train_config.{field}": {"exact": 1}})
+        args = runner.build_parser().parse_args(
+            self._minimal_argv("--start_iteration", "1", "--workflow_parameter_rules", raw)
+        )
+
+        with pytest.raises(SystemExit):
+            runner.normalize_args(args)
+
+        error = capsys.readouterr().err
+        assert "--workflow_parameter_rules is invalid" in error
+        assert f"train_config.{field}" in error
+        assert "TrainConfig" in error
+
     def test_legacy_iteration_alias_works_with_deprecation_warning(self):
         args = runner.build_parser().parse_args(self._minimal_argv("--iteration", "2"))
         with warnings.catch_warnings(record=True) as caught:
