@@ -240,7 +240,7 @@ count. Partial or stale observations remain labeled. These are observed provider
 reports; missing or unrecorded usage may exist, so the table does not establish
 complete billing. Preparation has no applicable token table. Known operation IDs
 can be read even when the current task choices differ; the admitted operation
-store configuration must still match. Direct runs without an operation ID use the
+store configuration must still match. Direct candidate runs without an operation ID use the
 [native Python reader](../candidate_worker/README.md).
 
 For native chains, parent and continuation IDs show the same cumulative usage;
