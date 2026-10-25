@@ -136,6 +136,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     def static(asset: str):
         types = {
             "app.js": "text/javascript",
+            "native-chain.js": "text/javascript",
+            "native-chain-monitor.js": "text/javascript",
             "session.js": "text/javascript",
             "navigation.js": "text/javascript",
             "editor-entry.js": "text/javascript",

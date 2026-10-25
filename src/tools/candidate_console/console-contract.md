@@ -582,3 +582,35 @@ receipt_available false for chains. Current evidence and terminal-time evidence
 remain distinct; lifecycle completion is not scientific success. Token reads
 return409 with code `not_supported` and a fixed safe message. Status/log reads
 never require configured choices, candidate tasks or editor selection.
+
+
+### Native browser state and evidence
+
+`native-chain.js` owns one page-memory pending selection and reviewed request
+digest; choice generation and session revision fence late responses. Changing
+choices invalidates review without erasing unresolved intent. Initial launch
+allocates one UUID before POST. Lost responses and reconnect read that UUID;
+only explicit Retry resubmits the retained payload. There is no automatic POST or
+replacement UUID. Only a confirmed admission enables explicit Review another
+native capture to clear the form; this does not stop the existing operation. Reload follows the UUID URL/remembered ID for monitoring only.
+No credential or launch payload enters persistent browser storage.
+
+`native-chain-monitor.js` renders the public observation using safe text DOM.
+Current evidence and terminal-time evidence are labeled separately. Missing
+terminal/checkpoints are unavailable, not zero/success. Mixed/no_records, timeout,
+unknown cleanup and invalid evidence retain their own fields. The existing app
+poll/cursor/epoch remains the only monitor loop. Native kind clears candidate
+token rows/times and suppresses later unsupported token reads; epoch/kind checks
+fence late candidate responses. Direct UUID navigation/reconnect needs no choice
+or editor fetch. Empty candidate choices disable Prepare with explanatory copy.
+
+`tests/browser/native_chain.mjs` uses the explicit Python/Playwright/Chromium and
+CONSOLE_EVIDENCE_DIR variables. From a clean committed checkout it creates an
+external synthetic task/capture, runs real Chromium/authenticated HTTP/detached
+native shell with two pseudo iterations and checks restoration/verified outputs.
+It loses an actual launch response, retains/retries one UUID, preserves unrelated
+editor drafts, reloads the direct monitor and recovers through code/HTTP after
+source/capture removal and monitor-only restart. Separate synthetic projection
+cases exercise async fences and mixed/timeout/unknown/invalid evidence. API cost
+and scientific GPU execution are zero; hardware observation is read-only. These
+checks do not qualify real LLM behavior or scientific training.

@@ -4,6 +4,7 @@
   const $ = id => document.getElementById(id);
   let choices = [], preparation = null, review = null, launch = null;
   let monitorId = '', cursor = 0, logText = '', polling = false, connected = false;
+  let monitorKind = null;
   let monitorEpoch = 0, generation = 0, invalidRoute = false;
   const say = (id, value) => { if (document.getElementById(id).textContent !== value) document.getElementById(id).textContent = value; };
   const remember = id => { try { localStorage.setItem('siderius.operation_id', id); } catch { /* Storage may be unavailable. */ } };
@@ -52,6 +53,7 @@
         document.getElementById("task").value = submittedTask;
       }
       limits();
+      if (!choices.length) say('prepare-status', 'No candidate tasks configured. Native captures and known-UUID monitoring remain available.');
     } catch (error) {
       if (!error.stale) say('prepare-status', 'Configured tasks unavailable: ' + error.message);
     }
@@ -166,7 +168,7 @@
   });
   function setMonitor(id) {
     if (monitorId.toLowerCase() === id.toLowerCase()) return;
-    monitorEpoch++; monitorId = id; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
+    monitorEpoch++; monitorKind = null; window.renderNativeChain(null); monitorId = id; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
     $('token-rows').replaceChildren(); document.querySelector('.token-table').hidden = true; say('tokens-times', '');
     say('remembered-operation', '');
     say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: Unavailable');
@@ -185,6 +187,12 @@
     try {
       const status = await api('operations/' + id);
       if (epoch !== monitorEpoch) return;
+      monitorKind = status.kind;
+      window.renderNativeChain(status);
+      if (monitorKind === 'native_chain') {
+        $('token-rows').replaceChildren(); document.querySelector('.token-table').hidden = true; say('tokens-times', '');
+        say('tokens-status', 'Native-chain token aggregation is not supported.');
+      }
       say('monitor-status', describe(status));
       say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: ' + (status.observed_at || 'Unavailable'));
       facts($('operation-facts'), [['Operation UUID', status.operation_id], ['Kind', status.kind], ['Observed at', status.observed_at],
@@ -206,11 +214,12 @@
     return (value === null ? 'Unavailable' : String(value)) + (missing ? ` · ${missing} missing` : '');
   }
   async function readTokens() {
-    if (!monitorId) return;
+    if (!monitorId || monitorKind === 'native_chain') return;
     const id = monitorId, epoch = monitorEpoch;
     try {
       const snapshot = await api(`operations/${id}/tokens`);
       if (epoch !== monitorEpoch) return;
+      if (monitorKind === 'native_chain') return;
       const rows = snapshot.groups.map(group => {
         const row = document.createElement('tr');
         for (const value of [group.provider, group.requested_model, group.served_model === null ? 'Unavailable' : group.served_model,
@@ -229,7 +238,7 @@
       say('tokens-times', `Read at: ${snapshot.observed_at} · Last valid usage: ${snapshot.last_valid_usage_at || 'Unavailable'}`);
     } catch (error) {
       if (error.stale) return;
-      if (epoch === monitorEpoch) say('tokens-status', 'Reported tokens stale or unavailable: ' + error.message + '. Last observations for this operation are retained. Disconnection does not mean zero usage or stopped.');
+      if (epoch === monitorEpoch && monitorKind !== 'native_chain') say('tokens-status', 'Reported tokens stale or unavailable: ' + error.message + '. Last observations for this operation are retained. Disconnection does not mean zero usage or stopped.');
     }
   }
   async function poll() {
