@@ -154,6 +154,7 @@ def test_http_policy_refusal_does_not_block_known_id_reads(prepared, monkeypatch
     assert (
         api.get(f"/api/operations/{selection.operation_id}").json()["native_status"] == "prepared"
     )
+    assert "graph_trace" not in api.get(f"/api/operations/{selection.operation_id}").json()
     assert api.get(f"/api/operations/{selection.operation_id}/log").status_code == 200
 
 

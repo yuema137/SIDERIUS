@@ -6,6 +6,14 @@ the synchronous CLI use the same launch boundary. It requires Linux,
 [bubblewrap](../workspace_sandbox/README.md), an installed SIDERIUS environment,
 and an explicitly prepared native proposal seed.
 
+To compare multiple implementations of one proposal, an advanced caller can select
+[the proposal-fanout profile](candidate-worker-contract.md#opt-in-proposal-fanout).
+Each implementation gets its own native files and validation. Prepare the explicit
+declaration and storage inputs using that contract, then submit through the same
+[candidate operation interface](../candidate_operations/README.md). Terminal status
+includes the verified per-instance trace. This profile has no training, graph
+resume or visual graph editor.
+
 For a first experiment, use [candidate preparation](../candidate_prepare/README.md)
 to build the seed, storage and launch request from task/data/profile selections
 without provider calls. The manual path below is for callers that already own

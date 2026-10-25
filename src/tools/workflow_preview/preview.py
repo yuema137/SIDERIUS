@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from tools.setup_review.route_models import LLMRoute
 from tools.setup_review.routes import NodeRouteRole, node_llm_routes
 from workflows.definition.candidate import candidate_nodes
+from workflows.definition.fanout import proposal_fanout
 from workflows.llm_config import WorkflowLLMConfig
 
 from .config import parse_config
@@ -60,7 +61,13 @@ def observe_bindings(
     read_file = observe_file if read_file is None else read_file
     request = WorkflowPreviewRequest.model_validate_json(request.model_dump_json())
     definition = request.document.definition
-    nodes = candidate_nodes(definition)
+    if request.execution_profile is None:
+        nodes = candidate_nodes(definition)
+        instances = tuple(nodes.items())
+    else:
+        proposal_fanout(definition)
+        instances = tuple((node.capability, node.id) for node in definition.nodes)
+        nodes = dict(instances)
     project = Path(request.project_root).resolve()
     if not project.is_dir():
         raise ValueError(f"project_root must be an existing directory: {project}")
@@ -101,7 +108,15 @@ def observe_bindings(
         workspace=str(workspace),
         files=tuple(observations),
         config_source="workflow_default" if request.llm_config_file is None else "explicit_file",
-        selected_constructor_routes=_selected_routes(config, nodes),
+        selected_constructor_routes=(
+            _selected_routes(config, nodes)
+            if request.execution_profile is None
+            else tuple(
+                route
+                for capability, node_id in instances
+                for route in _selected_routes(config, {capability: node_id})
+            )
+        ),
         inactive_roles=tuple(
             name
             for name in WorkflowLLMConfig.model_fields

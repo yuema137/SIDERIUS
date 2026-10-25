@@ -93,6 +93,10 @@ def execute_native(
         Path(request.preview.project_root) / request.preview.document.definition.task.data_root
     ).resolve()
     with bind_run_task_composition(composition, physical_data_root=str(data)):
+        if request.preview.execution_profile is not None:
+            from .graph import execute_fanout
+
+            return execute_fanout(request, initial, composition, config)
         if any(node.capability == "tuning" for node in request.preview.document.definition.nodes):
             from .training import execute_training
             from .training_admission import admit_training

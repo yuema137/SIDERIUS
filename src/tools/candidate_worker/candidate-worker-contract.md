@@ -325,6 +325,61 @@ refuses unused externals. Training reconciliation and native defaults are unchan
 Each phase still calls `require_binding`, which selects the fixed declaration
 binding before `require_resolved_binding` checks node, phase, run and native storage.
 These internal helpers do not admit a new topology or bypass task/artifact owners.
-The worker still supports exactly one proposal/implementation/validation and its
-existing optional tuning path; no graph execution, new workspace layout or recovery
-is exposed by this refactor.
+The default path retains exactly one proposal/implementation/validation and its
+existing optional tuning path. The opt-in profile below consumes these same helpers.
+
+### Opt-in proposal fanout
+
+Set `WorkflowPreviewRequest.execution_profile="native-proposal-fanout/v1"` for a
+fresh version-1 document containing one external proposal and complete
+implementation/validation pairs. Omit it for the existing fixed three/four-stage
+path. This field and terminal `graph_trace` are absent from default serialization.
+No branch-count limit is imposed; the control-record byte envelope admits size.
+
+Every implementation uses `proposal-to-implementation` with `output` referencing
+the same proposal. Every validator uses `proposed-implementation-to-validation`
+with two required result arguments, `proposal` and `implementation`, referencing
+that proposal and its own implementation. It also takes required external
+`storage`; optional `llm_provider`, `llm_model_id`, and `constraint_context` retain
+the existing native defaults/reconciliation. There is exactly one validator per
+implementation. This is a proposal/implementation AND boundary, not a merge of
+independent branch results. The protocol composes the existing implementation
+mapping and lineage enrichment, preserving immediate model-I/O/segmentation echoes.
+
+For implementation ID `build_a`, its storage external must name
+`<workspace>/<run_name>/graph_instances/build_a/iteration_001/attempt_001/impl_001`.
+Its validator shares that attempt's native storage. The proposal has its own
+`graph_instances/<proposal-id>/iteration_001/attempt_001` slot. IDs select invocation
+slots, not scientific model names: separate branches may generate different source
+bytes under the same proposal model name. Existing artifact ownership is checked
+again before validation; equal scientific IDs do not authorize sibling artifacts.
+The proposal seed is still published once under `candidate_run/proposal_input.json`.
+
+The existing child dispatches ready nodes serially in declaration order. All
+required predecessor results must have succeeded before constructing the consumer.
+Values move through typed in-memory results, never peer-file communication.
+Validation rejection is retained and independent siblings can continue. A native
+exception aborts further effects; remaining instances become blocked. Training,
+routing, loops, human pauses, buffers, cross-branch aggregation and graph resume
+are not supported by this profile.
+
+The final optional `graph_trace` contains every declared node exactly once: its
+capability, predecessor IDs, managed storage, terminal state, fixed reason code and
+native record path/digest. Native records remain scientific authority. The existing
+receipt verifier checks membership, paths, digests, dependency success and serial
+failure-stop semantics; the operation reader and console HTTP status use that
+verified projection. There is no active per-node trace file and no graph GUI.
+Outer timeout/interruption still overrides child success and may leave no complete
+trace; native files remain inspectable, never an automatic resume permit.
+
+Graph requests, initial/child/final receipts use the existing 4 MiB encoded control
+limit. Before claiming the workspace, admission encodes the complete request and
+largest possible terminal index using actual node IDs and paths, full digest
+placeholders and longest fixed state/reason representations. It refuses overflow
+before native calls; it never truncates membership. Final encoding is checked again;
+unexpected overflow publishes `failed` with `graph_control_overflow` and no partial
+accepted trace. Existing fixed synchronous CLI/input-file behavior is unchanged.
+For a bounded public JSON consumer, submit the existing `CandidateOperation` through
+`python -m tools.candidate_operations submit`, then use its existing status/log
+commands. The operation UUID identifies submission recovery; the native run ID
+continues identifying accounting. Same-UUID lookup does not relaunch effects.

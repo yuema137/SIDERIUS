@@ -8,11 +8,10 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from core.control_json import JSON_LIMIT, ControlOverflow, encode_control
 from core.durable_io import publish_bytes_atomically, publish_bytes_write_once
 
 from .models import OperationFailure
-
-JSON_LIMIT = 4 * 1024 * 1024
 
 
 def canonical(value: str) -> Path:
@@ -104,10 +103,10 @@ def read_model[Model: BaseModel](
 
 def encode(model: BaseModel) -> bytes:
     """Encode a record once, refusing bytes that the bounded reader cannot load."""
-    payload = (model.model_dump_json(indent=2) + "\n").encode()
-    if len(payload) > JSON_LIMIT:
-        raise OperationFailure("record_size", "JSON record exceeds 4 MiB")
-    return payload
+    try:
+        return encode_control(model)
+    except ControlOverflow as error:
+        raise OperationFailure("record_size", "JSON record exceeds 4 MiB") from error
 
 
 def publish(path: Path, model: BaseModel, *, replace: bool = False) -> None:

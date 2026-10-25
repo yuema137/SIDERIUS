@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tools.setup_review.route_models import LLMRoute
 from workflows.definition import WorkflowDocument
@@ -15,6 +15,9 @@ class PreviewModel(BaseModel):
 
 class WorkflowPreviewRequest(PreviewModel):
     document: WorkflowDocument
+    execution_profile: Literal["native-proposal-fanout/v1"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     project_root: str
     llm_config_file: str | None = None
 

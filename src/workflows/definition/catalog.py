@@ -76,6 +76,18 @@ PROTOCOLS = MappingProxyType(
                 ArgumentContract("task_composition_ref", "optional.task-composition-ref", False),
             ),
         ),
+        "proposed-implementation-to-validation": ProtocolContract(
+            "workflows.candidate_requests.proposed_implementation_to_validation",
+            "validation.input",
+            (
+                ArgumentContract("proposal", "proposal.output"),
+                ArgumentContract("implementation", "implementation.output"),
+                ArgumentContract("storage", "storage"),
+                ArgumentContract("llm_provider", "llm-provider", False),
+                ArgumentContract("llm_model_id", "optional.model-id", False),
+                ArgumentContract("constraint_context", "optional.constraint-context", False),
+            ),
+        ),
         "implementation-to-validation": ProtocolContract(
             "agent.schemas.protocols.ml_model_impl_to_ml_model_valid.local_all_fields",
             "validation.input",

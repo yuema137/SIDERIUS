@@ -114,18 +114,33 @@ def run_validation(
     """Map implementation and lineage; invoke and reconcile native validation."""
     context.require_binding(request, initial, inputs, "validation")
     seed, attempt = inputs.proposal, inputs.attempt
-    validation = local_all_fields(
-        implemented,
-        attempt.storage,
-        inputs.validator_provider,
-        inputs.validator_model,
-        constraint_context=seed.constraint_context,
-    )
-    enrich_validation_request(
-        validation,
-        human_advice=request.validation_advice,
-        inherited_components=proposal.inherited_components,
-    )
+    if request.preview.execution_profile is not None:
+        from workflows.candidate_requests import proposed_implementation_to_validation
+
+        assert seed.task_composition_ref is not None
+        verify_artifacts(implemented, attempt, request.read_only, seed.task_composition_ref)
+        validation = proposed_implementation_to_validation(
+            proposal,
+            implemented,
+            attempt.storage,
+            inputs.validator_provider,
+            inputs.validator_model,
+            constraint_context=seed.constraint_context,
+            human_advice=request.validation_advice,
+        )
+    else:
+        validation = local_all_fields(
+            implemented,
+            attempt.storage,
+            inputs.validator_provider,
+            inputs.validator_model,
+            constraint_context=seed.constraint_context,
+        )
+        enrich_validation_request(
+            validation,
+            human_advice=request.validation_advice,
+            inherited_components=proposal.inherited_components,
+        )
     validator = MLCodeValidatorAgent(**config.get("validate"))
     context.bind(validator)
     validated = validator.run(validation)

@@ -179,6 +179,7 @@ class CandidateConsole:
         return StatusView(
             **snapshot.model_dump(exclude={"receipt", "receipt_digest"}),
             native_status=receipt.status if receipt else None,
+            graph_trace=receipt.graph_trace if isinstance(receipt, CandidateRunReceipt) else None,
             native_id=native_id,
             validation_passed=receipt.validation_passed
             if isinstance(receipt, CandidateRunReceipt)

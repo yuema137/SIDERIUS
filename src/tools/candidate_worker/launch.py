@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter
 
+from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
 from execute_tools.impl_attempts import impl_attempt_dir
 from tools.workflow_preview.files import observe_file
@@ -19,8 +20,13 @@ from .models import CandidateRunReceipt, CandidateRunRequest
 from .preflight import fresh_preview, require_credentials
 
 
-def publish(path: Path, value: CandidateRunRequest | CandidateRunReceipt) -> None:
-    publish_bytes_write_once(str(path), (value.model_dump_json(indent=2) + "\n").encode())
+def publish(
+    path: Path, value: CandidateRunRequest | CandidateRunReceipt, *, bounded: bool = False
+) -> None:
+    payload = (
+        encode_control(value) if bounded else (value.model_dump_json(indent=2) + "\n").encode()
+    )
+    publish_bytes_write_once(str(path), payload)
 
 
 def reconcile(
@@ -29,6 +35,7 @@ def reconcile(
     child_path: Path,
     *,
     training: bool = False,
+    graph_request: CandidateRunRequest | None = None,
 ) -> CandidateRunReceipt:
     """A child result never overrides timeout or failed process completion."""
     if result.status != "completed":
@@ -36,7 +43,11 @@ def reconcile(
             update={"status": result.status, "error": f"worker exit {result.returncode}"}
         )
     try:
-        child = CandidateRunReceipt.model_validate_json(child_path.read_bytes())
+        from .graph_evidence import read_graph_control, verify_graph_trace
+
+        child = CandidateRunReceipt.model_validate_json(
+            read_graph_control(child_path) if graph_request is not None else child_path.read_bytes()
+        )
         for name in (
             "run_id",
             "run_name",
@@ -49,6 +60,9 @@ def reconcile(
         ):
             if getattr(child, name) != getattr(initial, name):
                 raise ValueError(f"child receipt changed {name}")
+        if graph_request is not None:
+            verify_graph_trace(graph_request, initial, child)
+            return child
         has_training_output = training and child.status in {"completed", "failed"}
         allowed = {"rejected", "completed", "failed"} if training else {"accepted", "rejected"}
         if child.status not in allowed:
@@ -102,10 +116,7 @@ def launch_candidate(
             raise ValueError(f"selected input changed: {expected.reference}")
         captures.append(payload)
     workspace = Path(observed.workspace)
-    workspace.mkdir(parents=True, exist_ok=True)
-    # mkdir is the exclusive ownership claim. Losing callers never publish files.
     control = workspace / "candidate_run"
-    control.mkdir()
     initial = CandidateRunReceipt(
         run_id=identity.hex,
         run_name=request.run_name,
@@ -117,11 +128,19 @@ def launch_candidate(
         ledger_path=str(workspace / "token_usage.jsonl"),
         log_path=str(control / "worker.log"),
     )
-    publish(control / "launch.json", initial)
+    graph = request.preview.execution_profile is not None
+    if graph:
+        from .graph_evidence import admit_graph_control
+
+        admit_graph_control(request, initial)
+    workspace.mkdir(parents=True, exist_ok=True)
+    # mkdir is the exclusive ownership claim. Losing callers never publish files.
+    control.mkdir()
+    publish(control / "launch.json", initial, bounded=graph)
     try:
         if any(path != control for path in workspace.iterdir()):
             raise ValueError("workspace became nonempty before exclusive claim")
-        publish(control / "request.json", request)
+        publish(control / "request.json", request, bounded=graph)
         if request.workflow_source is not None:
             publish_bytes_write_once(
                 str(control / "workflow.py.snapshot"),
@@ -150,6 +169,7 @@ def launch_candidate(
             result,
             control / "child.json",
             training=any(node.capability == "tuning" for node in definition.nodes),
+            graph_request=request if graph else None,
         )
     except KeyboardInterrupt:
         terminal = initial.model_copy(
@@ -159,5 +179,19 @@ def launch_candidate(
         terminal = initial.model_copy(
             update={"status": "failed", "error": f"{type(error).__name__}: {error}"}
         )
-    publish(control / "receipt.json", terminal)
+    if graph:
+        terminal = bounded_terminal(initial, terminal)
+    publish(control / "receipt.json", terminal, bounded=graph)
     return terminal
+
+
+def bounded_terminal(
+    initial: CandidateRunReceipt, terminal: CandidateRunReceipt
+) -> CandidateRunReceipt:
+    try:
+        encode_control(terminal)
+        return terminal
+    except ValueError:
+        failure = initial.model_copy(update={"status": "failed", "error": "graph_control_overflow"})
+        encode_control(failure)
+        return failure

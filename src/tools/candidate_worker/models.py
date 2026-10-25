@@ -10,6 +10,8 @@ from core.generated_artifact_name import validate_generated_artifact_name
 from tools.setup_review.route_models import LLMRoute
 from tools.workflow_preview.models import FileObservation, PreviewModel, WorkflowPreviewRequest
 
+from .graph_models import GraphTrace
+
 
 class ReviewedContext(PreviewModel):
     project_id: str
@@ -89,6 +91,7 @@ class CandidateRunReceipt(PreviewModel):
     native_output_paths: tuple[str, ...] = ()
     validation_passed: bool | None = None
     error: str | None = None
+    graph_trace: GraphTrace | None = Field(default=None, exclude_if=lambda value: value is None)
     training_output: TrainingOutputEvidence | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
