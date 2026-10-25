@@ -81,7 +81,6 @@ def test_explicit_review_uses_original_composition_owner_and_never_publishes(tmp
     assert review["findings"][0]["code"] == "identity_verified"
     assert {finding["code"] for finding in review["findings"] if finding["state"] == "blocked"} == {
         "compatibility_unresolved",
-        "save_unsupported",
     }
     assert not review["save_supported"] and not review["execution_ready"]
     assert "never-forward-task-review-fixture" not in response.text

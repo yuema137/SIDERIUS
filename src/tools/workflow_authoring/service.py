@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.durable_io import publish_bytes_atomically, publish_bytes_write_once
-from workflows.definition import ReusableWorkflowDocument
+from workflows.definition import AuthoredWorkflowDocument, ReusableWorkflowDocument
 from workflows.definition.source import (
     WorkflowSourceError,
     parse_workflow_source,
@@ -33,12 +33,39 @@ from .models import (
     SourceView,
 )
 from .options import binding_options
-from .task_models import TaskReferenceTarget, TaskReferenceUpdateProposal
+from .task_models import TaskReferenceReview, TaskReferenceTarget, TaskReferenceUpdateProposal
 from .training import training_inspector
 
 
 def digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def reviewed_source(
+    base: SourceView, source: str, task_review: TaskReferenceReview | None = None
+) -> ReviewView:
+    """One exact source projection for review and retained publication refusals."""
+    payload = source.encode("utf-8")
+    if len(payload) > MAX_SOURCE_BYTES:
+        raise AuthoringError("limit", "rendered editor source exceeds 32 KiB UTF-8")
+    document = parse_workflow_source(source)
+    diff = "".join(
+        difflib.unified_diff(
+            base.source.splitlines(True),
+            source.splitlines(True),
+            fromfile="current/workflow.py",
+            tofile="proposed/workflow.py",
+        )
+    )
+    return ReviewView(
+        source=source,
+        sha256=digest(payload),
+        diff=diff,
+        document=document,
+        binding_options=binding_options(document),
+        training=training_inspector(document),
+        task_reference_update=task_review,
+    )
 
 
 class AuthoringError(ValueError):
@@ -183,7 +210,12 @@ class WorkflowAuthoring:
                     "task_reference_policy", "select a configured version-aware task choice"
                 )
             try:
-                updated, task_review = review_task_references(base.document, proposal, target)
+                updated, task_review = review_task_references(
+                    base.document,
+                    proposal,
+                    tuple(self.task_targets.values()),
+                    self.project.project_root,
+                )
             except ValueError as error:
                 raise AuthoringError("task_reference_policy", str(error)) from error
             source = render_workflow_source(updated)
@@ -193,27 +225,40 @@ class WorkflowAuthoring:
                 if isinstance(proposal, DocumentProposal)
                 else proposal.source
             )
-        payload = source.encode("utf-8")
-        if len(payload) > MAX_SOURCE_BYTES:
-            raise AuthoringError("limit", "rendered editor source exceeds 32 KiB UTF-8")
-        document = parse_workflow_source(source)
-        diff = "".join(
-            difflib.unified_diff(
-                base.source.splitlines(True),
-                source.splitlines(True),
-                fromfile="current/workflow.py",
-                tofile="proposed/workflow.py",
+        review = reviewed_source(base, source, task_review)
+        if not isinstance(proposal, TaskReferenceUpdateProposal) and (
+            request.task_reference_selection is not None
+            or any(
+                isinstance(value, ReusableWorkflowDocument) and value.task_binding is not None
+                for value in (base.document, review.document)
             )
-        )
-        review = ReviewView(
-            task_reference_update=task_review,
-            source=source,
-            sha256=digest(payload),
-            diff=diff,
-            document=document,
-            binding_options=binding_options(document),
-            training=training_inspector(document),
-        )
+        ):
+            base = self._base(current_payload, request.expected_sha256)
+            if not isinstance(base.document, ReusableWorkflowDocument) or not isinstance(
+                review.document, ReusableWorkflowDocument
+            ):
+                raise AuthoringError(
+                    "task_reference_policy",
+                    "task-reference publication requires reusable v2 source",
+                )
+            if request.task_reference_selection is None:
+                raise AuthoringError(
+                    "task_reference_policy",
+                    "bound source requires explicit task-reference selection for review",
+                )
+            from .task_publication import review_publication
+
+            try:
+                task_review = review_publication(
+                    base.document,
+                    review.document,
+                    request.task_reference_selection,
+                    tuple(self.task_targets.values()),
+                    self.project.project_root,
+                )
+            except ValueError as error:
+                raise AuthoringError("task_reference_policy", str(error)) from error
+            review = review.model_copy(update={"task_reference_update": task_review})
         try:
             self._base(
                 self._read_bytes()[0] if task_review is not None else current_payload,
@@ -277,21 +322,58 @@ class WorkflowAuthoring:
         with self._locked():
             previous, mode = self._read_bytes()
             current = self._base(previous, request.expected_sha256)
-            if any(
+            bound = any(
                 isinstance(document, ReusableWorkflowDocument) and document.task_binding is not None
                 for document in (current.document, proposed)
+            )
+            if bound and request.task_reference_acceptance is None:
+                raise AuthoringError(
+                    "task_reference_acceptance",
+                    "Bound workflow Save requires explicit task-reference findings acceptance; keep the reviewed draft",
+                )
+            if request.task_reference_acceptance is not None and (
+                not isinstance(current.document, ReusableWorkflowDocument)
+                or not isinstance(proposed, ReusableWorkflowDocument)
+                or proposed.task_binding is None
             ):
                 raise AuthoringError(
-                    "task_binding_unsupported",
-                    "Bound workflow Save is unsupported until guarded task-reference publication is implemented; keep the reviewed draft",
+                    "task_reference_policy",
+                    "pin removal or unbound task-reference publication is unsupported",
                 )
-            if previous == payload:
-                return SaveView(sha256=digest(payload), recovery_ids=(), unchanged=True)
-            recovery = (self._recover(previous), self._recover(payload))
+            unchanged = previous == payload
+            recovery = () if unchanged else (self._recover(previous), self._recover(payload))
+            self._verify_publication(current, proposed, request)
             final, final_mode = self._read_bytes()
             if final != previous or final_mode != mode:
                 raise AuthoringError(
                     "conflict", "source changed before replacement", self._view(final)
                 )
+            if unchanged:
+                return SaveView(sha256=digest(payload), recovery_ids=(), unchanged=True)
             publish_bytes_atomically(str(self.project.source_file), payload, mode=mode)
             return SaveView(sha256=digest(payload), recovery_ids=recovery)
+
+    def _verify_publication(
+        self, current: SourceView, proposed: AuthoredWorkflowDocument, request: SaveRequest
+    ) -> None:
+        acceptance = request.task_reference_acceptance
+        if acceptance is None:
+            return
+        assert isinstance(current.document, ReusableWorkflowDocument)
+        assert isinstance(proposed, ReusableWorkflowDocument)
+        from .task_publication import review_publication, verify_acceptance
+
+        task_review = None
+        try:
+            task_review = review_publication(
+                current.document,
+                proposed,
+                acceptance.selection,
+                tuple(self.task_targets.values()),
+                self.project.project_root,
+            )
+            verify_acceptance(task_review, acceptance)
+        except ValueError as error:
+            failure = AuthoringError("task_reference_publication", str(error), current)
+            failure.proposal = reviewed_source(current, request.source, task_review)
+            raise failure from error

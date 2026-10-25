@@ -128,7 +128,7 @@ def test_http_review_consumes_configured_target_and_preserves_graph(configured, 
     assert [(f["code"], f["state"]) for f in report["findings"]] == [
         ("identity_verified", "retained"),
         ("compatibility_unresolved", "blocked"),
-        ("save_unsupported", "blocked"),
+        ("current_snapshot_adoption", "requires_review"),
     ]
     proposed = parse_workflow_source(value["source"])
     original = parse_workflow_source(before.decode())
