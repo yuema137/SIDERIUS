@@ -21,11 +21,15 @@ async function startServer(monitor = false) {
   server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.native_chain_fixture', fixture, ...(monitor ? ['--monitor'] : [])], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
   server.stderr.on('data', chunk => {stderr += chunk;});
   const lines = createInterface({input: server.stdout});
-  return new Promise((accept, reject) => {
+  const metadata = await new Promise((accept, reject) => {
     const timer = setTimeout(() => reject(new Error('Fixture startup timed out: ' + stderr)), 150000);
     lines.once('line', line => {clearTimeout(timer); accept(JSON.parse(line));});
     server.once('exit', code => {clearTimeout(timer); reject(new Error(`Fixture exit ${code}: ${stderr}`));});
   });
+  await until(async () => {
+    try {return (await fetch(metadata.origin)).ok;} catch {return false;}
+  });
+  return metadata;
 }
 async function stopServer() {
   if (!server || server.exitCode !== null) return;
