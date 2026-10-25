@@ -368,3 +368,191 @@ def test_closed_science_does_not_authorize_live_or_unknown_wrapper(history, stat
         require_closed(
             replace(node, process=ProcessObservation(status=status, reason="fixture")), None
         )
+
+
+def test_concurrent_stores_cannot_both_reserve_same_physical_predecessor(history, monkeypatch):
+    """Actual flock/write-once publication arbitrates competing host adapters."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    _, _, first, path, _ = history
+    alternate = first.config.model_copy(update={"state_root": first.config.state_root + "-other"})
+    admitted = first.native_resume_admission.model_copy(
+        update={
+            "state_root": alternate.state_root,
+            "store_digest": hashlib.sha256(encode(alternate)).hexdigest(),
+        }
+    )
+    submission = NativeChainResumeOperation(
+        request_id=uuid4(),
+        request=NativeChainResumeRequest(
+            predecessor_operation_id=admitted.predecessor_operation_id,
+            expected_review_digest=review_digest(admitted),
+        ),
+    )
+    second = first.model_copy(
+        update={
+            "native_id": uuid4(),
+            "config": alternate,
+            "submission": submission,
+            "request_digest": digest(submission),
+            "native_resume_admission": admitted,
+        }
+    )
+    by_store = {r.config.state_root: r.native_resume_admission for r in (first, second)}
+    monkeypatch.setattr(
+        "tools.candidate_operations.native_resume_execute.review_locked",
+        lambda config, *a, **k: NativeResumeReview(
+            eligibility="ready",
+            review_digest=review_digest(by_store[config.state_root]),
+            admission=by_store[config.state_root],
+        ),
+    )
+    monkeypatch.setattr(
+        "tools.candidate_operations.native_resume_execute.sandbox_profile", lambda *a: None
+    )
+    monkeypatch.setattr(
+        "tools.candidate_operations.native_resume_execute.verify_baseline", lambda *a: None
+    )
+    calls = []
+
+    def failed(*a):
+        calls.append(1)
+        raise ObservedSpawnFailure("no child")
+
+    monkeypatch.setattr("tools.candidate_operations.native_resume_execute.run_observed", failed)
+    barrier = Barrier(2)
+
+    def compete(record):
+        barrier.wait(timeout=5)
+        return execute_native_resume(record, path)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(compete, (first, second)))
+    assert len(calls) == 1
+    assert sorted(result.reason for result in results) == [
+        "native_resume_admission_failed",
+        "native_resume_spawn_failed",
+    ]
+    assert not (path / "native-chain-terminal.json").exists()
+
+
+def test_copied_predecessor_in_another_store_cannot_import_successor(history):
+    """Ancestry must bind the admitted store, not merely matching operation UUIDs."""
+    import shutil
+
+    from tools.candidate_operations.native_resume_lineage import read_lineage
+
+    root, root_path, child, _, _ = history
+    reserve(child)
+    config = root.config.model_copy(update={"state_root": root.config.state_root + "-copy"})
+    copied = root.model_copy(update={"config": config})
+    with locked_store(config) as store:
+        path = claim(store, copied)
+    for name in ("process.json", "completion.json", "native-chain-terminal.json"):
+        shutil.copyfile(root_path / name, path / name)
+        (path / name).chmod(0o600)
+    # Even a complete, internally consistent copied child cannot retarget the
+    # already-published physical reservation to this other store.
+    admission = child.native_resume_admission.model_copy(
+        update={
+            "state_root": config.state_root,
+            "store_digest": hashlib.sha256(encode(config)).hexdigest(),
+        }
+    )
+    submission = child.submission.model_copy(
+        update={
+            "request": child.submission.request.model_copy(
+                update={"expected_review_digest": review_digest(admission)}
+            )
+        }
+    )
+    copied_child = child.model_copy(
+        update={
+            "config": config,
+            "submission": submission,
+            "request_digest": digest(submission),
+            "native_resume_admission": admission,
+        }
+    )
+    with locked_store(config) as store:
+        child_path = claim(store, copied_child)
+    exited(copied_child, child_path)
+    with pytest.raises(ValueError, match="resume_link_changed"):
+        read_lineage(copied)
+
+
+def test_reservation_publication_error_never_becomes_no_child_permission(history, monkeypatch):
+    from core.native_writer.state import WriterState
+
+    _, _, record, path, _ = history
+    admitted = record.native_resume_admission
+    monkeypatch.setattr(
+        "tools.candidate_operations.native_resume_execute.review_locked",
+        lambda *a, **k: NativeResumeReview(
+            eligibility="ready", review_digest=review_digest(admitted), admission=admitted
+        ),
+    )
+    publish_state = WriterState.publish
+
+    def uncertain(state, name, value):
+        publish_state(state, name, value)
+        if name.startswith("successor."):
+            raise OSError("publication acknowledgement lost")
+
+    monkeypatch.setattr(WriterState, "publish", uncertain)
+    monkeypatch.setattr(
+        "tools.candidate_operations.native_resume_execute.run_observed",
+        lambda *a: pytest.fail("dispatched after uncertain publication"),
+    )
+    done = execute_native_resume(record, path)
+    assert done.outcome == "unknown" and done.reason == "native_resume_supervision_unresolved"
+    publish(path / "completion.json", done)
+    assert read_operation(record.config, record.submission.request_id).state == "unknown"
+
+
+def test_stale_review_refuses_before_persisting_another_request(history, monkeypatch):
+    from tools.candidate_operations.models import OperationFailure
+
+    _, _, record, path, _ = history
+    publish(
+        path / "completion.json",
+        Completion(
+            operation_id=record.submission.request_id,
+            request_digest=record.request_digest,
+            outcome="pre_dispatch_failure",
+            reason="native_resume_admission_failed",
+        ),
+    )
+    a = record.native_resume_admission
+    monkeypatch.setattr(
+        "tools.candidate_operations.submit.review_native_chain_resume",
+        lambda *args, **kw: NativeResumeReview(
+            eligibility="ready", review_digest=review_digest(a), admission=a
+        ),
+    )
+    new = NativeChainResumeOperation(
+        request_id=uuid4(),
+        request=NativeChainResumeRequest(
+            predecessor_operation_id=a.predecessor_operation_id, expected_review_digest="0" * 64
+        ),
+    )
+    with pytest.raises(OperationFailure, match="reviewed state changed"):
+        submit_operation(record.config, new, launch_environment={})
+    assert not (Path(record.config.state_root) / "operations" / str(new.request_id)).exists()
+
+
+@pytest.mark.parametrize("cleanup", ["present", "unknown"])
+def test_terminal_without_absent_cleanup_cannot_continue(history, cleanup):
+    from dataclasses import replace
+
+    from tools.candidate_operations.native_resume_lineage import read_lineage, require_closed
+
+    root, _, _, _, _ = history
+    node = read_lineage(root).head
+    supervision = node.terminal.supervision.model_copy(
+        update={"cleanup": GroupCleanup(required=True, final=GroupObservation(status=cleanup))}
+    )
+    changed = node.terminal.model_copy(update={"supervision": supervision})
+    with pytest.raises(ValueError, match="cleanup_unresolved"):
+        require_closed(replace(node, terminal=changed), None)
