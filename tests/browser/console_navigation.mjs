@@ -33,7 +33,7 @@ try {
     window.pollTimers = 0; const interval = window.setInterval.bind(window);
     window.setInterval = (...args) => {window.pollTimers++; return interval(...args);};
   }, remembered);
-  const page = await context.newPage(), faults = [], requests = [], offsets = [];
+  const page = await context.newPage(), faults = [], requests = [], offsets = [], logReads = [];
   page.on('pageerror', error => faults.push(error.message));
   let failEditor = true, unauthorized = false, unavailable = true;
   await page.route('**/api/**', async route => {
@@ -53,8 +53,10 @@ try {
     if (unavailable) return reply({error: {message: 'Fixture unavailable operation'}}, 404);
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
     if (url.pathname.endsWith('/log')) {
-      offsets.push(Number(url.searchParams.get('offset')));
-      return reply({text: '', next_offset: 73, observed_size: 73, truncated: false, missing: false});
+      const offset = Number(url.searchParams.get('offset')), kind = url.searchParams.get('kind');
+      assert.ok(['native', 'operation'].includes(kind));
+      offsets.push(offset); logReads.push({kind, offset});
+      return reply({text: offset === 0 ? `${kind} stream\n` : '', next_offset: 73, observed_size: 73, truncated: false, missing: false});
     }
     return reply({operation_id: operation, kind: 'candidate', state: 'running', observed_at: 'fixture observation', process: {status: 'alive'}, receipt_available: false});
   });
@@ -79,6 +81,17 @@ try {
   unavailable = false;
   await page.locator('#monitor-status').filter({hasText: 'State: running'}).waitFor();
   await waitUntil(() => offsets.includes(73));
+  await page.getByText('Activity and logs', {exact: true}).click();
+  assert.equal(await page.locator('#log').textContent(), 'native stream\n');
+  for (const kind of ['operation', 'native', 'operation']) {
+    const before = logReads.length;
+    await page.locator('#log-kind').selectOption(kind);
+    await waitUntil(() => logReads.slice(before).some(item => item.kind === kind));
+    const changedReads = logReads.slice(before).filter(item => item.kind === kind);
+    assert.equal(changedReads[0]?.offset, 0, 'Changing log source must restart its byte cursor');
+    await waitUntil(async () => (await page.locator('#log').textContent()) === `${kind} stream\n`);
+    await waitUntil(() => logReads.slice(before).some(item => item.kind === kind && item.offset === 73));
+  }
   const documentId = await page.evaluate(() => {window.documentId = 'same-shell'; return window.documentId;});
   const routeOffset = offsets.length;
   await page.locator('nav a[href="#home"]').click();
@@ -91,6 +104,8 @@ try {
   await page.locator('nav a[href="#slow-control"]').click();
   await waitUntil(() => offsets.length > routeOffset);
   assert.ok(offsets.slice(routeOffset).every(value => value === 73), 'Same UUID/back-forward must retain log cursor');
+  assert.equal(await page.locator('#log-kind').inputValue(), 'operation');
+  assert.equal(await page.locator('#log').textContent(), 'operation stream\n');
   assert.equal(await page.evaluate(() => window.documentId), documentId);
   assert.equal(await page.evaluate(() => window.pollTimers), 1);
   assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Slow control');
@@ -104,6 +119,8 @@ try {
   await page.evaluate(id => {location.hash = 'slow-control/' + id;}, operation);
   await connect();
   assert.equal(await page.locator('#operation-id').inputValue(), operation);
+  assert.equal(await page.locator('#log-kind').inputValue(), 'operation');
+  assert.equal(await page.locator('#log').textContent(), 'operation stream\n');
   await page.reload();
   assert.equal(await page.locator('#token').inputValue(), '');
   assert.equal(await page.locator('#monitor-button').isDisabled(), true);
