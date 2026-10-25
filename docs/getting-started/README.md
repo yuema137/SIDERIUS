@@ -66,14 +66,17 @@ explicitly launching it. The original declaration and configuration files remain
 authoritative; capture does not certify scientific success. Follow the linked
 guide for prerequisites and path requirements.
 
-## Open the optional candidate console
+## Open the optional workflow console
 
-The browser console prepares, reviews and launches **one candidate:
+The browser console can prepare, review and launch **one candidate:
 Propose → Implement → Validate**, followed by native Tune when declared in
 saved reusable source. Use the [training inspector guide](../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
 to configure that fourth stage. Completion is not a scientific success verdict. Create the
 external project with your coding agent first: the browser does not create
-projects or edit the console's task configuration.
+projects or edit the console's task configuration. It can also launch an
+externally configured native chain for multiple iterations, using the same
+backend as the CLI. Both routes are available whether you work in Professional
+or Assistant mode.
 
 Follow the [console setup](../../src/tools/candidate_console/README.md) in order:
 check the Linux sandbox, configure existing task/data/profile paths and output
@@ -94,6 +97,12 @@ matches your starting point:
   **New run** to select the configured task/resources, review and prepare the
   saved source. Open the prepared run, review it and explicitly launch. Each run
   has separate captured inputs and a workspace; later edits affect future runs.
+- **Configured native chain:** have your coding agent prepare a capture and
+  add it to the console configuration using the
+  [native-chain instructions](../../src/tools/candidate_console/README.md#run-a-configured-native-chain).
+  On Home, select it, review the run destination and execution policy, then
+  explicitly launch. Check the original capture for the full scientific
+  settings; this panel does not edit the chain or provide pause/resume.
 
 Follow the [saved-source recipe](../../src/tools/candidate_console/README.md#prepare-saved-source-or-open-an-existing-run)
 for the second route. Saving and preparation never launch automatically.

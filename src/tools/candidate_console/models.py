@@ -8,10 +8,14 @@ from pydantic import Field, field_validator, model_validator
 from agent.schemas.output_types import OutputTypeName
 from tools.candidate_operations import OperationStoreConfig
 from tools.candidate_operations.models import ProcessObservation
+from tools.candidate_operations.native_chain_models import NativeChainObservation
 from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.workflow_authoring.models import Project
 from tools.workflow_preview.models import PreviewModel
 from tools.workspace_sandbox.profile import SandboxProfile
+
+from .native_chain_models import NativeChainChoice
+from .readiness_models import CredentialReadiness as CredentialReadiness
 
 Advice = Annotated[str, Field(max_length=32768)]
 
@@ -41,7 +45,8 @@ class TaskChoice(PreviewModel):
 
 class ConsoleConfig(PreviewModel):
     operation_store: OperationStoreConfig
-    tasks: tuple[TaskChoice, ...] = Field(min_length=1)
+    tasks: tuple[TaskChoice, ...] = ()
+    native_chain_choices: tuple[NativeChainChoice, ...] = ()
     bind_host: Literal["127.0.0.1"] = "127.0.0.1"
     port: int = Field(ge=1024, le=65535)
     browser_origin: str
@@ -63,6 +68,8 @@ class ConsoleConfig(PreviewModel):
             or self.browser_origin != f"http://127.0.0.1:{origin.port}"
         ):
             raise ValueError("browser_origin must be an exact loopback HTTP origin with port")
+        if len({c.choice_id for c in self.native_chain_choices}) != len(self.native_chain_choices):
+            raise ValueError("native chain choice IDs must be unique")
         if len({task.task_id for task in self.tasks}) != len(self.tasks):
             raise ValueError("task IDs must be unique")
         if len({project.project_id for project in self.editor_projects}) != len(
@@ -118,19 +125,6 @@ class RouteView(PreviewModel):
     model: str | None
 
 
-class CredentialReadiness(PreviewModel):
-    """Ephemeral name-only facts; never admission or provider authentication."""
-
-    required_names: tuple[str, ...]
-    omitted_names: tuple[str, ...]
-    unresolved_routes: tuple[str, ...]
-    present_names: tuple[str, ...]
-    missing_names: tuple[str, ...]
-    file_status: Literal["not_needed", "not_selected", "readable", "unavailable"]
-    ready: bool
-    instructions: tuple[str, ...]
-
-
 class PreparedReview(PreviewModel):
     credential_readiness: CredentialReadiness
     prepare_operation_id: UUID
@@ -157,7 +151,7 @@ class PreparedReview(PreviewModel):
 
 class StatusView(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "prepare_reusable", "candidate"]
+    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain"]
     request_digest: str
     observed_at: str
     state: Literal["active", "completed", "operation_failed", "unknown"]
@@ -167,4 +161,7 @@ class StatusView(PreviewModel):
     native_status: str | None
     native_id: str | None
     validation_passed: bool | None
+    native_chain: NativeChainObservation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     reason: str

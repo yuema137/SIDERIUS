@@ -48,7 +48,7 @@ try {
       if (failEditor) return reply({error: {message: 'Fixture project unavailable'}}, 409);
       return route.continue();
     }
-    if (url.pathname === '/api/choices') return reply([]);
+    if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices') return reply([]);
     assert.ok(url.pathname.startsWith('/api/operations/' + operation), 'URL UUID wins over remembered ID');
     if (unavailable) return reply({error: {message: 'Fixture unavailable operation'}}, 404);
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});

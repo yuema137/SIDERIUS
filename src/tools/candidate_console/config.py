@@ -46,6 +46,10 @@ def validate_config(config: ConsoleConfig) -> ConsoleConfig:
         for name in task.task_read_only:
             if not canonical(name).exists():
                 raise ValueError("configured dependency must exist")
+    for choice in config.native_chain_choices:
+        request = choice.request
+        for path in (request.capture_path, request.envelope, *request.read_only, *request.devices):
+            canonical(path)
     if config.editor_projects:
         from tools.workflow_authoring.service import WorkflowAuthoring
 

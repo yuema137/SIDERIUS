@@ -9,12 +9,14 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/editor.css">
   <script src="/session.js" defer></script>
+  <script src="/native-chain-monitor.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/editor.js" defer></script>
   <script src="/navigation.js" defer></script>
   <script src="/reusable-intents.js" defer></script>
   <script src="/reusable-run.js" defer></script>
   <script src="/new-run.js" defer></script>
+  <script src="/native-chain.js" defer></script>
 </head>
 <body>
 <header><div class="brand">SIDERIUS <span>Local candidate console</span></div><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p>
@@ -30,6 +32,17 @@
     <p id="access-status" role="status">Not connected.</p>
   </section>
   <section id="view-home" data-view="home"><h1 tabindex="-1">Home</h1><p><a href="#workflow">Open workflow</a> · <a href="#slow-control">Open known operation</a></p>
+<section class="card" aria-labelledby="native-chain-heading">
+<h2 id="native-chain-heading">Run a configured native chain</h2>
+<p>Launch the captured native recipe independently of the workflow editor. Review the original capture for complete scientific settings. Each new destination needs a new externally reviewed capture and fresh envelope.</p>
+<label for="native-chain-choice">Native capture</label><select id="native-chain-choice" disabled><option value="">Connect to load native captures</option></select>
+<button id="native-chain-review" disabled>Review native capture</button>
+<p id="native-chain-status" role="status">Connect to review a configured native capture.</p>
+<details><summary>Reviewed run, input identities and execution policy</summary><div id="native-chain-details"></div></details>
+<button id="native-chain-launch" disabled>Launch native chain</button>
+<section id="native-chain-intent" hidden><p id="native-chain-operation-id" class="mono"></p>
+<div class="actions"><button id="native-chain-check" disabled>Check native admission</button><button id="native-chain-retry" disabled>Retry same native launch</button><a id="native-chain-monitor">Open native Slow control</a><button id="native-chain-new" disabled>Review another native capture</button></div></section>
+</section>
 <details id="configured-task"><summary>Prepare configured task</summary><p>Native Prepare generates its configured candidate. It does not run the selected editor declaration.</p>
   <div class="columns">
     <section class="card" aria-labelledby="prepare-heading">
@@ -149,6 +162,7 @@
     <p>Enter an operation UUID from this console or code. Reading an operation never launches or restarts it. Closing the page does not stop an admitted operation.</p>
     <form id="monitor-form" class="actions"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" disabled>Read operation</button></form>
     <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="operation-observed" class="muted"></p><details><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
+    <section id="native-chain-observation" hidden></section>
     <h3 id="tokens-heading">Reported LLM tokens</h3>
     <p id="tokens-status" role="status">No operation selected.</p>
     <p id="tokens-times" class="muted"></p>

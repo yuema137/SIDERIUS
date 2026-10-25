@@ -1,13 +1,15 @@
 # Local candidate console
 
 Prepare, review and explicitly launch one candidate from a configured scientific
-task, then reopen its native status, logs and reported LLM tokens by operation ID.
+task, or launch an externally reviewed native iteration chain. Reopen status and
+logs by operation ID; candidate runs also expose reported LLM tokens.
 The candidate runs Propose → Implement → Validate, with optional native Tune
 when the saved reusable source declares it. Inspect native outputs for scientific
 results; completion alone does not certify them.
 
 You need a synced checkout, a working [workspace sandbox](../workspace_sandbox/README.md),
-an existing task manifest, data directory and LLM profile. Keep configuration,
+an existing task manifest, data directory and LLM profile for candidate preparation,
+or a reviewed native capture for the native-chain route below. Keep configuration,
 credentials and outputs in your external project. Run commands from this checkout
 using its own `.venv/bin/python`.
 
@@ -127,6 +129,48 @@ original source or credential file disappears. Restart still validates configure
 resources. Source changes during preparation can make it fail; inspect and preserve
 that operation's evidence. A successfully prepared capture remains independent of
 later editor changes. Resume is not available in this reusable GUI flow.
+
+## Run a configured native chain
+
+A native capture records reviewed inputs for the original iterative recipe:
+Interpret → Propose → Implement → Validate → Tune. Create it through the
+[native capture setup](../native_chain/README.md) before opening the console.
+The browser launches that configured recipe independently of the editor.
+
+1. Add a `native_chain_choices` entry to your external `console.json`: give it a
+   `choice_id`, a readable `label`, and the native operation `request` prepared
+   with the capture. Configure its destination, resource limits and forwarded
+   credential names there. The [configuration contract](console-contract.md#configured-native-chains)
+   specifies these fields. For a native-only console, omit `tasks` and
+   `editor_projects`; no dummy candidate task is needed.
+2. Check and start the console with the commands above, then Connect. On Home,
+   choose the capture under **Run a configured native chain** and select
+   **Review native capture**. Inspect its run name, final iteration, workspace,
+   input identities, resource policy and credential readiness. Consult the
+   original capture for complete scientific settings.
+3. Select **Launch native chain** explicitly. The operation UUID appears before
+   submission. Follow **Open native Slow control** to see process state, shell
+   outcome, cleanup and each checkpoint's native status and integrity separately.
+   A completed process does not establish scientific success; `no_records`,
+   unavailable evidence and invalid evidence remain visible. Native-chain token
+   aggregation is not supported.
+4. If the response is lost, keep the displayed UUID. Reconnect to check it, or
+   use **Retry same native launch** while admission remains unconfirmed. Neither
+   navigation nor reconnect launches automatically. Reload the UUID's Slow control
+   link to monitor it without selecting a task or editor project. After admission
+   is confirmed, **Review another native capture** clears the form for another
+   configured destination; it does not stop the previous run.
+
+Each new destination needs a new externally reviewed capture and fresh envelope
+(the parent directory reserved for that operation). Pinned source changes may
+refuse dispatch. The console does not edit native captures or offer resume/stop.
+Unrelated unsaved editor drafts survive navigation. A pending native launch is
+retained in page memory; reload retains only the UUID for monitoring.
+
+For a monitor-only server, keep the same operation store and access configuration,
+remove task/native choices and editor projects, and omit `credential_file` if its
+file is unavailable. Known UUIDs remain readable after capture or source removal.
+An explicitly configured credential file must still pass startup checks.
 
 ## Credentials
 

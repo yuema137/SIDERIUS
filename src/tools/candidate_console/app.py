@@ -19,6 +19,7 @@ from .edited_routes import edited_router
 from .editor import editor_router
 from .files import token
 from .models import ConsoleConfig, LaunchSelection, PreparedSelection, PrepareSelection
+from .native_chain_routes import native_chain_router
 from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_preparation_routes import reusable_preparation_router
 from .reusable_routes import reusable_router
@@ -38,6 +39,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     )
     app.include_router(edited_router(service))
     app.include_router(reusable_router(service))
+    app.include_router(native_chain_router(service))
     app.include_router(reusable_preparation_router(service))
     app.add_middleware(RequestBoundary, config=service.config, token=token(config.auth_token_file))
 
@@ -57,6 +59,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             error.detail.message
             if error.detail.code == "credentials"
             else {
+                "native_chain_policy": "native chain choice is unavailable or overlaps editor writes",
+                "not_supported": "native-chain token aggregation is not supported",
                 "busy": "another operation is active or unresolved",
                 "conflict": "operation ID already identifies different content",
                 "stale_review": "reviewed source or bindings changed; review again",
@@ -132,6 +136,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     def static(asset: str):
         types = {
             "app.js": "text/javascript",
+            "native-chain.js": "text/javascript",
+            "native-chain-monitor.js": "text/javascript",
             "session.js": "text/javascript",
             "navigation.js": "text/javascript",
             "editor-entry.js": "text/javascript",

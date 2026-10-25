@@ -531,3 +531,86 @@ Offline browser and code witnesses exercise detached operations, native admissio
 protocol/staging and terminal output verification with provider, measurement and
 tuner effects substituted. They establish transport and artifact integrity, not
 real scientific training, historical replay, API access or GPU qualification.
+
+## Configured native chains
+
+`ConsoleConfig.tasks` and `native_chain_choices` default to empty tuples. An empty
+configuration supports known-UUID monitoring; a native-only configuration requires
+no candidate task or editor. `NativeChainChoice(choice_id, label, request)` uses a
+unique task-style ID, a 1–160 character label and the public
+`NativeChainOperationRequest` unchanged. Startup checks canonical configured paths,
+not capture freshness, pinned contents or destination availability. An explicitly
+configured credential file is still validated at startup; after deletion, restart
+with `credential_file: null` for monitoring or repair that file.
+
+`NativeChainConsole(console)` provides `choices()`, `review(selection)` and
+`launch(selection)`. HTTP GET `/api/native-chain/choices` returns descriptors only.
+POST `/api/native-chain/review` accepts `NativeChainChoiceSelection(choice_id)`.
+POST `/api/native-chain/launch` accepts `NativeChainLaunchSelection(choice_id,
+operation_id, expected_request_digest)` and returns `OperationHandle` with202.
+The shared RequestBoundary and threadpool transport apply unchanged.
+
+Review returns choice ID/label, public request digest and `NativeChainAdmission`,
+plus request fields capture_path, envelope, read_only, network, devices,
+environment_names, timeout_seconds, input_max_bytes, max_iterations_observed and
+max_observation_bytes. `credential_readiness` observes required names from admission
+and forwarded names from the request through the private-file reader; it neither
+reserves admission nor authenticates providers. Admission supplies run/recipe,
+workspace/final iteration, capture/input identities and checkout/Git paths. Full
+scientific settings, source bytes, checkout commit SHA and routes are not a console
+review projection; inspect the original capture for those settings.
+
+Launch first looks up the UUID, before choice/capture/source/credential reads.
+An existing native-chain record must match the public request digest; it is
+submitted unchanged with empty launch environment. Choice ID/label need not still
+exist or match. Corrupt/conflicting records refuse, never become fresh launches.
+For absent UUIDs, resolve configured choice, compare digest, call the public native
+review owner, check editor separation, read selected credentials and submit the
+identical typed request. Operation admission owns concurrent claims and rechecks.
+No console runtime, claim, request registry or automatic retry is introduced.
+
+Fresh review/launch refuses pinned input or capture paths writable by configured
+authoring projects: source_file, sibling .<source-name>.authoring.lock and recovery
+descendants. Writable destination/recovery overlap also refuses. Unrelated sources
+in the same project remain editable. Existing-record recovery bypasses this fresh
+policy. External edits remain subject to native capture rechecks before dispatch.
+
+`StatusView.kind` includes native_chain and its optional `native_chain` field
+projects the public `NativeChainObservation` unchanged. Absent native_chain is
+omitted for legacy responses. Receipt-derived fields remain null and
+receipt_available false for chains. Current evidence and terminal-time evidence
+remain distinct; lifecycle completion is not scientific success. Token reads
+return409 with code `not_supported` and a fixed safe message. Status/log reads
+never require configured choices, candidate tasks or editor selection.
+
+
+### Native browser state and evidence
+
+`native-chain.js` owns one page-memory pending selection and reviewed request
+digest; choice generation and session revision fence late responses. Changing
+choices invalidates review without erasing unresolved intent. Initial launch
+allocates one UUID before POST. Lost responses and reconnect read that UUID;
+only explicit Retry resubmits the retained payload. There is no automatic POST or
+replacement UUID. Only a confirmed admission enables explicit Review another
+native capture to clear the form; this does not stop the existing operation. Reload follows the UUID URL/remembered ID for monitoring only.
+No credential or launch payload enters persistent browser storage.
+
+`native-chain-monitor.js` renders the public observation using safe text DOM.
+Current evidence and terminal-time evidence are labeled separately. Missing
+terminal/checkpoints are unavailable, not zero/success. Mixed/no_records, timeout,
+unknown cleanup and invalid evidence retain their own fields. The existing app
+poll/cursor/epoch remains the only monitor loop. Native kind clears candidate
+token rows/times and suppresses later unsupported token reads; epoch/kind checks
+fence late candidate responses. Direct UUID navigation/reconnect needs no choice
+or editor fetch; the existing New run task loader is deferred to Workflow entry. Empty candidate choices disable Prepare with explanatory copy.
+
+`tests/browser/native_chain.mjs` uses the explicit Python/Playwright/Chromium and
+CONSOLE_EVIDENCE_DIR variables. From a clean committed checkout it creates an
+external synthetic task/capture, runs real Chromium/authenticated HTTP/detached
+native shell with two pseudo iterations and checks restoration/verified outputs.
+It loses an actual launch response, retains/retries one UUID, preserves unrelated
+editor drafts, reloads the direct monitor and recovers through code/HTTP after
+source/capture removal and monitor-only restart. Separate synthetic projection
+cases exercise async fences and mixed/timeout/unknown/invalid evidence. API cost
+and scientific GPU execution are zero; hardware observation is read-only. These
+checks do not qualify real LLM behavior or scientific training.
