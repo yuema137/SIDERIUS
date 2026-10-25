@@ -15,7 +15,8 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from typing import Any
+from types import UnionType
+from typing import Annotated, Any, Union, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -33,6 +34,48 @@ _PREDICATES: dict[str, ParameterPredicate] = {}
 
 class ParameterRuleError(ValueError):
     """A parameter-rule declaration or effective value is invalid."""
+
+
+def _model_path_exists(annotation: Any, parts: list[str]) -> bool:
+    """Recognize fields from their consuming models, including optional unions."""
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _model_path_exists(get_args(annotation)[0], parts)
+    if origin in (Union, UnionType):
+        return any(_model_path_exists(branch, parts) for branch in get_args(annotation))
+    if not isinstance(annotation, type) or not issubclass(annotation, BaseModel):
+        return False
+    field = annotation.model_fields.get(parts[0])
+    if field is None:
+        return False
+    return len(parts) == 1 or _model_path_exists(field.annotation, parts[1:])
+
+
+def _validate_training_rule_path(path: str, parts: list[str]) -> None:
+    """Keep fixed training targets aligned with the actual execution schema."""
+    if parts[0] != "train_config":
+        return
+    from ml_models.models_format_sandbox import TrainConfig
+
+    if not _model_path_exists(TrainConfig, parts[1:]):
+        raise ParameterRuleError(
+            f"unsupported training parameter path {path!r}: target must exist in "
+            "TrainConfig or one of its nested configuration models; check the "
+            "training fields in the task-composition parameter-rule contract"
+        )
+
+
+def _validate_parameter_path(path: str) -> None:
+    """Validate declaration syntax and fixed-contract target membership."""
+    parts = path.split(".")
+    if any(not part or not part.isidentifier() for part in parts):
+        raise ParameterRuleError(f"invalid parameter path {path!r}")
+    if len(parts) < 2 or parts[0] not in {"model_config", "train_config", "loss_config"}:
+        raise ParameterRuleError(
+            f"parameter path {path!r} must target a leaf under "
+            "model_config, train_config, or loss_config"
+        )
+    _validate_training_rule_path(path, parts)
 
 
 def register_parameter_predicate(name: str, predicate: ParameterPredicate) -> None:
@@ -152,18 +195,7 @@ class ParameterRules(BaseModel):
     @model_validator(mode="after")
     def validate_paths(self) -> ParameterRules:
         for path in self.rules:
-            parts = path.split(".")
-            if any(not part or not part.isidentifier() for part in parts):
-                raise ValueError(f"invalid parameter path {path!r}")
-            if len(parts) < 2 or parts[0] not in {
-                "model_config",
-                "train_config",
-                "loss_config",
-            }:
-                raise ValueError(
-                    f"parameter path {path!r} must target a leaf under "
-                    "model_config, train_config, or loss_config"
-                )
+            _validate_parameter_path(path)
         return self
 
 
@@ -270,8 +302,12 @@ def resolve_parameter_rule_document(
         ("task", task_rules or ParameterRules()),
         ("workflow", workflow_rules or ParameterRules()),
     )
+    # Frozen models can still contain a mutated rules dictionary. Recheck at
+    # this shared execution boundary, including proposal-baseline resolution.
     resolved = deepcopy(dict(document))
     paths = {path for _, rules in declarations for path in rules.rules}
+    for path in paths:
+        _validate_parameter_path(path)
     for path in sorted(paths):
         exact_values = [
             rule.exact

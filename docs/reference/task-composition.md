@@ -507,6 +507,18 @@ Notes:
   `loss_config`, and a parameter rule targeting that subtree is refused.
   The independent epoch ceiling remains a safety authority: a rule that would
   raise `train_config.epochs` above it is refused rather than weakening it.
+  Training rule targets are checked against the execution `TrainConfig` fields
+  when declarations are loaded and again at effective-rule resolution. Unknown
+  targets such as `train_config.num_epochs` and `train_config.train_portion`,
+  unknown nested fields, and descent through scalar fields are refused with the
+  offending path. Use `train_config.epochs` for an epoch lock; sampling remains
+  owned by workflow `--train_portion` / `--formal_train_portion`. Nested fields
+  are recognized across the optional `lr_schedule` union, while the schedule's
+  existing typed schema still owns selected-variant and value validation.
+  An exact lock may supply an omitted valid leaf; optional parent mappings must
+  already exist for nested writes. `train_config.lr_schedule: {exact: null}`
+  remains supported. Model-specific `model_config` paths remain extensible;
+  this fixed-field validation does not close the model plugin's configuration.
 - A workflow may add a second rule set through
   `--workflow_parameter_rules '<json>'`, using the same shape. Task and
   workflow rules are enforced together: the workflow may narrow a task rule

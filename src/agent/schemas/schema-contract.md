@@ -48,6 +48,13 @@ no hidden contracts, no silent defaults.
 - Record vocabularies (statuses, verdicts as persisted strings) are declared
   here and are load-bearing for persisted history — additive evolution only.
 - `extra="forbid"` on record-facing types where a misspelled key must refuse.
+- `ParameterRules` checks fixed `train_config` paths against the consuming
+  `TrainConfig.model_fields` and nested model annotations, including optional
+  unions. The shared document resolver repeats this check so a mutated rule
+  dictionary cannot introduce a silently ignored execution lock. Exact rules
+  may insert omitted valid leaves; model plugin paths remain extensible.
+  See the [parameter-rule contract](../../../docs/reference/task-composition.md)
+  for sampling ownership, composition conflicts and value-validation boundaries.
 
 ## Non-owned semantics
 
