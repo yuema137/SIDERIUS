@@ -602,7 +602,7 @@ unknown cleanup and invalid evidence retain their own fields. The existing app
 poll/cursor/epoch remains the only monitor loop. Native kind clears candidate
 token rows/times and suppresses later unsupported token reads; epoch/kind checks
 fence late candidate responses. Direct UUID navigation/reconnect needs no choice
-or editor fetch. Empty candidate choices disable Prepare with explanatory copy.
+or editor fetch; the existing New run task loader is deferred to Workflow entry. Empty candidate choices disable Prepare with explanatory copy.
 
 `tests/browser/native_chain.mjs` uses the explicit Python/Playwright/Chromium and
 CONSOLE_EVIDENCE_DIR variables. From a clean committed checkout it creates an

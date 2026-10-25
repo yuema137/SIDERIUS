@@ -96,7 +96,7 @@
     }
   }
   async function tasks() {
-    if (!session.connected || tasksRevision === session.revision) return;
+    if (!session.connected || window.consoleNavigation?.view !== 'workflow' || tasksRevision === session.revision) return;
     const version = generation;
     const revision = session.revision;
     const project = editor.projectId;
