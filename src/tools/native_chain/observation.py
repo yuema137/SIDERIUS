@@ -5,15 +5,19 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, TypeAdapter
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from core.iteration_manifest import verify_iteration_manifest
 from core.record_role import IterationFormalEvidence, formal_evidence_of
 from tools.native_chain.review import read_bytes
 from tools.workflow_preview.models import PreviewModel
+
+ObservationPolicy = Annotated[int, Field(strict=True, ge=1, le=2)]
+CURRENT_OBSERVATION_POLICY: ObservationPolicy = 2
+_POLICY_ADAPTER = TypeAdapter(ObservationPolicy)
 
 
 class NativeChainCheckpointObservation(PreviewModel):
@@ -133,9 +137,14 @@ def _checkpoint(workspace: Path, index: int, budget: _Budget) -> NativeChainChec
 
 
 def observe_native_chain(
-    workspace: Path, run_name: str, bounds: ObservationBounds
+    workspace: Path,
+    run_name: str,
+    bounds: ObservationBounds,
+    *,
+    policy: ObservationPolicy = CURRENT_OBSERVATION_POLICY,
 ) -> NativeChainEvidence:
     """Bound all discovery, retained bytes and emitted projection; never truncate success."""
+    policy = _POLICY_ADAPTER.validate_python(policy)
     budget = _Budget(bounds)
     try:
         if workspace != workspace.resolve() or workspace.is_symlink():
@@ -158,6 +167,8 @@ def observe_native_chain(
             "generated_library",
             "STOP",
         }
+        if policy == 2:
+            controls.add("token_usage.jsonl")
         indices = set()
         anomalies = []
         with os.scandir(workspace) as entries:

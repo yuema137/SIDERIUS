@@ -8,6 +8,7 @@ import pytest
 
 from core.iteration_manifest import manifest_self_digest, verify_iteration_manifest
 from tests.unit.scripts.test_inspect_run_state import _write_clean_chain_iter
+from tools.native_chain import observation
 from tools.native_chain.inspection import inspect_chain_iteration
 from tools.native_chain.observation import ObservationBounds, observe_native_chain
 
@@ -76,7 +77,8 @@ def test_mixed_native_status_and_legacy_unverified_remain_distinct(tmp_path):
     assert observe_native_chain(tmp_path, "native", bounds()).checkpoints[0].integrity == "invalid"
 
 
-def test_bounded_reader_refuses_symlink_escape_and_directory_flood(tmp_path):
+@pytest.mark.parametrize("policy", [1, 2])
+def test_bounded_reader_refuses_symlink_escape_and_directory_flood(tmp_path, policy):
     first = _write_clean_chain_iter(tmp_path, 1)
     manifest = stamp(first / "manifest.json")
     output = Path(manifest["output_path"])
@@ -85,14 +87,19 @@ def test_bounded_reader_refuses_symlink_escape_and_directory_flood(tmp_path):
     target = tmp_path / "outside"
     target.write_bytes(saved)
     output.symlink_to(target)
-    assert observe_native_chain(tmp_path, "native", bounds()).checkpoints[0].integrity == "invalid"
     assert (
-        observe_native_chain(tmp_path, "native", bounds(max_observation_bytes=10)).availability
+        observe_native_chain(tmp_path, "native", bounds(), policy=policy).checkpoints[0].integrity
+        == "invalid"
+    )
+    assert (
+        observe_native_chain(
+            tmp_path, "native", bounds(max_observation_bytes=10), policy=policy
+        ).availability
         == "limit_exceeded"
     )
     for i in range(20):
         (tmp_path / f"foreign{i}").touch()
-    result = observe_native_chain(tmp_path, "native", bounds())
+    result = observe_native_chain(tmp_path, "native", bounds(), policy=policy)
     assert result.availability == "limit_exceeded" and not result.checkpoints
 
 
@@ -115,3 +122,33 @@ def test_native_control_entries_do_not_consume_iteration_slots(tmp_path):
     result = observe_native_chain(tmp_path, "native", bounds())
     assert result.availability == "available" and not result.anomalies
     assert all(row.artifact_verified for row in result.checkpoints)
+
+
+def test_native_token_ledger_is_expected_without_reading_usage_rows(tmp_path, monkeypatch):
+    """#847: ledger presence preserves evidence; unknown names still raise diagnostics."""
+    stamp(_write_clean_chain_iter(tmp_path, 1) / "manifest.json")
+    (tmp_path / ".token_run_id").write_text("native-20261025T120000-123")
+    expected = observe_native_chain(tmp_path, "native", bounds())
+    assert expected.availability == "available" and not expected.anomalies
+    assert expected.checkpoints[0].artifact_verified
+    assert expected.token_run_id == "native-20261025T120000-123"
+
+    ledger = tmp_path / "token_usage.jsonl"
+    ledger.write_bytes(b"not a token row\n" * 100000)
+    original_read = observation.read_bytes
+
+    def read_without_ledger(path, limit):
+        assert path != ledger, "observer must not read the token accounting ledger"
+        return original_read(path, limit)
+
+    monkeypatch.setattr(observation, "read_bytes", read_without_ledger)
+    assert observe_native_chain(tmp_path, "native", bounds()) == expected
+    historical = observe_native_chain(tmp_path, "native", bounds(), policy=1)
+    assert historical.anomalies == ("unexpected_entry",)
+    assert historical.checkpoints == expected.checkpoints
+
+    (tmp_path / "unknown.jsonl").touch()
+    observed = observe_native_chain(tmp_path, "native", bounds())
+    assert observed.availability == "available"
+    assert observed.anomalies == ("unexpected_entry",)
+    assert observed.checkpoints == expected.checkpoints

@@ -55,3 +55,6 @@ iteration-count/directory/aggregate-byte limits and native token sidecar only.
 It verifies and parses the same output bytes through the existing manifest and
 HyperparamTuningOutput owners. It never controls native scheduling or resume.
 Legacy manifests expose separate false verification flags, never invented trust.
+The observer's two concrete policies preserve historical terminal comparison;
+version defaults and operation read/write behavior belong to the
+[candidate operation contract](../candidate_operations/candidate-operations-contract.md#captured-native-chain-operation).

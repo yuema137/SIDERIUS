@@ -376,3 +376,182 @@ def test_changed_scientific_evidence_does_not_reopen_process_lifecycle(chain):
     assert snapshot.native_chain.evidence.availability == "integrity_failure"
     assert snapshot.native_chain.terminal.evidence.checkpoints[0].native_status == "no_records"
     assert snapshot.native_chain.terminal.evidence.checkpoints[1].integrity == "missing"
+
+
+def _saved_observation_terminal(chain, policy, *, full_layout=False):
+    """Persist pre-#847 evidence explicitly, independently of the observer under test."""
+    import json
+
+    from tools.candidate_operations.files import publish_encoded
+    from tools.native_chain.observation import (
+        NativeChainCheckpointObservation,
+        NativeChainEvidence,
+    )
+
+    record, path = chain
+    workspace = Path(record.native_chain_admission.workspace)
+    iteration = workspace / "iter_001"
+    iteration.mkdir(parents=True)
+    # Legacy unverified manifest, exact bytes define the expected digest.
+    payload = b'{"status":"no_records"}'
+    (iteration / "manifest.json").write_bytes(payload)
+    (workspace / "token_usage.jsonl").write_text("not interpreted by observation\n")
+    terminal = NativeChainTerminal(
+        operation_id=record.submission.request_id,
+        request_digest=record.request_digest,
+        capture_sha256="a" * 64,
+        envelope=record.submission.request.envelope,
+        workspace=str(workspace),
+        runtime_digest=hashlib.sha256(encode(record.runtime)).hexdigest(),
+        supervision=ObservedExecutionResult(
+            execution=ExecutionResult(status="completed", returncode=0, elapsed_seconds=1),
+            cleanup=GroupCleanup(required=False, final=GroupObservation(status="absent")),
+            direct_child_reaped=True,
+        ),
+        evidence=NativeChainEvidence(
+            availability="available",
+            anomalies=("unexpected_entry",) if policy == 1 else (),
+            checkpoints=(
+                NativeChainCheckpointObservation(
+                    iteration=1,
+                    native_status="no_records",
+                    integrity="unverified",
+                    manifest_sha256=hashlib.sha256(payload).hexdigest(),
+                ),
+                NativeChainCheckpointObservation(iteration=2, integrity="missing"),
+            ),
+        ),
+    )
+    saved = terminal.model_dump(mode="json")
+    if full_layout:
+        # Exactly 19 entries: legacy v1 permits 18, current v2 permits 19.
+        (workspace / "iter_002").mkdir()
+        for name in (
+            "iter_001_hardware.json",
+            "iter_002_hardware.json",
+            ".chain_halted",
+            "chain_stopped.json",
+            "run_invariants_lock.json",
+            "effective_config.json",
+            "health_checks_effective.yaml",
+            "memory_trace.jsonl",
+            "per_file_best.json",
+            "evolution_log.jsonl",
+            "plugins",
+            "plugin_source_sentinel",
+            "native_test_hardware.json",
+            "generated_library",
+            "STOP",
+        ):
+            (workspace / name).touch()
+        (workspace / ".token_run_id").write_text("native_test-20261025T120000-123")
+        saved["evidence"] = NativeChainEvidence(availability="limit_exceeded").model_dump(
+            mode="json"
+        )
+    # Policy 1 is truly historical JSON: field absent, not an explicit new value.
+    saved.pop("observation_policy", None)
+    if type(policy) is not int or policy != 1:
+        saved["observation_policy"] = policy
+    terminal_bytes = json.dumps(saved).encode()
+    publish_encoded(path / "native-chain-terminal.json", terminal_bytes)
+    publish(
+        path / "completion.json",
+        Completion(
+            operation_id=record.submission.request_id,
+            request_digest=record.request_digest,
+            outcome="native_chain",
+            terminal_digest=hashlib.sha256(terminal_bytes).hexdigest(),
+            reason="native_chain_terminal",
+        ),
+    )
+    return workspace, terminal_bytes
+
+
+@pytest.mark.parametrize("policy", [1, 2])
+def test_saved_observer_policy_preserves_history_and_detects_mutation(chain, policy):
+    """#847: old ledger diagnostics are history, but later file changes still refuse."""
+    record, path = chain
+    workspace, terminal_bytes = _saved_observation_terminal(chain, policy)
+    completion_bytes = (path / "completion.json").read_bytes()
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.state == "completed"
+    assert snapshot.native_chain.evidence.availability == "available"
+    assert snapshot.native_chain.evidence.anomalies == ()
+    assert snapshot.native_chain.terminal.evidence.anomalies == (
+        ("unexpected_entry",) if policy == 1 else ()
+    )
+    assert snapshot.native_chain.terminal.observation_policy == policy
+    assert (path / "native-chain-terminal.json").read_bytes() == terminal_bytes
+    assert (path / "completion.json").read_bytes() == completion_bytes
+
+    unknown = workspace / "foreign.jsonl"
+    unknown.touch()
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.native_chain.evidence.anomalies == ("changed_after_terminal",)
+    unknown.unlink()
+    (workspace / "iter_001/manifest.json").write_text('{"status":"failed"}')
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.native_chain.evidence.availability == "integrity_failure"
+    assert snapshot.native_chain.evidence.anomalies == ("changed_after_terminal",)
+    assert (path / "native-chain-terminal.json").read_bytes() == terminal_bytes
+
+
+@pytest.mark.parametrize("policy", [0, 3, "2", True])
+def test_unsupported_saved_observer_policy_cannot_establish_terminal(chain, policy):
+    """Stored unknown/coerced policy must fail closed through the public read boundary."""
+    record, _ = chain
+    _saved_observation_terminal(chain, policy)
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.reason == "integrity_failure"
+    assert not releasable(record.config, record.submission.request_id)
+
+
+def test_saved_legacy_discovery_limit_projects_current_evidence(chain):
+    """The extra ledger slot must not turn a legacy limit result into a mutation."""
+    record, path = chain
+    _, terminal_bytes = _saved_observation_terminal(chain, 1, full_layout=True)
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.native_chain.terminal.evidence.availability == "limit_exceeded"
+    assert snapshot.native_chain.evidence.availability == "available"
+    assert snapshot.native_chain.evidence.anomalies == ()
+    assert snapshot.native_chain.evidence.token_run_id == "native_test-20261025T120000-123"
+    assert (path / "native-chain-terminal.json").read_bytes() == terminal_bytes
+
+
+def test_new_terminal_writer_records_current_observer_policy(chain, monkeypatch):
+    """Production terminal construction must not inherit the legacy read default."""
+    import json
+
+    from tools.candidate_operations.native_chain import execute_native_chain
+
+    record, path = chain
+    monkeypatch.setattr(
+        "tools.candidate_operations.native_chain.review_native_chain_operation",
+        lambda *a, **k: record.native_chain_admission,
+    )
+    monkeypatch.setattr("tools.candidate_operations.native_chain.captured", lambda *a: None)
+    monkeypatch.setattr("tools.candidate_operations.native_chain.sandbox_profile", lambda *a: None)
+    monkeypatch.setattr("tools.candidate_operations.native_chain.shell_arguments", lambda *a: ())
+
+    def supervised(*args):
+        workspace = Path(record.native_chain_admission.workspace)
+        workspace.mkdir()
+        (workspace / "token_usage.jsonl").touch()
+        return ObservedExecutionResult(
+            execution=ExecutionResult(status="completed", returncode=0, elapsed_seconds=1),
+            cleanup=GroupCleanup(required=False, final=GroupObservation(status="absent")),
+            direct_child_reaped=True,
+        )
+
+    monkeypatch.setattr("tools.candidate_operations.native_chain.run_observed", supervised)
+    completion = execute_native_chain(record, path)
+    assert completion.outcome == "native_chain"
+    payload = (path / "native-chain-terminal.json").read_bytes()
+    saved = json.loads(payload)
+    assert saved["observation_policy"] == 2
+    assert saved["evidence"]["anomalies"] == []
+    assert completion.terminal_digest == hashlib.sha256(payload).hexdigest()
+    publish(path / "completion.json", completion)
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.native_chain.evidence.availability == "available"
+    assert snapshot.native_chain.evidence == snapshot.native_chain.terminal.evidence

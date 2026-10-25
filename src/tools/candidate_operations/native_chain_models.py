@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from tools.native_chain.observation import NativeChainEvidence
+from tools.native_chain.observation import NativeChainEvidence, ObservationPolicy
 from tools.workflow_preview.models import FileObservation, PreviewModel
 from tools.workspace_sandbox.runner import ObservedExecutionResult
 
@@ -61,6 +61,7 @@ class NativeChainTerminal(PreviewModel):
     workspace: str
     runtime_digest: Digest
     supervision: ObservedExecutionResult
+    observation_policy: ObservationPolicy = 1
     evidence: NativeChainEvidence = Field(
         default_factory=lambda: NativeChainEvidence(availability="unavailable")
     )

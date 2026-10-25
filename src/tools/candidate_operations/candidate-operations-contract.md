@@ -473,18 +473,34 @@ is added by this code-consumer boundary.
 
 The chain snapshot's `native_chain.evidence` reports bounded current checkpoint
 observations, distinct from immutable `native_chain.terminal.evidence`. Active
-observations cannot complete lifecycle. Final reads compare current observation
-with terminal evidence; changed/disappeared evidence reports integrity_failure,
+observations cannot complete lifecycle. Final reads compare observation under the
+terminal's stored `observation_policy` with terminal evidence;
+changed/disappeared evidence reports integrity_failure,
 while trustworthy cleanup still permits lifecycle release. Manifest and artifact
 verification flags remain distinct: legacy unverified artifacts never become
 verified. `no_records` remains its own native status. Scores and formal-evidence
 counts come only from validated HyperparamTuningOutput and its existing role
 owner. No metric arithmetic or interpretation of human detail strings is added.
 
+`NativeChainTerminal.observation_policy` accepts only strict integers 1 and 2.
+Missing fields in historical terminals mean policy 1; new terminal writes
+explicitly record current policy 2. Policy 1 retains the original control names
+and discovery cap. Policy 2 additionally recognizes `token_usage.jsonl` without
+reading its rows, increasing the finite control-name cap by one. Full evidence
+equality is checked under the stored policy before a legacy terminal's live
+evidence is projected under the current policy. Historical terminal evidence,
+raw bytes and Completion digest remain unchanged. Unknown policies fail terminal
+validation. This is reader compatibility, independent of scientific task policy.
+Legacy reads can perform two bounded observations; filesystem mutation between
+observations is not atomic. A historical limit result remains a limit result
+in terminal evidence even when the current policy can return complete live evidence.
+Such a terminal has no retained checkpoint baseline: a complete current projection
+does not establish that checkpoint bytes stayed unchanged since completion.
+
 Directory discovery, per-file bytes, aggregate retained bytes and emitted evidence
 are bounded. Limits produce `limit_exceeded` with no truncated checkpoint list.
 Artifact paths must remain canonical within the scheduled iteration; aliases and
-escapes refuse. The observation reader reads each bounded artifact once; the shared manifest verifier
+escapes refuse. Each observation reads each bounded artifact once; the shared manifest verifier
 hashes supplied bytes and HyperparamTuningOutput parses those same bytes. Existing
 verifier callers retain their file behavior. The legacy inspector now delegates
 its original unbounded chain projection to `tools.native_chain.inspection`, with
