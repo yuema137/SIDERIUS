@@ -64,6 +64,11 @@ MANIFEST_REPLACEMENT_KEY = "manifest_replacement"
 REPLACED_MANIFEST_PREFIX = "manifest.replaced."
 
 
+def restorable_manifest_status(status: object) -> bool:
+    """Status eligibility only; integrity and artifact restoration remain separate."""
+    return status in ("completed", "no_records")
+
+
 class ManifestAlreadyPublishedError(RuntimeError):
     """A manifest already exists for this iteration and no replacement was
     requested. The existing manifest is untouched."""
