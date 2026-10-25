@@ -122,19 +122,19 @@ def training_runner(native_runner, monkeypatch):
             discovered_at="2026-01-01T00:00:00Z",
         ),
     )
-    real_propose = importlib.import_module("tools.candidate_worker.native").MLModelProposalAgent.run
+    real_propose = importlib.import_module("tools.candidate_worker.phases").MLModelProposalAgent.run
 
     def propose(self, value):
         seen.append(("proposal", value))
         return real_propose(self, value)
 
     monkeypatch.setattr(
-        importlib.import_module("tools.candidate_worker.native").MLModelProposalAgent,
+        importlib.import_module("tools.candidate_worker.phases").MLModelProposalAgent,
         "run",
         propose,
     )
 
-    native = importlib.import_module("tools.candidate_worker.native")
+    native = importlib.import_module("tools.candidate_worker.phases")
     real_implement = native.MLModelImplementor.run
 
     def implement(self, value):

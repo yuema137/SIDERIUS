@@ -325,7 +325,7 @@ class WorkflowLLMConfig(BaseModel):
         ),
     )
 
-    def get(self, node_name: str) -> dict:
+    def get(self, node_name: str) -> dict[str, Any]:
         """
         Get LLM constructor kwargs for a node, as a flat dict ready to
         splat into the node's input schema.
