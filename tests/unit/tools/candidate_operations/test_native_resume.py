@@ -430,10 +430,17 @@ def test_concurrent_stores_cannot_both_reserve_same_physical_predecessor(history
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(compete, (first, second)))
     assert len(calls) == 1
-    assert sorted(result.reason for result in results) == [
-        "native_resume_admission_failed",
-        "native_resume_spawn_failed",
-    ]
+    assert sum(result.reason == "native_resume_admission_failed" for result in results) == 1
+    # The losing contender may briefly hold the nonblocking writer lock while
+    # the winner verifies no-child closure. Contention must remain unresolved,
+    # rather than inventing proof; the separate uncontended test requires closure.
+    dispatched = next(
+        result for result in results if result.reason != "native_resume_admission_failed"
+    )
+    assert (dispatched.reason, dispatched.outcome) in {
+        ("native_resume_spawn_failed", "pre_dispatch_failure"),
+        ("native_resume_supervision_unresolved", "unknown"),
+    }
     assert not (path / "native-chain-terminal.json").exists()
 
 
