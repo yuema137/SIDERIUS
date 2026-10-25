@@ -14,6 +14,11 @@ from core.record_role import RecordRoleError, formal_evidence_of
 _CHAIN_ITER_RE = re.compile(r"^iter_(\d+)$")
 
 
+def next_chain_index(committed: list[int], *, first_seen: int = 1) -> int:
+    """Existing selection policy after the caller verifies gaps and integrity."""
+    return max(committed) + 1 if committed else first_seen
+
+
 @dataclass
 class IterationReport:
     """Per-iteration findings for the summary table.

@@ -9,11 +9,16 @@ from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 
-from .ownership import TRANSPORT_ENV, acquire
+from .ownership import TRANSPORT_ENV, WriterLease, acquire
 
 
 def launch_shell(workspace: Path, argv: Sequence[str], *, capture_sha256: str | None = None) -> int:
     lease = acquire(workspace, capture_sha256=capture_sha256)
+    return run_shell_with_lease(lease, argv)
+
+
+def run_shell_with_lease(lease: WriterLease, argv: Sequence[str]) -> int:
+    """Consume an acquired/adopted lease with the unchanged native shell lifecycle."""
     child: subprocess.Popen | None = None
     old_handlers = {}
     clean = False

@@ -360,6 +360,11 @@ def _iter_run_name(iter_idx: int) -> str:
     return f"iter_{iter_idx:03d}"
 
 
+def restorable_manifest_status(status: object) -> bool:
+    """Status eligibility only; integrity and artifact restoration remain separate."""
+    return status in ("completed", "no_records")
+
+
 def _read_manifest(workspace: str, iter_idx: int) -> dict:
     """Load + minimally validate ``iter_NNN/manifest.json``.
 
@@ -393,7 +398,7 @@ def _read_manifest(workspace: str, iter_idx: int) -> dict:
         # Clean no-records exit (gate exhaustion or all-rounds-failed).
         # Caller skips this iter — no output_path, no plugin to restore.
         return manifest
-    if status != "completed":
+    if not restorable_manifest_status(status):
         raise ResumeError(
             f"iter {iter_idx:03d}: manifest status={status!r}, expected "
             f"'completed' or 'no_records'. Refusing to chain off a "

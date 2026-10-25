@@ -89,3 +89,27 @@ Unresolved registration remains blocked until a future explicitly verified recov
 procedure exists. Do not delete or rewrite control metadata, infer safety from a
 missing PID, reconstruct a capture, or label a new workspace as resumed work.
 GUI, Professional and Assistant callers consume this same backend contract.
+
+## Explicit successor ownership primitives
+
+`resume.locked_registered_writer` opens existing state and the permanent lock,
+without creating directories or releasing durable records on exit. Its typed
+snapshot binds registration, claim, participation and unresolved records to the
+same bounded bytes that were parsed, plus lock device/inode. Orphan or mismatched
+claim references refuse. This lock is not outer-process cleanup evidence.
+
+An admitted operation can publish a write-once `successor.<predecessor-UUID>.json`
+reservation under this lock. `adopt_reserved_writer` requires the exact reservation
+and snapshot, then writes `adopted.<successor-UUID>.json` before removing the prior
+participant, unresolved and claim records in that order. It publishes the new
+claim and transfers the same held descriptor to `WriterLease`. Adoption is never
+replayed, even for the same UUID; interrupted transitions retain their permanent
+adoption marker. Registration and the lock inode are never replaced.
+
+The operation owner must separately prove outer inactivity, cleanup absence and
+unchanged scientific history. Core does not parse operation terminals or select an
+iteration. Native entry rechecks the original capture, bounded baseline and private
+reservation before adoption. `run_shell_with_lease` consumes the adopted lease with
+the same signal/wait/release behavior as fresh `launch_shell`; no new supervisor
+or cleanup mechanism is introduced. These internal primitives do not authorize
+manual metadata editing or bypass fresh capture admission.

@@ -348,13 +348,17 @@ check_chain_capture() {
         --input-max-bytes "$CHAIN_CAPTURE_INPUT_MAX_BYTES" "$@"
 }
 
-if [ -n "$EXPECTED_CHAIN_CAPTURE$EXPECTED_CHAIN_CAPTURE_SHA256$CHAIN_CAPTURE_INPUT_MAX_BYTES" ]; then
+if [ -n "$EXPECTED_CHAIN_CAPTURE$EXPECTED_CHAIN_CAPTURE_SHA256$CHAIN_CAPTURE_INPUT_MAX_BYTES$CHAIN_RESUME_PREDECESSOR$CHAIN_RESUME_SUCCESSOR$CHAIN_RESUME_RESERVATION_SHA256" ]; then
     if [ -z "$EXPECTED_CHAIN_CAPTURE" ] || [ -z "$EXPECTED_CHAIN_CAPTURE_SHA256" ] || \
             ! [[ "$CHAIN_CAPTURE_INPUT_MAX_BYTES" =~ ^[1-9][0-9]*$ ]]; then
         echo "Native chain refused: incomplete_capture_controls" >&2
         exit 78
     fi
-    check_chain_capture admit -- "${ORIGINAL_CHAIN_ARGS[@]}" || exit 78
+    CAPTURE_ACTION=admit
+    if [ -n "$CHAIN_RESUME_PREDECESSOR$CHAIN_RESUME_SUCCESSOR$CHAIN_RESUME_RESERVATION_SHA256" ]; then
+        CAPTURE_ACTION=resume-admit
+    fi
+    check_chain_capture "$CAPTURE_ACTION" -- "${ORIGINAL_CHAIN_ARGS[@]}" || exit 78
 fi
 
 # Acquire before history selection or workspace writes. Re-enter this exact
