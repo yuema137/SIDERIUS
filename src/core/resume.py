@@ -53,6 +53,7 @@ from core.iteration_manifest import (
     MANIFEST_BASENAME,
     RUN_OUTPUT_DIGEST_KEY,
     ManifestVerdict,
+    restorable_manifest_status,
     verify_iteration_manifest,
 )
 from core.resume_plugins import restore_model_plugin
@@ -358,11 +359,6 @@ def _iter_run_name(iter_idx: int) -> str:
     string here means resume cannot drift from the writer.
     """
     return f"iter_{iter_idx:03d}"
-
-
-def restorable_manifest_status(status: object) -> bool:
-    """Status eligibility only; integrity and artifact restoration remain separate."""
-    return status in ("completed", "no_records")
 
 
 def _read_manifest(workspace: str, iter_idx: int) -> dict:

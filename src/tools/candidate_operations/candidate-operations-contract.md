@@ -31,6 +31,11 @@ produce a nonzero typed error; CLI argument grammar errors use argparse's normal
 nonzero usage response. Exceptions that might include caller content are not
 serialized into CLI errors or wrapper completion.
 
+Read-only package/CLI bootstrap must not import the execution registry or load
+discoverable model plugins. Resume status eligibility uses the dependency-light
+`core.iteration_manifest.restorable_manifest_status`; native restoration imports
+the same predicate. Successful status stdout is one complete JSON document.
+
 ## Store and admission
 
 Config supplies canonical absolute `state_root`, nonempty `preparation_roots`

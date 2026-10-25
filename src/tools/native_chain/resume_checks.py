@@ -5,11 +5,11 @@ import os
 from pathlib import Path
 from uuid import UUID
 
+from core.iteration_manifest import restorable_manifest_status
 from core.native_writer.models import WriterRefusal
 from core.native_writer.resume import adoption_name, reservation_name
 from core.native_writer.resume_models import ResumeAdoption, ResumeReservation
 from core.native_writer.state import WriterState
-from core.resume import restorable_manifest_status
 
 from .inspection import next_chain_index
 from .models import NativeChainRefusal
