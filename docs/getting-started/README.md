@@ -60,6 +60,12 @@ file is a different format. Have your agent show the saved settings, command
 and output directory before execution. An optional
 [setup review](../../src/tools/setup_review/README.md) produces an HTML report.
 
+Optionally, [capture a native chain](../../src/tools/native_chain/README.md)
+to record the settings for a fresh foreground multi-iteration CLI run before
+explicitly launching it. The original declaration and configuration files remain
+authoritative; capture does not certify scientific success. Follow the linked
+guide for prerequisites and path requirements.
+
 ## Open the optional candidate console
 
 The browser console prepares, reviews and launches **one candidate:

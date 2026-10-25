@@ -177,6 +177,13 @@ bash scripts/launch/run_chain.sh \
 | `--ml_lit_review_config PATH` | forwards a task-owned literature-review YAML through the chain launcher; omit it only when the child default is intended |
 | `--gpu_execution_policy_json FILE` | optional GPU execution policy JSON file; forwards the supplied path unchanged to every iteration in both modes. Use an absolute path when the file is outside the checkout. The native Python runner owns typed validation and run identity; omission preserves its default. A missing or empty argument is refused by the launcher. |
 
+The auto-resume default and manual `--start_iter` override above describe
+ordinary launches without a native chain capture. Captured
+`native-standard-chain/v1` fixes `--start_iter 1` and `--no_auto_resume` and
+requires a workspace that does not exist; even an existing empty directory is
+refused. See the [native chain guide](../../src/tools/native_chain/README.md)
+for the supported scope and refusal behavior.
+
 Everything else is pass-through to the iteration: `--data_scope`,
 `--health_gate_enabled` / `--no-health_gate_enabled`, `--health_gate_files`,
 `--health_checks_config`, `--healthgate_mode`, `--max_rounds`, the epoch
