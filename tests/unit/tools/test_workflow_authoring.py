@@ -278,7 +278,7 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
             "workflow_parameter_rules": {
                 "rules": {
                     "train_config.epochs": {"range": {"min": 1, "max": 3}},
-                    "train_config.max_steps": {"exact": None},
+                    "train_config.lr_schedule": {"exact": None},
                 }
             },
         }
