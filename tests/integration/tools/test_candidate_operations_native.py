@@ -3,6 +3,7 @@
 import inspect
 import json
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 from tests.integration.tools.test_candidate_operations import wait_for
 from tests.unit.tools.candidate_operations.conftest import admitted
 from tests.unit.tools.candidate_prepare.conftest import selection
+from tests.unit.tools.candidate_worker.conftest import prepared
 from tests.unit.tools.candidate_worker.test_native import Provider
 from tools.candidate_operations import CandidateOperation, read_operation
 from tools.candidate_operations.process import environment
@@ -184,13 +186,23 @@ def test_native_timeout_is_preserved_by_detached_reader(admitted, tmp_path):
     assert status.state == "completed" and status.receipt.status == "timed_out"
 
 
-def native_submitter(tmp_path, bundle, reject=False):
+def native_submitter(tmp_path, bundle, reject=False, *, distinct_branches=False):
     # Test-only provider substitution inside the actual native sandbox. No production switch.
     provider = bundle / "offline_provider.py"
     provider.write_text(f"""import builtins, os, runpy, sys
 from typing import ClassVar
 {inspect.getsource(Provider)}
 Provider.reject = {reject!r}
+branch_count = 0
+original_generate = Provider.generate
+def generate(self, system, user, **kwargs):
+    global branch_count
+    result = original_generate(self, system, user, **kwargs)
+    if {distinct_branches!r} and kwargs.get('label') == 'implementor.code':
+        branch_count += 1
+        result['forward_body'] += '  # branch ' + str(branch_count)
+    return result
+Provider.generate = generate
 assert os.environ['EXPLICIT_TEST_KEY'] == 'bound-value'
 assert 'UNRELATED_SENTINEL' not in os.environ
 original = builtins.__import__
@@ -227,3 +239,96 @@ process.subprocess.Popen = spawn
 runpy.run_module('tools.candidate_operations', run_name='__main__')
 """)
     return submitter
+
+
+def test_fanout_public_detached_cli_preserves_instance_trace(prepared, tmp_path):
+    from tests.helpers.candidate_fanout import fanout_request
+    from tools.candidate_operations import OperationStoreConfig
+
+    request = fanout_request(prepared).model_copy(
+        update={
+            "environment_names": ("EXPLICIT_TEST_KEY", "OPENAI_API_KEY"),
+        }
+    )
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "state"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    config_path = tmp_path / "store.json"
+    config_path.write_text(config.model_dump_json())
+    submitter = native_submitter(
+        tmp_path, Path(request.preview.project_root), distinct_branches=True
+    )
+    submission = CandidateOperation(request_id=uuid4(), request=request)
+    envelope = tmp_path / "graph.json"
+    envelope.write_text(submission.model_dump_json())
+    result = cli(
+        config_path,
+        "submit",
+        "--request",
+        str(envelope),
+        harness=submitter,
+        env={
+            **environment((), {}),
+            "EXPLICIT_TEST_KEY": "bound-value",
+            "OPENAI_API_KEY": "offline-test-key",
+        },
+    )
+    assert json.loads(result.stdout)["observation"] == "starting"
+    wait_for(lambda: releasable(config, submission.request_id), timeout=90)
+    status = json.loads(
+        cli(config_path, "status", "--operation-id", str(submission.request_id)).stdout
+    )
+    assert status["state"] == "completed", status
+    assert status["receipt"]["status"] == "accepted", status
+    trace = status["receipt"]["graph_trace"]["nodes"]
+    assert len(trace) == 5 and all(item["state"] == "succeeded" for item in trace)
+    assert trace[2]["predecessors"] == ["build0", "propose"]
+    assert trace[4]["predecessors"] == ["build1", "propose"]
+    for index in (2, 4):
+        record = json.loads(Path(trace[index]["record_path"]).read_bytes())
+        assert record["tests_passed"] and record["gradient_check_passed"]
+    assert (
+        read_operation(config, submission.request_id).receipt.model_dump(mode="json")
+        == status["receipt"]
+    )
+    from fastapi.testclient import TestClient
+
+    from tools.candidate_console.app import create_app
+    from tools.candidate_console.models import ConsoleConfig
+
+    token_file = tmp_path / "auth-token"
+    token_file.write_text(secrets.token_urlsafe(32))
+    token_file.chmod(0o600)
+    app = create_app(
+        ConsoleConfig(
+            operation_store=config,
+            port=8765,
+            browser_origin="http://127.0.0.1:8765",
+            auth_token_file=str(token_file),
+        )
+    )
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        response = client.get(
+            f"/api/operations/{submission.request_id}",
+            headers={"Authorization": "Bearer " + token_file.read_text()},
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["graph_trace"] == status["receipt"]["graph_trace"]
+    implementations = [
+        json.loads(Path(trace[index]["record_path"]).read_bytes()) for index in (1, 3)
+    ]
+    assert implementations[0]["model_type"] == implementations[1]["model_type"]
+    assert (
+        Path(implementations[0]["model_file_path"]).read_bytes()
+        != Path(implementations[1]["model_file_path"]).read_bytes()
+    )
+    original_native_id = load_record(config, submission.request_id).native_id
+    Path(request.preview.project_root, "seed.json").unlink()
+    assert (
+        json.loads(cli(config_path, "submit", "--request", str(envelope)).stdout)["observation"]
+        == "existing"
+    )
+    assert load_record(config, submission.request_id).native_id == original_native_id
+    (tmp_path / "final-status.json").write_text(json.dumps(status, indent=2))

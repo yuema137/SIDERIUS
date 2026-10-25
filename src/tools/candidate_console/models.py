@@ -10,6 +10,7 @@ from tools.candidate_operations import OperationStoreConfig
 from tools.candidate_operations.models import ProcessObservation
 from tools.candidate_operations.native_chain_models import NativeChainObservation
 from tools.candidate_prepare.models import CandidatePreparationRequest
+from tools.candidate_worker.graph_models import GraphTrace
 from tools.workflow_authoring.models import Project
 from tools.workflow_preview.models import PreviewModel
 from tools.workspace_sandbox.profile import SandboxProfile
@@ -163,6 +164,7 @@ class StatusView(PreviewModel):
     native_status: str | None
     native_id: str | None
     validation_passed: bool | None
+    graph_trace: GraphTrace | None = Field(default=None, exclude_if=lambda value: value is None)
     native_chain: NativeChainObservation | None = Field(
         default=None, exclude_if=lambda value: value is None
     )

@@ -367,3 +367,97 @@ def test_unowned_or_conflicting_constraint_claim_refused(prepared, native_runner
     )
     assert expected in receipt.error
     assert not native_runner.calls
+
+
+@pytest.mark.parametrize("reject", [False, True])
+def test_fanout_runs_native_branches_with_separate_same_name_artifacts(
+    prepared, native_runner, monkeypatch, reject
+):
+    from tests.helpers.candidate_fanout import fanout_request
+    from tools.candidate_worker.graph_evidence import verify_graph_trace
+    from tools.candidate_worker.models import CandidateRunReceipt
+
+    original = native_runner.generate
+    implementations = []
+
+    def generate(self, system, user, **kwargs):
+        result = original(self, system, user, **kwargs)
+        if kwargs.get("label") == "implementor.code":
+            implementations.append(result)
+            result["forward_body"] += f"  # branch {len(implementations)}"
+        return result
+
+    monkeypatch.setattr(native_runner, "generate", generate)
+    native_runner.reject = reject
+    request = fanout_request(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.status == ("rejected" if reject else "accepted"), receipt.error
+    assert receipt.graph_trace is not None
+    assert len(receipt.graph_trace.nodes) == 5
+    records = [json.loads(Path(item.record_path).read_text()) for item in receipt.graph_trace.nodes]
+    assert records[1]["model_type"] == records[3]["model_type"] == "worker_linear"
+    assert records[1]["model_file_path"] != records[3]["model_file_path"]
+    assert (
+        Path(records[1]["model_file_path"]).read_bytes()
+        != Path(records[3]["model_file_path"]).read_bytes()
+    )
+    assert records[2]["tests_passed"] and records[4]["tests_passed"]
+    initial = CandidateRunReceipt.model_validate_json(
+        (Path(receipt.workspace) / "candidate_run/launch.json").read_bytes()
+    )
+    verify_graph_trace(request, initial, receipt)
+    Path(receipt.graph_trace.nodes[1].record_path).write_text("{}")
+    with pytest.raises(ValueError, match="record mismatch"):
+        verify_graph_trace(request, initial, receipt)
+
+
+def test_fanout_validation_refuses_same_identity_sibling_artifact(
+    prepared, native_runner, monkeypatch
+):
+    from tests.helpers.candidate_fanout import fanout_request
+    from tools.candidate_worker import phases
+
+    original = phases.run_implementation
+    outputs = []
+
+    def swapped(*args, **kwargs):
+        output, path = original(*args, **kwargs)
+        outputs.append(output)
+        return outputs[0], path
+
+    monkeypatch.setattr(phases, "run_implementation", swapped)
+    receipt = launch_candidate(fanout_request(prepared))
+    assert receipt.status == "failed"
+    assert receipt.graph_trace.nodes[2].state == "succeeded"
+    assert receipt.graph_trace.nodes[4].state == "failed"
+
+
+def test_join_protocol_optional_arguments_preserve_existing_defaults(prepared, native_runner):
+    from agent.schemas.implementor import ImplementorOutput
+    from agent.schemas.proposal import ProposalOutput
+    from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+    from tests.helpers.candidate_fanout import fanout_request
+    from workflows.candidate_validation_join import proposed_implementation_to_validation
+
+    receipt = launch_candidate(fanout_request(prepared, 1))
+    assert receipt.status == "accepted"
+    proposal = ProposalOutput.model_validate_json(Path(receipt.native_output_paths[0]).read_bytes())
+    implemented = ImplementorOutput.model_validate_json(
+        Path(receipt.native_output_paths[1]).read_bytes()
+    )
+    storage = StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(
+            workspace=receipt.graph_trace.nodes[1].storage, run_name=receipt.run_name
+        ),
+    )
+    mapped = proposed_implementation_to_validation(proposal, implemented, storage)
+    baseline = local_all_fields(implemented, storage)
+    assert mapped == baseline
+    assert mapped.model_io_contract == implemented.model_io_contract
+    assert mapped.segmentation_applicability == implemented.segmentation_applicability
+    with pytest.raises(ValueError, match="identity"):
+        proposed_implementation_to_validation(
+            proposal, implemented.model_copy(update={"candidate_id": None}), storage
+        )

@@ -9,6 +9,13 @@ if TYPE_CHECKING:
 
 
 def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefinition") -> None:
+    predecessor_facts(definition)
+
+
+def predecessor_facts(
+    definition: "WorkflowDefinition | ReusableWorkflowDefinition",
+) -> tuple[tuple[str, frozenset[str]], ...]:
+    """Validate every argument and return immutable scheduling dependencies."""
     from .models import ExternalRequest, ExternalSource
 
     externals = {item.id: item for item in definition.externals}
@@ -74,6 +81,8 @@ def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefini
         if not ready:
             raise ValueError("Cycles and feedback are unsupported in this declaration version")
         pending = {node: sources - ready for node, sources in pending.items() if node not in ready}
+
+    return tuple((node, frozenset(sources)) for node, sources in dependencies.items())
 
 
 def validate_positions(

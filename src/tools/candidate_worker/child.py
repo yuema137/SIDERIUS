@@ -7,7 +7,7 @@ from pathlib import Path
 from core.generated_library import bind_generated_library_to_workspace
 from tools.workflow_preview.files import observe_file
 
-from .launch import publish
+from .launch import bounded_terminal, publish
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .source import verify_snapshot
 
@@ -16,6 +16,8 @@ def execute(request_path: Path) -> CandidateRunReceipt:
     request = CandidateRunRequest.model_validate_json(request_path.read_bytes())
     control = request_path.parent
     initial = CandidateRunReceipt.model_validate_json((control / "launch.json").read_bytes())
+    if initial.graph_trace is not None:
+        raise ValueError("launch receipt cannot contain graph evidence")
     workspace = Path(initial.workspace)
     if request_path != workspace / "candidate_run" / "request.json":
         raise ValueError("child request path disagrees with claimed workspace")
@@ -33,7 +35,10 @@ def execute(request_path: Path) -> CandidateRunReceipt:
     from .native import execute_native
 
     receipt = execute_native(request, initial)
-    publish(control / "child.json", receipt)
+    graph = request.preview.execution_profile is not None
+    if graph:
+        receipt = bounded_terminal(initial, receipt)
+    publish(control / "child.json", receipt, bounded=graph)
     return receipt
 
 

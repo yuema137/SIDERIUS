@@ -21,6 +21,7 @@ from nodes.llm_settings import VALIDATE
 from workflows.attempt_storage import ImplAttemptStorage, impl_attempt_storage
 from workflows.definition import ExternalRequest, ExternalSource, ProtocolRequest
 from workflows.definition.candidate import candidate_nodes
+from workflows.definition.catalog import PROTOCOLS
 from workflows.definition.models import ExternalBinding
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition, build_task_composition_ref
@@ -169,8 +170,13 @@ def reconcile_protocol_inputs(
     used: set[str] = set()
     for protocol in protocols:
         for argument in protocol.arguments:
-            if argument.name == "output":
-                continue  # preview already proved this exact upstream result edge
+            contract = next(
+                item.contract
+                for item in PROTOCOLS[protocol.protocol].arguments
+                if item.name == argument.name
+            )
+            if contract in ("proposal.output", "implementation.output"):
+                continue  # declaration admission proves the selected typed result edge
             if not isinstance(argument.source, ExternalSource):
                 raise ValueError("only upstream output may be supplied by a result")
             binding = externals[argument.source.binding]
@@ -232,11 +238,7 @@ def materialize(
         control=control,
         admitted=admitted,
     )
-    validator = config.get("validate")
-    provider = TypeAdapter(Literal["gemini", "openai", "deepseek"]).validate_python(
-        validator.get("provider", VALIDATE.provider)
-    )
-    model = validator.get("model_id", VALIDATE.model_id) or default_model_for_provider(provider)
+    provider, model = validator_settings(config)
     externals = {item.id: item for item in definition.externals}
     used = {proposal_request.binding}
     if admitted is not None:
@@ -264,3 +266,15 @@ def materialize(
     if used != set(externals):
         raise ValueError("unused external inputs are unsupported by the candidate worker")
     return NativeInputs(seed, attempt, provider, model)
+
+
+def validator_settings(
+    config: WorkflowLLMConfig,
+) -> tuple[Literal["gemini", "openai", "deepseek"], str]:
+    """Resolve the native validator defaults once for fixed and instance layouts."""
+    validator = config.get("validate")
+    provider = TypeAdapter(Literal["gemini", "openai", "deepseek"]).validate_python(
+        validator.get("provider", VALIDATE.provider)
+    )
+    model = validator.get("model_id", VALIDATE.model_id) or default_model_for_provider(provider)
+    return provider, model

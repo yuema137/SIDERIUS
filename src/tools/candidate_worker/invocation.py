@@ -1,6 +1,7 @@
-"""Internal fixed-slot invocation identity, independent of scientific candidate IDs."""
+"""Native invocation identity, independent of scientific candidate IDs."""
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from agent.schemas.storage import StorageConfig
@@ -15,10 +16,10 @@ NativePhase = Literal["proposal", "implementation", "validation"]
 
 @dataclass(frozen=True)
 class FixedInvocationContext:
-    """Snapshot of an admitted fixed invocation; never a graph storage namespace.
+    """Snapshot of an admitted fixed or explicitly declared instance invocation.
 
     Storage values are copied from materialized inputs, not retained as a mutable
-    Pydantic object. Node IDs select a declaration identity, never a path or prompt.
+    Pydantic object. Admission derives managed slots from declaration identities.
     The existing candidate worker exposes only iteration 1 and attempt 1.
     """
 
@@ -44,7 +45,30 @@ class FixedInvocationContext:
         This compares invocation bindings only. Materialize retains scientific
         and external-input reconciliation; candidate_nodes retains shape checks.
         """
-        node_ids = candidate_nodes(request.preview.document.definition)
+        if request.preview.execution_profile is not None:
+            from workflows.attempt_storage import impl_attempt_storage
+            from workflows.definition.fanout import proposal_fanout
+
+            from .layout import graph_instance_dir
+
+            definition = request.preview.document.definition
+            shape = proposal_fanout(definition)
+            node = next((node for node in definition.nodes if node.id == self.node_id), None)
+            if node is None or node.capability != phase:
+                raise ValueError("native invocation node/phase binding disagrees")
+            parent = dict((validation, impl) for impl, validation in shape.branches)
+            owner = parent.get(self.node_id, self.node_id)
+            directory = graph_instance_dir(Path(initial.workspace), request.run_name, owner)
+            expected = (
+                str(directory)
+                if phase == "proposal"
+                else impl_attempt_storage(str(directory), request.run_name, 1).impl_dir
+            )
+            if self.storage_workspace != expected:
+                raise ValueError("native invocation storage binding disagrees")
+            node_ids = {phase: self.node_id}
+        else:
+            node_ids = candidate_nodes(request.preview.document.definition)
         self.require_resolved_binding(
             initial,
             run_name=request.run_name,
