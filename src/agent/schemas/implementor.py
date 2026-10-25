@@ -540,6 +540,12 @@ class ImplementorOutput(BaseModel):
         exclude_if=lambda value: value is None,
         description="Task-owned validation input identity, transported without reinterpretation.",
     )
+    segmentation_applicability: Literal["temporal", "not_applicable"] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Task-owned segmentation applicability echoed with the candidate; "
+        "it does not establish additional valid input dimensions.",
+    )
     model_io_contract: ModelIOContract | None = Field(
         default=None,
         description="The normalized Model-I/O contract this candidate was "

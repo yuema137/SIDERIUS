@@ -18,6 +18,7 @@ DOES write a ``capability_type='model'`` entry to the index (criterion
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -72,8 +73,9 @@ class TestBranchBShortCircuit:
     generation and returns an ImplementorOutput pointing at the existing
     plugin path."""
 
+    @pytest.mark.parametrize("applicability", [None, "temporal", "not_applicable"])
     def test_branch_b_hit_skips_llm_and_reuses_registered_path(
-        self, agent_with_mocks, tmp_path: Path, storage
+        self, agent_with_mocks, tmp_path: Path, storage, applicability
     ):
         # Pre-populate the registry with a model entry the proposer wants to reuse.
         existing_path = str(tmp_path / "global_models" / "wavenet_baseline_v16.py")
@@ -91,8 +93,24 @@ class TestBranchBShortCircuit:
             )
         )
         inp = _branch_b_input(tmp_path, storage, model_name="wavenet_baseline_v16")
+        from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
+        from tests.helpers.step04a_fixtures import forward_contract, tidmad_model_io
+
+        inp.forward_contract = forward_contract(tidmad_model_io())
+        inp.forward_contract.segmentation_applicability = applicability
 
         out = agent_with_mocks.run(inp)
+
+        validator = local_all_fields(out, storage)
+        assert out.model_io_contract == inp.forward_contract.model_io
+        assert out.segmentation_applicability == applicability
+        assert validator.segmentation_applicability == applicability
+        for payload in (json.loads(out.model_dump_json()), json.loads(validator.model_dump_json())):
+            if applicability is None:
+                assert "segmentation_applicability" not in payload
+            else:
+                assert payload["segmentation_applicability"] == applicability
+        assert not (tmp_path / "ws" / "implementor_iter_002.json").exists()
 
         # No LLM call (neither reasoning nor code commit).
         agent_with_mocks.bridge.generate_text.assert_not_called()
