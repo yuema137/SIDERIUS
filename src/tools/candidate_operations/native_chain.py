@@ -7,9 +7,9 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+from core.native_observation import observation_policy
 from tools.candidate_worker.preflight import credential_requirements, require_credentials
 from tools.native_chain.models import NativeChainCapture
-from tools.native_chain.observation import CURRENT_OBSERVATION_POLICY
 from tools.native_chain.review import read_bytes as capture_bytes
 from tools.workflow_preview.models import FileObservation
 from tools.workspace_sandbox.profile import SandboxProfile, runtime_roots
@@ -303,7 +303,7 @@ def publish_chain_terminal(
         workspace=fresh.workspace,
         runtime_digest=hashlib.sha256(encode(record.runtime)).hexdigest(),
         supervision=supervision,
-        observation_policy=CURRENT_OBSERVATION_POLICY,
+        observation_policy=observation_policy(request.max_evidence_read_bytes),
         evidence=chain_evidence(record),
     )
     payload = encode(terminal)

@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import Field
 
+from core.native_observation import EvidenceReadBytes
 from tools.native_chain.observation import NativeChainEvidence, ObservationPolicy
 from tools.workflow_preview.models import FileObservation, PreviewModel
 from tools.workspace_sandbox.runner import ObservedExecutionResult
@@ -24,6 +25,9 @@ class NativeChainOperationRequest(PreviewModel):
     input_max_bytes: int = Field(gt=0, le=16 * 1024 * 1024, strict=True)
     max_iterations_observed: int = Field(gt=0, le=1000, strict=True)
     max_observation_bytes: int = Field(gt=0, le=1024 * 1024, strict=True)
+    max_evidence_read_bytes: EvidenceReadBytes | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class NativeChainOperation(PreviewModel):

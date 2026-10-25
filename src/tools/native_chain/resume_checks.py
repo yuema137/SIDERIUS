@@ -75,6 +75,7 @@ def verify_baseline(workspace: Path, run_name: str, reservation: ResumeReservati
             final_iteration=reservation.final_iteration,
             input_max_bytes=reservation.input_max_bytes,
             max_observation_bytes=reservation.max_observation_bytes,
+            max_evidence_read_bytes=reservation.max_evidence_read_bytes,
         ),
         policy=reservation.observation_policy,
     )

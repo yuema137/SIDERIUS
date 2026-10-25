@@ -28,7 +28,8 @@
       ['Envelope', result.envelope], ['Read-only paths', result.read_only.join('\n') || '(none)'], ['Network', result.network],
       ['Devices', result.devices.join(', ') || '(none)'], ['Forwarded environment names', result.environment_names.join(', ') || '(none)'],
       ['Timeout seconds', result.timeout_seconds], ['Input byte limit', result.input_max_bytes],
-      ['Iteration observation limit', result.max_iterations_observed], ['Observation byte limit', result.max_observation_bytes],
+      ['Iteration observation limit', result.max_iterations_observed], ['Result summary limit (bytes)', result.max_observation_bytes],
+      ['Total result-file read limit (bytes)', result.max_evidence_read_bytes ?? `${result.max_observation_bytes} (shared with summary)`],
       ['Required credential names', r.required_names.join(', ') || '(none)'], ['Present names', r.present_names.join(', ') || '(none)'],
       ['Missing names', r.missing_names.join(', ') || '(none)'], ['Omitted names', r.omitted_names.join(', ') || '(none)'],
       ['Credential file status', r.file_status], ['Repair', r.instructions.join('\n') || '(none)']];

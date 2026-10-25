@@ -202,6 +202,14 @@ Review and submit the saved request:
 .venv/bin/python -m tools.candidate_operations submit --store-config store.json --request chain-operation.json
 ```
 
+For larger result files, add `max_evidence_read_bytes` to `chain-operation.json`
+before submitting a new run. It limits the total bytes read from result and
+manifest files; `input_max_bytes` still limits each file. The separate
+`max_observation_bytes` limits the short status summary. JSON parsing may use more
+RAM than the encoded files: the read budget does not include that overhead.
+Already submitted runs keep their original limits. GUI, Professional and
+Assistant use the same request and reader.
+
 Retain the request UUID for retries. Existing status and log commands keep working
 after submission exits. Read shell outcome, cleanup and checkpoint verification
 separately: a completed process is not a scientific success. The native shell

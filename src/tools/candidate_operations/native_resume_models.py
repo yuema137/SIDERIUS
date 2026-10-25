@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import Field
 
+from core.native_observation import observation_policy
 from core.native_writer.resume_models import ResumeReservation, WriterSnapshot
 from tools.native_chain.observation import NativeChainEvidence
 from tools.workflow_preview.models import PreviewModel
@@ -71,4 +72,6 @@ def reservation_for(
         final_iteration=admission.root_admission.final_iteration,
         input_max_bytes=admission.root_request.input_max_bytes,
         max_observation_bytes=admission.root_request.max_observation_bytes,
+        max_evidence_read_bytes=admission.root_request.max_evidence_read_bytes,
+        observation_policy=observation_policy(admission.root_request.max_evidence_read_bytes),
     )

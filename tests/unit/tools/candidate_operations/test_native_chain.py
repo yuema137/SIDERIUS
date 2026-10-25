@@ -24,7 +24,7 @@ from tools.workspace_sandbox.runner import ExecutionResult, ObservedExecutionRes
 
 
 @pytest.fixture
-def chain(tmp_path):
+def chain(tmp_path, request):
     envelope = tmp_path / "envelope"
     envelope.mkdir()
     source = tmp_path / "capture.json"
@@ -48,6 +48,7 @@ def chain(tmp_path):
             input_max_bytes=16777216,
             max_iterations_observed=2,
             max_observation_bytes=1048576,
+            max_evidence_read_bytes=getattr(request, "param", None),
         ),
     )
     runtime = runtime_identity()
