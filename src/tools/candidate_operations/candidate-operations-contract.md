@@ -423,3 +423,132 @@ Tokens are not applicable for both preparation variants, after integrity checks.
 Old prepare/candidate serialized records and request digests are unchanged by this
 variant. New reusable top receipts carry the invocation UUID; legacy receipts omit
 only that new field when absent, preserving all historical null fields.
+
+## Captured native chain operation
+
+`NativeChainOperation(kind="native_chain")` carries an A-owned capture path and
+SHA-256, an explicitly created empty envelope, read-only roots, network/devices,
+environment names, timeout and read bounds. Candidate roots also allowlist chain
+envelopes. The capture's workspace must be exactly `envelope/workspace`, absent
+until native shell admission; neither operation review nor claim creates it.
+Capture/pin bytes use A's reader and its exact captured limit, at most 16 MiB.
+Operation JSON remains limited to 4 MiB. Observation controls explicitly bound
+indices to 1000 and evidence to 1 MiB; they introduce no scientific defaults.
+
+`review --store-config FILE --request FILE` returns a typed admission without
+claiming or launching. Submit repeats review after existing-ID recovery. Review
+uses the exact interpreter and a subprocess cwd to invoke A's real `check admit`;
+server cwd is unchanged. Full resolved native routes use existing credential
+policy, including interpretation and tuning. Only names/requirements persist.
+Captured settings are not rewritten into a candidate loop or another scheduler.
+The native shell remains the sole scheduler. Capture source/config/package edits
+may refuse admission or a subsequent native iteration; capture is not portable
+snapshot replay.
+
+Each stored chain admission retains workspace, final index, run name, recipe,
+input digests and exact checkout/Git metadata directories. The detached child
+compares a fresh admission, exclusively creates `.native-chain-operation` in the
+empty envelope, verifies its identity and dispatches the original captured shell
+with exact capture controls. Claim collisions refuse before dispatch; partial
+claims are never reused or removed. Original files and linked-worktree Git
+metadata are mounted read-only at original paths. The envelope is the only
+writable project mount; the host operation store is never mounted. Git alternates
+and GIT_* environment injection are unsupported. Missing sandbox support has no
+unsandboxed fallback.
+
+`run_observed` adds supervision evidence without changing legacy `run`: actual
+shell result, shared-owner group cleanup and direct-child reaping. Only a proven
+pre-spawn failure is safe pre-dispatch failure; post-spawn exceptions are unknown.
+A sampled present/unknown group remains unresolved even if it exits later.
+The private host `native-chain-terminal.json` is bound by Completion. It is not a
+scientific receipt: `receipt_available` stays false. Terminal identity, proven
+cleanup and wrapper exit govern release, separately from scientific evidence.
+Missing/modified host terminal or contradictory pre-dispatch completion blocks
+release. Failed/timeout shell outcomes remain visible even when lifecycle finishes.
+Both log kinds read the inherited private operation log for this kind. Token
+aggregation returns a typed `not_supported` error. Same UUID recovery reads only
+stored identity and evidence, even after original capture deletion and key loss.
+No resume, cancellation, GUI launch, token aggregation or scientific qualification
+is added by this code-consumer boundary.
+
+The chain snapshot's `native_chain.evidence` reports bounded current checkpoint
+observations, distinct from immutable `native_chain.terminal.evidence`. Active
+observations cannot complete lifecycle. Final reads compare current observation
+with terminal evidence; changed/disappeared evidence reports integrity_failure,
+while trustworthy cleanup still permits lifecycle release. Manifest and artifact
+verification flags remain distinct: legacy unverified artifacts never become
+verified. `no_records` remains its own native status. Scores and formal-evidence
+counts come only from validated HyperparamTuningOutput and its existing role
+owner. No metric arithmetic or interpretation of human detail strings is added.
+
+Directory discovery, per-file bytes, aggregate retained bytes and emitted evidence
+are bounded. Limits produce `limit_exceeded` with no truncated checkpoint list.
+Artifact paths must remain canonical within the scheduled iteration; aliases and
+escapes refuse. The observation reader reads each bounded artifact once; the shared manifest verifier
+hashes supplied bytes and HyperparamTuningOutput parses those same bytes. Existing
+verifier callers retain their file behavior. The legacy inspector now delegates
+its original unbounded chain projection to `tools.native_chain.inspection`, with
+unchanged human display and next-iteration semantics. The new strict observation
+path does not silently impose new bounds on the legacy inspector.
+
+Only the native `.token_run_id` sidecar is read (at most 256 bytes), validated as
+`run_name-YYYYMMDDTHHMMSS-pid`, and retained with its byte digest. It is distinct
+from operation/native invocation UUIDs. No invented token-to-checkpoint binding
+or token-row aggregation is supplied. Missing sidecar remains unavailable.
+
+Required `NativeChainOperationRequest` JSON fields are `capture_path`,
+`capture_sha256`, `envelope`, `read_only`, `network`, `devices`,
+`environment_names`, `timeout_seconds`, `input_max_bytes`,
+`max_iterations_observed`, and `max_observation_bytes`. There are no implicit
+request defaults. `input_max_bytes` equals A's `launch_binding.file_max_bytes`
+and is strict positive <=16 MiB; `max_iterations_observed` is strict positive
+<=1000 and must cover the captured final iteration; `max_observation_bytes` is
+strict positive <=1 MiB. Enumeration permits at most twice the captured final
+index (iteration directory plus its native hardware file) plus the fixed
+recognized native control-name count. Unrecognized entries consume that same
+budget and remain explicit anomalies. This is distinct from reading those
+control files, which the checkpoint observer does not do.
+
+## Construct a native chain operation
+
+Save this complete recipe as an external `build_chain_operation.py`; replace
+capture/input/data paths and choose sandbox resources before invocation. It
+computes the capture identity automatically and preserves A's exact byte limit.
+Run once and retain the resulting `chain-operation.json` for UUID recovery.
+
+```python
+import hashlib
+from pathlib import Path
+from uuid import uuid4
+from tools.candidate_operations import NativeChainOperation, NativeChainOperationRequest
+from tools.native_chain.models import NativeChainCapture
+
+capture_path = Path("/absolute/external/review/capture.json")
+capture_bytes = capture_path.read_bytes()
+capture = NativeChainCapture.model_validate_json(capture_bytes)
+assert capture.environment.launch_binding is not None
+submission = NativeChainOperation(
+    request_id=uuid4(),  # Generate once; reuse the saved JSON for every retry.
+    request=NativeChainOperationRequest(
+        capture_path=str(capture_path),
+        capture_sha256=hashlib.sha256(capture_bytes).hexdigest(),
+        envelope=str(capture.declaration.run.workspace.parent),
+        read_only=("/absolute/external/task-inputs", "/absolute/external/data"),
+        network=False,
+        devices=(),
+        environment_names=(),  # Pseudo routes need no provider keys.
+        timeout_seconds=300,
+        input_max_bytes=capture.environment.launch_binding.file_max_bytes,
+        max_iterations_observed=capture.declaration.run.final_iteration,
+        max_observation_bytes=1048576,
+    ),
+)
+Path("chain-operation.json").write_text(submission.model_dump_json(indent=2))
+```
+
+The empty envelope must have been created before capture review. Its native
+workspace remains absent until native shell launch. The explicit 300-second
+timeout and 1 MiB observation budget are example caller choices. Configure
+provider environment names for enabled real routes. Explicit GPU device paths
+and read-only `/sys` may be needed to reproduce captured hardware facts; select
+the actual host paths, never bypass installation/hardware binding. No GUI or automatic capture builder is implied.

@@ -10,6 +10,7 @@ from tools.candidate_worker import launch_candidate
 
 from .files import canonical, publish, read_model
 from .models import Completion, OperationRecord
+from .native_chain import execute_native_chain
 from .process import current_identity, runtime_identity
 from .read import native_receipt
 from .reusable import verify_reusable_operation
@@ -36,6 +37,10 @@ def execute(path: Path) -> int:
         ):
             pre_dispatch_reason = "reusable_preparation_failed"
             verify_reusable_operation(record.config, record.submission)
+        if record.submission.kind == "native_chain":
+            completion = execute_native_chain(record, path)
+            publish(path / "completion.json", completion)
+            return 0 if completion.outcome == "native_chain" else 1
         entered = True
         if record.submission.kind == "prepare":
             prepare_candidate(record.submission.request, invocation_id=record.native_id)

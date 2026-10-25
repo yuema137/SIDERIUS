@@ -15,6 +15,7 @@ from .models import (
     OperationFailure,
     OperationStoreConfig,
 )
+from .native_chain import review_native_chain_operation
 from .read import read_operation
 from .submit import submit_operation
 
@@ -24,10 +25,10 @@ def main() -> int:
         description="Submit or inspect one detached native candidate operation"
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("submit", "status", "log"):
+    for name in ("submit", "review", "status", "log"):
         command = commands.add_parser(name)
         command.add_argument("--store-config", required=True)
-        if name == "submit":
+        if name in {"submit", "review"}:
             command.add_argument("--request", required=True)
         else:
             command.add_argument("--operation-id", required=True)
@@ -40,9 +41,16 @@ def main() -> int:
         config = OperationStoreConfig.model_validate_json(
             read_bytes(Path(args.store_config).absolute())
         )
-        if args.command == "submit":
+        if args.command in {"submit", "review"}:
             submission = SUBMISSION.validate_json(read_bytes(Path(args.request).absolute()))
-            result = submit_operation(config, submission, launch_environment=os.environ)
+            if args.command == "review":
+                if submission.kind != "native_chain":
+                    raise OperationFailure("kind", "review requires native_chain")
+                result = review_native_chain_operation(
+                    config, submission, launch_environment=os.environ
+                )
+            else:
+                result = submit_operation(config, submission, launch_environment=os.environ)
         elif args.command == "status":
             result = read_operation(config, UUID(args.operation_id))
         else:

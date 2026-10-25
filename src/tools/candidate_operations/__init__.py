@@ -14,6 +14,12 @@ from .models import (
     ReusablePreparationExpectation,
     ReusablePrepareOperation,
 )
+from .native_chain import review_native_chain_operation
+from .native_chain_models import (
+    NativeChainAdmission,
+    NativeChainOperation,
+    NativeChainOperationRequest,
+)
 from .prepared import read_prepared_candidate
 from .read import lookup_operation_request, read_operation, recover_reusable_preparation
 from .reusable import build_reusable_operation
@@ -25,6 +31,9 @@ __all__ = [
     "CandidateOperation",
     "LogChunk",
     "LogReadRequest",
+    "NativeChainAdmission",
+    "NativeChainOperation",
+    "NativeChainOperationRequest",
     "OperationHandle",
     "OperationSnapshot",
     "OperationStoreConfig",
@@ -41,5 +50,6 @@ __all__ = [
     "read_operation_tokens",
     "read_prepared_candidate",
     "recover_reusable_preparation",
+    "review_native_chain_operation",
     "submit_operation",
 ]

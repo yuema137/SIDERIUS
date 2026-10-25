@@ -3,7 +3,7 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, model_validator
 
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
 from tools.candidate_prepare.reusable_models import (
@@ -14,6 +14,8 @@ from tools.candidate_prepare.reusable_models import (
 )
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.workflow_preview.models import FileObservation, PreviewModel
+
+from .native_chain_models import NativeChainAdmission, NativeChainObservation, NativeChainOperation
 
 
 class OperationStoreConfig(PreviewModel):
@@ -49,7 +51,8 @@ class CandidateOperation(PreviewModel):
 
 
 OperationSubmission = Annotated[
-    PrepareOperation | ReusablePrepareOperation | CandidateOperation, Field(discriminator="kind")
+    PrepareOperation | ReusablePrepareOperation | CandidateOperation | NativeChainOperation,
+    Field(discriminator="kind"),
 ]
 SUBMISSION = TypeAdapter(OperationSubmission)
 NativeReceipt = CandidatePreparationReceipt | ReusablePreparationReceipt | CandidateRunReceipt
@@ -71,6 +74,27 @@ class OperationRecord(PreviewModel):
     runtime: RuntimeIdentity
     inputs: tuple[FileObservation, ...]
     admitted_at: str
+    native_chain_admission: NativeChainAdmission | None = None
+
+    @model_validator(mode="after")
+    def chain_binding(self):
+        admission = self.native_chain_admission
+        if self.submission.kind != "native_chain":
+            if admission is not None:
+                raise ValueError("chain admission on another operation kind")
+            return self
+        request = self.submission.request
+        if (
+            admission is None
+            or admission.request_digest != self.request_digest
+            or admission.capture_sha256 != request.capture_sha256
+            or admission.workspace != request.envelope + "/workspace"
+            or admission.checkout != self.runtime.source
+            or admission.input_files != self.inputs
+            or admission.final_iteration > request.max_iterations_observed
+        ):
+            raise ValueError("chain admission identity mismatch")
+        return self
 
 
 class ActiveOperation(PreviewModel):
@@ -99,14 +123,25 @@ class SpawnFailure(PreviewModel):
 class Completion(PreviewModel):
     operation_id: UUID
     request_digest: str
-    outcome: Literal["native", "pre_dispatch_failure", "unknown"]
+    outcome: Literal["native", "native_chain", "pre_dispatch_failure", "unknown"]
     receipt_digest: str | None = None
+    terminal_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def terminal_kind(self):
+        if self.outcome == "native_chain":
+            if self.terminal_digest is None or self.receipt_digest is not None:
+                raise ValueError("chain completion requires only terminal digest")
+        elif self.terminal_digest is not None:
+            raise ValueError("terminal digest requires chain completion")
+        return self
+
     reason: str
 
 
 class OperationHandle(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "prepare_reusable", "candidate"]
+    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain"]
     request_digest: str
     observed_at: str
     observation: Literal["starting", "existing", "operation_failed"]
@@ -114,7 +149,7 @@ class OperationHandle(PreviewModel):
 
 class OperationSnapshot(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "prepare_reusable", "candidate"]
+    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain"]
     request_digest: str
     observed_at: str
     state: Literal["active", "completed", "operation_failed", "unknown"]
@@ -123,6 +158,9 @@ class OperationSnapshot(PreviewModel):
     receipt_available: bool = False
     receipt_digest: str | None = None
     receipt: NativeReceipt | None = None
+    native_chain: NativeChainObservation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     reason: str
 
 

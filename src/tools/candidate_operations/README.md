@@ -62,7 +62,7 @@ before candidate execution.
      --kind native --offset 0 --limit 65536
    ```
 
-   `completed` means a validated native receipt exists. Read `receipt.status`:
+   For preparation and candidate kinds, `completed` means a validated native receipt exists. Read `receipt.status`:
    preparation can be `prepared`, while a candidate can be `accepted` or
    `rejected`; both can fail, time out or be interrupted. Acceptance means native
    candidate validation passed, not training or scientific scoring. A direct
@@ -170,3 +170,40 @@ the current file size reports truncation and restarts at zero. Same-size log
 replacement cannot be detected by this cursor. The
 [technical contract](candidate-operations-contract.md) defines integrity checks,
 credential limits and deployment boundaries.
+
+## Run a captured native chain
+
+For a captured native chain, first create a dedicated empty envelope under an
+allowed candidate root. Declare its absent `workspace` child in the native-chain
+source and create the capture using the [native-chain route](../native_chain/README.md).
+The outer directory is the envelope; the native shell creates its `workspace`
+child. Ask your coding agent to use the
+[complete construction recipe](candidate-operations-contract.md#construct-a-native-chain-operation)
+to generate `chain-operation.json` outside the envelope. Review the capture path,
+task-input and data directories, timeout, observation limits and sandbox access
+with it. The recipe reads the reviewed capture and prepares the operation identity
+automatically.
+
+Reuse that saved JSON for retries; do not generate a new request to recover a lost
+submission response. For real provider routes, select the required credential
+names and bind their values using the credential instructions above.
+
+The sandbox must observe the same hardware facts as the capture. If the reviewed
+runtime requires GPU visibility, select the required character devices under
+`/dev` and read-only `/sys` access. Empty device access works only when that
+captured runtime can be verified without those devices. The operation adapter
+supplies the exact checkout, interpreter and Git metadata access.
+
+Review and submit the saved request:
+
+```sh
+.venv/bin/python -m tools.candidate_operations review --store-config store.json --request chain-operation.json
+.venv/bin/python -m tools.candidate_operations submit --store-config store.json --request chain-operation.json
+```
+
+Retain the request UUID for retries. Existing status and log commands keep working
+after submission exits. Read shell outcome, cleanup and checkpoint verification
+separately: a completed process is not a scientific success. The native shell
+schedules iterations; this route does not resume existing workspaces. See the
+[operation contract](candidate-operations-contract.md#captured-native-chain-operation)
+for request fields, byte limits, recovery and evidence meanings.
