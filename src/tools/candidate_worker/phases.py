@@ -115,7 +115,7 @@ def run_validation(
     context.require_binding(request, initial, inputs, "validation")
     seed, attempt = inputs.proposal, inputs.attempt
     if request.preview.execution_profile is not None:
-        from workflows.candidate_requests import proposed_implementation_to_validation
+        from workflows.candidate_validation_join import proposed_implementation_to_validation
 
         assert seed.task_composition_ref is not None
         verify_artifacts(implemented, attempt, request.read_only, seed.task_composition_ref)

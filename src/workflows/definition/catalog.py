@@ -77,7 +77,7 @@ PROTOCOLS = MappingProxyType(
             ),
         ),
         "proposed-implementation-to-validation": ProtocolContract(
-            "workflows.candidate_requests.proposed_implementation_to_validation",
+            "workflows.candidate_validation_join.proposed_implementation_to_validation",
             "validation.input",
             (
                 ArgumentContract("proposal", "proposal.output"),

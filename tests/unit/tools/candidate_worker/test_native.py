@@ -438,7 +438,7 @@ def test_join_protocol_optional_arguments_preserve_existing_defaults(prepared, n
     from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
     from agent.schemas.storage import LocalStorageConfig, StorageConfig
     from tests.helpers.candidate_fanout import fanout_request
-    from workflows.candidate_requests import proposed_implementation_to_validation
+    from workflows.candidate_validation_join import proposed_implementation_to_validation
 
     receipt = launch_candidate(fanout_request(prepared, 1))
     assert receipt.status == "accepted"
