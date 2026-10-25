@@ -2,7 +2,8 @@
 
 `WorkflowAuthoring(Project)` owns inert read/review/save of one configured source.
 `AuthoredWorkflowDocument` (v1 or reusable v2), its native catalog and the source bridge own declaration
-semantics. Referenced files are never resolved or imported. Recovery copies do
+semantics. Ordinary source/document operations never resolve or import referenced
+files. Explicit task-reference review is the separate bounded inspection below. Recovery copies do
 not authorize execution and are never a source revision/publication system.
 
 `Project` selects an explicit normalized absolute project root, source file and
@@ -47,7 +48,8 @@ Binding choices derive from the same catalog for either variant. The browser
 renders managed_candidate externals as read-only managed roles; it never creates
 a location editor or location key for them. Unsupported preparation options have
 no structured editor and remain intact through other edits. Review/save remain
-inert declaration operations; reusable preparation/launch is not implemented.
+inert declaration operations for source/document proposals and unbound Save;
+reusable preparation/launch retain their candidate preparation/operation owners.
 
 ## Native training inspector
 
@@ -62,3 +64,49 @@ Nested workflow parameter rules are read-only in the inspector and editable in
 Source; untouched rules and advanced fields survive edits. Task rules are resolved
 later by native owners. All controls participate in the existing source-dirty,
 review, save, conflict and generation fences; launch payloads carry no overrides.
+
+## Bound-source publication boundary
+
+Inert read/review accepts the optional v2 TaskBinding declaration. Save currently
+refuses with `task_binding_unsupported` if either the current or proposed source
+is bound, before recovery/publication; identical bound bytes and pin removal also
+refuse. Keep the draft for later guarded publication. This is an explicitly
+unsupported boundary, not task-identity verification or executable approval.
+Unbound legacy Save retains its existing behavior.
+
+## Explicit task-reference inspection/review
+
+`WorkflowAuthoring(project, task_targets=...)` accepts typed `TaskReferenceTarget`
+projections of trusted configured choices. Code callers supply the same policy.
+The console projects only TaskChoice entries with explicit task_revision; no
+independent registry is introduced. Targets own configured manifest/data/config,
+read-only source roots, existing inspection parent and bounded check settings.
+The browser supplies no target path, factory, mount, environment or device policy.
+
+`ReviewRequest.proposal` additionally accepts `TaskReferenceUpdateProposal`
+(`kind="task_references"`, selected_choice_id, expected_task_binding). Selection
+alone/read/source review remain inert. Only this explicit proposal reads the
+configured LLM routing and invokes the existing setup-review composition child,
+without network/devices/caller environment or requested dataset/model/training/
+scoring/Health execution. See its returned limitations: trusted factories can
+read mounted inputs; no hostile-code or entire-import-closure guarantee exists.
+
+The existing POST `/api/editor/{project_id}/review` and Python service are actual
+consumers. Reusable v2 source is required. Unknown/unversioned choices or client
+pins differing from the configured selection refuse before child admission.
+`ReviewView.task_reference_update` is absent for ordinary reviews; explicit
+reviews return the original native owner summary and typed findings. The native
+semantic fingerprint and task_data_path_id must match the configured pin. Changed
+contents under the same readable label produce identity_mismatch; inspection or
+provider failure remains blocked, never substituted with a default provider.
+
+The proposal updates only selected manifest/data references and the accepted pin;
+it preserves nodes, bindings, options, settings and layout. No implicit remapping,
+default replacement or scientific compatibility policy exists here. A missing
+historical owner observation or changed binding is compatibility_unresolved and
+blocked; native facts and source diff do not certify scientific compatibility.
+Even a verified unchanged pin retains save_unsupported; save_supported and
+execution_ready are false. No canonical source/recovery/run is published. Only
+fresh local inspection scratch is written. A source change during inspection
+returns conflict with current bytes and inspectable proposal; final guarded Save
+and native preparation enforcement remain separate unsupported checkpoints.

@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.durable_io import publish_bytes_atomically, publish_bytes_write_once
+from workflows.definition import ReusableWorkflowDocument
 from workflows.definition.source import (
     WorkflowSourceError,
     parse_workflow_source,
@@ -32,6 +33,7 @@ from .models import (
     SourceView,
 )
 from .options import binding_options
+from .task_models import TaskReferenceTarget, TaskReferenceUpdateProposal
 from .training import training_inspector
 
 
@@ -55,7 +57,13 @@ def checked_path(path: Path) -> None:
 
 
 class WorkflowAuthoring:
-    def __init__(self, project: Project):
+    def __init__(self, project: Project, task_targets: tuple[TaskReferenceTarget, ...] = ()):
+        self.task_targets = {
+            target.choice_id: TaskReferenceTarget.model_validate_json(target.model_dump_json())
+            for target in task_targets
+        }
+        if len(self.task_targets) != len(task_targets):
+            raise ValueError("task reference choice IDs must be unique")
         self.project = Project.model_validate_json(project.model_dump_json())
         project = self.project
         for path in (project.project_root, project.source_file, project.recovery_directory):
@@ -160,11 +168,31 @@ class WorkflowAuthoring:
         current_payload = self._read_bytes()[0]
         base = self._view(current_payload)
         proposal = request.proposal
-        source = (
-            render_workflow_source(proposal.document)
-            if isinstance(proposal, DocumentProposal)
-            else proposal.source
-        )
+        task_review = None
+        if isinstance(proposal, TaskReferenceUpdateProposal):
+            from .task_references import review_task_references
+
+            base = self._base(current_payload, request.expected_sha256)
+            if not isinstance(base.document, ReusableWorkflowDocument):
+                raise AuthoringError(
+                    "task_reference_policy", "task-reference updates require reusable v2 source"
+                )
+            target = self.task_targets.get(proposal.selected_choice_id)
+            if target is None:
+                raise AuthoringError(
+                    "task_reference_policy", "select a configured version-aware task choice"
+                )
+            try:
+                updated, task_review = review_task_references(base.document, proposal, target)
+            except ValueError as error:
+                raise AuthoringError("task_reference_policy", str(error)) from error
+            source = render_workflow_source(updated)
+        else:
+            source = (
+                render_workflow_source(proposal.document)
+                if isinstance(proposal, DocumentProposal)
+                else proposal.source
+            )
         payload = source.encode("utf-8")
         if len(payload) > MAX_SOURCE_BYTES:
             raise AuthoringError("limit", "rendered editor source exceeds 32 KiB UTF-8")
@@ -178,6 +206,7 @@ class WorkflowAuthoring:
             )
         )
         review = ReviewView(
+            task_reference_update=task_review,
             source=source,
             sha256=digest(payload),
             diff=diff,
@@ -186,7 +215,10 @@ class WorkflowAuthoring:
             training=training_inspector(document),
         )
         try:
-            self._base(current_payload, request.expected_sha256)
+            self._base(
+                self._read_bytes()[0] if task_review is not None else current_payload,
+                request.expected_sha256,
+            )
         except AuthoringError as error:
             error.proposal = review
             raise
@@ -241,10 +273,18 @@ class WorkflowAuthoring:
         payload = request.source.encode("utf-8")
         if digest(payload) != request.proposal_sha256:
             raise AuthoringError("proposal", "reviewed source hash does not match")
-        parse_workflow_source(request.source)
+        proposed = parse_workflow_source(request.source)
         with self._locked():
             previous, mode = self._read_bytes()
-            self._base(previous, request.expected_sha256)
+            current = self._base(previous, request.expected_sha256)
+            if any(
+                isinstance(document, ReusableWorkflowDocument) and document.task_binding is not None
+                for document in (current.document, proposed)
+            ):
+                raise AuthoringError(
+                    "task_binding_unsupported",
+                    "Bound workflow Save is unsupported until guarded task-reference publication is implemented; keep the reviewed draft",
+                )
             if previous == payload:
                 return SaveView(sha256=digest(payload), recovery_ids=(), unchanged=True)
             recovery = (self._recover(previous), self._recover(payload))

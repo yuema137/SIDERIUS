@@ -9,6 +9,7 @@ from workflows.definition import AuthoredWorkflowDocument
 from workflows.definition.models import Source
 from workflows.definition.source import SourceDiagnostic
 
+from .task_models import TaskReferenceReview, TaskReferenceUpdateProposal
 from .training import TrainingInspector
 
 MAX_SOURCE_BYTES = 32 * 1024
@@ -45,7 +46,10 @@ class DocumentProposal(Model):
 
 class ReviewRequest(Model):
     expected_sha256: Digest
-    proposal: Annotated[SourceProposal | DocumentProposal, Field(discriminator="kind")]
+    proposal: Annotated[
+        SourceProposal | DocumentProposal | TaskReferenceUpdateProposal,
+        Field(discriminator="kind"),
+    ]
 
 
 class SaveRequest(SourceProposal):
@@ -78,6 +82,9 @@ class SourceView(Model):
 
 
 class ReviewView(Model):
+    task_reference_update: TaskReferenceReview | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     training: TrainingInspector | None = None
     binding_options: tuple[BindingOptions, ...]
     source: str

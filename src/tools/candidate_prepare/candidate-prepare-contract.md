@@ -430,3 +430,11 @@ Retained selection repeats these checks without needing current source. Child
 hash repair cannot legitimize substituted settings/seed facts. Terminal operation
 reads verify the native output digest and identity, not every checkpoint or
 scientific success. No outer loops, resume or historical defaults are added.
+
+### Bound reusable source (not yet executable)
+
+A v2 `TaskBinding` can be parsed inertly but reusable preparation currently
+refuses it in source-only inspection, before resolving task locations, reading
+manifest/config or creating a run envelope. Native pin enforcement is a separate
+integration checkpoint. No bound source is silently treated as unbound. Existing
+unbound requests and recovery of already admitted captures are unchanged.

@@ -27,6 +27,7 @@ from .models import (
     ReusableTaskReferences,
     ReusableWorkflowDefinition,
     ReusableWorkflowDocument,
+    TaskBinding,
     TaskReferences,
     WorkflowDefinition,
     WorkflowDocument,
@@ -57,6 +58,7 @@ _CONSTRUCTORS: dict[str, type[DeclarationModel]] = {
         WorkflowDefinition,
         NodePosition,
         WorkflowDocument,
+        TaskBinding,
     )
 }
 _FIELD_NAMES = frozenset(name for model in _CONSTRUCTORS.values() for name in model.model_fields)
@@ -313,7 +315,7 @@ def _render_value(value: object, depth: int) -> str:
         fields = [
             f"{child_indent}{name}={_render_value(getattr(value, name), depth + 1)},"
             for name in type(value).model_fields
-            if not (name == "training_settings" and getattr(value, name) is None)
+            if not (name in {"training_settings", "task_binding"} and getattr(value, name) is None)
         ]
         return f"{type(value).__name__}(\n" + "\n".join(fields) + f"\n{indentation})"
     if isinstance(value, tuple):
@@ -345,6 +347,10 @@ def render_workflow_source(document: AuthoredWorkflowDocument) -> str:
     except PydanticSerializationError:
         _fail("validation", "Declaration cannot be serialized for revalidation")
     constructors = _CONSTRUCTORS
+    if not isinstance(validated, ReusableWorkflowDocument) or validated.task_binding is None:
+        constructors = {
+            name: model for name, model in constructors.items() if name != "TaskBinding"
+        }
     if isinstance(validated, WorkflowDocument):
         # Keep the v1 canonical source byte-identical as its allowlist grows.
         constructors = {

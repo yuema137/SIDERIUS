@@ -257,3 +257,27 @@ is unsupported in reusable capture; task-composed Health and existing inline
 startup controls remain available. Native v1 external Health support is unchanged.
 Source validation does not load selected task plugins, bind runtime verifiers or
 discover hardware; importing native schemas can import torch.
+
+## Optional accepted task binding (declaration only)
+
+Reusable v2 documents may carry `task_binding: TaskBinding`. Its version is
+`siderius.task-binding/v1`; `package_id` and `revision` are explicit readable
+metadata, while `task_data_path_id` and `semantic_fingerprint` record the accepted
+native composition identity. These constructors compute no identity, resolve no
+package/version and import no task. Composition remains the single fingerprint
+owner; this is its assembly-bound identity, not a new universal package hash.
+Manifest/data locations remain separate declared references.
+
+Absent/None binding is omitted from serialization and source, including its
+constructor import, preserving existing v1/v2 canonical bytes and digests. A
+present binding participates in the existing document declaration digest. v1
+cannot carry this field and is never silently migrated. Old source stays unbound;
+no readable version is inferred from a path, timestamp or identity-format label.
+
+Bound source is currently readable/convertible but not executable through
+reusable preparation. Preparation refuses it during source inspection, before
+external input reads or envelope creation, until native pin enforcement lands.
+Authoring Save likewise refuses current or proposed bound source, including an
+attempt to remove an existing pin. These explicit refusals prevent a declaration
+feature from being mistaken for enforced execution/publication. Existing unbound
+paths and previously captured runs retain their original contracts.
