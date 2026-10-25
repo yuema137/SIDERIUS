@@ -11,6 +11,10 @@ for exact commands. Read the relevant linked contract when a report or refusal
 needs investigation. The source and validated schemas own runtime behavior;
 this skill adds guidance, not another configuration authority.
 
+Professional and Assistant describe who leads the setup decisions. Both use the
+same public preparation and execution owners below. Select the execution route
+separately: a candidate, optional native training, or a native iterative chain.
+
 ## Start from the user's problem, not a prepared manifest
 
 A brief such as "I have MNIST images and labels in /data/mnist; help me build and
@@ -142,3 +146,40 @@ launch remain separate explicit actions. Source-declared native training uses th
 [training inspector](../../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
 or ordinary source editing. Keep sparse settings in saved source; completion is
 not scientific validity. Resume remains unsupported.
+
+## Captured native iterative chains
+
+When the user selects the native Interpret → Propose → Implement → Validate →
+Tune recipe, follow the [native capture guide](../../../src/tools/native_chain/README.md)
+and [capture contract](../../../src/tools/native_chain/native-chain-contract.md).
+Save the declaration and review request in the external project, preserve the
+chosen scientific settings, and name the capture output and fresh absent native
+workspace explicitly. From the selected checkout, run
+`.venv/bin/python -m tools.native_chain review --request PATH`; its complete
+printed command is the foreground launch route. Capture checks do not run an
+iteration or produce a scientific semantic-review receipt. Launch remains a
+separate authorized action.
+Changing original bound inputs can refuse launch or a later iteration.
+
+For detached execution, follow the [operation steps](../../../src/tools/candidate_operations/README.md#run-a-captured-native-chain)
+and [construction recipe](../../../src/tools/candidate_operations/candidate-operations-contract.md#construct-a-native-chain-operation).
+Before capture review, create a dedicated empty envelope and declare its exact
+absent `workspace` child as the native workspace; do not retarget a capture. Save
+`chain-operation.json` outside that envelope, using the existing typed
+`NativeChainOperation` owner; review it through `review_native_chain_operation`
+or CLI `review`, then explicitly call `submit_operation` or CLI `submit`.
+Retain the saved submission and UUID. Recover a lost response by reading that
+UUID or resubmitting the identical saved payload; never rebuild it with a new ID.
+
+For GUI use, prepare the same native capture and operation request externally,
+then configure `native_chain_choices` using the [console contract](../../../src/tools/candidate_console/console-contract.md#configured-native-chains).
+Follow [Review native capture → Launch native chain → Slow control](../../../src/tools/candidate_console/README.md#run-a-configured-native-chain).
+The console uses the same operation owner independently of the editor. Preserve
+the displayed operation UUID; navigation, reconnect and monitoring never launch.
+Retry only the retained pending launch. Each new destination needs its own fresh
+envelope and reviewed capture; the console does not edit captures or stop/resume.
+
+Give the user the saved declaration, request, capture, submission/configuration
+and workspace paths relevant to their route. Inspect shell outcome, cleanup and
+native checkpoint evidence separately; completion does not establish scientific
+success. Preserve `no_records`, unavailable or invalid evidence explicitly.
