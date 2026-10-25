@@ -5,18 +5,18 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import Field, TypeAdapter
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from core.iteration_manifest import verify_iteration_manifest
+from core.native_observation import EvidenceReadBytes, ObservationPolicy, observation_policy
 from core.record_role import IterationFormalEvidence, formal_evidence_of
 from tools.native_chain.review import read_bytes
 from tools.workflow_preview.models import PreviewModel
 
-ObservationPolicy = Annotated[int, Field(strict=True, ge=1, le=2)]
-CURRENT_OBSERVATION_POLICY: ObservationPolicy = 2
+CURRENT_OBSERVATION_POLICY: ObservationPolicy = 3
 _POLICY_ADAPTER = TypeAdapter(ObservationPolicy)
 
 
@@ -46,6 +46,9 @@ class ObservationBounds(PreviewModel):
     final_iteration: int = Field(gt=0, le=1000, strict=True)
     input_max_bytes: int = Field(gt=0, le=16777216, strict=True)
     max_observation_bytes: int = Field(gt=0, le=1048576, strict=True)
+    max_evidence_read_bytes: EvidenceReadBytes | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ObservationLimit(ValueError):
@@ -53,8 +56,11 @@ class ObservationLimit(ValueError):
 
 
 class _Budget:
-    def __init__(self, bounds: ObservationBounds):
-        self.remaining = bounds.max_observation_bytes
+    def __init__(self, bounds: ObservationBounds, policy: ObservationPolicy):
+        if (policy == 3) != (bounds.max_evidence_read_bytes is not None):
+            raise ValueError("evidence-read budget requires observation policy 3")
+        read_limit = bounds.max_evidence_read_bytes
+        self.remaining: int = bounds.max_observation_bytes if read_limit is None else read_limit
         self.file_limit = bounds.input_max_bytes
 
     def read(self, path: Path) -> bytes:
@@ -141,11 +147,13 @@ def observe_native_chain(
     run_name: str,
     bounds: ObservationBounds,
     *,
-    policy: ObservationPolicy = CURRENT_OBSERVATION_POLICY,
+    policy: ObservationPolicy | None = None,
 ) -> NativeChainEvidence:
     """Bound all discovery, retained bytes and emitted projection; never truncate success."""
-    policy = _POLICY_ADAPTER.validate_python(policy)
-    budget = _Budget(bounds)
+    selected_policy = _POLICY_ADAPTER.validate_python(
+        observation_policy(bounds.max_evidence_read_bytes) if policy is None else policy
+    )
+    budget = _Budget(bounds, selected_policy)
     try:
         if workspace != workspace.resolve() or workspace.is_symlink():
             raise ValueError("workspace alias")
@@ -167,7 +175,7 @@ def observe_native_chain(
             "generated_library",
             "STOP",
         }
-        if policy == 2:
+        if selected_policy >= 2:
             controls.add("token_usage.jsonl")
         indices = set()
         anomalies = []
@@ -228,7 +236,10 @@ def observe_native_chain(
             token_run_id=token,
             token_sidecar_sha256=token_digest,
         )
-        if len(result.model_dump_json().encode()) > budget.remaining:
+        projection_limit = (
+            bounds.max_observation_bytes if selected_policy == 3 else budget.remaining
+        )
+        if len(result.model_dump_json().encode()) > projection_limit:
             raise ObservationLimit()
         return result
     except ObservationLimit:

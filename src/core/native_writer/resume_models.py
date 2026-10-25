@@ -3,7 +3,9 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, model_validator
+
+from core.native_observation import EvidenceReadBytes, ObservationPolicy, observation_policy
 
 from .models import Claim, Digest, Participation, Registration, Unresolved, WriterModel
 
@@ -36,11 +38,20 @@ class ResumeReservation(WriterModel):
     capture_sha256: Digest
     snapshot_digest: Digest
     evidence_digest: Digest
-    observation_policy: Literal[2] = 2
+    observation_policy: ObservationPolicy = 2
     start_iteration: int = Field(ge=2, le=1000, strict=True)
     final_iteration: int = Field(ge=2, le=1000, strict=True)
     input_max_bytes: int = Field(gt=0, le=16777216, strict=True)
     max_observation_bytes: int = Field(gt=0, le=1048576, strict=True)
+    max_evidence_read_bytes: EvidenceReadBytes | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def consistent_observation_budget(self):
+        if self.observation_policy != observation_policy(self.max_evidence_read_bytes):
+            raise ValueError("observation policy disagrees with evidence-read budget")
+        return self
 
 
 class ResumeAdoption(WriterModel):

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from core.native_observation import observation_policy
 from core.native_writer.ownership import acquire
 from core.native_writer.resume import (
     adopt_reserved_writer,
@@ -57,7 +58,7 @@ def terminal(record, path, request, admission, evidence, *, cleanup="absent"):
         envelope=request.envelope,
         workspace=admission.workspace,
         runtime_digest=hashlib.sha256(encode(record.runtime)).hexdigest(),
-        observation_policy=2,
+        observation_policy=observation_policy(request.max_evidence_read_bytes),
         evidence=evidence,
         supervision=ObservedExecutionResult(
             execution=ExecutionResult(status="failed", returncode=137, elapsed_seconds=1),
@@ -78,7 +79,8 @@ def terminal(record, path, request, admission, evidence, *, cleanup="absent"):
 
 
 @pytest.fixture
-def history(tmp_path, monkeypatch):
+def history(tmp_path, monkeypatch, request):
+    read_bytes = getattr(request, "param", None)
     envelope = tmp_path / "envelope"
     envelope.mkdir()
     capture = tmp_path / "capture.json"
@@ -100,6 +102,7 @@ def history(tmp_path, monkeypatch):
         input_max_bytes=4096,
         max_iterations_observed=2,
         max_observation_bytes=1048576,
+        max_evidence_read_bytes=read_bytes,
     )
     submission = NativeChainOperation(request_id=uuid4(), request=request)
     runtime = runtime_identity()
@@ -727,3 +730,46 @@ def test_unlinked_resume_wrapper_spawn_failure_remains_releasable(history):
     )
     snapshot = read_operation(record.config, record.submission.request_id)
     assert (snapshot.state, snapshot.reason) == ("operation_failed", "spawn_failed")
+
+
+@pytest.mark.parametrize("history", [None, 16 * 1048576], indirect=True)
+def test_public_resume_status_preserves_root_budget(history):
+    root, _, record, _, current = history
+    reserve(record)
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.native_chain.evidence == current[0]
+    reservation = reservation_for(
+        record.native_resume_admission,
+        record.submission.request_id,
+        record.native_id,
+        record.request_digest,
+    )
+    assert reservation.max_evidence_read_bytes == root.submission.request.max_evidence_read_bytes
+    assert reservation.observation_policy == observation_policy(reservation.max_evidence_read_bytes)
+
+
+@pytest.mark.parametrize("history", [16777216], indirect=True)
+def test_native_adoption_rechecks_large_history_with_reserved_budget(history):
+    from tests.unit.tools.native_chain.test_observation_read_budget import large_history
+    from tools.candidate_operations.native_chain_read import chain_evidence
+    from tools.native_chain.models import NativeChainRefusal
+    from tools.native_chain.resume_checks import verify_baseline
+
+    root, _, record, _, _ = history
+    workspace = Path(root.native_chain_admission.workspace)
+    large_history(workspace)
+    (workspace / ".token_run_id").write_text("fixture-20261025T120000-123")
+    # The root request also governs native per-file reads; retain its capture-compatible bound.
+    root_request = root.submission.request.model_copy(update={"input_max_bytes": 16777216})
+    admitted = record.native_resume_admission.model_copy(update={"root_request": root_request})
+    candidate = record.model_copy(update={"native_resume_admission": admitted})
+    evidence = chain_evidence(candidate)
+    assert evidence.availability == "available" and evidence.checkpoints[0].artifact_verified
+    admitted = admitted.model_copy(update={"evidence": evidence})
+    reservation = reservation_for(
+        admitted, record.submission.request_id, record.native_id, record.request_digest
+    )
+    verify_baseline(workspace, "fixture", reservation)
+    (workspace / ".token_run_id").write_text("fixture-20261025T120000-124")
+    with pytest.raises(NativeChainRefusal, match="resume_baseline_changed"):
+        verify_baseline(workspace, "fixture", reservation)

@@ -487,11 +487,18 @@ verified. `no_records` remains its own native status. Scores and formal-evidence
 counts come only from validated HyperparamTuningOutput and its existing role
 owner. No metric arithmetic or interpretation of human detail strings is added.
 
-`NativeChainTerminal.observation_policy` accepts only strict integers 1 and 2.
+`NativeChainTerminal.observation_policy` accepts only strict integers 1, 2 and 3.
 Missing fields in historical terminals mean policy 1; new terminal writes
-explicitly record current policy 2. Policy 1 retains the original control names
+record policy 2 when the root request omits `max_evidence_read_bytes`,
+and policy 3 when it supplies that field. Policy 1 retains the original control names
 and discovery cap. Policy 2 additionally recognizes `token_usage.jsonl` without
-reading its rows, increasing the finite control-name cap by one. Full evidence
+reading its rows, increasing the finite control-name cap by one. Policy 3
+keeps policy 2 discovery and verification, but separates aggregate input reads
+from the compact projection limit. The positive `max_evidence_read_bytes` is
+charged for manifest, output and token-sidecar bytes; `input_max_bytes` still
+bounds each artifact (the sidecar additionally retains its 256-byte bound).
+`max_observation_bytes` independently bounds the emitted compact evidence.
+Policies 1/2 reject an explicit read budget; policy 3 requires one. Full evidence
 equality is checked under the stored policy before a legacy terminal's live
 evidence is projected under the current policy. Historical terminal evidence,
 raw bytes and Completion digest remain unchanged. Unknown policies fail terminal
@@ -520,8 +527,13 @@ or token-row aggregation is supplied. Missing sidecar remains unavailable.
 Required `NativeChainOperationRequest` JSON fields are `capture_path`,
 `capture_sha256`, `envelope`, `read_only`, `network`, `devices`,
 `environment_names`, `timeout_seconds`, `input_max_bytes`,
-`max_iterations_observed`, and `max_observation_bytes`. There are no implicit
-request defaults. `input_max_bytes` equals A's `launch_binding.file_max_bytes`
+`max_iterations_observed`, and `max_observation_bytes`. Those fields have no implicit
+request defaults. Optional `max_evidence_read_bytes` is a strict positive integer;
+when absent it is omitted from serialization, preserving old request identities.
+It has no additional fixed ceiling: the operator chooses a finite aggregate
+allowance. Parsed JSON and Pydantic objects can consume substantially more memory
+than the encoded input, so this is not a process-memory guarantee. Existing
+requests and terminals are never upgraded to policy 3. `input_max_bytes` equals A's `launch_binding.file_max_bytes`
 and is strict positive <=16 MiB; `max_iterations_observed` is strict positive
 <=1000 and must cover the captured final iteration; `max_observation_bytes` is
 strict positive <=1 MiB. Enumeration permits at most twice the captured final
@@ -586,7 +598,7 @@ inherited from the verified root request. No new launcher, scheduler or scientif
 configuration is reconstructed. The native shell remains the iteration owner.
 
 Admission requires an exited wrapper, a digest-bound host terminal with a reaped
-direct child and cleanup final `absent`, current policy-2 evidence matching that
+direct child and cleanup final `absent`, root-request policy-2 or policy-3 evidence matching that
 terminal, a consistent registered writer snapshot and a free kernel lock. The
 prefix must be contiguous, verified and restorable under native status semantics,
 with at least one completed iteration. Selection uses the existing next-index
@@ -642,7 +654,9 @@ operation/config identities, Completion/terminal hashes, reservations and adopti
 records without scanning other stores. Limits are 64 successor links, 4096 bytes per
 writer record and 16 MiB aggregate host record bytes (charged before reads, including
 a conservative allowance for the initially loaded record). Existing 4 MiB record,
-16 MiB capture/input and 1 MiB scientific observation limits remain separate.
+16 MiB per-file capture/input and 1 MiB compact projection limits remain separate.
+An explicit aggregate evidence-read allowance is inherited unchanged in the
+reservation and checked by native adoption; it does not change host-record limits.
 Overflow, cycles, missing or contradictory linked records refuse; no truncation is
 presented as complete history. Root requests without successors retain the old
 terminal-policy comparison, including legacy policy-1 compatibility.

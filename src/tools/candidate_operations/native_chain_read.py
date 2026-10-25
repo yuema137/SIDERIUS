@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from core.native_observation import observation_policy
 from tools.native_chain.observation import (
-    CURRENT_OBSERVATION_POLICY,
     NativeChainEvidence,
     ObservationBounds,
     ObservationPolicy,
@@ -25,7 +25,7 @@ from .store import now
 
 
 def chain_evidence(
-    record: OperationRecord, *, policy: ObservationPolicy = CURRENT_OBSERVATION_POLICY
+    record: OperationRecord, *, policy: ObservationPolicy | None = None
 ) -> NativeChainEvidence:
     request, admission = chain_context(record)
     return observe_native_chain(
@@ -35,6 +35,7 @@ def chain_evidence(
             final_iteration=admission.final_iteration,
             input_max_bytes=request.input_max_bytes,
             max_observation_bytes=request.max_observation_bytes,
+            max_evidence_read_bytes=request.max_evidence_read_bytes,
         ),
         policy=policy,
     )
@@ -71,6 +72,7 @@ def validated_terminal(
         or terminal.workspace != admission.workspace
         or terminal.envelope != request.envelope
         or terminal.runtime_digest != hashlib.sha256(encode(record.runtime)).hexdigest()
+        or (terminal.observation_policy == 3) != (request.max_evidence_read_bytes is not None)
     ):
         raise ValueError("chain terminal identity mismatch")
     return terminal
@@ -113,13 +115,15 @@ def read_native_chain_operation(
             payload = read_bytes(path / "native-chain-terminal.json", private_file=True)
             terminal = validated_terminal(record, completion, payload)
     state, reason = chain_state(process, completion, terminal)
-    policy = terminal.observation_policy if terminal is not None else CURRENT_OBSERVATION_POLICY
+    request, _ = chain_context(record)
+    current_policy = observation_policy(request.max_evidence_read_bytes)
+    policy = terminal.observation_policy if terminal is not None else current_policy
     evidence = chain_evidence(record, policy=policy)
     if terminal is not None and evidence != terminal.evidence:
         evidence = NativeChainEvidence(
             availability="integrity_failure", anomalies=("changed_after_terminal",)
         )
-    elif policy != CURRENT_OBSERVATION_POLICY:
+    elif policy != current_policy:
         evidence = chain_evidence(record)
     return OperationSnapshot(
         operation_id=record.submission.request_id,

@@ -51,7 +51,7 @@ def review_locked(
         baseline is None
         or baseline.terminal is None
         or baseline.completion is None
-        or baseline.terminal.observation_policy != 2
+        or baseline.terminal.observation_policy not in (2, 3)
     ):
         raise ValueError("resume_verified_baseline_required")
     if head.terminal is None and (

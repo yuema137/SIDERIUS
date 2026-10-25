@@ -49,4 +49,7 @@ class NativeChainReviewView(PreviewModel):
     input_max_bytes: int
     max_iterations_observed: int
     max_observation_bytes: int
+    max_evidence_read_bytes: int | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     credential_readiness: CredentialReadiness

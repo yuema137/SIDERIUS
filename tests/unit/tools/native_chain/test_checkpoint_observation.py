@@ -18,6 +18,7 @@ def bounds(**changes):
         final_iteration=2,
         input_max_bytes=16777216,
         max_observation_bytes=changes.get("max_observation_bytes", 1048576),
+        max_evidence_read_bytes=changes.get("max_evidence_read_bytes"),
     )
 
 
@@ -77,8 +78,9 @@ def test_mixed_native_status_and_legacy_unverified_remain_distinct(tmp_path):
     assert observe_native_chain(tmp_path, "native", bounds()).checkpoints[0].integrity == "invalid"
 
 
-@pytest.mark.parametrize("policy", [1, 2])
+@pytest.mark.parametrize("policy", [1, 2, 3])
 def test_bounded_reader_refuses_symlink_escape_and_directory_flood(tmp_path, policy):
+    read_budget = {"max_evidence_read_bytes": 16777216} if policy == 3 else {}
     first = _write_clean_chain_iter(tmp_path, 1)
     manifest = stamp(first / "manifest.json")
     output = Path(manifest["output_path"])
@@ -88,18 +90,20 @@ def test_bounded_reader_refuses_symlink_escape_and_directory_flood(tmp_path, pol
     target.write_bytes(saved)
     output.symlink_to(target)
     assert (
-        observe_native_chain(tmp_path, "native", bounds(), policy=policy).checkpoints[0].integrity
+        observe_native_chain(tmp_path, "native", bounds(**read_budget), policy=policy)
+        .checkpoints[0]
+        .integrity
         == "invalid"
     )
     assert (
         observe_native_chain(
-            tmp_path, "native", bounds(max_observation_bytes=10), policy=policy
+            tmp_path, "native", bounds(max_observation_bytes=10, **read_budget), policy=policy
         ).availability
         == "limit_exceeded"
     )
     for i in range(20):
         (tmp_path / f"foreign{i}").touch()
-    result = observe_native_chain(tmp_path, "native", bounds(), policy=policy)
+    result = observe_native_chain(tmp_path, "native", bounds(**read_budget), policy=policy)
     assert result.availability == "limit_exceeded" and not result.checkpoints
 
 
