@@ -3,6 +3,7 @@
 import inspect
 import json
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -298,7 +299,7 @@ def test_fanout_public_detached_cli_preserves_instance_trace(prepared, tmp_path)
     from tools.candidate_console.models import ConsoleConfig
 
     token_file = tmp_path / "auth-token"
-    token_file.write_text("test-token-for-graph-status-1234567890")
+    token_file.write_text(secrets.token_urlsafe(32))
     token_file.chmod(0o600)
     app = create_app(
         ConsoleConfig(
