@@ -13,7 +13,11 @@ from tools.native_chain.observation import CURRENT_OBSERVATION_POLICY
 from tools.native_chain.review import read_bytes as capture_bytes
 from tools.workflow_preview.models import FileObservation
 from tools.workspace_sandbox.profile import SandboxProfile, runtime_roots
-from tools.workspace_sandbox.runner import ObservedSpawnFailure, run_observed
+from tools.workspace_sandbox.runner import (
+    ObservedExecutionResult,
+    ObservedSpawnFailure,
+    run_observed,
+)
 
 from .files import JSON_LIMIT, canonical, directory, encode, overlap, publish, read_model
 from .models import Completion, OperationFailure, OperationRecord, OperationStoreConfig
@@ -24,7 +28,7 @@ from .native_chain_models import (
     NativeChainOperationRequest,
     NativeChainTerminal,
 )
-from .native_chain_read import chain_evidence
+from .native_chain_read import chain_context, chain_evidence
 from .process import environment, runtime_identity
 from .store import digest, validate_config, validate_submission
 
@@ -275,26 +279,7 @@ def execute_native_chain(record: OperationRecord, path: Path) -> Completion:
         except ObservedSpawnFailure:
             entered = False
             raise
-        terminal = NativeChainTerminal(
-            operation_id=record.submission.request_id,
-            request_digest=record.request_digest,
-            capture_sha256=fresh.capture_sha256,
-            envelope=record.submission.request.envelope,
-            workspace=fresh.workspace,
-            runtime_digest=hashlib.sha256(encode(record.runtime)).hexdigest(),
-            supervision=supervision,
-            observation_policy=CURRENT_OBSERVATION_POLICY,
-            evidence=chain_evidence(record),
-        )
-        payload = encode(terminal)
-        publish(path / "native-chain-terminal.json", terminal)
-        return Completion(
-            operation_id=record.submission.request_id,
-            request_digest=record.request_digest,
-            outcome="native_chain",
-            terminal_digest=hashlib.sha256(payload).hexdigest(),
-            reason="native_chain_terminal",
-        )
+        return publish_chain_terminal(record, path, supervision)
     except (Exception, KeyboardInterrupt):
         return Completion(
             operation_id=record.submission.request_id,
@@ -304,3 +289,29 @@ def execute_native_chain(record: OperationRecord, path: Path) -> Completion:
             if entered
             else "native_chain_admission_failed",
         )
+
+
+def publish_chain_terminal(
+    record: OperationRecord, path: Path, supervision: ObservedExecutionResult
+) -> Completion:
+    request, fresh = chain_context(record)
+    terminal = NativeChainTerminal(
+        operation_id=record.submission.request_id,
+        request_digest=record.request_digest,
+        capture_sha256=fresh.capture_sha256,
+        envelope=request.envelope,
+        workspace=fresh.workspace,
+        runtime_digest=hashlib.sha256(encode(record.runtime)).hexdigest(),
+        supervision=supervision,
+        observation_policy=CURRENT_OBSERVATION_POLICY,
+        evidence=chain_evidence(record),
+    )
+    payload = encode(terminal)
+    publish(path / "native-chain-terminal.json", terminal)
+    return Completion(
+        operation_id=record.submission.request_id,
+        request_digest=record.request_digest,
+        outcome="native_chain",
+        terminal_digest=hashlib.sha256(payload).hexdigest(),
+        reason="native_chain_terminal",
+    )

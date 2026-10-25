@@ -161,7 +161,8 @@ observed alive. `unknown` means evidence is insufficient; it blocks new admissio
 and is never automatically retried. A new operation cannot reuse an older
 operation's receipt at the same output path. Preserve the records for investigation.
 A completed operation also keeps its slot until its process is observed exited.
-There is no cancellation, queue or recovery command.
+There is no cancellation or queue. Captured native continuation is limited to the
+explicit route below.
 
 Use `--kind operation` for wrapper output. Logs and full native receipts are
 trusted local data and may contain sensitive task or plugin output. Byte cursors
@@ -204,6 +205,44 @@ Review and submit the saved request:
 Retain the request UUID for retries. Existing status and log commands keep working
 after submission exits. Read shell outcome, cleanup and checkpoint verification
 separately: a completed process is not a scientific success. The native shell
-schedules iterations; this route does not resume existing workspaces. See the
+schedules iterations; this fresh-launch route does not reuse existing workspaces. See the
 [operation contract](candidate-operations-contract.md#captured-native-chain-operation)
 for request fields, byte limits, recovery and evidence meanings.
+
+## Continue a captured native chain
+
+Use this code/CLI route when a detached native chain ended after a verified
+iteration and the next iteration directory does not yet exist. The original
+operation must have exited with confirmed cleanup. Failed or partial iteration
+directories, stop markers and uncertain cleanup are refused. The console does
+not yet offer this action.
+
+1. Keep the original capture, inputs, checkout and environment. The initial run
+   must already have used a checkout supporting continuation; older captures
+   cannot be moved to a newer checkout to gain it. Inspect eligibility:
+
+   ```sh
+   .venv/bin/python -m tools.candidate_operations review-resume \
+     --store-config store.json --operation-id PREVIOUS_OPERATION_UUID
+   ```
+
+2. If the result is `ready`, check the reported workspace, next iteration and
+   original target. Ask your coding agent to follow the
+   [continuation construction recipe](candidate-operations-contract.md#construct-a-native-continuation)
+   and save `resume-operation.json`. `not_needed` means the target is already
+   reached. Bind the same provider credentials required by the original request.
+
+3. Submit explicitly:
+
+   ```sh
+   .venv/bin/python -m tools.candidate_operations submit \
+     --store-config store.json --request resume-operation.json
+   ```
+
+Continuation gets a new operation UUID and keeps the same native run, workspace,
+scientific settings and target. Retain the new JSON for lost-response retries;
+submitting that same UUID again only reconnects. Status preserves each operation's
+original terminal and reports current verified progress separately. Check the
+new operation's native outcome and checkpoint evidence. Professional and Assistant
+use this same route. A refusal does not authorize deleting locks, clearing stop
+markers, recapturing inputs or changing the target.

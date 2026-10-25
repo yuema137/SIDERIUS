@@ -16,6 +16,7 @@ from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunReque
 from tools.workflow_preview.models import FileObservation, PreviewModel
 
 from .native_chain_models import NativeChainAdmission, NativeChainObservation, NativeChainOperation
+from .native_resume_models import NativeChainResumeOperation, NativeResumeAdmission, review_digest
 
 
 class OperationStoreConfig(PreviewModel):
@@ -51,7 +52,11 @@ class CandidateOperation(PreviewModel):
 
 
 OperationSubmission = Annotated[
-    PrepareOperation | ReusablePrepareOperation | CandidateOperation | NativeChainOperation,
+    PrepareOperation
+    | ReusablePrepareOperation
+    | CandidateOperation
+    | NativeChainOperation
+    | NativeChainResumeOperation,
     Field(discriminator="kind"),
 ]
 SUBMISSION = TypeAdapter(OperationSubmission)
@@ -75,10 +80,31 @@ class OperationRecord(PreviewModel):
     inputs: tuple[FileObservation, ...]
     admitted_at: str
     native_chain_admission: NativeChainAdmission | None = None
+    native_resume_admission: NativeResumeAdmission | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def chain_binding(self):
         admission = self.native_chain_admission
+        resume = self.native_resume_admission
+        if self.submission.kind == "native_chain_resume":
+            if (
+                admission is not None
+                or resume is None
+                or resume.predecessor_operation_id
+                != self.submission.request.predecessor_operation_id
+                or resume.root_admission.input_files != self.inputs
+                or resume.root_admission.checkout != self.runtime.source
+                or resume.root_admission.workspace != resume.root_request.envelope + "/workspace"
+                or resume.root_admission.capture_sha256 != resume.root_request.capture_sha256
+                or resume.state_root != self.config.state_root
+                or review_digest(resume) != self.submission.request.expected_review_digest
+            ):
+                raise ValueError("resume admission identity mismatch")
+            return self
+        if resume is not None:
+            raise ValueError("resume admission on another operation kind")
         if self.submission.kind != "native_chain":
             if admission is not None:
                 raise ValueError("chain admission on another operation kind")
@@ -141,7 +167,7 @@ class Completion(PreviewModel):
 
 class OperationHandle(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain"]
+    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain", "native_chain_resume"]
     request_digest: str
     observed_at: str
     observation: Literal["starting", "existing", "operation_failed"]
@@ -149,7 +175,7 @@ class OperationHandle(PreviewModel):
 
 class OperationSnapshot(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain"]
+    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain", "native_chain_resume"]
     request_digest: str
     observed_at: str
     state: Literal["active", "completed", "operation_failed", "unknown"]

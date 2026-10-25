@@ -298,6 +298,9 @@ EXPECTED_CHAIN_CAPTURE_SHA256=""
 CHAIN_CAPTURE_INPUT_MAX_BYTES=""
 CHAIN_EXPORT_FD=""
 CHAIN_EXPORT_ITERATION=""
+CHAIN_RESUME_PREDECESSOR=""
+CHAIN_RESUME_SUCCESSOR=""
+CHAIN_RESUME_RESERVATION_SHA256=""
 
 parse_chain_args() {
     while [[ $# -gt 0 ]]; do
@@ -305,6 +308,9 @@ parse_chain_args() {
         --expected_chain_capture) EXPECTED_CHAIN_CAPTURE="$2"; shift 2 ;;
         --expected_chain_capture_sha256) EXPECTED_CHAIN_CAPTURE_SHA256="$2"; shift 2 ;;
         --chain_capture_input_max_bytes) CHAIN_CAPTURE_INPUT_MAX_BYTES="$2"; shift 2 ;;
+        --chain_resume_predecessor) CHAIN_RESUME_PREDECESSOR="$2"; shift 2 ;;
+        --chain_resume_successor) CHAIN_RESUME_SUCCESSOR="$2"; shift 2 ;;
+        --chain_resume_reservation_sha256) CHAIN_RESUME_RESERVATION_SHA256="$2"; shift 2 ;;
         --chain_export_fd)        CHAIN_EXPORT_FD="$2"; shift 2 ;;
         --chain_export_iteration) CHAIN_EXPORT_ITERATION="$2"; shift 2 ;;
         --workspace)              WORKSPACE="$2"; shift 2 ;;

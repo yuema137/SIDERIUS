@@ -63,7 +63,7 @@ def validate_config(config: OperationStoreConfig) -> OperationStoreConfig:
 
 
 def native_directory(submission: OperationSubmission) -> Path:
-    if submission.kind == "native_chain":
+    if submission.kind == "native_chain" or submission.kind == "native_chain_resume":
         raise OperationFailure("kind", "chain has no native receipt directory")
     if submission.kind == "prepare":
         return canonical(submission.request.output_dir) / "preparation"
@@ -90,6 +90,9 @@ def validate_submission(
     config: OperationStoreConfig, submission: OperationSubmission
 ) -> OperationSubmission:
     submission = SUBMISSION.validate_json(SUBMISSION.dump_json(submission))
+    if submission.kind == "native_chain_resume":
+        # Syntax only: same-ID lookup precedes every mutable predecessor/input check.
+        return submission
     state = canonical(config.state_root)
     if submission.kind == "native_chain":
         request = submission.request
@@ -180,6 +183,13 @@ def operation_path(config: OperationStoreConfig, operation_id: UUID) -> Path:
 def load_record(config: OperationStoreConfig, operation_id: UUID) -> OperationRecord:
     path = operation_path(config, operation_id)
     record = read_model(path / "request.json", OperationRecord, private_file=True)
+    return validate_record(config, operation_id, record)
+
+
+def validate_record(
+    config: OperationStoreConfig, operation_id: UUID, record: OperationRecord
+) -> OperationRecord:
+    """Validate already bounded bytes without a second filesystem read."""
     if record.submission.request_id != operation_id or record.request_digest != digest(
         record.submission
     ):

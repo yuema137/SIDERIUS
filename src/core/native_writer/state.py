@@ -64,6 +64,11 @@ class WriterState:
         return fd
 
     def read(self, name: str, model: type[Model]) -> Model | None:
+        payload = self.read_bytes(name)
+        return model.model_validate_json(payload) if payload is not None else None
+
+    def read_bytes(self, name: str) -> bytes | None:
+        """Return the same bounded bytes used for parsing and identity checks."""
         try:
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.fd)
         except FileNotFoundError:
@@ -73,7 +78,7 @@ class WriterState:
             payload = os.read(fd, _LIMIT + 1)
             if len(payload) > _LIMIT:
                 raise WriterRefusal("writer_state_limit")
-            return model.model_validate_json(payload)
+            return payload
         finally:
             os.close(fd)
 

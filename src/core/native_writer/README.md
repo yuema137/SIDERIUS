@@ -10,8 +10,9 @@ Inspect a selected workspace without changing its state:
 .venv/bin/python -m core.native_writer inspect --workspace /external/runs/run
 ```
 
-An `unresolved` claim requires verified recovery that is not yet available through
-this interface. Keep the control files intact; restarting or deleting a lock file
+An `unresolved` claim requires verified recovery through the limited
+[detached continuation route](../../tools/candidate_operations/README.md#continue-a-captured-native-chain).
+This inspection interface cannot authorize it. Keep control files intact; restarting or deleting a lock file
 does not prove that all writers stopped. See [the contract](native-writer-contract.md)
 for support boundaries and lifecycle behavior.
 

@@ -90,7 +90,9 @@ class NativeChainDeclaration(BindingModel):
                 raise ValueError("protected_chain_control")
         return self
 
-    def shell_arguments(self) -> tuple[str, ...]:
+    def shell_arguments(self, *, start_iteration: int = 1) -> tuple[str, ...]:
+        if not 1 <= start_iteration <= self.run.final_iteration:
+            raise ValueError("invalid_start_iteration")
         return (
             "--mode",
             "lilab",
@@ -101,7 +103,7 @@ class NativeChainDeclaration(BindingModel):
             "--num_iterations",
             str(self.run.final_iteration),
             "--start_iter",
-            "1",
+            str(start_iteration),
             "--no_auto_resume",
             *self.chain_args,
         )

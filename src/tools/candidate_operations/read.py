@@ -29,6 +29,7 @@ from .models import (
     SpawnFailure,
 )
 from .native_chain_read import read_native_chain_operation
+from .native_resume_read import has_continuation, read_resume_chain
 from .process import observe
 from .store import load_record, native_directory, now, operation_path, validate_config
 
@@ -50,7 +51,7 @@ def bound(record: OperationRecord, marker: ProcessIdentity | Completion | SpawnF
 
 def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
     submission = record.submission
-    if submission.kind == "native_chain":
+    if submission.kind == "native_chain" or submission.kind == "native_chain_resume":
         raise OperationFailure("kind", "chain has no native scientific receipt")
     if submission.kind == "prepare_reusable":
         return read_reusable_terminal(
@@ -99,6 +100,12 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
     process = ProcessObservation(status="unknown", reason="missing_identity")
     observed_at = now()
     try:
+        # Continuation owns one bounded read of all markers. Do not read them
+        # here first and then silently reset its aggregate budget.
+        if record.submission.kind in {"native_chain", "native_chain_resume"} and has_continuation(
+            record
+        ):
+            return read_resume_chain(record)
         identity = optional(path / "process.json", ProcessIdentity)
         failure = optional(path / "spawn_failure.json", SpawnFailure)
         completion = optional(path / "completion.json", Completion)
@@ -119,7 +126,7 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
                 process=process,
                 reason="spawn_failed",
             )
-        if record.submission.kind == "native_chain":
+        if record.submission.kind in {"native_chain", "native_chain_resume"}:
             return read_native_chain_operation(record, process, completion)
         native = native_receipt(record)
         if (

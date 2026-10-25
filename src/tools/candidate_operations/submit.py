@@ -26,6 +26,8 @@ from .models import (
 )
 from .native_chain import review_native_chain_operation
 from .native_chain_models import NativeChainAdmission
+from .native_resume import review_native_chain_resume
+from .native_resume_models import NativeResumeAdmission
 from .process import environment, runtime_identity, spawn
 from .read import releasable
 from .reusable import verify_reusable_operation
@@ -68,7 +70,11 @@ def _admitted_inputs(
     config: OperationStoreConfig,
     submission: OperationSubmission,
     chain_admission: NativeChainAdmission | None = None,
+    resume_admission: NativeResumeAdmission | None = None,
 ) -> tuple[FileObservation, ...]:
+    if submission.kind == "native_chain_resume":
+        assert resume_admission is not None
+        return resume_admission.root_admission.input_files
     if submission.kind == "native_chain":
         assert chain_admission is not None
         return chain_admission.input_files
@@ -135,6 +141,21 @@ def submit_operation(
                 # This boundary emits only names from the candidate credential policy.
                 raise OperationFailure("credentials", str(error)) from error
         chain_admission = None
+        resume_admission = None
+        if submission.kind == "native_chain_resume":
+            review = review_native_chain_resume(
+                config,
+                submission.request.predecessor_operation_id,
+                launch_environment=launch_environment,
+            )
+            if (
+                review.eligibility != "ready"
+                or review.review_digest != submission.request.expected_review_digest
+            ):
+                raise OperationFailure(
+                    "native_resume_review", "continuation is complete or the reviewed state changed"
+                )
+            resume_admission = review.admission
         if submission.kind == "native_chain":
             try:
                 chain_admission = review_native_chain_operation(
@@ -149,6 +170,8 @@ def submit_operation(
         names = (
             submission.request.environment_names
             if submission.kind == "candidate" or submission.kind == "native_chain"
+            else resume_admission.root_request.environment_names
+            if resume_admission is not None
             else ()
         )
         env = environment(names, launch_environment)
@@ -158,8 +181,9 @@ def submit_operation(
             request_digest=digest(submission),
             config=config,
             runtime=runtime_identity(),
-            inputs=_admitted_inputs(config, submission, chain_admission),
+            inputs=_admitted_inputs(config, submission, chain_admission, resume_admission),
             native_chain_admission=chain_admission,
+            native_resume_admission=resume_admission,
             admitted_at=now(),
         )
         compare_reusable_expectation(record, expected_reusable_inputs)

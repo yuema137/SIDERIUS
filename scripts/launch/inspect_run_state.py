@@ -65,6 +65,7 @@ from tools.native_chain.inspection import (
     _formal_evidence_detail,
     _validate_run_output,
     inspect_chain_iteration,
+    next_chain_index,
 )
 
 _RUN_ITER_RE = re.compile(r"^iteration_(\d+)$")
@@ -301,7 +302,7 @@ def compute_next_iter(
         return 1
     committed = [r for r in reports if r.status == "COMMITTED"]
     if committed:
-        return max(r.iter_idx for r in committed) + 1
+        return next_chain_index([r.iter_idx for r in committed])
     # No committed history — retry the first broken iter (legacy fallback).
     for r in reports:
         if r.status != "COMMITTED":

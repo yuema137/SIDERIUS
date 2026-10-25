@@ -20,6 +20,12 @@ from .native_chain_models import (
     NativeChainOperation,
     NativeChainOperationRequest,
 )
+from .native_resume import review_native_chain_resume
+from .native_resume_models import (
+    NativeChainResumeOperation,
+    NativeChainResumeRequest,
+    NativeResumeReview,
+)
 from .prepared import read_prepared_candidate
 from .read import lookup_operation_request, read_operation, recover_reusable_preparation
 from .reusable import build_reusable_operation
@@ -34,6 +40,9 @@ __all__ = [
     "NativeChainAdmission",
     "NativeChainOperation",
     "NativeChainOperationRequest",
+    "NativeChainResumeOperation",
+    "NativeChainResumeRequest",
+    "NativeResumeReview",
     "OperationHandle",
     "OperationSnapshot",
     "OperationStoreConfig",
@@ -51,5 +60,6 @@ __all__ = [
     "read_prepared_candidate",
     "recover_reusable_preparation",
     "review_native_chain_operation",
+    "review_native_chain_resume",
     "submit_operation",
 ]
