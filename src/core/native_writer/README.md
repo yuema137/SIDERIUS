@@ -14,3 +14,7 @@ An `unresolved` claim requires verified recovery that is not yet available throu
 this interface. Keep the control files intact; restarting or deleting a lock file
 does not prove that all writers stopped. See [the contract](native-writer-contract.md)
 for support boundaries and lifecycle behavior.
+
+`registered_idle` is not proof that every descendant stopped or permission to
+resume. Ordinary successful children retain the existing cooperative process
+semantics; deliberately escaped daemon writers are unsupported.

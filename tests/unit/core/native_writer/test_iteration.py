@@ -157,3 +157,34 @@ def test_observer_failure_does_not_mask_original_process_exception():
             capture_stdout=True,
         )
     assert error.value.returncode == 7
+
+
+@pytest.mark.parametrize("owned_group,exit_code", [(False, 0), (True, 7)])
+def test_clean_cooperative_or_proven_group_cleanup_preserves_release(
+    tmp_path, monkeypatch, owned_group, exit_code
+):
+    """Plain success retains legacy cooperation; proven group cleanup allows failure.
+
+    Treating all absent groups or all nonzero outcomes as leaked writers breaks
+    this policy. Abnormal plain children are covered by the real phase test above.
+    """
+    from contextlib import suppress
+
+    from core.native_writer import iteration_owner
+    from core.runtime_control.observed_subprocess import supervise_process
+
+    workspace = tmp_path / "run"
+    lease = acquire(workspace, capture_sha256="a" * 64)
+    monkeypatch.setenv(TRANSPORT_ENV, lease.transport.model_dump_json())
+    try:
+        with iteration_owner(str(workspace)), suppress(subprocess.CalledProcessError):
+            supervise_process(
+                [sys.executable, "-c", f"raise SystemExit({exit_code})"],
+                env=dict(os.environ),
+                preexec_fn=None,
+                capture_stdout=True,
+                deadline_provider=(lambda: (None, "")) if owned_group else None,
+            )
+    finally:
+        lease.close(clean=True)
+    assert inspect_writer(workspace).status == "registered_idle"

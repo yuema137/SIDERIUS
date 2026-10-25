@@ -79,6 +79,11 @@ guarantee. Legacy unregistered ownership provides no durable crash guarantee.
 creating control or scientific files. Inspection is a momentary observation, not
 launch authorization or proof of scientific completion. An invalid state also
 refuses launch. Public ownership refusals use exit 78 at shell/direct CLI entry.
+In particular, `registered_idle` is not proof of universal descendant absence:
+successful non-owned children retain cooperative direct-child semantics. A future
+resume admission must additionally establish that the outer operation is inactive
+and its supervision cleanup proves absence. Claim state alone cannot grant reuse;
+an active outer operation must refuse even if its native claim is idle.
 
 Unresolved registration remains blocked until a future explicitly verified recovery
 procedure exists. Do not delete or rewrite control metadata, infer safety from a
