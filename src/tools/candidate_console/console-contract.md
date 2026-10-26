@@ -255,6 +255,27 @@ an unavailable resource without forwarding exception text.
 Editor task/external fields and existing request/protocol argument choices use
 the native declaration document and a typed projection of the existing catalog.
 No JavaScript contract inventory or alternate graph schema is authoritative.
+The circuit renders existing authored request/argument sockets and result outputs.
+`editor-circuit.js` owns presentation/ephemeral gestures; `editor-circuit-geometry.js`
+contains prototype-derived obstacle routing and display-only fallback layout.
+Neither owns a graph, catalog, schema, request or execution engine. Type-compatible
+rebinding uses exact existing server BindingChoices. Circuit and inspector call
+one editor.js mutation; dragging writes positions through that same draft owner.
+Bindings/profile/options are not inferred from card order or geometry. Request
+protocols display as adaptor labels inside their actual consumer, not extra nodes.
+External source chips remain inspector bindings. Omitted optional ports, argument
+creation/deletion, new nodes and loops are not graphical controls in this slice.
+
+Socket/drag gestures send no requests. Source editing, disconnection, conflict,
+saving and invalid training drafts gate mutations; stale rendered projections
+cannot mutate a replacement document. Required whole-declaration checks remain
+Review/Save, with execution-profile/alias admission owned by separate native
+preparation. Type-compatible highlights do not claim runtime compatibility. Existing
+unrouteable/overlapping layouts retain every binding in the textual connection list.
+Fallback positions are presentation only until a user moves a node; stored positions
+remain exact. Keyboard buttons share pointer actions; Escape/right-click cancels a
+pending wire; Alt + arrows moves a heading. Shared semantic theme tokens own colors.
+
 Source/form/base changes invalidate Review. Unreviewed inspector edits disable
 the source textarea until Review synchronizes the rendered proposal, preventing
 a stale source buffer from silently replacing form changes. Source edits disable

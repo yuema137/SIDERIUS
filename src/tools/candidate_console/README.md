@@ -87,6 +87,19 @@ The entry URLs are `/#home`, `/#workflow` and `/#slow-control`. An old
 Connection sharing applies within one document; separate tabs/windows connect
 independently.
 
+## Edit existing circuit connections
+
+In Workflow builder, select a node to open its inspector. To change a connection,
+select a **result** output socket, then a highlighted named input. Press Escape
+or right-click to cancel. The inspector offers the same binding choices, including
+external inputs such as storage. Only existing inputs can be rewired here.
+
+Drag a node heading to move it, or focus the heading and use Alt + arrow keys.
+These edits stay local until **Review changes** and **Save reviewed source**.
+For a bound workflow, choose its matching configured task version and acknowledge
+the findings. Prepare a new run separately to check its supported execution profile.
+New nodes and optional input changes still use Advanced → Source.
+
 ## Bind a task version
 
 In Workflow builder, explicitly choose a configured task package/version and

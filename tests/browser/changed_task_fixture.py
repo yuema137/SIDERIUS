@@ -26,7 +26,7 @@ def main():
         profile = os.environ.get("CONSOLE_TASK_PROFILE")
         if profile is not None:
             transform = {"fanout": reusable_fanout, "families": reusable_families}[profile]
-            transform(preparation)
+            preparation = transform(preparation)
         console = root / "console"
         console.mkdir()
         config = console_config.__wrapped__(selection.__wrapped__(console), console)
@@ -63,6 +63,8 @@ def main():
                     "token": Path(config.auth_token_file).read_text(),
                     "source": str(author.project.source_file),
                     "profile": profile,
+                    "prepare_request": preparation.model_dump(mode="json"),
+                    "saved_binding": targets[0].binding.model_dump(mode="json"),
                     "binding": targets[1].binding.model_dump(mode="json"),
                     "plugin": str(targets[1].manifest.parent / "plugins/_quickstart_task.py"),
                 }
