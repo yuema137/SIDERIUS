@@ -115,8 +115,20 @@ class ReusableTaskReferences(DeclarationModel):
 
 class ManagedCandidateBinding(DeclarationModel):
     id: Identifier
-    contract: Literal["proposal.input", "storage", "native-training.settings"]
+    contract: Literal["proposal.input", "storage", "native-training.settings", "literature.input"]
     kind: Literal["managed_candidate"] = "managed_candidate"
+    literature_settings: dict[str, JsonValue] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def validate_literature_settings(self) -> Self:
+        if self.contract == "literature.input":
+            if self.literature_settings is None:
+                raise ValueError("Managed literature requires explicit literature_settings")
+        elif self.literature_settings is not None:
+            raise ValueError("literature_settings requires a literature.input binding")
+        return self
 
 
 class CandidatePreparationOptions(DeclarationModel):
@@ -162,7 +174,12 @@ class ReusableWorkflowDocument(DeclarationModel):
     )
 
     execution_profile: (
-        Literal["native-proposal-fanout/v1", "native-proposal-families/v1"] | None
+        Literal[
+            "native-proposal-fanout/v1",
+            "native-proposal-families/v1",
+            "native-literature-candidate/v1",
+        ]
+        | None
     ) = Field(default=None, exclude_if=lambda value: value is None)
     training_settings: dict[str, JsonValue] | None = Field(
         default=None, exclude_if=lambda value: value is None

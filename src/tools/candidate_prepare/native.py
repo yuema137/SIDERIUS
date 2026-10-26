@@ -28,7 +28,7 @@ from .models import CandidatePreparationRequest
 
 if TYPE_CHECKING:
     from workflows.candidate_training_settings import CandidateTrainingSettings
-    from workflows.definition import TaskBinding
+    from workflows.definition import ReusableWorkflowDocument, TaskBinding
 
 
 def _training_seed_bytes(proposal: ProposalInput, settings: "CandidateTrainingSettings") -> bytes:
@@ -58,6 +58,7 @@ def prepare_payloads(
     training_payload: bytes | None = None,
     expected_task_binding: "TaskBinding | None" = None,
     layout: PreparationLayout | None = None,
+    literature_document: "ReusableWorkflowDocument | None" = None,
 ) -> str:
     """Compose the selected task and save exact native inputs without a provider."""
     output = Path(request.output_dir)
@@ -125,10 +126,20 @@ def prepare_payloads(
                 values.update(proposal_training_values(training))
             proposal = ProposalInput.model_validate(values)
             proposals.append((record.filename, proposal))
+        literature_records = ()
+        if literature_document is not None:
+            from .reusable_literature import prepare_literature
+
+            review = prepare_literature(
+                literature_document, request, interpretation, proposals[0][1], config
+            )
+            if review is not None:
+                literature_records = (review,)
         records = (
             ("preparation/interpretation_input.json", interpretation_input),
             ("interpretation.json", interpretation),
             *proposals,
+            *literature_records,
             *((item.filename, item.storage) for item in admitted.storage_records),
         )
         for name, record in records:

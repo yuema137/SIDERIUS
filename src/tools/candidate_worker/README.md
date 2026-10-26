@@ -24,8 +24,10 @@ Reusable source/GUI preparation uses the same executor through the
 Code callers can also run one native literature review before one candidate with
 [the literature profile](candidate-worker-contract.md#opt-in-native-literature-candidate).
 Its typed findings enter the existing proposer, and the same operation/HTTP reader
-shows all four instances. Supply the complete native review and proposal inputs;
-reusable source preparation and editor creation do not yet support this profile.
+shows all four instances. Supply complete native inputs, or use
+[reusable literature preparation](../candidate_prepare/candidate-prepare-contract.md#reusable-native-literature-candidate)
+from the same saved source in code and the source editor. Dedicated visual creation
+controls are not provided.
 
 For a first experiment, use [candidate preparation](../candidate_prepare/README.md)
 to build the seed, storage and launch request from task/data/profile selections

@@ -137,6 +137,9 @@ def verify_reusable_bundle(
     from .reusable_training import verify_training_payloads
 
     verify_training_payloads(plan.document, output, read_bytes)
+    from .reusable_literature import verify_literature
+
+    verify_literature(plan.document, binding.request, read_bytes)
     candidate, bindings = build_candidate(
         binding.request, document, observe, execution_profile=resolved.execution_profile
     )

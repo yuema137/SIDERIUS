@@ -31,6 +31,7 @@ def setup(
     captures_count: int = 3,
     training: bool = False,
     families: bool = False,
+    literature: bool = False,
 ) -> None:
     selected = selection.__wrapped__(root)
     config = console_config.__wrapped__(selected, root)
@@ -80,6 +81,19 @@ def setup(
         from tests.helpers.reusable_fanout import reusable_families
 
         request = reusable_families(request)
+    if literature:
+        from tests.helpers.reusable_literature import reusable_literature
+
+        request = reusable_literature(
+            request,
+            {
+                "dynamic_search": {"enabled": False},
+                "findings_verbosity": 0,
+                "synthesis": {"transfer_tolerance": "strict"},
+            },
+        )
+        llm_path = Path(request.llm_config_file)
+        llm_path.write_text(llm_path.read_text().replace("literature-test", "offline-literature"))
     if training:
         from tests.unit.tools.candidate_prepare.test_reusable_training import add_training
 
@@ -188,12 +202,19 @@ def main():
     parser.add_argument("--captures-count", type=int, default=3)
     parser.add_argument("--training", action="store_true")
     parser.add_argument("--families", action="store_true")
+    parser.add_argument("--literature", action="store_true")
     args = parser.parse_args()
     if args.mode == "provider":
         provider(args.root)
     elif args.mode == "setup":
         setup(
-            args.root, args.origin, args.endpoint, args.captures_count, args.training, args.families
+            args.root,
+            args.origin,
+            args.endpoint,
+            args.captures_count,
+            args.training,
+            args.families,
+            args.literature,
         )
     elif args.mode == "verify-training":
         from tests.browser.reusable_training_fixture import code_equivalent

@@ -208,7 +208,7 @@ def _check_value(node: ast.expr, imported: set[str]) -> None:
             if keyword.arg is None or keyword.arg in seen or keyword.arg not in fields:
                 _fail("unsupported", "Unknown, duplicate or expanded constructor keyword", keyword)
             seen.add(keyword.arg)
-            if keyword.arg == "training_settings":
+            if keyword.arg in {"training_settings", "literature_settings"}:
                 _check_json_value(keyword.value)
             else:
                 _check_value(keyword.value, imported)
@@ -316,7 +316,8 @@ def _render_value(value: object, depth: int) -> str:
             f"{child_indent}{name}={_render_value(getattr(value, name), depth + 1)},"
             for name in type(value).model_fields
             if not (
-                name in {"training_settings", "task_binding", "execution_profile"}
+                name
+                in {"training_settings", "task_binding", "execution_profile", "literature_settings"}
                 and getattr(value, name) is None
             )
         ]

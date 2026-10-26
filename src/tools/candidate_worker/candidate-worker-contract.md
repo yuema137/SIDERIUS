@@ -486,9 +486,11 @@ stricter scientific policy. An escaping exception marks the review failed and al
 remaining instances blocked; no proposal runs. Timeout/interruption retains the
 existing uncertain-outcome behavior.
 
-This is an explicit native code/CLI/operation route, with verified HTTP observation.
-Reusable `execution_profile` still refuses this value; source-editor preparation
-and visual creation controls are not added. There is no per-review freeform human
+This explicit native code/CLI/operation route also accepts inputs from
+[reusable source preparation](../candidate_prepare/candidate-prepare-contract.md#reusable-native-literature-candidate),
+with the same source available to code and the existing source editor. Captured
+review settings appear in GUI review; dedicated visual creation controls are not
+added. There is no per-review freeform human
 advice field, N-way aggregation, parallelism, training, conditional routing, buffer,
 human pause or resume. Shared proposal advice is not literature advice. Historical
 scientific settings remain experiment-owned. Omitted/default fixed, fanout and

@@ -32,7 +32,9 @@ def provider(root: Path) -> None:
                 assert not (root / "hold-review").exists(), "browser did not release fake response"
             fake = Provider()
             fake.reject = reject
-            if not body.get("response_format"):
+            if model == "offline-literature":
+                content = '{"findings": []}'
+            elif not body.get("response_format"):
                 content = fake.generate_text("", "")
             else:
                 label = {

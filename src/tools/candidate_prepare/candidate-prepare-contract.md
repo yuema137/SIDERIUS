@@ -552,3 +552,63 @@ same G3A native executor. This yields N independently declared proposal calls, n
 N outputs from one proposer or a guarantee of scientific diversity. Aggregation,
 ranking, parallel generation, training, conditional routing, evidence buffers,
 human gates and graph resume remain outside this profile.
+
+## Reusable native literature candidate
+
+A v2 document can select `execution_profile="native-literature-candidate/v1"` for
+exactly one review feeding one proposal, implementation and validator through the
+[existing native profile](../candidate_worker/candidate-worker-contract.md#opt-in-native-literature-candidate).
+Use a managed `literature.input` binding for the review's external input, a managed
+`proposal.input` for the `literature-to-proposal` protocol's `proposal_input`, and
+managed storage bindings on the actual implementation/validator edges. All roles
+are checked; declaration order does not determine storage or lineage.
+
+The review binding requires explicit `literature_settings`; `{}` selects native
+defaults. Its sparse fields reuse existing native types:
+
+| Source field | Native type |
+| --- | --- |
+| `root_papers` | list of `PaperSource` |
+| `dynamic_search` | `DynamicSearchConfig` |
+| `confidence_rubric` | `ConfidenceRubric` |
+| `findings_verbosity` | 0 or 1 |
+| `synthesis` | `SynthesisConfig` |
+
+For example, `literature_settings={"dynamic_search": {"enabled": False},
+"synthesis": {"transfer_tolerance": "strict"}}` requests no dynamic search and
+selects the existing strict synthesis setting. `synthesis` retains the established
+workflow configuration name; the shared builder maps it to native
+`LiteratureReviewInput.synthesis_config`. Unknown fields and explicit null settings
+are refused. Routes/provider/model, storage, run identity, task description and
+interpretation are not user settings here. Captured LLM configuration owns routes;
+the composed task, prepared cold-start interpretation and checked proposal seed
+own scientific input. No freeform literature advice, research-question or
+scientific-focus field is introduced. Global proposal advice is not review advice.
+
+Declaration settings are inert JSON until the preparation boundary validates them
+with native types. The existing shared literature builder composes the review;
+no node, prompt, protocol or scientific schema changes. Local papers are refused
+with a pointer to the existing native workflow/CLI, whose support is unchanged.
+Remote root papers or enabled dynamic search require explicit
+`candidate_network=true`; preparation never guesses network access. No nested
+mounts or ambient/cache reuse are admitted. The shared candidate-specific policy
+is used both here and by the worker; the worker retains its fresh-cache refusal.
+
+Native task-pin checking precedes all prepared payload writes. The exact artifact
+census gains `literature.<review-id>.json`; the scalar receipt remains
+`proposal_path=<inputs>/proposal.json` because there is one candidate. The proposal
+seed must not contain literature evidence: the executed review owns that later
+projection. Parent verification reconstructs the review from independently retained
+source/settings/routes/storage and the captured typed interpretation plus checked
+seed, then compares exact review bytes and the artifact census. The scientific
+child still owns composition/cold-start semantics; a jointly forged interpretation
+and review beyond that existing trust boundary is not independently requalified.
+
+The source editor saves/reopens the same declaration consumed by code. Captured-run
+review shows the authored sparse settings and labels omissions as native defaults;
+it does not claim to show a fully expanded scientific configuration. The browser
+shows actual node instances/connections, with no new dedicated creation controls.
+Old fixed/fanout/family sources omit the new field; their declaration identity,
+canonical source and prepared payload conventions remain unchanged. This adds no
+aggregation, conditional routing, buffers, human gates, parallel generation or
+training. A valid empty native review retains its existing successful semantics.

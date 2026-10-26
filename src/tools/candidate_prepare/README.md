@@ -164,3 +164,12 @@ each proposer its own managed seed binding. Existing source save, New run,
 prepared-run review and launch use the same native worker. Each family retains
 its own files and candidate identity; execution is serial and does not aggregate
 or rank results. See the [family contract](candidate-prepare-contract.md#reusable-independent-proposal-families).
+
+To run one native literature review before a candidate, use
+`execution_profile="native-literature-candidate/v1"` and give the review a managed
+`literature.input` binding with explicit `literature_settings`. The same saved
+source works through code preparation and the source editor's preparation/review
+flow. Existing native settings control root papers, search and synthesis; proposal
+advice remains proposal advice. See the
+[literature contract](candidate-prepare-contract.md#reusable-native-literature-candidate)
+for settings, network restrictions and the four-node shape.

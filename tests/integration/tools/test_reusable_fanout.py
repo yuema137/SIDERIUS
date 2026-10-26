@@ -9,7 +9,9 @@ from uuid import uuid4
 
 import pytest
 
+from tests.helpers.candidate_literature import write_literature_provider
 from tests.helpers.reusable_fanout import reusable_families, reusable_fanout
+from tests.helpers.reusable_literature import reusable_literature
 from tests.integration.tools.test_bound_reusable_preparation import bound, bound_console_config
 from tests.integration.tools.test_candidate_operations import wait_for
 from tests.integration.tools.test_candidate_operations_native import cli, native_submitter
@@ -37,13 +39,20 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("families", [False, True])
+@pytest.mark.parametrize("profile", ["fanout", "families", "literature"])
 def test_bound_v2_fanout_detached_prepare_review_execute_and_http(
-    bound, console_config, tmp_path, families
+    bound, console_config, tmp_path, profile
 ):
     """Same-name models retain edge-owned sources through native preparation, UUID recovery and HTTP."""
     reusable, pin = bound
-    reusable = (reusable_families(reusable) if families else reusable_fanout(reusable)).model_copy(
+    families = profile == "families"
+    literature = profile == "literature"
+    factory = {
+        "fanout": reusable_fanout,
+        "families": reusable_families,
+        "literature": reusable_literature,
+    }[profile]
+    reusable = factory(reusable).model_copy(
         update={"candidate_environment_names": ("EXPLICIT_TEST_KEY", "OPENAI_API_KEY")}
     )
     original = Path(reusable.source_path).read_bytes()
@@ -97,7 +106,15 @@ def test_bound_v2_fanout_detached_prepare_review_execute_and_http(
         assert reviewed.status_code == 200, reviewed.text
         assert reviewed.json() == expected_review.model_dump(mode="json")
     candidate = build_reusable_operation(store, selected.preparation, uuid4())
-    profile = "native-proposal-families/v1" if families else "native-proposal-fanout/v1"
+    profile = (
+        "native-literature-candidate/v1"
+        if literature
+        else ("native-proposal-families/v1" if families else "native-proposal-fanout/v1")
+    )
+    if literature:
+        assert expected_review.literature_settings == {
+            "review": {"dynamic_search": {"enabled": False}}
+        }
     assert (
         candidate.request.preview.execution_profile == expected_review.execution_profile == profile
     )
@@ -113,6 +130,8 @@ def test_bound_v2_fanout_detached_prepare_review_execute_and_http(
     path = tmp_path / "candidate.json"
     path.write_text(candidate.model_dump_json())
     submitter = native_submitter(tmp_path, envelope / "inputs", distinct_branches=True)
+    if literature:
+        write_literature_provider(envelope / "inputs")
     cli(
         store_path,
         "submit",
@@ -131,7 +150,9 @@ def test_bound_v2_fanout_detached_prepare_review_execute_and_http(
     trace = status.receipt.model_dump(mode="json")["graph_trace"]
     nodes = {node["node_id"]: node for node in trace["nodes"]}
     implementations = []
-    for side in ("left", "right", "other") if families else ("left", "right"):
+    for side in (
+        ("left",) if literature else (("left", "right", "other") if families else ("left", "right"))
+    ):
         impl, valid = nodes["build_" + side], nodes["check_" + side]
         proposal_id = "alternate" if side == "other" else "hypothesis"
         assert valid["predecessors"] == sorted(["build_" + side, proposal_id])
@@ -143,11 +164,21 @@ def test_bound_v2_fanout_detached_prepare_review_execute_and_http(
         assert implementation["candidate_id"] == record["candidate_id"] == proposal["candidate_id"]
         implementations.append(implementation)
         assert "/graph_instances/build_" + side + "/" in implementation["model_file_path"]
-    assert implementations[0]["model_type"] == implementations[1]["model_type"]
-    assert (
-        Path(implementations[0]["model_file_path"]).read_bytes()
-        != Path(implementations[1]["model_file_path"]).read_bytes()
-    )
+    if literature:
+        assert len(nodes) == 4 and nodes["hypothesis"]["predecessors"] == ["review"]
+        assert nodes["review"]["state"] == "succeeded"
+        review_output = json.loads(Path(nodes["review"]["record_path"]).read_bytes())
+        assert review_output["findings"] == [] and review_output["retrieved_papers"] == []
+        rows = [
+            json.loads(line) for line in Path(status.receipt.ledger_path).read_text().splitlines()
+        ]
+        assert len(rows) == 1 and rows[0]["label"] == "lit_review.synthesis"
+    else:
+        assert implementations[0]["model_type"] == implementations[1]["model_type"]
+        assert (
+            Path(implementations[0]["model_file_path"]).read_bytes()
+            != Path(implementations[1]["model_file_path"]).read_bytes()
+        )
     with client(config) as http:
         response = http.get(f"/api/operations/{candidate.request_id}")
         assert response.status_code == 200, response.text
@@ -166,14 +197,19 @@ def test_bound_v2_fanout_detached_prepare_review_execute_and_http(
     assert not Path(reusable.source_path).exists()
 
 
-@pytest.mark.parametrize("families", [False, True])
-def test_graph_pin_refusal_precedes_branch_publication(bound, families):
+@pytest.mark.parametrize("profile", ["fanout", "families", "literature"])
+def test_graph_pin_refusal_precedes_branch_publication(bound, profile):
     """The explicit graph route must retain A2's native check before any branch payload."""
     request, pin = bound
-    request = reusable_families(request) if families else reusable_fanout(request)
+    request = {
+        "fanout": reusable_fanout,
+        "families": reusable_families,
+        "literature": reusable_literature,
+    }[profile](request)
     request = bind_source(request, pin.model_copy(update={"task_data_path_id": "wrong_path"}))
     receipt = prepare_reusable_candidate(request)
     assert receipt.status == "failed" and receipt.candidate_request_path is None
     output = Path(receipt.envelope) / "inputs"
+    assert not list(output.glob("literature.*.json"))
     assert not list(output.glob("storage.*.json")) and not list(output.glob("proposal*.json"))
     assert "native task composition differs" in (output / "preparation/worker.log").read_text()

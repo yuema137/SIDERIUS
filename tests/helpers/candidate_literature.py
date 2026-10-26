@@ -75,3 +75,31 @@ def literature_request(request):
             "selected_constructor_routes": observed.selected_constructor_routes,
         }
     )
+
+
+def write_literature_provider(project):
+    """Only SDK transport is fake; literature runs its real bridge and ledger."""
+    import inspect
+
+    from tests.unit.tools.candidate_worker.test_native import Provider
+
+    # Keep the real literature bridge and writer; substitute only its SDK transport.
+    # Other native nodes retain the existing offline provider fixture.
+    (project / "offline_provider.py").write_text(f"""import builtins, json, runpy, sys
+from types import SimpleNamespace
+from typing import ClassVar
+import agent.llm_bridge as bridge
+{inspect.getsource(Provider)}
+def complete(**kwargs):
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{{"findings": []}}'), finish_reason='stop')], usage=SimpleNamespace(prompt_tokens=11,completion_tokens=7,total_tokens=18), model=kwargs['model'])
+bridge.OpenAI = lambda **kwargs: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=complete)))
+original = builtins.__import__
+def offline(name, globals=None, locals=None, fromlist=(), level=0):
+    result = original(name, globals, locals, fromlist, level)
+    if name in ('nodes.ml_model_proposal_agent.ml_model_proposal_agent', 'nodes.ml_model_implementor.ml_model_implementor', 'nodes.ml_code_validator_agent.ml_code_validator_agent'):
+        sys.modules[name].LLMBridge = Provider
+    return result
+builtins.__import__ = offline
+sys.argv = ['tools.candidate_worker.child', sys.argv[1]]
+runpy.run_module('tools.candidate_worker.child', run_name='__main__')
+""")

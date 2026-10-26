@@ -16,7 +16,7 @@ from workflows.definition import (
 from workflows.definition.source import MAX_INPUT_BYTES
 
 from .admission import absent_destination, admit, canonical, overlap
-from .layout import graph_proposal_bindings, graph_storage_bindings
+from .layout import graph_literature_bindings, graph_proposal_bindings, graph_storage_bindings
 from .limits import PREPARATION_FILE_LIMIT
 from .models import CandidatePreparationRequest
 from .resolution import (
@@ -68,8 +68,10 @@ def reusable_locations(
         raise ValueError(
             "reusable preparation supports managed externals only; literal externals are unsupported"
         )
+    from .reusable_literature import review_settings
     from .reusable_training import settings_payload
 
+    review_settings(document)
     payload = settings_payload(document)
     task = document.definition.task
     manifest = resolve_location(project, task.manifest, "task.manifest")
@@ -89,7 +91,11 @@ def reusable_locations(
         "native-training.settings": "training_settings.json",
     }
     branch_files = (
-        {**graph_storage_bindings(document), **graph_proposal_bindings(document)}
+        {
+            **graph_storage_bindings(document),
+            **graph_proposal_bindings(document),
+            **graph_literature_bindings(document),
+        }
         if document.execution_profile is not None
         else {}
     )
@@ -100,7 +106,11 @@ def reusable_locations(
         externals=tuple(
             ResolvedExternalLocation(
                 binding=item.id,
-                location=str(envelope / "inputs" / branch_files.get(item.id, roles[item.contract])),
+                location=str(
+                    envelope
+                    / "inputs"
+                    / (branch_files[item.id] if item.id in branch_files else roles[item.contract])
+                ),
             )
             for item in document.definition.externals
         ),

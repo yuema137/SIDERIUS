@@ -9,6 +9,7 @@ from agent.schemas.proposal import ProposalInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.llm_settings import literature_bridge_arguments
 from tools.setup_review.routes import node_llm_routes
+from workflows.candidate_literature_policy import require_candidate_literature_policy
 from workflows.llm_config import WorkflowLLMConfig
 
 from .inputs import require_storage
@@ -39,13 +40,7 @@ def materialize_literature(
         raise ValueError("literature input task/run binding disagrees with selected candidate")
     if value.constraint_context != seed.constraint_context:
         raise ValueError("literature constraints disagree with the checked proposal seed")
-    if any(source.source_type == "local" for source in value.root_papers):
-        raise ValueError(
-            "native literature graph does not admit local papers; use the existing native "
-            "literature workflow/CLI for checkout-relative local sources"
-        )
-    if not request.network and (value.root_papers or value.dynamic_search.enabled):
-        raise ValueError("literature retrieval requires explicit network=true")
+    require_candidate_literature_policy(value, network=request.network)
     arguments = literature_bridge_arguments(
         provider=value.llm_provider,
         model_id=value.llm_model_id,

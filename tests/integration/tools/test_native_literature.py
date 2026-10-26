@@ -1,6 +1,5 @@
 """Detached native empty-review route, distinct from nonempty in-process retrieval."""
 
-import inspect
 import json
 import os
 import secrets
@@ -10,11 +9,10 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.helpers.candidate_literature import literature_request
+from tests.helpers.candidate_literature import literature_request, write_literature_provider
 from tests.integration.tools.test_candidate_operations import wait_for
 from tests.integration.tools.test_candidate_operations_native import cli, native_submitter
 from tests.unit.tools.candidate_worker.conftest import prepared
-from tests.unit.tools.candidate_worker.test_native import Provider
 from tools.candidate_console.app import create_app
 from tools.candidate_console.models import ConsoleConfig
 from tools.candidate_operations import CandidateOperation, OperationStoreConfig, read_operation
@@ -43,26 +41,7 @@ def test_detached_empty_review_cli_http_and_native_accounting(prepared, tmp_path
     config_path.write_text(config.model_dump_json())
     project = Path(request.preview.project_root)
     submitter = native_submitter(tmp_path, project)
-    # Keep the real literature bridge and writer; substitute only its SDK transport.
-    # Other native nodes retain the existing offline provider fixture.
-    (project / "offline_provider.py").write_text(f"""import builtins, json, runpy, sys
-from types import SimpleNamespace
-from typing import ClassVar
-import agent.llm_bridge as bridge
-{inspect.getsource(Provider)}
-def complete(**kwargs):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{{"findings": []}}'), finish_reason='stop')], usage=SimpleNamespace(prompt_tokens=11,completion_tokens=7,total_tokens=18), model=kwargs['model'])
-bridge.OpenAI = lambda **kwargs: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=complete)))
-original = builtins.__import__
-def offline(name, globals=None, locals=None, fromlist=(), level=0):
-    result = original(name, globals, locals, fromlist, level)
-    if name in ('nodes.ml_model_proposal_agent.ml_model_proposal_agent', 'nodes.ml_model_implementor.ml_model_implementor', 'nodes.ml_code_validator_agent.ml_code_validator_agent'):
-        sys.modules[name].LLMBridge = Provider
-    return result
-builtins.__import__ = offline
-sys.argv = ['tools.candidate_worker.child', sys.argv[1]]
-runpy.run_module('tools.candidate_worker.child', run_name='__main__')
-""")
+    write_literature_provider(project)
     operation = CandidateOperation(request_id=uuid4(), request=request)
     envelope = tmp_path / "candidate.json"
     envelope.write_text(operation.model_dump_json())
