@@ -160,21 +160,26 @@ class TestEndToEndPlumbing:
         import ast
         import inspect
 
-        from workflows import model_exploration
+        from workflows import model_exploration, tuner_preparation
 
-        tree = ast.parse(inspect.getsource(model_exploration))
-        carried = [
-            n.lineno
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Call)
-            and (getattr(n.func, "id", None) or getattr(n.func, "attr", None))
-            == "local_validated_model"
-            and "validation_max_portion" in {kw.arg for kw in n.keywords}
-        ]
-        assert carried, (
-            "local_validated_model is called without validation_max_portion, so "
-            "the ceiling never reaches the tuner input"
-        )
+        # The workflow forwards the carrier; its focused builder owns protocol mapping.
+        for owner, callee, name, value in (
+            (model_exploration.run_workflow, "prepare_native_tuner_input", "launch", "launch"),
+            (
+                tuner_preparation.prepare_native_tuner_input,
+                "local_validated_model",
+                "validation_max_portion",
+                "launch.validation_max_portion",
+            ),
+        ):
+            calls = [
+                n
+                for n in ast.walk(ast.parse(inspect.getsource(owner)))
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == callee
+            ]
+            assert len(calls) == 1, f"expected one {callee} call"
+            kwargs = {kw.arg: ast.unparse(kw.value) for kw in calls[0].keywords}
+            assert kwargs.get(name) == value, f"{callee} dropped/swapped {name}"
 
     def test_the_protocol_maps_it_onto_the_tuner_input(self):
         """The other half: a protocol that accepts a field and never maps it

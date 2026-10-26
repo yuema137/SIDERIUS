@@ -22,6 +22,7 @@ tests called out in design doc §3.5 Commit 8 live in the wiring layer.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import inspect
 import json
@@ -1544,10 +1545,44 @@ class TestComputeExpectedInvariants:
 
     def test_resume_receives_the_resolved_task_partition_count(self):
         """The iteration runner must not make resume rediscover task state."""
-        assert "_run_bound_iteration(args, package_scope)" in inspect.getsource(runner.main)
-        source = inspect.getsource(runner._run_bound_iteration)
-        assert "dataset_partition_count=(" in source
-        assert "run_composition.dataset_profile.partition_count" in source
+        for owner, callee, expected_args, expected_keywords in (
+            (
+                runner.main,
+                "_run_owned_iteration",
+                ["args"],
+                [{"reviewed_setup": "reviewed_setup", "chain_capture": "chain_capture"}],
+            ),
+            (
+                runner._run_owned_iteration,
+                "_run_bound_iteration",
+                ["args", "package_scope"],
+                [{"chain_capture": "chain_capture"}, {"reviewed_setup": "reviewed_setup"}, {}],
+            ),
+        ):
+            calls = [
+                n
+                for n in ast.walk(ast.parse(inspect.getsource(owner)))
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == callee
+            ]
+            assert len(calls) == len(expected_keywords), f"missing {callee} entry path"
+            actual_keywords = []
+            for call in calls:
+                assert [ast.unparse(arg) for arg in call.args] == expected_args
+                actual_keywords.append({kw.arg: ast.unparse(kw.value) for kw in call.keywords})
+            assert all(actual_keywords.count(expected) == 1 for expected in expected_keywords)
+        calls = [
+            n
+            for n in ast.walk(ast.parse(inspect.getsource(runner._run_bound_iteration)))
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "restore_prior_state"
+        ]
+        assert len(calls) == 1
+        kwargs = {kw.arg: ast.unparse(kw.value) for kw in calls[0].keywords}
+        assert kwargs.get("dataset_partition_count") == (
+            "run_composition.dataset_profile.partition_count if run_composition is not None "
+            "else resolve_dataset_profile().partition_count"
+        )
 
     def test_disabled_gates_null_sha_no_file(self, tmp_path):
         args = _normalized("--no-health_gate_enabled", "--data_scope", "0-1")

@@ -142,8 +142,26 @@ class TestThePrivateDuplicateIsGone:
         assert offenders == []
 
     def test_the_workflow_caller_uses_the_public_authority(self):
-        source = MODEL_EXPLORATION.read_text(encoding="utf-8")
-        assert "registered = register_model_in_memory(primary_plugin)" in source
+        from ml_models.plugin_loader import register_model_in_memory
+        from workflows import model_exploration, plugin_staging
+
+        assert plugin_staging.register_model_in_memory is register_model_in_memory
+        assert model_exploration.stage_native_plugins is plugin_staging.stage_native_plugins
+        for path, callee, arguments in (
+            (MODEL_EXPLORATION, "stage_native_plugins", ["impl_output", "proposal.model_name"]),
+            (
+                REPO_ROOT / "src/workflows/plugin_staging.py",
+                "register_model_in_memory",
+                ["primary_plugin"],
+            ),
+        ):
+            calls = [
+                n
+                for n in ast.walk(ast.parse(path.read_text()))
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == callee
+            ]
+            assert len(calls) == 1, f"expected one {callee} call"
+            assert [ast.unparse(arg) for arg in calls[0].args[: len(arguments)]] == arguments
 
 
 class TestTheCycleWorkaroundsAreDissolved:
