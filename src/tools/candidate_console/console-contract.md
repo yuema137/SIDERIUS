@@ -56,12 +56,11 @@ omitted, preserving legacy configuration serialization. Versioned choices projec
 to the shared authoring task-reference target policy; explicit review uses that
 configured native identity without creating a registry or guessing a version.
 The existing review HTTP route accepts the typed task_references proposal;
-ordinary selections do not trigger composition. No new GUI selector/update button
-is provided in this slice. The HTTP/Python authoring backend supports explicitly
-accepted current-snapshot adoption and guarded bound publication;
-the browser supplies no such acceptance controls. Reusable preparation independently
-enforces captured native pins; this adds no graphical selection/update controls.
-see the [authoring contract](../workflow_authoring/authoring-contract.md#explicit-task-reference-inspectionreview).
+ordinary selections do not trigger composition. The browser provides explicit
+selection, Update, findings acknowledgement and current-snapshot adoption through
+the [task-version controls](#workflow-builder-task-versions). Python and HTTP use the same
+[authoring contract](../workflow_authoring/authoring-contract.md#explicit-task-reference-inspectionreview).
+Reusable preparation independently enforces captured native pins.
 
 ## Python policy and request binding
 

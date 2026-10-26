@@ -110,7 +110,7 @@ To bind a reusable workflow in **Workflow builder**:
 2. Inspect the Python diff and task findings, confirm them and **Save reviewed source**.
 3. Prepare a new run separately, review its captured inputs, then explicitly launch.
 
-Save pending edits before Update; see the [task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version) for switching checked versions.
+Save pending edits before Update.
 An unbound workflow needs an explicit current-snapshot adoption confirmation.
 Bound edits need their matching configured choice for review. Professional and
 Assistant modes share this flow; see the [task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version).

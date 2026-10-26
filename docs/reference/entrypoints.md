@@ -408,7 +408,11 @@ In the console Workflow builder, both collaboration modes explicitly choose a
 configured task version, **Update workflow references**, inspect the diff/findings,
 confirm them and save. First save pending edits; a bound edit needs its matching
 configured selection for ordinary review. Adopting an unchanged current snapshot
-of unbound v2 source requires a separate confirmation before later edits. Changed references support fresh fixed managed candidates only, with native structured-interface checks and explicit review; see the [task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version). Assistant help proposes choices and edits the
+of unbound v2 source requires a separate confirmation before later edits. Changed
+references support fresh fixed managed candidates only, with native structured
+interface checks and explicit review; see the
+[task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version).
+Assistant help proposes choices and edits the
 same source; it does not replace explicit selection or acceptance. Saving source
 is separate from preparing or launching its next capture.
 The [preparation contract](../../src/tools/candidate_prepare/candidate-prepare-contract.md#managed-reusable-preparation)

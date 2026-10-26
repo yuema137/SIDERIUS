@@ -71,7 +71,8 @@ Inert read accepts the optional v2 TaskBinding declaration. Bound review and Sav
 require explicit configured selection and findings acceptance. Unbound legacy
 Save retains its inert behavior and wire serialization; omitted new optional
 fields remain omitted. Pin removal and unresolved compatibility refuse publication. Changed identities
-use the bounded [fresh candidate checks](#changed-task-versions-for-fresh-candidates). Reusable preparation independently enforces the captured pin through its
+use the bounded [fresh candidate checks](#changed-task-versions-for-fresh-candidates).
+Reusable preparation independently enforces the captured pin through its
 [native owner](../candidate_prepare/candidate-prepare-contract.md#accepted-task-binding-enforcement);
 successful Save is not preparation or launch approval. Existing runs keep their captured original pins.
 
@@ -104,11 +105,13 @@ provider failure remains blocked, never substituted with a default provider.
 
 The proposal updates only selected manifest/data references and the accepted pin;
 it preserves nodes, bindings, options, settings and layout. No implicit remapping,
-default replacement or scientific compatibility policy exists here. The current source must resolve to an unambiguous configured inspection policy;
+default replacement or scientific compatibility policy exists here. The current
+source must resolve to an unambiguous configured inspection policy;
 arbitrary source paths are never imported. Original-owner observations of both
 configured locations are required for relocation, unless the selected policy is
 already the current policy. Native identity compares the original semantic
-fingerprint and task_data_path_id, not readable package/revision labels. An unavailable original policy is compatibility_unresolved and blocked. Changed
+fingerprint and task_data_path_id, not readable package/revision labels. An
+unavailable original policy is compatibility_unresolved and blocked. Changed
 native identities use the bounded checks below; native facts and text diff do not
 certify scientific equivalence.
 
@@ -176,6 +179,7 @@ These checks determine supported structural compatibility, not scientific
 suitability. The browser displays full declaration details in a collapsed panel.
 Save still requires exact ordered acknowledgements and never prepares or launches.
 A later preparation builds a fresh target proposal under a new run UUID; previous
-captured source, inputs, run history and resume bindings stay unchanged. Training,
-objective or I/O adaptation and migration of prior trained state are outside this
-slice and receive a blocking finding where unsupported.
+captured source, inputs, run history and resume bindings stay unchanged. A fresh
+candidate may use a changed target objective after explicit review when the
+structured interfaces remain supported. Migrating a trained model or its objective
+state, training workflows and I/O adaptation remain outside this slice.
