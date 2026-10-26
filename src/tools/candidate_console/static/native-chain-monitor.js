@@ -32,7 +32,7 @@
     const sameOperation = panel.dataset.operationId === status?.operation_id;
     const expanded = new Set(sameOperation ? [...panel.querySelectorAll('details[open]')].map(el => el.dataset.evidenceKey) : []);
     panel.dataset.operationId = status?.operation_id || '';
-    panel.replaceChildren(); panel.hidden = status?.kind !== 'native_chain';
+    panel.replaceChildren(); panel.hidden = !['native_chain', 'native_chain_resume'].includes(status?.kind);
     if (panel.hidden) return;
     const native = status.native_chain, admission = native?.admission, supervision = native?.terminal?.supervision;
     const title = document.createElement('h2'); title.textContent = 'Native chain observations';

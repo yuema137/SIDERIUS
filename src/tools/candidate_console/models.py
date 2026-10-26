@@ -7,7 +7,7 @@ from pydantic import Field, field_validator, model_validator
 
 from agent.schemas.output_types import OutputTypeName
 from tools.candidate_operations import OperationStoreConfig
-from tools.candidate_operations.models import ProcessObservation
+from tools.candidate_operations.models import OperationKind, ProcessObservation
 from tools.candidate_operations.native_chain_models import NativeChainObservation
 from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.candidate_worker.graph_models import GraphTrace
@@ -154,7 +154,7 @@ class PreparedReview(PreviewModel):
 
 class StatusView(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain"]
+    kind: OperationKind
     request_digest: str
     observed_at: str
     state: Literal["active", "completed", "operation_failed", "unknown"]

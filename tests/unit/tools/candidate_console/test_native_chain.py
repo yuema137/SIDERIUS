@@ -86,7 +86,10 @@ def test_recovery_after_removed_choice_inputs_and_credentials(chain, console_con
     assert status["native_status"] is None and status["native_id"] is None
     assert status["native_chain"]["evidence"]["availability"] == "unavailable"
     tokens = monitor.get(f"/api/operations/{selection.operation_id}/tokens")
-    assert tokens.status_code == 409 and tokens.json()["error"]["code"] == "not_supported"
+    assert tokens.status_code == 200
+    assert tokens.json()["availability"] == "unavailable"
+    assert tokens.json()["groups"] == []
+    assert tokens.json()["scope"] == "chain_cumulative"
 
 
 def test_fresh_review_and_launch_share_digest_then_dispatch_once(
