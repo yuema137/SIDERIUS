@@ -73,12 +73,10 @@ body:has(#view-workflow:not([hidden])) nav.actions {
   width: 100%;
   max-width: 1920px;
 }
-body:has(#view-workflow:not([hidden])) main { padding: 12px clamp(16px, 2vw, 32px) 24px; }
-body:has(#view-workflow:not([hidden])) main { gap: 12px; }
+body:has(#view-workflow:not([hidden])) main { padding: 12px clamp(16px, 2vw, 32px) 24px; gap: 12px; }
 body:has(#view-workflow:not([hidden])) main > #route-status:empty { display: none; }
-body:has(#view-workflow:not([hidden])) nav.actions { margin-inline: auto; padding-inline: clamp(16px, 2vw, 32px); }
-body:has(#view-workflow:not([hidden])) header { padding-top: 12px; padding-bottom: 4px; }
-body:has(#view-workflow:not([hidden])) header { display: flex; align-items: center; gap: 16px; }
+body:has(#view-workflow:not([hidden])) nav.actions { margin: 0; min-height: 32px; padding-inline: clamp(16px, 2vw, 32px); }
+body:has(#view-workflow:not([hidden])) header { display: flex; align-items: center; gap: 16px; padding: 4px 24px 0; }
 body:has(#view-workflow:not([hidden])) .console-intro { display: block; margin: 0; font-size: .82rem; color: var(--muted); }
 body:has(#view-workflow:not([hidden])) .console-intro p { margin: 8px 0; }
 body:has(#view-workflow:not([hidden])) .theme-control { margin: 0 0 0 auto; }
@@ -89,9 +87,7 @@ body:has(#view-workflow:not([hidden])) main > section[aria-labelledby="access-he
   gap: 4px 12px;
   padding: 6px 12px;
 }
-body:has(#view-workflow:not([hidden])) nav.actions { margin: 0; min-height: 32px; }
 body:has(#view-workflow:not([hidden])) .theme-control select { min-height: 36px; padding: 5px 9px; }
-body:has(#view-workflow:not([hidden])) header { padding: 4px 24px 0; }
 body:has(#view-workflow:not([hidden])) #access-heading { margin: 0; font-size: .95rem; white-space: nowrap; }
 body:has(#view-workflow:not([hidden])) .access-help { margin: 0; font-size: .74rem; }
 body:has(#view-workflow:not([hidden])) #access-form { flex: 1 1 520px; min-width: 360px; margin: 0; align-items: center; }

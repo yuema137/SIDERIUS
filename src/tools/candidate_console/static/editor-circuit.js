@@ -124,6 +124,7 @@
         if (projection === value && drag?.node === node.id && drag.pointerId === event.pointerId) { cancel(); say('Node move cancelled.'); }
       });
       const mapping = element('details', '', card, 'circuit-mapping');
+      mapping.addEventListener('toggle', draw);
       element('summary', 'Mapping details', mapping);
       const mappingList = element('dl', '', mapping, 'circuit-mapping-list');
       element('dt', 'Capability ID', mappingList); element('dd', node.capability, mappingList);
