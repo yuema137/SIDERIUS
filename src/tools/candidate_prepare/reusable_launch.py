@@ -14,6 +14,7 @@ from tools.workflow_preview import WorkflowPreview
 
 from .admission import absent_destination, admit, canonical
 from .launch import publish, supervise
+from .layout import proposal_receipt_path
 from .models import CandidatePreparationReceipt
 from .reusable_admission import capture, safe_bytes, verify_origin
 from .reusable_models import (
@@ -148,7 +149,7 @@ def prepare_reusable_candidate(
                     "candidate_request_path": str(output / "candidate_request.json"),
                     "preview_path": str(output / "preview.json"),
                     "interpretation_path": str(output / "interpretation.json"),
-                    "proposal_path": str(output / "proposal.json"),
+                    "proposal_path": proposal_receipt_path(plan.document, output),
                     "composition_fingerprint": fingerprint,
                 }
             )

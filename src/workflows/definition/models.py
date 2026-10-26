@@ -161,9 +161,9 @@ class ReusableWorkflowDocument(DeclarationModel):
         default_factory=CandidatePreparationOptions
     )
 
-    execution_profile: Literal["native-proposal-fanout/v1"] | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
+    execution_profile: (
+        Literal["native-proposal-fanout/v1", "native-proposal-families/v1"] | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
     training_settings: dict[str, JsonValue] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )

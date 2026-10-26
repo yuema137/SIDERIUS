@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import UUID
 
 from .admission import canonical
+from .layout import proposal_receipt_path
 from .models import CandidatePreparationReceipt
 from .reusable_admission import captured_request
 from .reusable_models import (
@@ -12,6 +13,7 @@ from .reusable_models import (
     ReusableCandidatePreparationRequest,
     ReusablePreparationControl,
     ReusablePreparationObservations,
+    ReusablePreparationPlan,
     ReusablePreparationReceipt,
 )
 from .reusable_selection import CapturedBytes, captured_plan
@@ -23,7 +25,7 @@ def _binding(
     receipt: ReusablePreparationReceipt,
     envelope: Path,
     reader: CapturedBytes,
-) -> ReusableBindingCapture:
+) -> tuple[ReusableBindingCapture, ReusablePreparationPlan]:
     payload = reader(envelope / "binding.json")
     if hashlib.sha256(payload).hexdigest() != receipt.binding_sha256:
         raise ValueError("terminal binding digest mismatch")
@@ -41,12 +43,13 @@ def _binding(
     plan, _ = captured_plan(envelope, binding, reader)
     if binding.request != captured_request(request, plan.document, binding.locations):
         raise ValueError("terminal native request differs from admitted parameters and source")
-    return binding
+    return binding, plan
 
 
 def _native(
     receipt: ReusablePreparationReceipt,
     binding: ReusableBindingCapture,
+    plan: ReusablePreparationPlan,
     invocation_id: UUID,
     reader: CapturedBytes,
 ) -> None:
@@ -89,7 +92,7 @@ def _native(
         native.candidate_request_path != str(output / "candidate_request.json")
         or native.preview_path != str(output / "preview.json")
         or native.interpretation_path != str(output / "interpretation.json")
-        or native.proposal_path != str(output / "proposal.json")
+        or native.proposal_path != proposal_receipt_path(plan.document, output)
         or native.composition_fingerprint is None
     ):
         raise ValueError("prepared native receipt lacks fixed artifact references")
@@ -126,8 +129,8 @@ def read_reusable_terminal(
         or receipt.binding_path != str(envelope / "binding.json")
     ):
         raise ValueError("terminal reusable invocation identity mismatch")
-    binding = _binding(request, observations, receipt, envelope, reader)
-    _native(receipt, binding, invocation_id, reader)
+    binding, plan = _binding(request, observations, receipt, envelope, reader)
+    _native(receipt, binding, plan, invocation_id, reader)
     if receipt.status == "prepared":
         if receipt.error is not None or receipt.candidate_request_path != str(
             envelope / "inputs/candidate_request.json"

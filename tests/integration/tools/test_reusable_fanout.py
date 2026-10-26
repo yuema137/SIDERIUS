@@ -2,12 +2,14 @@
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
-from tests.helpers.reusable_fanout import reusable_fanout
+from tests.helpers.reusable_fanout import reusable_families, reusable_fanout
 from tests.integration.tools.test_bound_reusable_preparation import bound, bound_console_config
 from tests.integration.tools.test_candidate_operations import wait_for
 from tests.integration.tools.test_candidate_operations_native import cli, native_submitter
@@ -27,6 +29,7 @@ from tools.candidate_operations.process import environment
 from tools.candidate_operations.read import releasable
 from tools.candidate_operations.store import load_record
 from tools.candidate_prepare import prepare_reusable_candidate
+from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("SIDERIUS_TEST_WORKSPACE_SANDBOX") != "1",
@@ -34,10 +37,13 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_bound_v2_fanout_detached_prepare_review_execute_and_http(bound, console_config, tmp_path):
+@pytest.mark.parametrize("families", [False, True])
+def test_bound_v2_fanout_detached_prepare_review_execute_and_http(
+    bound, console_config, tmp_path, families
+):
     """Same-name models retain edge-owned sources through native preparation, UUID recovery and HTTP."""
     reusable, pin = bound
-    reusable = reusable_fanout(reusable).model_copy(
+    reusable = (reusable_families(reusable) if families else reusable_fanout(reusable)).model_copy(
         update={"candidate_environment_names": ("EXPLICIT_TEST_KEY", "OPENAI_API_KEY")}
     )
     original = Path(reusable.source_path).read_bytes()
@@ -59,7 +65,23 @@ def test_bound_v2_fanout_detached_prepare_review_execute_and_http(bound, console
     assert prepared.state == "completed" and prepared.receipt.status == "prepared", prepared
     envelope = Path(prepared.receipt.envelope)
     # A second fresh envelope proves source reuse without repeating model validation.
-    second = prepare_reusable_candidate(reusable.model_copy(update={"run_id": uuid4()}))
+    second_request = tmp_path / "second-prepare.json"
+    second_request.write_text(reusable.model_copy(update={"run_id": uuid4()}).model_dump_json())
+    second_cli = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.candidate_prepare",
+            "--reusable-request",
+            str(second_request),
+        ],
+        env=environment((), {}),
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=True,
+    )
+    second = ReusablePreparationReceipt.model_validate_json(second_cli.stdout)
     assert second.status == "prepared", second.error
     assert (Path(second.envelope) / "workflow.py.snapshot").read_bytes() == original
     assert (envelope / "workflow.py.snapshot").read_bytes() == original
@@ -75,7 +97,19 @@ def test_bound_v2_fanout_detached_prepare_review_execute_and_http(bound, console
         assert reviewed.status_code == 200, reviewed.text
         assert reviewed.json() == expected_review.model_dump(mode="json")
     candidate = build_reusable_operation(store, selected.preparation, uuid4())
-    assert candidate.request.preview.execution_profile == "native-proposal-fanout/v1"
+    profile = "native-proposal-families/v1" if families else "native-proposal-fanout/v1"
+    assert (
+        candidate.request.preview.execution_profile == expected_review.execution_profile == profile
+    )
+    native_receipt = json.loads((envelope / "inputs/preparation/receipt.json").read_bytes())
+    assert native_receipt["proposal_path"] == (
+        None if families else str(envelope / "inputs/proposal.json")
+    )
+    terminal = json.loads(
+        cli(store_path, "status", "--operation-id", str(preparation.request_id)).stdout
+    )
+    assert terminal["state"] == "completed" and terminal["receipt"]["status"] == "prepared"
+
     path = tmp_path / "candidate.json"
     path.write_text(candidate.model_dump_json())
     submitter = native_submitter(tmp_path, envelope / "inputs", distinct_branches=True)
@@ -97,13 +131,16 @@ def test_bound_v2_fanout_detached_prepare_review_execute_and_http(bound, console
     trace = status.receipt.model_dump(mode="json")["graph_trace"]
     nodes = {node["node_id"]: node for node in trace["nodes"]}
     implementations = []
-    for side in ("left", "right"):
+    for side in ("left", "right", "other") if families else ("left", "right"):
         impl, valid = nodes["build_" + side], nodes["check_" + side]
-        assert valid["predecessors"] == ["build_" + side, "hypothesis"]
+        proposal_id = "alternate" if side == "other" else "hypothesis"
+        assert valid["predecessors"] == sorted(["build_" + side, proposal_id])
         assert impl["state"] == valid["state"] == "succeeded"
         record = json.loads(Path(valid["record_path"]).read_bytes())
         assert record["tests_passed"] and record["gradient_check_passed"]
         implementation = json.loads(Path(impl["record_path"]).read_bytes())
+        proposal = json.loads(Path(nodes[proposal_id]["record_path"]).read_bytes())
+        assert implementation["candidate_id"] == record["candidate_id"] == proposal["candidate_id"]
         implementations.append(implementation)
         assert "/graph_instances/build_" + side + "/" in implementation["model_file_path"]
     assert implementations[0]["model_type"] == implementations[1]["model_type"]
@@ -115,22 +152,28 @@ def test_bound_v2_fanout_detached_prepare_review_execute_and_http(bound, console
         response = http.get(f"/api/operations/{candidate.request_id}")
         assert response.status_code == 200, response.text
         assert response.json()["graph_trace"] == trace
+    if families:
+        assert implementations[0]["candidate_id"] != implementations[2]["candidate_id"]
+        assert len(trace["nodes"]) == 8
+    assert Path(reusable.source_path).read_bytes() == original
+    Path(reusable.source_path).unlink()
     native_id = load_record(store, candidate.request_id).native_id
     assert (
         json.loads(cli(store_path, "submit", "--request", str(path)).stdout)["observation"]
         == "existing"
     )
     assert load_record(store, candidate.request_id).native_id == native_id
-    assert Path(reusable.source_path).read_bytes() == original
+    assert not Path(reusable.source_path).exists()
 
 
-def test_graph_pin_refusal_precedes_branch_publication(bound):
+@pytest.mark.parametrize("families", [False, True])
+def test_graph_pin_refusal_precedes_branch_publication(bound, families):
     """The explicit graph route must retain A2's native check before any branch payload."""
     request, pin = bound
-    request = reusable_fanout(request)
+    request = reusable_families(request) if families else reusable_fanout(request)
     request = bind_source(request, pin.model_copy(update={"task_data_path_id": "wrong_path"}))
     receipt = prepare_reusable_candidate(request)
     assert receipt.status == "failed" and receipt.candidate_request_path is None
     output = Path(receipt.envelope) / "inputs"
-    assert not list(output.glob("storage.*.json")) and not (output / "proposal.json").exists()
+    assert not list(output.glob("storage.*.json")) and not list(output.glob("proposal*.json"))
     assert "native task composition differs" in (output / "preparation/worker.log").read_text()

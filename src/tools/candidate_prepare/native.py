@@ -91,11 +91,6 @@ def prepare_payloads(
             description_source_policy=DescriptionSourcePolicy.COMPOSED,
         )
         interpretation = build_cold_start_interpretation(interpretation_input)
-        proposal_dir = admitted.proposal_dir
-        storage = StorageConfig(
-            backend="local",
-            local=LocalStorageConfig(workspace=str(proposal_dir), run_name=request.run_name),
-        )
         ref = build_task_composition_ref(composition)
         assert ref is not None
         if expected_task_binding is not None and (
@@ -103,36 +98,43 @@ def prepare_payloads(
             or ref.task_data_path_id != expected_task_binding.task_data_path_id
         ):
             raise ValueError("native task composition differs from accepted workflow binding")
-        proposal = local_full_context(
-            interpretation,
-            storage,
-            reasoning_pipeline=get_reasoning_pipeline(config),
-            human_advice=request.proposal_advice,
-            data_dir=request.data_root,
-            task_composition_ref=ref,
-        )
-        values = proposal.model_dump()
-        values.update(
-            task_description=composition.task_description,
-            forward_contract=composition.forward_contract,
-            proposal_blocks=composition.proposal_blocks,
-            allowed_output_types=request.allowed_output_types,
-        )
-        if training is not None:
-            from workflows.candidate_training_settings import proposal_training_values
+        proposals: list[tuple[str, ProposalInput]] = []
+        for record in admitted.proposal_records:
+            storage = StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=record.directory, run_name=request.run_name),
+            )
+            proposal = local_full_context(
+                interpretation,
+                storage,
+                reasoning_pipeline=get_reasoning_pipeline(config),
+                human_advice=request.proposal_advice,
+                data_dir=request.data_root,
+                task_composition_ref=ref,
+            )
+            values = proposal.model_dump()
+            values.update(
+                task_description=composition.task_description,
+                forward_contract=composition.forward_contract,
+                proposal_blocks=composition.proposal_blocks,
+                allowed_output_types=request.allowed_output_types,
+            )
+            if training is not None:
+                from workflows.candidate_training_settings import proposal_training_values
 
-            values.update(proposal_training_values(training))
-        proposal = ProposalInput.model_validate(values)
+                values.update(proposal_training_values(training))
+            proposal = ProposalInput.model_validate(values)
+            proposals.append((record.filename, proposal))
         records = (
             ("preparation/interpretation_input.json", interpretation_input),
             ("interpretation.json", interpretation),
-            ("proposal.json", proposal),
+            *proposals,
             *((item.filename, item.storage) for item in admitted.storage_records),
         )
         for name, record in records:
             payload = (record.model_dump_json(indent=2) + "\n").encode()
-            if name == "proposal.json" and training is not None:
-                payload = _training_seed_bytes(proposal, training)
+            if isinstance(record, ProposalInput) and training is not None:
+                payload = _training_seed_bytes(record, training)
             if layout is not None:
                 bounded_payload(payload)
             publish_bytes_write_once(str(output / name), payload)

@@ -5,8 +5,13 @@ from pathlib import Path
 from agent.schemas.storage import StorageConfig
 from tools.candidate_worker.layout import candidate_proposal_dir, graph_instance_dir
 from workflows.attempt_storage import impl_attempt_storage
-from workflows.definition import ExternalSource, ProtocolRequest, ReusableWorkflowDocument
-from workflows.definition.fanout import proposal_fanout
+from workflows.definition import (
+    ExternalRequest,
+    ExternalSource,
+    ProtocolRequest,
+    ReusableWorkflowDocument,
+)
+from workflows.definition.fanout import execution_families
 from workflows.definition.models import DeclarationModel
 
 
@@ -16,8 +21,16 @@ class StorageRecord(DeclarationModel):
     storage: StorageConfig
 
 
+class ProposalRecord(DeclarationModel):
+    """Declared graph owner, or None for the fixed native slot."""
+
+    filename: str
+    owner: str | None
+    directory: str
+
+
 class PreparationLayout(DeclarationModel):
-    proposal_dir: str
+    proposal_records: tuple[ProposalRecord, ...]
     storage_records: tuple[StorageRecord, ...]
 
 
@@ -26,9 +39,36 @@ def storage_filename(implementation: str) -> str:
     return f"storage.{implementation}.json"
 
 
+def proposal_filename(profile: str | None, owner: str) -> str:
+    return f"proposal.{owner}.json" if profile == "native-proposal-families/v1" else "proposal.json"
+
+
+def proposal_receipt_path(document: ReusableWorkflowDocument, output: Path) -> str | None:
+    """The explicit family profile has an indexed inventory, no singular proposal."""
+    return (
+        None
+        if document.execution_profile == "native-proposal-families/v1"
+        else str(output / "proposal.json")
+    )
+
+
+def graph_proposal_bindings(document: ReusableWorkflowDocument) -> dict[str, str]:
+    """Every prepared family owns one seed; shared aliases cannot name two files."""
+    shape = execution_families(document.definition, document.execution_profile)
+    nodes = {node.id: node for node in document.definition.nodes}
+    bindings: dict[str, str] = {}
+    for family in shape.families:
+        request = nodes[family.proposal].request
+        assert isinstance(request, ExternalRequest)
+        if request.binding in bindings:
+            raise ValueError("Graph proposal binding is shared across proposal owners")
+        bindings[request.binding] = proposal_filename(document.execution_profile, family.proposal)
+    return bindings
+
+
 def graph_storage_bindings(document: ReusableWorkflowDocument) -> dict[str, str]:
     """Assign aliases by admitted implementation edges, never node adjacency."""
-    shape = proposal_fanout(document.definition)
+    shape = execution_families(document.definition, document.execution_profile)
     nodes = {node.id: node for node in document.definition.nodes}
     owners: dict[str, str] = {}
     for implementation, validator in shape.branches:
@@ -54,7 +94,9 @@ def preparation_layout(
     if document is None or document.execution_profile is None:
         proposal = candidate_proposal_dir(workspace, run_name)
         return PreparationLayout(
-            proposal_dir=str(proposal),
+            proposal_records=(
+                ProposalRecord(filename="proposal.json", owner=None, directory=str(proposal)),
+            ),
             storage_records=(
                 StorageRecord(
                     filename="storage.json",
@@ -63,10 +105,18 @@ def preparation_layout(
                 ),
             ),
         )
-    shape = proposal_fanout(document.definition)
+    shape = execution_families(document.definition, document.execution_profile)
     graph_storage_bindings(document)
+    graph_proposal_bindings(document)
     return PreparationLayout(
-        proposal_dir=str(graph_instance_dir(workspace, run_name, shape.proposal)),
+        proposal_records=tuple(
+            ProposalRecord(
+                filename=proposal_filename(document.execution_profile, family.proposal),
+                owner=family.proposal,
+                directory=str(graph_instance_dir(workspace, run_name, family.proposal)),
+            )
+            for family in shape.families
+        ),
         storage_records=tuple(
             StorageRecord(
                 filename=storage_filename(implementation),

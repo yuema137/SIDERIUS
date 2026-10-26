@@ -504,3 +504,51 @@ The saved candidate request selects the existing G1 dispatcher and trace verifie
 Python, CLI and the existing saved-source review/preparation/launch transport use
 that same request. This adds no graph editing controls, training branch,
 aggregation, new scheduler, resume or additional capability adapters.
+
+## Reusable independent proposal families
+
+A v2 document can select `execution_profile="native-proposal-families/v1"` and
+independently declare several proposal instances with complete native branches.
+For example, `hypothesis -> build_left/check_left, build_right/check_right` and
+`alternate -> build_other/check_other` prepare two seeds and three implementation
+storage records. The existing family admission owns exact typed edges; a validator
+must consume its implementation's proposal. Every proposer needs its own managed
+`proposal.input` binding. Storage aliases may be shared only by the implementation
+and validator that own the same attempt. Unused or cross-owner aliases refuse.
+
+Preparation composes the task and cold interpretation once, verifies the accepted
+task binding before publishing native payloads, then maps each seed with the same
+native protocol and source-owned preparation options. No native agent, schema or
+prompt format changes. Advice, output restrictions and constructor settings remain
+shared source selections; there is no new per-node settings editor. Native debug
+dumps remain unset by managed preparation. Explicit native callers retain the
+worker's separately admitted per-proposal debug path capability.
+
+The ordered native index contains `preparation/interpretation_input.json`,
+`interpretation.json`, `proposal.<proposal-id>.json` in proposal declaration order,
+`storage.<implementation-id>.json` in admitted family/branch order, `llm.json`,
+`workflow.json` and `workflow.resolved.py`: exactly P+B+5 entries. Each seed's native
+storage belongs to its declared proposal instance. The parent independently
+reconstructs all names, paths, observations, pins, source options and the candidate
+request; a repaired child index cannot authorize a swapped or missing family seed.
+The existing byte limits apply without truncation or a new node-count policy.
+
+For this explicit family profile only, a successful native preparation receipt has
+`status="prepared", proposal_path=null`: there is no singular proposal file. The
+complete existing artifact index identifies the seeds. The top reusable receipt,
+retained selection, full verifier and operation terminal status determine success;
+null alone never means failed or unprepared. A first-family filename is not an
+acceptable scalar substitute. Old fixed/G1 prepared receipts still require their
+exact `proposal.json` path; old callers are not silently widened. No new public
+proposal-path list is added without a consumer.
+
+Professional and Assistant callers author the same v2 source. Existing Advanced
+source review/save/reopen and canvas preserve the profile, all instances and actual
+argument edges. This does not add visual node-creation or connection controls.
+The prepared-run review reports independent instances executed
+serially and lists nodes without inventing a chain. Existing New run preparation,
+retained-capture launch and editor-independent operation/HTTP observation use the
+same G3A native executor. This yields N independently declared proposal calls, not
+N outputs from one proposer or a guarantee of scientific diversity. Aggregation,
+ranking, parallel generation, training, conditional routing, evidence buffers,
+human gates and graph resume remain outside this profile.

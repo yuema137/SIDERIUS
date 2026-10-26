@@ -437,10 +437,12 @@ Preparation creates a matching seed/settings pair; explicit launch invokes the
 existing native tuner. Native completion is distinct from scientific validity,
 and neither this route nor offline tests establish historical replay parity.
 
-For independent proposal families, the interim supported route is an explicit
-version-1 native `CandidateRunRequest` with
-[`native-proposal-families/v1`](../../src/tools/candidate_worker/candidate-worker-contract.md#opt-in-independent-proposal-families).
-Professional and Assistant callers use the same native input contract and existing
-operation/HTTP observation. Reusable version-2 source and managed GUI preparation
-still reject this profile; the one-proposal reusable fanout profile remains supported.
-Families run serially and do not aggregate or rank their outputs.
+For independent proposal families, Professional and Assistant callers can author
+`execution_profile="native-proposal-families/v1"` in reusable v2 source, give each
+proposer its own managed seed binding, and use the same review/prepare/retained
+launch flow. The [family preparation contract](../../src/tools/candidate_prepare/candidate-prepare-contract.md#reusable-independent-proposal-families)
+owns exact indexing and explicit-profile receipt semantics. Existing source/canvas
+keeps the actual instance edges; prepared review lists independent instances
+executed serially. Direct version-1 native requests remain supported. Both routes
+use the same native executor and independent operation/HTTP observation; neither
+aggregates, ranks or promises distinct scientific proposals.

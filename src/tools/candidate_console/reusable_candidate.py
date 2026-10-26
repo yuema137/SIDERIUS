@@ -135,6 +135,7 @@ class ReusableCandidate:
         binding, request = inspected.binding, operation.request
         saved = binding.request
         return ReusableCaptureReview(
+            execution_profile=request.preview.execution_profile,
             selection=selection,
             request_digest=operation_request_digest(operation),
             source_path=binding.original_source.path,

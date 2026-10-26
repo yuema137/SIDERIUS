@@ -1,5 +1,6 @@
 """Curated captured-run API; browser selections never contain native requests."""
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -41,6 +42,9 @@ class ReusableCapturePage(PreviewModel):
 
 
 class ReusableCaptureReview(PreviewModel):
+    execution_profile: (
+        Literal["native-proposal-fanout/v1", "native-proposal-families/v1"] | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
     selection: ReusableCaptureSelection
     request_digest: str
     source_path: str

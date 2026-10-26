@@ -418,8 +418,7 @@ The family profile generates N independent instances, not N outputs from one
 proposer call; no scientific diversity, ranking, aggregation, parallel execution,
 training, conditional routing, buffers, human gates or graph resume is implied.
 
-Interim support is deliberately bounded: reusable version-2 source documents and
-managed preparation still reject this profile. Existing source/GUI authoring cannot
-prepare families yet. Code callers supply the version-1 native inputs and can read
-the resulting operation through Python, CLI or the existing console HTTP endpoint
-without loading an editor. Reusable preparation is the immediate follow-on slice.
+Reusable version-2 source and managed preparation also support this profile through
+[the reusable family contract](../candidate_prepare/candidate-prepare-contract.md#reusable-independent-proposal-families).
+Code callers may still supply version-1 native inputs directly. Both routes use
+the same existing operation/HTTP observation without loading an editor.
