@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -211,6 +211,7 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
         metric_spec=composition.metric.spec,
     )
 
+    supplied_factory = Mock(return_value=Mock())
     captured_lit_inputs: list = []
     captured_proposal_inputs: list = []
 
@@ -258,6 +259,7 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
                 run_name=run_name,
                 chain_run_name=run_name,
                 run_id="literature-context",
+                bridge_factory=supplied_factory,
                 llm_config=_make_llm_config(),
                 task_composition=composition,
             )
@@ -269,8 +271,14 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
         f"Expected MLLiteratureReviewAgent.run to fire once; got "
         f"{len(captured_lit_inputs)} call(s)."
     )
+    selected_factory = MockLitReview.call_args.kwargs["bridge_factory"]
+    selected_bridge = selected_factory(provider="openai", model_id="offline")
+    supplied_factory.assert_called_once_with(provider="openai", model_id="offline")
+    selected_bridge.set_run_context.assert_called_once_with(
+        workspace=Path(workspace), iter=1, run_name=run_name, run_id="literature-context"
+    )
     MockLitReview.assert_called_once_with(
-        bridge_factory=None,
+        bridge_factory=selected_factory,
         root_cache_dir=os.path.join(workspace, "cache", "literature", "root_papers"),
     )
     lit_input = captured_lit_inputs[0]

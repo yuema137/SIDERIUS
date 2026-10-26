@@ -176,10 +176,22 @@ as before; callers requiring accounting must supply both. Agent-owned binding
 preserves proposer lazy stage bridges and tuner deferred brain construction.
 The workflow's nested adapter reads its current iteration at each call, so
 chain offsets and later iterations retain their original accounting identity.
-Neither helper constructs providers, invokes nodes or changes retry behavior.
-Both helpers' bytes join the preflight estimation assembly alongside the
-previously covered workflow. Historical qualification is still required for the
-changed assembly; this source move does not establish a new qualified pair.
+Storage derivation and direct context binding do not construct providers or
+invoke nodes. For Literature Review, `run_context.contextual_bridge_factory`
+wraps the existing bridge factory and binds each bridge when the native node
+constructs it inside `run()`, before its first call. The node still owns constructor
+arguments and main/search client sharing. A missing run name or run ID returns
+the original factory unchanged, including `None`; custom factories remain supported.
+
+Literature usage now enters the run ledger, token rollups and spend estimates.
+Budget consumers of those totals can stop earlier because previously omitted
+usage is counted. Historical ledgers are not backfilled. This changes accounting,
+not native prompts, inputs, defaults or retry policy, and does not establish
+unchanged scientific campaign artifacts.
+
+The storage/context owners' bytes join the preflight estimation assembly alongside
+the workflow. Historical qualification is still required for a changed assembly;
+these changes do not establish a new qualified pair.
 
 ## Non-owned semantics
 

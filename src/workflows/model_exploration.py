@@ -183,7 +183,7 @@ from workflows.run_config import (
     active_vram_budget,
     validate_launch_trial_overrides,
 )
-from workflows.run_context import bind_agent_run_context
+from workflows.run_context import bind_agent_run_context, contextual_bridge_factory
 from workflows.strategy_modes import (
     ExplorationMode,
     FormalRoundStrategy,
@@ -2435,7 +2435,13 @@ def run_workflow(
                 run_name=bindings.run_name,
             )
             lit_agent = MLLiteratureReviewAgent(
-                bridge_factory=bridge_factory,
+                bridge_factory=contextual_bridge_factory(
+                    bridge_factory,
+                    workspace=bindings.workspace,
+                    iteration=_iteration,
+                    run_name=bindings.chain_run_name,
+                    run_id=bindings.run_id,
+                ),
                 root_cache_dir=os.path.join(
                     bindings.workspace,
                     "cache",
