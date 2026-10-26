@@ -1,6 +1,5 @@
 """Owner-backed task settings and lossless standard-argument transport."""
 
-import ast
 import hashlib
 import json
 from pathlib import Path
@@ -179,44 +178,55 @@ def test_legal_partial_scope_and_monitored_override_use_actual_health_owner(tmp_
     assert result.health_config["resolved_plugins"] == []
 
 
-def test_workflow_calls_shared_scope_and_analysis_owners_without_reimplementing(tmp_path):
-    """Evaluate the actual workflow call with a sentinel to prove forwarding."""
-    source = package_root() / "workflows/model_exploration.py"
-    tree = ast.parse(source.read_text())
-    calls = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "validate_scope_settings"
+def test_current_startup_forwards_scope_to_shared_owner(tmp_path, monkeypatch):
+    """The workflow's extracted startup path reaches the shared scope owner."""
+    from workflows import task_settings, training_startup
+    from workflows.run_config import WorkflowLaunchConfig
+
+    profile = DatasetProfile(
+        partition_count=4,
+        topology={"kind": "synthetic"},
+        anchor_selection_files=[0],
+        health_peek_files=[0],
+    )
+    monkeypatch.setattr(training_startup, "resolve_dataset_profile", lambda: profile)
+    monkeypatch.setattr(training_startup, "workflow_lock_identity", lambda *_args: object())
+    monkeypatch.setattr(
+        training_startup, "build_run_invariants", lambda **_kwargs: (object(), None)
+    )
+
+    observed = []
+    validate_scope_settings = task_settings.validate_scope_settings
+
+    def inspect_owner_call(**kwargs):
+        observed.append(kwargs)
+        return validate_scope_settings(**kwargs)
+
+    monkeypatch.setattr(training_startup, "validate_scope_settings", inspect_owner_call)
+    with pytest.raises(ValueError, match="partial data_scope requires formal_strategy='snapshot'"):
+        training_startup.prepare_training_run(
+            launch=WorkflowLaunchConfig(formal_strategy="anchors"),
+            workspace=str(tmp_path),
+            llm_config=None,
+            task_composition=None,
+            data_scope=DataScope.from_cli("0-1"),
+            health_gate_enabled=False,
+            health_gate_files=[1],
+            health_checks_config=None,
+            order_strategy_override=None,
+            file_order_override=None,
+            enable_structured_health_feedback=False,
+        )
+
+    assert observed == [
+        {
+            "scope_is_partial": True,
+            "formal_strategy": "anchors",
+            "task_composition": None,
+            "health_gate_enabled": False,
+            "health_gate_files": [1],
+        }
     ]
-    assert len(calls) == 1
-    captured = {}
-    values = dict(
-        _scope_is_partial=True,
-        launch=SimpleNamespace(formal_strategy="snapshot"),
-        task_composition=object(),
-        health_gate_enabled=False,
-        health_gate_files=[1],
-    )
-    eval(
-        compile(ast.Expression(calls[0]), str(source), "eval"),
-        {"validate_scope_settings": lambda **kwargs: captured.update(kwargs), **values},
-    )
-    assert captured == dict(
-        scope_is_partial=True,
-        formal_strategy="snapshot",
-        task_composition=values["task_composition"],
-        health_gate_enabled=False,
-        health_gate_files=[1],
-    )
-    imports = {
-        alias.name
-        for node in tree.body
-        if isinstance(node, ast.ImportFrom) and node.module == "workflows.task_settings"
-        for alias in node.names
-    }
-    assert imports >= {"resolve_analysis_binding", "validate_scope_settings"}
 
 
 def test_extracted_decisions_remain_inside_estimator_source_identity(monkeypatch):
