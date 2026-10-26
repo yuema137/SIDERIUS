@@ -18,6 +18,10 @@ from tools.workflow_preview.models import FileObservation, PreviewModel
 from .native_chain_models import NativeChainAdmission, NativeChainObservation, NativeChainOperation
 from .native_resume_models import NativeChainResumeOperation, NativeResumeAdmission, review_digest
 
+OperationKind = Literal[
+    "prepare", "prepare_reusable", "candidate", "native_chain", "native_chain_resume"
+]
+
 
 class OperationStoreConfig(PreviewModel):
     state_root: str
@@ -167,7 +171,7 @@ class Completion(PreviewModel):
 
 class OperationHandle(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain", "native_chain_resume"]
+    kind: OperationKind
     request_digest: str
     observed_at: str
     observation: Literal["starting", "existing", "operation_failed"]
@@ -175,7 +179,7 @@ class OperationHandle(PreviewModel):
 
 class OperationSnapshot(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "prepare_reusable", "candidate", "native_chain", "native_chain_resume"]
+    kind: OperationKind
     request_digest: str
     observed_at: str
     state: Literal["active", "completed", "operation_failed", "unknown"]
