@@ -1,6 +1,6 @@
 .editor-workspace {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
   gap: 1rem;
 }
 
@@ -10,32 +10,25 @@
   min-height: 22rem;
 }
 
-#editor-graph {
-  display: flex;
-  gap: .75rem;
-  flex-wrap: wrap;
-}
-
-.editor-node {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  min-width: 9rem;
-  padding: 1rem;
-  background: var(--control);
-  color: var(--text);
-  border: 1px solid var(--control-border);
-  border-radius: .7rem;
-}
-
-.editor-node:not(:disabled):hover {
-  background: var(--hover);
-}
-
-.editor-node[aria-pressed="true"] {
-  border: 2px solid var(--focus);
-  background: var(--hover);
-}
+#editor-graph { min-width: 0; }
+.circuit-viewport { overflow: auto; max-height: 52rem; border: 1px solid var(--control-border); border-radius: .5rem; }
+.circuit-world { position: relative; background: var(--panel); }
+.circuit-world svg { position: absolute; width: 100%; height: 100%; inset: 0; pointer-events: none; overflow: visible; }
+.circuit-card { position: absolute; width: 260px; background: var(--control); color: var(--text); border: 1px solid var(--control-border); border-radius: .6rem; }
+.editor-node { display: block; width: 100%; padding: .8rem; background: var(--control); color: var(--text); border: 0; border-radius: .5rem; text-align: left; font-weight: bold; touch-action: none; cursor: grab; }
+.editor-node[aria-pressed="true"] { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--hover); }
+.circuit-adapter { display: block; padding: .5rem .8rem; overflow-wrap: anywhere; border-bottom: 1px solid var(--control-border); }
+.circuit-port { position: relative; display: block; width: 100%; border: 0; border-radius: 0; padding: .55rem 1rem; text-align: left; background: transparent; color: var(--text); }
+.circuit-output { text-align: right; border-top: 1px solid var(--control-border); }
+.circuit-socket { position: absolute; width: 12px; height: 12px; top: calc(50% - 6px); left: -7px; border: 2px solid var(--text); background: var(--control); border-radius: 50%; }
+.circuit-output .circuit-socket { left: auto; right: -7px; }
+.circuit-external { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.circuit-wire { fill: none; stroke: var(--edge); stroke-width: 2; }
+.circuit-pending { fill: none; stroke: var(--focus); stroke-width: 2; stroke-dasharray: 6 4; opacity: .6; }
+.circuit-port.compatible { outline: 2px solid var(--focus); outline-offset: -3px; }
+.circuit-port.incompatible { opacity: .6; }
+.circuit-port[aria-pressed="true"] .circuit-socket { background: var(--focus); }
+.circuit-port:focus-visible, .editor-node:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 #editor-references label,
 #editor-inspector label {

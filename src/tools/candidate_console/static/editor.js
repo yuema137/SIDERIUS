@@ -86,6 +86,7 @@
     $('refresh').disabled = !connected || !project;
     $('save').disabled = !connected || saving || !reviewed || reviewed.source !== $('source').value || invalidTraining || !taskAccepted();
     renderTaskControls();
+    window.editorCircuit?.setEnabled(canEditCircuit());
   }
   function invalidate() {
     generation++; reviewed = null; taskAcknowledged = false; taskAdopted = false; controls(); $('diff').textContent = '';
@@ -125,18 +126,39 @@
     $('inspect').hidden = !!graph;
     status(graph ? 'Opened supported declaration. References remain literal.' : 'Unsupported source is read-only. Repair externally, then refresh.');
   }
+  const canEditCircuit = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict && trainingDrafts.size === 0;
+  function bindArgument(nodeId, argument, source) {
+    if (!canEditCircuit()) return;
+    const option = options.find(value => value.node === nodeId && value.argument === argument);
+    const choice = option?.choices.find(value => JSON.stringify(value.source) === JSON.stringify(source));
+    const item = graph.definition.nodes.find(value => value.id === nodeId);
+    if (!choice || !item) return;
+    const previous = argument === null ? {kind: 'external', binding: item.request.binding} : item.request.arguments.find(value => value.name === argument)?.source;
+    if (JSON.stringify(previous) === JSON.stringify(choice.source)) return;
+    if (argument === null) item.request.binding = choice.source.binding;
+    else item.request.arguments.find(value => value.name === argument).source = clone(choice.source);
+    mode = 'document'; changed(); render(); status('Binding changed locally. Review the declaration, then save. Preparation checks the supported execution profile separately.');
+  }
   function renderGraph() {
-    $('graph').replaceChildren(); $('edges').replaceChildren();
+    $('edges').replaceChildren();
+    const id = project, document = graph;
+    const live = () => project === id && graph === document;
+    window.editorCircuit.render($('graph'), {document: graph, options, selected, enabled: canEditCircuit()}, {
+      select: value => { if (live()) { selected = value; render(); } },
+      bind: (nodeId, argument, source) => { if (live()) bindArgument(nodeId, argument, source); },
+      move: (nodeId, x, y) => {
+        if (!live() || !canEditCircuit()) return;
+        const position = graph.positions.find(value => value.node === nodeId);
+        if (position) { position.x = x; position.y = y; } else graph.positions.push({node: nodeId, x, y});
+        mode = 'document'; changed(); render(); status('Node position changed locally. Review and save to keep the layout.');
+      }
+    });
     if (!graph) return;
     for (const item of graph.definition.nodes) {
-      const button = node('button', '', $('graph')); button.type = 'button'; button.className = 'editor-node';
-      button.setAttribute('aria-pressed', String(item.id === selected)); button.dataset.node = item.id;
-      node('strong', item.id, button); node('span', item.capability, button);
-      button.addEventListener('click', () => { selected = item.id; render(); });
-      const bindings = item.request.kind === 'external' ? [{ name: 'request', source: {kind: 'external', binding: item.request.binding} }] : item.request.arguments;
+      const bindings = item.request.kind === 'external' ? [{name: 'request', source: {kind: 'external', binding: item.request.binding}}] : item.request.arguments;
       for (const binding of bindings) {
-        const src = binding.source;
-        node('li', `${src.kind === 'external' ? `external:${src.binding}` : `${src.node}.${src.port}`} → ${item.id}.${binding.name}`, $('edges'));
+        const source = binding.source;
+        node('li', `${source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port}`} → ${item.id}.${binding.name}`, $('edges'));
       }
     }
   }
@@ -206,12 +228,7 @@
           if (JSON.stringify(choice.source) === JSON.stringify(active)) el.selected = true;
         });
         select.dataset.node = item.id; select.dataset.argument = option.argument || 'request';
-        select.addEventListener('change', () => {
-          const choice = clone(option.choices[Number(select.value)].source);
-          if (option.argument === null) item.request.binding = choice.binding;
-          else item.request.arguments.find(a => a.name === option.argument).source = choice;
-          mode = 'document'; changed(); status('Binding changed locally. Review validates the graph and updates its connections.');
-        });
+        select.addEventListener('change', () => bindArgument(item.id, option.argument, option.choices[Number(select.value)].source));
       }
     }
     for (const key of Object.keys(graph.definition.task)) field($('references'), `task.${key}`, graph.definition.task[key], value => { graph.definition.task[key] = value; });

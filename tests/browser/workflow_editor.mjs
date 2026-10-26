@@ -75,7 +75,7 @@ try {
   const agent = original.replace('nodes=(NodeInstance', 'nodes=(NodeInstance(id="second", capability="proposal", request=ExternalRequest(binding="other")),NodeInstance');
   await writeFile(metadata.source, agent);
   await page.locator('#editor-refresh').click();
-  await waitUntil(async () => (await page.locator('#editor-graph button').count()) === 2);
+  await waitUntil(async () => (await page.locator('#editor-graph .editor-node').count()) === 2);
   // Review a GUI proposal, then external write: save must conflict and retain it.
   await source.fill((await source.inputValue()).replace('old.json', 'gui.json'));
   await retainAcrossViews();
