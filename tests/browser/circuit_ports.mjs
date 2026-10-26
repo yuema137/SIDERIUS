@@ -63,9 +63,10 @@ try {
   await page.mouse.move(dragRect.x + 70, dragRect.y + 45); await page.keyboard.press('Escape'); await page.mouse.up();
   assert.deepEqual(await layoutSnapshot(), initialLayout, 'Escape restores an in-progress drag and its wires');
   dragRect = await dragHeader.boundingBox();
+  await dragHeader.evaluate(element => element.addEventListener('pointerdown', event => { element.dataset.testPointer = event.pointerId; }, {once: true}));
   await page.mouse.move(dragRect.x + 30, dragRect.y + 15); await page.mouse.down();
   await page.mouse.move(dragRect.x + 70, dragRect.y + 45);
-  await dragHeader.dispatchEvent('pointercancel'); await page.mouse.up();
+  await dragHeader.dispatchEvent('pointercancel', {pointerId: Number(await dragHeader.getAttribute('data-test-pointer'))}); await page.mouse.up();
   assert.deepEqual(await layoutSnapshot(), initialLayout, 'Pointer cancellation restores card and wires');
   assert.equal(await dirty(), false);
   await output('hypothesis').focus(); await page.keyboard.press('Space');
@@ -89,7 +90,15 @@ try {
   await page.locator('#circuit-node-build_left').focus(); await page.keyboard.press('Alt+ArrowDown');
   const header = page.locator('#circuit-node-build_left'); await header.scrollIntoViewIfNeeded();
   const rect = await header.boundingBox();
+  await header.evaluate(element => element.addEventListener('pointerdown', event => { element.dataset.testPointer = event.pointerId; }, {once: true}));
   await page.mouse.move(rect.x + 30, rect.y + 15); await page.mouse.down();
+  const otherPointer = Number(await header.getAttribute('data-test-pointer')) + 1;
+  const ownedLayout = await layoutSnapshot(), ownedDirty = await dirty();
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+    await header.dispatchEvent(type, {pointerId: otherPointer, button: 0, clientX: rect.x + 160, clientY: rect.y + 130});
+    assert.deepEqual(await layoutSnapshot(), ownedLayout, `${type} from another pointer cannot move or finish the owner gesture`);
+    assert.equal(await dirty(), ownedDirty);
+  }
   await page.mouse.move(rect.x + 70, rect.y + 45, {steps: 4}); await page.mouse.up();
   const position = await page.locator('.circuit-card[data-node="build_left"]').evaluate(element => element._position);
   assert.deepEqual(position, {x: beforePosition.x + 40, y: beforePosition.y + 50});

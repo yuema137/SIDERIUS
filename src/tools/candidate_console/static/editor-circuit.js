@@ -100,22 +100,24 @@
         actions.move(node.id, position.x + (event.key === 'ArrowLeft' ? -20 : event.key === 'ArrowRight' ? 20 : 0), position.y + (event.key === 'ArrowUp' ? -20 : event.key === 'ArrowDown' ? 20 : 0));
       });
       heading.addEventListener('pointerdown', event => {
-        if (projection !== value || !projection.enabled || event.button !== 0) return;
+        if (projection !== value || !projection.enabled || event.button !== 0 || drag) return;
         heading.setPointerCapture(event.pointerId);
-        drag = {node: node.id, card, startX: event.clientX, startY: event.clientY, position: {...card._position}, left: card.offsetLeft, top: card.offsetTop};
+        drag = {pointerId: event.pointerId, node: node.id, card, startX: event.clientX, startY: event.clientY, position: {...card._position}, left: card.offsetLeft, top: card.offsetTop};
       });
       heading.addEventListener('pointermove', event => {
-        if (!drag || drag.node !== node.id) return;
+        if (projection !== value || !drag || drag.node !== node.id || drag.pointerId !== event.pointerId) return;
         card.style.left = drag.left + event.clientX - drag.startX + 'px'; card.style.top = drag.top + event.clientY - drag.startY + 'px'; draw();
       });
       heading.addEventListener('pointerup', event => {
-        if (!drag || drag.node !== node.id) return;
+        if (projection !== value || !drag || drag.node !== node.id || drag.pointerId !== event.pointerId) return;
         const gesture = drag; drag = null;
         const dx = event.clientX - gesture.startX, dy = event.clientY - gesture.startY;
         if (projection.enabled && Math.abs(dx) + Math.abs(dy) > 3) actions.move(node.id, Math.round(gesture.position.x + dx), Math.round(gesture.position.y + dy));
         else { gesture.card.style.left = gesture.left + 'px'; gesture.card.style.top = gesture.top + 'px'; draw(); }
       });
-      heading.addEventListener('pointercancel', () => { if (projection === value) { cancel(); say('Node move cancelled.'); } });
+      heading.addEventListener('pointercancel', event => {
+        if (projection === value && drag?.node === node.id && drag.pointerId === event.pointerId) { cancel(); say('Node move cancelled.'); }
+      });
       if (node.request.kind === 'protocol') element('small', `⇥ ${node.request.protocol}`, card, 'circuit-adapter');
       for (const option of value.options.filter(item => item.node === node.id)) {
         const input = port(card, node, option.argument, false); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;

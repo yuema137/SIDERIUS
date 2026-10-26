@@ -195,7 +195,8 @@ try {
     await page.locator(`#editor-${action}`).click();
     const resolved = action === 'discard' ? external : proposal;
     assert.equal(await source.inputValue(), resolved, 'Only explicit local conflict action changes the proposal');
-    await page.locator('#editor-graph button').first().click(); // render must retain the session gate.
+    assert.ok(await page.locator('#editor-graph .editor-node').first().isDisabled());
+    await page.locator('#editor-graph .editor-node').first().dispatchEvent('click'); // Disabled circuit handlers must retain the session gate.
     for (const name of ['review', 'save', 'refresh', 'project']) {
       assert.equal(await page.locator(`#editor-${name}`).isDisabled(), true, `${action}: ${name} requires reconnect`);
     }
@@ -245,7 +246,7 @@ try {
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
   assert.deepEqual(await editorSnapshot(), reviewedBeforeDisconnect, 'Reconnect restores the retained review without reset');
-  // Re-rendering a selected node must preserve Save's transient pending gate.
+  // Disabled circuit selection must preserve Save's transient pending gate.
   let finishSave;
   const heldSave = new Promise(resolve => { finishSave = resolve; });
   let heldSubmissions = 0;
@@ -255,8 +256,9 @@ try {
   await page.locator('#editor-save').click();
   await waitUntil(() => heldSubmissions === 1);
   try {
-    await page.locator('#editor-graph button').first().click();
-    assert.equal(await page.locator('#editor-save').isDisabled(), true, 'Node render cannot enable pending Save');
+    assert.ok(await page.locator('#editor-graph .editor-node').first().isDisabled());
+    await page.locator('#editor-graph .editor-node').first().dispatchEvent('click');
+    assert.equal(await page.locator('#editor-save').isDisabled(), true, 'Disabled node selection cannot enable pending Save');
     await page.locator('#editor-save').dispatchEvent('click');
     await page.waitForTimeout(100);
     assert.equal(heldSubmissions, 1, 'Pending Save cannot resubmit');
