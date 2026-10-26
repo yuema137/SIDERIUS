@@ -239,7 +239,7 @@ class TestBuildLitReviewInput:
         assert inp.dynamic_search.enabled is True  # schema default
         assert inp.findings_verbosity == 1
 
-    def test_lit_review_yaml_is_no_longer_a_task_description_authority(self, tmp_path):
+    def test_lit_review_yaml_is_no_longer_a_task_description_authority(self, tmp_path, monkeypatch):
         """Step 04b: a stale ``task_description`` in the lit-review config
         must be IGNORED, not preferred and not merged.
 
@@ -251,6 +251,12 @@ class TestBuildLitReviewInput:
         just as happily while the YAML was still authoritative, because the
         two declarations were byte-identical before the collapse.
         """
+        from unittest.mock import Mock
+
+        from workflows import literature_input
+
+        shared = Mock(wraps=literature_input.build_literature_input)
+        monkeypatch.setattr(literature_input, "build_literature_input", shared)
         sentinel = "STALE-LOCAL-COPY: denoise audio recordings of whale song"
         inp = _build_lit_review_input(
             {"task_description": sentinel},
@@ -258,6 +264,11 @@ class TestBuildLitReviewInput:
             llm_kwargs=_LLM_KWARGS,
             storage=_storage(tmp_path),
             run_name="t",
+        )
+        # Bypassing the shared builder must fail even if duplicated bytes match.
+        shared.assert_called_once()
+        assert shared.call_args.kwargs["task_description"] == (
+            "Predict a continuous synthetic target from tabular inputs."
         )
         assert sentinel not in inp.task_description
         assert inp.task_description == get_task_description(load_task_config())

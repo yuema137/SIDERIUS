@@ -726,46 +726,18 @@ def _build_lit_review_input(
             ``{storage.local.workspace}/ml_literature_review_{run_name}.json``.
         run_name: Chain-wide run name (same as the rest of the workflow).
     """
-    # Lazy import keeps top-of-file imports identical to pre-Commit-6 for
-    # the lit-review schema types (which form a long import chain).
-    from agent.schemas.literature_review import LiteratureReviewInput
-    from agent.schemas.protocols.data_analysis_to_ml_literature_review import (
-        local_typed_evidence as project_analysis_for_literature,
-    )
-    from agent.schemas.protocols.interpreter_to_ml_literature_review import (
-        local_typed_evidence as project_interpretation_for_literature,
-    )
+    from workflows.literature_input import build_literature_input
 
-    # Step 04b — SINGLE SOURCE. The task description is resolved from the
-    # active task declaration, NOT from the lit-review YAML. `config` is deliberately
-    # not consulted for this key: a stale operator copy that still carries
-    # `task_description:` must be IGNORED, never merged or preferred, or the
-    # duplicate authority this PR removed would return invisibly.
-    #
-    # Same accessor and same call shape as the sibling production consumers
-    # (interpreter / proposer / implementor / tuner in this module). Its
-    # fail-closed semantics are upstream and deliberate: `load_task_config`
-    # already rejects a missing or empty task description, which is why the
-    # pre-04b empty-value warning here is gone rather than reimplemented —
-    # it guarded a state the canonical loader cannot produce.
-    task_description = get_task_description(load_task_config())
-
-    payload = {
-        "interpretation_evidence": project_interpretation_for_literature(interp_output),
-        "root_papers": config.get("root_papers", []),
-        "dynamic_search": config.get("dynamic_search", {}),
-        "synthesis_config": config.get("synthesis", {}),
-        "confidence_rubric": config.get("confidence_rubric", {}),
-        "findings_verbosity": config.get("findings_verbosity", 1),
-        "task_description": task_description,
-        "storage": storage,
-        "run_name": run_name,
-        **llm_kwargs,
-    }
-    if analysis_output is not None:
-        payload["data_analysis_evidence"] = project_analysis_for_literature(analysis_output.report)
-    payload["constraint_context"] = constraint_context
-    return LiteratureReviewInput.model_validate(payload)
+    return build_literature_input(
+        config,
+        interp_output,
+        task_description=get_task_description(load_task_config()),
+        analysis_report=analysis_output.report if analysis_output is not None else None,
+        constraint_context=constraint_context,
+        llm_kwargs=llm_kwargs,
+        storage=storage,
+        run_name=run_name,
+    )
 
 
 def _declared_metric_spec(composition: RunTaskComposition | None) -> MetricSpec | None:

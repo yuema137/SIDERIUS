@@ -215,6 +215,10 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
     captured_proposal_inputs: list = []
 
     def _lit_review_run(inp):
+        # A binding after run() would miss provider accounting; assert here.
+        MockLitReview.return_value.set_run_context.assert_called_once_with(
+            workspace=Path(workspace), iter=1, run_name=run_name, run_id="literature-context"
+        )
         captured_lit_inputs.append(inp)
         return _canned_lit_output()
 
@@ -252,6 +256,8 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
                 ),
                 workspace=workspace,
                 run_name=run_name,
+                chain_run_name=run_name,
+                run_id="literature-context",
                 llm_config=_make_llm_config(),
                 task_composition=composition,
             )
