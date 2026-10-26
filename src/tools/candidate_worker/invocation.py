@@ -11,7 +11,7 @@ from workflows.run_context import bind_agent_run_context
 from .inputs import NativeInputs
 from .models import CandidateRunReceipt, CandidateRunRequest
 
-NativePhase = Literal["proposal", "implementation", "validation"]
+NativePhase = Literal["proposal", "implementation", "validation", "literature"]
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,10 @@ class FixedInvocationContext:
             or (self.storage_workspace, self.storage_run_name)
             != (storage.local.workspace, storage.local.run_name)
             or self.storage_run_name != self.run_name
-            or (phase != "proposal" and self.storage_workspace != implementation_directory)
+            or (
+                phase in ("implementation", "validation")
+                and self.storage_workspace != implementation_directory
+            )
         ):
             raise ValueError("native invocation storage binding disagrees")
 

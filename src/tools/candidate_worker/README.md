@@ -21,6 +21,12 @@ and a verified trace. Execution is serial; this does not aggregate or rank resul
 Reusable source/GUI preparation uses the same executor through the
 [family preparation contract](../candidate_prepare/candidate-prepare-contract.md#reusable-independent-proposal-families).
 
+Code callers can also run one native literature review before one candidate with
+[the literature profile](candidate-worker-contract.md#opt-in-native-literature-candidate).
+Its typed findings enter the existing proposer, and the same operation/HTTP reader
+shows all four instances. Supply the complete native review and proposal inputs;
+reusable source preparation and editor creation do not yet support this profile.
+
 For a first experiment, use [candidate preparation](../candidate_prepare/README.md)
 to build the seed, storage and launch request from task/data/profile selections
 without provider calls. The manual path below is for callers that already own

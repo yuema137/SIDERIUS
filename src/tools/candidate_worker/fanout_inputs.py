@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from agent.schemas.literature_review import LiteratureReviewInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from workflows.attempt_storage import impl_attempt_storage
 from workflows.definition import ExternalRequest, ProtocolRequest
@@ -16,6 +17,7 @@ from .inputs import (
     validator_settings,
 )
 from .layout import graph_instance_dir, proposal_debug_dir
+from .literature_inputs import materialize_literature
 from .models import CandidateRunRequest
 
 
@@ -24,7 +26,7 @@ def materialize_fanout(
     workspace: Path,
     composition: RunTaskComposition,
     config: WorkflowLLMConfig,
-) -> dict[str, NativeInputs]:
+) -> dict[str, NativeInputs | LiteratureReviewInput]:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
     nodes = {node.id: node for node in definition.nodes}
@@ -36,12 +38,16 @@ def materialize_fanout(
     provider, model = validator_settings(config)
     externals = {item.id: item for item in definition.externals}
     used: set[str] = set()
-    result: dict[str, NativeInputs] = {}
+    result: dict[str, NativeInputs | LiteratureReviewInput] = {}
     for family in shape.families:
         proposal_request = nodes[family.proposal].request
-        assert isinstance(proposal_request, ExternalRequest)
+        if shape.literature is not None:
+            seed_binding = shape.literature.seed_binding
+        else:
+            assert isinstance(proposal_request, ExternalRequest)
+            seed_binding = proposal_request.binding
         seed, ref = materialize_proposal(
-            contents[f"external.{proposal_request.binding}"],
+            contents[f"external.{seed_binding}"],
             proposal_storage=StorageConfig(
                 backend="local",
                 local=LocalStorageConfig(
@@ -56,7 +62,7 @@ def materialize_fanout(
                 workspace, request.preview.execution_profile, family.proposal
             ),
         )
-        used.add(proposal_request.binding)
+        used.add(seed_binding)
         for implementation, validation in family.branches:
             attempt = impl_attempt_storage(
                 str(graph_instance_dir(workspace, request.run_name, implementation)),
@@ -80,6 +86,19 @@ def materialize_fanout(
             inputs = NativeInputs(seed, attempt, provider, model)
             result[implementation] = result[validation] = inputs
         result[family.proposal] = result[family.branches[0][0]]
+    if shape.literature is not None:
+        edge = shape.literature
+        candidate = result[edge.proposal]
+        assert isinstance(candidate, NativeInputs)
+        result[edge.review] = materialize_literature(
+            contents[f"external.{edge.review_binding}"],
+            request=request,
+            workspace=workspace,
+            node_id=edge.review,
+            seed=candidate.proposal,
+            config=config,
+        )
+        used.add(edge.review_binding)
     if used != set(externals):
         raise ValueError("unused external inputs are unsupported by the candidate worker")
     return result

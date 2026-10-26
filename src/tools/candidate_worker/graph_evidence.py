@@ -1,6 +1,7 @@
 """Derive and verify final graph evidence without importing native node consumers."""
 
 import hashlib
+import json
 from pathlib import Path
 from typing import cast
 
@@ -26,9 +27,10 @@ def expected_nodes(
         directory = graph_instance_dir(
             Path(initial.workspace), request.run_name, parents.get(node.id, node.id)
         )
-        if node.capability != "proposal":
+        if node.capability in ("implementation", "validation"):
             directory = Path(impl_attempt_dir(str(directory), 1))
         prefix = {
+            "literature": "ml_literature_review",
             "proposal": "proposal",
             "implementation": "implementor",
             "validation": "validation",
@@ -181,3 +183,99 @@ def verify_graph_trace(
         or receipt.training_output is not None
     ):
         raise ValueError("graph output index mismatch")
+    if (
+        execution_families(
+            request.preview.document.definition, request.preview.execution_profile
+        ).literature
+        is not None
+    ):
+        verify_literature_evidence(request, initial, trace)
+
+
+def verify_literature_evidence(
+    request: CandidateRunRequest, initial: CandidateRunReceipt, trace: GraphTrace
+) -> None:
+    """Reconstruct the typed edge from captured source inputs, not child claims."""
+    from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
+    from agent.schemas.proposal import ProposalInput
+    from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
+        local_typed_evidence,
+    )
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+
+    from .inputs import require_storage
+    from .layout import literature_input_path, proposal_input_path
+
+    edge = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    ).literature
+    assert edge is not None
+    nodes = {node.node_id: node for node in trace.nodes}
+    if nodes[edge.review].state != "succeeded":
+        return
+    workspace = Path(initial.workspace)
+
+    def captured(binding: str) -> bytes:
+        index, observation = next(
+            (index, item)
+            for index, item in enumerate(request.files)
+            if item.reference == f"external.{binding}"
+        )
+        payload = read_graph_control(workspace / "candidate_run" / f"input_{index:03}.snapshot")
+        if hashlib.sha256(payload).hexdigest() != observation.sha256:
+            raise ValueError("literature captured input digest mismatch")
+        return payload
+
+    selected = LiteratureReviewInput.model_validate_json(captured(edge.review_binding))
+    managed = StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(
+            workspace=nodes[edge.review].storage,
+            run_name=request.run_name,
+        ),
+    )
+    require_storage(selected.storage, managed)
+    selected.storage = managed
+    actual = LiteratureReviewInput.model_validate_json(
+        read_graph_control(literature_input_path(workspace, edge.review))
+    )
+    seed_payload = json.loads(captured(edge.seed_binding))
+    seed_storage = StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(
+            workspace=nodes[edge.proposal].storage,
+            run_name=request.run_name,
+        ),
+    )
+    seed_payload.setdefault("storage", seed_storage.model_dump(mode="json"))
+    seed = ProposalInput.model_validate(seed_payload)
+    require_storage(seed.storage, seed_storage)
+    seed.storage = seed_storage
+    if (
+        actual != selected
+        or selected.run_name != request.run_name
+        or (selected.task_description, selected.constraint_context)
+        != (seed.task_description, seed.constraint_context)
+    ):
+        raise ValueError("literature diagnostic/task binding mismatch")
+    path = nodes[edge.review].record_path
+    assert path is not None
+    with open_identity_file(path, require_no_follow=True) as handle:
+        before = regular_file_snapshot(handle)
+        payload = handle.read()
+        if (
+            regular_file_snapshot(handle) != before
+            or hashlib.sha256(payload).hexdigest() != nodes[edge.review].record_sha256
+        ):
+            raise ValueError("literature native record changed while verifying")
+    output = LiteratureReviewOutput.model_validate_json(payload)
+    if output.run_name != request.run_name:
+        raise ValueError("literature native record run binding mismatch")
+    if nodes[edge.proposal].state == "succeeded":
+        proposal = ProposalInput.model_validate_json(
+            read_graph_control(
+                proposal_input_path(workspace, request.preview.execution_profile, edge.proposal)
+            )
+        )
+        if proposal != local_typed_evidence(output, proposal_input=seed):
+            raise ValueError("proposal input does not match the declared literature edge")

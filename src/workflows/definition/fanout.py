@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from .models import (
     ExternalRequest,
+    ExternalSource,
     ProtocolRequest,
     ResultSource,
     ReusableWorkflowDefinition,
@@ -20,9 +21,18 @@ class ProposalFanout:
 
 
 @dataclass(frozen=True)
+class LiteratureEdge:
+    review: str
+    proposal: str
+    review_binding: str
+    seed_binding: str
+
+
+@dataclass(frozen=True)
 class ProposalFamilies:
     families: tuple[ProposalFanout, ...]
     predecessors: tuple[tuple[str, frozenset[str]], ...]
+    literature: LiteratureEdge | None = None
 
     @property
     def branches(self) -> tuple[tuple[str, str], ...]:
@@ -49,6 +59,8 @@ def execution_families(
     definition: WorkflowDefinition | ReusableWorkflowDefinition, profile: str | None
 ) -> ProposalFamilies:
     """Select only an explicitly supported native graph profile."""
+    if profile == "native-literature-candidate/v1":
+        return literature_candidate(definition)
     if profile == "native-proposal-families/v1":
         return proposal_families(definition)
     if profile == "native-proposal-fanout/v1":
@@ -117,4 +129,48 @@ def proposal_families(
             for proposal in proposals
         ),
         facts,
+    )
+
+
+def literature_candidate(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> ProposalFamilies:
+    """Validate the review edge, then reuse branch admission for its candidate."""
+    facts = predecessor_facts(definition)
+    reviews = [node for node in definition.nodes if node.capability == "literature"]
+    proposals = [node for node in definition.nodes if node.capability == "proposal"]
+    if len(definition.nodes) != 4 or len(reviews) != 1 or len(proposals) != 1:
+        raise ValueError("literature candidate requires one review and one complete candidate")
+    review, proposal = reviews[0], proposals[0]
+    if (
+        not isinstance(review.request, ExternalRequest)
+        or not isinstance(proposal.request, ProtocolRequest)
+        or proposal.request.protocol != "literature-to-proposal"
+    ):
+        raise ValueError("literature candidate requires an external review and typed proposal edge")
+    sources = {arg.name: arg.source for arg in proposal.request.arguments}
+    output, seed = sources.get("output"), sources.get("proposal_input")
+    if (
+        not isinstance(output, ResultSource)
+        or output.node != review.id
+        or not isinstance(seed, ExternalSource)
+    ):
+        raise ValueError("proposal must consume this review result and an external proposal seed")
+    # Existing branch ownership remains the authority for implementation/validation.
+    candidate = definition.model_copy(
+        update={
+            "nodes": tuple(
+                node.model_copy(update={"request": ExternalRequest(binding=seed.binding)})
+                if node.id == proposal.id
+                else node
+                for node in definition.nodes
+                if node.id != review.id
+            )
+        }
+    )
+    shape = proposal_families(candidate)
+    return ProposalFamilies(
+        shape.families,
+        facts,
+        LiteratureEdge(review.id, proposal.id, review.request.binding, seed.binding),
     )

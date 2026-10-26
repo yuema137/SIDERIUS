@@ -3,7 +3,7 @@
 ## Scope and owners
 
 Version 1 is an offline, within-iteration declaration format. It describes
-proposal, implementation and validation capabilities; it does not instantiate
+literature, proposal, implementation, validation and tuning capabilities; it does not instantiate
 nodes, invoke protocols, inspect files, import user code or execute graphs.
 `catalog.py` is a closed inventory of supported native boundaries. Catalog owner
 strings are documentation, never dynamic import instructions. Native schemas
@@ -296,3 +296,15 @@ refuses `training_settings` and uses the existing fanout topology admission duri
 [reusable preparation](../../tools/candidate_prepare/candidate-prepare-contract.md#reusable-proposal-fanout).
 Generated v1 source remains a declaration; its accompanying parent-verified worker
 request carries the execution profile.
+
+
+## Native literature edge
+
+The inert catalog includes `literature.input`, `literature.output`, the `literature`
+capability and `literature-to-proposal`. The latter maps a selected review `output`
+and external `proposal_input` through the existing target-owned
+`local_typed_evidence` protocol. Structural validity alone grants no execution.
+The native worker admits exactly one review and one complete candidate only under
+[its explicit literature profile](../../tools/candidate_worker/candidate-worker-contract.md#opt-in-native-literature-candidate).
+This does not extend `ReusableWorkflowDocument.execution_profile`, managed input
+preparation or visual editing support. Existing source serialization is unchanged.

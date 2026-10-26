@@ -422,3 +422,74 @@ Reusable version-2 source and managed preparation also support this profile thro
 [the reusable family contract](../candidate_prepare/candidate-prepare-contract.md#reusable-independent-proposal-families).
 Code callers may still supply version-1 native inputs directly. Both routes use
 the same existing operation/HTTP observation without loading an editor.
+
+
+### Opt-in native literature candidate
+
+Set `WorkflowPreviewRequest.execution_profile="native-literature-candidate/v1"`
+on a version-1 document. Exactly four instances are supported:
+
+| Instance capability | Request and required result sources |
+| --- | --- |
+| `literature` | External `literature.input`, the existing `LiteratureReviewInput` |
+| `proposal` | `literature-to-proposal`: `output` selects that review result; `proposal_input` selects an external `proposal.input` seed |
+| `implementation` | Existing `proposal-to-implementation`, selecting that proposal |
+| `validation` | Existing `proposed-implementation-to-validation`, selecting that proposal and implementation |
+
+The closed catalog points `literature-to-proposal` to the existing
+`ml_literature_review_to_ml_model_propose.local_typed_evidence`. Its target-owned
+bounded projection replaces `ProposalInput.literature_review_evidence`; it does not
+merge multiple reviews, rank findings or alter native prompts. Declaration order
+can differ from execution order. The existing serial readiness loop executes the
+review, projects its typed in-memory output, then calls the same native candidate
+phases. No interpreter is executed in this profile. Callers supply native typed
+interpretation evidence and may construct review inputs with
+`workflows.literature_input.build_literature_input`.
+
+The external review must explicitly select the run name and local storage
+`<workspace>/<run_name>/graph_instances/<review-id>/iteration_001/attempt_001`.
+Its task description and constraint context must equal the checked proposal seed.
+The seed retains task composition, data-root and native constraint reconciliation.
+Main/search bridge settings, retries and sharing must match the captured
+`WorkflowLLMConfig` routes; existing `lit_review` inheritance from `interpret`
+remains the configuration owner. Missing main configuration refuses, with no new
+provider fallback. Actual lazy bridges receive the existing run accounting context.
+
+All selected input files require explicit read-only mount admission. This profile
+refuses `PaperSource.source_type="local"`: the existing native resolver gives those
+paths checkout-relative semantics, which this external graph does not reinterpret.
+Use the existing literature workflow/CLI for local papers; their behavior is
+unchanged. Remote roots or enabled dynamic search require explicit `network=true`;
+network access is never guessed or enabled automatically. Provider calls also
+remain subject to the selected sandbox network policy. Empty roots with search
+disabled do not establish network retrieval support or zero provider usage.
+
+Each review uses a fresh managed `cache/root_papers` below its instance directory;
+existing input/cache/output slots refuse before native calls. The native output
+filename remains `ml_literature_review_<run_name>.json`. `capture_record` preserves
+and compares native-persisted bytes, or captures the returned typed output when
+native persistence is absent, under the existing ownership rule. The review input
+diagnostic is `candidate_run/literature_inputs/<review-id>.json`; the projected
+proposal diagnostic is `candidate_run/proposal_inputs/<proposal-id>.json`. Optional
+proposal prompt dumps stay under `candidate_run/debug/<proposal-id>/`.
+
+The parent checks graph membership, dependencies, storage, record paths and hashes,
+then independently compares the review diagnostic against captured external input,
+checks task/run binding, and reconstructs the target projection for a successful
+proposal. Native review bytes are read with no-follow stable file identity and
+compared to the recorded digest; no new scientific-output size cap is imposed.
+Inputs and control records retain their existing control-size boundary.
+
+A valid empty native review remains successful. Native synthesis already handles
+some provider failures by returning empty findings; this profile does not invent a
+stricter scientific policy. An escaping exception marks the review failed and all
+remaining instances blocked; no proposal runs. Timeout/interruption retains the
+existing uncertain-outcome behavior.
+
+This is an explicit native code/CLI/operation route, with verified HTTP observation.
+Reusable `execution_profile` still refuses this value; source-editor preparation
+and visual creation controls are not added. There is no per-review freeform human
+advice field, N-way aggregation, parallelism, training, conditional routing, buffer,
+human pause or resume. Shared proposal advice is not literature advice. Historical
+scientific settings remain experiment-owned. Omitted/default fixed, fanout and
+family profiles retain their serialization and native scientific payloads.

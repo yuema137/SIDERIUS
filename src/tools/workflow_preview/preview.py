@@ -25,6 +25,7 @@ class HealthReference(BaseModel):
 def _selected_routes(config: WorkflowLLMConfig, nodes: dict[str, str]) -> tuple[LLMRoute, ...]:
     selected = []
     roles: tuple[tuple[str, NodeRouteRole], ...] = (
+        ("literature", "lit_review"),
         ("proposal", "propose"),
         ("implementation", "implement"),
         ("validation", "validate"),
@@ -124,6 +125,7 @@ def observe_bindings(
             not in (
                 {"propose", "implement", "validate_model"}
                 | ({"tune"} if "tuning" in nodes else set())
+                | ({"lit_review"} if "literature" in nodes else set())
             )
         ),
     )
