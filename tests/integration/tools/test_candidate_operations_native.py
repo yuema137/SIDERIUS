@@ -241,11 +241,12 @@ runpy.run_module('tools.candidate_operations', run_name='__main__')
     return submitter
 
 
-def test_fanout_public_detached_cli_preserves_instance_trace(prepared, tmp_path):
-    from tests.helpers.candidate_fanout import fanout_request
+@pytest.mark.parametrize("families", [False, True])
+def test_fanout_public_detached_cli_preserves_instance_trace(prepared, tmp_path, families):
+    from tests.helpers.candidate_fanout import families_request, fanout_request
     from tools.candidate_operations import OperationStoreConfig
 
-    request = fanout_request(prepared).model_copy(
+    request = (families_request(prepared) if families else fanout_request(prepared)).model_copy(
         update={
             "environment_names": ("EXPLICIT_TEST_KEY", "OPENAI_API_KEY"),
         }
@@ -283,11 +284,13 @@ def test_fanout_public_detached_cli_preserves_instance_trace(prepared, tmp_path)
     assert status["state"] == "completed", status
     assert status["receipt"]["status"] == "accepted", status
     trace = status["receipt"]["graph_trace"]["nodes"]
-    assert len(trace) == 5 and all(item["state"] == "succeeded" for item in trace)
-    assert trace[2]["predecessors"] == ["build0", "propose"]
-    assert trace[4]["predecessors"] == ["build1", "propose"]
-    for index in (2, 4):
-        record = json.loads(Path(trace[index]["record_path"]).read_bytes())
+    assert len(trace) == (6 if families else 5)
+    assert all(item["state"] == "succeeded" for item in trace)
+    by_id = {item["node_id"]: item for item in trace}
+    for index in range(2):
+        proposal = f"propose{index}" if families else "propose"
+        assert by_id[f"check{index}"]["predecessors"] == [f"build{index}", proposal]
+        record = json.loads(Path(by_id[f"check{index}"]["record_path"]).read_bytes())
         assert record["tests_passed"] and record["gradient_check_passed"]
     assert (
         read_operation(config, submission.request_id).receipt.model_dump(mode="json")
@@ -317,15 +320,24 @@ def test_fanout_public_detached_cli_preserves_instance_trace(prepared, tmp_path)
     assert response.status_code == 200, response.text
     assert response.json()["graph_trace"] == status["receipt"]["graph_trace"]
     implementations = [
-        json.loads(Path(trace[index]["record_path"]).read_bytes()) for index in (1, 3)
+        json.loads(Path(by_id[f"build{index}"]["record_path"]).read_bytes()) for index in range(2)
     ]
     assert implementations[0]["model_type"] == implementations[1]["model_type"]
     assert (
         Path(implementations[0]["model_file_path"]).read_bytes()
         != Path(implementations[1]["model_file_path"]).read_bytes()
     )
+    if families:
+        control = Path(status["receipt"]["workspace"]) / "candidate_run"
+        assert not (control / "proposal_input.json").exists()
+        assert implementations[0]["candidate_id"] != implementations[1]["candidate_id"]
+        for index in range(2):
+            proposal = json.loads(Path(by_id[f"propose{index}"]["record_path"]).read_bytes())
+            assert proposal["candidate_id"] == implementations[index]["candidate_id"]
+            assert (control / "proposal_inputs" / f"propose{index}.json").is_file()
+            assert (control / "debug" / f"propose{index}" / "prompt.md").is_file()
     original_native_id = load_record(config, submission.request_id).native_id
-    Path(request.preview.project_root, "seed.json").unlink()
+    Path(request.preview.project_root, "seed0.json" if families else "seed.json").unlink()
     assert (
         json.loads(cli(config_path, "submit", "--request", str(envelope)).stdout)["observation"]
         == "existing"

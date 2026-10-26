@@ -14,6 +14,12 @@ declaration and storage inputs using that contract, then submit through the same
 includes the verified per-instance trace. This profile has no training, graph
 resume or visual graph editor.
 
+To generate several independent proposal candidates in one run, code callers can
+select [proposal families](candidate-worker-contract.md#opt-in-independent-proposal-families)
+and supply one native seed per declared proposer. Each family has isolated files
+and a verified trace. Execution is serial; this does not aggregate or rank results.
+Reusable source/GUI preparation does not yet support this profile.
+
 For a first experiment, use [candidate preparation](../candidate_prepare/README.md)
 to build the seed, storage and launch request from task/data/profile selections
 without provider calls. The manual path below is for callers that already own

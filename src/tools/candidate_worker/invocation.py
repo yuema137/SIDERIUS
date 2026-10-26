@@ -47,12 +47,12 @@ class FixedInvocationContext:
         """
         if request.preview.execution_profile is not None:
             from workflows.attempt_storage import impl_attempt_storage
-            from workflows.definition.fanout import proposal_fanout
+            from workflows.definition.fanout import execution_families
 
             from .layout import graph_instance_dir
 
             definition = request.preview.document.definition
-            shape = proposal_fanout(definition)
+            shape = execution_families(definition, request.preview.execution_profile)
             node = next((node for node in definition.nodes if node.id == self.node_id), None)
             if node is None or node.capability != phase:
                 raise ValueError("native invocation node/phase binding disagrees")

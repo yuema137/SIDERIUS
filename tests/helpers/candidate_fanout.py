@@ -84,3 +84,73 @@ def fanout_request(request, branches=2):
             "selected_constructor_routes": observed.selected_constructor_routes,
         }
     )
+
+
+def families_request(request, families=2):
+    """Independent seeds and one branch per family; validators declared before producers."""
+    request = fanout_request(request, families)
+    raw = request.preview.model_dump(mode="json")
+    definition = raw["document"]["definition"]
+    project = Path(request.preview.project_root)
+    workspace = Path(definition["task"]["workspace"])
+    seed = json.loads((project / "seed.json").read_text())
+    # The native debug dump exists only on its explicit pipeline route.
+    seed["reasoning_pipeline"] = {
+        "stages": [
+            {
+                "name": "comparison",
+                "system_prompt_key": "COMPARATIVE_ANALYSIS",
+                "output_mode": "text",
+            }
+        ]
+    }
+    nodes = []
+    definition["externals"] = definition["externals"][1:]
+    for index in range(families):
+        proposal = f"propose{index}"
+        binding = f"seed{index}"
+        path = project / f"{binding}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    **seed,
+                    "debug_dump_proposing_prompt_path": str(
+                        workspace / "candidate_run" / "debug" / proposal / "prompt.md"
+                    ),
+                }
+            )
+        )
+        definition["externals"].append(
+            {"id": binding, "contract": "proposal.input", "location": path.name}
+        )
+        implementation, validation = definition["nodes"][1 + 2 * index : 3 + 2 * index]
+        for node in (implementation, validation):
+            for arg in node["request"]["arguments"]:
+                if arg["source"].get("node") == "propose":
+                    arg["source"]["node"] = proposal
+        nodes.extend(
+            (
+                validation,
+                implementation,
+                {
+                    "id": proposal,
+                    "capability": "proposal",
+                    "request": {"kind": "external", "binding": binding},
+                },
+            )
+        )
+    # Interleave families as well as reversing predecessor declaration order.
+    if families == 2:
+        nodes = [nodes[index] for index in (0, 4, 2, 3, 1, 5)]
+    definition["nodes"] = nodes
+    raw["execution_profile"] = "native-proposal-families/v1"
+    preview = WorkflowPreviewRequest.model_validate_json(json.dumps(raw))
+    observed = preview_workflow(preview)
+    return request.model_copy(
+        update={
+            "preview": preview,
+            "files": observed.files,
+            "declaration_digest": preview.document.definition.declaration_digest(),
+            "selected_constructor_routes": observed.selected_constructor_routes,
+        }
+    )

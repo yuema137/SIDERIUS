@@ -1,4 +1,4 @@
-"""Admission for one proposal and complete implementation/validation branches."""
+"""Admission for explicit proposal families and complete native branches."""
 
 from dataclasses import dataclass
 
@@ -19,21 +19,61 @@ class ProposalFanout:
     predecessors: tuple[tuple[str, frozenset[str]], ...]
 
 
+@dataclass(frozen=True)
+class ProposalFamilies:
+    families: tuple[ProposalFanout, ...]
+    predecessors: tuple[tuple[str, frozenset[str]], ...]
+
+    @property
+    def branches(self) -> tuple[tuple[str, str], ...]:
+        return tuple(branch for family in self.families for branch in family.branches)
+
+    def proposal_for(self, node_id: str) -> str:
+        """Select lineage from admitted edges, never scientific candidate identity."""
+        return next(
+            family.proposal
+            for family in self.families
+            if node_id == family.proposal or any(node_id in branch for branch in family.branches)
+        )
+
+
 def proposal_fanout(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> ProposalFanout:
-    """Check the executable shape without imposing a topology-size budget."""
+    """Retain the one-proposal profile's admission contract."""
+    shape = proposal_families(definition)
+    if len(shape.families) != 1:
+        raise ValueError("fanout requires one external proposal and complete validation branches")
+    return shape.families[0]
+
+
+def execution_families(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition, profile: str | None
+) -> ProposalFamilies:
+    """Select only an explicitly supported native graph profile."""
+    if profile == "native-proposal-families/v1":
+        return proposal_families(definition)
+    if profile == "native-proposal-fanout/v1":
+        family = proposal_fanout(definition)
+        return ProposalFamilies((family,), family.predecessors)
+    raise ValueError("unsupported native graph profile")
+
+
+def proposal_families(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> ProposalFamilies:
+    """Admit independent external proposals with exact typed branch ownership."""
     facts = predecessor_facts(definition)
     proposals = [node for node in definition.nodes if node.capability == "proposal"]
     implementations = [node for node in definition.nodes if node.capability == "implementation"]
     validations = [node for node in definition.nodes if node.capability == "validation"]
     if (
-        len(proposals) != 1
+        not proposals
         or not implementations
         or len(validations) != len(implementations)
-        or len(definition.nodes) != 1 + len(implementations) + len(validations)
-        or not isinstance(proposals[0].request, ExternalRequest)
+        or len(definition.nodes) != len(proposals) + len(implementations) + len(validations)
+        or any(not isinstance(node.request, ExternalRequest) for node in proposals)
     ):
-        raise ValueError("fanout requires one external proposal and complete validation branches")
-    proposal = proposals[0].id
+        raise ValueError("fanout requires external proposals and complete validation branches")
+    proposal_ids = {node.id for node in proposals}
 
     def sources(request: ExternalRequest | ProtocolRequest, protocol: str) -> dict[str, str]:
         if not isinstance(request, ProtocolRequest) or request.protocol != protocol:
@@ -44,20 +84,37 @@ def proposal_fanout(definition: WorkflowDefinition | ReusableWorkflowDefinition)
             if isinstance(arg.source, ResultSource)
         }
 
+    owners: dict[str, str] = {}
+    for node in implementations:
+        refs = sources(node.request, "proposal-to-implementation")
+        if set(refs) != {"output"} or refs["output"] not in proposal_ids:
+            raise ValueError("each implementation must consume a declared proposal result")
+        owners[node.id] = refs["output"]
+    if set(owners.values()) != proposal_ids:
+        raise ValueError("each proposal requires a complete implementation/validation branch")
     validators: dict[str, str] = {}
     for node in validations:
         refs = sources(node.request, "proposed-implementation-to-validation")
-        if refs.get("proposal") != proposal or "implementation" not in refs:
+        parent = refs.get("implementation")
+        if parent not in owners or refs.get("proposal") != owners[parent]:
             raise ValueError("validation requires both this proposal and an implementation result")
-        parent = refs["implementation"]
         if parent in validators:
             raise ValueError("each implementation requires exactly one validator")
         validators[parent] = node.id
-    for node in implementations:
-        if sources(node.request, "proposal-to-implementation") != {"output": proposal}:
-            raise ValueError("each implementation must consume this proposal result")
-    if set(validators) != {node.id for node in implementations}:
+    if set(validators) != set(owners):
         raise ValueError("validation branches must cover exactly the declared implementations")
-    return ProposalFanout(
-        proposal, tuple((node.id, validators[node.id]) for node in implementations), facts
+    return ProposalFamilies(
+        tuple(
+            ProposalFanout(
+                proposal.id,
+                tuple(
+                    (node.id, validators[node.id])
+                    for node in implementations
+                    if owners[node.id] == proposal.id
+                ),
+                facts,
+            )
+            for proposal in proposals
+        ),
+        facts,
     )

@@ -7,7 +7,7 @@ from typing import cast
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.validator import ValidatorOutput
-from workflows.definition.fanout import proposal_fanout
+from workflows.definition.fanout import execution_families
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 
@@ -26,7 +26,7 @@ def execute_fanout(
     config: WorkflowLLMConfig,
 ) -> CandidateRunReceipt:
     definition = request.preview.document.definition
-    shape = proposal_fanout(definition)
+    shape = execution_families(definition, request.preview.execution_profile)
     dependencies = dict(shape.predecessors)
     inputs = materialize_fanout(request, Path(initial.workspace), composition, config)
     results: dict[str, ProposalOutput | ImplementorOutput | ValidatorOutput] = {}
@@ -72,7 +72,7 @@ def execute_fanout(
                 if phase == "proposal":
                     output, path = phases.run_proposal(context, request, initial, selected, config)
                 else:
-                    proposal = results[shape.proposal]
+                    proposal = results[shape.proposal_for(node.id)]
                     assert isinstance(proposal, ProposalOutput)
                     if phase == "implementation":
                         output, path = phases.run_implementation(

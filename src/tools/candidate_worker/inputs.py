@@ -99,6 +99,7 @@ def materialize_proposal(
     data_root: Path,
     control: Path,
     admitted: "TrainingAdmission | None" = None,
+    debug_root: Path | None = None,
 ) -> tuple[ProposalInput, TaskCompositionRef]:
     """Reconcile one selected seed with explicit managed storage and task authority."""
     raw = json.loads(payload)
@@ -132,9 +133,10 @@ def materialize_proposal(
             raise ValueError(f"proposal seed {name} disagrees with composed task")
     if seed.data_dir is None or Path(seed.data_dir).resolve() != data_root:
         raise ValueError("proposal seed data_dir disagrees with selected physical root")
+    debug_root = control / "debug" if debug_root is None else debug_root
     debug = seed.debug_dump_proposing_prompt_path
     if debug is not None and (
-        not Path(debug).is_absolute() or not Path(debug).resolve().is_relative_to(control / "debug")
+        not Path(debug).is_absolute() or not Path(debug).resolve().is_relative_to(debug_root)
     ):
         raise ValueError("debug prompt path must be inside candidate_run/debug")
     if admitted is None:

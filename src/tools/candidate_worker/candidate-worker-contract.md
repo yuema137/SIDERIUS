@@ -383,3 +383,43 @@ For a bounded public JSON consumer, submit the existing `CandidateOperation` thr
 `python -m tools.candidate_operations submit`, then use its existing status/log
 commands. The operation UUID identifies submission recovery; the native run ID
 continues identifying accounting. Same-UUID lookup does not relaunch effects.
+
+### Opt-in independent proposal families
+
+`WorkflowPreviewRequest.execution_profile="native-proposal-families/v1"` admits
+one or more independently declared external proposal instances, each with at least
+one complete implementation/validation branch. Each implementation's `output`
+selects its proposal result. Each validator's `proposal` must select that same
+proposal, and its `implementation` must select its own implementation. Cross-family
+joins, orphan proposals, duplicate validators and extra capabilities refuse.
+Declaration order need not be topological; actual typed edges determine readiness.
+
+Use the version-1 `WorkflowDocument` and complete native inputs described above,
+then the existing `CandidateRunRequest`/candidate operation interface. For example,
+`proposal_a -> build_a/check_a` and `proposal_b -> build_b/check_b` produce two
+native candidate identities in one run. Each proposal seed must match the selected
+run task composition and data root. Its optional explicit storage must match
+`<workspace>/<run_name>/graph_instances/<proposal-id>/iteration_001/attempt_001`.
+Implementation storage and validator sharing follow the fanout convention above.
+Every captured seed retains its existing `input_<index>.snapshot`; the materialized
+proposal diagnostic is `candidate_run/proposal_inputs/<proposal-id>.json`.
+An optional absolute `debug_dump_proposing_prompt_path` must resolve below
+`candidate_run/debug/<proposal-id>/`; a shared or sibling path refuses before any
+native call. The existing native pipeline writes the debug dump when selected;
+the legacy proposer mode does not write it. Default/G1 retain their previous
+`proposal_input.json` and debug directory semantics.
+
+The existing serial worker, native nodes/protocols, output formats, control byte
+limits and independently verified operation/HTTP trace remain the execution path.
+A validator rejection permits other ready families to continue. A native exception
+aborts all remaining families because the run is uncertain; independent exception
+recovery is not supported. Candidate IDs are native outputs, never dispatch keys.
+The family profile generates N independent instances, not N outputs from one
+proposer call; no scientific diversity, ranking, aggregation, parallel execution,
+training, conditional routing, buffers, human gates or graph resume is implied.
+
+Interim support is deliberately bounded: reusable version-2 source documents and
+managed preparation still reject this profile. Existing source/GUI authoring cannot
+prepare families yet. Code callers supply the version-1 native inputs and can read
+the resulting operation through Python, CLI or the existing console HTTP endpoint
+without loading an editor. Reusable preparation is the immediate follow-on slice.

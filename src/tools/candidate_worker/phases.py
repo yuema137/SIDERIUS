@@ -18,6 +18,7 @@ from workflows.llm_config import WorkflowLLMConfig
 from .artifacts import capture_record, verify_artifacts
 from .inputs import NativeInputs
 from .invocation import FixedInvocationContext
+from .layout import proposal_input_path
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
@@ -34,8 +35,12 @@ def run_proposal(
     assert seed.storage.local is not None and seed.task_composition_ref is not None
     proposal_dir = Path(context.storage_workspace)
     proposal_dir.mkdir(parents=True, exist_ok=True)
+    input_path = proposal_input_path(
+        Path(context.workspace), request.preview.execution_profile, context.node_id
+    )
+    input_path.parent.mkdir(parents=True, exist_ok=True)
     publish_bytes_write_once(
-        str(Path(context.workspace) / "candidate_run" / "proposal_input.json"),
+        str(input_path),
         seed.model_dump_json(indent=2).encode(),
     )
 

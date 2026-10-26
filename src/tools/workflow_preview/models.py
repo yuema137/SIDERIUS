@@ -15,9 +15,9 @@ class PreviewModel(BaseModel):
 
 class WorkflowPreviewRequest(PreviewModel):
     document: WorkflowDocument
-    execution_profile: Literal["native-proposal-fanout/v1"] | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
+    execution_profile: (
+        Literal["native-proposal-fanout/v1", "native-proposal-families/v1"] | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
     project_root: str
     llm_config_file: str | None = None
 

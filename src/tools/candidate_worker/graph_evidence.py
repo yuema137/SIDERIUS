@@ -7,7 +7,7 @@ from typing import cast
 from core.control_json import JSON_LIMIT, encode_control
 from core.file_identity import open_identity_file, regular_file_snapshot
 from execute_tools.impl_attempts import impl_attempt_dir
-from workflows.definition.fanout import proposal_fanout
+from workflows.definition.fanout import execution_families
 
 from .graph_models import GraphCapability, GraphNodeEvidence, GraphTrace
 from .layout import graph_instance_dir
@@ -18,7 +18,7 @@ def expected_nodes(
     request: CandidateRunRequest, initial: CandidateRunReceipt
 ) -> tuple[GraphNodeEvidence, ...]:
     definition = request.preview.document.definition
-    shape = proposal_fanout(definition)
+    shape = execution_families(definition, request.preview.execution_profile)
     parents = {validation: impl for impl, validation in shape.branches}
     predecessors = dict(shape.predecessors)
     evidence = []
