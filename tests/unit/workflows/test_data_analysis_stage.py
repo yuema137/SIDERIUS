@@ -426,3 +426,101 @@ def test_rejected_analysis_plan_recovers_through_workflow_proposer_handoff(tmp_p
         assert bridge.calls.count("data_analysis.plan.resolution_retry") == (iteration == 1)
         report_refs.append(output.report_ref.logical_ref)
     assert report_refs[0] != report_refs[1]
+
+
+@pytest.mark.parametrize("run_id", [None, "run-884"])
+def test_native_stage_usage_is_recorded_only_with_explicit_chain_context(
+    tmp_path, monkeypatch, run_id
+):
+    """#884: a valid no-work report still incurs a real selection-call ledger row."""
+    import json
+    from unittest.mock import Mock
+
+    from agent import llm_bridge
+    from workflows.run_context import contextual_bridge_factory
+
+    class NoReadCapability:
+        def materialize_analysis_view(self, _request):
+            raise AssertionError("non-execution must not read data")
+
+        def export_analysis_materialization(self, *_args):
+            raise AssertionError("non-execution must not export data")
+
+    calls = []
+
+    def complete(**kwargs):
+        calls.append(kwargs["model"])
+        content = {
+            "skill_ids": [],
+            "generated_program_question_ids": [],
+            "rationale": "Evidence unavailable under policy.",
+            "non_execution_reason": "No authorized useful analysis.",
+        }
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(content)))],
+            usage=SimpleNamespace(prompt_tokens=11, completion_tokens=7, total_tokens=18),
+            model=kwargs["model"],
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-placeholder")
+    monkeypatch.setattr(llm_bridge, "load_dotenv", lambda: None)
+    monkeypatch.setattr(
+        llm_bridge,
+        "OpenAI",
+        Mock(
+            return_value=SimpleNamespace(
+                chat=SimpleNamespace(completions=SimpleNamespace(create=complete))
+            )
+        ),
+    )
+    template = _input(tmp_path)
+    binding = ResolvedWorkflowDataAnalysis(
+        task_context=template.task_context,
+        available_assets=template.available_assets,
+        declared_scope=template.declared_scope,
+        access_policy=template.access_policy,
+        resource_envelope=template.resource_envelope,
+        allowed_skill_packs=template.allowed_skill_packs,
+        task_analysis_capability=NoReadCapability(),
+        report_schema_version=1,
+        config_content_sha256="7" * 64,
+        config_path=str(tmp_path / "policy.json"),
+    )
+    output = run_optional_data_analysis(
+        _interpretation(template.analysis_brief),
+        binding=binding,
+        iteration=4,
+        run_name="native",
+        storage=template.storage,
+        human_advice=None,
+        llm_kwargs={"provider": "openai", "model_id": "offline-analysis", "max_retries": 0},
+        bridge_factory=contextual_bridge_factory(
+            None,
+            workspace=tmp_path,
+            iteration=4,
+            run_name="chain",
+            run_id=run_id,
+        ),
+        chain_workspace=str(tmp_path),
+    )
+    assert output is not None and output.report.findings == ()
+    assert output.report.resource_usage.attempted_invocations == 0
+    assert (tmp_path / output.report_ref.logical_ref).is_file()
+    assert calls == ["offline-analysis"]
+    ledger = tmp_path / "token_usage.jsonl"
+    if run_id is None:
+        assert not ledger.exists()
+    else:
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        assert [
+            (row["label"], row["run_id"], row["run_name"], row["iter"], row["tokens"])
+            for row in rows
+        ] == [
+            (
+                "data_analysis.skill_selection",
+                "run-884",
+                "chain",
+                4,
+                {"prompt": 11, "completion": 7, "total": 18},
+            ),
+        ]
