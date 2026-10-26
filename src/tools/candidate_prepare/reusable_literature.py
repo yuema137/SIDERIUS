@@ -57,7 +57,9 @@ def review_settings(document: ReusableWorkflowDocument) -> tuple[str, Literature
     binding = next(item for item in document.definition.externals if item.id == edge.review_binding)
     if not isinstance(binding, ManagedCandidateBinding) or binding.literature_settings is None:
         raise ValueError("Reusable literature requires source-owned managed settings")
-    return edge.review, LiteratureSettings.model_validate(binding.literature_settings, extra="forbid")
+    return edge.review, LiteratureSettings.model_validate(
+        binding.literature_settings, extra="forbid"
+    )
 
 
 def prepare_literature(
