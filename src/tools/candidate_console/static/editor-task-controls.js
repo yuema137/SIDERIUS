@@ -52,7 +52,7 @@
         node('p', `${finding.code} · ${finding.reference}`, details);
       }
       if (!review.save_supported || review.findings.some(item => item.state === 'blocked')) {
-        node('p', 'This reference cannot be saved. Keep your draft and inspect the findings. Changed native task identity is not supported by this update flow.', parent); return;
+        node('p', 'This reference cannot be saved. Keep your draft and resolve the blocked findings. Unsupported interfaces or workflow mappings require a separate update.', parent); return;
       }
       const check = (id, text, checked, callback) => {
         const label = node('label', '', parent), input = node('input', '', label); input.type = 'checkbox'; input.id = id;
@@ -60,6 +60,10 @@
         input.checked = checked; input.disabled = !state.connected || state.saving;
         label.append(document.createTextNode(text)); input.addEventListener('change', () => callback(input.checked));
       };
+      if (review.current_observation?.result.candidate_check) {
+        const details = node('details', '', parent); node('summary', 'Task declaration details', details);
+        node('pre', JSON.stringify({previous: review.current_observation.result, target: review.observation.result}, null, 2), details);
+      }
       check('editor-task-acknowledge', ' I reviewed every finding above and the exact Python diff.', state.acknowledged, actions.acknowledge);
       if (review.findings.some(item => item.code === 'current_snapshot_adoption')) check('editor-task-adopt', ' Adopt the currently observed snapshot; no historical task identity is claimed.', state.adopted, actions.adopt);
     } finally {

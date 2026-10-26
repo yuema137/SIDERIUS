@@ -8,6 +8,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from agent.schemas.hyperparam_tuning import TaskCompositionRef
+from agent.schemas.output_types import OutputTypeName
+from agent.schemas.task_config import ForwardContract
 from tools.setup_review.models import SetupDeclarationReport, SetupReviewRequest
 from tools.setup_review.task_settings_models import TaskSettingsInputs, TaskSettingsSummary
 from tools.workspace_sandbox.profile import SandboxProfile
@@ -19,7 +22,13 @@ CHILD_REQUEST_NAME = "check-request.json"
 CHILD_RESULT_NAME = "check-result.json"
 FAILURE_MESSAGE_MAX_CHARS = 4096
 FailureStage = Literal[
-    "composition", "planner_strategy", "task_settings", "transport", "sandbox", "stale_manifest"
+    "composition",
+    "planner_strategy",
+    "task_settings",
+    "transport",
+    "sandbox",
+    "stale_manifest",
+    "candidate_check",
 ]
 
 
@@ -30,6 +39,16 @@ class CheckModel(BaseModel):
 class TaskCheckSettings(CheckModel):
     timeout_seconds: float = Field(gt=0)
     result_max_bytes: PositiveBytes = 1048576
+
+
+class CandidateCheckOptions(CheckModel):
+    allowed_output_types: tuple[OutputTypeName, ...] | None
+
+
+class CandidateCheckFacts(CheckModel):
+    reference: TaskCompositionRef
+    forward_contract: ForwardContract
+    default_scope: tuple[int, ...]
 
 
 class TaskCheckRequest(CheckModel):
@@ -50,6 +69,9 @@ class CompositionJob(CheckModel):
     scratch: str
     settings: TaskCheckSettings
     task_settings: TaskSettingsInputs | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    candidate_check: CandidateCheckOptions | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -97,6 +119,9 @@ class CompositionResult(CheckModel):
     planner_strategy_identity: dict[str, JsonValue] | None = None
     failure: CheckFailure | None = None
     task_settings: TaskSettingsSummary | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    candidate_check: CandidateCheckFacts | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 

@@ -60,6 +60,8 @@ def _failed_child(profile, argv):
 def test_handled_child_failure_is_escaped_and_command_remains_ordinary(check_request, monkeypatch):
     monkeypatch.setattr(parent, "run", _failed_child)
     report = parent.check_task(check_request)
+    assert "candidate_check" not in report.job.model_dump()
+    assert "candidate_check" not in report.result.model_dump()
     assert report.result.outcome == "failed"
     assert report.execution.status == "completed"
     assert report.request.settings.result_max_bytes == 1048576

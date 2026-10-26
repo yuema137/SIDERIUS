@@ -112,7 +112,21 @@ def review_publication(
     project: Path,
 ) -> TaskReferenceReview:
     target = selected_target(selection, targets)
-    observed = observe_target(target)
+    changed = current.task_binding is not None and not same_identity(
+        current.task_binding, target.binding
+    )
+    if changed:
+        from .candidate_compatibility import inspect_changed_candidate
+
+        observed, previous_observation, compatibility = inspect_changed_candidate(
+            current, proposed, references(current, project), targets, target
+        )
+    else:
+        observed = observe_target(target)
+        previous_observation, previous_failure = current_observation(
+            current, project, targets, target
+        )
+        compatibility = (previous_failure,) if previous_failure is not None else ()
     findings = []
 
     def finding(
@@ -151,16 +165,7 @@ def review_publication(
             "definition.task",
             "Proposed pin and resolved task locations must match the explicitly configured selection",
         )
-    if current.task_binding is not None and not same_identity(current.task_binding, target.binding):
-        finding(
-            "compatibility_unresolved",
-            "blocked",
-            "definition.task",
-            "Changed native identity requires a separate owner-backed compatibility review; text differences cannot prove migration safety",
-        )
-    previous_observation, previous_failure = current_observation(current, project, targets, target)
-    if previous_failure is not None:
-        findings.append(previous_failure)
+    findings.extend(compatibility)
     if current.task_binding is None:
         if not adoption_unchanged(current, proposed):
             finding(
@@ -180,7 +185,9 @@ def review_publication(
             "authored_changes",
             "requires_review",
             "source",
-            "Review the exact proposed source, advice and references; unchanged task identity does not certify authored scientific choices",
+            "Review the exact proposed source, advice and references; unchanged task identity does not certify authored scientific choices"
+            if not changed
+            else "Explicitly accept the changed task for a fresh candidate. Retained advice needs scientific review; this does not migrate or resume an old run.",
         )
     return TaskReferenceReview(
         selected_choice_id=target.choice_id,

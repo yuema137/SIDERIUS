@@ -52,4 +52,8 @@ def read_composition_result(job: CompositionJob) -> CompositionResult:
         job.task_settings is not None
     ):
         raise ValueError("Child result does not match the requested task-settings checks")
+    if result.outcome == "passed" and (result.candidate_check is not None) != (
+        job.candidate_check is not None
+    ):
+        raise ValueError("Child result does not match the requested candidate checks")
     return result

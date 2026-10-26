@@ -1,0 +1,191 @@
+"""Changed references for fresh fixed candidates, never trained-state migration."""
+
+from pathlib import Path
+
+from tools.candidate_prepare.resolution import check_candidate_roles
+from tools.setup_review.composition_models import CandidateCheckOptions, CompositionObservation
+from workflows.definition import ManagedCandidateBinding, ReusableWorkflowDocument
+from workflows.definition.candidate import candidate_nodes
+
+from .task_models import TaskReferenceFinding, TaskReferenceTarget
+from .task_observation import identity_matches, observe_target
+
+
+def _check_source(current: ReusableWorkflowDocument, proposed: ReusableWorkflowDocument) -> None:
+    for document in (current, proposed):
+        if document.training_settings is not None or document.execution_profile is not None:
+            raise ValueError(
+                "Changed references support fixed candidates without training or execution profiles"
+            )
+        if not all(
+            isinstance(item, ManagedCandidateBinding) for item in document.definition.externals
+        ):
+            raise ValueError("Changed references require managed proposal/storage bindings only")
+        roles = candidate_nodes(document.definition)
+        if "tuning" in roles:
+            raise ValueError("Changed references do not migrate training settings")
+        check_candidate_roles(document, {roles["proposal"]})
+    if any(
+        getattr(current, key) != getattr(proposed, key)
+        for key in ("positions", "preparation_options")
+    ) or (
+        current.definition.nodes != proposed.definition.nodes
+        or current.definition.externals != proposed.definition.externals
+    ):
+        raise ValueError(
+            "Save graph, layout, option and advice edits before changing task references"
+        )
+
+
+def _changes(
+    before: CompositionObservation, observed: CompositionObservation
+) -> tuple[TaskReferenceFinding, ...]:
+    assert before.result.candidate_check is not None and observed.result.candidate_check is not None
+    assert before.result.task is not None and observed.result.task is not None
+    changes = [
+        (name, getattr(before.result.task, name), getattr(observed.result.task, name))
+        for name in (
+            "task_data_path_id",
+            "task_config",
+            "dataset_profile",
+            "primary_metric",
+            "secondary_metrics",
+            "parameter_rules",
+            "plugins",
+            "code_package_identity",
+            "task_health_declaration",
+        )
+    ]
+    changes.extend(
+        (
+            (
+                "objective",
+                before.result.candidate_check.reference.objective,
+                observed.result.candidate_check.reference.objective,
+            ),
+            (
+                "custom_loss",
+                before.result.candidate_check.reference.task_owned_custom_loss,
+                observed.result.candidate_check.reference.task_owned_custom_loss,
+            ),
+            (
+                "default_scope",
+                before.result.candidate_check.default_scope,
+                observed.result.candidate_check.default_scope,
+            ),
+        )
+    )
+    return tuple(
+        TaskReferenceFinding(
+            code="authored_changes",
+            state="requires_review",
+            reference=f"task.{name}",
+            message=f"Task {name.replace('_', ' ')} changed. Inspect the task declaration details and explicitly review retained advice; no scientific equivalence is claimed.",
+        )
+        for name, first, second in changes
+        if first != second
+    )
+
+
+def inspect_changed_candidate(
+    current: ReusableWorkflowDocument,
+    proposed: ReusableWorkflowDocument,
+    locations: tuple[Path, Path],
+    targets: tuple[TaskReferenceTarget, ...],
+    target: TaskReferenceTarget,
+) -> tuple[CompositionObservation, CompositionObservation | None, tuple[TaskReferenceFinding, ...]]:
+    """Check each version against its own pin before deterministic workflow checks."""
+
+    def blocked(message: str, reference: str = "definition.task") -> TaskReferenceFinding:
+        return TaskReferenceFinding(
+            code="compatibility_unresolved", state="blocked", reference=reference, message=message
+        )
+
+    try:
+        _check_source(current, proposed)
+    except ValueError as error:
+        return observe_target(target), None, (blocked(str(error), "source"),)
+
+    options = CandidateCheckOptions(
+        allowed_output_types=proposed.preparation_options.allowed_output_types
+    )
+    observed = observe_target(target, options)
+    previous = [
+        value
+        for value in targets
+        if (value.manifest, value.data_root) == locations and value.binding == current.task_binding
+    ]
+    if len(previous) != 1:
+        return (
+            observed,
+            None,
+            (
+                blocked(
+                    "The previous task version needs one matching configured choice; keep separate version directories"
+                ),
+            ),
+        )
+    try:
+        before = observe_target(previous[0], options)
+    except (OSError, ValueError):
+        return (
+            observed,
+            None,
+            (
+                blocked(
+                    "The previous task version is unavailable; restore its unchanged source in a separate version directory"
+                ),
+            ),
+        )
+    old, new = before.result.candidate_check, observed.result.candidate_check
+    if not identity_matches(before, previous[0]) or old is None or new is None:
+        return (
+            observed,
+            before,
+            (
+                blocked(
+                    "Both previous and target task versions must pass native candidate checks against their own pins"
+                ),
+            ),
+        )
+    for facts, selected in ((old, previous[0]), (new, target)):
+        if (facts.reference.semantic_fingerprint, facts.reference.task_data_path_id) != (
+            selected.binding.semantic_fingerprint,
+            selected.binding.task_data_path_id,
+        ):
+            return (
+                observed,
+                before,
+                (blocked("Candidate facts differ from the configured native identity"),),
+            )
+    for field in (
+        "model_io",
+        "supervision_target",
+        "custom_loss_applicability",
+        "segmentation_applicability",
+    ):
+        if getattr(old.forward_contract, field) != getattr(new.forward_contract, field):
+            return (
+                observed,
+                before,
+                (
+                    blocked(
+                        "Structured task interfaces changed; explicit I/O adaptation is outside this fixed-candidate update",
+                        f"forward_contract.{field}",
+                    ),
+                ),
+            )
+    findings = _changes(before, observed)
+    return (
+        observed,
+        before,
+        (
+            *findings,
+            TaskReferenceFinding(
+                code="identity_verified",
+                state="retained",
+                reference="workflow.candidate",
+                message="Both native versions passed; fixed candidate interfaces and authored graph, layout, options and advice are preserved. New runs use a fresh target proposal.",
+            ),
+        ),
+    )

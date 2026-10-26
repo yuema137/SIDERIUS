@@ -3,14 +3,20 @@
 from uuid import uuid4
 
 from tools.setup_review.composition_check import observe_composition
-from tools.setup_review.composition_models import CompositionJob, CompositionObservation
+from tools.setup_review.composition_models import (
+    CandidateCheckOptions,
+    CompositionJob,
+    CompositionObservation,
+)
 from tools.setup_review.composition_transport import manifest_digest
 from workflows.llm_config import WorkflowLLMConfig
 
 from .task_models import TaskReferenceTarget
 
 
-def observe_target(target: TaskReferenceTarget) -> CompositionObservation:
+def observe_target(
+    target: TaskReferenceTarget, candidate_check: CandidateCheckOptions | None = None
+) -> CompositionObservation:
     for path in (target.manifest, target.data_root, target.llm_config_file, target.inspection_root):
         if not path.is_absolute() or path != path.resolve():
             raise ValueError("configured task references must be canonical absolute paths")
@@ -23,6 +29,7 @@ def observe_target(target: TaskReferenceTarget) -> CompositionObservation:
         planner_strategy=config.get("tune").get("planner_strategy"),
         scratch=str(target.inspection_root / str(uuid4())),
         settings=target.settings,
+        candidate_check=candidate_check,
     )
     return observe_composition(job, target.read_only, data_root=target.data_root)
 

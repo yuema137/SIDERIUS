@@ -93,7 +93,12 @@ In Workflow builder, explicitly choose a configured task package/version and
 **Update workflow references**. Inspect the Python diff and task findings, confirm
 them and **Save reviewed source**. An unbound reusable workflow requires a separate
 confirmation to adopt its currently observed snapshot; save that binding before
-editing its scientific settings. A changed native identity remains unsupported.
+editing its scientific settings. For a three-step Propose → Implement → Validate workflow, you can switch to
+another checked task version. Keep both task directories available and unchanged.
+Review changed data declarations, metrics and guidance, along with retained advice;
+Save checks compatible inputs and outputs again. Training workflows and other
+unsupported forms explain why the switch is blocked. Existing runs stay unchanged.
+See the [exact support boundary](../workflow_authoring/authoring-contract.md#changed-task-versions-for-fresh-candidates).
 
 Save pending source or inspector edits before Update. For bound edits, select the
 matching configured choice and use ordinary **Review changes** and Save first.
