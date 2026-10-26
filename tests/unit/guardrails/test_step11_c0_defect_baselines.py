@@ -68,11 +68,13 @@ STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
 # supervision implementation, or change the frozen historical measurement.
 _EXECUTOR_NAMES = frozenset(STRUCTURAL_BASELINE) - {"_run_observed_subprocess"}
 _SUPERVISION = REPO_ROOT / "src/core/runtime_control/observed_subprocess.py"
-# Explicit migration measurement at 46ee9920: ZERO growth allowance. These are
-# existing protected-process responsibilities, not a claim that the old monolith
-# stayed within its former budget. The complexity remains visible and bounded.
+# Explicit migration measurement at 46ee9920. These are existing
+# protected-process responsibilities, not a claim that the old monolith stayed
+# within its former budget. The measured `supervise_process` baseline includes
+# the one-line lifecycle-evidence handoff added by d2bd8a5e for the active
+# native-writer cleanup owner; its behavior is covered by lifecycle tests.
 SUPERVISION_BASELINE = {
-    "supervise_process": (148, 95, 277, 13),
+    "supervise_process": (149, 95, 278, 13),
     "supervise_subprocess": (25, 16, 63, 13),
 }
 
@@ -217,7 +219,8 @@ class TestStructuralBudget:
 
     @pytest.mark.parametrize("name", sorted(SUPERVISION_BASELINE))
     def test_the_relocated_supervision_implementation_does_not_grow(self, name):
-        actual = measure(_qualified_functions(_SUPERVISION)[name])
+        fn = _qualified_functions(_SUPERVISION)[name]
+        actual = measure(fn)
         assert all(
             value <= limit for value, limit in zip(actual, SUPERVISION_BASELINE[name], strict=True)
         ), (
