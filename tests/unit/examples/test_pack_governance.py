@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -248,17 +249,29 @@ def _is_sanctioned_plugin_source(rel_posix: str) -> bool:
     ``examples/<pack>/plugins/*.py``. The four explicit workflow declaration
     examples are also sanctioned; this exact-path exception does not permit
     other Python files in that framework-owned namespace."""
-    if rel_posix in WORKFLOW_DECLARATION_SOURCES:
-        return True
     parts = rel_posix.split("/")
+    if len(parts) >= 2 and parts[:2] == ["examples", WORKFLOW_DECLARATIONS_DIR]:
+        return rel_posix in WORKFLOW_DECLARATION_SOURCES
     return len(parts) == 4 and parts[0] == "examples" and parts[2] == "plugins"
 
 
-def test_workflow_declarations_are_not_scientific_example_packs() -> None:
-    """Framework declaration scripts do not need scientific pack metadata."""
-    packs = _pack_dirs(EXAMPLES_ROOT)
-    assert EXAMPLES_ROOT / WORKFLOW_DECLARATIONS_DIR not in packs
-    assert {pack.name for pack in packs} == {"quickstart", "synthetic_masked_regression"}
+def test_workflow_declarations_are_not_scientific_example_packs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exclude the framework namespace while retaining unknown tracked packs."""
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_tracked",
+        lambda _repo_root, _rel: [
+            "examples/workflow_declarations/native_training.py",
+            "examples/new_scientific_pack/README.md",
+            "examples/quickstart/README.md",
+        ],
+    )
+    assert _pack_dirs(EXAMPLES_ROOT) == [
+        EXAMPLES_ROOT / "new_scientific_pack",
+        EXAMPLES_ROOT / "quickstart",
+    ]
 
 
 def test_python_under_examples_only_as_pack_plugin_source_d14_rescope() -> None:
@@ -296,11 +309,14 @@ def test_negative_python_under_examples_mirror_is_detected(tmp_path: Path) -> No
     workflow.mkdir()
     (workflow / "native_training.py").write_text("pass\n")
     (workflow / "unexpected.py").write_text("pass\n")
+    (workflow / "plugins").mkdir()
+    (workflow / "plugins" / "intrusion.py").write_text("pass\n")
     found = _python_files_under(tmp_path / "examples")
     rels = [p.relative_to(tmp_path).as_posix() for p in found]
     offenders = [r for r in rels if not _is_sanctioned_plugin_source(r)]
     assert offenders == [
         "examples/some_pack/loader.py",
+        "examples/workflow_declarations/plugins/intrusion.py",
         "examples/workflow_declarations/unexpected.py",
     ]
     assert "examples/some_pack/plugins/model.py" in rels  # detected, sanctioned
