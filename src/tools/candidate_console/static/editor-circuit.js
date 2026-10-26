@@ -3,6 +3,7 @@
   'use strict';
   let projection = null, actions = null, host = null, pending = null, drag = null;
   const geometry = window.editorCircuitGeometry;
+  const presentation = window.editorCapabilityPresentation;
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const element = (tag, text, parent, className) => {
     const value = document.createElement(tag); value.textContent = text;
@@ -81,7 +82,7 @@
   function render(container, value, callbacks) {
     const focus = container.contains(document.activeElement) ? document.activeElement.id : null;
     host = container; projection = value; actions = callbacks; cancel(false); host.replaceChildren();
-    const message = element('p', 'Select a result output, then a highlighted input to rebind. Drag a node heading to move it; Alt + arrow keys also move the selected heading.', host, 'circuit-message');
+    const message = element('p', 'Select a capability to inspect it. Choose an output, then a highlighted input to rebind.', host, 'circuit-message');
     message.setAttribute('role', 'status');
     const viewport = element('div', '', host, 'circuit-viewport'), world = element('div', '', viewport, 'circuit-world');
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('aria-hidden', 'true'); world.append(svg);
@@ -89,9 +90,13 @@
     const saved = new Map(value.document.positions.map(p => [p.node, p]));
     const cards = [];
     for (const node of value.document.definition.nodes) {
-      const card = element('article', '', world, 'circuit-card'); card.dataset.node = node.id;
-      const heading = element('button', `${node.id} · ${node.capability}`, card, 'editor-node');
+      const card = element('article', '', world, 'circuit-card'); card.dataset.node = node.id; card.dataset.capability = node.capability;
+      const heading = element('button', '', card, 'editor-node');
       heading.type = 'button'; heading.dataset.node = node.id; heading.id = `circuit-node-${node.id}`;
+      const capabilityLabel = presentation.append(heading, node.capability, node.id);
+      heading.setAttribute('aria-label', `${capabilityLabel}, instance ${node.id}`);
+      const role = [...heading.querySelector('.capability-heading').classList].find(name => name.startsWith('capability-') && name !== 'capability-heading');
+      if (role) card.classList.add(role);
       heading.setAttribute('aria-pressed', String(node.id === value.selected));
       heading.addEventListener('click', () => { if (projection === value && projection.enabled) actions.select(node.id); });
       heading.addEventListener('keydown', event => {
@@ -118,11 +123,17 @@
       heading.addEventListener('pointercancel', event => {
         if (projection === value && drag?.node === node.id && drag.pointerId === event.pointerId) { cancel(); say('Node move cancelled.'); }
       });
-      if (node.request.kind === 'protocol') element('small', `⇥ ${node.request.protocol}`, card, 'circuit-adapter');
+      const mapping = element('details', '', card, 'circuit-mapping');
+      element('summary', 'Mapping details', mapping);
+      const mappingList = element('dl', '', mapping, 'circuit-mapping-list');
+      element('dt', 'Capability ID', mappingList); element('dd', node.capability, mappingList);
+      element('dt', 'Instance ID', mappingList); element('dd', node.id, mappingList);
+      if (node.request.kind === 'protocol') { element('dt', 'Protocol', mappingList); element('dd', node.request.protocol, mappingList); }
       for (const option of value.options.filter(item => item.node === node.id)) {
         const input = port(card, node, option.argument, false); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;
         const source = option.argument === null ? {kind: 'external', binding: node.request.binding} : node.request.arguments.find(item => item.name === option.argument).source;
-        if (source.kind === 'external') element('small', `external: ${source.binding}`, input, 'circuit-external');
+        element('dt', option.argument || 'Request', mappingList);
+        element('dd', source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port}`, mappingList);
       }
       const output = port(card, node, null, true); output.id = `circuit-output-${node.id}`;
       cards.push(card);

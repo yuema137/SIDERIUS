@@ -42,7 +42,7 @@ try {
   page.setDefaultTimeout(30000);
   const original = await readFile(metadata.source, 'utf8');
   const inspectTraining = async () => {
-    const tuning = page.locator('.editor-node').filter({hasText: 'fit · tuning'});
+    const tuning = page.locator('[data-node="fit"].editor-node');
     await tuning.click();
     assert.equal(await page.locator('[data-training="trial_max_epochs"]').inputValue(), '3');
     assert.equal(await page.locator('[data-training="sampling_seed"]').inputValue(), '17');

@@ -150,6 +150,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "theme.js": "text/javascript",
             "editor.html": "text/html",
             "editor.js": "text/javascript",
+            "editor-capability-presentation.js": "text/javascript",
             "editor-circuit.js": "text/javascript",
             "editor-circuit-geometry.js": "text/javascript",
             "editor-task-controls.js": "text/javascript",

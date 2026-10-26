@@ -64,3 +64,117 @@ pre {
 .editor-task-controls button { margin: .3rem .5rem .3rem 0; }
 .editor-task-controls .editor-task-acknowledgement { display: flex; align-items: flex-start; gap: .5rem; }
 .editor-task-acknowledgement input { width: auto; flex: none; }
+
+/* Workflow is a canvas workspace; prose pages keep the shared 1240px measure. */
+body:has(#view-workflow:not([hidden])) header,
+body:has(#view-workflow:not([hidden])) main,
+body:has(#view-workflow:not([hidden])) footer,
+body:has(#view-workflow:not([hidden])) nav.actions {
+  width: 100%;
+  max-width: 1920px;
+}
+body:has(#view-workflow:not([hidden])) main { padding: 12px clamp(16px, 2vw, 32px) 24px; }
+body:has(#view-workflow:not([hidden])) main { gap: 12px; }
+body:has(#view-workflow:not([hidden])) main > #route-status:empty { display: none; }
+body:has(#view-workflow:not([hidden])) nav.actions { margin-inline: auto; padding-inline: clamp(16px, 2vw, 32px); }
+body:has(#view-workflow:not([hidden])) header { padding-top: 12px; padding-bottom: 4px; }
+body:has(#view-workflow:not([hidden])) header { display: flex; align-items: center; gap: 16px; }
+body:has(#view-workflow:not([hidden])) .console-intro { display: block; margin: 0; font-size: .82rem; color: var(--muted); }
+body:has(#view-workflow:not([hidden])) .console-intro p { margin: 8px 0; }
+body:has(#view-workflow:not([hidden])) .theme-control { margin: 0 0 0 auto; }
+body:has(#view-workflow:not([hidden])) main > section[aria-labelledby="access-heading"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 6px 12px;
+}
+body:has(#view-workflow:not([hidden])) nav.actions { margin: 0; min-height: 32px; }
+body:has(#view-workflow:not([hidden])) .theme-control select { min-height: 36px; padding: 5px 9px; }
+body:has(#view-workflow:not([hidden])) header { padding: 4px 24px 0; }
+body:has(#view-workflow:not([hidden])) #access-heading { margin: 0; font-size: .95rem; white-space: nowrap; }
+body:has(#view-workflow:not([hidden])) .access-help { margin: 0; font-size: .74rem; }
+body:has(#view-workflow:not([hidden])) #access-form { flex: 1 1 520px; min-width: 360px; margin: 0; align-items: center; }
+body:has(#view-workflow:not([hidden])) #access-form .grow { min-width: 220px; }
+body:has(#view-workflow:not([hidden])) #access-form label { margin: 0; font-size: .82rem; }
+body:has(#view-workflow:not([hidden])) #access-form input { padding: 6px 10px; min-height: 38px; }
+body:has(#view-workflow:not([hidden])) #access-form button { min-height: 38px; padding: 6px 12px; }
+body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin: 0; font-size: .7rem; }
+#view-workflow > h1 { margin: 0 0 6px; font-size: 1.2rem; }
+.workflow-controls {
+  display: grid;
+  grid-template-columns: minmax(250px, .8fr) minmax(280px, 1.2fr);
+  gap: 12px;
+  align-items: start;
+}
+.workflow-project, .workflow-task-details, .workflow-actions { padding: 7px 12px; margin: 0; }
+.workflow-project { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: center; }
+.workflow-project > label { margin: 0; }
+.workflow-project > p { grid-column: 1 / -1; margin: 0; font-size: .7rem; }
+.workflow-project details { grid-column: 1 / -1; margin: 2px 0 0; font-size: .78rem; }
+.workflow-project details p { margin-bottom: 0; }
+.workflow-task-details > summary { min-height: 42px; display: flex; align-items: center; }
+.workflow-task-details[open] { max-height: min(60vh, 620px); overflow: auto; }
+.workflow-task-details .editor-task-controls { margin-top: 12px; }
+.workflow-actions { display: flex; align-items: center; gap: 12px; }
+.workflow-actions .actions { margin: 0; gap: 8px; }
+.workflow-actions button { min-height: 36px; padding: 5px 10px; }
+#editor-pending { flex: 1 1 180px; margin: 0; color: var(--muted); font-size: .78rem; }
+.editor-workspace {
+  grid-template-columns: minmax(0, 2.2fr) minmax(290px, .9fr);
+  align-items: start;
+  gap: 14px;
+}
+.workflow-canvas-panel { min-height: 0; padding: 16px; }
+.workflow-canvas-panel > h2, .workflow-inspector-panel > h2 { margin-bottom: 10px; }
+.canvas-help { margin: 0 0 8px; font-size: .84rem; }
+.canvas-help p { margin: 6px 0; color: var(--muted); }
+.workflow-inspector-panel {
+  position: sticky;
+  top: 12px;
+  max-height: min(760px, calc(100vh - 170px));
+  overflow: auto;
+  padding: 16px;
+}
+.workflow-run-details { margin-top: 16px; }
+.workflow-run-details[open] { display: grid; gap: 14px; }
+.workflow-run-details > section { min-width: 0; padding-top: 8px; border-top: 1px solid var(--border); }
+.connection-list { margin: 8px 0 0; font-size: .82rem; }
+.connection-list ul { margin: 8px 0 0; padding-left: 1.25rem; }
+.connection-list li { overflow-wrap: anywhere; margin: 4px 0; }
+
+.circuit-card { width: 215px; border-radius: 10px; background: var(--capability-generic-tint); }
+.circuit-card.capability-literature { --capability-accent: var(--capability-literature); --capability-tint: var(--capability-literature-tint); }
+.circuit-card.capability-proposal { --capability-accent: var(--capability-proposal); --capability-tint: var(--capability-proposal-tint); }
+.circuit-card.capability-implementation { --capability-accent: var(--capability-implementation); --capability-tint: var(--capability-implementation-tint); }
+.circuit-card.capability-validation { --capability-accent: var(--capability-validation); --capability-tint: var(--capability-validation-tint); }
+.circuit-card.capability-tuning { --capability-accent: var(--capability-tuning); --capability-tint: var(--capability-tuning-tint); }
+.circuit-card.capability-generic { --capability-accent: var(--capability-generic); --capability-tint: var(--capability-generic-tint); }
+.circuit-card { background: var(--capability-tint); }
+.editor-node { padding: .65rem .7rem; min-height: 62px; background: transparent; }
+.capability-heading { display: grid; grid-template-columns: 30px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; gap: 2px 9px; width: 100%; min-width: 0; text-align: left; }
+.capability-heading svg { grid-column: 1; grid-row: 1 / span 2; width: 28px; height: 28px; color: var(--capability-accent, var(--capability-generic)); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.capability-name { grid-column: 2; grid-row: 1; color: var(--text); font-size: .95rem; font-weight: 750; letter-spacing: .015em; line-height: 1.2; overflow-wrap: anywhere; }
+.capability-instance { grid-column: 2; grid-row: 2; color: var(--muted); font-size: .72rem; font-weight: 500; line-height: 1.2; overflow-wrap: anywhere; }
+.inspector-capability-heading { margin: 0 0 10px; }
+.inspector-capability-heading .capability-name { font-size: 1.05rem; }
+.inspector-mapping, .circuit-mapping { margin: 0; border-top: 1px solid var(--border); padding: 6px 10px 8px; font-size: .76rem; }
+.inspector-mapping { margin: 4px 0 12px; padding: 8px 0; }
+.circuit-mapping > summary, .inspector-mapping > summary { color: var(--muted); font-weight: 600; }
+.circuit-mapping-list, .inspector-mapping-list { display: grid; grid-template-columns: minmax(70px, .7fr) minmax(0, 1.3fr); gap: 3px 8px; margin: 7px 0 0; }
+.circuit-mapping-list dt, .inspector-mapping-list dt { color: var(--muted); }
+.circuit-mapping-list dd, .inspector-mapping-list dd { margin: 0; overflow-wrap: anywhere; }
+.circuit-message { margin: 2px 0 8px; font-size: .8rem; color: var(--muted); }
+.circuit-viewport { height: clamp(420px, calc(100vh - 310px), 760px); max-height: none; }
+
+@media (max-width: 800px) {
+  body:has(#view-workflow:not([hidden])) main > section[aria-labelledby="access-heading"] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  body:has(#view-workflow:not([hidden])) #access-heading { white-space: normal; }
+  .workflow-controls, .editor-workspace { grid-template-columns: minmax(0, 1fr); }
+  .workflow-inspector-panel { position: static; max-height: none; }
+  .workflow-project { grid-template-columns: auto minmax(0, 1fr); }
+  .workflow-actions { display: block; }
+  #editor-pending { margin-top: 6px; }
+  .circuit-viewport { min-height: 360px; height: min(58vh, 620px); }
+  .workflow-task-details[open] { max-height: 60vh; }
+}
