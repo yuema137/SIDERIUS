@@ -80,11 +80,26 @@ even when using the default models.
    exact diff; Save writes those reviewed bytes. Switching views retains pending
    edits and review state. A real page exit with pending edits uses the browser's
    unsaved-change guard. Saving does not run the declaration.
+   For reusable task packages, [bind a task version](#bind-a-task-version) first.
 
 The entry URLs are `/#home`, `/#workflow` and `/#slow-control`. An old
 `/editor.html` link redirects to `/#workflow` before asking for credentials.
 Connection sharing applies within one document; separate tabs/windows connect
 independently.
+
+## Bind a task version
+
+In Workflow builder, explicitly choose a configured task package/version and
+**Update workflow references**. Inspect the Python diff and task findings, confirm
+them and **Save reviewed source**. An unbound reusable workflow requires a separate
+confirmation to adopt its currently observed snapshot; save that binding before
+editing its scientific settings. A changed native identity remains unsupported.
+
+Save pending source or inspector edits before Update. For bound edits, select the
+matching configured choice and use ordinary **Review changes** and Save first.
+Choosing a version alone never changes source. Both Professional and Assistant
+collaboration use this flow. Saving affects future captures; preparation and launch
+remain separate, and existing runs keep their captured binding.
 
 ## Prepare saved source or open an existing run
 

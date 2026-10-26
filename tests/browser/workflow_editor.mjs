@@ -229,6 +229,12 @@ try {
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   const reviewedBeforeDisconnect = await editorSnapshot();
+  // Optional task metadata failure must not discard an ordinary unbound review.
+  await page.route('**/api/editor/task-choices', route => route.fulfill({status: 503, json: {error: {message: 'Fixture catalog unavailable'}}}));
+  await page.locator('#editor-task-refresh').click();
+  await page.locator('#editor-task-message').filter({hasText: 'Task choices unavailable'}).waitFor();
+  assert.deepEqual(await editorSnapshot(), reviewedBeforeDisconnect, 'Metadata failure preserves legacy reviewed source, diff and Save readiness');
+  await page.unroute('**/api/editor/task-choices');
   await page.route('**/api/choices', route => route.fulfill({status: 401, json: {error: {message: 'Expired fixture'}}}));
   await page.evaluate(() => window.consoleSession.request('choices').catch(() => {}));
   const beforeRefusedSave = editorRequests.length;

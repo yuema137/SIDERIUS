@@ -1,6 +1,7 @@
 """Authenticated editor routes preserve ordinary file authority and body bounds."""
 
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from tests.unit.tools.test_workflow_authoring import SOURCE
 from tools.candidate_console.app import create_app
 from tools.workflow_authoring.models import Project
+from workflows.definition import TaskBinding
 
 
 @pytest.fixture
@@ -94,8 +96,48 @@ def test_empty_editor_selection_keeps_existing_console(console_config):
     headers = {"Authorization": "Bearer " + open(console_config.auth_token_file).read()}
     with TestClient(create_app(console_config), base_url=console_config.browser_origin) as client:
         assert client.get("/api/editor/projects", headers=headers).json() == []
+        assert client.get("/api/editor/task-choices", headers=headers).json() == {"choices": []}
         assert client.get("/api/choices", headers=headers).status_code == 200
         assert client.get("/editor.html").status_code == 200
+
+
+def test_task_choice_metadata_is_safe_and_inert(editor_config, monkeypatch):
+    """Fails if GET leaks target paths, inspects task content, or starts native observation."""
+    pin = TaskBinding(
+        package_id="synthetic",
+        revision="snapshot-one",
+        task_data_path_id="synthetic-path",
+        semantic_fingerprint="a" * 64,
+    )
+    task = editor_config.tasks[0].model_copy(update={"task_revision": pin})
+    app = create_app(editor_config.model_copy(update={"tasks": (task,)}))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("metadata GET reached native observation/content inspection")
+
+    monkeypatch.setattr("tools.workflow_authoring.task_publication.observe_target", forbidden)
+    monkeypatch.setattr("tools.workflow_authoring.task_observation.observe_composition", forbidden)
+    read_bytes, read_text = Path.read_bytes, Path.read_text
+    protected = {Path(task.task_manifest), Path(task.llm_config_file)}
+    monkeypatch.setattr(
+        Path, "read_bytes", lambda path: forbidden() if path in protected else read_bytes(path)
+    )
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda path, *args, **kwargs: (
+            forbidden() if path in protected else read_text(path, *args, **kwargs)
+        ),
+    )
+    headers = {"Authorization": "Bearer " + Path(editor_config.auth_token_file).read_text()}
+    with TestClient(app, base_url=editor_config.browser_origin) as client:
+        assert client.get("/api/editor/task-choices").status_code == 401
+        response = client.get("/api/editor/task-choices", headers=headers)
+        assert response.status_code == 200
+        assert response.json() == {
+            "choices": [{"choice_id": task.task_id, "binding": pin.model_dump(mode="json")}]
+        }
+        assert client.get("/editor-task-controls.js").status_code == 200
 
 
 def test_oversized_source_is_bounded_unavailable_not_console_startup_failure(editor_config):

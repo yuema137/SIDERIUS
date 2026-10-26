@@ -65,3 +65,9 @@ pre {
     grid-template-columns: 1fr;
   }
 }
+.editor-task-controls p, .editor-task-controls li { overflow-wrap: anywhere; }
+.editor-task-controls label { display: block; margin: .6rem 0; }
+.editor-task-controls select { max-width: 100%; }
+.editor-task-controls button { margin: .3rem .5rem .3rem 0; }
+.editor-task-controls .editor-task-acknowledgement { display: flex; align-items: flex-start; gap: .5rem; }
+.editor-task-acknowledgement input { width: auto; flex: none; }

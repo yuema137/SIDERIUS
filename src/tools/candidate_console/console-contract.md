@@ -631,3 +631,32 @@ source/capture removal and monitor-only restart. Separate synthetic projection
 cases exercise async fences and mixed/timeout/unknown/invalid evidence. API cost
 and scientific GPU execution are zero; hardware observation is read-only. These
 checks do not qualify real LLM behavior or scientific training.
+
+## Workflow builder task versions
+
+Authenticated `GET /api/editor/task-choices` returns typed
+`{choices: [{choice_id, binding}]}` projected from the same configured
+`TaskReferenceTarget` tuple used by authoring. Only choices with `task_revision`
+are present. Empty choices preserve ordinary unbound editing. This inert GET
+does not inspect files, compose/import tasks or start native observations; internal
+resource paths/settings and credentials are absent. Metadata is configured intent,
+not verification of current task contents or execution readiness.
+
+Workflow builder shows saved binding separately and starts with no task selection.
+Users explicitly select a choice (or click the unique matching saved-choice action).
+`editor.js` remains the project/draft/generation/conflict/review/Save owner;
+`editor-task-controls.js` is a projection-and-callback view without requests or a
+second draft. Ordinary bound review uses `task_reference_selection`. Clean explicit
+Update uses the existing `task_references` proposal without a second selection.
+Dirty Update is disabled and its callback guarded; selection remains available
+so matching bound edits can be reviewed/saved before updating.
+
+Task review displays native observation, exact Python diff and ordered
+retained/requires_review/blocked findings. Save is unavailable for blocked or
+unsupported review and until all findings have an explicit acknowledgement;
+current-snapshot adoption has its own confirmation. The existing Save route gets
+`task_reference_acceptance` from the reviewed snapshot, never the current dropdown.
+Source/selection/base/review/connection changes clear acceptance. Reconnect refreshes
+metadata without replacing drafts, retaining a selection only while choice ID and
+full binding still match. Changed native identity remains unsupported;
+`execution_ready` remains false. No existing run/capture is rewritten.

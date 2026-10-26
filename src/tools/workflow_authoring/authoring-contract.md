@@ -134,7 +134,15 @@ so an external edit during a slow no-op check cannot report stale success. The
 existing atomic writer, recovery semantics and final noncooperating-writer window
 remain authoritative; no review-token registry or parallel writer exists.
 
-The existing HTTP and Python owners consume these fields. The browser does not
-yet provide selection/acceptance controls; no bound GUI authoring capability is
-claimed. Native preparation enforcement is owned separately by candidate_prepare;
+The existing HTTP, Python and Workflow builder consumers use these fields.
+The browser requires an explicit configured selection for ordinary bound review;
+its separate Update action submits a task-reference proposal from the saved base.
+Update is disabled while source, inspector or reviewed reference edits are unsaved.
+The editor retains those drafts and lets the user select the matching configured
+choice to review/save first. Selection alone never changes source or adopts a pin.
+Every task finding, including retained findings, is displayed in original order;
+Save requires explicit acceptance and separate current-snapshot adoption intent
+where applicable. The acceptance uses the reviewed selection/findings snapshot.
+Changing source, selection, base or connection invalidates that acceptance.
+Native preparation enforcement is owned separately by candidate_prepare;
 arbitrary task migration remains unsupported.

@@ -12,9 +12,21 @@ from tools.setup_review.composition_models import TaskCheckSettings
 from tools.workflow_authoring.models import Project, ReviewRequest, SaveRequest
 from tools.workflow_authoring.service import AuthoringError, WorkflowAuthoring
 from tools.workflow_authoring.task_models import TaskReferenceTarget
+from workflows.definition import TaskBinding
 from workflows.definition.source import WorkflowSourceError
 
 from .models import TaskChoice
+
+
+class EditorTaskChoice(BaseModel):
+    """Safe configured intent; internal inspection paths are never browser metadata."""
+
+    choice_id: str
+    binding: TaskBinding
+
+
+class EditorTaskChoices(BaseModel):
+    choices: tuple[EditorTaskChoice, ...]
 
 
 def task_reference_targets(tasks: tuple[TaskChoice, ...]) -> tuple[TaskReferenceTarget, ...]:
@@ -93,6 +105,15 @@ def editor_router(
             }
             for project in projects
         ]
+
+    @router.get("/task-choices", response_model=EditorTaskChoices)
+    def task_choices() -> EditorTaskChoices:
+        return EditorTaskChoices(
+            choices=tuple(
+                EditorTaskChoice(choice_id=target.choice_id, binding=target.binding)
+                for target in task_targets
+            )
+        )
 
     @router.get("/{project_id}")
     def read(project_id: str):
