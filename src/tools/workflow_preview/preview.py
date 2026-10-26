@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from tools.setup_review.route_models import LLMRoute
 from tools.setup_review.routes import NodeRouteRole, node_llm_routes
 from workflows.definition.candidate import candidate_nodes
-from workflows.definition.fanout import proposal_fanout
+from workflows.definition.fanout import execution_families
 from workflows.llm_config import WorkflowLLMConfig
 
 from .config import parse_config
@@ -65,7 +65,7 @@ def observe_bindings(
         nodes = candidate_nodes(definition)
         instances = tuple(nodes.items())
     else:
-        proposal_fanout(definition)
+        execution_families(definition, request.execution_profile)
         instances = tuple((node.capability, node.id) for node in definition.nodes)
         nodes = dict(instances)
     project = Path(request.project_root).resolve()
