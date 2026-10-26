@@ -136,6 +136,7 @@ try {
   }
   await page.setViewportSize({width: 390, height: 900});
   await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'circuit-narrow.png'), fullPage: true});
+  const staleInspector = await page.locator('#editor-inspector select[data-argument="output"]').elementHandle();
   await call(process.env.EDITOR_PYTHON, ['-c', `
 from pathlib import Path
 import json
@@ -151,6 +152,16 @@ p.write_text(render_workflow_source(ReusableWorkflowDocument.model_validate_json
   await waitUntil(async () => (await page.locator('#editor-source').inputValue()) !== saved);
   assert.ok(await page.locator('path.circuit-wire[data-from="hypothesis"][data-to="build_left"]').count());
   assert.deepEqual(await page.locator('.circuit-card[data-node="build_left"]').evaluate(element => element._position), position);
+  const refreshedSource = await page.locator('#editor-source').inputValue(), refreshedLayout = await layoutSnapshot();
+  assert.equal(await dirty(), false);
+  await staleInspector.evaluate(element => {
+    element.value = [...element.options].find(option => option.textContent === 'alternate.result').value;
+    element.dispatchEvent(new Event('change', {bubbles: true}));
+  });
+  assert.equal(await dirty(), false, 'A retained inspector handle cannot edit a replacement graph');
+  assert.equal(await page.locator('#editor-source').inputValue(), refreshedSource);
+  assert.deepEqual(await layoutSnapshot(), refreshedLayout);
+  assert.deepEqual(requests.map(item => item.path.split('/').at(-1)), ['review', 'save']);
   assert.equal(await readFile(snapshot, 'utf8'), saved, 'Code edits never rewrite the previous capture');
   assert.deepEqual(faults, []);
   console.log('PASS real socket branch move, keyboard/cancel/type refusal, pointer and keyboard layout, reviewed save, native family preparation, code roundtrip, themes and narrow view; no API/GPU');

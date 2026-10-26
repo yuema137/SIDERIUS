@@ -215,6 +215,7 @@
   function renderInspector() {
     $('inspector').replaceChildren(); $('references').replaceChildren();
     if (!graph) return;
+    const capturedGraph = graph;
     const item = graph.definition.nodes.find(n => n.id === selected);
     if (item) {
       node('p', `${item.id} · ${item.capability}`, $('inspector'));
@@ -228,7 +229,9 @@
           if (JSON.stringify(choice.source) === JSON.stringify(active)) el.selected = true;
         });
         select.dataset.node = item.id; select.dataset.argument = option.argument || 'request';
-        select.addEventListener('change', () => bindArgument(item.id, option.argument, option.choices[Number(select.value)].source));
+        select.addEventListener('change', () => {
+          if (graph === capturedGraph) bindArgument(item.id, option.argument, option.choices[Number(select.value)].source);
+        });
       }
     }
     for (const key of Object.keys(graph.definition.task)) field($('references'), `task.${key}`, graph.definition.task[key], value => { graph.definition.task[key] = value; });
