@@ -658,5 +658,5 @@ current-snapshot adoption has its own confirmation. The existing Save route gets
 Source/selection/base/review/connection changes clear acceptance. Reconnect refreshes
 metadata without replacing drafts, retaining a selection only while choice ID and
 full binding still match. Changed native identity uses the authoring owner’s
-[fixed fresh-candidate checks](../workflow_authoring/authoring-contract.md#changed-task-versions-for-fresh-candidates);
+[fresh-candidate and native-profile checks](../workflow_authoring/authoring-contract.md#changed-task-versions-for-fresh-candidates);
 `execution_ready` remains false. No existing run/capture is rewritten.
