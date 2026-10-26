@@ -13,9 +13,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.durable_io import publish_bytes_write_once
 from ml_models.model_descriptions import DescriptionSourcePolicy
 from nodes.result_interpretation_agent import build_cold_start_interpretation
-from tools.candidate_worker.layout import candidate_proposal_dir
 from tools.workflow_preview.config import parse_config
-from workflows.attempt_storage import impl_attempt_storage
 from workflows.proposal_pipeline import get_reasoning_pipeline
 from workflows.task_composition import (
     bind_run_task_composition,
@@ -24,6 +22,8 @@ from workflows.task_composition import (
 )
 
 from .declaration import candidate_document
+from .layout import PreparationLayout, preparation_layout
+from .limits import bounded_payload
 from .models import CandidatePreparationRequest
 
 if TYPE_CHECKING:
@@ -57,9 +57,13 @@ def prepare_payloads(
     *,
     training_payload: bytes | None = None,
     expected_task_binding: "TaskBinding | None" = None,
+    layout: PreparationLayout | None = None,
 ) -> str:
     """Compose the selected task and save exact native inputs without a provider."""
     output = Path(request.output_dir)
+    admitted = layout or preparation_layout(
+        None, Path(request.candidate_workspace), request.run_name
+    )
     training = None
     if training_payload is not None:
         from workflows.candidate_training_settings import parse_training_settings
@@ -87,7 +91,7 @@ def prepare_payloads(
             description_source_policy=DescriptionSourcePolicy.COMPOSED,
         )
         interpretation = build_cold_start_interpretation(interpretation_input)
-        proposal_dir = candidate_proposal_dir(Path(request.candidate_workspace), request.run_name)
+        proposal_dir = admitted.proposal_dir
         storage = StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(proposal_dir), run_name=request.run_name),
@@ -119,17 +123,18 @@ def prepare_payloads(
 
             values.update(proposal_training_values(training))
         proposal = ProposalInput.model_validate(values)
-        attempt = impl_attempt_storage(str(proposal_dir), request.run_name, 1)
         records = (
             ("preparation/interpretation_input.json", interpretation_input),
             ("interpretation.json", interpretation),
             ("proposal.json", proposal),
-            ("storage.json", attempt.storage),
+            *((item.filename, item.storage) for item in admitted.storage_records),
         )
         for name, record in records:
             payload = (record.model_dump_json(indent=2) + "\n").encode()
             if name == "proposal.json" and training is not None:
                 payload = _training_seed_bytes(proposal, training)
+            if layout is not None:
+                bounded_payload(payload)
             publish_bytes_write_once(str(output / name), payload)
         if training_payload is not None:
             publish_bytes_write_once(str(output / "training_settings.json"), training_payload)

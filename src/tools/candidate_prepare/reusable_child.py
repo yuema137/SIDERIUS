@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
 from core.generated_library import bind_generated_library_to_workspace
 from workflows.definition import (
@@ -14,6 +15,8 @@ from workflows.definition import (
 )
 
 from .admission import verify_sources
+from .layout import preparation_layout
+from .limits import bounded_payload
 from .models import PreparedArtifacts
 from .resolution import resolve_reusable_candidate
 from .reusable_admission import safe_bytes
@@ -66,17 +69,27 @@ def execute(request_path: Path) -> None:
     from .native import prepare_payloads
     from .reusable_training import settings_payload
 
+    filenames = reusable_files(document)
+    layout = (
+        preparation_layout(
+            document, Path(control.request.candidate_workspace), control.request.run_name
+        )
+        if document.execution_profile is not None
+        else None
+    )
     fingerprint = prepare_payloads(
         control.request,
         training_payload=settings_payload(document),
         expected_task_binding=document.task_binding,
+        layout=layout,
     )
-    publish_bytes_write_once(
-        str(output / "workflow.json"), (resolved.document.model_dump_json(indent=2) + "\n").encode()
-    )
-    publish_bytes_write_once(
-        str(output / "workflow.resolved.py"), render_workflow_source(resolved.document).encode()
-    )
+    for name, workflow_payload in (
+        ("workflow.json", (resolved.document.model_dump_json(indent=2) + "\n").encode()),
+        ("workflow.resolved.py", render_workflow_source(resolved.document).encode()),
+    ):
+        if layout is not None:
+            bounded_payload(workflow_payload)
+        publish_bytes_write_once(str(output / name), workflow_payload)
     from .reusable_admission import observation
 
     index = PreparedArtifacts(
@@ -84,12 +97,12 @@ def execute(request_path: Path) -> None:
         control_sha256=hashlib.sha256(payload).hexdigest(),
         composition_fingerprint=fingerprint,
         files=tuple(
-            observation(output / name, name, safe_bytes(output / name))
-            for name in reusable_files(document)
+            observation(output / name, name, safe_bytes(output / name)) for name in filenames
         ),
     )
     publish_bytes_write_once(
-        str(output / "preparation/child.json"), index.model_dump_json(indent=2).encode()
+        str(output / "preparation/child.json"),
+        (encode_control(index) if layout is not None else index.model_dump_json(indent=2).encode()),
     )
 
 

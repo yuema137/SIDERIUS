@@ -105,6 +105,20 @@ REUSABLE_FILES = (*NATIVE_FILES, "workflow.resolved.py")
 
 def reusable_files(document: ReusableWorkflowDocument) -> tuple[str, ...]:
     """Only source-declared training adds an artifact; retain the legacy census exactly."""
+    if document.execution_profile is not None:
+        from workflows.definition.fanout import proposal_fanout
+
+        from .layout import storage_filename
+
+        storage = tuple(
+            storage_filename(implementation)
+            for implementation, _ in proposal_fanout(document.definition).branches
+        )
+        return tuple(
+            item
+            for name in REUSABLE_FILES
+            for item in (storage if name == "storage.json" else (name,))
+        )
     if document.training_settings is None:
         return REUSABLE_FILES
     return (*REUSABLE_FILES, "training_settings.json")

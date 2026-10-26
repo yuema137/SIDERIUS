@@ -8,13 +8,12 @@ from pydantic import BaseModel
 
 from agent.schemas.output_types import OutputTypeName
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from tools.candidate_worker.layout import candidate_proposal_dir
 from tools.candidate_worker.models import CandidateRunRequest, WorkflowSourceSnapshot
 from tools.workflow_preview.models import FileObservation, WorkflowBindings
-from workflows.attempt_storage import impl_attempt_storage
 from workflows.definition import WorkflowDocument, render_workflow_source
 
 from .bundle import build_candidate
+from .layout import preparation_layout
 from .models import CompositionIdentity, PreparedArtifacts
 from .resolution import resolve_reusable_candidate
 from .reusable_admission import observation, safe_bytes
@@ -47,16 +46,18 @@ def verify_payloads(
     request = plan.binding.request
     output = Path(request.output_dir)
     proposal = ProposalProjection.model_validate_json(read_bytes(output / "proposal.json"))
-    proposal_dir = candidate_proposal_dir(Path(request.candidate_workspace), request.run_name)
+    layout = preparation_layout(plan.document, Path(request.candidate_workspace), request.run_name)
+    proposal_dir = layout.proposal_dir
     expected = StorageConfig(
         backend="local",
         local=LocalStorageConfig(workspace=str(proposal_dir), run_name=request.run_name),
     )
     if proposal.storage != expected:
         raise ValueError("proposal storage differs from selected native destination")
-    storage = StorageConfig.model_validate_json(read_bytes(output / "storage.json"))
-    if storage != impl_attempt_storage(str(proposal_dir), request.run_name, 1).storage:
-        raise ValueError("attempt storage differs from selected native destination")
+    for record in layout.storage_records:
+        storage = StorageConfig.model_validate_json(read_bytes(output / record.filename))
+        if storage != record.storage:
+            raise ValueError("attempt storage differs from selected native destination")
     if proposal.task_composition_ref.semantic_fingerprint != fingerprint:
         raise ValueError("child fingerprint disagrees with native proposal")
     accepted = plan.document.task_binding
@@ -136,7 +137,9 @@ def verify_reusable_bundle(
     from .reusable_training import verify_training_payloads
 
     verify_training_payloads(plan.document, output, read_bytes)
-    candidate, bindings = build_candidate(binding.request, document, observe)
+    candidate, bindings = build_candidate(
+        binding.request, document, observe, execution_profile=resolved.execution_profile
+    )
     values = candidate.model_dump()
     values["workflow_source"] = WorkflowSourceSnapshot(
         origin_path=str(output / "workflow.resolved.py"),

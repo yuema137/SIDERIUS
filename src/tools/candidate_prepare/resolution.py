@@ -4,9 +4,10 @@ Locations are explicit caller observations, never interpreted or opened here.
 The result is not a prepared run and does not certify execution readiness.
 """
 
-from typing import Self
+from pathlib import Path
+from typing import Literal, Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from workflows.definition import (
     CandidatePreparationOptions,
@@ -20,7 +21,10 @@ from workflows.definition import (
     WorkflowDocument,
 )
 from workflows.definition.candidate import candidate_nodes
+from workflows.definition.fanout import proposal_fanout
 from workflows.definition.models import DeclarationModel, Identifier, Location
+
+from .layout import graph_storage_bindings
 
 
 class ResolvedExternalLocation(DeclarationModel):
@@ -46,10 +50,16 @@ class ReusableCandidateLocations(DeclarationModel):
 class ResolvedReusableCandidate(DeclarationModel):
     document: WorkflowDocument
     preparation_options: CandidatePreparationOptions
+    execution_profile: Literal["native-proposal-fanout/v1"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 def _check_roles(document: ReusableWorkflowDocument, proposal_id: str) -> None:
     """Require generated roles and supported literal roles at their actual usage."""
+    result_roles = {"output", "proposal", "validation"}
+    if document.execution_profile is not None:
+        result_roles.add("implementation")
     externals = {item.id: item for item in document.definition.externals}
     used: set[str] = set()
     for node in document.definition.nodes:
@@ -66,7 +76,7 @@ def _check_roles(document: ReusableWorkflowDocument, proposal_id: str) -> None:
             continue
         for argument in request.arguments:
             if not isinstance(argument.source, ExternalSource):
-                if argument.name not in {"output", "proposal", "validation"}:
+                if argument.name not in result_roles:
                     raise ValueError("Reusable candidate optional/storage roles require externals")
                 continue
             external = externals[argument.source.binding]
@@ -108,8 +118,12 @@ def resolve_reusable_candidate(
     bindings = ReusableCandidateLocations.model_validate_json(
         bindings.model_dump_json(warnings=False)
     )
-    roles = candidate_nodes(document.definition)
-    _check_roles(document, roles["proposal"])
+    proposal = (
+        candidate_nodes(document.definition)["proposal"]
+        if document.execution_profile is None
+        else proposal_fanout(document.definition).proposal
+    )
+    _check_roles(document, proposal)
     locations = {item.binding: item.location for item in bindings.externals}
     expected = {item.id for item in document.definition.externals}
     if locations.keys() != expected:
@@ -119,7 +133,20 @@ def resolve_reusable_candidate(
         for item in document.definition.externals
         if isinstance(item, ManagedCandidateBinding) and item.contract == "storage"
     }
-    if len(storage) != 1:
+    if document.execution_profile is not None:
+        output = Path(bindings.workspace).parent / "inputs"
+        graph_files = graph_storage_bindings(document)
+        graph_files.update(
+            {
+                item.id: "proposal.json"
+                for item in document.definition.externals
+                if isinstance(item, ManagedCandidateBinding) and item.contract == "proposal.input"
+            }
+        )
+        for alias, filename in graph_files.items():
+            if locations[alias] != str(output / filename):
+                raise ValueError("Graph storage differs from generated branch location")
+    elif len(storage) != 1:
         raise ValueError("Managed storage bindings must share one generated storage location")
     effective = WorkflowDocument(
         definition=WorkflowDefinition(
@@ -140,5 +167,6 @@ def resolve_reusable_candidate(
         ResolvedReusableCandidate(
             document=effective,
             preparation_options=document.preparation_options,
+            execution_profile=document.execution_profile,
         ).model_dump_json()
     )

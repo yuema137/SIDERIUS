@@ -315,7 +315,10 @@ def _render_value(value: object, depth: int) -> str:
         fields = [
             f"{child_indent}{name}={_render_value(getattr(value, name), depth + 1)},"
             for name in type(value).model_fields
-            if not (name in {"training_settings", "task_binding"} and getattr(value, name) is None)
+            if not (
+                name in {"training_settings", "task_binding", "execution_profile"}
+                and getattr(value, name) is None
+            )
         ]
         return f"{type(value).__name__}(\n" + "\n".join(fields) + f"\n{indentation})"
     if isinstance(value, tuple):

@@ -60,25 +60,9 @@ def bound(tmp_path, monkeypatch, selection):
     return request, pin
 
 
-def test_bound_preparation_http_review_and_parent_forgery_refusal(bound, console_config, tmp_path):
-    """Real child agrees with captured pin; HTTP/code share a verified capture; forged index cannot repin it."""
-    request, pin = bound
-    source = Path(request.source_path).read_bytes()
+def bound_console_config(request, pin, console_config, tmp_path):
+    """Expose the same explicit bound project through existing console transport."""
     plan = preflight_reusable_candidate(request)
-    receipt = prepare_reusable_candidate(request)
-    assert receipt.status == "prepared", receipt.error
-    envelope = Path(receipt.envelope)
-    output = envelope / "inputs"
-    assert (envelope / "workflow.py.snapshot").read_bytes() == source
-    assert not (envelope / "workspace").exists()
-    proposal_path = output / "proposal.json"
-    original_proposal = proposal_path.read_bytes()
-    proposal = json.loads(original_proposal)
-    assert proposal["task_composition_ref"]["semantic_fingerprint"] == pin.semantic_fingerprint
-    assert proposal["task_composition_ref"]["task_data_path_id"] == pin.task_data_path_id
-    verified = verify_reusable_preparation(select_reusable_preparation(str(envelope)))
-    assert verified.composition_fingerprint == pin.semantic_fingerprint
-
     recovery = tmp_path / "recovery"
     recovery.mkdir(mode=0o700)
     project = Project(
@@ -124,6 +108,29 @@ def test_bound_preparation_http_review_and_parent_forgery_refusal(bound, console
             "runnable_editor_projects": (project.project_id,),
         }
     )
+    return config, project, task
+
+
+def test_bound_preparation_http_review_and_parent_forgery_refusal(bound, console_config, tmp_path):
+    """Real child agrees with captured pin; HTTP/code share a verified capture; forged index cannot repin it."""
+    request, pin = bound
+    source = Path(request.source_path).read_bytes()
+    plan = preflight_reusable_candidate(request)
+    config, project, task = bound_console_config(request, pin, console_config, tmp_path)
+    receipt = prepare_reusable_candidate(request)
+    assert receipt.status == "prepared", receipt.error
+    envelope = Path(receipt.envelope)
+    output = envelope / "inputs"
+    assert (envelope / "workflow.py.snapshot").read_bytes() == source
+    assert not (envelope / "workspace").exists()
+    proposal_path = output / "proposal.json"
+    original_proposal = proposal_path.read_bytes()
+    proposal = json.loads(original_proposal)
+    assert proposal["task_composition_ref"]["semantic_fingerprint"] == pin.semantic_fingerprint
+    assert proposal["task_composition_ref"]["task_data_path_id"] == pin.task_data_path_id
+    verified = verify_reusable_preparation(select_reusable_preparation(str(envelope)))
+    assert verified.composition_fingerprint == pin.semantic_fingerprint
+
     adapter = ReusableCandidate(CandidateConsole(config))
     choice = ReusableCaptureChoice(task_id=task.task_id, run_id=request.run_id)
     expected = adapter.review(project.project_id, adapter.select(project.project_id, choice))
