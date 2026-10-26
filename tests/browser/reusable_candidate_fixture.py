@@ -25,7 +25,12 @@ from tools.workflow_authoring.models import Project
 
 
 def setup(
-    root: Path, origin: str, endpoint: str, captures_count: int = 3, training: bool = False
+    root: Path,
+    origin: str,
+    endpoint: str,
+    captures_count: int = 3,
+    training: bool = False,
+    families: bool = False,
 ) -> None:
     selected = selection.__wrapped__(root)
     config = console_config.__wrapped__(selected, root)
@@ -71,6 +76,10 @@ def setup(
             "candidate_environment_names": tuple(environment),
         }
     )
+    if families:
+        from tests.helpers.reusable_fanout import reusable_families
+
+        request = reusable_families(request)
     if training:
         from tests.unit.tools.candidate_prepare.test_reusable_training import add_training
 
@@ -178,11 +187,14 @@ def main():
     parser.add_argument("--endpoint")
     parser.add_argument("--captures-count", type=int, default=3)
     parser.add_argument("--training", action="store_true")
+    parser.add_argument("--families", action="store_true")
     args = parser.parse_args()
     if args.mode == "provider":
         provider(args.root)
     elif args.mode == "setup":
-        setup(args.root, args.origin, args.endpoint, args.captures_count, args.training)
+        setup(
+            args.root, args.origin, args.endpoint, args.captures_count, args.training, args.families
+        )
     elif args.mode == "verify-training":
         from tests.browser.reusable_training_fixture import code_equivalent
 

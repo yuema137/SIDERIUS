@@ -21,10 +21,10 @@ from workflows.definition import (
     WorkflowDocument,
 )
 from workflows.definition.candidate import candidate_nodes
-from workflows.definition.fanout import proposal_fanout
+from workflows.definition.fanout import execution_families
 from workflows.definition.models import DeclarationModel, Identifier, Location
 
-from .layout import graph_storage_bindings
+from .layout import graph_proposal_bindings, graph_storage_bindings
 
 
 class ResolvedExternalLocation(DeclarationModel):
@@ -50,12 +50,12 @@ class ReusableCandidateLocations(DeclarationModel):
 class ResolvedReusableCandidate(DeclarationModel):
     document: WorkflowDocument
     preparation_options: CandidatePreparationOptions
-    execution_profile: Literal["native-proposal-fanout/v1"] | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
+    execution_profile: (
+        Literal["native-proposal-fanout/v1", "native-proposal-families/v1"] | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
 
 
-def _check_roles(document: ReusableWorkflowDocument, proposal_id: str) -> None:
+def _check_roles(document: ReusableWorkflowDocument, proposal_ids: set[str]) -> None:
     """Require generated roles and supported literal roles at their actual usage."""
     result_roles = {"output", "proposal", "validation"}
     if document.execution_profile is not None:
@@ -67,7 +67,7 @@ def _check_roles(document: ReusableWorkflowDocument, proposal_id: str) -> None:
         if isinstance(request, ExternalRequest):
             external = externals[request.binding]
             if not (
-                node.id == proposal_id
+                node.id in proposal_ids
                 and isinstance(external, ManagedCandidateBinding)
                 and external.contract == "proposal.input"
             ):
@@ -103,8 +103,8 @@ def _check_roles(document: ReusableWorkflowDocument, proposal_id: str) -> None:
         for item in externals.values()
         if isinstance(item, ManagedCandidateBinding) and item.contract == "proposal.input"
     ]
-    if len(proposals) != 1:
-        raise ValueError("Exactly one managed proposal binding is required")
+    if len(proposals) != len(proposal_ids):
+        raise ValueError("Exactly one managed proposal binding per proposal is required")
 
 
 def resolve_reusable_candidate(
@@ -118,12 +118,17 @@ def resolve_reusable_candidate(
     bindings = ReusableCandidateLocations.model_validate_json(
         bindings.model_dump_json(warnings=False)
     )
-    proposal = (
-        candidate_nodes(document.definition)["proposal"]
+    proposals = (
+        {candidate_nodes(document.definition)["proposal"]}
         if document.execution_profile is None
-        else proposal_fanout(document.definition).proposal
+        else {
+            family.proposal
+            for family in execution_families(
+                document.definition, document.execution_profile
+            ).families
+        }
     )
-    _check_roles(document, proposal)
+    _check_roles(document, proposals)
     locations = {item.binding: item.location for item in bindings.externals}
     expected = {item.id for item in document.definition.externals}
     if locations.keys() != expected:
@@ -136,13 +141,7 @@ def resolve_reusable_candidate(
     if document.execution_profile is not None:
         output = Path(bindings.workspace).parent / "inputs"
         graph_files = graph_storage_bindings(document)
-        graph_files.update(
-            {
-                item.id: "proposal.json"
-                for item in document.definition.externals
-                if isinstance(item, ManagedCandidateBinding) and item.contract == "proposal.input"
-            }
-        )
+        graph_files.update(graph_proposal_bindings(document))
         for alias, filename in graph_files.items():
             if locations[alias] != str(output / filename):
                 raise ValueError("Graph storage differs from generated branch location")

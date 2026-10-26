@@ -10,6 +10,7 @@ from workflows.definition import ReusableWorkflowDocument, parse_workflow_source
 from workflows.definition.source import MAX_INPUT_BYTES
 
 from .admission import canonical, verify_sources
+from .layout import proposal_receipt_path
 from .models import CandidatePreparationReceipt
 from .resolution import resolve_reusable_candidate
 from .reusable_admission import observation, reusable_locations, safe_bytes
@@ -183,7 +184,7 @@ def _verify(
         candidate_request_path=str(output / "candidate_request.json"),
         preview_path=str(output / "preview.json"),
         interpretation_path=str(output / "interpretation.json"),
-        proposal_path=str(output / "proposal.json"),
+        proposal_path=proposal_receipt_path(plan.document, output),
         composition_fingerprint=fingerprint,
         source_observations=control.sources,
     ):

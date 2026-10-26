@@ -69,3 +69,46 @@ def reusable_fanout(request):
     return request.model_copy(
         update={"expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
     )
+
+
+def reusable_families(request):
+    """Two proposal families, first with two branches, deliberately interleaved."""
+    import copy
+
+    request = reusable_fanout(request)
+    source = Path(request.source_path)
+    raw = parse_workflow_source(source.read_text()).model_dump(mode="json")
+    raw["execution_profile"] = "native-proposal-families/v1"
+    definition = raw["definition"]
+    proposal = next(node for node in definition["nodes"] if node["capability"] == "proposal")
+    definition["externals"].extend(
+        [
+            {"id": "alternate_seed", "contract": "proposal.input", "kind": "managed_candidate"},
+            {"id": "slot_other", "contract": "storage", "kind": "managed_candidate"},
+        ]
+    )
+    extras = []
+    for node in definition["nodes"]:
+        if node["id"] not in {"build_right", "check_right", proposal["id"]}:
+            continue
+        copied = copy.deepcopy(node)
+        if copied["capability"] == "proposal":
+            copied["id"] = "alternate"
+            copied["request"]["binding"] = "alternate_seed"
+        else:
+            copied["id"] = copied["id"].replace("right", "other")
+            for arg in copied["request"]["arguments"]:
+                source_ref = arg["source"]
+                if source_ref.get("node") == proposal["id"]:
+                    source_ref["node"] = "alternate"
+                elif "node" in source_ref:
+                    source_ref["node"] = source_ref["node"].replace("right", "other")
+                elif "binding" in source_ref:
+                    source_ref["binding"] = "slot_other"
+        extras.append(copied)
+    definition["nodes"] = [extras[0], *definition["nodes"], *extras[1:]]
+    document = ReusableWorkflowDocument.model_validate_json(json.dumps(raw))
+    source.write_text("# reusable independent families\n" + render_workflow_source(document))
+    return request.model_copy(
+        update={"expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+    )

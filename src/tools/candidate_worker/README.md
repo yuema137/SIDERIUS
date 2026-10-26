@@ -18,7 +18,8 @@ To generate several independent proposal candidates in one run, code callers can
 select [proposal families](candidate-worker-contract.md#opt-in-independent-proposal-families)
 and supply one native seed per declared proposer. Each family has isolated files
 and a verified trace. Execution is serial; this does not aggregate or rank results.
-Reusable source/GUI preparation does not yet support this profile.
+Reusable source/GUI preparation uses the same executor through the
+[family preparation contract](../candidate_prepare/candidate-prepare-contract.md#reusable-independent-proposal-families).
 
 For a first experiment, use [candidate preparation](../candidate_prepare/README.md)
 to build the seed, storage and launch request from task/data/profile selections

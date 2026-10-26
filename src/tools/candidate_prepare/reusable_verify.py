@@ -45,27 +45,11 @@ def verify_payloads(
 ) -> None:
     request = plan.binding.request
     output = Path(request.output_dir)
-    proposal = ProposalProjection.model_validate_json(read_bytes(output / "proposal.json"))
     layout = preparation_layout(plan.document, Path(request.candidate_workspace), request.run_name)
-    proposal_dir = layout.proposal_dir
-    expected = StorageConfig(
-        backend="local",
-        local=LocalStorageConfig(workspace=str(proposal_dir), run_name=request.run_name),
-    )
-    if proposal.storage != expected:
-        raise ValueError("proposal storage differs from selected native destination")
     for record in layout.storage_records:
         storage = StorageConfig.model_validate_json(read_bytes(output / record.filename))
         if storage != record.storage:
             raise ValueError("attempt storage differs from selected native destination")
-    if proposal.task_composition_ref.semantic_fingerprint != fingerprint:
-        raise ValueError("child fingerprint disagrees with native proposal")
-    accepted = plan.document.task_binding
-    if accepted is not None and (
-        proposal.task_composition_ref.semantic_fingerprint != accepted.semantic_fingerprint
-        or proposal.task_composition_ref.task_data_path_id != accepted.task_data_path_id
-    ):
-        raise ValueError("native proposal differs from parent-captured workflow task binding")
     advice = (
         [
             AdviceProjection(
@@ -78,11 +62,27 @@ def verify_payloads(
         if request.proposal_advice
         else []
     )
-    if (
-        proposal.expert_context != advice
-        or proposal.allowed_output_types != request.allowed_output_types
-    ):
-        raise ValueError("native proposal options differ from captured source")
+    for record in layout.proposal_records:
+        proposal = ProposalProjection.model_validate_json(read_bytes(output / record.filename))
+        expected = StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=record.directory, run_name=request.run_name),
+        )
+        if proposal.storage != expected:
+            raise ValueError("proposal storage differs from selected native destination")
+        if proposal.task_composition_ref.semantic_fingerprint != fingerprint:
+            raise ValueError("child fingerprint disagrees with native proposal")
+        accepted = plan.document.task_binding
+        if accepted is not None and (
+            proposal.task_composition_ref.semantic_fingerprint != accepted.semantic_fingerprint
+            or proposal.task_composition_ref.task_data_path_id != accepted.task_data_path_id
+        ):
+            raise ValueError("native proposal differs from parent-captured workflow task binding")
+        if (
+            proposal.expert_context != advice
+            or proposal.allowed_output_types != request.allowed_output_types
+        ):
+            raise ValueError("native proposal options differ from captured source")
 
 
 def verify_reusable_bundle(

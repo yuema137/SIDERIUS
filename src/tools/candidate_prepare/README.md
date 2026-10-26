@@ -157,3 +157,10 @@ branch; the existing worker keeps branch code and validation evidence separate.
 This profile does not support training settings or cross-branch aggregation. See the
 [fanout contract](candidate-prepare-contract.md#reusable-proposal-fanout) for the
 supported shape and limits.
+
+For several independent proposal candidates, select
+`execution_profile="native-proposal-families/v1"` in the same v2 source and give
+each proposer its own managed seed binding. Existing source save, New run,
+prepared-run review and launch use the same native worker. Each family retains
+its own files and candidate identity; execution is serial and does not aggregate
+or rank results. See the [family contract](candidate-prepare-contract.md#reusable-independent-proposal-families).
