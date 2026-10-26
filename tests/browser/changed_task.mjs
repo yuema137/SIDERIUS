@@ -47,6 +47,9 @@ try {
   assert.ok(await save.isDisabled());
   assert.match(await page.locator('#editor-task-message').textContent(), /reviewed, not saved/);
   assert.match(await page.locator('#editor-task-controls').textContent(), /fresh candidate|fresh target proposal/);
+  if (metadata.profile === 'families') {
+    assert.match(await page.locator('#editor-task-findings').textContent(), /2 proposal families and 3 implementation branches/);
+  }
   await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'changed-reviewed.png'), fullPage: true});
   await page.locator('#editor-task-acknowledge').check();
   assert.ok(await save.isEnabled());
@@ -71,6 +74,7 @@ try {
   assert.deepEqual(accepted.selection.expected_task_binding, metadata.binding);
   assert.equal(accepted.adopt_current_snapshot, false);
   assert.match(await readFile(metadata.source, 'utf8'), /revision='new'/);
+  if (metadata.profile) assert.match(await readFile(metadata.source, 'utf8'), new RegExp(`native-proposal-${metadata.profile === 'fanout' ? 'fanout' : 'families'}/v1`));
   assert.deepEqual(faults, []);
   await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'changed-saved.png'), fullPage: true});
   console.log('PASS real checked changed-reference review, acknowledgement, drift refusal, save; no API/GPU');

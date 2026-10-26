@@ -34,8 +34,23 @@ def test_literal_context_cannot_inherit_changed_task():
         _check_source(document, document)
 
 
-@pytest.mark.parametrize("profile", ("native-proposal-fanout/v1",))
-def test_profile_is_outside_fixed_candidate_update(profile):
-    document = managed().model_copy(update={"execution_profile": profile})
-    with pytest.raises(ValueError, match="without training or execution profiles"):
-        _check_source(document, document)
+@pytest.mark.parametrize("profile", ("native-proposal-fanout/v1", "native-proposal-families/v1"))
+def test_existing_native_profile_keeps_managed_roles_and_explicit_profile(profile):
+    raw = managed().model_dump()
+    raw["execution_profile"] = profile
+    validation = raw["definition"]["nodes"][2]["request"]
+    validation["protocol"] = "proposed-implementation-to-validation"
+    validation["arguments"] = (
+        {"name": "proposal", "source": {"kind": "result", "node": "hypothesis"}},
+        {"name": "implementation", "source": {"kind": "result", "node": "build"}},
+        validation["arguments"][-1],
+    )
+    document = ReusableWorkflowDocument.model_validate(raw)
+    _check_source(document, document)
+    other = (
+        "native-proposal-families/v1"
+        if profile == "native-proposal-fanout/v1"
+        else "native-proposal-fanout/v1"
+    )
+    with pytest.raises(ValueError, match="Save graph, profile"):
+        _check_source(document.model_copy(update={"execution_profile": other}), document)

@@ -1,6 +1,7 @@
 """Serve the real two-version C1 integration fixture without provider access."""
 
 import json
+import os
 import socket
 import tempfile
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 import uvicorn
 
+from tests.helpers.reusable_fanout import reusable_families, reusable_fanout
 from tests.integration.tools.test_changed_task_candidate import changed_candidate
 from tests.unit.tools.candidate_console.conftest import console_config
 from tests.unit.tools.candidate_prepare.conftest import selection
@@ -20,7 +22,11 @@ def main():
         pytest.MonkeyPatch.context() as patch,
     ):
         root = Path(directory)
-        author, targets, _ = changed_candidate.__wrapped__(root, patch, None)
+        author, targets, preparation = changed_candidate.__wrapped__(root, patch, None)
+        profile = os.environ.get("CONSOLE_TASK_PROFILE")
+        if profile is not None:
+            transform = {"fanout": reusable_fanout, "families": reusable_families}[profile]
+            transform(preparation)
         console = root / "console"
         console.mkdir()
         config = console_config.__wrapped__(selection.__wrapped__(console), console)
@@ -56,6 +62,7 @@ def main():
                     "origin": origin,
                     "token": Path(config.auth_token_file).read_text(),
                     "source": str(author.project.source_file),
+                    "profile": profile,
                     "binding": targets[1].binding.model_dump(mode="json"),
                     "plugin": str(targets[1].manifest.parent / "plugins/_quickstart_task.py"),
                 }

@@ -153,22 +153,32 @@ arbitrary task migration remains unsupported.
 
 ## Changed task versions for fresh candidates
 
-An already-bound reusable v2 fixed Propose → Implement → Validate graph may switch
-to another configured checked identity. Both versions must remain separately
+An already-bound reusable v2 Propose → Implement → Validate graph may switch to
+another configured checked identity. Supported forms are the fixed candidate and
+the existing native-proposal-fanout/v1 and native-proposal-families/v1 profiles. Both versions must remain separately
 available, each matching its own configured native fingerprint and data-path ID.
 The previous locations and full saved binding must identify exactly one choice.
 Review and Save independently rerun the existing composition child for both;
 source or target drift blocks publication. No archive or alternate identity exists.
 
 This slice requires managed generated proposal/storage bindings only, no literal
-context/model/checkpoint, training settings or execution profile. Native candidate
-role validation owns the graph shape. Nodes, bindings, positions, preparation
-options and advice must be unchanged; save ordinary edits first. The target pure
+context/model/checkpoint or training settings. Native candidate role validation
+owns the fixed shape; execution_families owns admitted profile lineage. The existing
+graph_proposal_bindings and graph_storage_bindings owners reject shared aliases
+across proposal or implementation owners. Execution profile, nodes, bindings,
+positions, preparation options and advice must be unchanged; save ordinary edits first. The target pure
 candidate check uses existing owners to resolve the default complete data scope,
 validate declared allowed output forms and parameter-rule ownership, and build the
 native task composition reference. No model, dataset samples, training, provider
 calls or invented run settings are involved. Optional candidate request/result
-fields are omitted for legacy and unchanged-identity observations.
+fields are omitted for legacy and unchanged-identity observations. Profile tasks
+share one task reference and source-global preparation options, so the pure task
+check runs once per old/target task; family and alias ownership are separately
+checked for every source instance. No per-instance advice/options interface exists.
+Later native preparation independently verifies every proposal seed's target pin,
+shared output/advice options and own storage, and every branch storage record.
+Family receipt proposal_path=null and fixed/fanout proposal.json semantics stay
+with the existing preparation owner; no first-family scalar fallback is introduced.
 
 The native normalized structured Model-I/O, supervision target, custom-loss
 applicability and segmentation applicability must match. Missing structured I/O

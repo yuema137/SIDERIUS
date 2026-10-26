@@ -409,8 +409,8 @@ configured task version, **Update workflow references**, inspect the diff/findin
 confirm them and save. First save pending edits; a bound edit needs its matching
 configured selection for ordinary review. Adopting an unchanged current snapshot
 of unbound v2 source requires a separate confirmation before later edits. Changed
-references support fresh fixed managed candidates only, with native structured
-interface checks and explicit review; see the
+references support fresh managed candidates, including source-declared native
+fanout/family profiles, with native structured interface checks and explicit review; see the
 [task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version).
 Assistant help proposes choices and edits the
 same source; it does not replace explicit selection or acceptance. Saving source

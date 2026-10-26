@@ -2,10 +2,12 @@
 
 from pathlib import Path
 
+from tools.candidate_prepare.layout import graph_proposal_bindings, graph_storage_bindings
 from tools.candidate_prepare.resolution import check_candidate_roles
 from tools.setup_review.composition_models import CandidateCheckOptions, CompositionObservation
 from workflows.definition import ManagedCandidateBinding, ReusableWorkflowDocument
 from workflows.definition.candidate import candidate_nodes
+from workflows.definition.fanout import execution_families
 
 from .task_models import TaskReferenceFinding, TaskReferenceTarget
 from .task_observation import identity_matches, observe_target
@@ -13,27 +15,31 @@ from .task_observation import identity_matches, observe_target
 
 def _check_source(current: ReusableWorkflowDocument, proposed: ReusableWorkflowDocument) -> None:
     for document in (current, proposed):
-        if document.training_settings is not None or document.execution_profile is not None:
-            raise ValueError(
-                "Changed references support fixed candidates without training or execution profiles"
-            )
+        if document.training_settings is not None:
+            raise ValueError("Changed references do not migrate training settings")
         if not all(
             isinstance(item, ManagedCandidateBinding) for item in document.definition.externals
         ):
             raise ValueError("Changed references require managed proposal/storage bindings only")
-        roles = candidate_nodes(document.definition)
-        if "tuning" in roles:
-            raise ValueError("Changed references do not migrate training settings")
-        check_candidate_roles(document, {roles["proposal"]})
+        if document.execution_profile is None:
+            roles = candidate_nodes(document.definition)
+            if "tuning" in roles:
+                raise ValueError("Changed references do not migrate training settings")
+            check_candidate_roles(document, {roles["proposal"]})
+        else:
+            shape = execution_families(document.definition, document.execution_profile)
+            check_candidate_roles(document, {family.proposal for family in shape.families})
+            graph_proposal_bindings(document)
+            graph_storage_bindings(document)
     if any(
         getattr(current, key) != getattr(proposed, key)
-        for key in ("positions", "preparation_options")
+        for key in ("positions", "preparation_options", "execution_profile")
     ) or (
         current.definition.nodes != proposed.definition.nodes
         or current.definition.externals != proposed.definition.externals
     ):
         raise ValueError(
-            "Save graph, layout, option and advice edits before changing task references"
+            "Save graph, profile, layout, option and advice edits before changing task references"
         )
 
 
@@ -176,6 +182,14 @@ def inspect_changed_candidate(
                 ),
             )
     findings = _changes(before, observed)
+    message = "Both native versions passed; fixed candidate interfaces and authored graph, layout, options and advice are preserved. New runs use a fresh target proposal."
+    if proposed.execution_profile is not None:
+        shape = execution_families(proposed.definition, proposed.execution_profile)
+        message = (
+            f"Both native versions passed; {len(shape.families)} proposal families and "
+            f"{len(shape.branches)} implementation branches keep their typed lineage, "
+            "managed storage, layout and shared options/advice. New runs use fresh target proposals."
+        )
     return (
         observed,
         before,
@@ -185,7 +199,7 @@ def inspect_changed_candidate(
                 code="identity_verified",
                 state="retained",
                 reference="workflow.candidate",
-                message="Both native versions passed; fixed candidate interfaces and authored graph, layout, options and advice are preserved. New runs use a fresh target proposal.",
+                message=message,
             ),
         ),
     )
