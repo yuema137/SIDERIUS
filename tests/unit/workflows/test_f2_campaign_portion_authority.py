@@ -77,28 +77,25 @@ def test_launch_input_is_never_mutated(tmp_path):
 
 
 def test_the_merge_is_wired_at_the_tuner_input_construction():
-    """Reachability (the C3 lesson, applied at authoring time this round) —
-    the defect only this catches: the helper existing while the production
-    tuner-input construction still passes the RAW ``launch.plan_overrides``
-    (the merge silently unwired = the dead transit back). AST-based over
-    ``model_exploration``: the keyword ``plan_overrides`` at some Call must
-    be ``frozen_portion_overrides(launch)``. Fails by: no such keyword
-    value anywhere."""
-    src = (REPO_ROOT / "src/workflows" / "model_exploration.py").read_text()
-    wired = []
-    for node in ast.walk(ast.parse(src)):
-        if isinstance(node, ast.Call):
-            for kw in node.keywords:
-                if (
-                    kw.arg == "plan_overrides"
-                    and isinstance(kw.value, ast.Call)
-                    and getattr(kw.value.func, "id", "") == "frozen_portion_overrides"
-                ):
-                    wired.append(node.lineno)
-    assert wired, (
-        "the tuner-input construction no longer routes plan_overrides through "
-        "frozen_portion_overrides — the frozen-portion transit is severed"
-    )
+    """Dropping the builder edge or using raw plan_overrides severs the frozen lock."""
+    for filename, callee, name, expected in (
+        ("model_exploration.py", "prepare_native_tuner_input", "launch", "launch"),
+        (
+            "tuner_preparation.py",
+            "local_validated_model",
+            "plan_overrides",
+            "frozen_portion_overrides(launch)",
+        ),
+    ):
+        src = (REPO_ROOT / "src/workflows" / filename).read_text()
+        calls = [
+            n
+            for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == callee
+        ]
+        assert len(calls) == 1, f"expected one {callee} call"
+        actual = {kw.arg: ast.unparse(kw.value) for kw in calls[0].keywords}
+        assert actual.get(name) == expected, f"{callee} dropped/bypassed {name}"
 
 
 def test_unfrozen_proposer_transit_resolves_to_the_planner_default():

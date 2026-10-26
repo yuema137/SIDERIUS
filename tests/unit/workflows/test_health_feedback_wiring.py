@@ -7,6 +7,7 @@ proposer protocol call — and the history carry is one-directional
 The end-to-end three-workspace pseudo cases land in CB5-c.
 """
 
+import ast
 import inspect
 import re
 from pathlib import Path
@@ -49,23 +50,38 @@ class TestRunWorkflowSignature:
 
 class TestLockCall:
     def test_workflow_lock_call_passes_policy_explicitly(self):
-        # The second element of the unpack is deliberately NOT pinned. It was
-        # `_` while the effective-config path was discarded; Step 12 / PR-12a
-        # C1 binds it (`_run_effective_health_config`) so the workflow can hand
-        # the tuner the config the run actually reads. This test's subject is
-        # the POLICY KWARGS, and hardcoding a throwaway binding name made it
-        # fail for a change that has nothing to do with them.
-        match = re.search(
-            r"_run_invariants, \w+ = build_run_invariants\((.*?)\n    \)", _SRC, re.DOTALL
-        )
-        assert match is not None, "the workflow's build_run_invariants call site was not found"
-        call = match.group(1)
-        for kwarg in (
-            "structured_health_feedback_enabled=enable_structured_health_feedback",
-            "health_feedback_history_window_iterations=",
-            "health_feedback_history_max_entries_per_model=",
+        # Preparation moved; both edges must still carry the run's policy.
+        startup = (
+            Path(__file__).resolve().parents[3] / "src/workflows/training_startup.py"
+        ).read_text()
+        for source, callee, expected in (
+            (
+                _SRC,
+                "prepare_training_run",
+                {
+                    "launch": "launch",
+                    "enable_structured_health_feedback": "enable_structured_health_feedback",
+                },
+            ),
+            (
+                startup,
+                "build_run_invariants",
+                {
+                    "structured_health_feedback_enabled": "enable_structured_health_feedback",
+                    "health_feedback_history_window_iterations": "launch.health_feedback_history_window_iterations",
+                    "health_feedback_history_max_entries_per_model": "launch.health_feedback_history_max_entries_per_model",
+                },
+            ),
         ):
-            assert kwarg in call, f"workflow lock call missing {kwarg}"
+            calls = [
+                n
+                for n in ast.walk(ast.parse(source))
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == callee
+            ]
+            assert len(calls) == 1, f"expected one live {callee} call"
+            actual = {kw.arg: ast.unparse(kw.value) for kw in calls[0].keywords}
+            for name, value in expected.items():
+                assert actual.get(name) == value, f"{callee} dropped/swapped {name}"
 
 
 class TestThreading:

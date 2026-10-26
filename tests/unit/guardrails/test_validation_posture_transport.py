@@ -30,14 +30,17 @@ hour and reports success.
 
 from __future__ import annotations
 
+import ast
 import inspect
+from pathlib import Path
 
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
+from tests.helpers.launcher_bindings import workflow_call_bindings
 from workflows.run_config import WorkflowLaunchConfig
-from workflows.run_one_iteration import build_parser, main
+from workflows.run_one_iteration import build_parser
 
 #: Every hop between the CLI and the tuner input that declares its parameters
 #: EXPLICITLY, so an unknown keyword is a TypeError at launch. Both entries
@@ -72,78 +75,71 @@ def test_there_are_validation_flags_to_check():
     assert VALIDATION_FLAGS, "no --validation_* flags found; the derivation is broken"
 
 
+def _call_keywords(owner, callee):
+    """Read the real named call, excluding comments and neighboring calls."""
+    calls = [
+        n
+        for n in ast.walk(ast.parse(inspect.getsource(owner)))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == callee
+    ]
+    assert len(calls) == 1, f"expected one {callee} call"
+    return {kw.arg: ast.unparse(kw.value) for kw in calls[0].keywords}
+
+
 @pytest.mark.parametrize("flag", VALIDATION_FLAGS)
 def test_each_hop_accepts_what_the_previous_hop_forwards(flag):
-    """Walk the chain: forwarded by hop N -> must be declared by hop N+1.
+    """Unknown keywords must fail here, not during a real Gate launch.
 
-    Not "every hop takes every flag" — that is false and would be the
-    same mistake in reverse. ``validation_fixed_candidate_plan``
-    legitimately stops at the workflow, which consumes it to bypass the
-    proposer; it never reaches the tuner protocol and must not be
-    required to.
-
-    The real invariant is narrower and is exactly what broke twice: a
-    keyword one function hands to the next must be one the next function
-    declares. Forwarding is read from source as ``name=`` in the caller,
-    which is the form every hop here uses.
+    Follow the reachable standard projection rather than main's former flat
+    call; otherwise extraction makes every case return without checking anything.
+    The fixed candidate plan is consumed by the workflow, not the tuner.
     """
-    forwarded_from = "run_one_iteration.main"
-    forwarded = f"{flag}=args.{flag}" in inspect.getsource(main)
+    from workflows import tuner_preparation
 
-    for hop in FORWARDING_HOPS:
-        if not forwarded:
-            return  # the flag's journey ended at the previous hop
-        assert flag in inspect.signature(hop).parameters, (
-            f"{forwarded_from} forwards {flag} to {hop.__name__}(), which does "
-            f"not declare it; the chain raises TypeError at launch"
-        )
-        forwarded_from = hop.__name__
-        forwarded = f"{flag}={flag}" in inspect.getsource(hop)
-
-    if forwarded:
-        assert flag in HyperparamTuningInput.model_fields, (
-            f"{forwarded_from} forwards {flag} to HyperparamTuningInput, which does not declare it"
-        )
+    source = Path(__file__).resolve().parents[3] / "src/workflows/run_one_iteration.py"
+    forwarded = workflow_call_bindings(source)
+    assert flag in forwarded, f"standard launch dropped {flag}"
+    expected = (
+        "fixed_candidate_plan" if flag == "validation_fixed_candidate_plan" else f"args.{flag}"
+    )
+    assert forwarded[flag] == expected
+    assert flag in inspect.signature(WorkflowLaunchConfig).parameters
+    protocol = _call_keywords(tuner_preparation.prepare_native_tuner_input, "local_validated_model")
+    if flag in protocol:
+        assert flag in inspect.signature(local_validated_model).parameters
+        assert flag in HyperparamTuningInput.model_fields
+    else:
+        assert flag == "validation_fixed_candidate_plan", f"protocol dropped bound {flag}"
 
 
 @pytest.mark.parametrize("flag", VALIDATION_FLAGS)
 def test_no_validation_flag_is_accepted_and_then_dropped(flag):
-    """Accepted-but-unused is the SILENT version of the same defect.
+    """A declared ceiling must retain its value through builder and protocol.
 
-    A TypeError at least stops the run. A parameter a hop declares and
-    never passes on produces a Gate that starts, runs unbounded, and
-    reports success — the bound existing only in the command line.
-
-    Occurrence counting, not a call graph: a used parameter appears at
-    least twice in the function source (its declaration and its use),
-    a dropped one exactly once.
+    Exact call arguments catch dropped, swapped and constant values; occurrence
+    counts could pass on a comment or an unrelated neighboring call.
     """
-    import dataclasses
+    from workflows import model_exploration, tuner_preparation
 
-    # The workflow hop: Step 09.5a C3 split DECLARATION (the carrier field)
-    # from USE (`launch.<flag>` inside run_workflow), so occurrence counting
-    # inside one object no longer expresses the invariant. Declared-then-used
-    # still does, across the two.
-    if flag in {f.name for f in dataclasses.fields(WorkflowLaunchConfig)}:
-        from workflows.model_exploration import run_workflow
-
-        workflow_source = inspect.getsource(run_workflow)
-        assert f"launch.{flag}" in workflow_source, (
-            f"WorkflowLaunchConfig declares {flag} but run_workflow never reads "
-            f"it; the bound would be silently discarded rather than failing loudly"
-        )
-
-    # Every other hop still declares and uses the flag in one place.
-    for hop in FORWARDING_HOPS:
-        if not callable(hop) or dataclasses.is_dataclass(hop):
-            continue
-        if flag not in inspect.signature(hop).parameters:
-            continue  # a flag whose path stops before this hop
-        source = inspect.getsource(hop)
-        assert source.count(flag) >= 2, (
-            f"{hop.__name__}() declares {flag} but never uses it; the bound "
-            f"would be silently discarded rather than failing loudly"
-        )
+    if flag == "validation_fixed_candidate_plan":
+        tree = ast.parse(inspect.getsource(model_exploration.run_workflow))
+        plans = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and ast.unparse(n.func) == "ProposalOutput.model_validate"
+        ]
+        assert any(
+            [ast.unparse(arg) for arg in call.args] == [f"launch.{flag}"] for call in plans
+        ), "workflow dropped the fixed validation plan"
+        return
+    workflow = _call_keywords(model_exploration.run_workflow, "prepare_native_tuner_input")
+    assert workflow.get("launch") == "launch", "workflow bypassed the launch carrier"
+    protocol = _call_keywords(tuner_preparation.prepare_native_tuner_input, "local_validated_model")
+    assert protocol.get(flag) == f"launch.{flag}", f"builder dropped/swapped {flag}"
+    tuner_input = _call_keywords(local_validated_model, "HyperparamTuningInput")
+    assert tuner_input.get(flag) == flag, f"protocol dropped/swapped {flag}"
 
 
 @pytest.mark.parametrize("flag", VALIDATION_FLAGS)

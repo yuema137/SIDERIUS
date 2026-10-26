@@ -181,10 +181,21 @@ class TestRunBindingsProductionAdoption:
             rel = path.relative_to(REPO_ROOT).as_posix()
             if rel.startswith(("tests/", ".venv/", "docs/")):
                 continue
-            if "WorkflowRunBindings(" in path.read_text(encoding="utf-8", errors="ignore"):
-                sites.append(rel)
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "WorkflowRunBindings"
+                ):
+                    sites.append(rel)
         assert sites, "no production module constructs WorkflowRunBindings"
-        assert sites == ["src/workflows/model_exploration.py"], sites
+        # Independent native entrypoints each construct their own run authority.
+        # Counting actual calls rejects missing, duplicate and comment-only writers.
+        assert sorted(sites) == [
+            "src/tools/candidate_worker/training_admission.py",
+            "src/workflows/model_exploration.py",
+        ], sites
 
     #: Authorities the carrier owns whose local name is identical to the field.
     #: Reading one as a bare local AFTER construction is a second source of
