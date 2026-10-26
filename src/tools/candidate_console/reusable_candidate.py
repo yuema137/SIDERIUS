@@ -134,8 +134,11 @@ class ReusableCandidate:
         task, inspected, operation = self._operation(project_id, selection, uuid4())
         binding, request = inspected.binding, operation.request
         saved = binding.request
+        profile = request.preview.execution_profile
+        if profile == "native-literature-candidate/v1":
+            raise ValueError("Reusable capture review does not yet support native literature")
         return ReusableCaptureReview(
-            execution_profile=request.preview.execution_profile,
+            execution_profile=profile,
             selection=selection,
             request_digest=operation_request_digest(operation),
             source_path=binding.original_source.path,
