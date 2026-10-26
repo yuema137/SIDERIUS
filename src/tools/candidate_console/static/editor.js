@@ -37,7 +37,7 @@
     else if (pending && !message) message = "Save existing edits first, then update workflow references. To review a bound draft, select its matching configured task version.";
     else if (!taskChoices?.length && !message) message = 'No version-aware task choices configured. Ordinary unbound editing remains available.';
     else if (savedBinding && !matching.length && !taskSelection && !message) message = 'No configured choice matches the saved binding. Configure a matching choice before reviewing bound edits.';
-    else if (!message) message = 'Choose a version, then explicitly update, review and save. Choosing alone does not change source. Changed native identity remains unsupported.';
+    else if (!message) message = 'Choose a version, then explicitly update, review and save. Choosing alone does not change source. Switching checked versions requires a supported fresh candidate.';
     window.editorTaskControls.render($('task-controls'), {choices: taskChoices, selection: taskSelection, matching, savedBinding,
       connected: window.consoleSession.connected, saving, canUpdate: canUpdateTask(), message, review: taskReview(),
       acknowledged: taskAcknowledged, adopted: taskAdopted}, {
@@ -101,6 +101,18 @@
     $('conflict-diff').textContent = 'Current disk file version: ' + value.sha256.slice(0, 12) + '\n--- Current disk source\n+++ Pending proposal\n' + value.source.split('\n').map(line => '- ' + line).join('\n') + '\n' + $('source').value.split('\n').map(line => '+ ' + line).join('\n');
     status('Source changed. Pending proposal preserved; inspect current source before choosing a new base.');
   }
+  function showTaskRefusal(proposal, selection) {
+    $('source').value = proposal.source; $('source').disabled = false;
+    graph = clone(proposal.document); options = proposal.binding_options; training = proposal.training;
+    mode = 'source'; sourceDirty = false; pending = proposal.source !== base.source;
+    taskAcknowledged = false; taskAdopted = false;
+    reviewed = {source: proposal.source, sha256: proposal.sha256, base: base.sha256,
+      taskReview: proposal.task_reference_update, taskSelection: clone(selection)};
+    $('diff').textContent = proposal.diff || '(No source changes)';
+    diagnostic(); render();
+  }
+  const hasSourceConflict = error => error.code === 'conflict' ||
+    (error.value?.current && error.value.current.sha256 !== base?.sha256);
   function adopt(value) {
     trainingDrafts.clear();
     taskSelection = null; taskMessage = '';
@@ -290,7 +302,8 @@
       if (error.stale) return;
       if (!current(id, version)) return;
       if (error.value?.proposal) { const proposal = error.value.proposal; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); options = proposal.binding_options; training = proposal.training; mode = 'source'; sourceDirty = false; render(); }
-      if (error.value?.current) showConflict(error.value.current);
+      if (hasSourceConflict(error) && error.value?.current) showConflict(error.value.current);
+      else if (error.value?.proposal?.task_reference_update) showTaskRefusal(error.value.proposal, selection || proposal);
       diagnostic(error.value?.diagnostics); status(error.message);
     }
   }
@@ -311,9 +324,13 @@
     } catch (error) {
       if (error.stale) return;
       if (!current(id, version)) return;
-      if (error.value?.current) showConflict(error.value.current);
+      if (hasSourceConflict(error) && error.value?.current) { showConflict(error.value.current); reviewed = null; }
+      else if (error.value?.proposal?.task_reference_update) {
+        showTaskRefusal(error.value.proposal, exact.taskSelection);
+        status(error.message + ' Task reference save refused; pending proposal retained. Correct the task sources and review again.');
+        return;
+      } else reviewed = null;
       status(error.message + ' Save is unconfirmed; pending proposal retained. Refresh to inspect disk.');
-      reviewed = null;
     } finally { saving = false; controls(); }
   });
   $('discard').addEventListener('click', () => { if (conflict) adopt(conflict); });

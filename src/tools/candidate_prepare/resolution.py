@@ -55,7 +55,7 @@ class ResolvedReusableCandidate(DeclarationModel):
     ) = Field(default=None, exclude_if=lambda value: value is None)
 
 
-def _check_roles(document: ReusableWorkflowDocument, proposal_ids: set[str]) -> None:
+def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[str]) -> None:
     """Require generated roles and supported literal roles at their actual usage."""
     result_roles = {"output", "proposal", "validation"}
     if document.execution_profile is not None:
@@ -128,7 +128,7 @@ def resolve_reusable_candidate(
             ).families
         }
     )
-    _check_roles(document, proposals)
+    check_candidate_roles(document, proposals)
     locations = {item.binding: item.location for item in bindings.externals}
     expected = {item.id for item in document.definition.externals}
     if locations.keys() != expected:

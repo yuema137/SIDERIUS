@@ -70,8 +70,8 @@ review, save, conflict and generation fences; launch payloads carry no overrides
 Inert read accepts the optional v2 TaskBinding declaration. Bound review and Save
 require explicit configured selection and findings acceptance. Unbound legacy
 Save retains its inert behavior and wire serialization; omitted new optional
-fields remain omitted. Pin removal, changed native identity and unresolved
-compatibility refuse publication. Reusable preparation independently enforces the captured pin through its
+fields remain omitted. Pin removal and unresolved compatibility refuse publication. Changed identities
+use the bounded [fresh candidate checks](#changed-task-versions-for-fresh-candidates). Reusable preparation independently enforces the captured pin through its
 [native owner](../candidate_prepare/candidate-prepare-contract.md#accepted-task-binding-enforcement);
 successful Save is not preparation or launch approval. Existing runs keep their captured original pins.
 
@@ -108,9 +108,9 @@ default replacement or scientific compatibility policy exists here. The current 
 arbitrary source paths are never imported. Original-owner observations of both
 configured locations are required for relocation, unless the selected policy is
 already the current policy. Native identity compares the original semantic
-fingerprint and task_data_path_id, not readable package/revision labels. A changed
-native identity or unavailable original policy is compatibility_unresolved and
-blocked; native facts and text diff do not certify scientific migration safety.
+fingerprint and task_data_path_id, not readable package/revision labels. An unavailable original policy is compatibility_unresolved and blocked. Changed
+native identities use the bounded checks below; native facts and text diff do not
+certify scientific equivalence.
 
 An unbound v2 may explicitly adopt the currently observed snapshot while retaining
 its managed graph, externals, preparation options and training settings. Findings
@@ -146,3 +146,36 @@ where applicable. The acceptance uses the reviewed selection/findings snapshot.
 Changing source, selection, base or connection invalidates that acceptance.
 Native preparation enforcement is owned separately by candidate_prepare;
 arbitrary task migration remains unsupported.
+
+
+## Changed task versions for fresh candidates
+
+An already-bound reusable v2 fixed Propose → Implement → Validate graph may switch
+to another configured checked identity. Both versions must remain separately
+available, each matching its own configured native fingerprint and data-path ID.
+The previous locations and full saved binding must identify exactly one choice.
+Review and Save independently rerun the existing composition child for both;
+source or target drift blocks publication. No archive or alternate identity exists.
+
+This slice requires managed generated proposal/storage bindings only, no literal
+context/model/checkpoint, training settings or execution profile. Native candidate
+role validation owns the graph shape. Nodes, bindings, positions, preparation
+options and advice must be unchanged; save ordinary edits first. The target pure
+candidate check uses existing owners to resolve the default complete data scope,
+validate declared allowed output forms and parameter-rule ownership, and build the
+native task composition reference. No model, dataset samples, training, provider
+calls or invented run settings are involved. Optional candidate request/result
+fields are omitted for legacy and unchanged-identity observations.
+
+The native normalized structured Model-I/O, supervision target, custom-loss
+applicability and segmentation applicability must match. Missing structured I/O
+or unresolved mappings block; prose is never parsed into a shape rule. Changes to
+data declarations, metrics, objectives, rules, plugins and narrative guidance are
+ordered findings requiring explicit review, along with retained authored advice.
+These checks determine supported structural compatibility, not scientific
+suitability. The browser displays full declaration details in a collapsed panel.
+Save still requires exact ordered acknowledgements and never prepares or launches.
+A later preparation builds a fresh target proposal under a new run UUID; previous
+captured source, inputs, run history and resume bindings stay unchanged. Training,
+objective or I/O adaptation and migration of prior trained state are outside this
+slice and receive a blocking finding where unsupported.
