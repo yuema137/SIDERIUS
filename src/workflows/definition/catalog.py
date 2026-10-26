@@ -29,6 +29,8 @@ class ProtocolContract:
 
 CONTRACTS = MappingProxyType(
     {
+        "literature.input": "agent.schemas.literature_review.LiteratureReviewInput",
+        "literature.output": "agent.schemas.literature_review.LiteratureReviewOutput",
         "proposal.input": "agent.schemas.proposal.ProposalInput",
         "proposal.output": "agent.schemas.proposal.ProposalOutput",
         "implementation.input": "agent.schemas.implementor.ImplementorInput",
@@ -48,6 +50,7 @@ CONTRACTS = MappingProxyType(
 
 CAPABILITIES = MappingProxyType(
     {
+        "literature": CapabilityContract("literature.input", "literature.output"),
         "proposal": CapabilityContract("proposal.input", "proposal.output"),
         "implementation": CapabilityContract("implementation.input", "implementation.output"),
         "tuning": CapabilityContract("tuning.input", "tuning.output"),
@@ -57,6 +60,14 @@ CAPABILITIES = MappingProxyType(
 
 PROTOCOLS = MappingProxyType(
     {
+        "literature-to-proposal": ProtocolContract(
+            "agent.schemas.protocols.ml_literature_review_to_ml_model_propose.local_typed_evidence",
+            "proposal.input",
+            (
+                ArgumentContract("output", "literature.output"),
+                ArgumentContract("proposal_input", "proposal.input"),
+            ),
+        ),
         "validated-candidate-to-tuning": ProtocolContract(
             "tools.candidate_worker.training.prepare_tuning_request",
             "tuning.input",

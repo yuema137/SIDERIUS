@@ -1,11 +1,14 @@
 """Serial typed readiness within the existing native candidate worker."""
 
 import traceback
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 from agent.schemas.implementor import ImplementorOutput
+from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
 from agent.schemas.proposal import ProposalOutput
+from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import local_typed_evidence
 from agent.schemas.validator import ValidatorOutput
 from workflows.definition.fanout import execution_families
 from workflows.llm_config import WorkflowLLMConfig
@@ -15,7 +18,9 @@ from . import phases
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import record_digest
 from .graph_models import GraphCapability, GraphNodeEvidence, GraphTrace
+from .inputs import NativeInputs
 from .invocation import NativePhase, invocation_from_storage
+from .literature_phase import run_literature
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
@@ -29,7 +34,9 @@ def execute_fanout(
     shape = execution_families(definition, request.preview.execution_profile)
     dependencies = dict(shape.predecessors)
     inputs = materialize_fanout(request, Path(initial.workspace), composition, config)
-    results: dict[str, ProposalOutput | ImplementorOutput | ValidatorOutput] = {}
+    results: dict[
+        str, ProposalOutput | ImplementorOutput | ValidatorOutput | LiteratureReviewOutput
+    ] = {}
     evidence: dict[str, GraphNodeEvidence] = {}
     aborted = False
     while len(evidence) < len(definition.nodes):
@@ -38,9 +45,13 @@ def execute_fanout(
                 continue
             selected = inputs[node.id]
             storage = (
-                selected.proposal.storage
-                if node.capability == "proposal"
-                else selected.attempt.storage
+                selected.storage
+                if isinstance(selected, LiteratureReviewInput)
+                else (
+                    selected.proposal.storage
+                    if node.capability == "proposal"
+                    else selected.attempt.storage
+                )
             )
             assert storage.local is not None
             item = GraphNodeEvidence(
@@ -60,7 +71,9 @@ def execute_fanout(
                 break
             try:
                 phase: NativePhase
-                if node.capability == "proposal":
+                if node.capability == "literature":
+                    phase = "literature"
+                elif node.capability == "proposal":
                     phase = "proposal"
                 elif node.capability == "implementation":
                     phase = "implementation"
@@ -69,9 +82,21 @@ def execute_fanout(
                 context = invocation_from_storage(
                     initial, node_id=node.id, phase=phase, storage=storage
                 )
-                if phase == "proposal":
+                if phase == "literature":
+                    assert isinstance(selected, LiteratureReviewInput)
+                    output, path = run_literature(context, request, initial, selected)
+                elif phase == "proposal":
+                    assert isinstance(selected, NativeInputs)
+                    if shape.literature is not None:
+                        review = results[shape.literature.review]
+                        assert isinstance(review, LiteratureReviewOutput)
+                        selected = replace(
+                            selected,
+                            proposal=local_typed_evidence(review, proposal_input=selected.proposal),
+                        )
                     output, path = phases.run_proposal(context, request, initial, selected, config)
                 else:
+                    assert isinstance(selected, NativeInputs)
                     proposal = results[shape.proposal_for(node.id)]
                     assert isinstance(proposal, ProposalOutput)
                     if phase == "implementation":

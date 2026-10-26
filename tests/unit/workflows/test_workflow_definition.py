@@ -171,7 +171,11 @@ def test_catalog_matches_exact_native_protocol_signatures():
         TaskCompositionRef,
     )
     from agent.schemas.implementor import ImplementorInput, ImplementorOutput
+    from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
     from agent.schemas.proposal import ProposalInput, ProposalOutput
+    from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
+        local_typed_evidence,
+    )
     from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
     from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
     from agent.schemas.storage import StorageConfig
@@ -179,6 +183,8 @@ def test_catalog_matches_exact_native_protocol_signatures():
     from workflows.candidate_training_settings import CandidateTrainingSettings
 
     native = {
+        "literature.input": LiteratureReviewInput,
+        "literature.output": LiteratureReviewOutput,
         "tuning.input": HyperparamTuningInput,
         "tuning.output": HyperparamTuningOutput,
         "native-training.settings": CandidateTrainingSettings,
@@ -200,6 +206,7 @@ def test_catalog_matches_exact_native_protocol_signatures():
             cls = native[contract]
             assert CONTRACTS[contract] == f"{cls.__module__}.{cls.__name__}"
     for key, function in [
+        ("literature-to-proposal", local_typed_evidence),
         ("proposal-to-implementation", local_full_spec),
         ("implementation-to-validation", local_all_fields),
     ]:
