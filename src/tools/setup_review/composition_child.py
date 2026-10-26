@@ -104,7 +104,7 @@ def compose_in_child(job: CompositionJob) -> CompositionResult:
                 from tools.setup_review.candidate_check import check_candidate
 
                 with bind_code_package(composition.code_package):
-                    candidate = check_candidate(composition, job.candidate_check)
+                    candidate = check_candidate(composition, job.candidate_check, job.scratch)
             except Exception as error:
                 return CompositionResult.failed(job, "candidate_check", error, task=task)
         return CompositionResult(

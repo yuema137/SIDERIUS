@@ -13,6 +13,7 @@ from tests.helpers.reusable_fanout import reusable_families, reusable_fanout
 from tests.integration.tools.test_changed_task_candidate import changed_candidate
 from tests.unit.tools.candidate_console.conftest import console_config
 from tests.unit.tools.candidate_prepare.conftest import selection
+from tests.unit.tools.candidate_prepare.test_reusable_training import add_training
 from tools.candidate_console.app import create_app
 
 
@@ -23,6 +24,9 @@ def main():
     ):
         root = Path(directory)
         author, targets, preparation = changed_candidate.__wrapped__(root, patch, None)
+        training = os.environ.get("CONSOLE_TRAINING") == "1"
+        if training:
+            preparation = add_training(preparation)
         profile = os.environ.get("CONSOLE_TASK_PROFILE")
         if profile is not None:
             transform = {"fanout": reusable_fanout, "families": reusable_families}[profile]
@@ -66,6 +70,7 @@ def main():
                     "prepare_request": preparation.model_dump(mode="json"),
                     "saved_binding": targets[0].binding.model_dump(mode="json"),
                     "binding": targets[1].binding.model_dump(mode="json"),
+                    "training": training,
                     "plugin": str(targets[1].manifest.parent / "plugins/_quickstart_task.py"),
                 }
             ),

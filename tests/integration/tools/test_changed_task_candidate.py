@@ -7,10 +7,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from tests.integration.tools.test_setup_composition_check import _external_hook_request
 from tests.unit.tools.candidate_prepare.conftest import selection
 from tests.unit.tools.candidate_prepare.test_reusable_preparation import reusable
+from tests.unit.tools.candidate_prepare.test_reusable_training import SETTINGS, add_training
 from tools.candidate_prepare import prepare_reusable_candidate
 from tools.setup_review.composition_check import check_task
 from tools.workflow_authoring.models import Project, ReviewRequest, SaveRequest
@@ -51,6 +53,36 @@ def changed_candidate(tmp_path, monkeypatch, request):
                         "        - {role: class, dimension: {fixed: 2}}\n", ""
                     )
                 )
+            if getattr(request, "param", None) == "health_incompatible":
+                task = setup.read_only[0]
+                (task / "health_plugin.py").write_text(
+                    """
+from execute_tools.health_checks import register
+from execute_tools.health_checks.schemas import CheckInputDeclaration
+class Check:
+    name = "setup_fixture_check"
+    declaration = CheckInputDeclaration(consumes_view="setup.fixture_view")
+    def run(self, ctx, config=None):
+        raise AssertionError("task reference review must not evaluate Health")
+register(Check())
+"""
+                )
+                (task / "health.yaml").write_text(
+                    """
+facts: {encoding_family: setup_fixture}
+plugins:
+  - {kind: file, ref: health_plugin.py}
+roster:
+  - gate_id: inspect_distribution
+    check: setup_fixture_check
+    disposition: blocking
+    reason: retained training posture compatibility fixture
+"""
+                )
+                manifest = task / "task.yaml"
+                task_declaration = yaml.safe_load(manifest.read_text())
+                task_declaration["task_health"] = {"config": "health.yaml"}
+                manifest.write_text(yaml.safe_dump(task_declaration))
         report = check_task(setup)
         assert report.result.outcome == "passed", report.result.failure
         facts = report.result.task
@@ -82,6 +114,8 @@ def changed_candidate(tmp_path, monkeypatch, request):
         }
     )
     preparation = reusable.__wrapped__(selected)
+    if getattr(request, "param", None) in {"training", "health_incompatible"}:
+        preparation = add_training(preparation)
     source = Path(preparation.source_path)
     document = parse_workflow_source(source.read_text()).model_copy(
         update={"task_binding": targets[0].binding}
@@ -126,6 +160,7 @@ def reviewed_request(author, target):
     return reviewed, request
 
 
+@pytest.mark.parametrize("changed_candidate", (None, "training"), indirect=True)
 def test_changed_reference_saves_and_prepares_fresh_target(changed_candidate):
     author, targets, preparation = changed_candidate
     original = author.read()
@@ -151,6 +186,17 @@ def test_changed_reference_saves_and_prepares_fresh_target(changed_candidate):
     assert task.save_supported, task.findings
     assert task.current_observation.result.candidate_check is not None
     assert task.observation.result.candidate_check is not None
+    old_candidate = task.current_observation.result.candidate_check
+    new_candidate = task.observation.result.candidate_check
+    if old_document.training_settings is None:
+        assert old_candidate.training is None
+        assert new_candidate.training is None
+    else:
+        assert old_candidate.training is None
+        assert new_candidate.training is not None
+        assert new_candidate.training.resolved_scope == tuple(new_candidate.default_scope)
+        assert new_candidate.training.ordering.resolved_strategy is not None
+        assert new_candidate.training.health_gate_enabled
     assert any(
         item.reference == "task.primary_metric" and item.state == "requires_review"
         for item in task.findings
@@ -161,6 +207,8 @@ def test_changed_reference_saves_and_prepares_fresh_target(changed_candidate):
     assert document.definition.nodes == old_document.definition.nodes
     assert document.positions == old_document.positions
     assert document.preparation_options == old_document.preparation_options
+    assert document.definition.externals == old_document.definition.externals
+    assert document.training_settings == old_document.training_settings
     assert document.task_binding == targets[1].binding
     result = prepare_reusable_candidate(
         preparation.model_copy(
@@ -181,6 +229,13 @@ def test_changed_reference_saves_and_prepares_fresh_target(changed_candidate):
         == targets[1].binding.semantic_fingerprint
     )
     assert not (Path(result.envelope) / "workspace").exists()
+    if document.training_settings is not None:
+        settings = json.loads(
+            (Path(result.envelope) / "inputs/training_settings.json").read_bytes()
+        )
+        assert settings == {
+            "launch": {**SETTINGS["launch"], "allowed_output_types": ["classifier"]}
+        }
     assert {
         str(path.relative_to(old_envelope)): path.read_bytes()
         for path in old_envelope.rglob("*")
@@ -202,6 +257,33 @@ def test_source_or_target_drift_blocks_save_without_partial_source(changed_candi
     with pytest.raises(AuthoringError, match="publication is blocked"):
         author.save(request)
     assert author.read().source == original
+
+
+@pytest.mark.parametrize("changed_candidate", ("training",), indirect=True)
+def test_concurrent_training_settings_edit_blocks_reference_save(changed_candidate):
+    """A source settings edit after task review cannot be overwritten by the stale Save."""
+    author, targets, _ = changed_candidate
+    _, request = reviewed_request(author, targets[1])
+    original = parse_workflow_source(author.read().source)
+    settings = json.loads(json.dumps(original.training_settings))
+    settings["launch"]["sampling_seed"] = 99
+    concurrent = original.model_copy(update={"training_settings": settings})
+    author.project.source_file.write_text(render_workflow_source(concurrent))
+    with pytest.raises(AuthoringError, match="source changed"):
+        author.save(request)
+    assert parse_workflow_source(author.read().source).training_settings == settings
+
+
+@pytest.mark.parametrize("changed_candidate", ("health_incompatible",), indirect=True)
+def test_target_health_binding_incompatible_with_retained_training_posture(changed_candidate):
+    """Target Health declaration must honor the retained observe-only posture."""
+    author, targets, _ = changed_candidate
+    reviewed, _ = reviewed_request(author, targets[1])
+    task = reviewed.task_reference_update
+    assert not task.save_supported
+    assert task.observation.result.failure.stage == "candidate_check"
+    assert task.observation.result.failure.exception_type == "FormalLaunchPolicyError"
+    assert "observe_only" in task.observation.result.failure.message
 
 
 def test_missing_previous_choice_blocks_changed_reference(changed_candidate):

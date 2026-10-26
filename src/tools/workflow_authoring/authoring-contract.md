@@ -162,19 +162,29 @@ Review and Save independently rerun the existing composition child for both;
 source or target drift blocks publication. No archive or alternate identity exists.
 
 This slice requires managed generated proposal/storage bindings only, no literal
-context/model/checkpoint or training settings. Native candidate role validation
-owns the fixed shape; execution_families owns admitted profile lineage. The existing
+context/model/checkpoint. Existing native four-stage training may retain its
+unchanged source-owned settings when the task changes; both versions still pass
+their own identity/interface checks, while only the target receives additional
+training-configuration checks for a fresh run. Training settings, preparation
+options and graph remain authored as saved. Training workflows combined with an
+execution profile remain unsupported. Native candidate role validation owns the
+fixed shape; execution_families owns admitted profile lineage. The existing
 graph_proposal_bindings and graph_storage_bindings owners reject shared aliases
 across proposal or implementation owners. Execution profile, nodes, bindings,
-positions, preparation options and advice must be unchanged; save ordinary edits first. The target pure
-candidate check uses existing owners to resolve the default complete data scope,
-validate declared allowed output forms and parameter-rule ownership, and build the
-native task composition reference. No model, dataset samples, training, provider
-calls or invented run settings are involved. Optional candidate request/result
-fields are omitted for legacy and unchanged-identity observations. Profile tasks
-share one task reference and source-global preparation options, so the pure task
-check runs once per old/target task; family and alias ownership are separately
-checked for every source instance. No per-instance advice/options interface exists.
+positions, preparation options, training settings and advice must be unchanged;
+save ordinary edits first. The target pure candidate check uses existing owners to
+resolve the default complete data scope, validate declared allowed output forms
+and parameter-rule ownership, and build the native task composition reference.
+For retained training settings, the native check also validates actual scope,
+formal posture, Health declaration/materialization, authored ordering and
+workflow-rule ownership. A non-null managed training data root is refused because
+review has no physical run-root binding. No model, dataset samples, actual Health
+evaluation, training, provider calls or invented run settings are involved;
+execution readiness remains false. Optional candidate request/result fields are
+omitted for legacy and unchanged-identity observations. Profile tasks share one
+task reference and source-global preparation options, so the pure task check runs
+once per old/target task; family and alias ownership are separately checked for
+every source instance. No per-instance advice/options interface exists.
 Later native preparation independently verifies every proposal seed's target pin,
 shared output/advice options and own storage, and every branch storage record.
 Family receipt proposal_path=null and fixed/fanout proposal.json semantics stay
@@ -191,5 +201,6 @@ Save still requires exact ordered acknowledgements and never prepares or launche
 A later preparation builds a fresh target proposal under a new run UUID; previous
 captured source, inputs, run history and resume bindings stay unchanged. A fresh
 candidate may use a changed target objective after explicit review when the
-structured interfaces remain supported. Migrating a trained model or its objective
-state, training workflows and I/O adaptation remain outside this slice.
+structured interfaces remain supported. Migrating a trained model or objective
+state, combining execution profiles with training, and I/O adaptation remain
+outside this slice.

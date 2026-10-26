@@ -15,16 +15,12 @@ from .task_observation import identity_matches, observe_target
 
 def _check_source(current: ReusableWorkflowDocument, proposed: ReusableWorkflowDocument) -> None:
     for document in (current, proposed):
-        if document.training_settings is not None:
-            raise ValueError("Changed references do not migrate training settings")
         if not all(
             isinstance(item, ManagedCandidateBinding) for item in document.definition.externals
         ):
             raise ValueError("Changed references require managed proposal/storage bindings only")
         if document.execution_profile is None:
             roles = candidate_nodes(document.definition)
-            if "tuning" in roles:
-                raise ValueError("Changed references do not migrate training settings")
             check_candidate_roles(document, {roles["proposal"]})
         else:
             shape = execution_families(document.definition, document.execution_profile)
@@ -37,9 +33,10 @@ def _check_source(current: ReusableWorkflowDocument, proposed: ReusableWorkflowD
     ) or (
         current.definition.nodes != proposed.definition.nodes
         or current.definition.externals != proposed.definition.externals
+        or current.training_settings != proposed.training_settings
     ):
         raise ValueError(
-            "Save graph, profile, layout, option and advice edits before changing task references"
+            "Save graph, profile, layout, option, training settings and advice edits before changing task references"
         )
 
 
@@ -112,10 +109,17 @@ def inspect_changed_candidate(
     except ValueError as error:
         return observe_target(target), None, (blocked(str(error), "source"),)
 
-    options = CandidateCheckOptions(
+    old_options = CandidateCheckOptions(
         allowed_output_types=proposed.preparation_options.allowed_output_types
     )
-    observed = observe_target(target, options)
+    observed_options = old_options
+    if proposed.training_settings is not None:
+        from tools.candidate_prepare.reusable_training import settings_payload
+
+        payload = settings_payload(proposed)
+        assert payload is not None
+        observed_options = old_options.model_copy(update={"training_settings": payload.decode()})
+    observed = observe_target(target, observed_options)
     previous = [
         value
         for value in targets
@@ -132,7 +136,7 @@ def inspect_changed_candidate(
             ),
         )
     try:
-        before = observe_target(previous[0], options)
+        before = observe_target(previous[0], old_options)
     except (OSError, ValueError):
         return (
             observed,
@@ -181,7 +185,16 @@ def inspect_changed_candidate(
                     ),
                 ),
             )
-    findings = _changes(before, observed)
+    findings = list(_changes(before, observed))
+    if proposed.training_settings is not None:
+        findings.append(
+            TaskReferenceFinding(
+                code="authored_changes",
+                state="requires_review",
+                reference="workflow.training_settings",
+                message="Retained native training settings were checked for a fresh target run; no old training state or run evidence is migrated.",
+            )
+        )
     message = "Both native versions passed; fixed candidate interfaces and authored graph, layout, options and advice are preserved. New runs use a fresh target proposal."
     if proposed.execution_profile is not None:
         shape = execution_families(proposed.definition, proposed.execution_profile)

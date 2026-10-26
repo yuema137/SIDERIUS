@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
+from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.output_types import OutputTypeName
 from agent.schemas.task_config import ForwardContract
 from tools.setup_review.models import SetupDeclarationReport, SetupReviewRequest
@@ -43,12 +44,23 @@ class TaskCheckSettings(CheckModel):
 
 class CandidateCheckOptions(CheckModel):
     allowed_output_types: tuple[OutputTypeName, ...] | None
+    training_settings: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class CandidateTrainingFacts(CheckModel):
+    resolved_scope: tuple[int, ...]
+    scope_is_partial: bool
+    ordering: ResolvedOrdering
+    health_gate_enabled: bool
 
 
 class CandidateCheckFacts(CheckModel):
     reference: TaskCompositionRef
     forward_contract: ForwardContract
     default_scope: tuple[int, ...]
+    training: CandidateTrainingFacts | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class TaskCheckRequest(CheckModel):
