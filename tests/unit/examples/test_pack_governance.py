@@ -44,6 +44,15 @@ REQUIRED_PACK_DOCS = ("README.md", "PROVENANCE.md", "STATUS.md")
 MATURITY_LEVEL = re.compile(r"\bL[0-4]\b")
 ROADMAP_DOC = "docs/design/siderius_generic_framework_upgrade.md"
 READ_ONLY_BANNER_PINS = ("DO NOT EDIT", "does not read")
+WORKFLOW_DECLARATIONS_DIR = "workflow_declarations"
+WORKFLOW_DECLARATION_SOURCES = frozenset(
+    {
+        "examples/workflow_declarations/managed_reusable_candidate.py",
+        "examples/workflow_declarations/native_training.py",
+        "examples/workflow_declarations/reusable_candidate.py",
+        "examples/workflow_declarations/reusable_training.py",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +145,7 @@ def _pack_dirs(examples_root: Path) -> list[Path]:
         for p in _tracked(examples_root.parent, examples_root.name)
         if len(Path(p).parts) > 2
     }
+    names.discard(WORKFLOW_DECLARATIONS_DIR)
     return sorted(examples_root / name for name in names)
 
 
@@ -235,10 +245,20 @@ def test_negative_an_UNBOUND_pack_task_config_is_still_an_offender() -> None:
 
 def _is_sanctioned_plugin_source(rel_posix: str) -> bool:
     """D14 re-scope: reference plugin SOURCE lives at exactly
-    ``examples/<pack>/plugins/*.py`` (parent §5.4 relaxation: plugin source +
-    execution manifests + fixtures — never framework-imported code)."""
+    ``examples/<pack>/plugins/*.py``. The four explicit workflow declaration
+    examples are also sanctioned; this exact-path exception does not permit
+    other Python files in that framework-owned namespace."""
+    if rel_posix in WORKFLOW_DECLARATION_SOURCES:
+        return True
     parts = rel_posix.split("/")
     return len(parts) == 4 and parts[0] == "examples" and parts[2] == "plugins"
+
+
+def test_workflow_declarations_are_not_scientific_example_packs() -> None:
+    """Framework declaration scripts do not need scientific pack metadata."""
+    packs = _pack_dirs(EXAMPLES_ROOT)
+    assert EXAMPLES_ROOT / WORKFLOW_DECLARATIONS_DIR not in packs
+    assert {pack.name for pack in packs} == {"quickstart", "synthetic_masked_regression"}
 
 
 def test_python_under_examples_only_as_pack_plugin_source_d14_rescope() -> None:
@@ -267,17 +287,24 @@ def test_python_under_examples_only_as_pack_plugin_source_d14_rescope() -> None:
 
 
 def test_negative_python_under_examples_mirror_is_detected(tmp_path: Path) -> None:
-    """Proves the re-scoped guard fires: a `.py` OUTSIDE a plugins/ dir is an
-    offender; one INSIDE `examples/<pack>/plugins/` is sanctioned."""
+    """Proves only plugin sources and the four declared scripts are sanctioned."""
     mirror = tmp_path / "examples" / "some_pack"
     (mirror / "plugins").mkdir(parents=True)
     (mirror / "plugins" / "model.py").write_text("PLUGIN_MODEL_TYPE = 'x'\n")
     (mirror / "loader.py").write_text("import os\n")
+    workflow = tmp_path / "examples" / WORKFLOW_DECLARATIONS_DIR
+    workflow.mkdir()
+    (workflow / "native_training.py").write_text("pass\n")
+    (workflow / "unexpected.py").write_text("pass\n")
     found = _python_files_under(tmp_path / "examples")
     rels = [p.relative_to(tmp_path).as_posix() for p in found]
     offenders = [r for r in rels if not _is_sanctioned_plugin_source(r)]
-    assert offenders == ["examples/some_pack/loader.py"]
+    assert offenders == [
+        "examples/some_pack/loader.py",
+        "examples/workflow_declarations/unexpected.py",
+    ]
     assert "examples/some_pack/plugins/model.py" in rels  # detected, sanctioned
+    assert "examples/workflow_declarations/native_training.py" in rels
 
 
 # ---------------------------------------------------------------------------
