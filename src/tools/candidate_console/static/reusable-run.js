@@ -183,7 +183,9 @@
   });
   window.reusableCandidate = Object.freeze({async openPrepared(context) {
     if (!session.connected || editor.projectId !== context.project) { status('Select the retained project in Workflow before opening this run.'); return; }
-    document.getElementById('capture-heading').scrollIntoView({block: 'start'});
+    const captureHeading = document.getElementById('capture-heading');
+    captureHeading.closest('.workflow-run-details').open = true;
+    captureHeading.scrollIntoView({block: 'start'});
     invalidate(); handoffGeneration = generation; tasksRevision = session.revision;
     const version = generation, revision = session.revision;
     if (![...$('task').options].some(item => item.value === context.task)) {
