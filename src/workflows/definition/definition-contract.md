@@ -284,3 +284,15 @@ publication while native identity remains unchanged, through its
 Pin removal and unresolved changed-task migration remain refused. Guarded
 publication alone does not establish successful preparation or launch. Existing unbound
 paths and previously captured runs retain their original contracts.
+
+## Reusable execution profile
+
+`ReusableWorkflowDocument.execution_profile` optionally selects
+`"native-proposal-fanout/v1"`. None is omitted from JSON and canonical source, so
+old source bytes and semantic identities remain unchanged. An explicit profile is
+source-owned and participates in the document digest; task-only identity adoption
+cannot change it. No profile is inferred from repeated nodes. Graph execution
+refuses `training_settings` and uses the existing fanout topology admission during
+[reusable preparation](../../tools/candidate_prepare/candidate-prepare-contract.md#reusable-proposal-fanout).
+Generated v1 source remains a declaration; its accompanying parent-verified worker
+request carries the execution profile.

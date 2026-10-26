@@ -2,7 +2,13 @@
 
 from dataclasses import dataclass
 
-from .models import ExternalRequest, ProtocolRequest, ResultSource, WorkflowDefinition
+from .models import (
+    ExternalRequest,
+    ProtocolRequest,
+    ResultSource,
+    ReusableWorkflowDefinition,
+    WorkflowDefinition,
+)
 from .validation import predecessor_facts
 
 
@@ -13,7 +19,7 @@ class ProposalFanout:
     predecessors: tuple[tuple[str, frozenset[str]], ...]
 
 
-def proposal_fanout(definition: WorkflowDefinition) -> ProposalFanout:
+def proposal_fanout(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> ProposalFanout:
     """Check the executable shape without imposing a topology-size budget."""
     facts = predecessor_facts(definition)
     proposals = [node for node in definition.nodes if node.capability == "proposal"]

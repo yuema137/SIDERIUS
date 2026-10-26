@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter
 
+from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
 from tools.workflow_preview import WorkflowPreview
 
@@ -82,6 +83,9 @@ def prepare_reusable_candidate(
         log_path=str(control_dir / "worker.log"),
         source_observations=control.sources,
     )
+    if plan.document.execution_profile is not None:
+        encode_control(binding)
+        encode_control(control)
     verify_origin(binding)
     envelope.mkdir()  # A losing caller must not write even a failure receipt.
     claimed = envelope.lstat()
@@ -118,6 +122,9 @@ def prepare_reusable_candidate(
             verify_origin(binding)
             absent_destination(canonical(binding.request.candidate_workspace))
             preview = WorkflowPreview(**bindings.model_dump(), workspace_state="absent")
+            if plan.document.execution_profile is not None:
+                for record in (candidate.preview, preview, candidate):
+                    encode_control(record)
             for name, record in (
                 ("preview_request.json", candidate.preview),
                 ("preview.json", preview),

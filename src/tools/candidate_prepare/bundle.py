@@ -3,6 +3,7 @@
 import hashlib
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 from tools.candidate_worker.models import CandidateRunRequest
 from tools.workflow_preview.models import FileObservation, WorkflowBindings, WorkflowPreviewRequest
@@ -70,11 +71,16 @@ def build_candidate(
     request: CandidatePreparationRequest,
     document: WorkflowDocument,
     observe: Callable[[Path, str], tuple[FileObservation, bytes]],
+    *,
+    execution_profile: Literal["native-proposal-fanout/v1"] | None = None,
 ) -> tuple[CandidateRunRequest, WorkflowBindings]:
     """Build the existing worker request from parent-verified declaration and observations."""
     output = canonical(request.output_dir)
     preview_request = WorkflowPreviewRequest(
-        document=document, project_root=str(output), llm_config_file="llm.json"
+        document=document,
+        project_root=str(output),
+        llm_config_file="llm.json",
+        execution_profile=execution_profile,
     )
     preview = observe_bindings(preview_request, read_file=observe)
     candidate = CandidateRunRequest(

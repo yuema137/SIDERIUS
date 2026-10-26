@@ -147,3 +147,13 @@ Edit training settings in saved source or the
 Preparation generates `inputs/training_settings.json` for the native worker;
 do not edit generated inputs. External Health configuration files are not captured.
 See the [contract](candidate-prepare-contract.md) for settings and capture semantics.
+
+For several implementations of one proposal, set
+`execution_profile="native-proposal-fanout/v1"` in the reusable document and declare
+one storage binding per implementation/validator pair. Each validator must consume
+its implementation result and the shared proposal result. Prepare and launch through
+the same steps above. The bundle contains `storage.<implementation-id>.json` for each
+branch; the existing worker keeps branch code and validation evidence separate.
+This profile does not support training settings or cross-branch aggregation. See the
+[fanout contract](candidate-prepare-contract.md#reusable-proposal-fanout) for the
+supported shape and limits.

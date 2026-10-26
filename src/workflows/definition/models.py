@@ -161,6 +161,9 @@ class ReusableWorkflowDocument(DeclarationModel):
         default_factory=CandidatePreparationOptions
     )
 
+    execution_profile: Literal["native-proposal-fanout/v1"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     training_settings: dict[str, JsonValue] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -168,6 +171,8 @@ class ReusableWorkflowDocument(DeclarationModel):
 
     @model_validator(mode="after")
     def validate_training(self) -> Self:
+        if self.execution_profile is not None and self.training_settings is not None:
+            raise ValueError("Fanout does not support training_settings")
         settings_bindings = [
             item
             for item in self.definition.externals

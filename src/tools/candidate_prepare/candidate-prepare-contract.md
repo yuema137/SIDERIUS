@@ -464,3 +464,43 @@ check compares the whole TaskCompositionRef against fresh composition; later tas
 drift remains that owner's refusal. Native assembly fingerprints remain authoritative;
 a declaration of a readable version cannot suppress their mismatch. Arbitrary
 task migration and graphical task/version selection are separate capabilities.
+
+## Reusable proposal fanout
+
+A v2 source can explicitly select `execution_profile="native-proposal-fanout/v1"`.
+Omission retains fixed three/four-stage preparation and its existing bytes. The
+profile participates in the source semantic digest and is reconstructed from the
+captured source when the parent builds the worker request. It is never inferred
+from node count or accepted from child output. The existing G1 shape owner admits
+one proposal, one or more implementations and exactly one matching validator per
+implementation, with each validator consuming both proposal and implementation
+results. `training_settings` is unsupported with this profile.
+
+The shared preparation layout uses the existing graph instance and first-attempt
+storage owners. `proposal.json` uses the proposal instance directory; each
+implementation owns `storage.<implementation-id>.json`. Its validator uses that
+same storage through its declared implementation result edge. Different external
+aliases within one branch may select the same file; aliases shared across branches
+refuse. Locations must exactly match the generated binding map. Reordered node
+declarations do not change which implementation owns a validator's storage.
+
+The exact artifact index replaces `storage.json` in `NATIVE_FILES` with branch
+storage files in admitted implementation order, followed by the usual
+`workflow.resolved.py`. There are B+6 files for B branches. The parent derives the
+same census from retained source and rejects missing, extra or reordered index
+entries and incorrect storage even if a child recomputes their hashes. This is
+index membership, not a recursive prohibition on diagnostic files. Both A2 task
+pin checks remain before successful publication.
+
+Graph preparation applies the existing 4 MiB control encoder to capture/control,
+child index and published preview/request records before successful publication.
+Every graph-native payload write uses the preparation reader's existing 16 MiB
+per-file ceiling. Source remains limited to 1 MiB, 100,000 AST nodes and depth 64.
+No arbitrary branch-count limit is added. Captured reads cache each path once;
+there is no independent aggregate memory budget. Overflow may preserve partial
+diagnostics but cannot produce a successful preparation receipt or launch.
+
+The saved candidate request selects the existing G1 dispatcher and trace verifier.
+Python, CLI and the existing saved-source review/preparation/launch transport use
+that same request. This adds no graph editing controls, training branch,
+aggregation, new scheduler, resume or additional capability adapters.

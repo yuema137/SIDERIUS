@@ -55,6 +55,7 @@ def adoption_unchanged(
         and current.definition.externals == proposed.definition.externals
         and current.preparation_options == proposed.preparation_options
         and current.training_settings == proposed.training_settings
+        and current.execution_profile == proposed.execution_profile
     )
 
 

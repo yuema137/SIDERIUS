@@ -16,6 +16,8 @@ from workflows.definition import (
 from workflows.definition.source import MAX_INPUT_BYTES
 
 from .admission import absent_destination, admit, canonical, overlap
+from .layout import graph_storage_bindings
+from .limits import PREPARATION_FILE_LIMIT
 from .models import CandidatePreparationRequest
 from .resolution import (
     ResolvedExternalLocation,
@@ -30,7 +32,7 @@ from .reusable_models import (
 )
 
 
-def safe_bytes(path: Path, limit: int = 16 * 1024 * 1024) -> bytes:
+def safe_bytes(path: Path, limit: int = PREPARATION_FILE_LIMIT) -> bytes:
     canonical(str(path))
     descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
     with os.fdopen(descriptor, "rb") as stream:
@@ -86,6 +88,9 @@ def reusable_locations(
         "storage": "storage.json",
         "native-training.settings": "training_settings.json",
     }
+    branch_files = (
+        graph_storage_bindings(document) if document.execution_profile is not None else {}
+    )
     return ReusableCandidateLocations(
         manifest=str(manifest),
         data_root=str(data),
@@ -93,7 +98,7 @@ def reusable_locations(
         externals=tuple(
             ResolvedExternalLocation(
                 binding=item.id,
-                location=str(envelope / "inputs" / roles[item.contract]),
+                location=str(envelope / "inputs" / branch_files.get(item.id, roles[item.contract])),
             )
             for item in document.definition.externals
         ),
