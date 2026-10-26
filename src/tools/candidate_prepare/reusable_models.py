@@ -104,11 +104,11 @@ REUSABLE_FILES = (*NATIVE_FILES, "workflow.resolved.py")
 
 
 def reusable_files(document: ReusableWorkflowDocument) -> tuple[str, ...]:
-    """Expand only source-declared family/storage/training files; preserve old order."""
+    """Expand only source-declared family/storage/literature/training files; preserve old order."""
     if document.execution_profile is not None:
         from workflows.definition.fanout import execution_families
 
-        from .layout import proposal_filename, storage_filename
+        from .layout import graph_literature_bindings, proposal_filename, storage_filename
 
         shape = execution_families(document.definition, document.execution_profile)
         proposals = tuple(
@@ -120,7 +120,7 @@ def reusable_files(document: ReusableWorkflowDocument) -> tuple[str, ...]:
             item
             for name in REUSABLE_FILES
             for item in ({"storage.json": storage, "proposal.json": proposals}.get(name, (name,)))
-        )
+        ) + tuple(graph_literature_bindings(document).values())
     if document.training_settings is None:
         return REUSABLE_FILES
     return (*REUSABLE_FILES, "training_settings.json")

@@ -2,6 +2,7 @@
 
 import heapq
 import os
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from tools.candidate_operations import (
@@ -16,6 +17,8 @@ from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare import verify_reusable_preparation
 from tools.candidate_prepare.reusable_models import ReusableBindingInspection
 from tools.candidate_prepare.reusable_selection import (
+    CapturedBytes,
+    captured_plan,
     inspect_current_reusable_binding,
     inspect_reusable_binding,
 )
@@ -134,11 +137,24 @@ class ReusableCandidate:
         task, inspected, operation = self._operation(project_id, selection, uuid4())
         binding, request = inspected.binding, operation.request
         saved = binding.request
-        profile = request.preview.execution_profile
-        if profile == "native-literature-candidate/v1":
-            raise ValueError("Reusable capture review does not yet support native literature")
+        literature_settings = {}
+        if request.preview.execution_profile == "native-literature-candidate/v1":
+            from tools.candidate_prepare.reusable_literature import review_settings
+            from workflows.definition import ManagedCandidateBinding
+
+            plan, _ = captured_plan(Path(binding.envelope), binding, CapturedBytes())
+            selected = review_settings(plan.document)
+            assert selected is not None
+            authored = next(
+                item.literature_settings
+                for item in plan.document.definition.externals
+                if isinstance(item, ManagedCandidateBinding)
+                and item.literature_settings is not None
+            )
+            literature_settings = {selected[0]: authored}
         return ReusableCaptureReview(
-            execution_profile=profile,
+            literature_settings=literature_settings,
+            execution_profile=request.preview.execution_profile,
             selection=selection,
             request_digest=operation_request_digest(operation),
             source_path=binding.original_source.path,

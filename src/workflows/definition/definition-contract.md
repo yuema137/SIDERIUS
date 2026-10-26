@@ -306,5 +306,14 @@ and external `proposal_input` through the existing target-owned
 `local_typed_evidence` protocol. Structural validity alone grants no execution.
 The native worker admits exactly one review and one complete candidate only under
 [its explicit literature profile](../../tools/candidate_worker/candidate-worker-contract.md#opt-in-native-literature-candidate).
-This does not extend `ReusableWorkflowDocument.execution_profile`, managed input
-preparation or visual editing support. Existing source serialization is unchanged.
+The reusable preparation route below uses the same native profile. Existing source
+editing supports its declaration; dedicated visual creation controls are not added.
+
+Reusable v2 sources can opt into that same four-node literature profile. Its
+managed `literature.input` binding requires sparse `literature_settings`; the
+source parser accepts only inert JSON, and preparation validates existing native
+types. The field is absent for old bindings, preserving old canonical source and
+declaration identity. Settings participate in external-binding identity and cannot
+be changed by a task-reference-only update. See the
+[preparation contract](../../tools/candidate_prepare/candidate-prepare-contract.md#reusable-native-literature-candidate)
+for the exact controls, child-composition trust boundary and resource restrictions.

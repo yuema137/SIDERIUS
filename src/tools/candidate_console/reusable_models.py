@@ -3,7 +3,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, JsonValue
 
 from agent.schemas.output_types import OutputTypeName
 from tools.candidate_operations.models import OperationFailure
@@ -43,8 +43,16 @@ class ReusableCapturePage(PreviewModel):
 
 class ReusableCaptureReview(PreviewModel):
     execution_profile: (
-        Literal["native-proposal-fanout/v1", "native-proposal-families/v1"] | None
+        Literal[
+            "native-proposal-fanout/v1",
+            "native-proposal-families/v1",
+            "native-literature-candidate/v1",
+        ]
+        | None
     ) = Field(default=None, exclude_if=lambda value: value is None)
+    literature_settings: dict[str, dict[str, JsonValue]] = Field(
+        default_factory=dict, exclude_if=lambda value: not value
+    )
     selection: ReusableCaptureSelection
     request_digest: str
     source_path: str

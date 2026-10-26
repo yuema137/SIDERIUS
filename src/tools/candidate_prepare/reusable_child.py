@@ -82,6 +82,9 @@ def execute(request_path: Path) -> None:
         training_payload=settings_payload(document),
         expected_task_binding=document.task_binding,
         layout=layout,
+        literature_document=document
+        if document.execution_profile == "native-literature-candidate/v1"
+        else None,
     )
     for name, workflow_payload in (
         ("workflow.json", (resolved.document.model_dump_json(indent=2) + "\n").encode()),

@@ -59,11 +59,24 @@ def graph_proposal_bindings(document: ReusableWorkflowDocument) -> dict[str, str
     bindings: dict[str, str] = {}
     for family in shape.families:
         request = nodes[family.proposal].request
-        assert isinstance(request, ExternalRequest)
-        if request.binding in bindings:
+        if shape.literature is not None:
+            binding = shape.literature.seed_binding
+        else:
+            assert isinstance(request, ExternalRequest)
+            binding = request.binding
+        if binding in bindings:
             raise ValueError("Graph proposal binding is shared across proposal owners")
-        bindings[request.binding] = proposal_filename(document.execution_profile, family.proposal)
+        bindings[binding] = proposal_filename(document.execution_profile, family.proposal)
     return bindings
+
+
+def graph_literature_bindings(document: ReusableWorkflowDocument) -> dict[str, str]:
+    """The admitted review owns its one generated native input."""
+    if document.execution_profile != "native-literature-candidate/v1":
+        return {}
+    edge = execution_families(document.definition, document.execution_profile).literature
+    assert edge is not None
+    return {edge.review_binding: f"literature.{edge.review}.json"}
 
 
 def graph_storage_bindings(document: ReusableWorkflowDocument) -> dict[str, str]:

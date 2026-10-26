@@ -72,7 +72,9 @@ def build_candidate(
     document: WorkflowDocument,
     observe: Callable[[Path, str], tuple[FileObservation, bytes]],
     *,
-    execution_profile: Literal["native-proposal-fanout/v1", "native-proposal-families/v1"]
+    execution_profile: Literal[
+        "native-proposal-fanout/v1", "native-proposal-families/v1", "native-literature-candidate/v1"
+    ]
     | None = None,
 ) -> tuple[CandidateRunRequest, WorkflowBindings]:
     """Build the existing worker request from parent-verified declaration and observations."""
