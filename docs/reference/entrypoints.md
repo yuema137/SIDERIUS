@@ -404,6 +404,14 @@ Both routes use `tools.candidate_prepare.prepare_reusable_candidate` and its
 `--reusable-request` CLI. Professional callers author external project files;
 Assistant callers help author the same files and explicit selections. Source
 owns task references/advice; request owns fresh run identity and runtime policy.
+In the console Workflow builder, both collaboration modes explicitly choose a
+configured task version, **Update workflow references**, inspect the diff/findings,
+confirm them and save. First save pending edits; a bound edit needs its matching
+configured selection for ordinary review. Adopting an unchanged current snapshot
+of unbound v2 source requires a separate confirmation before later edits. Changing
+native task identity is unsupported. Assistant help proposes choices and edits the
+same source; it does not replace explicit selection or acceptance. Saving source
+is separate from preparing or launching its next capture.
 The [preparation contract](../../src/tools/candidate_prepare/candidate-prepare-contract.md#managed-reusable-preparation)
 owns managed-only support, failure receipts and the authored-v2 versus generated-v1
 publication boundary. For authorized execution, both routes retain the exact

@@ -104,6 +104,17 @@ matches your starting point:
   explicitly launch. Check the original capture for the full scientific
   settings; this panel does not edit the chain or provide pause/resume.
 
+To bind a reusable workflow in **Workflow builder**:
+
+1. Choose a configured task package/version and **Update workflow references**.
+2. Inspect the Python diff and task findings, confirm them and **Save reviewed source**.
+3. Prepare a new run separately, review its captured inputs, then explicitly launch.
+
+Save pending edits before Update; changing native task identity is unsupported.
+An unbound workflow needs an explicit current-snapshot adoption confirmation.
+Bound edits need their matching configured choice for review. Professional and
+Assistant modes share this flow; see the [task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version).
+
 Follow the [saved-source recipe](../../src/tools/candidate_console/README.md#prepare-saved-source-or-open-an-existing-run)
 for the second route. Saving and preparation never launch automatically.
 Launching runs code and may make paid calls. Configuration checks and offline
