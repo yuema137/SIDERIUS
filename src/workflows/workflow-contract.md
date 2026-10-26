@@ -177,13 +177,15 @@ preserves proposer lazy stage bridges and tuner deferred brain construction.
 The workflow's nested adapter reads its current iteration at each call, so
 chain offsets and later iterations retain their original accounting identity.
 Storage derivation and direct context binding do not construct providers or
-invoke nodes. For Literature Review, `run_context.contextual_bridge_factory`
-wraps the existing bridge factory and binds each bridge when the native node
+invoke nodes. For Literature Review and Data Analysis,
+`run_context.contextual_bridge_factory` wraps the existing bridge factory and
+binds each bridge when the native node
 constructs it inside `run()`, before its first call. The node still owns constructor
 arguments and main/search client sharing. A missing run name or run ID returns
 the original factory unchanged, including `None`; custom factories remain supported.
 
-Literature usage now enters the run ledger, token rollups and spend estimates.
+Literature and Data Analysis usage now enter the run ledger, token rollups and
+spend estimates.
 Budget consumers of those totals can stop earlier because previously omitted
 usage is counted. Historical ledgers are not backfilled. This changes accounting,
 not native prompts, inputs, defaults or retry policy, and does not establish

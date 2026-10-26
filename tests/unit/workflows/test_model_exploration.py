@@ -584,7 +584,10 @@ class TestRunWorkflowSingleIteration:
         assert proposal_input.workflow_parameter_rules == rules
         assert tune_input.workflow_parameter_rules == rules
 
-    def test_analysis_enabled_traverses_typed_stage_and_proposer_edge(self, workflow_env):
+    @pytest.mark.parametrize("chain_name,run_id", [("chain", "id"), (None, "id"), ("chain", None)])
+    def test_analysis_enabled_traverses_typed_stage_and_proposer_edge(
+        self, workflow_env, chain_name, run_id
+    ):
         analysis_binding = SimpleNamespace(
             access_policy=AnalysisAccessPolicy(
                 policy_id="raw-only",
@@ -605,6 +608,8 @@ class TestRunWorkflowSingleIteration:
         analysis_output = MagicMock()
         analysis_output.report.findings = ()
         analysis_output.report.skill_result_refs = ()
+        analysis_output.report.provenance.generated_skill_registry = None
+        factory = MagicMock(side_effect=lambda **_kwargs: MagicMock())
 
         with (
             patch(
@@ -623,13 +628,34 @@ class TestRunWorkflowSingleIteration:
                     source_run_name="v1",
                     human_advice_analysis="Inspect the authorized high-noise slice.",
                     data_analysis_enabled=True,
+                    max_iterations=2,
                 ),
                 workspace=workflow_env["workspace"],
                 run_name="test_run",
+                chain_run_name=chain_name,
+                run_id=run_id,
+                bridge_factory=factory,
                 task_composition=composition,
                 historical_model_inference_capability=historical_inference_capability,
             )
 
+        assert len(run_analysis.call_args_list) == 2
+        # Invoke saved factories after both iterations; no late loop-variable capture.
+        for iteration, stage_call in enumerate(run_analysis.call_args_list, start=1):
+            selected = stage_call.kwargs["bridge_factory"]
+            if chain_name is None or run_id is None:
+                assert selected is factory
+            for _ in range(2):
+                bridge = selected(provider="openai", model_id="offline-analysis")
+                if chain_name is not None and run_id is not None:
+                    bridge.set_run_context.assert_called_once_with(
+                        workspace=Path(workflow_env["workspace"]),
+                        iter=iteration,
+                        run_name=chain_name,
+                        run_id=run_id,
+                    )
+                else:
+                    bridge.set_run_context.assert_not_called()
         interpretation_input = workflow_env["interp"].return_value.run.call_args.args[0]
         assert interpretation_input.analysis_brief_requested is True
         assert interpretation_input.analysis_access_policy is analysis_binding.access_policy
@@ -738,11 +764,19 @@ class TestRunWorkflowSingleIteration:
             ),
         )
         composition = replace(workflow_env["composition"], data_analysis=analysis_binding)
+        supplied_factory = MagicMock(side_effect=lambda **_kwargs: MagicMock())
         trace: list[str] = []
         analysis_predecessors: list[object | None] = []
         literature_inputs: list[object] = []
 
         def run_analysis(_interpretation, **kwargs):
+            bridge = kwargs["bridge_factory"](provider="openai", model_id="offline-analysis")
+            bridge.set_run_context.assert_called_once_with(
+                workspace=Path(workflow_env["workspace"]),
+                iter=1,
+                run_name="chain",
+                run_id="order-context",
+            )
             predecessor = kwargs["literature_output"]
             analysis_predecessors.append(predecessor)
             trace.append("analysis:with-literature" if predecessor is not None else "analysis:none")
@@ -776,6 +810,9 @@ class TestRunWorkflowSingleIteration:
                 ),
                 workspace=workflow_env["workspace"],
                 run_name="test_run",
+                chain_run_name="chain",
+                run_id="order-context",
+                bridge_factory=supplied_factory,
                 task_composition=composition,
                 llm_config=WorkflowLLMConfig(
                     interpret=NodeLLMConfig(provider="openai", model_id="test"),
