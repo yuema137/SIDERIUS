@@ -303,7 +303,7 @@ footer {
 
 a { color: var(--primary); }
 button:not(:disabled):hover { background: var(--primary-hover); }
-button.secondary:not(:disabled):hover { background: var(--hover); }
+button.secondary:not(:disabled):hover { background: var(--bg); }
 
 [hidden] { display: none !important; }
 nav { padding: 0 32px; }
