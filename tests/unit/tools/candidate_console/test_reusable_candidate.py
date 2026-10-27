@@ -310,3 +310,67 @@ def test_output_restriction_direction_and_startup_root_scope(captured):
     )
     with pytest.raises(ValueError, match="within both"):
         CandidateConsole(config.model_copy(update={"operation_store": bad_store}))
+
+
+def test_launch_review_states_the_executed_loop_bound_and_refuses_divergence(captured, monkeypatch):
+    """Fails if launch review omits/misreports the bound the worker will execute
+    (`request.preview...loop`) or accepts a request loop absent from the capture."""
+    from tools.candidate_console import reusable_candidate as module
+    from workflows.definition import AuthoredLoop
+
+    adapter, project, choice, _ = captured
+    selected = adapter.select(project.project_id, choice)
+    plain = adapter.review(project.project_id, selected)
+    assert plain.loop is None and '"loop"' not in plain.model_dump_json()
+
+    loop = AuthoredLoop.model_validate(
+        {
+            "final_iteration": 2,
+            "feedback": {
+                "source": {"kind": "result", "node": "fit", "port": "result"},
+                "target": "interpret",
+                "protocol": "tuning-to-interpretation",
+                "history": "native-research/v1",
+            },
+        }
+    )
+    task, inspected, operation = adapter._operation(project.project_id, selected, uuid4())
+    document = operation.request.preview.document
+    preview = operation.request.preview.model_copy(
+        update={
+            "document": document.model_copy(
+                update={"definition": document.definition.model_copy(update={"loop": loop})}
+            )
+        }
+    )
+    looped = operation.model_copy(
+        update={"request": operation.request.model_copy(update={"preview": preview})}
+    )
+    monkeypatch.setattr(adapter, "_operation", lambda *args: (task, inspected, looped))
+    with pytest.raises(OperationFailure, match="research loop differs from captured"):
+        adapter.review(project.project_id, selected)
+
+    original_plan = module.captured_plan
+
+    def captured_with_loop(*args):
+        plan, rest = original_plan(*args)
+        captured_document = plan.document
+        definition = captured_document.definition.model_copy(update={"loop": loop})
+        return (
+            plan.model_copy(
+                update={"document": captured_document.model_copy(update={"definition": definition})}
+            ),
+            rest,
+        )
+
+    monkeypatch.setattr(module, "captured_plan", captured_with_loop)
+    review = adapter.review(project.project_id, selected)
+    assert json.loads(review.model_dump_json())["loop"] == {
+        "final_iteration": 2,
+        "feedback": {
+            "source": {"kind": "result", "node": "fit", "port": "result"},
+            "target": "interpret",
+            "protocol": "tuning-to-interpretation",
+            "history": "native-research/v1",
+        },
+    }

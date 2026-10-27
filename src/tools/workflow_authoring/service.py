@@ -23,12 +23,14 @@ from workflows.definition.source import (
     render_workflow_source,
 )
 
+from .loop import loop_template, with_loop
 from .models import (
     MAX_SOURCE_BYTES,
     DocumentProposal,
     DraftProposal,
     DraftRequest,
     DraftView,
+    LoopProposal,
     Project,
     ReviewRequest,
     ReviewView,
@@ -70,6 +72,7 @@ def reviewed_source(
         binding_options=legacy_options,
         port_inventory=port_inventory,
         training=training_inspector(document),
+        loop_template=loop_template(document),
         task_reference_update=task_review,
     )
 
@@ -181,6 +184,7 @@ class WorkflowAuthoring:
             binding_options=legacy_options,
             port_inventory=port_inventory,
             training=training_inspector(document),
+            loop_template=loop_template(document),
         )
 
     def read(self) -> SourceView:
@@ -241,6 +245,8 @@ class WorkflowAuthoring:
             except ValueError as error:
                 raise AuthoringError("task_reference_policy", str(error)) from error
             source = render_workflow_source(updated)
+        elif isinstance(proposal, LoopProposal):
+            source = render_workflow_source(with_loop(proposal.source, proposal.loop))
         else:
             source = (
                 render_workflow_source(proposal.document)

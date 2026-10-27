@@ -189,3 +189,7 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
   .circuit-viewport { min-height: 360px; height: min(58vh, 620px); }
   .workflow-task-details[open] { max-height: 60vh; }
 }
+/* Research loop: one fieldset per loop facet (limit, feedback, later facets). */
+.workflow-loop-panel fieldset { margin: 0 0 12px; }
+.workflow-loop-panel legend { font-weight: 600; }
+.workflow-loop-panel input[type="number"] { max-width: 10rem; }

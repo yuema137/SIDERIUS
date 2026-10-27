@@ -95,6 +95,27 @@ Source; untouched rules and advanced fields survive edits. Task rules are resolv
 later by native owners. All controls participate in the existing source-dirty,
 review, save, conflict and generation fences; launch payloads carry no overrides.
 
+## Research-loop editing
+
+`AuthoredLoop` on the declaration remains the only loop authority. Source/read and
+review projections include optional `loop_template`: the one supported
+tuning→interpretation feedback (`protocol="tuning-to-interpretation"`,
+`history="native-research/v1"`, `final_iteration=1`) when the graph has exactly one
+tuning and one interpretation node; otherwise it is absent and feedback stays
+source-authored. The template is inert until reviewed and saved.
+
+`ReviewRequest` accepts `LoopProposal(kind="loop", source, loop)`: the exact
+complete proposal source is parsed, only `definition.loop` is replaced (`null`
+removes it), and the result is rendered through the normal canonical renderer,
+which revalidates endpoints and `final_iteration > 0` (strict integer). It then
+follows the ordinary review, task acceptance and Save boundary. Parsing source
+rather than a browser JSON document keeps other authored values exact (browser
+JSON turns `2.0` into `2`), so add-then-remove on a canonical source restores its
+original bytes and declaration digest, and unchanged loop proposals publish no
+bytes. A declaration without a loop renders and digests exactly as before.
+Endpoint rewiring and loop execution admission (interpretation profile, native
+loop owner) remain outside the editor.
+
 ## Bound-source publication boundary
 
 Inert read accepts the optional v2 TaskBinding declaration. Bound review and Save

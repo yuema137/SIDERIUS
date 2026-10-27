@@ -4,7 +4,8 @@
   const $ = id => document.getElementById(`editor-${id}`);
   let candidateEnabled = false, sourceAvailable = false;
   let project = '', generation = 0, base = null, graph = null;
-  let training = null;
+  let training = null, loopTemplate = null;
+  const LOOP_DRAFT = 'loop.final_iteration';
   let taskChoices = null, taskSelection = null, taskMessage = '', taskLoadingRevision = null;
   let taskAcknowledged = false, taskAdopted = false;
   const trainingDrafts = new Map();
@@ -99,14 +100,16 @@
     cancelDraftButton.disabled = !connected || saving;
     renderTaskControls();
     window.editorCircuit?.setEnabled(canEditCircuit());
+    window.editorLoopControls?.setEnabled($('loop'), canEditLoop());
   }
   function invalidate() {
     generation++; reviewed = null; taskAcknowledged = false; taskAdopted = false; controls(); $('diff').textContent = '';
     $('pending').textContent = bindingDraft
       ? `Pending binding draft · ${bindingDraft.inspection?.status || 'checking'}`
-      : pending ? (mode === 'document' ? 'Pending inspector edits · Review changes to update Python source before editing it.' : 'Pending source edits · not saved') : 'No pending edits.';
+      : pending ? (mode === 'document' ? 'Pending inspector edits · Review changes to update Python source before editing it.'
+        : mode === 'loop' ? 'Pending research-loop edits · Review changes to update Python source before editing it.' : 'Pending source edits · not saved') : 'No pending edits.';
   }
-  function changed() { pending = true; $('source').disabled = mode === 'document' || mode === 'binding-draft'; invalidate(); }
+  function changed() { pending = true; $('source').disabled = ['document', 'loop', 'binding-draft'].includes(mode); invalidate(); }
   const api = (path, body) => window.consoleSession.request('editor/' + path, body);
   function diagnostic(items = []) { $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}`).join('\n'); }
   function showConflict(value, isBindingDraft = false) {
@@ -122,7 +125,7 @@
   }
   function showTaskRefusal(proposal, selection) {
     $('source').value = proposal.source; $('source').disabled = false;
-    graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training;
+    graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training; loopTemplate = proposal.loop_template || null;
     mode = 'source'; sourceDirty = false; pending = proposal.source !== base.source;
     taskAcknowledged = false; taskAdopted = false;
     reviewed = {source: proposal.source, sha256: proposal.sha256, base: base.sha256,
@@ -136,7 +139,7 @@
     trainingDrafts.clear();
     taskSelection = null; taskMessage = '';
     bindingDraft = null; bindingDraftConflict = false;
-    sourceAvailable = true; base = value; graph = value.document ? clone(value.document) : null; inventory = value.port_inventory || []; training = value.training;
+    sourceAvailable = true; base = value; graph = value.document ? clone(value.document) : null; inventory = value.port_inventory || []; training = value.training; loopTemplate = value.loop_template || null;
     $('source').value = value.source; $('source').disabled = !graph; mode = 'source'; sourceDirty = false; pending = false; conflict = null;
     $('conflict').hidden = true; selected = graph?.definition.nodes.some(n => n.id === selected) ? selected : graph?.definition.nodes[0]?.id;
     invalidate(); diagnostic(value.diagnostics); render();
@@ -146,6 +149,9 @@
     status(graph ? 'Opened supported declaration. References remain literal.' : 'Unsupported source is read-only. Repair externally, then refresh.');
   }
   const canEditCircuit = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict && trainingDrafts.size === 0;
+  // An invalid limit draft must stay editable so the author can correct it.
+  const canEditLoop = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict &&
+    mode !== 'binding-draft' && [...trainingDrafts.keys()].every(key => key === LOOP_DRAFT);
   function projectBindingDraft() {
     inventory = clone(base.port_inventory || []);
     for (const option of inventory) {
@@ -289,7 +295,7 @@
     node('p', 'Workflow parameter rules (exact / range / allowed / predicate):', parent);
     node('pre', JSON.stringify(graph.training_settings.launch?.workflow_parameter_rules ?? null, null, 2), parent);
     const advanced = node('button', 'Edit advanced settings and rules in source', parent); advanced.type = 'button';
-    advanced.addEventListener('click', () => { $('advanced').open = true; $('source').focus(); if (mode === 'document') status('Review inspector edits first to update the source.'); });
+    advanced.addEventListener('click', () => { $('advanced').open = true; $('source').focus(); if (mode === 'document' || mode === 'loop') status('Review inspector edits first to update the source.'); });
   }
   function renderInspector() {
     $('inspector').replaceChildren(); $('references').replaceChildren();
@@ -352,8 +358,42 @@
       }
     }
   }
+  function renderLoop() {
+    if (!graph) { $('loop').replaceChildren(); return; }
+    const capturedGraph = graph;
+    const live = () => graph === capturedGraph && canEditLoop();
+    // Loop-only edits are reviewed as a typed loop patch on the exact current
+    // source; with other inspector edits pending, the whole document carries them.
+    const loopMode = () => { if (mode !== 'document') mode = 'loop'; };
+    const edit = message => { loopMode(); changed(); render(); status(message); };
+    window.editorLoopControls.render($('loop'), {loop: graph.definition.loop || null, template: loopTemplate,
+      draft: trainingDrafts.get(LOOP_DRAFT), nodes: graph.definition.nodes, profile: graph.execution_profile || null, enabled: canEditLoop()}, {
+      add: () => {
+        if (!live() || graph.definition.loop || !loopTemplate) return;
+        graph.definition.loop = clone(loopTemplate);
+        edit(`Research loop added locally (final iteration ${loopTemplate.final_iteration}). Review and save to update the source.`);
+      },
+      remove: () => {
+        if (!live() || !graph.definition.loop) return;
+        delete graph.definition.loop; trainingDrafts.delete(LOOP_DRAFT);
+        edit('Research loop removed locally. Review and save to update the source.');
+      },
+      limit: input => {
+        if (!live() || !graph.definition.loop) return;
+        input.setCustomValidity('');
+        if (input.value.trim() !== '' && Number.isInteger(input.valueAsNumber) && input.checkValidity()) {
+          graph.definition.loop.final_iteration = input.valueAsNumber; trainingDrafts.delete(LOOP_DRAFT);
+          status('Iteration limit changed locally. Review and save to update the source.');
+        } else {
+          trainingDrafts.set(LOOP_DRAFT, input.value); input.setCustomValidity('Enter a whole number of at least 1.');
+          status('Invalid iteration limits are not reviewed. Enter a whole number of at least 1.');
+        }
+        loopMode(); changed();
+      }
+    });
+  }
   function render() {
-    renderGraph(); renderInspector();
+    renderGraph(); renderInspector(); renderLoop();
     if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) input.disabled = true;
     if (pending && mode !== 'binding-draft') for (const input of document.querySelectorAll('#editor-inspector select[data-node], #editor-inspector .editor-disconnect')) input.disabled = true;
     if (mode === 'binding-draft') for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) {
@@ -366,7 +406,7 @@
     taskSelection = null; taskMessage = '';
     sourceAvailable = false; pending = false; sourceDirty = false; mode = 'source';
     trainingDrafts.clear();
-    base = null; graph = null; conflict = null; reviewed = null; inventory = []; training = null; selected = null;
+    base = null; graph = null; conflict = null; reviewed = null; inventory = []; training = null; loopTemplate = null; selected = null;
     bindingDraft = null; bindingDraftConflict = false;
     $('conflict').hidden = true; $('rebase').disabled = true;
     $('source').value = ''; $('source').disabled = true;
@@ -433,7 +473,7 @@
       $('source').value = value.source; $('source').disabled = false; graph = clone(value.document); mode = 'source'; sourceDirty = false;
       // Choices depend on actual new nodes/externals: refresh projection through
       // the reviewed document using server-derived options returned by review.
-      inventory = value.port_inventory || []; training = value.training; selected = graph.definition.nodes.some(n => n.id === selected) ? selected : graph.definition.nodes[0]?.id;
+      inventory = value.port_inventory || []; training = value.training; loopTemplate = value.loop_template || null; selected = graph.definition.nodes.some(n => n.id === selected) ? selected : graph.definition.nodes[0]?.id;
       pending = value.source !== base.source;
       reviewed = {source: value.source, sha256: value.sha256, base: base.sha256, taskReview: value.task_reference_update,
         taskSelection: value.task_reference_update ? (proposal.kind === 'task_references' ? clone(proposal) : selection) : null};
@@ -448,7 +488,7 @@
         showConflict(error.value.current, mode === 'binding-draft');
         diagnostic(error.value?.diagnostics); status(error.message); return;
       }
-      if (error.value?.proposal) { const proposal = error.value.proposal; bindingDraft = null; bindingDraftConflict = false; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training; mode = 'source'; sourceDirty = false; render(); }
+      if (error.value?.proposal) { const proposal = error.value.proposal; bindingDraft = null; bindingDraftConflict = false; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training; loopTemplate = proposal.loop_template || null; mode = 'source'; sourceDirty = false; render(); }
       if (error.value?.proposal?.task_reference_update) showTaskRefusal(error.value.proposal, selection || error.value.proposal);
       else if (mode === 'binding-draft' && ['draft_incomplete', 'draft_invalid'].includes(error.code)) {
         bindingDraft.inspection = {status: error.code.slice('draft_'.length), diagnostics: [error.message]};
@@ -459,7 +499,9 @@
   }
   $('review').addEventListener('click', () => reviewProposal(mode === 'binding-draft'
     ? {kind: 'draft', draft: {base_document: clone(bindingDraft.base_document), bindings: clone(bindingDraft.bindings)}}
-    : mode === 'document' ? {kind: 'document', document: clone(graph)} : {kind: 'source', source: $('source').value}));
+    : mode === 'document' ? {kind: 'document', document: clone(graph)}
+    : mode === 'loop' ? {kind: 'loop', source: $('source').value, loop: graph.definition.loop ? clone(graph.definition.loop) : null}
+    : {kind: 'source', source: $('source').value}));
   $('save').addEventListener('click', async () => {
     if (!window.consoleSession.connected || saving || !reviewed || reviewed.source !== $('source').value || !taskAccepted()) return;
     const id = project, version = generation, exact = {...reviewed};
