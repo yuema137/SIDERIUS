@@ -1,4 +1,4 @@
-"""Detached native empty-review route, distinct from nonempty in-process retrieval."""
+"""Native literature worker input plus detached empty-review route coverage."""
 
 import json
 import os
@@ -9,22 +9,29 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from agent.schemas.literature_review import LiteratureReviewOutput
+from agent.schemas.proposal import AgentCard, ExpertContextItem, ProposalInput
+from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
+    NamedLiteratureReviewOutput,
+    local_typed_evidence_many,
+)
 from tests.helpers.candidate_literature import literature_request, write_literature_provider
 from tests.integration.tools.test_candidate_operations import wait_for
 from tests.integration.tools.test_candidate_operations_native import cli, native_submitter
-from tests.unit.tools.candidate_worker.conftest import prepared
+from tests.unit.tools.candidate_worker.conftest import prepared, refresh
+from tests.unit.tools.candidate_worker.test_native import native_runner
 from tools.candidate_console.app import create_app
 from tools.candidate_console.models import ConsoleConfig
 from tools.candidate_operations import CandidateOperation, OperationStoreConfig, read_operation
 from tools.candidate_operations.process import environment
 from tools.candidate_operations.read import releasable
+from tools.candidate_worker import launch_candidate
 
-pytestmark = pytest.mark.skipif(
+
+@pytest.mark.skipif(
     os.environ.get("SIDERIUS_TEST_WORKSPACE_SANDBOX") != "1",
     reason="requires explicit bubblewrap-capable host opt-in",
 )
-
-
 def test_detached_empty_review_cli_http_and_native_accounting(prepared, tmp_path):
     """Actual retained worker and independent readers; no real retrieval or provider requests."""
     request = literature_request(prepared).model_copy(
@@ -101,3 +108,107 @@ def test_detached_empty_review_cli_http_and_native_accounting(prepared, tmp_path
         )
     assert response.status_code == 200, response.text
     assert response.json()["graph_trace"] == status["receipt"]["graph_trace"]
+
+
+def test_external_proposal_worker_carries_multiple_attributed_reviews(
+    prepared, native_runner, monkeypatch
+):
+    """Actual worker sends and persists the collection through native fake-provider calls."""
+
+    project = Path(prepared.preview.project_root)
+    seed_path = project / "seed.json"
+    seed = ProposalInput.model_validate_json(seed_path.read_bytes())
+
+    def review(agent_name: str, source_ref: str, claim: str) -> LiteratureReviewOutput:
+        return LiteratureReviewOutput(
+            agent_card=AgentCard(
+                agent_name=agent_name,
+                role="Reviews a bounded scientific literature area.",
+                expertise_domain="Synthetic sequence modeling.",
+                coverage=f"Sources represented by {source_ref}.",
+                limitations="Claims need validation on the declared task.",
+                trust_level="soft_prior",
+                trust_guidance="Treat findings as external hypotheses.",
+            ),
+            findings=[
+                ExpertContextItem(
+                    source=agent_name,
+                    kind="literature",
+                    content=claim,
+                    source_ref=source_ref,
+                    confidence=0.7,
+                )
+            ],
+            retrieved_papers=[],
+            run_name=prepared.run_name,
+            started_at="2026-01-01T00:00:00Z",
+            finished_at="2026-01-01T00:01:00Z",
+        )
+
+    seed = local_typed_evidence_many(
+        [
+            NamedLiteratureReviewOutput(
+                contribution_id="review-spectral",
+                output=review(
+                    "spectral-reviewer",
+                    "doi:10.0000/spectral",
+                    "A spectral loss may improve localized frequency residuals.",
+                ),
+            ),
+            NamedLiteratureReviewOutput(
+                contribution_id="review-time-domain",
+                output=review(
+                    "time-domain-reviewer",
+                    "doi:10.0000/time",
+                    "A spectral loss may hide time-domain transients.",
+                ),
+            ),
+        ],
+        proposal_input=seed,
+    )
+    seed_payload = seed.model_dump(mode="json")
+    seed_payload.pop("storage")
+    seed_path.write_text(json.dumps(seed_payload))
+    request = refresh(prepared)
+    provider_requests = []
+    for method in ("generate_text", "generate"):
+        original = getattr(native_runner, method)
+
+        def capture(self, system, user, _original=original, **kwargs):
+            provider_requests.append({"label": kwargs.get("label"), "system": system, "user": user})
+            return _original(self, system, user, **kwargs)
+
+        monkeypatch.setattr(native_runner, method, capture)
+
+    receipt = launch_candidate(request)
+    assert receipt.status == "accepted", receipt.error
+
+    persisted = json.loads(
+        (Path(receipt.workspace) / "candidate_run/proposal_input.json").read_bytes()
+    )
+    contributions = persisted["literature_review_evidence"]["reviews"]
+    assert [item["contribution_id"] for item in contributions] == [
+        "review-spectral",
+        "review-time-domain",
+    ]
+    assert [item["evidence"]["agent_card"]["agent_name"] for item in contributions] == [
+        "spectral-reviewer",
+        "time-domain-reviewer",
+    ]
+
+    proposer_requests = [
+        item for item in provider_requests if (item["label"] or "").startswith("proposer")
+    ]
+    assert proposer_requests
+    request_text = "\n".join(item["user"] for item in proposer_requests)
+    for expected in (
+        "review-spectral",
+        "spectral-reviewer",
+        "doi:10.0000/spectral",
+        "A spectral loss may improve localized frequency residuals.",
+        "review-time-domain",
+        "time-domain-reviewer",
+        "doi:10.0000/time",
+        "A spectral loss may hide time-domain transients.",
+    ):
+        assert expected in request_text

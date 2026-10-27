@@ -14,12 +14,17 @@ Tests cover:
 """
 
 import pytest
+from pydantic import ValidationError
 
+from agent.prompt_templates.proposal import render_literature_review_evidence
 from agent.schemas.literature_review import LiteratureReviewOutput
-from agent.schemas.proposal import AgentCard, ExpertContextItem, VocabEntry
+from agent.schemas.proposal import AgentCard, ExpertContextItem, ProposalInput, VocabEntry
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
+    NamedLiteratureReviewOutput,
     database_all_channels,
     local_all_channels,
+    local_typed_evidence_many,
 )
 
 # ---------------------------------------------------------------------------
@@ -27,9 +32,9 @@ from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
 # ---------------------------------------------------------------------------
 
 
-def _make_agent_card() -> AgentCard:
+def _make_agent_card(agent_name: str = "ml_literature_review") -> AgentCard:
     return AgentCard(
-        agent_name="ml_literature_review",
+        agent_name=agent_name,
         role="Surveys published ML literature for techniques that may break "
         "current architectural bottlenecks.",
         expertise_domain="Time-series denoising and 1-D sequence modeling.",
@@ -71,15 +76,18 @@ def _make_output(
     findings: list[ExpertContextItem] | None = None,
     vocab: list[VocabEntry] | None = None,
     mindset: str | None = None,
+    *,
+    agent_name: str = "ml_literature_review",
+    run_name: str = "test_run",
 ) -> LiteratureReviewOutput:
     return LiteratureReviewOutput(
-        agent_card=_make_agent_card(),
+        agent_card=_make_agent_card(agent_name),
         findings=findings if findings is not None else [],
         new_vocab_candidates=vocab if vocab is not None else [],
         suggested_mindset=mindset,
         retrieved_papers=[],
         search_rounds_used=0,
-        run_name="test_run",
+        run_name=run_name,
         started_at="2026-06-02T00:00:00Z",
         finished_at="2026-06-02T00:01:00Z",
     )
@@ -202,3 +210,146 @@ class TestDatabaseAllChannels:
         output = _make_output()
         with pytest.raises(NotImplementedError, match="Postgres StorageConfig backend"):
             database_all_channels(output)
+
+
+def _proposal_input() -> ProposalInput:
+    return ProposalInput(interpretation_evidence=build_proposer_evidence({}))
+
+
+def _named(contribution_id: str, agent_name: str, source_ref: str, claim: str):
+    return NamedLiteratureReviewOutput(
+        contribution_id=contribution_id,
+        output=_make_output(
+            findings=[
+                ExpertContextItem(
+                    source="ml_literature_review",
+                    kind="literature",
+                    content=claim,
+                    source_ref=source_ref,
+                    confidence=0.7,
+                )
+            ],
+            agent_name=agent_name,
+        ),
+    )
+
+
+def test_plural_adapter_preserves_three_named_conflicting_reviews_and_order():
+    """Catches two-only handling, claim deduplication, attribution loss or reordering."""
+
+    proposal = local_typed_evidence_many(
+        [
+            _named("review-a", "spectral-reviewer", "doi:10.0000/a", "Use a spectral loss."),
+            _named("review-b", "time-domain-reviewer", "doi:10.0000/b", "Avoid spectral loss."),
+            _named("review-c", "hybrid-reviewer", "doi:10.0000/a", "Use a spectral loss."),
+        ],
+        proposal_input=_proposal_input(),
+    )
+
+    collection = proposal.literature_review_evidence
+    assert collection is not None
+    serialized = collection.model_dump(mode="json")
+    assert [item["contribution_id"] for item in serialized["reviews"]] == [
+        "review-a",
+        "review-b",
+        "review-c",
+    ]
+    assert [item["evidence"]["agent_card"]["agent_name"] for item in serialized["reviews"]] == [
+        "spectral-reviewer",
+        "time-domain-reviewer",
+        "hybrid-reviewer",
+    ]
+    assert [item["evidence"]["findings"][0]["content"] for item in serialized["reviews"]] == [
+        "Use a spectral loss.",
+        "Avoid spectral loss.",
+        "Use a spectral loss.",
+    ]
+    rendered = render_literature_review_evidence(collection)
+    positions = [
+        rendered.index(value)
+        for value in (
+            "Review: review-a",
+            "spectral-reviewer",
+            "doi:10.0000/a",
+            "Use a spectral loss.",
+            "Review: review-b",
+            "time-domain-reviewer",
+            "doi:10.0000/b",
+            "Avoid spectral loss.",
+            "Review: review-c",
+        )
+    ]
+    assert positions == sorted(positions)
+
+
+def test_plural_adapter_refuses_duplicate_ids_and_mixed_run_identity():
+    """Catches ambiguous contribution identity or reviews from different runs."""
+
+    duplicate_ids = [
+        _named("same", "reviewer-a", "doi:10.0000/a", "Claim A."),
+        _named("same", "reviewer-b", "doi:10.0000/b", "Claim B."),
+    ]
+    with pytest.raises((ValueError, ValidationError), match="contribution IDs must be unique"):
+        local_typed_evidence_many(duplicate_ids, proposal_input=_proposal_input())
+
+    mixed_runs = [
+        _named("review-a", "reviewer-a", "doi:10.0000/a", "Claim A."),
+        NamedLiteratureReviewOutput(
+            contribution_id="review-b",
+            output=_make_output(run_name="other_run"),
+        ),
+    ]
+    with pytest.raises(ValueError, match="share the same run_name"):
+        local_typed_evidence_many(mixed_runs, proposal_input=_proposal_input())
+
+
+def test_plural_adapter_refuses_existing_evidence_and_incomplete_output():
+    """Catches silent replacement and a malformed producer object crossing the edge."""
+
+    with pytest.raises(ValueError, match="at least one named literature review"):
+        local_typed_evidence_many([], proposal_input=_proposal_input())
+
+    seed = _proposal_input().model_copy(
+        update={
+            "literature_review_evidence": local_typed_evidence_many(
+                [_named("existing", "reviewer", "doi:10.0000/x", "Existing claim.")],
+                proposal_input=_proposal_input(),
+            ).literature_review_evidence
+        }
+    )
+    with pytest.raises(ValueError, match="already contains"):
+        local_typed_evidence_many(
+            [_named("new", "reviewer", "doi:10.0000/y", "New claim.")],
+            proposal_input=seed,
+        )
+
+    with pytest.raises(ValidationError, match="run_name"):
+        NamedLiteratureReviewOutput.model_validate(
+            {"contribution_id": "incomplete", "output": {"agent_card": _make_agent_card()}}
+        )
+
+
+def test_plural_adapter_refuses_collection_over_shared_prompt_byte_limit():
+    """Catches aggregate byte growth beyond the single-review prompt ceiling."""
+
+    reviews = [
+        NamedLiteratureReviewOutput(
+            contribution_id=f"review-{index}",
+            output=_make_output(
+                findings=[
+                    ExpertContextItem(
+                        source="ml_literature_review",
+                        kind="literature",
+                        content=f"Claim {index}: " + "x" * 7_500,
+                        source_ref=f"doi:10.0000/{index}",
+                        confidence=0.7,
+                    )
+                    for _ in range(5)
+                ],
+                agent_name=f"reviewer-{index}",
+            ),
+        )
+        for index in range(2)
+    ]
+    with pytest.raises(ValidationError, match="collection exceeds the 65536-byte"):
+        local_typed_evidence_many(reviews, proposal_input=_proposal_input())

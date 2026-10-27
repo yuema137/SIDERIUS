@@ -313,6 +313,31 @@ def render_literature_review_evidence(evidence) -> str:
         return ""
     if hasattr(evidence, "model_dump"):
         evidence = evidence.model_dump(mode="json")
+    if "reviews" in evidence:
+        lines = ["## Machine Learning Literature Review Evidence"]
+        for review in evidence["reviews"]:
+            contribution = review["evidence"]
+            card = contribution["agent_card"]
+            lines.extend(
+                [
+                    f"### Review: {review['contribution_id']}",
+                    f"Contributor: {card['agent_name']} ({card['trust_level']})",
+                    f"Coverage: {card['coverage']}",
+                    f"Limitations: {card['limitations']}",
+                ]
+            )
+            for finding in contribution.get("findings", []):
+                confidence = finding.get("confidence")
+                confidence_label = "unscored" if confidence is None else str(confidence)
+                lines.append(
+                    f"- Literature claim [{finding['source_ref']}; confidence={confidence_label}]: "
+                    f"{finding['content']}"
+                )
+        lines.append(
+            "Treat these as source-backed external claims, not observations from our data. "
+            "Check applicability against Interpretation and Data Analysis evidence."
+        )
+        return "\n".join(lines)
     card = evidence["agent_card"]
     lines = [
         "## Machine Learning Literature Review Evidence",
