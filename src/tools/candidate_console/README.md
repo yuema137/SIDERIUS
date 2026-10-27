@@ -77,6 +77,8 @@ even when using the default models.
    token table, or Activity and logs when needed. When a workflow run has
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.
+   A running authored research loop shows **Stop at next boundary**: the current
+   iteration finishes, and status says stopped only once the native receipt does.
    Configured **Recorded examples** appear in Slow control. They show verified
    proposal, implementation, validation and reported-token evidence only; they
    are not live operations, training results, scientific scores or billing
