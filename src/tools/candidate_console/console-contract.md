@@ -52,8 +52,9 @@ least 32 bytes; the operator must generate random bytes. Values never enter nati
 requests. Credentials are reread per launch and only configured native environment
 names are passed; native environment validation rejects reserved names.
 The credential file format is decided once, by `files.parse_credential_payload`,
-on the bytes already read through that descriptor: first non-whitespace byte `{`
-means a strict JSON object of string names to string values; anything else is
+on the bytes already read through that descriptor: a leading UTF-8 BOM is
+ignored; first non-whitespace byte `{` means a strict JSON object of string names
+to string values (`[` or `"` is refused as malformed JSON); anything else is
 UTF-8 dotenv parsed by python-dotenv `dotenv_values(stream=..., interpolate=False)`
 (no `${...}` expansion, no second open; names without a value are absent).
 Undeclared entries are ignored and never logged. Parse refusals are raised

@@ -76,8 +76,9 @@ def token(value: str) -> str:
 def parse_credential_payload(payload: bytes) -> dict[str, str]:
     """Parse already-checked private credential bytes as JSON or dotenv.
 
-    Detection rule: if the first non-whitespace byte is ``{`` the payload is a
-    strict JSON object of string names to string values; otherwise it is
+    Detection rule: a leading UTF-8 BOM is ignored; if the first non-whitespace
+    byte is ``{`` the payload must be a strict JSON object of string names to
+    string values (``[`` or ``"`` is refused as malformed JSON); otherwise it is
     dotenv text (``KEY=value``, ``export`` prefixes, comments and quotes as
     python-dotenv defines them). Dotenv parsing never interpolates ``${...}``
     references and reads only these bytes, never a second path. Names without
@@ -89,8 +90,9 @@ def parse_credential_payload(payload: bytes) -> dict[str, str]:
     from pydantic import ValidationError
 
     text: str | None = None
+    payload = payload.removeprefix(b"\xef\xbb\xbf")  # editors may write a UTF-8 BOM
     try:
-        if payload.lstrip()[:1] == b"{":
+        if payload.lstrip()[:1] in (b"{", b"[", b'"'):
             return TypeAdapter(dict[str, str]).validate_json(payload, strict=True)
         text = payload.decode("utf-8")
     except (ValidationError, UnicodeDecodeError):

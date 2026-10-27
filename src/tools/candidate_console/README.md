@@ -258,9 +258,10 @@ Create the file privately, owned by the user running the console, with mode
 chmod 600 /absolute/private/credentials.json
 ```
 
-You can instead point `credential_file` at an existing dotenv file, such as a
-checkout's `.env`, once it is owned by you with mode `600`. A file whose first
-non-blank character is `{` is read as JSON; anything else is read as dotenv
+You can instead point `credential_file` at an existing dotenv file owned by you
+with mode `600`. Prefer one kept outside the source tree; a checkout's `.env`
+also works. A file whose first non-blank character is `{` is read as JSON;
+anything else is read as dotenv
 (comments, `export` and quotes allowed; `${...}` is not expanded). Only the
 declared names are passed to the candidate; other entries are ignored.
 
@@ -295,7 +296,7 @@ before launching.
 For direct CLI or coding-agent launches, use the separate
 [API-key procedure](../../../docs/getting-started/installation.md#api-keys):
 trusted shell-compatible external files or managed environment injection are
-supported there. Console JSON is not a shell/dotenv file.
+supported there. A JSON credential file cannot be sourced by a shell.
 
 ## Monitor reported usage
 

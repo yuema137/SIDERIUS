@@ -56,6 +56,15 @@ def test_leading_whitespace_json_still_uses_strict_json(tmp_path):
 
 
 @pytest.mark.parametrize(
+    "text", [f"\ufeffOPENAI_API_KEY={FAKE}\n", f'\ufeff{{"OPENAI_API_KEY": "{FAKE}"}}']
+)
+def test_leading_utf8_bom_is_ignored(tmp_path, text):
+    """Fails if a BOM written by an editor hides the first name or flips JSON to dotenv."""
+    path = _private(tmp_path, text)
+    assert credentials(path, ("OPENAI_API_KEY",)) == {"OPENAI_API_KEY": FAKE}
+
+
+@pytest.mark.parametrize(
     ("text", "mode", "names"),
     [
         (f"OPENAI_API_KEY={FAKE}\n", 0o644, ("OPENAI_API_KEY",)),
@@ -67,8 +76,16 @@ def test_leading_whitespace_json_still_uses_strict_json(tmp_path):
         (f'{{"OPENAI_API_KEY": "{FAKE}", broken', 0o600, ("OPENAI_API_KEY",)),
         (f'{{"OPENAI_API_KEY": ["{FAKE}"]}}', 0o600, ("OPENAI_API_KEY",)),
         (f"OPENAI_API_KEY={FAKE}\udcff\n", 0o600, ("OPENAI_API_KEY",)),
+        (f'["{FAKE}"]', 0o600, ("OPENAI_API_KEY",)),
     ],
-    ids=["mode-0644", "missing-names", "malformed-json", "non-string-json", "non-utf8-dotenv"],
+    ids=[
+        "mode-0644",
+        "missing-names",
+        "malformed-json",
+        "non-string-json",
+        "non-utf8-dotenv",
+        "json-array",
+    ],
 )
 def test_refusals_carry_names_only(tmp_path, caplog, text, mode, names):
     """Fails if a refusal, its chained cause or a log record quotes a credential value."""
