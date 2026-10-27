@@ -85,6 +85,9 @@ def execute(request_path: Path) -> None:
         literature_document=document
         if document.execution_profile == "native-literature-candidate/v1"
         else None,
+        reusable_document=document
+        if document.execution_profile == "native-interpretation-candidate/v1"
+        else None,
     )
     for name, workflow_payload in (
         ("workflow.json", (resolved.document.model_dump_json(indent=2) + "\n").encode()),

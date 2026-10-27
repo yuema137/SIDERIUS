@@ -59,6 +59,7 @@ def prepare_payloads(
     expected_task_binding: "TaskBinding | None" = None,
     layout: PreparationLayout | None = None,
     literature_document: "ReusableWorkflowDocument | None" = None,
+    reusable_document: "ReusableWorkflowDocument | None" = None,
 ) -> str:
     """Compose the selected task and save exact native inputs without a provider."""
     output = Path(request.output_dir)
@@ -74,11 +75,27 @@ def prepare_payloads(
     config = parse_config(config_bytes)
     composition = compose_run_task_bindings(request.task_manifest)
     with bind_run_task_composition(composition, physical_data_root=request.data_root):
+        interpretation_workspace = str(output / "preparation")
+        if reusable_document is not None:
+            from tools.candidate_worker.layout import graph_instance_dir
+            from workflows.definition.fanout import execution_families
+
+            shape = execution_families(
+                reusable_document.definition, reusable_document.execution_profile
+            )
+            assert shape.interpretation is not None
+            interpretation_workspace = str(
+                graph_instance_dir(
+                    Path(request.candidate_workspace),
+                    request.run_name,
+                    shape.interpretation.interpretation,
+                )
+            )
         interpretation_input = InterpretationInput(
             storage=StorageConfig(
                 backend="local",
                 local=LocalStorageConfig(
-                    workspace=str(output / "preparation"), run_name=request.run_name
+                    workspace=interpretation_workspace, run_name=request.run_name
                 ),
             ),
             cold_start=True,
@@ -142,10 +159,21 @@ def prepare_payloads(
             *literature_records,
             *((item.filename, item.storage) for item in admitted.storage_records),
         )
+        generated_external_records = ()
+        if reusable_document is not None:
+            from .reusable_interpretation import external_payloads
+
+            generated_external_records = external_payloads(
+                reusable_document, request, interpretation_input, proposals[0][1]
+            )
         for name, record in records:
             payload = (record.model_dump_json(indent=2) + "\n").encode()
             if isinstance(record, ProposalInput) and training is not None:
                 payload = _training_seed_bytes(record, training)
+            if layout is not None:
+                bounded_payload(payload)
+            publish_bytes_write_once(str(output / name), payload)
+        for name, payload in generated_external_records:
             if layout is not None:
                 bounded_payload(payload)
             publish_bytes_write_once(str(output / name), payload)

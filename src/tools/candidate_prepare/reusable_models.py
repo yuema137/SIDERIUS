@@ -108,19 +108,31 @@ def reusable_files(document: ReusableWorkflowDocument) -> tuple[str, ...]:
     if document.execution_profile is not None:
         from workflows.definition.fanout import execution_families
 
-        from .layout import graph_literature_bindings, proposal_filename, storage_filename
+        from .layout import (
+            graph_literature_bindings,
+            graph_storage_filenames,
+            interpretation_external_bindings,
+            proposal_filename,
+        )
 
         shape = execution_families(document.definition, document.execution_profile)
         proposals = tuple(
             proposal_filename(document.execution_profile, family.proposal)
             for family in shape.families
         )
-        storage = tuple(storage_filename(implementation) for implementation, _ in shape.branches)
-        return tuple(
-            item
-            for name in REUSABLE_FILES
-            for item in ({"storage.json": storage, "proposal.json": proposals}.get(name, (name,)))
-        ) + tuple(graph_literature_bindings(document).values())
+        storage = graph_storage_filenames(document)
+        return (
+            tuple(
+                item
+                for name in REUSABLE_FILES
+                for item in (
+                    {"storage.json": storage, "proposal.json": proposals}.get(name, (name,))
+                )
+            )
+            + tuple(graph_literature_bindings(document).values())
+            + tuple(interpretation_external_bindings(document).values())
+            + (("training_settings.json",) if document.training_settings is not None else ())
+        )
     if document.training_settings is None:
         return REUSABLE_FILES
     return (*REUSABLE_FILES, "training_settings.json")
