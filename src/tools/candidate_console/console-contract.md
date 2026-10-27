@@ -320,7 +320,11 @@ iteration or a native failure may still end the loop first. Refusals: unknown
 operation 404; `kind` (not an authored candidate loop), `not_ready` (worker has
 not claimed its workspace) and `not_running` (terminal or not confirmed running)
 409 with route-local fixed messages; `integrity` and others 409 with the generic
-message. Native detail and paths are never echoed.
+message. Native detail and paths are never echoed. A repeated POST after the
+Stop marker exists replays the recorded request and returns 200 `requested`
+even when the loop has since become terminal (the backend replays the marker
+before its running check); a 200 is therefore an idempotent acknowledgement,
+never evidence that the loop is still running.
 
 Slow control: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
