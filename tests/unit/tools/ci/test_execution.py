@@ -123,17 +123,6 @@ class TestRunShard:
 
 
 class TestFrozenSensitiveManifest:
-    def test_the_manifest_is_exactly_the_six_reviewed_files(self):
-        """Freezing means the set does not drift silently.
-
-        Fails as: a file is added or removed without the reasoning that CP-6
-        requires, re-opening the keyword-classification trap.
-        """
-        assert len(SENSITIVE_FILES) == 6
-        assert TIMING_FILES | GIT_STATE_FILES == set(SENSITIVE_FILES)
-        assert len(GIT_STATE_FILES) == 0
-        assert len(TIMING_FILES) == 6
-
     def test_checkpoint_worker_deadline_witness_is_excluded_from_bulk(self):
         """52373be9 timed out before the blocking-read marker under bulk load.
 

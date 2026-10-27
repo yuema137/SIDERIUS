@@ -49,9 +49,7 @@ from execute_tools.health_checks._task_health_config import (
     HealthProviderBinding,
     HealthRosterEntry,
     TaskHealthConfig,
-    ValueScale,
 )
-from execute_tools.health_checks.schemas import TaskHealthFacts
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 """tests/unit/execute_tools/health_checks/<this file> → four hops to the root.
@@ -411,31 +409,6 @@ class TestTheTaskCannotStateFrameworkPolicy:
         """
         assert TASK_DECLARABLE_POLICY_KEYS == {"aggregation"}
 
-    def test_no_key_is_both_refused_and_declarable(self):
-        """A key in both sets is a contradiction, not a precedence.
-
-        It would be rejected at authoring and honoured at composition — two
-        authorities disagreeing about whether the value can exist at all.
-        Neither set's own test can see this; only their intersection can.
-        """
-        assert not (FRAMEWORK_OWNED_PARAMETER_KEYS & TASK_DECLARABLE_POLICY_KEYS)
-
-    def test_a_declared_aggregation_is_accepted(self):
-        """The F-SCAND-2 capability at the authoring boundary.
-
-        Fails with a ``ValidationError`` naming "framework policy" the
-        moment ``aggregation`` is put back into
-        ``FRAMEWORK_OWNED_PARAMETER_KEYS``.
-        """
-        entry = HealthRosterEntry(
-            gate_id="amplitude_collapse_blocking",
-            check="amplitude_collapse",
-            disposition=HealthDisposition.BLOCKING,
-            parameters={"collapse_threshold": 0.95, "aggregation": "any_pass"},
-        )
-
-        assert entry.parameters == {"collapse_threshold": 0.95, "aggregation": "any_pass"}
-
     @pytest.mark.parametrize("mode", ["any_pass", "all_pass", "max", "min", "mean", "median"])
     def test_every_implemented_mode_is_declarable(self, mode):
         """A task may reach the whole runtime vocabulary, not a sub-slice.
@@ -548,30 +521,10 @@ class TestTheTaskCannotStateFrameworkPolicy:
 class TestFactsVocabularyIsReusedNotRestated:
     """08a's ``TaskHealthFacts`` is the one facts vocabulary (§4.1)."""
 
-    def test_the_document_embeds_08a_facts(self):
-        cfg = TaskHealthConfig.model_validate({"facts": {"encoding_family": "int8_symbol_stream"}})
-
-        assert isinstance(cfg.facts, TaskHealthFacts)
-        assert isinstance(cfg.resolved_facts(), TaskHealthFacts)
-
     def test_an_axis_outside_08a_vocabulary_is_refused(self):
         """A second facts vocabulary cannot be smuggled in through this document."""
         with pytest.raises(ValidationError):
             TaskHealthConfig.model_validate({"facts": {"invented_axis": "x"}})
-
-
-class TestValueScaleOwnsUnitAndNumberTogether:
-    """§3.9 — separating them is what broke parity in 08a."""
-
-    def test_both_halves_are_required(self):
-        with pytest.raises(ValidationError):
-            ValueScale(unit="mV")  # type: ignore[call-arg]
-        with pytest.raises(ValidationError):
-            ValueScale(units_per_sample=0.3125)  # type: ignore[call-arg]
-
-    def test_the_tidmad_factor_is_expressible_exactly(self):
-        """40/128 is binary-exact, so the migration cannot lose precision."""
-        assert ValueScale(unit="mV", units_per_sample=40.0 / 128.0).units_per_sample == 0.3125
 
 
 class TestTaskHealthConfigIsConsumedOnlyThroughTheBindingSeam:

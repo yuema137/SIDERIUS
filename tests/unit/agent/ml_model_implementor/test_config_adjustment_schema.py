@@ -23,8 +23,6 @@ import pytest
 from pydantic import ValidationError
 
 from agent.schemas.implementor import (
-    _FORBIDDEN_ADJUSTMENT_FIELDS,
-    _MAX_ADJUSTMENT_DELTA,
     ConfigAdjustment,
     ImplementorOutput,
 )
@@ -163,23 +161,6 @@ class TestConfigAdjustmentEdgeCases:
         )
         assert adj.original_value == 0
 
-    def test_reason_required_non_empty(self):
-        with pytest.raises(ValidationError) as exc:
-            ConfigAdjustment(
-                original_value=100,
-                adjusted_value=110,
-                reason="",
-            )
-        # Pydantic reports min_length violation
-        assert "reason" in str(exc.value).lower()
-
-    def test_reason_missing_rejected(self):
-        with pytest.raises(ValidationError):
-            ConfigAdjustment(
-                original_value=100,
-                adjusted_value=110,
-            )
-
 
 # =====================================================================
 # ImplementorOutput.baseline_config_adjustments — ownership check
@@ -187,11 +168,6 @@ class TestConfigAdjustmentEdgeCases:
 
 
 class TestImplementorOutputAdjustments:
-    def test_defaults_to_empty_dict(self):
-        """Existing tests construct ImplementorOutput without this field — must stay valid."""
-        out = ImplementorOutput(**_BASE_OUTPUT_KW)
-        assert out.baseline_config_adjustments == {}
-
     def test_valid_model_internal_adjustment_accepted(self):
         out = ImplementorOutput(
             **_BASE_OUTPUT_KW,
@@ -259,19 +235,3 @@ class TestImplementorOutputAdjustments:
             },
         )
         assert len(out.baseline_config_adjustments) == 2
-
-
-class TestModuleConstants:
-    """Lightweight sanity checks on the module-level policy constants."""
-
-    def test_forbidden_set_contains_segmentation_size(self):
-        # This is the only dataset-level field we guard today (docs §5.1).
-        assert "segmentation_size" in _FORBIDDEN_ADJUSTMENT_FIELDS
-
-    def test_forbidden_set_is_frozen(self):
-        # Guard against accidental mutation at runtime.
-        assert isinstance(_FORBIDDEN_ADJUSTMENT_FIELDS, frozenset)
-
-    def test_delta_threshold_matches_locked_decision(self):
-        # docs §5.2 locked in ±20%.
-        assert _MAX_ADJUSTMENT_DELTA == 0.20

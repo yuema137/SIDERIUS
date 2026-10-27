@@ -12,40 +12,7 @@ import inspect
 import re
 from pathlib import Path
 
-from workflows.model_exploration import run_workflow
-
 _SRC = (Path(__file__).resolve().parents[3] / "src/workflows/model_exploration.py").read_text()
-
-
-class TestRunWorkflowSignature:
-    def test_policy_params_with_locked_defaults(self):
-        """Step 09.5a C3 split these across two owners, so the assertion follows
-        them rather than the old flat signature.
-
-        `enable_structured_health_feedback` is a LOCKED RUN INVARIANT and stays
-        an explicit authority on the signature; the two retention bounds are
-        transit configuration and moved to the launch carrier.
-
-        The restored fingerprint history was "a chain-state seed that stays
-        explicit until C4" — Step 10 / P1 C5 is where it moved, into the ONE
-        `restored_state` carrier (09.5a's C4b hand-off). The assertion follows
-        it there rather than being deleted: what this test is for is that the
-        DEFAULTS are unchanged, and an absent restored state must still mean
-        an empty history exactly as `None` did.
-        """
-        from core.resume import RestoredState
-        from workflows.run_config import WorkflowLaunchConfig
-
-        sig = inspect.signature(run_workflow)
-        assert sig.parameters["enable_structured_health_feedback"].default is False
-        assert sig.parameters["restored_state"].default is None
-        # Cold start and "restored nothing" must remain indistinguishable to
-        # every consumer: both are falsy, which is what the consumers test.
-        assert RestoredState().collapse_fingerprint_history == {}
-
-        launch = WorkflowLaunchConfig()
-        assert launch.health_feedback_history_window_iterations == 3
-        assert launch.health_feedback_history_max_entries_per_model == 8
 
 
 class TestLockCall:

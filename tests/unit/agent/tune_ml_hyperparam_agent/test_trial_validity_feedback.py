@@ -213,16 +213,6 @@ class TestTheFactsAreTransportedUnchanged:
 class TestProducerToConsumerReachability:
     """A field written to an artifact but never consumed is not complete."""
 
-    def test_the_tuner_output_declares_the_carrier(self):
-        from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
-
-        assert "trial_validity_feedback" in HyperparamTuningOutput.model_fields
-
-    def test_the_proposal_input_declares_the_window(self):
-        from agent.schemas.proposal import ProposalInput
-
-        assert "recent_trial_validity" in ProposalInput.model_fields
-
     def test_the_protocol_collects_it_from_tuner_outputs(self):
         """MUTATION TARGET: producing the report but never forwarding it."""
         import inspect

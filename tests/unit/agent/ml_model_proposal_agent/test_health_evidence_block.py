@@ -157,9 +157,6 @@ class TestLegacyEmptyPartial:
         Without this, moving the check upstream and ALSO leaving a silent
         render-time fallback would look identical from the test above.
         """
-        from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
-
-        assert "collapse_fingerprint_history" in ProposerInterpretationEvidence.model_fields
         evidence = build_proposer_evidence(
             structured_interpretation_output().model_dump(mode="json")
         )

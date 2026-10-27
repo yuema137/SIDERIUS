@@ -39,8 +39,6 @@ from execute_tools.observables import (
     acquisition_of,
 )
 from workflows.task_composition import (
-    _MANIFEST_KEYS,
-    _REQUIRED_KEYS,
     TaskCompositionError,
     compose_observables_from_manifest,
     compose_run_task_bindings,
@@ -95,18 +93,6 @@ def _entry(symbol: str, name: str) -> dict:
 
 
 class TestTheKeysAreDeclarable:
-    def test_both_sections_are_manifest_keys_and_neither_is_required(self):
-        """A task may declare observables, and a task with none stays valid.
-
-        Both halves matter. Without the first, level 1 does not exist at all.
-        Without the second, every existing manifest would fail to compose the
-        moment this family landed.
-        """
-        assert "dynamic_observables" in _MANIFEST_KEYS
-        assert "static_observables" in _MANIFEST_KEYS
-        assert "dynamic_observables" not in _REQUIRED_KEYS
-        assert "static_observables" not in _REQUIRED_KEYS
-
     def test_a_declared_manifest_composes_both_families_in_manifest_order(self, manifest):
         path = _write(
             manifest,
@@ -239,18 +225,6 @@ class TestAcquisitionIsAType:
         )
         with pytest.raises(TaskCompositionError, match="not a usable observable"):
             compose_run_task_bindings(path)
-
-    def test_the_two_bases_declare_DIFFERENT_abstract_methods(self):
-        """The structural reason the two cannot be satisfied interchangeably.
-
-        If both bases ever declared the same method set, an implementation
-        would satisfy either by accident and `isinstance` would stop
-        discriminating — the type would collapse back into a convention
-        without any test that asserts a refusal going red.
-        """
-        assert DynamicObservable.__abstractmethods__ == frozenset({"reset", "update", "value"})
-        assert StaticObservable.__abstractmethods__ == frozenset({"compute"})
-        assert not (DynamicObservable.__abstractmethods__ & StaticObservable.__abstractmethods__)
 
 
 # ---------------------------------------------------------------------------

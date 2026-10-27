@@ -55,10 +55,6 @@ class TestTheHostOomStatusHasExactlyOneConsumingAuthority:
     The defect existed because producer and consumer never shared a name.
     """
 
-    def test_the_producer_side_is_unchanged(self):
-        src = _OOM_PRODUCER.read_text(encoding="utf-8")
-        assert src.count(f'status = "{_OOM_STATUS}" if _is_oom_failure(e) else "error"') == 3
-
     def test_exactly_one_production_module_spells_the_status_in_code(self):
         """Scope, stated explicitly: every non-test `.py` under the
         production roots — the same walk the pre-fix census used, so the

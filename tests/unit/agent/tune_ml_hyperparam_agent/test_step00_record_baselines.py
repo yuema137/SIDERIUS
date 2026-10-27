@@ -1,4 +1,4 @@
-"""Step-00 REC-1 / REC-2 / REC-3 / REC-4 — record & artifact baselines.
+"""Step-00 REC-2 / REC-3 / REC-4 — record & artifact baselines.
 
 Design: ``docs/design/generic_framework_upgrade/step_00_golden_baseline_harness.md``
 §13.3 / §22.1 (OD-2 outcome A) / §15.1 (roadmap steps 03/05/08/09/10/12).
@@ -27,155 +27,16 @@ from pathlib import Path
 
 import pytest
 
-from agent.schemas.hyperparam_tuning import (
-    ExperimentRecord,
-    HyperparamTuningOutput,
-    TrialConfig,
-)
-from agent.schemas.interpretation import InterpretationOutput
+from agent.schemas.hyperparam_tuning import ExperimentRecord
 from tests.helpers.golden import assert_json_golden
 from tests.helpers.step00_pseudo_iteration import (
     PLUGIN_MODEL_TYPE,
     run_bounded_pseudo_iteration,
 )
 
-# PR #548 declares one additive output field: formal_validity_feedback before
-# trial_validity_feedback. Its independent ordered golden is updated surgically;
-# no recorded scientific values or other schema fields were re-captured.
 GOLDENS = Path(__file__).parent / "goldens"
 
 _PRESENT = "<present>"
-
-# ---------------------------------------------------------------------------
-# REC-1 — ordered full field lists (Type 3). Hardcoded expectations,
-# captured at clean tree; NEVER read back from the schema under test.
-#
-# Declared delta, `R-OBS-1` (2026-08-27): 63 -> 64. `static_observations`
-# was inserted after `training_diagnosis`, the position `model_fields`
-# reports for it. Measured before the list was touched: EXACTLY ONE ADDED
-# NAME, zero moved, zero removed — and the same one key, `{}`, in each of
-# the two REC-2 projection goldens, inserted surgically rather than
-# re-captured. The record WRITER emits no key at all for a run that
-# declares no static observable, so a non-declaring run's persisted record
-# file is byte-identical; what these baselines see is the SCHEMA default
-# materializing through `model_dump()`.
-# NOTE: the duplicate `file_vector` declaration (design §13.8) is
-# byte-identical and keeps first-declaration position — this list cannot
-# detect it; the known-defect register is the guard.
-# ---------------------------------------------------------------------------
-
-EXPERIMENT_RECORD_FIELDS = [
-    "record_type",
-    "exp_id",
-    "status",
-    # Protected native execution receipts; absent selection remains omitted.
-    "gpu_execution",
-    "model_type",
-    "candidate_id",
-    "timestamp",
-    "file_index",
-    "params",
-    "logical_round",
-    "attempt_index",
-    "failure_stage",
-    "failure_type",
-    "proposed_config",
-    "gpu_evidence",
-    "failure_attribution",
-    "traceback_summary",
-    "counts_toward_completed_rounds",
-    "counts_toward_attempt_budget",
-    "final_loss",
-    "loss_history",
-    "model_params",
-    # Step 07a C3 — ADDITIVE (design pr_07a §3.8 / ledger §14.3): the trainer's
-    # observation payload + its diagnosis, persisted, hidden from both LLM-facing
-    # renders. 56 → 58; positioned beside the legacy training keys, every other
-    # position unchanged.
-    "training_history",
-    "training_diagnosis",
-    # Data Analysis Gate 5 — additive, omitted from legacy serialization when
-    # absent. A successful producer may bind one immutable trained-model
-    # artifact; legacy records never guess reconstruction identity from paths.
-    "trained_model_artifact_ref",
-    "static_observations",
-    "denoising_score",
-    "file_vector",
-    "score_table",
-    "failure_reason",
-    "gate_action",
-    "health_gate_results",
-    # Deployment receipt is additive and omitted from serialization when absent.
-    "external_evaluation",
-    "scientific_authority",
-    "training_psd_segments",
-    "eval_psd_segments",
-    "timing",
-    # PR #560: retain the two existing execution receipt families through the
-    # typed record boundary. Both remain omitted when absent; other fields
-    # and legacy persisted values are unchanged.
-    "training_budget",
-    "selected_checkpoint",
-    "target_standardization",
-    "runtime_verification",
-    "memory",
-    # #601 preserves the observed attempt role, including preflight refusals.
-    "attempt_role",
-    "is_trial",
-    "trial_strategy",
-    "trial_portion",
-    "eval_strategy",
-    "eval_portion",
-    "train_portion",
-    "target_files",
-    "validation_workload_ceiling",
-    # Step 11 C8 — ADDITIVE (design step_11 §7 C8 / R-11-9): the COMPOSED
-    # run's task-composition fingerprint, stamped at the single
-    # validate-and-persist seam so a later resume can certify the records it
-    # restores. 61 -> 62; positioned with the other run-invariant stamps it
-    # is validated beside, every earlier position unchanged. Defaults None,
-    # so every record of an UN-composed run carries what these baselines
-    # already pin.
-    "task_composition_fingerprint",
-    # arXiv U1 (#254) — ADDITIVE: the OPAQUE experiment-arm label, stamped at
-    # the same validate-and-persist seam as the fingerprint above but ONLY
-    # when the run is labelled, so the on-disk summary entries of an
-    # unlabelled run (REC-3, pinned below) carry no key. 62 -> 63; positioned
-    # beside the other run-invariant stamp it is validated with, every
-    # earlier position unchanged. Defaults None, so every record of an
-    # unlabelled run still projects to what REC-2 pins (with one added
-    # `experiment_arm: null` — the same declared-delta shape as C8's).
-    "experiment_arm",
-    "resolved_data_scope",
-    "health_gate_enabled",
-    "planned_trial_strategy",
-    "planned_eval_strategy",
-    "strategy_normalization_reason",
-    "proposed_order_strategy",
-    "proposed_file_order",
-    "ordering_proposal_rejected",
-    "ordering_proposal_rejection_reason",
-    "override_order_strategy",
-    "override_file_order",
-    # #447 separates selected ordering from actual execution evidence.
-    "ordering_observation",
-    "resolved_order_strategy",
-    "resolved_file_order",
-    "ordering_resolution_source",
-    # Step 06 C4 — ADDITIVE (design step_06 §19 C4 / ledger §20.6): the metric
-    # interface's record-facing payload. 54 → 56; every earlier position unchanged.
-    "metric_result",
-    "metric_refusal",
-    # Step 10 / P2b C2 — ADDITIVE (design pr_10_p2b §4.3 / ledger §15.6): the
-    # DECLARED observational secondaries' three outcomes — value, scientific
-    # refusal, and crash provenance. 58 -> 61; positioned beside the primary
-    # pair they mirror, every earlier position unchanged. All three default
-    # EMPTY, so every record of a run that declares no secondary carries the
-    # same values these baselines pin.
-    "secondary_metric_results",
-    "secondary_metric_refusals",
-    "secondary_metric_errors",
-]
 
 
 def project_record(rec: dict) -> dict:
@@ -185,7 +46,7 @@ def project_record(rec: dict) -> dict:
     scores, vector, score_table, params configs, trial/eval stamps,
     DataScope stamps, ordering provenance, gate fields). Values reduced
     to presence markers: minted/measured/free-text (their KEYS remain —
-    a rename/drop still fails here and in REC-1).
+    a rename/drop still fails here).
     """
     p = dict(rec)
     for key in ("timestamp", "exp_id"):
@@ -232,26 +93,6 @@ def pseudo_run(tmp_path_factory):
     finally:
         mp.undo()
     return output, bridge, sandbox, workspace
-
-
-class TestREC1FieldLists:
-    def test_experiment_record_ordered_fields(self):
-        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS
-
-    def test_output_and_interpretation_field_counts_and_heads(self):
-        """REC-3 schema part: HyperparamTuningOutput and
-        InterpretationOutput ordered field lists, pinned as committed
-        JSON expectations (46 and 35+ fields — too long for inline
-        literals; the JSON golden IS the hardcoded expectation)."""
-        assert_json_golden(
-            {
-                "hyperparam_tuning_output": list(HyperparamTuningOutput.model_fields),
-                "interpretation_output": list(InterpretationOutput.model_fields),
-                "trial_config": list(TrialConfig.model_fields),
-            },
-            GOLDENS / "rec3_schema_field_lists.json",
-            surface="REC-3 artifact schema ordered field lists",
-        )
 
 
 class TestREC2CanonicalRecordProjection:

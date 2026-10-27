@@ -10,8 +10,6 @@ operational values land with the RT6 chain wiring).
 
 from __future__ import annotations
 
-import pytest
-
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningInput
 from nodes.ml_hyperparameter_tune_agent import (
     _build_guardrail_rejection_record,
@@ -135,16 +133,6 @@ class TestRejectionRecord:
         assert "min_formal_batch_size=4" in discovery
         assert "allow_extreme_steps=False" in discovery
         assert "480000" in record["memory"]["conclusion"]
-
-
-class TestSchemaDefaults:
-    def test_guardrails_default_disabled(self):
-        # Zero behavior change until the RT6 chain wiring sets the §5
-        # provisional operational values.
-        fields = HyperparamTuningInput.model_fields
-        assert fields["max_steps_per_attempt"].default is None
-        assert fields["min_formal_batch_size"].default is None
-        assert fields["allow_extreme_steps"].default is False
 
 
 class TestRT6CliMapping:

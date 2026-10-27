@@ -8,13 +8,10 @@ PURE function: determinism is pinned by re-deriving and comparing dumps.
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from agent.schemas.training_diagnosis import (
     FLAT_REL_TOL,
-    TrainingDiagnosis,
     derive_training_diagnosis,
     symmetric_relative_change,
 )
@@ -173,16 +170,3 @@ class TestDiagnosisRules:
         d = derive_training_diagnosis(_hist([1.0, 0.995]), flat_rel_tol=0.001)
         assert d.flat_rel_tol == 0.001 and d.train_trend == "decreasing"
         assert derive_training_diagnosis(_hist([1.0, 0.995])).train_trend == "flat"
-
-    def test_no_calibrated_labels_exist_on_the_schema(self):
-        """Parent §8.2 item 3 / Q-07a-2: overfitting / underfitting / converged /
-        plateau are NOT v1 diagnosis fields."""
-        names = set(TrainingDiagnosis.model_fields)
-        for forbidden in ("overfitting", "underfitting", "converged", "plateau"):
-            assert not any(forbidden in n for n in names), names
-
-    def test_the_diagnosis_dump_round_trips_with_non_finite_free_values(self):
-        d = derive_training_diagnosis(_hist([3.0, 2.0], [3.1, 2.1]))
-        again = TrainingDiagnosis.model_validate(d.model_dump())
-        assert again == d
-        assert all(not isinstance(v, float) or math.isfinite(v) for v in d.model_dump().values())

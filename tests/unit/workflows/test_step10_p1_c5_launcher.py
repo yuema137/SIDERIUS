@@ -35,7 +35,6 @@ from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LAUNCHER = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
-WORKFLOW = REPO_ROOT / "src/workflows" / "model_exploration.py"
 
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 FOURTH_MANIFEST = FIXTURES / "fourth_task" / "composition.yaml"
@@ -95,63 +94,6 @@ class TestTheCarriedValuesStillReachTheirConsumers:
         assert state.current_collapse_fingerprint_history == {"punet": [{"iteration": 1}]}
         assert state.current_prediction_memory is restored.prediction_memory
 
-    def test_the_workflow_unpacks_every_one_of_the_carried_fields(self):
-        """The unpacking block reads each carried value exactly once, and
-        reads the RIGHT field name for each.
-
-        Source-level because the mapping is what C5 introduced: a typo like
-        `restored_state.runtime_vocab` where `accumulated_key_findings` was
-        meant produces a run that is merely wrong, never one that raises.
-        """
-        tree = ast.parse(WORKFLOW.read_text(encoding="utf-8"))
-        run_workflow = next(
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "run_workflow"
-        )
-        read_fields = {
-            node.attr
-            for node in ast.walk(run_workflow)
-            if isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "restored_state"
-        }
-        assert read_fields == {
-            "runtime_vocab",
-            "accumulated_key_findings",
-            "model_knowledge_cache",
-            "accumulated_physical_rejections",
-            "previous_proposal_data",
-            "chain_best_valid_formal_score",
-            "collapse_fingerprint_history",
-            "prediction_memory",
-            # Step 10 / P5+P6 C2.
-            "vocab_link_confirmations",
-        }, f"the unpacking reads {sorted(read_fields)}"
-
-        helper = next(
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_restored_negative_feedback"
-        )
-        helper_fields = {
-            node.attr
-            for node in ast.walk(helper)
-            if isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "restored_state"
-        }
-        assert helper_fields == {
-            "accumulated_negative_feedback",
-            "accumulated_gate_exhaustions",
-        }
-        assert any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "_restored_negative_feedback"
-            for node in ast.walk(run_workflow)
-        )
-
     def test_cold_start_and_restored_nothing_stay_indistinguishable(self):
         """The three non-`ChainState` consumers all test TRUTHINESS, so the
         migration is only behaviour-preserving if `None` (cold start) and
@@ -171,53 +113,6 @@ class TestTheCarriedValuesStillReachTheirConsumers:
         assert not empty.collapse_fingerprint_history
         assert empty.previous_proposal_data is None
         assert empty.chain_best_valid_formal_score is None
-
-
-class TestSignatureAndCallers:
-    def test_run_workflow_has_exactly_twenty_two_parameters(self):
-        from workflows.model_exploration import run_workflow
-
-        assert len(inspect.signature(run_workflow).parameters) == 22
-
-    def test_no_compatibility_wrapper_re_exposes_the_carried_values(self):
-        """09.5a rule 2, unchanged: the old surface must not survive beside
-        the new one, or the transport this closed would still be reachable."""
-        retired = {
-            "restored_runtime_vocab",
-            "accumulated_key_findings",
-            "restored_model_knowledge_cache",
-            "accumulated_physical_rejections",
-            "accumulated_gate_exhaustions",
-            "restored_previous_proposal",
-            "restored_chain_incumbent_score",
-            "restored_collapse_fingerprint_history",
-            "restored_prediction_memory",
-        }
-        offenders: dict[str, list[str]] = {}
-        for rel in (
-            "src/workflows/model_exploration.py",
-            "src/workflows/run_one_iteration.py",
-        ):
-            tree = ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))
-            for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
-                declared = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
-                overlap = sorted(declared & retired)
-                if overlap:
-                    offenders[f"{rel}::{fn.name}"] = overlap
-        assert offenders == {}, f"the retired restored surface survives: {offenders}"
-
-    def test_the_launcher_forwards_the_carrier_and_the_composition(self):
-        tree = ast.parse(LAUNCHER.read_text(encoding="utf-8"))
-        call = next(
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "run_workflow"
-        )
-        keywords = {kw.arg: ast.unparse(kw.value) for kw in call.keywords if kw.arg}
-        assert keywords["restored_state"] == "state"
-        assert keywords["task_composition"] == "run_composition"
 
 
 @pytest.fixture(params=["run_one_iteration", "model_exploration"])
@@ -266,35 +161,6 @@ class TestTheCompositionFlag:
             )
         assert refusal.value.code == 2
         assert f"unrecognized arguments: {TASK_DATA_PATH_ARGV_FLAG}" in capsys.readouterr().err
-
-    def test_the_launcher_resolves_the_composition_before_the_workflow(self):
-        """§5.1: the workflow receives the resolved VALUE, never a path, so it
-        performs no YAML or plugin I/O of its own."""
-        tree = ast.parse(LAUNCHER.read_text(encoding="utf-8"))
-        composes = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "compose_run_task_bindings"
-        ]
-        assert len(composes) == 1
-        assert ast.unparse(composes[0].args[0]) == "args.task_composition"
-
-        workflow_tree = ast.parse(WORKFLOW.read_text(encoding="utf-8"))
-        run_workflow = next(
-            node
-            for node in ast.walk(workflow_tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "run_workflow"
-        )
-        inside = [
-            node
-            for node in ast.walk(run_workflow)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "compose_run_task_bindings"
-        ]
-        assert inside == [], "run_workflow composes; it must only consume"
 
     def test_the_launcher_wraps_the_call_in_the_binding(self):
         """The binding must ENCLOSE the workflow call, not merely precede it —

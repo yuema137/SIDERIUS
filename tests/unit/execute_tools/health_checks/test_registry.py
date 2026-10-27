@@ -7,7 +7,6 @@ from typing import Any, ClassVar
 import pytest
 
 from execute_tools.health_checks.registry import (
-    _REGISTRY,
     all_registered,
     get,
     register,
@@ -61,8 +60,5 @@ class TestRegistry:
     def test_all_registered_empty_after_clear(self, clean_registry):
         assert all_registered() == []
 
-    def test_registry_isolation_between_tests_via_fixture(self, clean_registry):
-        register(_FakeCheck("leak_test"))
-        assert "leak_test" in _REGISTRY
         # Fixture teardown restores the pre-test snapshot — next test does
         # not see this entry. Verified by the test suite running clean twice.

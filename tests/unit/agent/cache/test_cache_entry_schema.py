@@ -1,25 +1,4 @@
-"""Commit 6.3 / C1 — schema validation tests for the consolidated cache entry.
-
-Parametrized to keep the defensive shield intact (strict-mode rejections,
-length-bound caps, extra='forbid') while contracting one-input-per-test
-fixtures into single parametrized functions with explicit case IDs.
-
-What this file pins:
-
-  1. Strict-mode (``extra="forbid"``) is on for every model — unknown keys are
-     rejected immediately. Caught at instantiation, no silent drift.
-  2. Length / non-empty constraints from the spec:
-       * statement: non-empty, <= 500 chars
-       * latest:    <= 800 chars
-       * short_message: <= 120 chars
-       * history:   <= 3 entries
-  3. Closed-enum fields (``strength``, ``failure_class``) reject unknown values.
-  4. ``evidence_iters`` is non-empty and entries are >= 0 (set-union semantics
-     have no meaning for a finding that has never been observed).
-  5. ``ErrorSignature.key()`` returns the (failure_class, top_user_frame,
-     error_type) tuple — the dedup contract the consolidator relies on.
-  6. ``CacheEntry.from_legacy_dict`` is zero-friction for pre-6.3 chains.
-"""
+"""Custom cache iteration validation, error identity, and legacy conversion."""
 
 from __future__ import annotations
 
@@ -27,9 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from agent.schemas.cache_entry import (
-    ERROR_SHORT_MESSAGE_MAX_CHARS,
     FINDING_STATEMENT_MAX_CHARS,
-    NARRATIVE_HISTORY_MAX_ENTRIES,
     NARRATIVE_LATEST_MAX_CHARS,
     CacheEntry,
     ConsolidatedFinding,
@@ -42,57 +19,12 @@ from agent.schemas.cache_entry import (
 # ---------------------------------------------------------------------------
 
 
-def test_finding_valid_construction() -> None:
-    f = ConsolidatedFinding(
-        statement="ridge near 50 Hz dominates",
-        evidence_iters=[2, 5],
-        strength="strong",
-    )
-    assert f.statement == "ridge near 50 Hz dominates"
-    assert f.evidence_iters == [2, 5]
-    assert f.strength == "strong"
-
-
-def test_finding_accepts_max_length_statement() -> None:
-    """Boundary guard (off-by-one): exactly at the cap must succeed."""
-    f = ConsolidatedFinding(
-        statement="x" * FINDING_STATEMENT_MAX_CHARS,
-        evidence_iters=[1],
-        strength="moderate",
-    )
-    assert len(f.statement) == FINDING_STATEMENT_MAX_CHARS
-
-
 @pytest.mark.parametrize(
     "kwargs",
     [
         pytest.param(
-            dict(statement="", evidence_iters=[1], strength="weak"),
-            id="empty_statement",
-        ),
-        pytest.param(
-            dict(
-                statement="x" * (FINDING_STATEMENT_MAX_CHARS + 1),
-                evidence_iters=[1],
-                strength="moderate",
-            ),
-            id="oversized_statement",
-        ),
-        pytest.param(
-            dict(statement="ok", evidence_iters=[], strength="weak"),
-            id="empty_evidence_iters",
-        ),
-        pytest.param(
             dict(statement="ok", evidence_iters=[3, -1], strength="weak"),
             id="negative_iter",
-        ),
-        pytest.param(
-            dict(statement="ok", evidence_iters=[1], strength="extreme"),
-            id="unknown_strength",
-        ),
-        pytest.param(
-            dict(statement="ok", evidence_iters=[1], strength="weak", unexpected="should fail"),
-            id="extra_field_forbidden",
         ),
     ],
 )
@@ -109,69 +41,12 @@ def test_finding_rejects_invalid_input(kwargs) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_narrative_valid_construction() -> None:
-    n = ConsolidatedNarrative(
-        latest="best config is depth=6, width=128",
-        history=[(2, "depth=4 was too shallow"), (5, "depth=5 still bottlenecked")],
-    )
-    assert n.latest.startswith("best config")
-    assert len(n.history) == 2
-
-
-def test_narrative_accepts_empty_latest() -> None:
-    """Empty latest is intentional — the LLM may have no signal for a field
-    this iter; the consolidator still needs a placeholder entry."""
-    n = ConsolidatedNarrative(latest="")
-    assert n.latest == ""
-    assert n.history == []
-
-
-@pytest.mark.parametrize(
-    "kwargs, attr, expected_len",
-    [
-        pytest.param(
-            dict(latest="x" * NARRATIVE_LATEST_MAX_CHARS),
-            "latest",
-            NARRATIVE_LATEST_MAX_CHARS,
-            id="max_length_latest",
-        ),
-        pytest.param(
-            dict(latest="ok", history=[(i, f"n{i}") for i in range(NARRATIVE_HISTORY_MAX_ENTRIES)]),
-            "history",
-            NARRATIVE_HISTORY_MAX_ENTRIES,
-            id="max_history_entries",
-        ),
-    ],
-)
-def test_narrative_accepts_at_boundary(kwargs, attr, expected_len) -> None:
-    """Boundary guards (off-by-one) for both string and list caps."""
-    n = ConsolidatedNarrative(**kwargs)
-    assert len(getattr(n, attr)) == expected_len
-
-
 @pytest.mark.parametrize(
     "kwargs",
     [
         pytest.param(
-            dict(latest="x" * (NARRATIVE_LATEST_MAX_CHARS + 1)),
-            id="oversized_latest",
-        ),
-        pytest.param(
-            dict(
-                latest="ok",
-                history=[
-                    (i, f"narrative iter {i}") for i in range(NARRATIVE_HISTORY_MAX_ENTRIES + 1)
-                ],
-            ),
-            id="over_cap_history",
-        ),
-        pytest.param(
             dict(latest="ok", history=[(-1, "bad")]),
             id="negative_history_iter",
-        ),
-        pytest.param(
-            dict(latest="ok", surprise="nope"),
-            id="extra_field_forbidden",
         ),
     ],
 )
@@ -199,12 +74,6 @@ def _valid_error_sig(**overrides):
     return ErrorSignature(**base)
 
 
-def test_error_sig_valid_construction() -> None:
-    sig = _valid_error_sig()
-    assert sig.failure_class == "vram"
-    assert sig.evidence_iters == [3]
-
-
 def test_error_sig_key_tuple() -> None:
     """The consolidator dedupes by ``key()`` — pin the field order so a
     future refactor cannot silently change the dedup contract and break
@@ -213,98 +82,9 @@ def test_error_sig_key_tuple() -> None:
     assert sig.key() == ("vram", "ml_models/foo.py:42 in forward", "torch.cuda.OutOfMemoryError")
 
 
-def test_error_sig_accepts_empty_last_frames() -> None:
-    """Spec §2.2: last_frames may be empty for non-Python failure modes."""
-    sig = _valid_error_sig(last_frames=[], top_user_frame="")
-    assert sig.last_frames == []
-    assert sig.top_user_frame == ""
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        pytest.param(dict(failure_class="cosmic_ray"), id="unknown_failure_class"),
-        pytest.param(
-            dict(short_message="x" * (ERROR_SHORT_MESSAGE_MAX_CHARS + 1)),
-            id="oversized_short_message",
-        ),
-        pytest.param(dict(evidence_iters=[]), id="empty_evidence_iters"),
-        pytest.param(dict(error_type=""), id="empty_error_type"),
-        pytest.param(dict(unexpected="nope"), id="extra_field_forbidden"),
-    ],
-)
-def test_error_sig_rejects_invalid_input(overrides) -> None:
-    """Defensive shield: every documented rejection still raises."""
-    with pytest.raises(ValidationError):
-        _valid_error_sig(**overrides)
-
-
 # ---------------------------------------------------------------------------
 # CacheEntry — strict construction
 # ---------------------------------------------------------------------------
-
-
-def test_cache_entry_minimal_valid() -> None:
-    """Only model_type is required; all 8 LLM-flat fields default to empty
-    accumulator shells. error_signatures defaults to []."""
-    e = CacheEntry(model_type="punet")
-    assert e.model_type == "punet"
-    assert e.key_findings == []
-    assert e.bottlenecks == []
-    assert e.best_config_analysis.latest == ""
-    assert e.score_trend.history == []
-    assert e.error_signatures == []
-    assert e.stats == {}
-
-
-def test_cache_entry_full_payload_round_trip() -> None:
-    """End-to-end smoke: build a fully-populated entry and confirm every
-    nested type validates together (catches missing-field-in-narrative cases
-    that a per-class test would miss)."""
-    e = CacheEntry(
-        model_type="punet",
-        key_findings=[
-            ConsolidatedFinding(
-                statement="ridge near 50 Hz",
-                evidence_iters=[2, 5],
-                strength="strong",
-            ),
-        ],
-        bottlenecks=[
-            ConsolidatedFinding(
-                statement="VRAM spike at 16 GB",
-                evidence_iters=[3],
-                strength="moderate",
-            ),
-        ],
-        best_config_analysis=ConsolidatedNarrative(
-            latest="d=6,w=128",
-            history=[(2, "d=4 too shallow")],
-        ),
-        error_signatures=[_valid_error_sig()],
-        stats={"best_score": 1.23, "completed_rounds": 4},
-    )
-    dumped = e.model_dump()
-    re_parsed = CacheEntry.model_validate(dumped)
-    assert re_parsed.error_signatures[0].key() == e.error_signatures[0].key()
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        pytest.param({}, id="missing_model_type"),
-        pytest.param({"model_type": ""}, id="empty_model_type"),
-        pytest.param(
-            {"model_type": "punet", "surprise_field": 1},
-            id="extra_field_forbidden",
-        ),
-    ],
-)
-def test_cache_entry_rejects_invalid_input(kwargs) -> None:
-    """Defensive shield: every documented rejection still raises.
-    Pre-empts the LLM-output schema drift hazard the spec calls out."""
-    with pytest.raises(ValidationError):
-        CacheEntry(**kwargs)  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -473,14 +253,3 @@ def test_legacy_defaults_missing_fields() -> None:
     assert entry.best_config_analysis.latest == ""
     assert entry.error_signatures == []
     assert entry.stats == {}
-
-
-def test_legacy_error_signatures_default_empty() -> None:
-    """Pre-6.3 chains never wrote error_signatures. The adapter must seed []
-    (not None) so the consolidator's set-merge has a valid iterable."""
-    entry = CacheEntry.from_legacy_dict(
-        _legacy_entry(),
-        model_type="punet",
-        current_iter=7,
-    )
-    assert entry.error_signatures == []

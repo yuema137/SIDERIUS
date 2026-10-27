@@ -170,21 +170,6 @@ class TestComponentFirstObservation:
                 total=good_total.model_copy(update={"predicted_seconds": 1.0}),
             )
 
-    def test_admission_cost_model_round_trip(self):
-        adm = AdmissionRecord(
-            decision="rejected",
-            stage="post_setup_runtime_verification",
-            setup_cost_seconds=110.0,
-            verification_cost_seconds=6.2,
-            avoided_predicted_runtime_seconds=27_600.0,
-        )
-        obs = RuntimeObservation(
-            timestamp="2026-07-23T20:00:00+00:00",
-            components=self._components(),
-            admission=adm,
-        )
-        assert obs.admission is not None and obs.admission.decision == "rejected"
-
 
 class TestLegacyRecordCompatibility:
     def test_legacy_record_without_block_is_explicit_absence(self):

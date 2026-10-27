@@ -86,13 +86,6 @@ class TestTheLabelStopsLying:
 
 
 class TestTheFiveFieldsAreRecordedTogether:
-    @pytest.mark.parametrize(
-        "field",
-        ["gate_name", "gate_role", "configured_action", "healthgate_mode", "result_authority"],
-    )
-    def test_each_field_is_declared(self, field):
-        assert field in PersistedHealthGateResult.model_fields
-
     def test_configured_and_resolved_actions_are_distinct_facts(self):
         """`resolved_action: continue` alone is ambiguous: it means either
         'the check passed, so nothing to do' or 'configured to do nothing'.

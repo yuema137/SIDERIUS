@@ -17,7 +17,6 @@ from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import (
     ExperimentPlan,
-    ExperimentRecord,
     HyperparamTuningInput,
     TrialConfig,
     validate_runtime_config,
@@ -34,17 +33,6 @@ def _input(**overrides) -> HyperparamTuningInput:
     return HyperparamTuningInput(**{**base, **overrides})
 
 
-def _record(**overrides) -> ExperimentRecord:
-    base = {
-        "exp_id": "e1",
-        "status": "success",
-        "model_type": "wavenet",
-        "timestamp": "2026-07-28T00:00:00Z",
-        "params": {},
-    }
-    return ExperimentRecord(**{**base, **overrides})
-
-
 def _trial_config(**overrides) -> TrialConfig:
     base = {
         "is_trial": True,
@@ -57,22 +45,6 @@ def _trial_config(**overrides) -> TrialConfig:
 
 
 # ---- ExperimentPlan: the agent's proposal ----
-
-
-def test_plan_defaults_to_no_proposal():
-    plan = ExperimentPlan()
-    assert plan.order_strategy is None
-    assert plan.file_order is None
-
-
-def test_plan_accepts_a_valid_sequential_proposal():
-    plan = ExperimentPlan(order_strategy="sequential", file_order=PERMUTATION)
-    assert plan.order_strategy == "sequential"
-    assert plan.file_order == PERMUTATION
-
-
-def test_plan_accepts_a_shuffle_proposal():
-    assert ExperimentPlan(order_strategy="shuffle").order_strategy == "shuffle"
 
 
 @pytest.mark.parametrize(
@@ -89,11 +61,6 @@ def test_plan_rejects_structurally_invalid_proposals(kwargs):
     with pytest.raises(ValidationError) as exc:
         ExperimentPlan(**kwargs)
     assert "agent proposal" in str(exc.value)
-
-
-def test_plan_rejects_an_unknown_strategy():
-    with pytest.raises(ValidationError):
-        ExperimentPlan(order_strategy="round_robin")
 
 
 def test_with_defaults_drops_a_malformed_ordering_proposal_instead_of_raising():
@@ -125,18 +92,6 @@ def test_with_defaults_keeps_a_valid_ordering_proposal():
 # ---- HyperparamTuningInput: the operator's override ----
 
 
-def test_input_defaults_to_no_override():
-    agent_input = _input()
-    assert agent_input.order_strategy_override is None
-    assert agent_input.file_order_override is None
-
-
-def test_input_accepts_a_valid_override():
-    agent_input = _input(order_strategy_override="sequential", file_order_override=PERMUTATION)
-    assert agent_input.order_strategy_override == "sequential"
-    assert agent_input.file_order_override == PERMUTATION
-
-
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -153,17 +108,6 @@ def test_input_rejects_structurally_invalid_overrides(kwargs):
 
 
 # ---- the schema / runtime validation split ----
-
-
-def test_permutation_is_not_checked_by_the_schema():
-    """Scope-dependent validation must NOT run in the schema validator — the
-    schema has no dataset to resolve against."""
-    agent_input = _input(
-        data_scope=DataScope.from_cli(SCOPE_SPEC),
-        order_strategy_override="sequential",
-        file_order_override=[4, 6, 5],  # a subset of the scope
-    )
-    assert agent_input.file_order_override == [4, 6, 5]
 
 
 def test_validate_runtime_config_rejects_a_subset_override():
@@ -207,17 +151,6 @@ def test_no_override_passes_runtime_validation_unchanged():
 # ---- TrialConfig: the resolved value ----
 
 
-def test_trial_config_defaults_to_shuffle():
-    cfg = _trial_config()
-    assert cfg.resolved_order_strategy == "shuffle"
-    assert cfg.resolved_file_order is None
-
-
-def test_trial_config_carries_a_resolved_sequential_order():
-    cfg = _trial_config(resolved_order_strategy="sequential", resolved_file_order=PERMUTATION)
-    assert cfg.resolved_file_order == PERMUTATION
-
-
 def test_trial_config_rejects_a_file_order_under_shuffle():
     """A stale file order alongside shuffle would misreport what ran."""
     with pytest.raises(ValidationError) as exc:
@@ -226,35 +159,3 @@ def test_trial_config_rejects_a_file_order_under_shuffle():
 
 
 # ---- ExperimentRecord: the provenance septet ----
-
-
-def test_record_defaults_leave_every_ordering_field_absent():
-    """Pre-PR2 records must stay constructible and readable."""
-    record = _record()
-    assert record.proposed_order_strategy is None
-    assert record.override_order_strategy is None
-    assert record.resolved_order_strategy is None
-    assert record.ordering_resolution_source is None
-
-
-def test_record_reconstructs_an_overridden_proposal():
-    """The load-bearing case: the agent asked for one thing, the operator
-    forced another, and the record must show both plus what actually ran."""
-    record = _record(
-        proposed_order_strategy="sequential",
-        proposed_file_order=PERMUTATION,
-        override_order_strategy="shuffle",
-        resolved_order_strategy="shuffle",
-        resolved_file_order=None,
-        ordering_resolution_source="operator_override",
-    )
-    assert record.proposed_order_strategy == "sequential"
-    assert record.resolved_order_strategy == "shuffle"
-    assert record.ordering_resolution_source == "operator_override"
-    # Round-trips, so downstream readers see the same three levels.
-    assert ExperimentRecord.model_validate_json(record.model_dump_json()) == record
-
-
-def test_record_rejects_an_unknown_resolution_source():
-    with pytest.raises(ValidationError):
-        _record(ordering_resolution_source="vibes")

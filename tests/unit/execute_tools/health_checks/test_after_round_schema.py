@@ -5,7 +5,8 @@ Covers the three accepted forms of ``GateConfig.after_round``:
     (b) literal ``"every"``  → fires on every round
     (c) list[int]            → fires on any listed round
 
-Plus rejection cases (0, negative, empty list, arbitrary string, bool).
+Accepted forms are exercised through YAML loading and the production runner.
+Direct cases retain custom rejection and coercion behavior only.
 """
 
 from __future__ import annotations
@@ -27,34 +28,6 @@ def _make_gate(after_round):
     )
 
 
-# --- Accepted forms --------------------------------------------------------
-
-
-class TestAcceptedForms:
-    def test_int_specific_round(self):
-        g = _make_gate(5)
-        assert g.after_round == 5
-        assert g.matches_round(5)
-        assert not g.matches_round(4)
-        assert not g.matches_round(6)
-
-    def test_every_matches_all_rounds(self):
-        g = _make_gate("every")
-        assert g.after_round == "every"
-        for r in [1, 2, 5, 10, 100, 999]:
-            assert g.matches_round(r)
-
-    def test_list_of_ints_matches_only_listed(self):
-        g = _make_gate([1, 3, 5])
-        assert g.after_round == [1, 3, 5]
-        assert g.matches_round(1)
-        assert g.matches_round(3)
-        assert g.matches_round(5)
-        assert not g.matches_round(2)
-        assert not g.matches_round(4)
-        assert not g.matches_round(6)
-
-
 # --- Rejected forms --------------------------------------------------------
 
 
@@ -67,12 +40,6 @@ class TestRejectedForms:
         with pytest.raises(ValidationError, match=">= 1"):
             _make_gate(-1)
 
-    def test_arbitrary_string_rejected(self):
-        # Pydantic's discriminated-union type check rejects at type layer
-        # before our field_validator runs; any ValidationError is acceptable.
-        with pytest.raises(ValidationError):
-            _make_gate("sometimes")
-
     def test_empty_list_rejected(self):
         with pytest.raises(ValidationError, match="at least one"):
             _make_gate([])
@@ -80,11 +47,6 @@ class TestRejectedForms:
     def test_list_with_zero_rejected(self):
         with pytest.raises(ValidationError, match=">= 1"):
             _make_gate([1, 0, 3])
-
-    def test_list_with_string_rejected(self):
-        # Same as above: pydantic's list[int] rejects at type layer.
-        with pytest.raises(ValidationError):
-            _make_gate([1, "every", 3])
 
     def test_yaml_yes_coerces_to_int_1(self):
         # Documented behaviour, not a bug: PyYAML parses ``yes``/``true``
@@ -125,7 +87,7 @@ health_gates:
             lambda: cfg_mod.load_health_gates_config(str(cfg_path)),
         )
 
-        for r in [1, 4, 7, 10]:
+        for r in [1, 4, 7, 10, 100, 999]:
             assert runner.get_gates_for_position(r) == ["every_gate"]
 
     def test_list_gate_matches_only_listed_rounds(self, tmp_path, monkeypatch):

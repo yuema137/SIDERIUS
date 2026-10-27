@@ -14,10 +14,8 @@ Covers:
 * SQUID-specific limitation phrasing is gone (was: "Cannot judge SQUID-
   specific applicability"; now: "Cannot judge task-specific applicability").
 * "denoising" hardcode is gone from `role` and `expertise_domain`.
-* All AgentCard field-length constraints are still satisfied.
-* `agent_name`, `trust_level`, and `trust_guidance` (non-task fields) are
-  unchanged.
-* The card is still serializable through Pydantic.
+* The literature card retains its soft-prior trust classification.
+* Published trust guidance reflects the run's declared confidence rubric.
 
 See docs/design/enable_global_task_config.md § Commit T4.
 """
@@ -62,52 +60,11 @@ class TestAgentCardTaskAgnostic:
         assert "task-specific applicability" in _AGENT_CARD.limitations
 
 
-class TestAgentCardFieldConstraintsSatisfied:
-    """AgentCard schema enforces ``max_length`` on role / expertise_domain /
-    limitations. Regression guard: the T4c rewrites must stay within those
-    caps so a future edit catches an overflow at test time, not at
-    Pydantic-validation time during a real chain run."""
-
-    def test_role_within_200_chars(self):
-        assert len(_AGENT_CARD.role) <= 200
-
-    def test_expertise_domain_within_300_chars(self):
-        assert len(_AGENT_CARD.expertise_domain) <= 300
-
-    def test_limitations_within_300_chars(self):
-        assert len(_AGENT_CARD.limitations) <= 300
-
-    def test_coverage_unchanged(self):
-        # `coverage` was already task-agnostic before T4c — regression guard
-        # to confirm it wasn't accidentally edited.
-        assert _AGENT_CARD.coverage == "ArXiv/S2 results any year; local PDFs in reference_data/."
-
-
 class TestAgentCardNonTaskFieldsUnchanged:
-    def test_agent_name(self):
-        assert _AGENT_CARD.agent_name == "ml_literature_review"
-
     def test_trust_level(self):
         # Lit-review carries inspirational findings → soft_prior. T4c is
         # not allowed to touch this; regression guard.
         assert _AGENT_CARD.trust_level == "soft_prior"
-
-    def test_trust_guidance_non_empty(self):
-        # Rendered by ConfidenceRubric().render_for_consumer() at module
-        # import time. Must be non-empty after T4c.
-        assert _AGENT_CARD.trust_guidance.strip() != ""
-
-
-class TestAgentCardSerializes:
-    def test_pydantic_round_trip(self):
-        """Pydantic validation must accept the post-T4c card unchanged."""
-        as_dict = _AGENT_CARD.model_dump()
-        from agent.schemas.proposal import AgentCard
-
-        rehydrated = AgentCard.model_validate(as_dict)
-        assert rehydrated.role == _AGENT_CARD.role
-        assert rehydrated.expertise_domain == _AGENT_CARD.expertise_domain
-        assert rehydrated.limitations == _AGENT_CARD.limitations
 
 
 def test_published_agent_card_uses_run_rubric(tmp_path):

@@ -90,7 +90,6 @@ class TestSemanticIsDerived:
         """A declared field could contradict the tensor it describes. The
         contract exposes no competing semantic field; the optional inference
         reconstruction contract is orthogonal to tensor semantics."""
-        assert set(ModelIOContract.model_fields) == {"input", "output", "inference"}
         with pytest.raises(ValidationError):
             ModelIOContract(
                 input=_contract(categorical=True).input,

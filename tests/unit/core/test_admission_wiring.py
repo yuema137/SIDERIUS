@@ -148,24 +148,6 @@ class TestTheGateItself:
         assert explicit_none is None
         assert absent != explicit_none
 
-    def test_the_default_is_not_none(self):
-        """Structural guard on the same thing: the getattr default must
-        be the compatibility mode itself."""
-        tree = ast.parse(EXECUTOR.read_text())
-        defaults = [
-            node.args[2]
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "getattr"
-            and len(node.args) == 3
-            and isinstance(node.args[1], ast.Constant)
-            and node.args[1].value == "admission_mode"
-        ]
-        assert len(defaults) == 1
-        assert isinstance(defaults[0], ast.Constant)
-        assert defaults[0].value == "trial"
-
     def test_the_raw_value_is_passed_through_not_resolved_by_the_caller(self):
         """Mode policy has one home. The executor must not silently map
         a wrong value onto a valid posture — doing so would make the

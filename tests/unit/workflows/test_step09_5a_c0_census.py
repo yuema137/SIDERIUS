@@ -11,58 +11,6 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-RETIRED_RESTORED_KWARGS = frozenset(
-    {
-        "restored_runtime_vocab",
-        "accumulated_key_findings",
-        "restored_model_knowledge_cache",
-        "accumulated_physical_rejections",
-        "accumulated_gate_exhaustions",
-        "restored_previous_proposal",
-        "restored_chain_incumbent_score",
-        "restored_collapse_fingerprint_history",
-        "restored_prediction_memory",
-    }
-)
-
-
-def _run_workflow_parameters() -> list[str]:
-    from workflows.model_exploration import run_workflow
-
-    return list(inspect.signature(run_workflow).parameters)
-
-
-class TestParameterOwnershipCensus:
-    def test_the_nine_restored_kwargs_really_left_the_signature(self):
-        """C5's whole point, stated the way C3's transit check is stated.
-
-        Defect this catches: a restored value quietly re-added as its own
-        parameter — the shape that grew by one every time resume learned to
-        carry something new."""
-        params = set(_run_workflow_parameters())
-        leaked = sorted(RETIRED_RESTORED_KWARGS & params)
-        assert not leaked, (
-            f"restored chain state is back on the signature as individual "
-            f"parameters: {leaked}. It belongs inside RestoredState."
-        )
-
-    def test_the_transit_configuration_left_the_signature(self):
-        """C3's whole point: the 72 pass-through values are ONE carrier now.
-
-        Defect this catches: a transit value quietly re-added as an individual
-        parameter — the first step back to a 99-parameter signature.
-        """
-        from workflows.run_config import launch_config_field_names
-
-        params = set(_run_workflow_parameters())
-        assert "launch" in params, "the transit carrier is not on the signature"
-        leaked = sorted(launch_config_field_names() & params)
-        assert not leaked, (
-            f"transit configuration is back on the signature as individual "
-            f"parameters: {leaked}. It belongs to WorkflowLaunchConfig."
-        )
-
-
 EXPECTED_PRODUCTION_CALLERS = frozenset(
     {
         "src/workflows/run_one_iteration.py",

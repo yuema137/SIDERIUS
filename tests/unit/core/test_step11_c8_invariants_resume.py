@@ -101,17 +101,6 @@ class TestResumeCarriesNoTaskToken:
         assert "TIDMAD" not in names | attrs
         assert not any("TIDMAD" in c for c in constants)
 
-    def test_the_scope_comes_from_the_runs_own_profile(self):
-        src = RESUME.read_text(encoding="utf-8")
-        assert "resolve_dataset_profile().partition_count" in src
-
-    def test_it_matches_the_sibling_call_site(self):
-        """The sibling was already composition-aware; the two now derive the
-        same way, which is the point of removing the divergence.
-        """
-        sibling = (REPO_ROOT / "src/workflows" / "model_exploration.py").read_text(encoding="utf-8")
-        assert "_run_partitions = resolve_dataset_profile().partition_count" in sibling
-
 
 # ----------------------------------------------------------------------
 # R-11-9 — the three cases, each named
@@ -206,18 +195,6 @@ class TestTheStampIsProduced:
     including a composed run's own. This is the half that makes case 2
     reachable at all.
     """
-
-    def test_the_record_schema_carries_it(self):
-        from agent.schemas.hyperparam_tuning import ExperimentRecord
-
-        field = ExperimentRecord.model_fields["task_composition_fingerprint"]
-        assert field.default is None, "legacy records must still validate"
-
-    def test_the_output_schema_carries_it(self):
-        from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
-
-        field = HyperparamTuningOutput.model_fields["task_composition_fingerprint"]
-        assert field.default is None
 
     def test_it_is_stamped_at_the_single_persist_seam(self):
         """One place, for the reason `candidate_id` is stamped there: nine

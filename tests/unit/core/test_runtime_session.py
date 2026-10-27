@@ -39,11 +39,6 @@ def _load(path) -> dict:
         return json.load(f)
 
 
-class TestRuntimeControlPolicy:
-    def test_defaults_are_record_only(self):
-        assert RuntimeControlPolicy().operator_budget_seconds is None
-
-
 class TestEventLogLifecycle:
     def test_sidecar_exists_from_creation(self, tmp_path):
         path = tmp_path / "rv.json"

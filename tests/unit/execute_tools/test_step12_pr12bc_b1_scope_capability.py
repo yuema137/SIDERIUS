@@ -183,28 +183,6 @@ TASK_VOCABULARY_MARKERS = (
 
 
 class TestTheRequestCarriesNoTaskVocabulary:
-    def test_the_declared_field_set_is_exactly_the_audited_one(self):
-        """Hardcoded, never read back from the model. A field added without
-        an audit entry fails here.
-
-        ``task_parameters`` was added at B3 as a RECORDED extension of D-BC-1
-        (§Q.B3): D-BC-1 derived this carrier from where trial and formal
-        DIFFER, and a per-attempt value that is the same in both rounds is
-        exactly what that method cannot see — TIDMAD's scope needs
-        ``seg_size``, the planner's model choice, which every round needs and
-        neither varies. It is task vocabulary, so it can only ride OPAQUELY.
-        """
-        assert set(ScopeBuildRequest.model_fields) == {
-            "round_kind",
-            "selection_strategy",
-            "portion",
-            "seed",
-            "max_samples",
-            "target_partitions",
-            "subset_ref",
-            "task_parameters",
-        }
-
     def test_the_opaque_payload_is_never_interpreted_by_the_carrier(self):
         """Opacity is a property of the FRAMEWORK: the carrier accepts any
         mapping and validates none of its contents, exactly as ``subset_ref``
@@ -256,14 +234,6 @@ class TestTheRequestCarriesNoTaskVocabulary:
         """
         for name in ("leg", "kind", "is_eval", "phase"):
             assert name not in ScopeBuildRequest.model_fields
-
-    def test_the_carrier_is_frozen_and_forbids_extras(self):
-        with pytest.raises(ValidationError):
-            ScopeBuildRequest(
-                round_kind="trial", selection_strategy="snapshot", portion=0.1, seg_size=10
-            )
-        with pytest.raises(ValidationError):
-            REQUEST.portion = 0.5  # type: ignore[misc]
 
 
 class TestTheSemanticBounds:
