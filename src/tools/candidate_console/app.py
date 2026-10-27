@@ -249,6 +249,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "editor-circuit-geometry.js": "text/javascript",
             "editor-task-controls.js": "text/javascript",
             "editor-loop-controls.js": "text/javascript",
+            "editor-draft.js": "text/javascript",
+            "editor-draft.css": "text/css",
             "reusable-run.js": "text/javascript",
             "reusable-intents.js": "text/javascript",
             "new-run.js": "text/javascript",

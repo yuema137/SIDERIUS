@@ -79,7 +79,10 @@ readiness. The normal review route
 also accepts `DraftProposal(kind="draft")` and promotes it before the existing
 source review, task acceptance and Save boundary. Neither draft route changes
 preparation or launch admission. A stale base refuses and leaves the caller's draft
-intact. Drafts are not persisted by this API.
+intact. Drafts are not persisted by this API. `base_document` is any validated
+document, not necessarily the saved one: only `expected_sha256` binds the saved
+source. The console's unified draft relies on this to review layout and inspector
+edits together with binding patches in one `DraftProposal`.
 
 ## Native training inspector
 
