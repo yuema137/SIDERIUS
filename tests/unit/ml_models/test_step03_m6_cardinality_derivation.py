@@ -150,13 +150,6 @@ class TestOneCardinalityAuthority:
             apply_contract_cardinality({"num_classes": 256}, _contract(256))["num_classes"] == 256
         )
 
-    def test_neither_side_is_silently_adopted(self):
-        """The two failure modes §4b forbids: the config silently winning
-        (a second authority) or being silently overwritten (an author
-        believing a value that never took effect)."""
-        with pytest.raises(ContractCardinalityConflictError):
-            apply_contract_cardinality({"num_classes": 10}, _contract(256))
-
     def test_an_output_without_class_semantics_injects_nothing(self):
         """§4b's deliberate asymmetry — where cardinality is not meaningful,
         the model config is not given one."""

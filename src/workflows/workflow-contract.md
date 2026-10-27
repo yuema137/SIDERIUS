@@ -311,3 +311,28 @@ research-policy schemas retain their defaults. `model_exploration` preserves
 `_get_reasoning_pipeline` as a compatibility import. The preflight source assembly
 includes both the workflow and this owner; moving code does not preserve an old
 qualified assembly hash.
+
+## Optional provider routing and output limits
+
+`NodeLLMConfig.provider` uses `agent.llm_settings.ProviderName`. Providers
+`anthropic`, `moonshot`, and `zai` require an explicit `model_id`; they do not
+change existing provider/model defaults. The bridge selects their optional
+Pydantic AI transport. Installation, credentials, protocol behavior, errors,
+and provider limitations belong to the [agent contract](../agent/agent-contract.md).
+
+`NodeLLMConfig.max_output_tokens` is an optional positive output-token ceiling.
+An omitted/None ceiling is excluded from serialized configuration and projected
+bridge arguments, preserving old configuration identities. It is independent of
+input size and must not be interpreted as a context-window or total cost budget.
+Each proposal stage, tuner planner/reflector, and literature main/search route
+can specify its own ceiling. Proposal stage omissions preserve their own default
+instead of inheriting another configured stage's ceiling. Literature search
+inherits the main ceiling when its separate ceiling is omitted. Tuner reflector
+inheritance follows the bridge's `reflect_max_output_tokens` contract.
+
+Projection owners are `WorkflowLLMConfig.get`, node bridge-argument helpers,
+and the validator-to-tuner protocol. Setup review and candidate-worker
+credential checks use the same provider metadata and argument projections.
+These checks report required credential names, never values, and cannot prove
+provider/model availability. New provider support does not add task defaults,
+change prompts, or modify deterministic training and evaluation.

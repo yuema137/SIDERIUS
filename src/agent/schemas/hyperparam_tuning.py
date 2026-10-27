@@ -16,7 +16,7 @@ from typing import Annotated, Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
-from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
@@ -3031,7 +3031,7 @@ class HyperparamTuningInput(BaseModel):
     # ``sandbox.get_summary()``, which the DS6b ingress validation covers.
 
     # --- LLM (planner) ---
-    llm_provider: Literal["gemini", "openai", "deepseek"] = Field(
+    llm_provider: ProviderName = Field(
         default=DEFAULT_LLM_PROVIDER,
         description=(
             "LLM provider for the planner sub-call (and the default for the "
@@ -3045,6 +3045,12 @@ class HyperparamTuningInput(BaseModel):
             "reflector when not overridden)."
         ),
     )
+    max_output_tokens: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
+    )
+    reflect_max_output_tokens: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
+    )
     reasoning_effort: str | None = Field(
         default=None, description="Explicit OpenAI planner reasoning effort."
     )
@@ -3056,7 +3062,7 @@ class HyperparamTuningInput(BaseModel):
     # a different model than the planner — see docs/break_tuner_agent.md.
     # When both reflect_* fields are None (default), the reflector uses the
     # planner's provider and model (legacy behavior).
-    reflect_provider: Literal["gemini", "openai", "deepseek"] | None = Field(
+    reflect_provider: ProviderName | None = Field(
         default=None,
         description=(
             "Optional separate provider for the reflector sub-call. "

@@ -14,6 +14,21 @@ from typing import Literal, TypedDict
 # One authority for omitted agent routing. Explicit provider/model choices win.
 DEFAULT_LLM_PROVIDER: Literal["openai"] = "openai"
 DEFAULT_LLM_MODEL = "gpt-5.6-luna"
+ProviderName = Literal["openai", "gemini", "deepseek", "anthropic", "moonshot", "zai"]
+
+
+class OptionalProviderConfig(TypedDict):
+    """Explicit-model native routes; no implicit scientific model selection."""
+
+    base_url: str
+    api_key_env: str
+
+
+OPTIONAL_PROVIDERS: dict[str, OptionalProviderConfig] = {
+    "anthropic": {"base_url": "https://api.anthropic.com", "api_key_env": "ANTHROPIC_API_KEY"},
+    "moonshot": {"base_url": "https://api.moonshot.ai/v1", "api_key_env": "MOONSHOT_API_KEY"},
+    "zai": {"base_url": "https://api.z.ai/api/paas/v4", "api_key_env": "ZAI_API_KEY"},
+}
 
 
 class ProviderConfig(TypedDict):
@@ -54,6 +69,11 @@ KNOWN_PROVIDERS: dict[str, ProviderConfig] = {
     #     "default_model": "claude-sonnet-4-20250514",
     # },
 }
+
+
+def provider_configuration(provider: str) -> ProviderConfig | OptionalProviderConfig | None:
+    """Credential and endpoint metadata for both supported transport families."""
+    return KNOWN_PROVIDERS.get(provider.lower()) or OPTIONAL_PROVIDERS.get(provider.lower())
 
 
 def default_model_for_provider(provider: str) -> str:
@@ -132,11 +152,13 @@ def resolve_main_transport(
         raise ValueError("reasoning_effort requires the OpenAI provider")
     timeout = DEFAULT_REQUEST_TIMEOUT_SECONDS if request_timeout is None else float(request_timeout)
     retries = DEFAULT_TIMEOUT_RETRIES if timeout_retries is None else int(timeout_retries)
-    known = KNOWN_PROVIDERS.get(normalized)
+    known = provider_configuration(normalized)
+    if normalized in OPTIONAL_PROVIDERS and not model_id:
+        raise ValueError(f"An explicit model_id is required for provider {normalized!r}")
     if base_url is None and known:
         base_url = known["base_url"]
-    if model_id is None and known:
-        model_id = known["default_model"]
+    if model_id is None and normalized in KNOWN_PROVIDERS:
+        model_id = default_model_for_provider(normalized)
     return MainTransportSettings(normalized, model_id, base_url, reasoning_effort, timeout, retries)
 
 
@@ -166,7 +188,7 @@ def resolve_reflect_transport(
     reuse = normalized == main.provider
     endpoint = main.base_url
     if not reuse:
-        known = KNOWN_PROVIDERS.get(normalized)
+        known = provider_configuration(normalized)
         if known is None:
             raise ValueError(
                 f"Unknown reflect_provider {normalized!r}. "
@@ -176,4 +198,8 @@ def resolve_reflect_transport(
                 f"after construction."
             )
         endpoint = known["base_url"]
+        if normalized in OPTIONAL_PROVIDERS and not model_id:
+            raise ValueError(
+                f"An explicit reflect_model_id is required for provider {normalized!r}"
+            )
     return ReflectTransportSettings(normalized, model_id or main.model_id, endpoint, effort, reuse)

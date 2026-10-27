@@ -4,7 +4,7 @@ import inspect
 import json
 import subprocess
 import sys
-from typing import Literal, get_type_hints
+from typing import get_type_hints
 
 import pytest
 from pydantic import ValidationError
@@ -77,6 +77,39 @@ def test_roundtrip_and_layout_independent_declaration_digest():
     payload["task"]["workspace"] = "runs/other"
     changed = WorkflowDefinition.model_validate_json(json.dumps(payload))
     assert changed.declaration_digest() != graph.declaration_digest()
+
+
+def test_draft_optional_removal_and_external_disconnect_preserve_base():
+    """Fails if optional disconnect nulls a payload, required external input survives, or base mutates."""
+    from workflows.definition.draft import BindingPatch, WorkflowDraft, inspect_draft
+
+    payload = WorkflowDocument(definition=definition()).model_dump(mode="json")
+    payload["definition"]["externals"].append(
+        {"id": "provider", "contract": "llm-provider", "location": "provider.json"}
+    )
+    payload["definition"]["nodes"][2]["request"]["arguments"].append(
+        {"name": "llm_provider", "source": {"kind": "external", "binding": "provider"}}
+    )
+    base = WorkflowDocument.model_validate_json(json.dumps(payload))
+    before = base.model_dump_json()
+    optional = WorkflowDraft(
+        base_document=base,
+        bindings=(BindingPatch(node="validate", argument="llm_provider", source=None),),
+    )
+    result = inspect_draft(optional)
+    assert result.status == "complete" and result.document is not None
+    request = result.document.definition.nodes[2].request
+    assert isinstance(request, ProtocolRequest)
+    assert [item.name for item in request.arguments] == ["output", "storage"]
+    required = inspect_draft(
+        WorkflowDraft(
+            base_document=base,
+            bindings=(BindingPatch(node="propose", argument=None, source=None),),
+        )
+    )
+    assert required.status == "incomplete" and required.document is None
+    assert required.diagnostics == ("propose.request: required input is unbound",)
+    assert base.model_dump_json() == before
 
 
 @pytest.mark.parametrize(
@@ -164,6 +197,7 @@ assert not any(n.startswith(('agent.', 'nodes.', 'torch')) and n not in {'agent.
 
 
 def test_catalog_matches_exact_native_protocol_signatures():
+    from agent.llm_settings import ProviderName
     from agent.schemas.constraint_disclosure import ConstraintContext
     from agent.schemas.hyperparam_tuning import (
         HyperparamTuningInput,
@@ -197,7 +231,7 @@ def test_catalog_matches_exact_native_protocol_signatures():
         "storage": StorageConfig,
         "optional.constraint-context": ConstraintContext | None,
         "optional.task-composition-ref": TaskCompositionRef | None,
-        "llm-provider": Literal["gemini", "openai", "deepseek"],
+        "llm-provider": ProviderName,
         "optional.model-id": str | None,
     }
     assert native.keys() == CONTRACTS.keys()

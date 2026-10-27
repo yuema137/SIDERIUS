@@ -9,7 +9,7 @@
 #    - generate_text(system_prompt, user_prompt) -> str (plain text)
 #    - tool_call(system_prompt, user_prompt, tools) -> ToolCallResult
 #    - list_models() -> list of model IDs
-#    All providers (OpenAI, Gemini, any OpenAI-compatible endpoint) are
+#    Legacy providers (OpenAI, Gemini, any OpenAI-compatible endpoint) are
 #    accessed through a single openai.OpenAI client routed via base_url.
 #    Nodes call these methods directly with their own prompts.
 #
@@ -45,6 +45,7 @@ from pydantic import ValidationError
 
 from agent.llm_settings import (
     DEFAULT_LLM_PROVIDER,
+    provider_configuration,
     resolve_main_transport,
     resolve_reflect_transport,
 )
@@ -60,6 +61,9 @@ from agent.llm_settings import (
 from agent.llm_settings import (
     ProviderConfig as _ProviderConfig,
 )
+from agent.llm_transport.client import PydanticClient
+from agent.llm_transport.contracts import Completion, PydanticTransportConfig, validate_completion
+from agent.llm_transport.selection import optional_client, validate_output_limit
 from agent.planner_strategy import resolve_planner_strategy
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.tuner.rendering import (
@@ -347,13 +351,10 @@ class LLMBridge:
     """
     Universal API gateway for all LLM calls in SIDERIUS.
 
-    **Architectural invariant**: this class is the ONLY place in the
-    `agent/`, `nodes/`, and `workflows/` codebase that constructs an
-    `OpenAI()` client. Every agent must route its LLM calls through an
-    `LLMBridge` instance. This is enforced by
-    ``tests/unit/agent/test_llm_bridge_singleton.py``, which fails if
-    any other file under those directories instantiates ``OpenAI()``
-    directly.
+    **Architectural invariant**: agents route model calls through this gateway.
+    Provider clients are constructed here or in its owned ``llm_transport``
+    adapter package. ``tests/unit/agent/test_llm_bridge_singleton.py`` enforces
+    those owners across agent, node, and workflow source.
 
     Why this matters: the retry policy, timeouts, provider routing,
     planner/reflector model split, and any future cross-cutting
@@ -368,8 +369,10 @@ class LLMBridge:
     """
 
     @staticmethod
-    def _create_completion(client: OpenAI, *, reasoning_effort: str | None, **kwargs: Any) -> Any:
-        """Apply one optional SDK argument at the shared Chat Completions edge.
+    def _create_completion(
+        client: OpenAI | PydanticClient, *, reasoning_effort: str | None, **kwargs: Any
+    ) -> Any:
+        """Apply reasoning and deadline settings at the shared transport edge.
 
         The SDK overloads are not compatible with a dynamic ``**`` spread;
         only this call edge is cast, while request-shape tests inspect all
@@ -380,12 +383,17 @@ class LLMBridge:
         remaining = remaining_seconds("llm.request")
         if remaining is not None:
             from httpx import Timeout
+            from httpx2 import Timeout as SDKTimeout
 
             configured = getattr(client, "timeout", None)
-            if isinstance(configured, Timeout):
-                kwargs["timeout"] = Timeout(
+            if isinstance(configured, (Timeout, SDKTimeout)):
+                kwargs["timeout"] = type(configured)(
                     **{
-                        part: min(remaining, getattr(configured, part) or remaining)
+                        part: (
+                            remaining
+                            if getattr(configured, part) is None
+                            else min(remaining, getattr(configured, part))
+                        )
                         for part in ("connect", "read", "write", "pool")
                     }
                 )
@@ -393,6 +401,8 @@ class LLMBridge:
                 kwargs["timeout"] = min(remaining, configured)
             else:
                 kwargs["timeout"] = remaining
+        if isinstance(client, PydanticClient):
+            return client.create(**kwargs)
         return cast(Any, client.chat.completions.create)(**kwargs)
 
     def __init__(
@@ -409,14 +419,25 @@ class LLMBridge:
         request_timeout: float | None = None,
         timeout_retries: int | None = None,
         reflect_retry_policy: RetryPolicy | None = None,
+        max_output_tokens: int | None = None,
+        reflect_max_output_tokens: int | None = None,
+        transport: PydanticTransportConfig | None = None,
+        reflect_transport: PydanticTransportConfig | None = None,
     ):
         """
-        Unified LLM bridge — every provider is accessed through ``openai.OpenAI``.
+        Unified LLM bridge with legacy SDK and optional Pydantic AI Direct transports.
 
         For known providers (``"openai"``, ``"gemini"``), ``base_url`` and
         ``api_key`` are resolved automatically from environment variables.
         Any OpenAI-compatible endpoint can be used by passing ``base_url``
         and ``api_key`` explicitly.
+
+        New providers anthropic/moonshot/zai select Pydantic AI Direct API.
+        See llm_transport/transport-contract.md for protocols and limitations.
+        max_output_tokens optionally bounds output; None preserves legacy defaults
+        and uses 8192 for the new Anthropic route. reflect_max_output_tokens
+        inherits it when omitted. transport/reflect_transport explicitly override
+        protocol selection for Python callers without changing workflow defaults.
 
         Args:
             provider: Provider label (used for logging / identification).
@@ -498,6 +519,8 @@ class LLMBridge:
                       request does not fit the budget, not evidence that
                       waiting longer will help.
         """
+        validate_output_limit(max_output_tokens)
+        validate_output_limit(reflect_max_output_tokens, field="reflect_max_output_tokens")
         load_dotenv()
         main_settings = resolve_main_transport(
             provider=provider,
@@ -546,7 +569,22 @@ class LLMBridge:
         # Branching the call keeps the runtime identical (omitting
         # ``base_url`` lets the SDK fall back to its default endpoint) while
         # giving the type-checker concrete keyword arguments to match.
-        if base_url:
+        self.max_output_tokens = max_output_tokens
+        self.reflect_max_output_tokens = (
+            max_output_tokens if reflect_max_output_tokens is None else reflect_max_output_tokens
+        )
+        native = optional_client(
+            provider=self.provider,
+            model_id=self.model_name,
+            base_url=base_url,
+            api_key=self.api_key,
+            timeout=self.request_timeout,
+            max_output_tokens=max_output_tokens,
+            config=transport,
+        )
+        if native is not None:
+            self.client = native
+        elif base_url:
             self.client = OpenAI(
                 api_key=self.api_key,
                 max_retries=0,
@@ -576,7 +614,28 @@ class LLMBridge:
         self.reflect_model_name: str = cast(str, reflect_settings.model_id)
         self.reflect_reasoning_effort = reflect_settings.reasoning_effort
 
-        if reflect_settings.reuse_main_client:
+        reflect_native = None
+        if reflect_transport is not None or not reflect_settings.reuse_main_client:
+            reflect_known = provider_configuration(reflect_settings.provider)
+            reflect_key = (
+                self.api_key
+                if reflect_settings.reuse_main_client
+                else os.getenv(reflect_known["api_key_env"])
+                if reflect_known
+                else None
+            )
+            reflect_native = optional_client(
+                provider=self.reflect_provider,
+                model_id=self.reflect_model_name,
+                base_url=reflect_settings.base_url,
+                api_key=reflect_key,
+                timeout=self.request_timeout,
+                max_output_tokens=self.reflect_max_output_tokens,
+                config=reflect_transport,
+            )
+        if reflect_native is not None:
+            self.reflect_client = reflect_native
+        elif reflect_settings.reuse_main_client:
             self.reflect_client = self.client
         else:
             reflect_known = _KNOWN_PROVIDERS[reflect_settings.provider]
@@ -939,6 +998,8 @@ class LLMBridge:
         Calls the ``GET /models`` endpoint exposed by OpenAI-compatible APIs.
         Returns a sorted list of model ID strings.
         """
+        if isinstance(self.client, PydanticClient):
+            raise NotImplementedError("Model enumeration is not part of the Direct API transport")
         response = self.client.models.list()
         return sorted(m.id for m in response)
 
@@ -1585,6 +1646,10 @@ class LLMBridge:
             extra:          Free-form caller context, e.g.
                             ``{"attempt": 0, "status": "ok"}``.
         """
+        if isinstance(response, Completion):
+            extra = {**(extra or {}), **response.transport_metadata}
+            if response.failure:
+                extra["status"] = "invalid_provider_response"
         if self._token_usage_path is None:
             # Context not set — silent no-op until set_run_context is called.
             return
@@ -1708,7 +1773,7 @@ class LLMBridge:
 
     def _chat_json(
         self,
-        client: OpenAI,
+        client: OpenAI | PydanticClient,
         model_name: str,
         system_prompt: str,
         user_prompt: str,
@@ -1778,6 +1843,18 @@ class LLMBridge:
                         {"role": "user", "content": user_prompt},
                     ],
                     response_format={"type": "json_object"},
+                    **(
+                        {"max_completion_tokens": cap}
+                        if (
+                            cap := (
+                                getattr(self, "reflect_max_output_tokens", None)
+                                if label == "tuner.reflector"
+                                else getattr(self, "max_output_tokens", None)
+                            )
+                        )
+                        is not None
+                        else {}
+                    ),
                 ),
                 label="_chat_json",
                 on_late_response=lambda response, attempt=attempt: record_usage(
@@ -1822,6 +1899,7 @@ class LLMBridge:
                 extra={"attempt": attempt, "status": attempt_status},
             )
 
+            validate_completion(response)
             if attempt_status == "ok":
                 trailing = text[end_idx:].strip()
                 if trailing:
@@ -1961,6 +2039,11 @@ class LLMBridge:
             lambda: self._create_completion(
                 self.client,
                 reasoning_effort=self.reasoning_effort,
+                **(
+                    {"max_completion_tokens": self.max_output_tokens}
+                    if getattr(self, "max_output_tokens", None) is not None
+                    else {}
+                ),
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -1978,6 +2061,7 @@ class LLMBridge:
             response=response,
             extra={"attempt": 0, "status": "ok"},
         )
+        validate_completion(response)
         # Pure type-system shim. ``message.content`` is ``Optional[str]``
         # per the OpenAI SDK; an ``AttributeError`` on a ``None`` payload
         # is the *intended* fail-fast signal that the workflow-level
@@ -2033,6 +2117,11 @@ class LLMBridge:
             lambda: self._create_completion(
                 self.client,
                 reasoning_effort=self.reasoning_effort,
+                **(
+                    {"max_completion_tokens": self.max_output_tokens}
+                    if getattr(self, "max_output_tokens", None) is not None
+                    else {}
+                ),
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -2062,6 +2151,7 @@ class LLMBridge:
             extra={"attempt": 0, "status": tool_status},
         )
 
+        validate_completion(response)
         if not message.tool_calls:
             raise ValueError(
                 f"[LLMBridge.tool_call] Model did not return a tool call. "

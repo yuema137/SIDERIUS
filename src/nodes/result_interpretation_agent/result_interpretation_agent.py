@@ -204,6 +204,7 @@ class ResultInterpretationAgent:
         max_retries: int | None = INTERPRET.max_retries,
         reasoning_effort: str | None = INTERPRET.reasoning_effort,
         bridge_factory=None,
+        max_output_tokens: int | None = None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
@@ -214,6 +215,7 @@ class ResultInterpretationAgent:
             model_id=model_id,
             max_retries=max_retries,
             reasoning_effort=reasoning_effort,
+            max_output_tokens=max_output_tokens,
         )
         self.bridge = self._bridge_factory(**bridge_kwargs)
 

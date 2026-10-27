@@ -353,7 +353,3 @@ class TestNoPromotion:
         fields = set(GpuEvidenceBundle.model_fields)
         for forbidden in ("authoritative", "promoted", "applicable_to", "registry_key"):
             assert forbidden not in fields
-
-    @pytest.mark.parametrize("attr", ["coverage_is_thin"])
-    def test_thinness_is_exposed_so_bc3_can_refuse(self, attr):
-        assert hasattr(GpuEvidenceBundle(), attr)

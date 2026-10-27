@@ -19,6 +19,8 @@ def tuner_bridge_arguments(agent_input: HyperparamTuningInput) -> dict[str, Any]
         reflect_model_id=agent_input.reflect_model_id,
         max_retries=agent_input.max_retries,
         reasoning_effort=agent_input.reasoning_effort,
+        max_output_tokens=agent_input.max_output_tokens,
+        reflect_max_output_tokens=agent_input.reflect_max_output_tokens,
         reflect_reasoning_effort=agent_input.reflect_reasoning_effort,
         reflect_retry_policy=agent_input.reflect_retry_policy,
     )
@@ -34,6 +36,8 @@ def tuner_bridge_kwargs(
     reasoning_effort: str | None,
     reflect_reasoning_effort: str | None,
     reflect_retry_policy: RetryPolicy | None = None,
+    max_output_tokens: int | None = None,
+    reflect_max_output_tokens: int | None = None,
 ) -> dict[str, Any]:
     """Project already-resolved settings without fabricating a full tuner input."""
     kwargs: dict[str, Any] = {
@@ -49,4 +53,8 @@ def tuner_bridge_kwargs(
         kwargs["reflect_reasoning_effort"] = reflect_reasoning_effort
     if reflect_retry_policy is not None:
         kwargs["reflect_retry_policy"] = reflect_retry_policy
+    if max_output_tokens is not None:
+        kwargs["max_output_tokens"] = max_output_tokens
+    if reflect_max_output_tokens is not None:
+        kwargs["reflect_max_output_tokens"] = reflect_max_output_tokens
     return kwargs
