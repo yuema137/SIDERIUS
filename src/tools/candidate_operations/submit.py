@@ -261,5 +261,7 @@ def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopS
         if snapshot.receipt_available or snapshot.process.status != "alive":
             raise OperationFailure("not_running", "candidate is terminal or not confirmed running")
         with directory(control) as descriptor:
-            publish_bytes_write_once(f"/proc/self/fd/{descriptor}/stop.json", encode_control(marker))
+            publish_bytes_write_once(
+                f"/proc/self/fd/{descriptor}/stop.json", encode_control(marker)
+            )
         return marker
