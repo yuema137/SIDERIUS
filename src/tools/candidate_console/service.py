@@ -31,11 +31,14 @@ from .models import (
     PreparedReview,
     PreparedSelection,
     PrepareSelection,
+    RecordedExampleOption,
+    RecordedExampleView,
     RouteView,
     StatusView,
     TaskChoice,
 )
 from .readiness import credential_readiness
+from .recorded_examples import read_recorded_example
 
 
 def preparation_request(
@@ -188,6 +191,21 @@ class CandidateConsole:
 
     def tokens(self, operation_id: UUID) -> CandidateTokenSnapshot:
         return read_operation_tokens(self.config.operation_store, operation_id)
+
+    def recorded_example_choices(self) -> tuple[RecordedExampleOption, ...]:
+        return tuple(
+            RecordedExampleOption(example_id=item.example_id, label=item.label)
+            for item in self.config.recorded_examples
+        )
+
+    def recorded_example(self, example_id: str) -> RecordedExampleView:
+        choice = next(
+            (item for item in self.config.recorded_examples if item.example_id == example_id),
+            None,
+        )
+        if choice is None:
+            raise OperationFailure("example", "recorded example is not configured")
+        return read_recorded_example(self.config.operation_store, choice)
 
     def log(self, request: LogReadRequest) -> LogChunk:
         return read_operation_log(self.config.operation_store, request)

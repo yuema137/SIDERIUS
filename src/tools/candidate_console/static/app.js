@@ -168,7 +168,7 @@
   function setMonitor(id) {
     if (monitorId.toLowerCase() === id.toLowerCase()) return;
     monitorEpoch++; window.renderNativeChain(null); monitorId = id; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
-    $('token-rows').replaceChildren(); document.querySelector('.token-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
+    $('token-rows').replaceChildren(); $('tokens-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
     say('remembered-operation', '');
     say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: Unavailable');
     say('tokens-status', 'Reading reported tokens…');
@@ -204,34 +204,14 @@
       if (epoch === monitorEpoch) say('monitor-status', 'Observation stale or unavailable: ' + error.message + '. Last displayed facts are retained; disconnection does not mean stopped.');
     }
   }
-  function tokenCell(value, missing) {
-    return (value === null ? 'Unavailable' : String(value)) + (missing ? ` · ${missing} missing` : '');
-  }
   async function readTokens() {
     if (!monitorId) return;
     const id = monitorId, epoch = monitorEpoch;
     try {
       const snapshot = await api(`operations/${id}/tokens`);
       if (epoch !== monitorEpoch) return;
-      const rows = snapshot.groups.map(group => {
-        const row = document.createElement('tr');
-        for (const value of [group.provider, group.requested_model, group.served_model === null ? 'Unavailable' : group.served_model,
-          tokenCell(group.reported_input_tokens, group.missing_input_rows), tokenCell(group.reported_output_tokens, group.missing_output_rows),
-          tokenCell(group.reported_total_tokens, group.missing_total_rows), String(group.response_rows)]) {
-          const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
-        }
-        return row;
-      });
-      $('token-rows').replaceChildren(...rows);
-      document.querySelector('.token-table').hidden = rows.length === 0;
-      const messages = { reported_responses: 'Reported response observations.', no_reported_responses: 'No reported responses observed.',
-        native_evidence_unavailable: 'Native evidence not available yet.', usage_unavailable: 'Reported usage is unavailable.',
-        preparation_not_applicable: 'Not applicable to preparation operations.' };
-      say('tokens-status', (snapshot.quality.partial ? 'Partial evidence: known sums only. ' : '') + (snapshot.scope === 'chain_cumulative' ? 'Whole-run cumulative usage. ' : '') + messages[snapshot.reason]);
-      const identity = snapshot.identity_basis === 'retained_sidecar' ? 'Run identity matches retained records.' :
-        snapshot.identity_basis === 'observed_sidecar' ? 'Run identity comes from its current identity file; no matching identity was retained at completion.' : '';
-      say('tokens-provenance', snapshot.scope === 'chain_cumulative' ? `${snapshot.coverage_note} ${identity}` : snapshot.coverage_note);
-      say('tokens-times', `Read at: ${snapshot.observed_at} · Last valid usage: ${snapshot.last_valid_usage_at || 'Unavailable'}`);
+      window.presentTokenSnapshot(snapshot, {rows: $('token-rows'), table: $('tokens-table'), status: $('tokens-status'),
+        provenance: $('tokens-provenance'), times: $('tokens-times')});
     } catch (error) {
       if (error.stale) return;
       if (epoch === monitorEpoch) say('tokens-status', 'Reported tokens stale or unavailable: ' + error.message + '. Last observations for this operation are retained. Disconnection does not mean zero usage or stopped.');

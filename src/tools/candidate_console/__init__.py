@@ -1,6 +1,13 @@
 """Local configured candidate console, independently callable from Python."""
 
-from .models import ConsoleConfig, LaunchSelection, PreparedSelection, PrepareSelection, TaskChoice
+from .models import (
+    ConsoleConfig,
+    LaunchSelection,
+    PreparedSelection,
+    PrepareSelection,
+    RecordedExampleChoice,
+    TaskChoice,
+)
 from .service import CandidateConsole
 
 __all__ = [
@@ -9,5 +16,6 @@ __all__ = [
     "LaunchSelection",
     "PrepareSelection",
     "PreparedSelection",
+    "RecordedExampleChoice",
     "TaskChoice",
 ]

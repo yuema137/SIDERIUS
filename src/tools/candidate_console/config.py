@@ -50,6 +50,13 @@ def validate_config(config: ConsoleConfig) -> ConsoleConfig:
         request = choice.request
         for path in (request.capture_path, request.envelope, *request.read_only, *request.devices):
             canonical(path)
+    candidate_roots = tuple(canonical(root) for root in store.candidate_roots)
+    for example in config.recorded_examples:
+        workspace = canonical(example.workspace)
+        if not workspace.is_dir() or not any(
+            workspace != root and workspace.is_relative_to(root) for root in candidate_roots
+        ):
+            raise ValueError("recorded example workspace must be inside a candidate root")
     if config.editor_projects:
         from tools.workflow_authoring.service import WorkflowAuthoring
 
