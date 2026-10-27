@@ -9,6 +9,7 @@ from tools.candidate_operations import (
     LogReadRequest,
     OperationHandle,
     OperationSnapshot,
+    OperationStoreConfig,
     PreparedCandidate,
     PrepareOperation,
     read_operation,
@@ -62,6 +63,26 @@ def preparation_request(
         proposal_advice=selection.proposal_advice,
         implementation_advice=selection.implementation_advice,
         validation_advice=selection.validation_advice,
+    )
+
+
+def loop_status(
+    operation_store: OperationStoreConfig, snapshot: OperationSnapshot
+) -> LoopStatusView | None:
+    """Declared loop bound from the admitted submission; bodies only from the receipt."""
+    if snapshot.kind != "candidate":
+        return None
+    submission = lookup_operation_request(operation_store, snapshot.operation_id)
+    if not isinstance(submission, CandidateOperation):
+        return None
+    loop = submission.request.preview.document.definition.loop
+    if loop is None:
+        return None
+    receipt = snapshot.receipt
+    trace = receipt.loop_trace if isinstance(receipt, CandidateRunReceipt) else None
+    return LoopStatusView(
+        final_iteration=loop.final_iteration,
+        attempted_iterations=None if trace is None else trace.attempted_iterations,
     )
 
 
@@ -194,24 +215,7 @@ class CandidateConsole:
             validation_passed=receipt.validation_passed
             if isinstance(receipt, CandidateRunReceipt)
             else None,
-            loop=self._loop_status(snapshot),
-        )
-
-    def _loop_status(self, snapshot: OperationSnapshot) -> LoopStatusView | None:
-        """Declared loop bound from the admitted submission; bodies only from the receipt."""
-        if snapshot.kind != "candidate":
-            return None
-        submission = lookup_operation_request(self.config.operation_store, snapshot.operation_id)
-        if not isinstance(submission, CandidateOperation):
-            return None
-        loop = submission.request.preview.document.definition.loop
-        if loop is None:
-            return None
-        receipt = snapshot.receipt
-        trace = receipt.loop_trace if isinstance(receipt, CandidateRunReceipt) else None
-        return LoopStatusView(
-            final_iteration=loop.final_iteration,
-            attempted_iterations=None if trace is None else trace.attempted_iterations,
+            loop=loop_status(self.config.operation_store, snapshot),
         )
 
     def request_loop_stop(self, operation_id: UUID) -> LoopStopAcknowledgement:
