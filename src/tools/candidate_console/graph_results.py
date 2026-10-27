@@ -7,16 +7,19 @@ receipt verifiers. Any evidence that cannot be re-verified becomes a typed
 ``OperationFailure("integrity", ...)`` whose HTTP message carries no path.
 """
 
+import hashlib
+import json
 from pathlib import Path
 from uuid import UUID
 
-from execute_tools.run_report import load_run_output, project_run
+from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from core.file_identity import open_identity_file, regular_file_snapshot
+from execute_tools.run_report import project_run
 from tools.candidate_operations import read_operation
 from tools.candidate_operations.files import read_model
 from tools.candidate_operations.models import CandidateOperation, OperationFailure
 from tools.candidate_operations.read import lookup_operation_request
 from tools.candidate_operations.store import native_directory
-from tools.candidate_worker.graph_evidence import record_digest
 from tools.candidate_worker.graph_models import GraphNodeEvidence
 from tools.candidate_worker.loop_evidence import verify_loop
 from tools.candidate_worker.models import CandidateRunReceipt
@@ -25,9 +28,8 @@ from workflows.definition.fanout import execution_families
 from .models import ConsoleConfig, GraphBodyResult, GraphResultsView, GraphRunSummary
 
 
-def _summary(path: str) -> GraphRunSummary:
-    output_path = Path(path)
-    output = load_run_output(output_path)
+def _summary(output: HyperparamTuningOutput, output_path: Path) -> GraphRunSummary:
+    """Project one tuning record to graph summary; output is pre-validated."""
     view = project_run(output, source_path=output_path)
     return GraphRunSummary(
         run_name=view.run_name,
@@ -71,14 +73,30 @@ def _body_result(iteration: int, tuning: GraphNodeEvidence) -> GraphBodyResult:
     if tuning.record_path is None or tuning.record_sha256 is None:
         raise OperationFailure("integrity", "verified tuning output identity is missing")
     try:
-        if record_digest(tuning.record_path) != tuning.record_sha256:
-            raise OperationFailure("integrity", "verified tuning output changed")
-        result = _summary(tuning.record_path)
+        output = _verified_record(tuning.record_path, tuning.record_sha256)
+        result = _summary(output, Path(tuning.record_path))
     except OperationFailure:
         raise
     except (OSError, ValueError) as error:
+        # ValueError covers JSON syntax and pydantic ValidationError.
         raise OperationFailure("integrity", "verified tuning output is unavailable") from error
     return GraphBodyResult(iteration=iteration, tuning_state=tuning.state, result=result)
+
+
+def _verified_record(path: str, expected_sha256: str) -> HyperparamTuningOutput:
+    """Read the record once (no-follow), check its digest and parse those same bytes.
+
+    Parsing mirrors ``load_run_output`` (``json.loads`` then ``model_validate``)
+    so a valid record projects exactly as before.
+    """
+    with open_identity_file(path, require_no_follow=True) as handle:
+        before = regular_file_snapshot(handle)
+        data = handle.read()
+        if regular_file_snapshot(handle) != before:
+            raise ValueError("native record changed while reading")
+    if hashlib.sha256(data).hexdigest() != expected_sha256:
+        raise OperationFailure("integrity", "verified tuning output changed")
+    return HyperparamTuningOutput.model_validate(json.loads(data))
 
 
 def read_graph_results(config: ConsoleConfig, operation_id: UUID) -> GraphResultsView:

@@ -264,12 +264,12 @@ policy. `StatusView` and operation status semantics are unchanged.
 - Bodies: a standalone graph yields its one receipt. A loop yields exactly the body
   receipts returned by `verify_loop(request, launch.json receipt, receipt)`, in
   verified iteration order (`iteration` = 1-based position). A loop with no
-  verified completed-body index returns `available=true`, `bodies=[]`. Body
-  membership is never inferred from directory names.
+  verified completed-body index (`attempted_iterations == 0`) returns `available=false`
+  with no bodies. Body membership is never inferred from directory names.
 - Per body, the tuning node is the declared `execution_families(...).tuning`
   node in that body's `graph_trace`. Only `state == "succeeded"` reads a record:
-  its `record_sha256` is re-checked with `record_digest`, then the file is passed
-  through `load_run_output` and `project_run` alone. Any other state returns
+  its `record_sha256` is re-checked with `record_digest`, then the file is validated
+  as JSON and against the `HyperparamTuningOutput` schema. Any other state returns
   `result=null` (no score, even if a record file exists).
 - `GraphRunSummary` is the path-free subset of `RunView`: run name, model type,
   status, termination reason, times, completed rounds, total attempts, `metric`,
@@ -277,7 +277,7 @@ policy. `StatusView` and operation status semantics are unchanged.
   tuner's own `RunHeadline` and `status_counts`. `source_path`, provenance,
   storage/record paths, raw `all_records`/attempts and failure detail are absent.
 - Failures: a missing tuning node, missing record identity, changed digest,
-  unreadable/invalid record, or a refused loop re-verification raises
+  unreadable/invalid/schema-invalid record, or a refused loop re-verification raises
   `OperationFailure("integrity", ...)` → HTTP 409 with the generic sanitized
   message; an unknown operation is 404.
 
