@@ -21,12 +21,12 @@ from .test_training import training_request as training_request
 from .test_training import training_runner as training_runner
 
 
-def loop_request(prepared):
+def loop_request(prepared, final_iteration=2):
     request = graph_training_request(prepared)
     definition = request.preview.document.definition.model_copy(
         update={
             "loop": AuthoredLoop(
-                final_iteration=2,
+                final_iteration=final_iteration,
                 feedback=LoopFeedback(
                     source=ResultSource(node="train"),
                     target="interpret",
@@ -158,8 +158,9 @@ def test_two_native_bodies_preserve_advice_and_verify_feedback(
     assert refused.value.detail.code == "integrity"
 
 
+@pytest.mark.parametrize("paused_first", [False, True])
 def test_operation_stop_finishes_active_body_without_next_dispatch(
-    prepared, loop_tuner, monkeypatch, tmp_path
+    prepared, loop_tuner, monkeypatch, tmp_path, paused_first
 ):
     import importlib
     from uuid import uuid4
@@ -167,10 +168,16 @@ def test_operation_stop_finishes_active_body_without_next_dispatch(
     from tools.candidate_operations import (
         CandidateOperation,
         OperationStoreConfig,
+        request_loop_pause,
         request_loop_stop,
+        review_loop_resume,
         submit_operation,
     )
-    from tools.candidate_operations.models import OperationSnapshot, ProcessObservation
+    from tools.candidate_operations.models import (
+        OperationFailure,
+        OperationSnapshot,
+        ProcessObservation,
+    )
     from tools.candidate_operations.store import load_record
     from tools.candidate_worker import training
 
@@ -186,6 +193,11 @@ def test_operation_stop_finishes_active_body_without_next_dispatch(
     )
     submit_operation(config, submission, launch_environment={"OPENAI_API_KEY": "offline-stub"})
     record = load_record(config, submission.request_id)
+    # Before the worker claims its workspace, Pause and Resume review are typed not_ready.
+    for control in (request_loop_pause, review_loop_resume):
+        with pytest.raises(OperationFailure) as refused:
+            control(config, submission.request_id)
+        assert refused.value.detail.code == "not_ready"
     observed = OperationSnapshot(
         operation_id=submission.request_id,
         kind="candidate",
@@ -204,6 +216,9 @@ def test_operation_stop_finishes_active_body_without_next_dispatch(
 
     def stop_at_tuning(self, value):
         output = real(self, value)
+        if paused_first:
+            # Stop is terminal and wins even over an earlier Pause at the same boundary.
+            request_loop_pause(config, submission.request_id)
         marker = request_loop_stop(config, submission.request_id)
         assert marker.run_id == record.native_id.hex
         return output
@@ -217,13 +232,27 @@ def test_operation_stop_finishes_active_body_without_next_dispatch(
     verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
 
 
-def test_failed_feedback_never_dispatches_the_next_body(prepared, loop_tuner, monkeypatch):
+@pytest.mark.parametrize("paused", [False, True])
+def test_failed_feedback_never_dispatches_the_next_body(prepared, loop_tuner, monkeypatch, paused):
     from tools.candidate_worker import training
+    from tools.candidate_worker.loop_models import LoopPause
+    from tools.candidate_worker.models import CandidateRunReceipt
 
     request = loop_request(prepared)
     real = training.HyperparamTuningAgent.run
 
     def abort(self, value):
+        if paused:
+            # A failed body never becomes a resumable paused checkpoint.
+            control = Path(request.preview.document.definition.task.workspace) / "candidate_run"
+            launched = CandidateRunReceipt.model_validate_json(
+                (control / "launch.json").read_bytes()
+            )
+            (control / "pause.json").write_text(
+                LoopPause(
+                    run_id=launched.run_id, declaration_digest=launched.declaration_digest
+                ).model_dump_json()
+            )
         return real(self, value).model_copy(
             update={"termination_reason": "infrastructure_abort", "status": "failed"}
         )
@@ -329,12 +358,13 @@ def test_omitted_seed_metric_uses_native_stamp_when_completed_cache_needs_cappin
 
 
 @pytest.mark.parametrize("fixture", ["prepared", "training_request"])
-def test_fixed_profile_readback_rejects_loop_stopped_status(request, fixture):
+@pytest.mark.parametrize("status", ["stopped", "paused"])
+def test_fixed_profile_readback_rejects_loop_stopped_status(request, fixture, status):
     from tools.candidate_worker.records import verify_candidate_records
 
     selected = request.getfixturevalue(fixture)
     launched = initial(selected)
-    stopped = launched.model_copy(update={"status": "stopped"})
+    stopped = launched.model_copy(update={"status": status})
     with pytest.raises(ValueError, match="fixed candidate receipt cannot claim loop Stop"):
         verify_candidate_records(
             selected,

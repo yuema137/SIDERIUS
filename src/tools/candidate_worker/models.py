@@ -87,6 +87,7 @@ class CandidateRunReceipt(PreviewModel):
         "interrupted",
         "completed",
         "stopped",
+        "paused",
     ]
     node_ids: tuple[str, ...]
     selected_constructor_routes: tuple[LLMRoute, ...]

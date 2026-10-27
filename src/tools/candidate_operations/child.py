@@ -55,6 +55,10 @@ def execute(path: Path) -> int:
                 invocation_id=record.native_id,
                 expected_observations=ReusablePreparationObservations.from_inputs(record.inputs),
             )
+        elif record.submission.kind == "candidate_loop_resume":
+            from .loop_resume import execute_resume
+
+            execute_resume(record)
         else:
             launch_candidate(record.submission.request, invocation_id=record.native_id)
         native = native_receipt(record)

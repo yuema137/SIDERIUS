@@ -31,7 +31,14 @@ from .models import (
 from .native_chain_read import read_native_chain_operation
 from .native_resume_read import has_continuation, read_resume_chain
 from .process import observe
-from .store import load_record, native_directory, now, operation_path, validate_config
+from .store import (
+    is_authored_loop,
+    load_record,
+    native_directory,
+    now,
+    operation_path,
+    validate_config,
+)
 
 
 def optional[Model: BaseModel](path: Path, model: type[Model]) -> Model | None:
@@ -53,6 +60,10 @@ def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
     submission = record.submission
     if submission.kind == "native_chain" or submission.kind == "native_chain_resume":
         raise OperationFailure("kind", "chain has no native scientific receipt")
+    if is_authored_loop(record):
+        from .loop_resume import read_segment
+
+        return read_segment(record)
     if submission.kind == "prepare_reusable":
         return read_reusable_terminal(
             submission.request,
@@ -79,6 +90,7 @@ def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
         ):
             raise OperationFailure("integrity", "native preparation identity mismatch")
     else:
+        assert submission.kind == "candidate"
         receipt = CandidateRunReceipt.model_validate_json(payload)
         initial = read_model(control / "launch.json", CandidateRunReceipt)
         saved = read_model(control / "request.json", CandidateRunRequest)
@@ -136,6 +148,11 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
         ):
             raise OperationFailure("integrity", "completed native receipt changed or vanished")
         if native is not None:
+            successor = None
+            if is_authored_loop(record):
+                from .loop_resume import successor_id
+
+                successor = successor_id(record)
             if completion is not None and completion.outcome == "pre_dispatch_failure":
                 raise OperationFailure(
                     "integrity", "pre-dispatch failure contradicts native receipt"
@@ -149,6 +166,7 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
                 process=process,
                 finishing=process.status == "alive",
                 receipt_available=True,
+                successor_operation_id=successor,
                 receipt=native[0],
                 receipt_digest=native[1],
                 reason="native_terminal",

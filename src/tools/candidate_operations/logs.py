@@ -15,8 +15,16 @@ def read_operation_log(config: OperationStoreConfig, request: LogReadRequest) ->
         operation_path(config, request.operation_id) / "operation.log"
         if request.kind == "operation"
         or record.submission.kind in {"native_chain", "native_chain_resume"}
-        else native_directory(record.submission) / "worker.log"
+        else None
     )
+    if path is None:
+        # A loop continuation owns its segment worker.log beside its binding.
+        if record.submission.kind == "candidate_loop_resume":
+            from .loop_resume import selected_control
+
+            path = selected_control(record) / "worker.log"
+        else:
+            path = native_directory(record.submission) / "worker.log"
     try:
         with open_file(path, private_file=request.kind == "operation") as descriptor:
             size = os.fstat(descriptor).st_size

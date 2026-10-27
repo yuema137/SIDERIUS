@@ -35,6 +35,11 @@ def read_operation_tokens(
             availability="not_applicable",
             reason="preparation_not_applicable",
         )
+    if record.submission.kind == "candidate_loop_resume":
+        from .loop_resume import root_record
+
+        record = root_record(record)
+    assert record.submission.kind == "candidate"
     control = native_directory(record.submission)
     workspace = control.parent
     root = next(

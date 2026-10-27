@@ -72,7 +72,8 @@ def advance_body(
 def verify_loop(
     request: CandidateRunRequest, initial: CandidateRunReceipt, receipt: CandidateRunReceipt
 ) -> tuple[CandidateRunReceipt, ...]:
-    from .loop import stop_requested
+    """Verify the loop terminal; return its accepted body receipts in iteration order."""
+    from .loop import pause_requested, stop_requested
     from .loop_models import admit_loop
 
     admit_loop(request)
@@ -103,18 +104,55 @@ def verify_loop(
         return ()
     if trace.attempted_iterations > loop.final_iteration:
         raise ValueError("loop exceeds declared finite limit")
-    if trace.attempted_iterations < loop.final_iteration:
-        next_iteration = trace.attempted_iterations + 1
-        next_control = candidate_control_dir(Path(initial.workspace), iteration=next_iteration)
-        if (next_iteration > 1 and next_control.exists()) or any(
-            Path(item.storage).exists()
-            for item in expected_nodes(request, initial, iteration=next_iteration)
-        ):
-            raise ValueError("loop terminal omits an already-dispatched body")
+    from .loop_resume import has_successor, verify_segment
+
+    # A segment may pause only after dispatching its own body, never at its resume point.
+    resumed_at = verify_segment(initial, receipt)
+    if trace.attempted_iterations < loop.final_iteration and not has_successor(initial, receipt):
+        require_unused_next(request, initial, trace.attempted_iterations)
+    _, bodies = replay_completed(request, initial, trace.attempted_iterations)
+    last = bodies[-1] if bodies else None
+    expected = (
+        last.status
+        if last is not None and last.status != "completed"
+        else "completed"
+        if trace.attempted_iterations == loop.final_iteration
+        else "paused"
+        if receipt.status == "paused" and trace.attempted_iterations > resumed_at
+        else "stopped"
+    )
+    if (
+        receipt.status != expected
+        or receipt.validation_passed != (None if last is None else last.validation_passed)
+        or (expected == "stopped" and not stop_requested(initial))
+        or (expected == "paused" and not pause_requested(initial, trace.segment_id))
+    ):
+        raise ValueError("loop terminal disagrees with completed bodies or Stop/Pause evidence")
+    return bodies
+
+
+def require_unused_next(
+    request: CandidateRunRequest, initial: CandidateRunReceipt, completed: int
+) -> None:
+    next_iteration = completed + 1
+    next_control = candidate_control_dir(Path(initial.workspace), iteration=next_iteration)
+    if (next_iteration > 1 and next_control.exists()) or any(
+        Path(item.storage).exists()
+        for item in expected_nodes(request, initial, iteration=next_iteration)
+    ):
+        raise ValueError("loop terminal omits an already-dispatched body")
+
+
+def replay_completed(
+    request: CandidateRunRequest, initial: CandidateRunReceipt, completed: int
+) -> tuple[ChainState, tuple[CandidateRunReceipt, ...]]:
+    """Shared verified-prefix fold for readback and continuation history.
+
+    Returns the folded history and the verified body receipts in iteration order.
+    """
     state = initial_history(request, initial)
-    last = None
     bodies: list[CandidateRunReceipt] = []
-    for iteration in range(1, trace.attempted_iterations + 1):
+    for iteration in range(1, completed + 1):
         control = candidate_control_dir(Path(initial.workspace), iteration=iteration)
         body = CandidateRunReceipt.model_validate_json(read_graph_control(control / "body.json"))
         for name in (
@@ -131,22 +169,8 @@ def verify_loop(
                 raise ValueError("loop body identity changed")
         verify_graph_trace(request, initial, body, iteration=iteration, history=state)
         bodies.append(body)
-        if body.status != "completed" and iteration != trace.attempted_iterations:
+        if body.status != "completed" and iteration != completed:
             raise ValueError("loop continued without successful required feedback")
         if body.status == "completed":
             advance_body(request, initial, body, state)
-        last = body
-    expected = (
-        last.status
-        if last is not None and last.status != "completed"
-        else "completed"
-        if trace.attempted_iterations == loop.final_iteration
-        else "stopped"
-    )
-    if (
-        receipt.status != expected
-        or receipt.validation_passed != (None if last is None else last.validation_passed)
-        or (expected == "stopped" and not stop_requested(initial))
-    ):
-        raise ValueError("loop terminal disagrees with completed bodies or Stop evidence")
-    return tuple(bodies)
+    return state, tuple(bodies)

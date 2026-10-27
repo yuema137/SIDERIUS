@@ -59,8 +59,8 @@ def verify_candidate_records(
             return
         if receipt.graph_trace is not None or receipt.loop_trace is not None:
             raise ValueError("fixed candidate receipt cannot contain graph evidence")
-        if receipt.status == "stopped":
-            raise ValueError("fixed candidate receipt cannot claim loop Stop")
+        if receipt.status in {"stopped", "paused"}:
+            raise ValueError("fixed candidate receipt cannot claim loop Stop or Pause")
         if any(node.capability == "tuning" for node in saved.preview.document.definition.nodes):
             if (
                 receipt.status == "completed"

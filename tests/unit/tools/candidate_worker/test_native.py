@@ -74,6 +74,20 @@ def native_runner(monkeypatch):
         return ExecutionResult(status="completed", returncode=0, elapsed_seconds=0.0)
 
     monkeypatch.setattr(importlib.import_module("tools.candidate_worker.launch"), "run", run)
+
+    def observed(profile, argv):
+        from core.runtime_control.process_group import GroupCleanup, GroupObservation
+        from tools.workspace_sandbox.runner import ObservedExecutionResult
+
+        return ObservedExecutionResult(
+            execution=run(profile, argv),
+            direct_child_reaped=True,
+            cleanup=GroupCleanup(required=False, final=GroupObservation(status="absent")),
+        )
+
+    monkeypatch.setattr(
+        importlib.import_module("tools.candidate_worker.launch"), "run_observed", observed
+    )
     return Provider
 
 
