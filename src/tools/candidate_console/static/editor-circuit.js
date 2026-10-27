@@ -19,7 +19,7 @@
     if (moved && redraw) draw();
   }
   function choice(node, argument) {
-    return projection.options.find(value => value.node === node && value.argument === argument);
+    return projection.inventory.find(value => value.node === node && value.argument === argument);
   }
   function highlight() {
     if (!host) return;
@@ -46,8 +46,7 @@
     const occupied = new Set();
     for (const input of world.querySelectorAll('[data-input]')) {
       const option = choice(input.dataset.node, input.dataset.argument || null);
-      const node = projection.document.definition.nodes.find(value => value.id === input.dataset.node);
-      const source = option?.argument === null ? null : node.request.arguments.find(value => value.name === option?.argument)?.source;
+      const source = option?.source;
       if (source?.kind !== 'result') continue;
       const output = [...world.querySelectorAll('[data-output]')].find(value => value.dataset.node === source.node);
       if (!output) continue;
@@ -55,17 +54,43 @@
       if (!route) { say('Some wires could not be routed around the current cards. Move overlapping cards; the connection list retains every binding.'); continue; }
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', geometry.path(route)); path.classList.add('circuit-wire');
-      path.dataset.from = source.node; path.dataset.to = node.id; path.dataset.argument = option.argument;
+      path.dataset.from = source.node; path.dataset.to = input.dataset.node; path.dataset.argument = option.argument;
       svg.append(path);
     }
     highlight();
   }
-  function port(parent, node, argument, output) {
+  function port(parent, node, argument, output, metadata = null) {
     const snapshot = projection;
     const label = output ? 'result' : argument || 'request';
     const button = element('button', label, parent, `circuit-port ${output ? 'circuit-output' : 'circuit-input'}`);
     button.type = 'button'; button.dataset.node = node.id;
-    button.setAttribute('aria-label', `${node.id}.${label} ${output ? 'output' : 'input'}`);
+    if (metadata) {
+      const state = metadata.bound ? 'bound' : metadata.required ? 'required, unbound' : 'optional, unbound';
+      const contract = metadata.socket_contract;
+      const mapping = metadata.protocol_mapping ? `; mapped by ${metadata.protocol_mapping.owner} (${metadata.protocol_mapping.id}) to ${metadata.protocol_mapping.output_contract.id}` : '';
+      const offered = metadata.choices.length ? metadata.choices.map(value => `${value.label} [${value.contract.id}]`).join('; ') : 'no connections offered by the server';
+      const detail = `${node.id}.${label} input; ${state}; contract ${contract.id}: ${contract.native_type}${mapping}; server-offered connections: ${offered}`;
+      button.title = detail;
+      button.setAttribute('aria-label', detail);
+      element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
+      const type = element('span', contract.id, button, 'circuit-port-contract');
+      type.setAttribute('aria-hidden', 'true');
+      element('span', metadata.required ? 'required' : 'optional', button, 'circuit-port-requirement');
+      button.classList.toggle('is-unbound', !metadata.bound);
+      button.dataset.contract = contract.id;
+      button.dataset.required = String(metadata.required);
+    } else {
+      const contract = projection.inventory.find(value => value.node === node.id)?.node_output_contract;
+      const detail = `${node.id}.result output${contract ? `; contract ${contract.id}: ${contract.native_type}` : ''}`;
+      button.title = detail;
+      button.setAttribute('aria-label', detail);
+      element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
+      if (contract) {
+        const type = element('span', contract.id, button, 'circuit-port-contract');
+        type.setAttribute('aria-hidden', 'true');
+        button.dataset.contract = contract.id;
+      }
+    }
     if (output) { button.dataset.output = ''; button.setAttribute('aria-pressed', 'false'); }
     else { button.dataset.input = ''; button.dataset.argument = argument || ''; }
     element('span', '', button, 'circuit-socket');
@@ -130,11 +155,15 @@
       element('dt', 'Capability ID', mappingList); element('dd', node.capability, mappingList);
       element('dt', 'Instance ID', mappingList); element('dd', node.id, mappingList);
       if (node.request.kind === 'protocol') { element('dt', 'Protocol', mappingList); element('dd', node.request.protocol, mappingList); }
-      for (const option of value.options.filter(item => item.node === node.id)) {
-        const input = port(card, node, option.argument, false); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;
-        const source = option.argument === null ? {kind: 'external', binding: node.request.binding} : node.request.arguments.find(item => item.name === option.argument).source;
+      const protocolMapping = value.inventory.find(item => item.node === node.id)?.protocol_mapping;
+      if (protocolMapping) {
+        element('dt', 'Protocol owner', mappingList); element('dd', protocolMapping.owner, mappingList);
+        element('dt', 'Mapped input contract', mappingList); element('dd', protocolMapping.output_contract.id, mappingList);
+      }
+      for (const option of value.inventory.filter(item => item.node === node.id)) {
+        const input = port(card, node, option.argument, false, option); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;
         element('dt', option.argument || 'Request', mappingList);
-        element('dd', source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port}`, mappingList);
+        element('dd', option.source ? (option.source.kind === 'external' ? `external:${option.source.binding}` : `${option.source.node}.${option.source.port}`) : 'unbound', mappingList);
       }
       const output = port(card, node, null, true); output.id = `circuit-output-${node.id}`;
       cards.push(card);
