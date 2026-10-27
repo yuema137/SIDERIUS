@@ -253,7 +253,8 @@ replacement polling, token-only failure isolation and old-run epoch fencing.
 `ConsoleConfig.recorded_examples` defaults to empty. The authenticated
 `GET /api/recorded-examples` lists only configured entries; the detail GET takes
 an allowlist ID, never a browser-supplied filesystem path. Slow control presents
-the captured three-stage proposal/implementation/validation result and reads
+the captured three-stage proposal/implementation/validation result, labelled with
+the editor's paper capability names, and reads
 reported provider usage through the existing candidate-token owner and shared
 token presenter. The panel labels this **candidate validation only**. It is not
 a `StatusView`, operation, training result, scientific score or billing record,
@@ -308,9 +309,15 @@ cannot mutate a replacement document. Required whole-declaration checks remain
 Review/Save, with execution-profile/alias admission owned by separate native
 preparation. Type-compatible highlights do not claim runtime compatibility. Existing
 unrouteable/overlapping layouts retain every binding in the textual connection list.
-Fallback positions are presentation only until a user moves a node; stored positions
-remain exact. Keyboard buttons share pointer actions; Escape/right-click cancels a
-pending wire; Alt + arrows moves a heading. Shared semantic theme tokens own colors.
+Stored positions remain exact. Nodes without one get a display-only fallback placed
+right of every stored card (card size is measured from the rendered cards), so a
+partial code-authored set never overlaps. A pointer drag and Alt + arrows call the
+same move: it records every displayed position, the moved one updated, so the next
+open shows the same layout; a save without a move keeps positions unchanged.
+Keyboard buttons share pointer actions; Escape/right-click cancels a pending wire.
+Card headings use the paper capability names (`INTERPRET`, `LITERATURE`, `PROPOSE`,
+`IMPLEMENT`, `VALIDATE`, `TRAIN & TUNE`) from `editor-capability-presentation.js`;
+a unit census binds that table to the catalog. Shared semantic theme tokens own colors.
 
 Source/form/base changes invalidate Review. Unreviewed inspector edits disable
 the source textarea until Review synchronizes the rendered proposal, preventing
@@ -338,6 +345,11 @@ CONSOLE_PLAYWRIGHT_MODULE=/absolute/installed/playwright \
 CONSOLE_BROWSER_EXECUTABLE=/absolute/installed/chromium \
 node tests/browser/workflow_editor.mjs
 ```
+
+`tests/browser/capability_layout.mjs` (same variables) opens a five-node authored
+loop and checks paper headings, no generic card, pairwise-disjoint cards in light
+and dark themes, and full-layout persistence for pointer and keyboard moves;
+`tests/browser/circuit_geometry.mjs` checks fallback placement without a browser.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser

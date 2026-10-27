@@ -3,6 +3,7 @@
   'use strict';
   const svg = 'http://www.w3.org/2000/svg';
   const entries = Object.freeze({
+    interpretation: {label: 'INTERPRET', role: 'interpretation', paths: [['path', {d: 'M4 4v16h16'}], ['path', {d: 'm7.5 15 3.5-4 3 2.5 4.5-5.5'}], ['circle', {cx: '18.5', cy: '8', r: '1.6'}]]},
     literature: {label: 'LITERATURE', role: 'literature', paths: [['path', {d: 'M6 3.5h8l4 4V20H6z'}], ['path', {d: 'M14 3.5V8h4M9 12h5M9 15h3'}], ['circle', {cx: '17.5', cy: '16.5', r: '2.5'}], ['path', {d: 'm19.3 18.3 2 2'}]]},
     proposal: {label: 'PROPOSE', role: 'proposal', paths: [['path', {d: 'M9 18h6M10 21h4'}], ['path', {d: 'M8.5 14.5a7 7 0 1 1 7 0c-.8.6-1.2 1.3-1.3 2h-4.4c-.1-.7-.5-1.4-1.3-2Z'}], ['path', {d: 'M12 2v2M4.9 5l1.4 1.4M19.1 5l-1.4 1.4'}]]},
     implementation: {label: 'IMPLEMENT', role: 'implementation', paths: [['path', {d: 'm8 7-5 5 5 5M16 7l5 5-5 5M14 5l-4 14'}]]},
@@ -30,5 +31,6 @@
     parent.append(row);
     return entry.label;
   }
-  window.editorCapabilityPresentation = Object.freeze({append});
+  const label = capability => (entries[capability] || fallback).label;
+  window.editorCapabilityPresentation = Object.freeze({append, label});
 })();

@@ -4,6 +4,7 @@
   const $ = id => document.getElementById(id);
   let connected = false, choiceRevision = -1, readRevision = 0;
   const api = path => window.consoleSession.request(path);
+  const label = capability => window.editorCapabilityPresentation.label(capability);
   function setStatus(text) { $('recorded-example-status').textContent = text; }
   function renderFacts(rows, values) {
     rows.replaceChildren();
@@ -21,7 +22,7 @@
     ]);
     const stages = example.stages.map(stage => {
       const item = document.createElement('li');
-      item.textContent = `${stage.capability.toUpperCase()}: ${stage.model_type}` +
+      item.textContent = `${label(stage.capability)}: ${stage.model_type}` +
         (stage.passed === null ? '' : ` · passed: ${stage.passed}`);
       return item;
     });
@@ -33,7 +34,7 @@
     ]);
     const nodes = declaration.nodes.map(node => {
       const details = document.createElement('details');
-      const summary = document.createElement('summary'); summary.textContent = `${node.id} · ${node.capability.toUpperCase()}`;
+      const summary = document.createElement('summary'); summary.textContent = `${node.id} · ${label(node.capability)}`;
       const request = document.createElement('pre'); request.textContent = JSON.stringify(node.request, null, 2);
       details.append(summary, request); return details;
     });

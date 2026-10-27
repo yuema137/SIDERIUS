@@ -42,9 +42,10 @@ try {
   assert.match(await page.locator('#recorded-example-heading').locator('..').textContent(), /Candidate validation evidence only/);
   assert.match(content, /accepted/);
   assert.match(content, /Validation passed/);
-  assert.match(content, /PROPOSAL: tiny_pooled_conv_regressor/);
-  assert.match(content, /IMPLEMENTATION: tiny_pooled_conv_regressor/);
-  assert.match(content, /VALIDATION: tiny_pooled_conv_regressor · passed: true/);
+  assert.match(content, /PROPOSE: tiny_pooled_conv_regressor/);
+  assert.match(content, /IMPLEMENT: tiny_pooled_conv_regressor/);
+  assert.match(content, /VALIDATE: tiny_pooled_conv_regressor · passed: true/);
+  assert.doesNotMatch(content, /(PROPOSAL|IMPLEMENTATION|VALIDATION):/, 'Stages use the editor paper labels, not upper-cased IDs');
   assert.match(content, /Editable source snapshot.*Unavailable in the captured request/);
   assert.match(content, /Observed provider reports; missing or unrecorded usage may exist/);
   assert.match(await page.locator('#recorded-token-rows').textContent(), /26942/);
