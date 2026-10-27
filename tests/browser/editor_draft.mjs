@@ -137,11 +137,12 @@ try {
   await page.locator('#circuit-node-validate').focus(); await page.keyboard.press('Alt+ArrowUp');
   assert.equal(await dirty(), true);
   assert.deepEqual(faults, []);
+  // Same real-exit pattern as console_navigation.mjs: a dismissed reload keeps the draft.
   let unloadDialog = null;
-  page.once('dialog', dialog => { unloadDialog = dialog.type(); void dialog.dismiss(); });
-  await page.close({runBeforeUnload: true});
-  await waitUntil(async () => unloadDialog !== null);
+  page.once('dialog', async dialog => { unloadDialog = dialog.type(); await dialog.dismiss(); });
+  await page.reload({timeout: 3000}).catch(() => {});
   assert.equal(unloadDialog, 'beforeunload');
+  assert.equal(await dirty(), true, 'Declining the exit keeps the unsaved draft');
   console.log('PASS unified draft: wire+move+inspector edit in one draft, keyboard/button undo/redo, local undoable Discard, dirty title/header, confirmed refresh, beforeunload guard and one reviewed byte-exact save.');
 } finally {
   if (browser) await browser.close();
