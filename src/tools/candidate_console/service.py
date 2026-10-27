@@ -4,6 +4,8 @@ from pathlib import Path
 from uuid import UUID
 
 from tools.candidate_operations import (
+    CandidateLoopResumeOperation,
+    CandidateLoopResumeRequest,
     CandidateOperation,
     LogChunk,
     LogReadRequest,
@@ -12,11 +14,14 @@ from tools.candidate_operations import (
     OperationStoreConfig,
     PreparedCandidate,
     PrepareOperation,
+    loop_root_operation,
     read_operation,
     read_operation_log,
     read_operation_tokens,
     read_prepared_candidate,
+    request_loop_pause,
     request_loop_stop,
+    review_loop_resume,
     submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure
@@ -34,6 +39,9 @@ from .models import (
     ConsoleConfig,
     GraphResultsView,
     LaunchSelection,
+    LoopPauseAcknowledgement,
+    LoopResumeReview,
+    LoopResumeSelection,
     LoopStatusView,
     LoopStopAcknowledgement,
     PreparedReview,
@@ -69,20 +77,25 @@ def preparation_request(
 def loop_status(
     operation_store: OperationStoreConfig, snapshot: OperationSnapshot
 ) -> LoopStatusView | None:
-    """Declared loop bound from the admitted submission; bodies only from the receipt."""
-    if snapshot.kind != "candidate":
+    """Declared loop bound from the root submission; bodies only from this segment's receipt.
+
+    A resume segment's own submission carries no definition, so the bound comes from
+    the root candidate the operations owner resolves through immutable predecessors.
+    """
+    if snapshot.kind not in ("candidate", "candidate_loop_resume"):
         return None
-    submission = lookup_operation_request(operation_store, snapshot.operation_id)
-    if not isinstance(submission, CandidateOperation):
+    root = loop_root_operation(operation_store, snapshot.operation_id)
+    if root is None:
         return None
-    loop = submission.request.preview.document.definition.loop
+    loop = root.request.preview.document.definition.loop
     if loop is None:
-        return None
+        raise OperationFailure("kind", "operation loop definition is missing")
     receipt = snapshot.receipt
     trace = receipt.loop_trace if isinstance(receipt, CandidateRunReceipt) else None
     return LoopStatusView(
         final_iteration=loop.final_iteration,
         attempted_iterations=None if trace is None else trace.attempted_iterations,
+        stop_reason=None if trace is None else trace.stop_reason,
     )
 
 
@@ -222,6 +235,49 @@ class CandidateConsole:
         """Record graceful Stop; acknowledgement is not termination (read status for that)."""
         request_loop_stop(self.config.operation_store, operation_id)
         return LoopStopAcknowledgement(operation_id=operation_id)
+
+    def request_loop_pause(self, operation_id: UUID) -> LoopPauseAcknowledgement:
+        """Record a completed-boundary Pause; acknowledgement is not paused (read status)."""
+        request_loop_pause(self.config.operation_store, operation_id)
+        return LoopPauseAcknowledgement(operation_id=operation_id)
+
+    def review_loop_resume(self, operation_id: UUID) -> LoopResumeReview:
+        """Owner review of one exited paused segment, plus names-only credential facts."""
+        snapshot = review_loop_resume(self.config.operation_store, operation_id)
+        root = loop_root_operation(self.config.operation_store, operation_id)
+        receipt = snapshot.receipt
+        if root is None or root.request.preview.document.definition.loop is None:
+            raise OperationFailure("kind", "resume segment root is not an authored loop")
+        if not isinstance(receipt, CandidateRunReceipt) or receipt.loop_trace is None:
+            raise OperationFailure("integrity", "loop resume receipt missing trace")
+        if snapshot.receipt_digest is None:
+            raise OperationFailure("integrity", "loop resume receipt has no digest")
+        return LoopResumeReview(
+            predecessor_operation_id=operation_id,
+            expected_receipt_digest=snapshot.receipt_digest,
+            completed_iterations=receipt.loop_trace.attempted_iterations,
+            final_iteration=root.request.preview.document.definition.loop.final_iteration,
+            credential_readiness=credential_readiness(root.request, self.config.credential_file),
+        )
+
+    def resume_loop(self, selection: LoopResumeSelection) -> OperationHandle:
+        """Submit one reviewed Resume; a known request UUID replays before credential reads."""
+        selection = LoopResumeSelection.model_validate_json(selection.model_dump_json())
+        store = self.config.operation_store
+        submission = CandidateLoopResumeOperation(
+            request_id=selection.request_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=selection.predecessor_operation_id,
+                expected_receipt_digest=selection.expected_receipt_digest,
+            ),
+        )
+        environment: dict[str, str] = {}
+        if lookup_operation_request(store, selection.request_id) is None:
+            root = loop_root_operation(store, selection.predecessor_operation_id)
+            if root is None:
+                raise OperationFailure("kind", "operation is not an authored loop")
+            environment = credentials(self.config.credential_file, root.request.environment_names)
+        return submit_operation(store, submission, launch_environment=environment)
 
     def graph_results(self, operation_id: UUID) -> GraphResultsView:
         return read_graph_results(self.config, operation_id)

@@ -766,7 +766,8 @@ when requested through a resumed segment. Neither request sends a process signal
 `OperationSnapshot` only when its native receipt is paused, its Completion binds
 that receipt, the wrapper is observably exited, and recorded native supervision
 proves clean process-group shutdown. Missing/unknown lifecycle evidence, a reached
-finite limit, a root Stop or an existing successor refuses with `loop_resume`. A
+finite limit, a met stop condition (a `completed` receipt with `loop_trace.stop_reason`),
+a root Stop or an existing successor refuses with `loop_resume`. A
 partial next body already invalidates the paused readback, so the review finds no
 verified paused segment. The review constructs no process and reads no credentials.
 
@@ -799,8 +800,18 @@ reads select that segment's worker log. Reported-token reads use the original ru
 identity and ledger, so they describe the run total, not a fabricated per-segment
 subtotal. Root source/captures and earlier receipts remain immutable.
 
+`loop_root_operation(config, operation_id)` is the read-only root resolver for
+callers (the console's loop bound, Resume credential names and per-body results).
+It returns the root `CandidateOperation` of an authored-loop operation or segment,
+or `None` for any other operation, by following immutable
+`predecessor_operation_id` records only; a resume segment whose root is not an
+authored loop raises `kind` (reachable only with tampered records). It reads no
+native file, process or credential, and an unknown operation raises `FileNotFoundError`.
+Predecessor-link cycles raise `integrity`.
+
 These authored controls do not use fixed native-chain capture recipes or shell
-resume flags. No arbitrary iteration cap, new history policy, mid-body recovery or
-GUI control is introduced. Offline tests separate operation and worker processes,
-exercise real native body/evidence construction with provider/training doubles, and
-cover required lifecycle/admission refusals; they are not paper qualification.
+resume flags. No arbitrary iteration cap, new history policy or mid-body recovery
+is introduced; the console's Pause/Resume controls only call these functions.
+Offline tests separate operation and worker processes, exercise real native
+body/evidence construction with provider/training doubles, and cover required
+lifecycle/admission refusals; they are not paper qualification.

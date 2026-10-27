@@ -15,9 +15,13 @@ from uuid import UUID
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from core.file_identity import open_identity_file, regular_file_snapshot
 from execute_tools.run_report import project_run
-from tools.candidate_operations import read_operation
+from tools.candidate_operations import loop_root_operation, read_operation
 from tools.candidate_operations.files import read_model
-from tools.candidate_operations.models import CandidateOperation, OperationFailure
+from tools.candidate_operations.models import (
+    CandidateLoopResumeOperation,
+    CandidateOperation,
+    OperationFailure,
+)
 from tools.candidate_operations.read import lookup_operation_request
 from tools.candidate_operations.store import native_directory
 from tools.candidate_worker.graph_models import GraphNodeEvidence
@@ -102,10 +106,12 @@ def _verified_record(path: str, expected_sha256: str) -> HyperparamTuningOutput:
 def read_graph_results(config: ConsoleConfig, operation_id: UUID) -> GraphResultsView:
     """Show each verified authored body independently; never aggregate loop scores.
 
-    ``available`` is false unless the operation is a completed candidate whose
-    native receipt carries graph or loop evidence. A loop that verified no body
-    is available with zero bodies, so the monitor states that nothing was
-    recorded instead of hiding the result section.
+    ``available`` is false unless the operation is a completed candidate or
+    authored-loop resume segment whose native receipt carries graph or loop
+    evidence. A paused or resumed segment lists every body verified up to its own
+    receipt, resolved through the operations owner's root, never by directory. A
+    loop that verified no body is available with zero bodies, so the monitor
+    states that nothing was recorded instead of hiding the result section.
     """
     snapshot = read_operation(config.operation_store, operation_id)
     unavailable = GraphResultsView(operation_id=operation_id, available=False)
@@ -115,6 +121,10 @@ def read_graph_results(config: ConsoleConfig, operation_id: UUID) -> GraphResult
     if receipt.graph_trace is None and receipt.loop_trace is None:
         return unavailable
     submission = lookup_operation_request(config.operation_store, operation_id)
+    if isinstance(submission, CandidateLoopResumeOperation):
+        # read_operation already verified this segment's receipt against its root;
+        # verify_loop replays every body from the root request and launch receipt.
+        submission = loop_root_operation(config.operation_store, operation_id)
     if not isinstance(submission, CandidateOperation):
         return unavailable
 

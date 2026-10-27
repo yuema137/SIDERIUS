@@ -266,3 +266,239 @@ def test_five_node_browser_fixture_saves_every_node_position():
     assert sorted(position.node for position in document.positions) == sorted(
         node.id for node in document.definition.nodes
     )
+
+
+def test_research_loop_add_limit_remove_round_trip_over_editor_routes(editor_config):
+    """Fails if a GUI loop edit bypasses typed review/validation, drifts other source
+    bytes (``2.0`` -> ``2`` via browser JSON) or keeps a removed loop."""
+    from tests.browser.workflow_editor_server import interpretation_profile_source
+    from workflows.definition import ReusableWorkflowDocument, parse_workflow_source
+    from workflows.definition.source import render_workflow_source
+
+    path = editor_config.editor_projects[0].source_file
+    looped = parse_workflow_source(interpretation_profile_source())
+    assert isinstance(looped, ReusableWorkflowDocument)
+    plain_document = looped.model_copy(
+        update={"definition": looped.definition.model_copy(update={"loop": None})}
+    )
+    plain = render_workflow_source(plain_document)
+    assert "'trial_time_budget_minutes': 2.0" in plain  # a float JSON clients lose
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    feedback = {
+        "source": {"kind": "result", "node": "fit", "port": "result"},
+        "target": "interpret",
+        "protocol": "tuning-to-interpretation",
+        "history": "native-research/v1",
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+
+        def review(loop):
+            base = client.get("/api/editor/example", headers=headers).json()
+            proposal = {"kind": "loop", "source": base["source"], "loop": loop}
+            body = {"expected_sha256": base["sha256"], "proposal": proposal}
+            return base, client.post("/api/editor/example/review", headers=headers, json=body)
+
+        def review_and_save(loop):
+            base, response = review(loop)
+            assert response.status_code == 200, response.text
+            view = response.json()
+            saved = client.post(
+                "/api/editor/example/save",
+                headers=headers,
+                json={
+                    "expected_sha256": base["sha256"],
+                    "proposal_sha256": view["sha256"],
+                    "source": view["source"],
+                },
+            )
+            assert saved.status_code == 200, saved.text
+            return view, saved.json()
+
+        # A graph without one tuning/interpretation pair offers no one-click loop.
+        assert "loop_template" not in client.get("/api/editor/example", headers=headers).json()
+        path.write_text(plain)
+        base = client.get("/api/editor/example", headers=headers).json()
+        assert "loop" not in base["document"]["definition"]
+        assert base["loop_template"] == {"final_iteration": 1, "feedback": feedback}
+
+        # Saving a non-loop declaration without loop edits keeps exact bytes.
+        view, saved = review_and_save(None)
+        assert (view["diff"], saved["unchanged"], path.read_text()) == ("", True, plain)
+
+        # Add the server template with an edited limit; nothing else changes.
+        view, _ = review_and_save({**base["loop_template"], "final_iteration": 3})
+        assert "final_iteration=3" in view["diff"]
+        assert "2.0" not in "".join(
+            line for line in view["diff"].splitlines(True) if line.startswith(("-", "+"))
+        )
+        saved_document = parse_workflow_source(path.read_text())
+        assert saved_document.model_dump(mode="json")["definition"]["loop"] == {
+            "final_iteration": 3,
+            "feedback": feedback,
+        }
+        assert (
+            saved_document.model_copy(
+                update={"definition": saved_document.definition.model_copy(update={"loop": None})}
+            )
+            == plain_document
+        )
+
+        # Invalid limits and endpoints are refused by the declaration; disk is untouched.
+        looped_bytes = path.read_bytes()
+        for invalid in (0, -1, 2.5, "4", True, None):
+            _, refused = review({"final_iteration": invalid, "feedback": feedback})
+            assert refused.status_code == 422, (invalid, refused.text)
+        _, refused = review(
+            {"final_iteration": 2, "feedback": {**feedback, "target": "hypothesis"}}
+        )
+        assert refused.status_code == 422, refused.text
+        assert refused.json()["diagnostics"][0]["field_path"] == ["definition"]
+        assert path.read_bytes() == looped_bytes
+
+        # Saving a loop declaration without edits keeps exact bytes; then edit the limit.
+        view, saved = review_and_save({"final_iteration": 3, "feedback": feedback})
+        assert (view["diff"], saved["unchanged"], path.read_bytes()) == ("", True, looped_bytes)
+        review_and_save({"final_iteration": 5, "feedback": feedback})
+        assert parse_workflow_source(path.read_text()).definition.loop.final_iteration == 5
+
+        # Removing the loop restores the original non-loop bytes and declaration digest.
+        review_and_save(None)
+        assert path.read_text() == plain
+        assert (
+            parse_workflow_source(path.read_text()).declaration_digest()
+            == plain_document.declaration_digest()
+        )
+        reopened = client.get("/api/editor/example", headers=headers).json()
+        assert "loop" not in reopened["document"]["definition"]
+
+
+def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_config):
+    """Fails if a GUI stop-condition edit bypasses the typed declaration (invalid k,
+    missing metric id, duplicate kind or the reserved judge reach disk), if a
+    condition-free loop's bytes drift, or if add-then-remove does not restore them."""
+    from tests.browser.workflow_editor_server import interpretation_profile_source
+    from workflows.definition import parse_workflow_source
+
+    path = editor_config.editor_projects[0].source_file
+    path.write_text(interpretation_profile_source())
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    threshold = {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85}
+    patience = {"kind": "no_improvement", "completed_bodies": 1}
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        base = client.get("/api/editor/example", headers=headers).json()
+        loop = base["document"]["definition"]["loop"]
+        assert loop["final_iteration"] == 2 and "stop_conditions" not in loop
+
+        def review(stops):
+            current = client.get("/api/editor/example", headers=headers).json()
+            proposal = {
+                "kind": "loop",
+                "source": current["source"],
+                "loop": {**loop, "stop_conditions": stops},
+            }
+            body = {"expected_sha256": current["sha256"], "proposal": proposal}
+            return current, client.post("/api/editor/example/review", headers=headers, json=body)
+
+        def review_and_save(stops):
+            current, response = review(stops)
+            assert response.status_code == 200, response.text
+            view = response.json()
+            saved = client.post(
+                "/api/editor/example/save",
+                headers=headers,
+                json={
+                    "expected_sha256": current["sha256"],
+                    "proposal_sha256": view["sha256"],
+                    "source": view["source"],
+                },
+            )
+            assert saved.status_code == 200, saved.text
+            return view
+
+        original = path.read_bytes()
+        # An explicit empty list is the same declaration: no bytes move.
+        assert review_and_save([])["diff"] == "" and path.read_bytes() == original
+
+        # Each refusal is typed by the layer that owns it; the file is untouched.
+        # Per-condition shape is refused by the request schema before any source work.
+        for invalid in (
+            [{"kind": "no_improvement", "completed_bodies": 0}],
+            [{"kind": "no_improvement", "completed_bodies": 1.5}],
+            [{"kind": "metric_threshold", "threshold": 0.85}],
+            [{**threshold, "metric_id": ""}],
+            [{**threshold, "threshold": "0.85"}],
+            [{"kind": "judge"}],
+        ):
+            _, refused = review(invalid)
+            assert refused.status_code == 422, (invalid, refused.text)
+            assert refused.json()["error"]["code"] == "validation", (invalid, refused.text)
+        # Cross-field rules (k below the final iteration, one condition per kind) are
+        # refused by the declaration, located at the definition, not as a source error.
+        for invalid in (
+            [{"kind": "no_improvement", "completed_bodies": 2}],  # == final_iteration
+            [threshold, {**threshold, "threshold": 0.9}],
+        ):
+            _, refused = review(invalid)
+            assert refused.status_code == 422, (invalid, refused.text)
+            body = refused.json()
+            assert body["error"]["code"] == "source", (invalid, refused.text)
+            assert [(item["code"], item["field_path"]) for item in body["diagnostics"]] == [
+                ("validation", ["definition"])
+            ], (invalid, refused.text)
+        assert path.read_bytes() == original
+
+        # Add both kinds: only the loop's stop conditions (and their constructors) move.
+        view = review_and_save([threshold, patience])
+        added = [line for line in view["diff"].splitlines() if line.startswith("+ ")]
+        assert any("MetricThresholdStop(" in line for line in added), view["diff"]
+        assert any("NoImprovementStop(" in line for line in added), view["diff"]
+        assert not any(
+            line.startswith("-") and not line.startswith("---")
+            for line in view["diff"].splitlines()
+        )
+        saved = parse_workflow_source(path.read_text()).model_dump(mode="json")
+        assert saved["definition"]["loop"]["stop_conditions"] == [threshold, patience]
+
+        # Remove one, then the other: the condition-free bytes return exactly.
+        review_and_save([patience])
+        assert "MetricThresholdStop" not in path.read_text()
+        review_and_save([])
+        assert path.read_bytes() == original
+
+
+def test_loop_proposal_against_a_stale_source_version_is_a_conflict(editor_config):
+    """Fails if a loop proposal is reviewed against bytes other than the current file:
+    an outdated ``expected_sha256`` must refuse with ``conflict`` and write nothing."""
+    from tests.browser.workflow_editor_server import interpretation_profile_source
+
+    path = editor_config.editor_projects[0].source_file
+    path.write_text(interpretation_profile_source())
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        stale = client.get("/api/editor/example", headers=headers).json()
+        path.write_text(path.read_text() + "\n")  # another writer changes the file
+        current = path.read_bytes()
+        response = client.post(
+            "/api/editor/example/review",
+            headers=headers,
+            json={
+                "expected_sha256": stale["sha256"],
+                "proposal": {
+                    "kind": "loop",
+                    "source": stale["source"],
+                    "loop": stale["document"]["definition"]["loop"],
+                },
+            },
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "conflict"
+        assert path.read_bytes() == current

@@ -15,6 +15,7 @@ from tools.candidate_operations.native_chain_models import NativeChainObservatio
 from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.graph_models import GraphState, GraphTrace
+from tools.candidate_worker.loop_stop import StopReason
 from tools.workflow_authoring.models import Project
 from tools.workflow_preview.models import PreviewModel
 from tools.workspace_sandbox.profile import SandboxProfile
@@ -205,6 +206,9 @@ class LoopStatusView(PreviewModel):
 
     final_iteration: int = Field(gt=0)
     attempted_iterations: int | None = Field(default=None, ge=0)
+    # The receipt's verified reason when a declared stop condition completed the loop
+    # before its limit; absent otherwise (and absent while no receipt exists).
+    stop_reason: StopReason | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class LoopStopSelection(PreviewModel):
@@ -218,6 +222,35 @@ class LoopStopAcknowledgement(PreviewModel):
     outcome: Literal["requested"] = "requested"
 
 
+class LoopPauseSelection(PreviewModel):
+    """Empty JSON body: the path UUID selects the segment to Pause."""
+
+
+class LoopPauseAcknowledgement(PreviewModel):
+    """Pause was recorded for this segment; the active body still completes."""
+
+    operation_id: UUID
+    outcome: Literal["requested"] = "requested"
+
+
+class LoopResumeReview(PreviewModel):
+    """Verified paused segment the operator may continue; names-only credential facts."""
+
+    predecessor_operation_id: UUID
+    expected_receipt_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    completed_iterations: int = Field(gt=0)
+    final_iteration: int = Field(gt=0)
+    credential_readiness: CredentialReadiness
+
+
+class LoopResumeSelection(PreviewModel):
+    """Client-retained request UUID plus the reviewed paused receipt digest."""
+
+    request_id: UUID
+    predecessor_operation_id: UUID
+    expected_receipt_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class StatusView(PreviewModel):
     operation_id: UUID
     kind: OperationKind
@@ -225,6 +258,9 @@ class StatusView(PreviewModel):
     observed_at: str
     state: Literal["active", "completed", "operation_failed", "unknown"]
     process: ProcessObservation
+    successor_operation_id: UUID | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     finishing: bool
     receipt_available: bool
     native_status: str | None

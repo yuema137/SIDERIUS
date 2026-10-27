@@ -144,6 +144,12 @@ class ReusableCandidate:
                 "reusable_preparation",
                 "candidate profile differs from captured reusable declaration",
             )
+        loop = request.preview.document.definition.loop
+        if loop != plan.document.definition.loop:
+            raise OperationFailure(
+                "reusable_preparation",
+                "candidate research loop differs from captured reusable declaration",
+            )
         literature_settings = {}
         if profile == "native-literature-candidate/v1":
             from tools.candidate_prepare.reusable_literature import review_settings
@@ -159,6 +165,7 @@ class ReusableCandidate:
             )
             literature_settings = {selected[0]: authored}
         return ReusableCaptureReview(
+            loop=loop,
             literature_settings=literature_settings,
             execution_profile=profile,
             selection=selection,

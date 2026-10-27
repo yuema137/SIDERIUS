@@ -442,3 +442,86 @@ assert render_workflow_source(parse_workflow_source(source)) == source
         [sys.executable, "-c", code, str(path)], cwd=tmp_path, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
+
+
+def loop_document(*conditions):
+    from workflows.definition import AuthoredLoop, LoopFeedback
+
+    return WorkflowDocument(
+        definition=WorkflowDefinition(
+            task=TaskReferences(manifest="task.json", data_root="data", workspace="run"),
+            externals=(
+                ExternalBinding(id="seed", contract="interpretation.input", location="seed.json"),
+                ExternalBinding(id="tune", contract="tuning.input", location="tune.json"),
+            ),
+            nodes=(
+                NodeInstance(
+                    id="interpret",
+                    capability="interpretation",
+                    request=ExternalRequest(binding="seed"),
+                ),
+                NodeInstance(
+                    id="train", capability="tuning", request=ExternalRequest(binding="tune")
+                ),
+            ),
+            loop=AuthoredLoop(
+                final_iteration=3,
+                feedback=LoopFeedback(
+                    source=ResultSource(node="train"),
+                    target="interpret",
+                    protocol="tuning-to-interpretation",
+                    history="native-research/v1",
+                ),
+                stop_conditions=conditions,
+            ),
+        )
+    )
+
+
+def test_loop_without_stop_conditions_keeps_pre_stop_source_bytes_and_digest():
+    import hashlib
+
+    document = loop_document()
+    source = render_workflow_source(document)
+    # Pinned on the pre-stop-condition base f4b633ed: an always-rendered field, a new
+    # constructor import or a dumped empty tuple would change existing declarations.
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "f564feba0de613c2c6480741a384cf14e84b392e7975598853b3cb2ad26204e6"
+    )
+    assert document.definition.declaration_digest() == (
+        "0a14c34c8578cab5a8c49f0fe63bc78620a95686d2e9d98df9c39d95a3d86d85"
+    )
+
+
+def test_stop_conditions_roundtrip_and_refuse_judge_duplicates_and_unreachable_k():
+    from pydantic import ValidationError
+
+    from workflows.definition import JudgeStop, MetricThresholdStop, NoImprovementStop
+
+    threshold = MetricThresholdStop(metric_id="accuracy", threshold=-0.5)
+    document = loop_document(threshold, NoImprovementStop(completed_bodies=2))
+    source = render_workflow_source(document)
+    assert parse_workflow_source(source) == document
+    assert "MetricThresholdStop(" in source and "    NoImprovementStop,\n" in source
+    assert "JudgeStop" not in source
+    only = render_workflow_source(loop_document(threshold))
+    assert "NoImprovementStop" not in only
+    assert (
+        document.definition.declaration_digest() != loop_document().definition.declaration_digest()
+    )
+    with pytest.raises(ValidationError, match="judge stop conditions are deferred"):
+        JudgeStop()
+    with pytest.raises(WorkflowSourceError):
+        parse_workflow_source(
+            source.replace(
+                "    NoImprovementStop,\n", "    NoImprovementStop,\n    JudgeStop,\n", 1
+            )
+            .replace("NoImprovementStop(\n", "JudgeStop(\n", 1)
+            .replace("                    completed_bodies=2,\n", "", 1)
+            .replace("kind='no_improvement'", "kind='judge'")
+        )
+    with pytest.raises(ValidationError, match="more than one stop condition"):
+        loop_document(threshold, threshold)
+    with pytest.raises(ValidationError, match="below final_iteration"):
+        loop_document(NoImprovementStop(completed_bodies=3))
+    loop_document(NoImprovementStop(completed_bodies=2))
