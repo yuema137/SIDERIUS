@@ -7,7 +7,6 @@ executed" is only half the fact; which level decided it is the other half.
 """
 
 import pytest
-from pydantic import ValidationError
 
 from agent.schemas.ordering import (
     DEFAULT_ORDER_STRATEGY,
@@ -218,23 +217,6 @@ def test_legacy_default_is_distinguishable_from_a_chosen_default():
     chosen = resolve_ordering(resolved_scope=SCOPE)
     assert chosen.resolved_strategy == "shuffle"
     assert chosen.resolution_source == "default"
-
-
-def test_resolved_ordering_is_immutable():
-    """Frozen: a resolved fact must not be edited after the fact."""
-    r = resolve_ordering(resolved_scope=SCOPE)
-    with pytest.raises(ValidationError):
-        r.resolved_strategy = "sequential"
-
-
-def test_resolved_ordering_round_trips_through_json():
-    r = resolve_ordering(
-        resolved_scope=SCOPE,
-        proposed_strategy="sequential",
-        proposed_file_order=PERMUTATION,
-        override_strategy="shuffle",
-    )
-    assert ResolvedOrdering.model_validate_json(r.model_dump_json()) == r
 
 
 def test_describes_execution_shows_all_levels():

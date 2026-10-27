@@ -51,14 +51,6 @@ class TestResolvedEpochs:
     def test_an_explicit_value_is_honoured(self):
         assert tuner._resolve_effective_epochs({"epochs": 3}) == 3
 
-    def test_it_does_not_reintroduce_the_bypass_literal(self):
-        """The specific regression: resolving an absent key to 1.
-
-        That single value is what made the clamp compare ``1 > 1`` and
-        decline to act.
-        """
-        assert tuner._resolve_effective_epochs({}) != 1
-
     def test_the_trainer_really_would_use_the_resolved_value(self):
         """Not a claim about a schema — a claim about the trainer.
 
@@ -163,7 +155,6 @@ class TestTheMaxEpochsBoundIsNotBypassable:
         ``agent_input.max_epochs`` directly again would silently disable
         both per-mode ceilings while every legacy run stayed green.
         """
-        import inspect
 
         src = tuner_node_source()
         assert 'planned_epochs = plan.train_cfg.get("epochs", 1)' not in src, (

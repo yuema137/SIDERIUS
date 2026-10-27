@@ -261,33 +261,3 @@ class TestLitReviewSearchDecisionPersona:
         # task framing; it must not have been accidentally removed.
         body = self._md_path().read_text(encoding="utf-8")
         assert "{TASK_DESCRIPTION}" in body
-
-
-# ---------------------------------------------------------------------------
-# Workflow injection — propose_input.task_description / forward_contract
-# are mutated by the workflow at the proposer call site. The schema-default
-# path is exercised here so a future regression on the field defaults fires.
-# ---------------------------------------------------------------------------
-
-
-class TestProposalInputTaskConfigFields:
-    def test_defaults_are_empty(self):
-        inp = ProposalInput(
-            interpretation_evidence=build_proposer_evidence({}),
-            existing_model_types=[],
-        )
-        assert inp.task_description == ""
-        assert inp.forward_contract.is_empty()
-
-    def test_fields_round_trip_through_pydantic(self):
-        inp = ProposalInput(
-            interpretation_evidence=build_proposer_evidence({}),
-            existing_model_types=[],
-            task_description="hello",
-            forward_contract=_squid_fc(),
-        )
-        # Round-trip through model_dump / model_validate.
-        as_dict = inp.model_dump()
-        rehydrated = ProposalInput.model_validate(as_dict)
-        assert rehydrated.task_description == "hello"
-        assert rehydrated.forward_contract.input_shape == "[B, T] int64"

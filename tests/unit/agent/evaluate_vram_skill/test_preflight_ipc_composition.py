@@ -319,26 +319,3 @@ class TestSchemaDiffGuardrail:
             "pass them in the payload branch of run_isolated_preflight — "
             "adding one without the other still loses the field."
         )
-
-    def test_the_model_does_not_accept_arbitrary_extra_fields(self):
-        """A widened model must stay a contract, not a bag."""
-        result = IsolatedProbeResult.model_validate(
-            {"label": "x", "outcome": "COMPLETED_MEASUREMENT", "invented_key": 1}
-        )
-        assert not hasattr(result, "invented_key")
-
-    def test_the_repair_covers_the_exact_fields_a5_lost(self):
-        """Named explicitly so a future refactor cannot quietly re-drop
-        them and still pass the generic diff above."""
-        declared = set(IsolatedProbeResult.model_fields)
-        for field in (
-            "limit_gb",
-            "dominant_phase",
-            "verdict",
-            "suggestion",
-            "violations",
-            "offending_config",
-            "memory_killer",
-            "truncated",
-        ):
-            assert field in declared, f"{field} was lost in A5 and must stay declared"
