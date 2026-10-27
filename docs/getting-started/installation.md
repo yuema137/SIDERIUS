@@ -241,7 +241,7 @@ for effectful runs:
   bridge module's directory (from the current working directory only in a REPL
   or debugger). In a source checkout this is normally `<checkout>/.env`.
 - The paper resolver also loads the checkout's `.env` as a compatibility fallback
-  when `S2_API_KEY` is absent. Neither loader overrides a variable that is
+  when `S2_API_KEY` is absent. No loader overrides a variable that is
   already set; all add every missing variable in the file, not only keys.
   `PYTHON_DOTENV_DISABLED=1` disables all three loaders.
 - `.env` is ignored by the checkout's `.gitignore` (pattern `*.env`). Keeping
