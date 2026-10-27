@@ -110,6 +110,12 @@ select a **result** output socket, then a highlighted named input. Press Escape
 or right-click to cancel. The inspector offers the same binding choices, including
 external inputs such as storage. Only existing inputs can be rewired here.
 
+A large workflow opens zoomed out so every node is visible; **Fit to view**, the
+zoom buttons and **Actual size** change only the view. Optional inputs that are
+not connected are folded into an "N optional inputs" row on each card; expand it
+to connect one. If saved cards overlap, **Arrange view** shows a non-overlapping
+layout without changing the file.
+
 Drag a node heading to move it, or focus the heading and use Alt + arrow keys.
 These edits stay local until **Review changes** and **Save reviewed source**.
 For a bound workflow, choose its matching configured task version and acknowledge
@@ -117,6 +123,10 @@ the findings. Prepare a new run separately to check its supported execution prof
 New nodes and optional input changes still use Advanced → Source.
 
 ## Bind a task version
+
+The **Task package and version** panel always states which task package and
+version the open workflow uses. Versions are offered only for configured tasks
+that declare `task_revision`; otherwise the panel says that none are configured.
 
 In Workflow builder, explicitly choose a configured task package/version and
 **Update workflow references**. Inspect the Python diff and task findings, confirm

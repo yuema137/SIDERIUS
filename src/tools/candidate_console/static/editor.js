@@ -41,11 +41,12 @@
     let message = taskMessage;
     if (taskReview()) message = taskReview().save_supported ? 'Task references reviewed, not saved. Review the findings and confirm before saving.' : 'Task reference review is blocked. Keep your draft and inspect the findings.';
     else if (pending && !message) message = "Save existing edits first, then update workflow references. To review a bound draft, select its matching configured task version.";
-    else if (!taskChoices?.length && !message) message = 'No version-aware task choices configured. Ordinary unbound editing remains available.';
+    // The view explains an empty or unloaded choice list next to the saved task state.
+    else if (!taskChoices?.length && !message) message = '';
     else if (savedBinding && !matching.length && !taskSelection && !message) message = 'No configured choice matches the saved binding. Configure a matching choice before reviewing bound edits.';
     else if (!message) message = 'Choose a version, then explicitly update, review and save. Choosing alone does not change source. Switching checked versions requires a supported fresh candidate.';
     window.editorTaskControls.render($('task-controls'), {choices: taskChoices, selection: taskSelection, matching, savedBinding,
-      connected: window.consoleSession.connected, saving, canUpdate: canUpdateTask(), message, review: taskReview(),
+      connected: window.consoleSession.connected, projectOpen: !!base?.document, saving, canUpdate: canUpdateTask(), message, review: taskReview(),
       acknowledged: taskAcknowledged, adopted: taskAdopted}, {
       select: selectTask, update: updateTask, refresh: () => loadTaskChoices(),
       acknowledge: value => { taskAcknowledged = value; controls(); },
@@ -230,7 +231,7 @@
     $('edges').replaceChildren();
     const id = project, document = graph;
     const live = () => project === id && graph === document;
-    window.editorCircuit.render($('graph'), {document: graph, inventory, selected, enabled: canEditCircuit(),
+    window.editorCircuit.render($('graph'), {viewKey: id, document: graph, inventory, selected, enabled: canEditCircuit(),
       allowBindingChange: !pending || mode === 'binding-draft', allowMove: mode !== 'binding-draft'}, {
       select: value => { if (live()) { selected = value; render(); } },
       bind: (nodeId, argument, source) => { if (live()) updateBindingDraft(nodeId, argument, source); },

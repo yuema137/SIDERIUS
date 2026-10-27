@@ -173,6 +173,23 @@ function route(a, b, boxes, source, target, occupied = new Set()) {
   if (!points) return null;
   return simplifyRoute([a, ...points, b]);
 }
+// View-only zoom: the largest scale (never above 1, never below `min`) at which
+// `content` fits `available`. Positions stay in document coordinates; only the
+// rendered view is scaled, so fitting never changes a saved position.
+function fitScale(content, available, min = 0.4) {
+  if (!(content.width > 0 && content.height > 0 && available.width > 0 && available.height > 0)) return 1;
+  const scale = Math.min(1, available.width / content.width, available.height / content.height);
+  return Math.max(min, Math.floor(scale * 100) / 100);
+}
+// Index pairs of boxes ({left, right, top, bottom}) whose interiors intersect.
+function overlaps(boxes) {
+  const pairs = [];
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j];
+    if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) pairs.push([i, j]);
+  }
+  return pairs;
+}
 function path(points) { return points.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' '); }
-globalThis.editorCircuitGeometry = Object.freeze({route, path, segmentClear, arrange, place});
+globalThis.editorCircuitGeometry = Object.freeze({route, path, segmentClear, arrange, place, fitScale, overlaps});
 })();
