@@ -25,13 +25,16 @@ def materialize_literature(
     node_id: str,
     seed: ProposalInput,
     config: WorkflowLLMConfig,
+    iteration: int = 1,
 ) -> LiteratureReviewInput:
     """Require selected task, routes, network policy and fresh managed ownership."""
     value = LiteratureReviewInput.model_validate_json(payload)
     storage = StorageConfig(
         backend="local",
         local=LocalStorageConfig(
-            workspace=str(graph_instance_dir(workspace, request.run_name, node_id)),
+            workspace=str(
+                graph_instance_dir(workspace, request.run_name, node_id, iteration=iteration)
+            ),
             run_name=request.run_name,
         ),
     )
@@ -63,9 +66,9 @@ def materialize_literature(
     if (arguments.search is None) != (routes[1].shares_client_with is not None):
         raise ValueError("literature search bridge sharing disagrees with selected configuration")
     for path in (
-        literature_cache_dir(workspace, request.run_name, node_id),
-        literature_input_path(workspace, node_id),
-        graph_instance_dir(workspace, request.run_name, node_id)
+        literature_cache_dir(workspace, request.run_name, node_id, iteration=iteration),
+        literature_input_path(workspace, node_id, iteration=iteration),
+        graph_instance_dir(workspace, request.run_name, node_id, iteration=iteration)
         / f"ml_literature_review_{request.run_name}.json",
     ):
         if path.exists() or path.is_symlink():

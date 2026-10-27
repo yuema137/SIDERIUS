@@ -29,11 +29,15 @@ def execute_fanout(
     initial: CandidateRunReceipt,
     composition: RunTaskComposition,
     config: WorkflowLLMConfig,
+    *,
+    iteration: int = 1,
 ) -> CandidateRunReceipt:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
     dependencies = dict(shape.predecessors)
-    inputs = materialize_fanout(request, Path(initial.workspace), composition, config)
+    inputs = materialize_fanout(
+        request, Path(initial.workspace), composition, config, iteration=iteration
+    )
     results: dict[
         str, ProposalOutput | ImplementorOutput | ValidatorOutput | LiteratureReviewOutput
     ] = {}
@@ -80,7 +84,7 @@ def execute_fanout(
                 else:
                     phase = "validation"
                 context = invocation_from_storage(
-                    initial, node_id=node.id, phase=phase, storage=storage
+                    initial, node_id=node.id, phase=phase, storage=storage, iteration=iteration
                 )
                 if phase == "literature":
                     assert isinstance(selected, LiteratureReviewInput)

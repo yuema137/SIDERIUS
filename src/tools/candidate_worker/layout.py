@@ -19,7 +19,7 @@ def graph_instance_dir(workspace: Path, run_name: str, node_id: str, *, iteratio
     )
 
 
-def _control_dir(workspace: Path, iteration: int) -> Path:
+def candidate_control_dir(workspace: Path, *, iteration: int = 1) -> Path:
     # Existing captures bind the original unnumbered iteration-one diagnostics.
     control = workspace / "candidate_run"
     return control if iteration == 1 else control / f"iteration_{iteration:03d}"
@@ -29,7 +29,7 @@ def proposal_input_path(
     workspace: Path, profile: str | None, node_id: str, *, iteration: int = 1
 ) -> Path:
     """Isolate family diagnostics while retaining fixed and G1 bytes/paths."""
-    control = _control_dir(workspace, iteration)
+    control = candidate_control_dir(workspace, iteration=iteration)
     if profile in ("native-proposal-families/v1", "native-literature-candidate/v1"):
         return control / "proposal_inputs" / f"{node_id}.json"
     return control / "proposal_input.json"
@@ -38,7 +38,7 @@ def proposal_input_path(
 def proposal_debug_dir(
     workspace: Path, profile: str | None, node_id: str, *, iteration: int = 1
 ) -> Path:
-    directory = _control_dir(workspace, iteration) / "debug"
+    directory = candidate_control_dir(workspace, iteration=iteration) / "debug"
     return (
         directory / node_id
         if profile in ("native-proposal-families/v1", "native-literature-candidate/v1")
@@ -48,7 +48,11 @@ def proposal_debug_dir(
 
 def literature_input_path(workspace: Path, node_id: str, *, iteration: int = 1) -> Path:
     """Managed native review diagnostics, separate from proposal inputs."""
-    return _control_dir(workspace, iteration) / "literature_inputs" / f"{node_id}.json"
+    return (
+        candidate_control_dir(workspace, iteration=iteration)
+        / "literature_inputs"
+        / f"{node_id}.json"
+    )
 
 
 def literature_cache_dir(

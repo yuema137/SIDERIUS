@@ -207,7 +207,7 @@ def test_managed_literature_collision_refuses_before_any_call(
     request = literature_request(prepared)
     original = graph.materialize_fanout
 
-    def materialize(request, workspace, *args):
+    def materialize(request, workspace, *args, **kwargs):
         path = {
             "input": literature_input_path(workspace, "review"),
             "cache": literature_cache_dir(workspace, request.run_name, "review"),
@@ -216,7 +216,7 @@ def test_managed_literature_collision_refuses_before_any_call(
         }[collision]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("stale")
-        return original(request, workspace, *args)
+        return original(request, workspace, *args, **kwargs)
 
     monkeypatch.setattr(graph, "materialize_fanout", materialize)
     receipt = launch_candidate(request)
