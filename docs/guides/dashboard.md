@@ -98,8 +98,9 @@ Things the UI shows that deserve a caveat, and things it does not show at all:
   [workspaces and resume](workspaces-and-resume.md).
 - **The task's identity is not shown.** Records carry the metric id and
   composition fingerprint; the UI does not display them yet.
-- **The x-axis "research loop" is the record's position in the fetched page**,
-  not a run concept — changing the `Limit` field renumbers it.
+- **The x-axis labelled "Research loop" is only the record's position in the
+  fetched page**, not an iteration or an authored research loop; changing the
+  `Limit` field renumbers it.
 
 None of these affects what was *recorded* — the workspace JSONs and the API
 carry the full truth; the charts are a convenience layer that predates the

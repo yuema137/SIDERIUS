@@ -4,8 +4,9 @@ Prepare, review and explicitly launch one candidate from a configured scientific
 task, or launch an externally reviewed native iteration chain. Reopen status and
 logs and reported LLM tokens by operation ID, or view an explicitly configured
 read-only candidate-validation example.
-The candidate runs Propose → Implement → Validate, with optional native Tune
-when the saved reusable source declares it. Inspect native outputs for scientific
+A run executes the saved workflow: Propose → Implement → Validate, optionally
+preceded by Interpret and followed by Train & Tune, and repeated as a research
+loop when the source declares one. Inspect native outputs for scientific
 results; completion alone does not certify them.
 
 You need a synced checkout, a working [workspace sandbox](../workspace_sandbox/README.md),
@@ -182,7 +183,10 @@ While the server is live, an admitted preparation can be recovered even if its
 original source or credential file disappears. Restart still validates configured
 resources. Source changes during preparation can make it fail; inspect and preserve
 that operation's evidence. A successfully prepared capture remains independent of
-later editor changes. Resume is not available in this reusable GUI flow.
+later editor changes. Only a paused research loop can be resumed, as a new
+segment of the same run; failed, stopped or timed-out runs cannot. A coding agent
+can do the same from the
+[command line or Python](../candidate_operations/README.md#stop-pause-or-resume-a-research-loop).
 
 ## Run a configured native chain
 
