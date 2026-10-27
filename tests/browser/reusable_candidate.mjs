@@ -56,6 +56,7 @@ try {
   await page.locator('#capture-status').filter({hasText: 'not enabled'}).waitFor();
   assert.equal(await page.locator('#capture-open').isDisabled(), true);
   await page.locator('#editor-project').selectOption('capture');
+  await page.locator('nav a[href="#run"]').click(); // Prepared runs live on the Run page.
   await page.locator('#capture-task').selectOption('synthetic');
   await open(metadata.captures[0]);
   assert.match(await page.locator('#capture-summary').textContent(), /hypothesis → build → check/);
@@ -77,6 +78,7 @@ try {
   await page.locator('#capture-finish').click(); await open(metadata.captures[0]);
 
   // A dirty source is visibly separate; Save guards still own file mutation.
+  await page.locator('nav a[href="#workflow"]').click();
   await page.locator('#editor-advanced').evaluate(el => {el.open = true;});
   const source = await page.locator('#editor-source').inputValue();
   await page.locator('#editor-source').fill(source + '\n# pending browser draft\n');
@@ -84,6 +86,7 @@ try {
   assert.equal(await page.locator('#capture-launch').isEnabled(), true);
   await page.locator('nav a[href="#slow-control"]').click(); await page.locator('nav a[href="#workflow"]').click();
   assert.match(await page.locator('#editor-source').inputValue(), /pending browser draft/);
+  await page.locator('nav a[href="#run"]').click();
   // Storage refusal must prevent POST; it must not silently launch an unrecoverable UUID.
   await page.evaluate(() => {window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {if (key === 'siderius.reusable-candidate.v1') throw new Error('offline storage fixture'); return window.originalSetItem.call(this, key, value);};});
   const beforeStorage = requests.length; await page.locator('#capture-launch').click();
@@ -115,7 +118,7 @@ try {
   await unlink(join(root, 'hold-review'));
   context = await browser.newContext(); await context.addInitScript(value => localStorage.setItem('siderius.reusable-candidate.v1', value), intent);
   page = await context.newPage(); page.on('pageerror', error => faults.push(error.message));
-  await page.goto(origin + '/#workflow'); await connect();
+  await page.goto(origin + '/#run'); await connect();
   // Restored ambiguous intent must not gain dismissal from a later preclaim signal.
   await page.route('**/reusable-captures/launch', route => route.fulfill({status: 409, json: {error: {code: 'task_policy', message: 'Fixture later refusal', admission_not_attempted: true}}}));
   await page.locator('#capture-retry').click();
@@ -137,7 +140,7 @@ try {
   await page.screenshot({path: join(evidence, 'recovered-monitor.png'), fullPage: true});
   // Restore configured resources for the other fresh admissions; recovery above ran without them.
   await rename(metadata.source + '.saved', metadata.source); await rename(metadata.credential + '.saved', metadata.credential);
-  await page.locator('nav a[href="#workflow"]').click(); await page.locator('#capture-check').click();
+  await page.locator('nav a[href="#run"]').click(); await page.locator('#capture-check').click();
   await page.locator('#capture-finish').waitFor(); await page.locator('#capture-finish').click();
   await page.locator('#capture-task').selectOption('synthetic');
   await page.locator('#capture-refresh').click(); await open(metadata.captures[1]);

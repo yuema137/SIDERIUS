@@ -17,6 +17,8 @@
   const ready = () => session.connected && editor.candidateEnabled &&
     editor.sourceAvailable && editor.reusableSource && editor.savedSha256 &&
     !editor.dirty && !editor.sourceDirty && !editor.conflict && !editor.saving;
+  // The single Run gate: page guidance reads it and never re-derives eligibility.
+  window.newRunGate = Object.freeze({get ready() { return !!ready(); }});
   const current = (version, revision, project) =>
     generation === version && session.revision === revision && editor.projectId === project;
   const api = (suffix, body, project = editor.projectId) =>
@@ -35,6 +37,7 @@
     $('prerequisites').textContent = ready()
       ? 'Saved source ready. Choose a configured task and resource set, then review preparation.'
       : 'Select a runnable project with supported reusable source. Save edits and resolve conflicts before preparation.';
+    window.dispatchEvent(new CustomEvent('new-run-gate', {detail: {ready: !!ready()}}));
   }
   function invalidate() {
     generation++;
@@ -96,7 +99,7 @@
     }
   }
   async function tasks() {
-    if (!session.connected || window.consoleNavigation?.view !== 'workflow' || tasksRevision === session.revision) return;
+    if (!session.connected || !['workflow', 'run'].includes(window.consoleNavigation?.view) || tasksRevision === session.revision) return;
     const version = generation;
     const revision = session.revision;
     const project = editor.projectId;
@@ -121,7 +124,7 @@
     if (JSON.stringify(editor) !== previous) { invalidate(); if (session.connected) void tasks(); }
   });
   session.subscribe(() => { invalidate(); tasksRevision = null; if (session.connected) void tasks(); });
-  window.addEventListener('console-view', event => { if (event.detail.view === 'workflow') void tasks(); });
+  window.addEventListener('console-view', event => { if (['workflow', 'run'].includes(event.detail.view)) void tasks(); });
   $('task').addEventListener('change', invalidate); $('name').addEventListener('input', invalidate);
   $('review').addEventListener('click', async () => {
     if (!ready() || busy || !$('task').value || !$('name').value) return;

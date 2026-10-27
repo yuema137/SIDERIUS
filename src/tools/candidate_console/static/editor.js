@@ -456,10 +456,10 @@
     if (projectsLoaded) {
       void loadTaskChoices();
       if (!base && project && !pending) void refresh(false);
-    } else if (window.consoleNavigation?.view === 'workflow') void openProjects();
+    } else if (['workflow', 'run'].includes(window.consoleNavigation?.view)) void openProjects();
   }
   window.consoleSession.subscribe(connection);
-  window.addEventListener('console-view', event => { if (event.detail.view === 'workflow') void openProjects(); });
+  window.addEventListener('console-view', event => { if (['workflow', 'run'].includes(event.detail.view)) void openProjects(); });
   window.addEventListener('beforeunload', event => { if (pending) { event.preventDefault(); event.returnValue = ''; } });
   $('inspect').addEventListener('click', () => { $('advanced').open = true; $('source').focus(); });
   $('project').addEventListener('change', () => {

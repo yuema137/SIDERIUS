@@ -93,10 +93,11 @@ matches your starting point:
 - **Configured task:** on Home, expand **Prepare configured task**, select the
   task and prepare its inputs. Review models and resources, then explicitly
   **Launch candidate**. This route is independent of Workflow Editor edits.
-- **Saved reusable workflow:** in Workflow Editor, save your changes and use
-  **New run** to select the configured task/resources, review and prepare the
-  saved source. Open the prepared run, review it and explicitly launch. Each run
-  has separate captured inputs and a workspace; later edits affect future runs.
+- **Saved reusable workflow:** in Workflow Editor, save your changes and select
+  **Next: prepare a run**. On the Run page, use **New run** to select the
+  configured task/resources, review and prepare the saved source. Open the
+  prepared run, review it and explicitly launch. Each run has separate captured
+  inputs and a workspace; later edits affect future runs.
 - **Configured native chain:** have your coding agent prepare a capture and
   add it to the console configuration using the
   [native-chain instructions](../../src/tools/candidate_console/README.md#run-a-configured-native-chain).
@@ -108,7 +109,7 @@ To bind a reusable workflow in **Workflow builder**:
 
 1. Choose a configured task package/version and **Update workflow references**.
 2. Inspect the Python diff and task findings, confirm them and **Save reviewed source**.
-3. Prepare a new run separately, review its captured inputs, then explicitly launch.
+3. Select **Next: prepare a run**, prepare on the Run page, review its captured inputs, then explicitly launch.
 
 Save pending edits before Update.
 An unbound workflow needs an explicit current-snapshot adoption confirmation.
