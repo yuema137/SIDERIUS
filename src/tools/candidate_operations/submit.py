@@ -73,6 +73,11 @@ def _admitted_inputs(
     chain_admission: NativeChainAdmission | None = None,
     resume_admission: NativeResumeAdmission | None = None,
 ) -> tuple[FileObservation, ...]:
+    if submission.kind == "candidate_loop_resume":
+        from .loop_resume import root_record
+        from .store import load_record
+
+        return root_record(load_record(config, submission.request.predecessor_operation_id)).inputs
     if submission.kind == "native_chain_resume":
         assert resume_admission is not None
         return resume_admission.root_admission.input_files
@@ -141,6 +146,28 @@ def submit_operation(
             except ValueError as error:
                 # This boundary emits only names from the candidate credential policy.
                 raise OperationFailure("credentials", str(error)) from error
+        loop_root = None
+        if submission.kind == "candidate_loop_resume":
+            from .loop_resume import review_locked, root_record
+            from .store import load_record
+
+            review = review_locked(config, submission.request.predecessor_operation_id)
+            if review.receipt_digest != submission.request.expected_receipt_digest:
+                raise OperationFailure("loop_resume", "reviewed paused receipt changed")
+            loop_root = root_record(
+                load_record(config, submission.request.predecessor_operation_id)
+            )
+            assert loop_root.submission.kind == "candidate"
+            if runtime_identity() != loop_root.runtime:
+                raise OperationFailure("runtime", "continuation runtime changed")
+            try:
+                require_credentials(
+                    loop_root.submission.request.selected_constructor_routes,
+                    loop_root.submission.request.environment_names,
+                    launch_environment,
+                )
+            except ValueError as error:
+                raise OperationFailure("credentials", str(error)) from error
         chain_admission = None
         resume_admission = None
         if submission.kind == "native_chain_resume":
@@ -175,6 +202,9 @@ def submit_operation(
             if resume_admission is not None
             else ()
         )
+        if loop_root is not None:
+            assert loop_root.submission.kind == "candidate"
+            names = loop_root.submission.request.environment_names
         env = environment(names, launch_environment)
         record = OperationRecord(
             native_id=uuid4(),
@@ -189,6 +219,10 @@ def submit_operation(
         )
         compare_reusable_expectation(record, expected_reusable_inputs)
         path = claim(root, record)
+        if submission.kind == "candidate_loop_resume":
+            from .loop_resume import reserve
+
+            reserve(record)
         observation = "starting"
         try:
             spawn(path, env)
@@ -219,8 +253,6 @@ def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopS
     """
     from core.control_json import encode_control
     from core.durable_io import publish_bytes_write_once
-    from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
-    from tools.candidate_worker.records import verify_candidate_records
 
     from .files import directory, read_model
     from .read import read_operation
@@ -229,28 +261,16 @@ def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopS
     config = validate_config(config)
     with locked_store(config, create=False):
         record = load_record(config, operation_id)
-        submission = record.submission
-        if (
-            submission.kind != "candidate"
-            or submission.request.preview.document.definition.loop is None
-        ):
-            raise OperationFailure("kind", "Stop requires a finite authored candidate loop")
-        validate_submission(config, submission)
-        control = native_directory(submission)
+        from .loop_resume import root_inputs
+
         try:
-            initial = read_model(control / "launch.json", CandidateRunReceipt)
-            saved = read_model(control / "request.json", CandidateRunRequest)
+            root_record, _, initial = root_inputs(record)
+            assert root_record.submission.kind == "candidate"
+            control = native_directory(root_record.submission)
         except FileNotFoundError as error:
             raise OperationFailure(
                 "not_ready", "candidate worker has not claimed its workspace"
             ) from error
-        verify_candidate_records(
-            saved,
-            initial,
-            expected_request=submission.request,
-            expected_run_id=record.native_id.hex,
-            workspace=control.parent,
-        )
         marker = LoopStop(run_id=initial.run_id, declaration_digest=initial.declaration_digest)
         path = control / "stop.json"
         if path.exists():

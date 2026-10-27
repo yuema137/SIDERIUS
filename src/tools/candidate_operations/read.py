@@ -53,6 +53,13 @@ def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
     submission = record.submission
     if submission.kind == "native_chain" or submission.kind == "native_chain_resume":
         raise OperationFailure("kind", "chain has no native scientific receipt")
+    if submission.kind == "candidate_loop_resume" or (
+        submission.kind == "candidate"
+        and submission.request.preview.document.definition.loop is not None
+    ):
+        from .loop_resume import read_segment
+
+        return read_segment(record)
     if submission.kind == "prepare_reusable":
         return read_reusable_terminal(
             submission.request,
@@ -136,6 +143,14 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
         ):
             raise OperationFailure("integrity", "completed native receipt changed or vanished")
         if native is not None:
+            successor = None
+            if record.submission.kind == "candidate_loop_resume" or (
+                record.submission.kind == "candidate"
+                and record.submission.request.preview.document.definition.loop is not None
+            ):
+                from .loop_resume import successor_id
+
+                successor = successor_id(record)
             if completion is not None and completion.outcome == "pre_dispatch_failure":
                 raise OperationFailure(
                     "integrity", "pre-dispatch failure contradicts native receipt"
@@ -149,6 +164,7 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
                 process=process,
                 finishing=process.status == "alive",
                 receipt_available=True,
+                successor_operation_id=successor,
                 receipt=native[0],
                 receipt_digest=native[1],
                 reason="native_terminal",
