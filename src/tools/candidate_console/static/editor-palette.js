@@ -5,7 +5,9 @@
 (() => {
   'use strict';
   const clone = value => JSON.parse(JSON.stringify(value));
-  const MIME = 'application/x-siderius-capability';
+  // Drag payload is prefixed text/plain: custom MIME types are dropped by some drag
+  // implementations (e.g. automated Chromium drags), so the drop would never arrive.
+  const PREFIX = 'siderius-capability:';
   let host = null, canvas = null, actions = null, catalog = null, loading = null, state = {enabled: false, pendingNode: null};
   const element = (tag, text, parent, className) => {
     const value = document.createElement(tag); value.textContent = text;
@@ -59,7 +61,7 @@
         button.setAttribute('aria-label', `Add ${label(capability)} ${routeText(entry)}`);
         button.disabled = !state.enabled;
         button.addEventListener('click', () => add(entry));
-        button.addEventListener('dragstart', event => { event.dataTransfer.setData(MIME, String(index)); event.dataTransfer.effectAllowed = 'copy'; });
+        button.addEventListener('dragstart', event => { event.dataTransfer.setData('text/plain', PREFIX + index); event.dataTransfer.effectAllowed = 'copy'; });
       }
     }
   }
@@ -80,9 +82,9 @@
     const cancel = element('button', 'Cancel new node', host, 'palette-cancel');
     cancel.type = 'button'; cancel.hidden = true; cancel.addEventListener('click', () => actions.cancel());
     element('p', 'Click or drag a capability onto the canvas. A new node stays a local draft until its required inputs are connected and you review and save.', host, 'palette-note').setAttribute('role', 'status');
-    canvas.addEventListener('dragover', event => { if (state.enabled && event.dataTransfer.types.includes(MIME)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } });
+    canvas.addEventListener('dragover', event => { if (state.enabled && [...event.dataTransfer.types].includes('text/plain')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } });
     canvas.addEventListener('drop', event => {
-      const index = event.dataTransfer.getData(MIME);
+      const data = event.dataTransfer.getData('text/plain'), index = data.startsWith(PREFIX) ? data.slice(PREFIX.length) : '';
       if (!state.enabled || index === '' || !catalog?.[Number(index)]) return;
       event.preventDefault(); add(catalog[Number(index)], {x: event.clientX, y: event.clientY});
     });
