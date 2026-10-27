@@ -141,7 +141,8 @@ class ReusableCandidate:
         profile = plan.document.execution_profile
         if request.preview.execution_profile != profile:
             raise OperationFailure(
-                "reusable_preparation", "candidate profile differs from captured reusable declaration"
+                "reusable_preparation",
+                "candidate profile differs from captured reusable declaration",
             )
         literature_settings = {}
         if profile == "native-literature-candidate/v1":

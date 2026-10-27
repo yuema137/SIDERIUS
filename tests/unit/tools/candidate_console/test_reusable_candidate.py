@@ -119,7 +119,9 @@ def test_review_refuses_concrete_only_profile_against_captured_declaration(captu
         update={"request": operation.request.model_copy(update={"preview": preview})}
     )
     monkeypatch.setattr(adapter, "_operation", lambda *args: (task, inspected, changed))
-    with pytest.raises(OperationFailure, match="profile differs from captured reusable declaration"):
+    with pytest.raises(
+        OperationFailure, match="profile differs from captured reusable declaration"
+    ):
         adapter.review(project.project_id, selected)
     assert not (envelope / "workspace").exists()
 
