@@ -63,7 +63,6 @@ from core.run_invariants import (
     validate_run_invariants,
     validate_stamped_invariants,
 )
-from core.sandbox_executor import get_plugin_dir
 from core.scientific_authority import resolve_record_authority
 from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.evaluation_metric import (
@@ -1642,6 +1641,12 @@ def restore_prior_state(
                 ),
                 source=f"restored iter {iter_idx:03d} run_output {output_path}",
             )
+
+        # Imported here, not at module scope: ``core.sandbox_executor`` imports
+        # ``ml_models.models_sandbox``, whose import executes every generated
+        # model plugin in the global library. Light consumers of this module
+        # (the candidate console via ``loop_evidence``) must not run that code.
+        from core.sandbox_executor import get_plugin_dir
 
         run_name = _iter_run_name(iter_idx)
         plugin_dir = get_plugin_dir(abs_workspace, run_name)
