@@ -457,7 +457,32 @@ Neither owns a graph, catalog, schema, request or execution engine. Type-compati
 rebinding uses exact existing server BindingChoices. Circuit and inspector call
 one editor.js mutation; dragging writes positions through that same draft owner.
 Bindings/profile/options are not inferred from card order or geometry. Request
-protocols display as adaptor labels inside their actual consumer, not extra nodes.
+protocols display inside their actual consumer, not as extra nodes: a protocol
+node's card carries a `.circuit-adapter` chip ("Mapping: <protocol id>", coloured by
+the protocol's output contract) that expands, per card and remembered across
+re-renders of the same graph, into one row per inventory argument
+(`<source> → <argument>` with the socket contract) and the native owner function
+that maps them into `protocol_mapping.output_contract`. External-request nodes have
+no chip.
+
+Port legibility is presentation keyed on the server-sent contract id
+(`editor-contract-presentation.js`, styles in `editor-contract-presentation.css`).
+A table gives each catalog contract a readable name, a colour token
+(`--contract-<colour>`, defined for both themes) and a socket shape (`circle` for
+`<capability>.input`, `square` for `<capability>.output`, `diamond` for
+`optional.*`, `capsule` for other contracts); a unit census binds the table to
+`CONTRACTS` and requires distinct (colour, shape) pairs and names. An id missing
+from the table (a newer server catalog) gets a stable hash-derived token. Port
+pills show the readable name (the id stays in the tooltip), wires take the colour of
+the result they carry, required inputs and outputs have filled sockets and optional
+inputs hollow ones, and a closed "Port types (N)" legend lists the contracts present
+in the opened graph. The table never decides compatibility. Connection preview
+reads only the server's `port_inventory` choices: hovering an output highlights
+offered inputs and dims the rest without selecting; pressing an output and releasing
+over an input binds exactly as output-then-input clicks do. A refused or dimmed
+input states `<input> expects <socket contract> (<name>), but <source> provides
+<output contract> (<name>)`, or that the server does not offer the source although
+both contracts match.
 External source chips remain inspector bindings. Omitted optional ports, argument
 creation/deletion and new nodes are not graphical controls in this slice.
 Required and bound inputs always render as card rows; optional unbound inputs fold
@@ -558,7 +583,11 @@ and overlap detection without a browser. `tests/browser/editor_canvas_fit.mjs`
 (same variables) checks at 1440x900 that all five cards are in view after
 fit-on-open, that view controls send nothing and keep bytes, folded optional
 inputs, the disjoint fully wired interpretation fixture, Arrange view on an
-overlapping layout, zoomed drag arithmetic and a non-empty task panel.
+overlapping layout, zoomed drag arithmetic and a non-empty task panel. `tests/browser/port_legibility.mjs` (same variables) opens the
+eight-node families fixture and checks one distinct colour+shape token and readable
+pill name per contract, filled/hollow sockets, wire colour, the legend, hover
+preview (highlight/dim without selecting), the two-contract refusal, the mapping
+chip's field rows and drag-to-connect, without writing the source.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser

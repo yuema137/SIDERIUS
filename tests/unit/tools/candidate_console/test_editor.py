@@ -246,6 +246,51 @@ def test_every_catalog_capability_has_its_paper_label_and_theme_role():
         assert theme.count(f"--capability-{role}-tint:") == 2, role
 
 
+def contract_presentation_entries() -> dict[str, tuple[str, str, str]]:
+    """Parse ``{contract: (name, colour, shape)}`` from the browser's contract table."""
+    script = (STATIC / "editor-contract-presentation.js").read_text()
+    block = re.search(r"const entries = Object\.freeze\(\{\n(.*?)\n  \}\);", script, re.S)
+    assert block, "contract presentation table not found"
+    rows = block.group(1).splitlines()
+    pattern = r"    '([^']+)': \{name: '([^']+)', colour: '([^']+)', shape: '([^']+)'\},"
+    parsed = [re.fullmatch(pattern, row) for row in rows]
+    assert all(parsed), f"unparsed contract rows: {rows}"
+    return {match[1]: (match[2], match[3], match[4]) for match in parsed if match}
+
+
+def test_every_catalog_contract_has_a_distinct_port_token_in_both_themes():
+    """Fails if a catalog contract falls back to a hash token (which can collide), two
+    contracts share a colour+shape or a readable name, or a colour lacks a CSS token."""
+    from workflows.definition.catalog import CONTRACTS
+
+    entries = contract_presentation_entries()
+    assert set(entries) == set(CONTRACTS)
+    tokens = [(colour, shape) for _, colour, shape in entries.values()]
+    assert len(set(tokens)) == len(tokens)
+    names = [name for name, _, _ in entries.values()]
+    assert len(set(names)) == len(names)
+    css = (STATIC / "editor-contract-presentation.css").read_text()
+    for colour in {colour for colour, _ in tokens}:
+        assert f"--contract-{colour}:" in css, colour
+    for shape in {shape for _, shape in tokens}:
+        assert f'.circuit-port[data-contract-shape="{shape}"] .circuit-socket' in css, shape
+    # Literal colours (not theme aliases) need a dark-theme value too.
+    light, dark = css.split(':root[data-theme="dark"]', 1)
+    for literal in re.findall(r"(--contract-[\w-]+): #", light):
+        assert f"{literal}: #" in dark, literal
+
+
+def test_every_index_asset_is_served(console_config):
+    """Fails if index.html references a static script or stylesheet the asset allowlist
+    does not serve (the editor would load without it and break at runtime)."""
+    index = (STATIC / "index.html").read_text()
+    assets = re.findall(r'(?:src|href)="/([\w.-]+\.(?:js|css))"', index)
+    assert "editor-contract-presentation.js" in assets
+    with TestClient(create_app(console_config), base_url=console_config.browser_origin) as client:
+        for asset in assets:
+            assert client.get("/" + asset).status_code == 200, asset
+
+
 def test_five_node_browser_fixture_saves_every_node_position():
     """Fails if the layout witness fixture stops parsing as the five-node authored loop
     or leaves a node to fallback placement instead of its saved coordinates."""
