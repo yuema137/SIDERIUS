@@ -38,10 +38,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CHAIN_LIB = REPO_ROOT / "scripts" / "launch" / "_chain_common.sh"
 RUN_ONE_ITERATION = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 WORKFLOW = REPO_ROOT / "src/workflows" / "model_exploration.py"
+# run_workflow delegates the validator-to-tuner protocol call here (98a4457c).
+TUNER_PREPARATION = REPO_ROOT / "src/workflows" / "tuner_preparation.py"
 PROTOCOL_DIR = REPO_ROOT / "src/agent" / "schemas" / "protocols"
 
-# Protocol functions run_workflow calls (workflows/model_exploration.py
-# imports, lines 87-90 + 533). Update when the workflow gains an edge.
+# Protocol functions run_workflow calls, directly in workflows/model_exploration.py
+# or through workflows/tuner_preparation.py. Update when the workflow gains an edge.
 WORKFLOW_PROTOCOL_FUNCS = [
     ("agent.schemas.protocols.ml_model_impl_to_ml_model_valid", "local_all_fields"),
     ("agent.schemas.protocols.ml_model_propose_to_ml_model_impl", "local_full_spec"),
@@ -118,14 +120,25 @@ class TestWorkflowToProtocols:
     def test_every_protocol_call_kwarg_is_accepted(self):
         import importlib
 
-        tree = ast.parse(WORKFLOW.read_text())
-        checked = 0
+        from tests.helpers.workflow_delegation import (
+            TUNER_PREPARATION_ENTRYPOINT,
+            assert_run_workflow_delegates,
+        )
+
+        # The tuner-preparation calls only count while run_workflow uses it.
+        assert_run_workflow_delegates(
+            TUNER_PREPARATION_ENTRYPOINT, TUNER_PREPARATION, "local_validated_model"
+        )
+        trees = [ast.parse(path.read_text()) for path in (WORKFLOW, TUNER_PREPARATION)]
+        uncalled: list[str] = []
         for module_name, func_name in WORKFLOW_PROTOCOL_FUNCS:
             func = getattr(importlib.import_module(module_name), func_name)
             sig = inspect.signature(func)
             has_var_kw = any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values())
-            for call_kwargs in _call_kwargs(tree, func_name):
-                checked += 1
+            calls = [kwargs for tree in trees for kwargs in _call_kwargs(tree, func_name)]
+            if not calls:
+                uncalled.append(func_name)
+            for call_kwargs in calls:
                 if has_var_kw:
                     continue
                 unknown = call_kwargs - set(sig.parameters)
@@ -133,8 +146,8 @@ class TestWorkflowToProtocols:
                     f"run_workflow passes kwargs {sorted(unknown)} that "
                     f"{func_name}() does not accept (runtime TypeError)"
                 )
-        assert checked >= len(WORKFLOW_PROTOCOL_FUNCS), (
-            "some listed protocol functions are never called by "
+        assert not uncalled, (
+            f"listed protocol functions {uncalled} are never called by "
             "run_workflow — update WORKFLOW_PROTOCOL_FUNCS"
         )
 
