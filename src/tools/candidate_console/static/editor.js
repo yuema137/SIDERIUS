@@ -52,8 +52,14 @@
   function selectTask(choiceId) {
     if (!window.consoleSession.connected || saving) return;
     const choice = taskChoices?.find(item => item.choice_id === choiceId);
+    if (mode === 'binding-draft' && choice && base?.document?.task_binding &&
+        !bindingEqual(choice.binding, base.document.task_binding)) {
+      status('A binding draft can only use the configured task choice matching its saved task identity.'); controls(); return;
+    }
     taskSelection = choice ? {kind: 'task_references', selected_choice_id: choice.choice_id, expected_task_binding: clone(choice.binding)} : null;
-    taskMessage = ''; invalidate();
+    taskMessage = '';
+    if (mode === 'binding-draft') { reviewed = null; controls(); return; }
+    invalidate();
   }
   async function loadTaskChoices() {
     if (!window.consoleSession.connected || taskLoadingRevision === window.consoleSession.revision) return;
@@ -65,14 +71,14 @@
       taskChoices = value.choices; taskMessage = '';
       if (taskSelection && !taskChoices.some(choice => choice.choice_id === taskSelection.selected_choice_id && bindingEqual(choice.binding, taskSelection.expected_task_binding))) {
         taskSelection = null; taskMessage = 'Configured choice changed; select and review again.';
-        invalidate();
+        if (mode === 'binding-draft') controls(); else invalidate();
       }
       controls();
     } catch (error) {
       if (!error.stale && revision === window.consoleSession.revision) {
         taskChoices = null; taskSelection = null; taskMessage = 'Task choices unavailable: ' + error.message + ' Refresh task choices to retry.';
         taskAcknowledged = false; taskAdopted = false;
-        if (taskReview()) invalidate(); else { generation++; controls(); }
+        if (taskReview()) invalidate(); else if (mode === 'binding-draft') controls(); else { generation++; controls(); }
       }
     } finally { if (taskLoadingRevision === revision) taskLoadingRevision = null; }
   }
@@ -92,7 +98,6 @@
     cancelDraftButton.hidden = !bindingDraft || bindingDraftConflict;
     cancelDraftButton.disabled = !connected || saving;
     renderTaskControls();
-    if (mode === 'binding-draft') for (const input of $('task-controls').querySelectorAll('select, input, button')) input.disabled = true;
     window.editorCircuit?.setEnabled(canEditCircuit());
   }
   function invalidate() {
@@ -152,6 +157,10 @@
   }
   function updateBindingDraft(nodeId, argument, source) {
     if (!canEditCircuit() || !base?.document || bindingDraftConflict) return;
+    if (!bindingDraft && base.document.task_binding && taskSelection &&
+        !bindingEqual(taskSelection.expected_task_binding, base.document.task_binding)) {
+      status('Select the configured choice matching the saved task identity before editing its bindings.'); return;
+    }
     if (pending && mode !== 'binding-draft') {
       status('Review/save or discard the current edits before starting a connection draft.'); return;
     }
@@ -223,12 +232,13 @@
       }
     });
     if (!graph) return;
-    for (const item of graph.definition.nodes) {
-      const bindings = item.request.kind === 'external' ? [{name: 'request', source: {kind: 'external', binding: item.request.binding}}] : item.request.arguments;
-      for (const binding of bindings) {
-        const source = binding.source;
-        node('li', `${source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port}`} → ${item.id}.${binding.name}`, $('edges'));
-      }
+    for (const option of inventory) {
+      const destination = `${option.node}.${option.argument ?? 'request'}`;
+      const source = option.source;
+      const mapping = source
+        ? `${source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port}`} → ${destination}`
+        : `${option.required ? 'Required' : 'Optional'} · unbound → ${destination}`;
+      node('li', mapping, $('edges'));
     }
   }
   function field(parent, label, value, update) {
