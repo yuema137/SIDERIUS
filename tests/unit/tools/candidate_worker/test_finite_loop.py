@@ -374,3 +374,68 @@ def test_fixed_profile_readback_rejects_loop_stopped_status(request, fixture, st
             workspace=Path(launched.workspace),
             receipt=stopped,
         )
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        "native-proposal-fanout/v1",
+        "native-proposal-families/v1",
+        "native-literature-candidate/v1",
+        None,  # the fixed single-candidate profile
+    ],
+)
+def test_loop_on_unsupported_profile_is_refused_before_record_and_dispatch(
+    prepared, tmp_path, monkeypatch, profile
+):
+    """Gap G2 (R1): only the native interpretation profile may launch an authored loop.
+
+    Fails if launch admission (``fresh_preview`` in ``submit_operation``) stops refusing
+    a looped declaration on another profile: a durable record, the active marker,
+    the run workspace and a worker spawn would then appear. The control submission
+    proves the same loop and credentials dispatch on the supported profile.
+    ``admit_loop`` and each profile's shape check in ``preview_workflow`` refuse these
+    declarations independently, so removing only one of them stays green.
+    """
+    from unittest.mock import Mock
+    from uuid import uuid4
+
+    from tools.candidate_operations import (
+        CandidateOperation,
+        OperationStoreConfig,
+        submit_operation,
+    )
+    from tools.candidate_operations.models import OperationFailure
+
+    supported = loop_request(prepared)
+    assert supported.preview.execution_profile == "native-interpretation-candidate/v1"
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "state"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    spawn = Mock()
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", spawn)
+    unsupported = supported.model_copy(
+        update={"preview": supported.preview.model_copy(update={"execution_profile": profile})}
+    )
+    submission = CandidateOperation(request_id=uuid4(), request=unsupported)
+    with pytest.raises(OperationFailure) as refused:
+        submit_operation(
+            config, submission, launch_environment={"OPENAI_API_KEY": "offline-test-key"}
+        )
+    assert refused.value.detail.code == "candidate_preflight"
+    assert refused.value.detail.message == "candidate inputs or routes changed; review again"
+    state = Path(config.state_root)
+    assert not (state / "operations" / str(submission.request_id)).exists()
+    assert not (state / "active.json").exists()
+    assert not Path(unsupported.preview.document.definition.task.workspace).exists()
+    spawn.assert_not_called()
+
+    handle = submit_operation(
+        config,
+        CandidateOperation(request_id=uuid4(), request=supported),
+        launch_environment={"OPENAI_API_KEY": "offline-test-key"},
+    )
+    assert handle.observation == "starting"
+    spawn.assert_called_once()
