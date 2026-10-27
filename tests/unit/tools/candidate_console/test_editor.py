@@ -522,3 +522,14 @@ def test_interpretation_fixture_saves_complete_disjoint_positions():
     placed = sorted(positions.values())
     for (x1, y1), (x2, y2) in pairwise(placed):
         assert x2 - x1 >= 300 or abs(y2 - y1) >= 600, (placed, (x1, y1), (x2, y2))
+
+
+def test_every_index_asset_is_served(editor_config):
+    """Fails if index.html loads a local script/stylesheet the exact static map omits
+    (the editor modules then never load and the page stops at a missing global)."""
+    page = (STATIC / "index.html").read_text()
+    assets = re.findall(r'(?:src|href)="/([\w.-]+\.(?:js|css))"', page)
+    assert "editor-problems.js" in assets and "editor-parameters.css" in assets
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        for asset in assets:
+            assert client.get("/" + asset).status_code == 200, asset

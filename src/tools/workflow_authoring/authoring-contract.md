@@ -75,7 +75,15 @@ document validator for source contracts, references and acyclicity.
 plus its inspection (`incomplete`, `invalid`, or `complete`). It checks the saved
 source digest, performs no publication and writes no recovery copy. Only complete
 inspection contains a complete declaration document; this does not certify execution
-readiness. The normal review route
+readiness. Each inspection carries `diagnostics` (legacy strings, unchanged) and
+`problems`, one typed `DraftProblem` per diagnostic: `code`
+(`required_unbound`, `external_binding_required` or `declaration_invalid`),
+`node` and `field` (the argument name, or `request` for an external request) when
+the problem belongs to one socket, and `message`. For socket problems `message`
+equals the legacy string; a native validator refusal keeps one legacy string
+(the whole `ValidationError`) and yields one `declaration_invalid` problem per
+validator error, located only by its dotted validator path in `field`. The editor
+lists `problems` and never derives one itself. The normal review route
 also accepts `DraftProposal(kind="draft")` and promotes it before the existing
 source review, task acceptance and Save boundary. Neither draft route changes
 preparation or launch admission. A stale base refuses and leaves the caller's draft
@@ -90,6 +98,13 @@ controls. `document.training_settings` remains sparse. Unset removes a key, null
 is explicit, and a supplied value remains authored. Numeric blanks block review
 without becoming zero/null. Epoch controls are ceilings, independent of parameter
 rules and native planning. Sampling and training base seeds have separate controls.
+Each `TrainingControl.help` (`TrainingControlHelp`) projects the field's entry in
+`CandidateTrainingSettings.model_json_schema()` for `WorkflowLaunchConfig`:
+`description`, `unit`, `minimum`/`maximum`, `exclusive_minimum`/`exclusive_maximum`
+(read from the field or its nullable `anyOf` branch) and `schema_default` (the
+launch-config field default). Keys the schema does not declare stay `null` and are
+not shown; today only `schema_default` is declared for the presented controls.
+`effective` remains the resolved native value for the document.
 Nested workflow parameter rules are read-only in the inspector and editable in
 Source; untouched rules and advanced fields survive edits. Task rules are resolved
 later by native owners. All controls participate in the existing source-dirty,

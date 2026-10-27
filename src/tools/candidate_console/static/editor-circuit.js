@@ -287,6 +287,10 @@
       heading.addEventListener('pointercancel', event => {
         if (projection === value && drag?.node === node.id && drag.pointerId === event.pointerId) { cancel(); say('Node move cancelled.'); }
       });
+      // Server inventory marks required sockets; an unbound one flags the whole card.
+      const missing = value.inventory.filter(item => item.node === node.id && item.required && !item.bound).length;
+      card.classList.toggle('has-required-unbound', missing > 0);
+      if (missing) element('span', `${missing} required input${missing === 1 ? '' : 's'} missing`, card, 'circuit-problem-badge').dataset.node = node.id;
       const mapping = element('details', '', card, 'circuit-mapping');
       mapping.addEventListener('toggle', draw);
       element('summary', 'Mapping details', mapping);

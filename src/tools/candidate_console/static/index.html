@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/editor.css">
+  <link rel="stylesheet" href="/editor-parameters.css">
   <script src="/number-format.js" defer></script>
   <script src="/session.js" defer></script>
   <script src="/token-presenter.js" defer></script>
@@ -21,6 +22,8 @@
   <script src="/editor-capability-presentation.js" defer></script>
   <script src="/editor-circuit-geometry.js" defer></script>
   <script src="/editor-circuit.js" defer></script>
+  <script src="/editor-problems.js" defer></script>
+  <script src="/editor-node-parameters.js" defer></script>
   <script src="/editor.js" defer></script>
   <script src="/navigation.js" defer></script>
   <script src="/recorded-example.js" defer></script>
@@ -115,6 +118,7 @@
       <button id="editor-save" disabled>Save reviewed source</button>
     </div>
     <p id="editor-pending">No pending edits.</p>
+    <section id="editor-problems" aria-label="Problems" aria-live="polite" hidden></section>
     <div id="editor-conflict" hidden>
       <h2>Source changed on disk</h2>
       <p>Inspect current source and its difference from your proposal. Your pending edits are preserved.</p>
