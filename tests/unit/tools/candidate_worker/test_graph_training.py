@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -105,6 +106,85 @@ def test_five_node_native_training_and_parent_evidence(prepared, training_runner
     proposal_path.write_text(seed.model_copy(update={"expert_context": []}).model_dump_json())
     with pytest.raises(ValueError, match="declared interpretation edge"):
         verify_graph_trace(request, parent, receipt)
+
+
+def test_console_graph_results_reuse_native_run_report_without_paths(
+    prepared, training_runner, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from execute_tools.run_report import load_run_output, project_run
+    from tools.candidate_console import graph_results
+    from tools.candidate_operations.models import CandidateOperation, OperationFailure
+
+    request = graph_training_request(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    verify_graph_trace(request, parent, receipt)
+    tuning = next(node for node in receipt.graph_trace.nodes if node.capability == "tuning")
+    assert tuning.record_path is not None
+    operation_id = UUID(hex=receipt.run_id)
+    monkeypatch.setattr(
+        graph_results,
+        "read_operation",
+        lambda *_: SimpleNamespace(state="completed", receipt=receipt),
+    )
+    monkeypatch.setattr(
+        graph_results,
+        "lookup_operation_request",
+        lambda *_: CandidateOperation(request_id=operation_id, request=request),
+    )
+
+    view = graph_results.read_graph_results(SimpleNamespace(operation_store=object()), operation_id)
+    expected = project_run(
+        load_run_output(Path(tuning.record_path)), source_path=tuning.record_path
+    )
+
+    assert view.available is True
+    assert len(view.bodies) == 1
+    assert view.bodies[0].iteration == 1
+    assert view.bodies[0].tuning_state == "succeeded"
+    assert view.bodies[0].result is not None
+    assert view.bodies[0].result.headline == expected.headline
+    assert view.bodies[0].result.metric == expected.metric
+    assert view.bodies[0].result.status_counts == expected.status_counts
+    payload = view.model_dump_json()
+    assert tuning.record_path not in payload
+    assert "source_path" not in payload
+    assert '"attempts":' not in payload
+
+    # A completed operation whose tuning stage did not succeed has no score, even
+    # though its record file is still on disk: process completion is not success.
+    failed_nodes = tuple(
+        node.model_copy(update={"state": "failed"}) if node is tuning else node
+        for node in receipt.graph_trace.nodes
+    )
+    failed = receipt.model_copy(
+        update={"graph_trace": receipt.graph_trace.model_copy(update={"nodes": failed_nodes})}
+    )
+    monkeypatch.setattr(
+        graph_results,
+        "read_operation",
+        lambda *_: SimpleNamespace(state="completed", receipt=failed),
+    )
+    no_score = graph_results.read_graph_results(
+        SimpleNamespace(operation_store=object()), operation_id
+    )
+    assert [(body.tuning_state, body.result) for body in no_score.bodies] == [("failed", None)]
+
+    # A record changed after verification is refused as integrity, without its path.
+    monkeypatch.setattr(
+        graph_results,
+        "read_operation",
+        lambda *_: SimpleNamespace(state="completed", receipt=receipt),
+    )
+    record = Path(tuning.record_path)
+    record.write_bytes(record.read_bytes() + b" ")
+    with pytest.raises(OperationFailure, match="verified tuning output changed") as refused:
+        graph_results.read_graph_results(SimpleNamespace(operation_store=object()), operation_id)
+    assert refused.value.detail.code == "integrity"
+    assert tuning.record_path not in refused.value.detail.message
 
 
 @pytest.mark.parametrize("fault", ["validator", "abort", "disclosure"])

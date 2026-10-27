@@ -147,6 +147,7 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | POST /api/candidates | LaunchSelection → OperationHandle, 202 |
 | GET /api/operations/{UUID} | StatusView |
 | GET /api/operations/{UUID}/tokens | CandidateTokenSnapshot, read-only fixed native projection |
+| GET /api/operations/{UUID}/graph-results | GraphResultsView, read-only per-body native tuning report projection |
 | GET /api/operations/{UUID}/log | kind=native or operation, offset>=0, max_bytes=1..65536 → LogChunk |
 
 Outer ASGI RequestBoundary checks exact Host (configured bind/browser authorities),
@@ -247,6 +248,55 @@ owns arithmetic, quality, limits and evidence semantics. Focused HTTP tests prov
 route reachability, auth/Host/Origin/UUID checks before reader entry, no-store/CSP
 and sanitized failures. The browser harness adds null/partial/stale token views,
 replacement polling, token-only failure isolation and old-run epoch fencing.
+
+## Verified graph tuning results
+
+`CandidateConsole.graph_results(UUID)` delegates to
+`graph_results.read_graph_results`. It calls `read_operation` (which already runs
+`verify_candidate_records`, including `verify_graph_trace`/`verify_loop`) and
+`lookup_operation_request`; it adds no admission, scoring, ranking or reduction
+policy. `StatusView` and operation status semantics are unchanged.
+
+- `available=false` unless the snapshot state is `completed`, its receipt is a
+  `CandidateRunReceipt` with `graph_trace` or `loop_trace`, and the admitted
+  submission is a `CandidateOperation`. Fixed (non-graph) candidates, active,
+  failed or integrity-unknown operations return `available=false` with no bodies.
+- Bodies: a standalone graph yields its one receipt. A loop yields exactly the body
+  receipts returned by `verify_loop(request, launch.json receipt, receipt)`, in
+  verified iteration order (`iteration` = 1-based position). A loop with no
+  verified completed-body index returns `available=true`, `bodies=[]`. Body
+  membership is never inferred from directory names.
+- Per body, the tuning node is the declared `execution_families(...).tuning`
+  node in that body's `graph_trace`. Only `state == "succeeded"` reads a record:
+  its `record_sha256` is re-checked with `record_digest`, then the file is passed
+  through `load_run_output` and `project_run` alone. Any other state returns
+  `result=null` (no score, even if a record file exists).
+- `GraphRunSummary` is the path-free subset of `RunView`: run name, model type,
+  status, termination reason, times, completed rounds, total attempts, `metric`,
+  `metric_source`, `ranking_refusal`, declared secondary metric identities, the
+  tuner's own `RunHeadline` and `status_counts`. `source_path`, provenance,
+  storage/record paths, raw `all_records`/attempts and failure detail are absent.
+- Failures: a missing tuning node, missing record identity, changed digest,
+  unreadable/invalid record, or a refused loop re-verification raises
+  `OperationFailure("integrity", ...)` → HTTP 409 with the generic sanitized
+  message; an unknown operation is 404.
+
+Slow control: `graph-results-monitor.js` owns `window.renderGraphResults` and the
+`#graph-results-observation` section. `app.js` requests the route once per
+selected operation inside the existing poll, only for `kind == "candidate"` and
+`state == "completed"`; the existing monitor epoch fences replies and selection
+clears the section. 404/409 are final for that selection; other failures retry on
+the next existing poll. Each body is its own section (`Iteration N` for several
+bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
+(`TRAIN & TUNE`). No cross-body score or ordering is computed or displayed.
+
+Witnesses: `test_console_graph_results_reuse_native_run_report_without_paths`
+(native graph record vs `project_run`, no path, failed stage has no score, changed
+record refused), `test_two_native_bodies_preserve_advice_and_verify_feedback`
+(two loop bodies in verified order, refused body → integrity) and
+`tests/browser/graph_results_monitor.mjs` (synthetic GET-only two-body render).
+Provider and tuner effects are offline doubles; these establish projection, not
+scientific training. No public paired prepared/completed example exists yet.
 
 ## Recorded candidate examples
 

@@ -3,7 +3,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   let choices = [], preparation = null, review = null, launch = null;
-  let monitorId = '', cursor = 0, logText = '', polling = false, connected = false;
+  let monitorId = '', cursor = 0, logText = '', polling = false, connected = false, graphResultsAttemptedFor = '';
   let monitorEpoch = 0, generation = 0, invalidRoute = false;
   const say = (id, value) => { if (document.getElementById(id).textContent !== value) document.getElementById(id).textContent = value; };
   const remember = id => { try { localStorage.setItem('siderius.operation_id', id); } catch { /* Storage may be unavailable. */ } };
@@ -167,7 +167,7 @@
   });
   function setMonitor(id) {
     if (monitorId.toLowerCase() === id.toLowerCase()) return;
-    monitorEpoch++; window.renderNativeChain(null); monitorId = id; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
+    monitorEpoch++; window.renderNativeChain(null); window.renderGraphResults(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
     $('token-rows').replaceChildren(); $('tokens-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
     say('remembered-operation', '');
     say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: Unavailable');
@@ -192,6 +192,19 @@
       facts($('operation-facts'), [['Operation UUID', status.operation_id], ['Kind', status.kind], ['Observed at', status.observed_at],
         ['Process observation', `${status.process.status}: ${status.process.reason || '(no reason supplied)'}`], ['Native ID', status.native_id],
         ['Validation passed', status.validation_passed === null ? 'Not available' : String(status.validation_passed)], ['Reason', status.reason || '(none)'], ['Native receipt available', String(status.receipt_available)]]);
+      if (status.kind === 'candidate' && status.state === 'completed' && graphResultsAttemptedFor !== id) {
+        graphResultsAttemptedFor = id;
+        try {
+          const projection = await api(`operations/${id}/graph-results`);
+          if (epoch !== monitorEpoch) return;
+          window.renderGraphResults(projection);
+        } catch (error) {
+          if (epoch !== monitorEpoch) return;
+          // Only a server verdict is final; disconnection retries on the existing poll.
+          if (![404, 409].includes(error.status)) graphResultsAttemptedFor = '';
+          if (!error.stale) window.renderGraphResults(null, error.status === 409 ? 'Workflow results could not be verified for this operation; no score is shown.' : 'Workflow results are unavailable for this operation.');
+        }
+      }
       const chunk = await api(`operations/${id}/log?kind=${kind}&offset=${cursor}&max_bytes=65536`);
       if (epoch !== monitorEpoch) return;
       cursor = chunk.next_offset;

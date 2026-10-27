@@ -30,5 +30,6 @@
     parent.append(row);
     return entry.label;
   }
-  window.editorCapabilityPresentation = Object.freeze({append});
+  const label = capability => (entries[capability] || fallback).label;
+  window.editorCapabilityPresentation = Object.freeze({append, label});
 })();
