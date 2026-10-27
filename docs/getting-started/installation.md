@@ -157,9 +157,10 @@ single map; the linked procedures own the details.
 | Browser candidate console (`candidate_console`) | Only the JSON `credential_file` named in the console configuration (mode `600`), limited to the task's `candidate_environment_names`. Shell exports and a project `.env` do not satisfy its readiness or Launch check | [Console credentials](../../src/tools/candidate_console/README.md#credentials), [configuration contract](../../src/tools/candidate_console/console-contract.md#configuration) |
 | Paper resolver (Semantic Scholar) | `S2_API_KEY` in the calling process; source checkouts fall back to the checkout `.env` when the variable is absent | [Semantic Scholar key](#semantic-scholar-key) |
 
-Provider key names come from the LLM bridge's provider table:
-`OPENAI_API_KEY`, `GEMINI_API_KEY` and `DEEPSEEK_API_KEY`. Offline
-installation, focused tests and `--dry-run` need none of them.
+Key names are declared in `src/agent/llm_settings.py` — `KNOWN_PROVIDERS`
+(`OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`) and the explicit-model
+`OPTIONAL_PROVIDERS` (`ANTHROPIC_API_KEY`, `MOONSHOT_API_KEY`, `ZAI_API_KEY`).
+Offline installation, focused tests and `--dry-run` need none of them.
 
 ### Command-line procedure
 
@@ -239,9 +240,10 @@ for effectful runs:
   python-dotenv then uses the nearest `.env` found by walking upward from the
   bridge module's directory (from the current working directory only in a REPL
   or debugger). In a source checkout this is normally `<checkout>/.env`.
-- Neither loader overrides a variable that is already set; both add every
-  missing variable in the file, not only keys. `PYTHON_DOTENV_DISABLED=1`
-  disables both.
+- The paper resolver also loads the checkout's `.env` as a compatibility fallback
+  when `S2_API_KEY` is absent. Neither loader overrides a variable that is
+  already set; all add every missing variable in the file, not only keys.
+  `PYTHON_DOTENV_DISABLED=1` disables all three loaders.
 - `.env` is ignored by the checkout's `.gitignore` (pattern `*.env`). Keeping
   values there still places secrets inside the source tree, which this
   procedure avoids.

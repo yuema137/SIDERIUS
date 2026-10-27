@@ -31,8 +31,8 @@ Before you start, you need **Python 3.12+ and uv**, your dataset location, and a
 project directory outside this checkout for your task, settings and results.
 Use this checkout's own `.venv/bin/python` after installation. Provider keys
 are needed for real model calls; offline setup checks need none.
-[Where to put them](docs/getting-started/installation.md#api-keys) differs
-between the command line and the browser console.
+The command line and the browser console read them from different places; see
+[API keys](docs/getting-started/installation.md#api-keys).
 The optional browser console also needs the
 [Linux workspace sandbox](src/tools/workspace_sandbox/README.md).
 

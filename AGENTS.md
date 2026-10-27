@@ -2,8 +2,8 @@
 
 Read [CLAUDE.md](CLAUDE.md) first. It owns repository contribution policy;
 the linked subsystem contracts and source own detailed behavior. This file
-provides navigation, not a second set of rules. It is the repository's single
-capability map; CLAUDE.md links here rather than keeping another one.
+provides navigation only; boundary rules and their single owners stay in CLAUDE.md's
+single-authorities table.
 
 SIDERIUS is a task-generic closed-loop research framework for supervised
 scientific machine learning. Tasks supply scientific semantics through
@@ -33,17 +33,22 @@ the [repository map](docs/repository-map.md).
 | Agent-driven orchestration in an external project | [orchestrator toolkit](docs/agent-reference/orchestrator-toolkit/README.md), [orchestration setup](src/tools/orchestration_setup/README.md) |
 | Graph, nodes and protocols | [architecture](docs/architecture.md), [node contract](src/nodes/node-contract.md), [node template](src/nodes/NODE_TEMPLATE.md) |
 | Typed schemas | [schema contract](src/agent/schemas/schema-contract.md) |
+| Literature review and paper resolver | [literature review node](src/nodes/ml_literature_review/ml_literature_review.md), [paper resolver skill](src/agent/skills/paper_resolver_skill/paper_resolver_skill.md) |
 | Task composition and manifests | [task composition reference](docs/reference/task-composition.md), [composition mechanism](docs/agent-reference/mechanisms/composition.md), [define a task](docs/guides/define-a-task.md) |
 | Data path and scope | [data-path and scope](docs/agent-reference/mechanisms/data-path-and-scope.md) |
 | Metrics | [metric mechanism](docs/agent-reference/mechanisms/metrics.md) |
 | Health checks and validity | [Health contract](src/execute_tools/health_checks/health-contract.md), [Health mechanism](docs/agent-reference/mechanisms/health-gates.md) |
 | Training objectives and diagnosis | [training mechanism](docs/agent-reference/mechanisms/training-objective-and-diagnosis.md), [model contract](src/ml_models/model-contract.md) |
+| Data analysis agent | [data analysis node](src/nodes/data_analysis_agent/data_analysis_agent.md) |
 | Execution, sandbox and resource control | [execution mechanism](docs/agent-reference/mechanisms/execution.md), [execution contract](src/execute_tools/execution-contract.md), [core contract](src/core/core-contract.md), [workspace sandbox](src/tools/workspace_sandbox/README.md) |
 | Plugins | [plugin mechanism](docs/agent-reference/mechanisms/plugins.md) |
 | Persistence, run invariants and resume | [persistence mechanism](docs/agent-reference/mechanisms/persistence-and-resume.md), [workspace guide](docs/guides/workspaces-and-resume.md) |
+| Run report and runtime replay | [run report README](src/tools/run_report/README.md), [runtime replay](docs/reference/runtime-replay.md) |
+| Dashboard and run monitoring | [dashboard guide](docs/guides/dashboard.md), [operating a run](docs/guides/operating-a-run.md) |
 | Candidate console (browser GUI) | [console contract](src/tools/candidate_console/console-contract.md) |
 | Candidate preparation, operations and worker | [prepare contract](src/tools/candidate_prepare/candidate-prepare-contract.md), [operations contract](src/tools/candidate_operations/candidate-operations-contract.md), [worker contract](src/tools/candidate_worker/candidate-worker-contract.md) |
 | Setup review | [setup review](src/tools/setup_review/README.md), [setup skill](docs/agent-reference/siderius-setup-review/SKILL.md) |
+| Examples and Quickstart | [examples](examples/README.md) |
 | LLM routing and providers | [agent contract](src/agent/agent-contract.md), [transport contract](src/agent/llm_transport/transport-contract.md), [LLM defaults](docs/reference/llm-defaults.md) |
 | Credentials: which entry point reads keys from where | [API keys](docs/getting-started/installation.md#api-keys) |
 | Configuration ownership | [configuration map](docs/reference/configuration-map.md), [configuration contract](configs/configuration-contract.md) |
