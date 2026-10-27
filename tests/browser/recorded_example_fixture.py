@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import secrets
+import shutil
 import socket
 from pathlib import Path
 
@@ -29,6 +30,25 @@ def main() -> None:
     parser.add_argument("directory", type=Path)
     args = parser.parse_args()
     workspace = args.workspace.resolve(strict=True)
+    invalid_workspace = workspace.parent / f".recorded-view-fixture-{secrets.token_hex(8)}"
+    shutil.copytree(workspace, invalid_workspace)
+    request_path = invalid_workspace / "candidate_run" / "request.json"
+    request = json.loads(request_path.read_text())
+    request["preview"]["document"]["definition"]["task"]["workspace"] = str(invalid_workspace)
+    request["declaration_digest"] = "0" * 64
+    request_path.write_text(json.dumps(request))
+    for filename in ("launch.json", "receipt.json"):
+        receipt_path = invalid_workspace / "candidate_run" / filename
+        receipt = json.loads(receipt_path.read_text())
+        receipt["declaration_digest"] = "0" * 64
+        receipt["workspace"] = str(invalid_workspace)
+        receipt["ledger_path"] = str(invalid_workspace / "token_usage.jsonl")
+        receipt["log_path"] = str(invalid_workspace / "candidate_run" / "worker.log")
+        receipt["native_output_paths"] = [
+            value.replace(str(workspace), str(invalid_workspace))
+            for value in receipt.get("native_output_paths", [])
+        ]
+        receipt_path.write_text(json.dumps(receipt))
     directory = args.directory.resolve()
     directory.mkdir(parents=True, exist_ok=False)
     preparations, state = directory / "preparations", directory / "state"
@@ -53,6 +73,18 @@ def main() -> None:
                 workspace=str(workspace),
                 expected_run_id=args.run_id,
             ),
+            RecordedExampleChoice(
+                example_id="tess-recorded-b",
+                label="TESS candidate validation example B",
+                workspace=str(workspace),
+                expected_run_id=args.run_id,
+            ),
+            RecordedExampleChoice(
+                example_id="tess-invalid-declaration",
+                label="TESS mismatched declaration digest fixture",
+                workspace=str(invalid_workspace),
+                expected_run_id=args.run_id,
+            ),
         ),
         port=port,
         browser_origin=f"http://127.0.0.1:{port}",
@@ -67,6 +99,8 @@ def main() -> None:
                 "example_id": "tess-recorded",
                 "workspace": str(workspace),
                 "before": before,
+                "invalid_workspace": str(invalid_workspace),
+                "invalid_before": tree_digest(invalid_workspace),
             }
         ),
         flush=True,
@@ -89,7 +123,16 @@ def main() -> None:
             log_level="error",
         )
     finally:
-        (directory / "after.json").write_text(json.dumps(tree_digest(workspace), sort_keys=True))
+        (directory / "after.json").write_text(
+            json.dumps(
+                {
+                    "workspace": tree_digest(workspace),
+                    "invalid_workspace": tree_digest(invalid_workspace),
+                },
+                sort_keys=True,
+            )
+        )
+        shutil.rmtree(invalid_workspace)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,8 @@ def read_recorded_example(
     candidate_id = receipt.candidate_id
     if (
         declaration_workspace != workspace
+        or request.declaration_digest != request.preview.document.definition.declaration_digest()
+        or receipt.declaration_digest != request.declaration_digest
         or request.preview.execution_profile is not None
         or tuple(node.capability for node in request.preview.document.definition.nodes)
         != ("proposal", "implementation", "validation")

@@ -88,7 +88,13 @@
       if (revision === readRevision) $('recorded-example-open').disabled = !connected || !$('recorded-example-choice').value;
     }
   });
-  $('recorded-example-choice').addEventListener('change', () => { readRevision++; });
+  $('recorded-example-choice').addEventListener('change', () => {
+    readRevision++;
+    $('recorded-example-content').hidden = true;
+    const id = $('recorded-example-choice').value;
+    $('recorded-example-open').disabled = !connected || !id;
+    setStatus(id ? 'Example changed. Read its recorded evidence to verify it.' : 'Choose a configured example.');
+  });
   window.consoleSession.subscribe(state => {
     connected = state.connected; readRevision++;
     $('recorded-example-choice').disabled = !connected || choiceRevision !== state.revision;

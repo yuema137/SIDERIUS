@@ -51,11 +51,39 @@ try {
   assert.match(await page.locator('#recorded-token-rows').textContent(), /7346/);
   assert.equal(await page.locator('#recorded-token-rows tr').count(), 1);
   await page.locator('#recorded-token-table').locator('xpath=..').locator('summary').click();
+
+  // A delayed A response must not leave the reader disabled or its old view visible after B is selected.
+  let delayNextA = false;
+  await page.route('**/api/recorded-examples/tess-recorded', async route => {
+    if (delayNextA) {
+      delayNextA = false;
+      await new Promise(resolve => setTimeout(resolve, 1200));
+    }
+    await route.continue();
+  });
+  delayNextA = true;
+  await page.locator('#recorded-example-open').click();
+  await page.locator('#recorded-example-status').filter({hasText: 'Verifying captured candidate records'}).waitFor();
+  await page.locator('#recorded-example-choice').selectOption('tess-recorded-b');
+  assert.equal(await page.locator('#recorded-example-content').isVisible(), false, 'changing selection clears stale evidence');
+  assert.equal(await page.locator('#recorded-example-open').isEnabled(), true, 'changing selection restores the read control while A is pending');
+  await page.locator('#recorded-example-open').click();
+  await page.locator('#recorded-example-status').filter({hasText: 'Candidate validation evidence verified'}).waitFor();
+  await page.waitForTimeout(1400);
+  assert.equal(await page.locator('#recorded-example-content').isVisible(), true, 'late A response does not replace B');
+  assert.match(await page.locator('#recorded-example-status').textContent(), /Candidate validation evidence verified/);
+
+  await page.locator('#recorded-example-choice').selectOption('tess-invalid-declaration');
+  assert.equal(await page.locator('#recorded-example-content').isVisible(), false);
+  await page.locator('#recorded-example-open').click();
+  await page.locator('#recorded-example-status').filter({hasText: 'failed verification'}).waitFor();
+  assert.doesNotMatch(await page.locator('#recorded-example-status').textContent(), /Candidate validation evidence verified/);
   assert.deepEqual(faults, []);
   assert.ok(calls.length >= 3);
   assert.ok(calls.every(call => call.method === 'GET'), 'recorded example uses GET only');
-  assert.ok(calls.every(call => ['/api/choices', '/api/native-chain/choices', '/api/recorded-examples', `/api/recorded-examples/${metadata.example_id}`].includes(call.path)), 'no operation, preparation, launch, review, token, or log route is called');
-  assert.ok(responses.every(response => response.status === 200));
+  assert.ok(calls.every(call => ['/api/choices', '/api/native-chain/choices', '/api/recorded-examples', `/api/recorded-examples/${metadata.example_id}`, '/api/recorded-examples/tess-recorded-b', '/api/recorded-examples/tess-invalid-declaration'].includes(call.path)), 'no operation, preparation, launch, review, token, or log route is called');
+  assert.ok(responses.filter(response => response.path === '/api/recorded-examples/tess-invalid-declaration').every(response => response.status === 409));
+  assert.ok(responses.filter(response => response.path !== '/api/recorded-examples/tess-invalid-declaration').every(response => response.status === 200));
   await page.screenshot({path: resolve(evidence, 'recorded-example.png'), fullPage: true});
   await writeFile(resolve(evidence, 'browser-receipt.json'), JSON.stringify({head: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim(), workspace: metadata.workspace, before: metadata.before, calls, responses, faults, content}, null, 2));
 } catch (error) {
@@ -68,6 +96,7 @@ try {
   if (server.exitCode === null) {const done = new Promise(resolve => server.once('exit', resolve)); server.kill('SIGINT'); await done;}
   if (metadata) {
     const after = JSON.parse(await readFile(resolve(fixtureDir, 'after.json'), 'utf8'));
-    assert.deepEqual(after, metadata.before, 'viewing must leave all candidate files byte-identical');
+    assert.deepEqual(after.workspace, metadata.before, 'viewing must leave original candidate files byte-identical');
+    assert.deepEqual(after.invalid_workspace, metadata.invalid_before, 'viewing must leave the corrupted integrity fixture byte-identical');
   }
 }
