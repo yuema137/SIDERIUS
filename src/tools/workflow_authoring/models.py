@@ -98,10 +98,18 @@ class ReviewRequest(Model):
         return self
 
 
+# 1-64 characters, no control characters, no leading/trailing whitespace.
+VersionName = Annotated[
+    str, Field(pattern=r"^[^\s\x00-\x1f\x7f](?:[^\x00-\x1f\x7f]{0,62}[^\s\x00-\x1f\x7f])?$")
+]
+
+
 class SaveRequest(SourceProposal):
     kind: Literal["source"] = "source"
     expected_sha256: Digest
     proposal_sha256: Digest
+    # Presentation-only name recorded beside the source; omitted -> next "vN".
+    version_name: VersionName | None = Field(default=None, exclude_if=lambda value: value is None)
     task_reference_acceptance: TaskReferenceAcceptance | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -184,3 +192,4 @@ class SaveView(Model):
     sha256: Digest
     recovery_ids: tuple[str, ...]
     unchanged: bool = False
+    version_name: str | None = Field(default=None, exclude_if=lambda value: value is None)

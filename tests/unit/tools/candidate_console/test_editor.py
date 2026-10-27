@@ -578,3 +578,21 @@ def test_every_index_asset_is_served(editor_config):
     with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
         for asset in assets:
             assert client.get("/" + asset).status_code == 200, asset
+
+
+def test_http_version_routes(editor_config):
+    """Fails if history routes bypass console auth or the list/detail wire shape breaks."""
+    config = editor_config
+    headers = {
+        "Authorization": "Bearer " + open(config.auth_token_file).read(),
+        "Origin": config.browser_origin,
+    }
+    with TestClient(create_app(config), base_url=config.browser_origin) as client:
+        assert client.get("/api/editor/example/versions").status_code == 401
+        listed = client.get("/api/editor/example/versions", headers=headers).json()
+        assert listed["next_name"] == "v1" and listed["record_present"] is False
+        sha = listed["versions"][0]["sha256"]
+        detail = client.get(f"/api/editor/example/versions/0?sha256={sha}", headers=headers)
+        assert detail.status_code == 200 and detail.json()["source"] == SOURCE
+        stale = client.get(f"/api/editor/example/versions/0?sha256={'0' * 64}", headers=headers)
+        assert stale.status_code == 409 and stale.json()["error"]["code"] == "conflict"

@@ -13,6 +13,7 @@ from tools.candidate_operations import (
     submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure
+from tools.workflow_authoring.versions import version_record_path
 
 from .files import credentials
 from .native_chain_models import (
@@ -34,7 +35,11 @@ def check_editor_separation(
     destinations = [Path(choice.request.envelope), Path(admission.workspace)]
     for project in console.config.editor_projects:
         source = project.source_file
-        files = (source, source.with_name(f".{source.name}.authoring.lock"))
+        files = (
+            source,
+            source.with_name(f".{source.name}.authoring.lock"),
+            version_record_path(source),
+        )
         recovery = project.recovery_directory
         pinned_overlap = any(p in files or p.is_relative_to(recovery) for p in inputs)
         output_overlap = any(

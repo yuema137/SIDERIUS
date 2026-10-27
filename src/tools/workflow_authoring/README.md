@@ -40,8 +40,11 @@ whether referenced manifests, data or plugins exist.
    exact generated Python diff. After inspector edits, review first to update
    the Python panel before typing source changes. Inspector changes can rewrite formatting and
    comments; review shows that rewrite.
-5. Click **Save reviewed source**. Success means the reviewed bytes were saved
-   and read back. Exact previous/proposed bytes are kept as separate
+5. Keep the suggested **Version name** (`v1`, `v2`, ...) or type your own, then
+   click **Save reviewed source**. Success means the reviewed bytes were saved
+   and read back, and `workflow.py.versions.json` beside the source records the
+   name, time and SHA-256. **Version history** lists saved versions, marks the
+   current one and opens each read-only with its diff from the previous one. Exact previous/proposed bytes are kept as separate
    recovery copies; the ordinary `workflow.py` remains authoritative. Its
    ordinary permission bits are preserved.
 6. After your coding agent edits that file normally, click **Refresh from disk**.
