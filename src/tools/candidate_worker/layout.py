@@ -80,3 +80,9 @@ def interpretation_input_path(workspace: Path, node_id: str, *, iteration: int =
         / "interpretation_inputs"
         / f"{node_id}.json"
     )
+
+
+def tuning_input_path(workspace: Path, node_id: str, *, iteration: int = 1) -> Path:
+    return (
+        candidate_control_dir(workspace, iteration=iteration) / "tuning_inputs" / f"{node_id}.json"
+    )

@@ -12,6 +12,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ProposalInput
@@ -269,3 +270,21 @@ def effective_training_settings(
     payload = (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
     parse_training_settings(payload)
     return payload
+
+
+def reconcile_constraints(
+    actual: ConstraintContext | None, expected: ConstraintContext | None
+) -> None:
+    """Accept incomplete evidence, but refuse each already known conflicting section."""
+    if actual is None:
+        return
+    if expected is None:
+        raise ValueError("constraint_context conflicts with disabled disclosure")
+    for name in type(actual).model_fields:
+        if name == "known_sections":
+            continue
+        value = getattr(actual, name)
+        if (name in actual.known_sections or value is not None) and value != getattr(
+            expected, name
+        ):
+            raise ValueError(f"constraint_context.{name} disagrees with native training")

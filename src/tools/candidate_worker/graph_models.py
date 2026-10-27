@@ -7,7 +7,7 @@ from pydantic import Field
 from tools.workflow_preview.models import PreviewModel
 
 GraphCapability = Literal[
-    "proposal", "implementation", "validation", "literature", "interpretation"
+    "proposal", "implementation", "validation", "literature", "interpretation", "tuning"
 ]
 GraphState = Literal["pending", "running", "succeeded", "rejected", "failed", "blocked"]
 GraphReason = Literal["dependency_not_successful", "native_failure", "validation_rejected"]
