@@ -149,6 +149,7 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | GET /api/operations/{UUID}/tokens | CandidateTokenSnapshot, read-only fixed native projection |
 | GET /api/operations/{UUID}/graph-results | GraphResultsView, read-only per-body native tuning report projection |
 | GET /api/operations/{UUID}/log | kind=native or operation, offset>=0, max_bytes=1..65536 → LogChunk |
+| POST /api/operations/{UUID}/loop-stop | empty `LoopStopSelection` `{}` → `LoopStopAcknowledgement` (`outcome="requested"`), 200 |
 
 Outer ASGI RequestBoundary checks exact Host (configured bind/browser authorities),
 rejects proxy/forwarded headers and requires constant-time bearer authentication
@@ -255,7 +256,8 @@ replacement polling, token-only failure isolation and old-run epoch fencing.
 `graph_results.read_graph_results`. It calls `read_operation` (which already runs
 `verify_candidate_records`, including `verify_graph_trace`/`verify_loop`) and
 `lookup_operation_request`; it adds no admission, scoring, ranking or reduction
-policy. `StatusView` and operation status semantics are unchanged.
+policy. Operation status semantics are unchanged; `StatusView.loop` is described
+under [Authored loop Stop and state](#authored-loop-stop-and-state).
 
 - `available=false` unless the snapshot state is `completed`, its receipt is a
   `CandidateRunReceipt` with `graph_trace` or `loop_trace`, and the admitted
@@ -297,6 +299,47 @@ record refused), `test_two_native_bodies_preserve_advice_and_verify_feedback`
 `tests/browser/graph_results_monitor.mjs` (synthetic GET-only two-body render).
 Provider and tuner effects are offline doubles; these establish projection, not
 scientific training. No public paired prepared/completed example exists yet.
+
+## Authored loop Stop and state
+
+`StatusView.loop` is present only for a `candidate` operation whose admitted
+submission (`lookup_operation_request`) declares `definition.loop`:
+`final_iteration` comes from that declaration and `attempted_iterations` only from
+the native receipt's `loop_trace` (`null` while no receipt exists). The console
+never infers per-body progress from an active process. Fixed and non-candidate
+operations omit the field.
+
+`CandidateConsole.request_loop_stop(UUID)` delegates once to
+`candidate_operations.request_loop_stop`, which owns admission, identity checks,
+idempotency and the write-once marker. HTTP POST `/api/operations/{UUID}/loop-stop`
+passes the ordinary mutation boundary (bearer token, exact Origin, JSON content
+type, 256 KiB limit) and accepts only the empty JSON object. Success returns
+`{"operation_id": UUID, "outcome": "requested"}`; it means the request was
+recorded, never that the loop stopped. The active body completes; the final
+iteration or a native failure may still end the loop first. Refusals: unknown
+operation 404; `kind` (not an authored candidate loop), `not_ready` (worker has
+not claimed its workspace) and `not_running` (terminal or not confirmed running)
+409 with route-local fixed messages; `integrity` and others 409 with the generic
+message. Native detail and paths are never echoed. A repeated POST after the
+Stop marker exists replays the recorded request and returns 200 `requested`
+even when the loop has since become terminal (the backend replays the marker
+before its running check); a 200 is therefore an idempotent acknowledgement,
+never evidence that the loop is still running.
+
+Slow control: `loop-control.js` owns `window.renderLoopControl` and
+`#loop-control`, rendered from each existing status poll (no extra polling).
+**Stop at next boundary** is shown only for a `candidate` with `loop`, state
+`active` and no receipt. A click disables the button for the pending request, so
+one click sequence issues one POST; after acknowledgement the button is hidden and
+the state reads "Stop requested … Not yet stopped." until a receipt arrives. A
+receipt `stopped` reads "stopped at a completed body boundary after N of M
+bodies"; `completed` reads "finished after N of M bodies" (and notes that a
+requested Stop did not take effect); other statuses read "ended (status)". The
+acknowledgement is memory-only for the selected operation: a reload or another
+selection forgets it, because no marker read exists and the receipt is the
+authority. Witnesses: `tests/unit/tools/candidate_console/test_loop_stop.py` and
+`tests/browser/loop_controls.mjs` (stubbed API). The worker Stop semantics are
+witnessed by `candidate_worker/test_finite_loop.py`.
 
 ## Recorded candidate examples
 

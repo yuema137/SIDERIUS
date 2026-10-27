@@ -203,8 +203,6 @@ def interpretation_candidate(
     definition: WorkflowDefinition | ReusableWorkflowDefinition,
 ) -> ProposalFamilies:
     """One explicit native interpretation edge and one complete candidate branch."""
-    if not isinstance(definition, WorkflowDefinition):
-        raise ValueError("interpretation profile requires a concrete workflow declaration")
     facts = predecessor_facts(definition)
     interpreters = [node for node in definition.nodes if node.capability == "interpretation"]
     proposals = [node for node in definition.nodes if node.capability == "proposal"]

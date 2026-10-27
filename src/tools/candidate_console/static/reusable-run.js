@@ -3,6 +3,11 @@
   'use strict';
   const $ = id => document.getElementById('capture-' + id);
   const session = window.consoleSession, coordinator = window.reusableIntents;
+  const profileDescriptions = {
+    'native-proposal-families/v1': ' Independent proposal instances executed serially.',
+    'native-literature-candidate/v1': ' Native literature review feeds one proposal, implementation and validation.',
+    'native-interpretation-candidate/v1': ' Native interpretation feeds one proposal, implementation, validation and tuning.',
+  };
   let editor = window.workflowEditor.state, generation = 0, selected = null, review = null;
   let handoffGeneration = -1;
   let tasksRevision = null, cursor = null, busy = false, intent = null, terminal = false, refusedInitial = false, storageProblem = false;
@@ -134,11 +139,8 @@
     const version = ++generation, revision = session.revision; review = null; $('summary').replaceChildren(); $('details').textContent = ''; controls();
     try {
       const value = await api('/review', selected); if (!current(version, revision)) return; review = value;
-      const profile = value.execution_profile === 'native-proposal-families/v1'
-        ? ' Independent proposal instances executed serially.'
-        : (value.execution_profile === 'native-literature-candidate/v1'
-          ? ' Native literature review feeds one proposal, implementation and validation.'
-          : (value.execution_profile ? ' Proposal fanout executed serially.' : ''));
+      const profile = profileDescriptions[value.execution_profile]
+        || (value.execution_profile ? ' Proposal fanout executed serially.' : '');
       const nodes = value.nodes.map(item => item[0]).join(value.execution_profile ? ', ' : ' → ');
       $('summary').textContent = `${value.run_name} · ${value.task_label} · Captured workflow.${profile} Nodes: ${nodes}. ${value.credential_readiness.ready ? 'Configured credentials ready (presence only).' : value.credential_readiness.instructions.join(' ')}`;
       const routes = value.routes.map(route => `${route.node_id}: ${route.provider || 'unresolved'} / ${route.model || 'unresolved'}`).join('\n');
