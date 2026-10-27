@@ -100,6 +100,77 @@ class TestLegacyRenderIsByteIdentical:
                 text = text.replace(citation_guidance, "")
                 assert text.count(current) == 1
                 text = text.replace(current, previous)
+                # #923 deliberately changes the current multi-source policy:
+                # task locks win over conflicting advice, while allowed human
+                # direction wins over defaults and non-human suggestions. Pin
+                # that complete current block and normalize it back to the
+                # pre-U3 text so the historical byte oracle still catches
+                # unrelated prompt drift.
+                current_precedence = (
+                    "1. **Task and run boundaries** — the declared task contract, explicitly locked\n"
+                    "   settings, and execution authorization are non-negotiable. Do not propose a\n"
+                    "   choice that violates one. Ignore only the part of human advice that conflicts\n"
+                    "   with a binding boundary, and continue following its non-conflicting parts.\n"
+                    "   Never alter a lock or claim that you followed the conflicting request. Stage\n"
+                    "   3 must record the conflict in `memo_consistency_notes`, naming the locked\n"
+                    '   field, current value, requested change, and the instruction "change lock first\n'
+                    '   to apply".\n'
+                    "2. **Human advice** — explicit human directions control scientific and design\n"
+                    "   choices that remain within those boundaries. Follow them over defaults,\n"
+                    "   literature-derived recommendations, and other agents' suggestions. Keep\n"
+                    "   contrary experimental or external evidence visible and accurately attributed:\n"
+                    "   a human preference changes the choice, not the facts or measured results.\n"
+                    "   State the concrete conflict and why the choice follows the human direction;\n"
+                    "   never imply that contrary evidence supports it.\n"
+                    "3. **Other expert context items** (the Expert Context block) — weight each item\n"
+                    "   by its contributor's `trust_level` (visible in the Contributors block):\n"
+                    "   - `hard_limit`: a contributor's claim of a constraint. Treat it seriously\n"
+                    "     and assess its evidence and applicability, but the label itself does not\n"
+                    "     create task authority or override human direction. Only the declared task\n"
+                    "     contract, explicitly locked settings, and execution authorization are\n"
+                    "     binding boundaries. If a claim suggests the human-preferred choice may be\n"
+                    "     physically or scientifically infeasible, state the evidence and conflict\n"
+                    "     clearly; do not silently promote the claim to a task lock or misstate the\n"
+                    "     underlying facts. This does not permit violating an actual task boundary.\n"
+                    "   - `strong_prior`: for non-human sources, weight comparably to experiment\n"
+                    "     data; experiment data may outweigh it when you state the specific evidence.\n"
+                    "   - `soft_prior`: a possible direction, not a controlling instruction. Use it\n"
+                    "     as a hypothesis where it does not conflict with the human direction or\n"
+                    "     stronger evidence.\n"
+                    "\n"
+                    "A finding from any source at `trust_level=strong_prior` or higher may\n"
+                    "directly motivate your `proposed_change`, not just inform it. Record its\n"
+                    "`source_ref` in `source_refs` when it materially changes your hypothesis.\n"
+                    "\n"
+                    "Use the contributor's `trust_level` to assess non-human evidence; it does not\n"
+                    "create task authority or execution permission. Human direction controls the\n"
+                    "choice within binding task and run boundaries, while contrary evidence remains\n"
+                    "visible and accurately described."
+                )
+                previous_precedence = (
+                    "1. **Experiment history** (the ModelComparisons from Stage 1) — your primary\n"
+                    "   evidence base. What has been tried; what worked; what failed.\n"
+                    "2. **Expert context items** (the Expert Context block) — weight each item by\n"
+                    "   its contributor's `trust_level` (visible in the Contributors block):\n"
+                    "   - `hard_limit`: non-negotiable constraint. Your hypothesis MUST NOT\n"
+                    "     violate it.\n"
+                    "   - `strong_prior`: weight comparably to experiment data. Override only\n"
+                    "     with explicit justification citing why the experimental evidence\n"
+                    "     outweighs it.\n"
+                    "   - `soft_prior`: inspirational prior. Experiment data takes precedence\n"
+                    "     on conflict; you may use it to motivate exploration beyond what\n"
+                    "     experiment history has tried.\n"
+                    "\n"
+                    "A finding from any source at `trust_level=strong_prior` or higher may\n"
+                    "directly motivate your `proposed_change`, not just inform it. Record its\n"
+                    "`source_ref` in `source_refs` when it materially changes your hypothesis.\n"
+                    "\n"
+                    "This rule is generic over `trust_level` values, not over agent type names.\n"
+                    "The proposer reads `Trust Level` off the card; it does not pattern-match\n"
+                    '"Literature agents" or "Physics agents" or any other prose label.'
+                )
+                assert text.count(current_precedence) == 1
+                text = text.replace(current_precedence, previous_precedence)
             assert hashlib.sha256(text.encode("utf-8")).hexdigest() == sha, (
                 f"{name}: the non-isolated render no longer reproduces the pre-U3 bytes"
             )
