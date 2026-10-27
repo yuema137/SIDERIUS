@@ -69,11 +69,26 @@ class NodeInstance(DeclarationModel):
     request: Request
 
 
+class LoopFeedback(DeclarationModel):
+    """Explicit cross-body edge; it is not a cycle inside the body's DAG."""
+
+    source: ResultSource
+    target: Identifier
+    protocol: Literal["tuning-to-interpretation"]
+    history: Literal["native-research/v1"]
+
+
+class AuthoredLoop(DeclarationModel):
+    final_iteration: Annotated[int, Field(gt=0)]
+    feedback: LoopFeedback
+
+
 class WorkflowDefinition(DeclarationModel):
     schema_version: Literal[1] = 1
     task: TaskReferences
     externals: tuple[ExternalBinding, ...] = ()
     nodes: tuple[NodeInstance, ...] = Field(min_length=1)
+    loop: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_connections(self) -> Self:
@@ -147,6 +162,7 @@ class ReusableWorkflowDefinition(DeclarationModel):
     task: ReusableTaskReferences
     externals: tuple[ExternalBinding | ManagedCandidateBinding, ...] = ()
     nodes: tuple[NodeInstance, ...] = Field(min_length=1)
+    loop: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_connections(self) -> Self:

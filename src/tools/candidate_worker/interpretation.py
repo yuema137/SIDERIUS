@@ -8,17 +8,24 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from agent.schemas.constraint_disclosure import ConstraintContext
+from agent.schemas.health_feedback import FormalValidityFeedback
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput, TaskCompositionRef
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ExpertContextItem, ProposalInput
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.chain_state import ChainState
 from core.durable_io import publish_bytes_write_once
 from ml_models.model_descriptions import DescriptionSourcePolicy
 from workflows.definition import ExternalSource, ProtocolRequest
 from workflows.definition.fanout import InterpretationEdge
 from workflows.llm_config import WorkflowLLMConfig
+from workflows.research_history import (
+    interpretation_history,
+    prior_findings,
+    recent_formal_feedback,
+)
 from workflows.task_composition import RunTaskComposition, build_task_composition_ref
 
 from .artifacts import capture_record
@@ -43,11 +50,27 @@ class InterpretationArguments(BaseModel):
     constraint_context: ConstraintContext | None = None
     workflow_parameter_rules: ParameterRules | None = None
 
-    def apply(self, output: InterpretationOutput) -> ProposalInput:
+    def apply(
+        self,
+        output: InterpretationOutput,
+        *,
+        history: ChainState | None = None,
+        feedback: list[FormalValidityFeedback] | None = None,
+    ) -> ProposalInput:
         # Keep nested native models and omit unsupplied optional arguments.
-        return local_full_context(
-            output, **{name: getattr(self, name) for name in self.model_fields_set}
-        )
+        values = {name: getattr(self, name) for name in self.model_fields_set}
+        if history is not None:
+            values.update(
+                expert_context=prior_findings(history) + list(self.expert_context or []),
+                recent_tune_outputs=list(history.recent_tune_outputs),
+                recent_formal_validity=feedback
+                if feedback is not None
+                else recent_formal_feedback(history, None),
+            )
+        result = local_full_context(output, **values)
+        if history is not None:
+            result.existing_model_types = list(history.all_model_types)
+        return result
 
 
 def read_arguments(
@@ -71,12 +94,34 @@ def prepare_interpretation(
     *,
     iteration: int,
     admitted: "TrainingAdmission | None" = None,
+    history: ChainState | None = None,
 ) -> tuple[InterpretationInput, InterpretationArguments]:
     definition = request.preview.document.definition
     protocol = next(node.request for node in definition.nodes if node.id == edge.proposal)
     assert isinstance(protocol, ProtocolRequest)
     arguments = read_arguments(protocol, contents)
     value = InterpretationInput.model_validate_json(contents[f"external.{edge.input_binding}"])
+    if history is not None and iteration > 1:
+        value = value.model_copy(
+            update={
+                **interpretation_history(history, value),
+                "iteration": iteration,
+                "storage": StorageConfig(
+                    backend="local",
+                    local=LocalStorageConfig(
+                        workspace=str(
+                            graph_instance_dir(
+                                workspace,
+                                request.run_name,
+                                edge.interpretation,
+                                iteration=iteration,
+                            )
+                        ),
+                        run_name=request.run_name,
+                    ),
+                ),
+            }
+        )
     for node_id, storage in (
         (edge.interpretation, value.storage),
         (edge.proposal, arguments.storage),

@@ -11,6 +11,7 @@ from tools.setup_review.route_models import LLMRoute
 from tools.workflow_preview.models import FileObservation, PreviewModel, WorkflowPreviewRequest
 
 from .graph_models import GraphTrace
+from .loop_models import LoopTrace
 
 
 class ReviewedContext(PreviewModel):
@@ -78,7 +79,14 @@ class CandidateRunReceipt(PreviewModel):
     workspace: str
     declaration_digest: str
     status: Literal[
-        "launched", "accepted", "rejected", "failed", "timed_out", "interrupted", "completed"
+        "launched",
+        "accepted",
+        "rejected",
+        "failed",
+        "timed_out",
+        "interrupted",
+        "completed",
+        "stopped",
     ]
     node_ids: tuple[str, ...]
     selected_constructor_routes: tuple[LLMRoute, ...]
@@ -91,6 +99,7 @@ class CandidateRunReceipt(PreviewModel):
     native_output_paths: tuple[str, ...] = ()
     validation_passed: bool | None = None
     error: str | None = None
+    loop_trace: LoopTrace | None = Field(default=None, exclude_if=lambda value: value is None)
     graph_trace: GraphTrace | None = Field(default=None, exclude_if=lambda value: value is None)
     training_output: TrainingOutputEvidence | None = Field(
         default=None, exclude_if=lambda value: value is None

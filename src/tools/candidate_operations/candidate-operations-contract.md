@@ -739,3 +739,15 @@ Bind the original provider environment names and submit with the ordinary CLI or
 `submit_operation`. New credentials are checked only for new execution; status and
 identical same-ID recovery do not read their values. Source, writer or checkpoint
 changes after review refuse the new operation rather than changing its meaning.
+
+### Authored finite-loop Stop
+
+`request_loop_stop(config, operation_id)` is an operation-bound graceful request
+for the candidate worker's declared finite loop. It reuses the store lock,
+configured-root admission, saved request/run identity checks and current process
+observation. It writes only the already-claimed native control marker, never
+creates a queued candidate workspace, and never sends a signal. Identical marker
+requests are idempotent. Read the ordinary operation snapshot for the eventual
+native outcome; acknowledgement alone does not mean stopped. The worker's
+[candidate contract](../candidate_worker/candidate-worker-contract.md#declared-finite-research-body)
+owns completed-body observation, the `stopped` receipt and evidence replay.

@@ -512,7 +512,7 @@ def _effective_config_body_sha(path: str) -> str | None:
     return read_effective_config_body_sha(path)
 
 
-def _commit_time_gate_ids(
+def commit_time_gate_ids(
     parsed: HyperparamTuningOutput,
     output_path: str,
     workspace: str,
@@ -542,6 +542,9 @@ def _commit_time_gate_ids(
             # that remains UNKNOWN rather than an empty, valid-by-default set.
             return resolve_scientific_gate_ids(path)
     return None
+
+
+_commit_time_gate_ids = commit_time_gate_ids  # compatibility for existing callers
 
 
 def _classify_commit_time(
@@ -759,7 +762,7 @@ def classify_committed_record(
         walker for incumbent-specific reasons).
     """
     rec = _record_dict(record)
-    gate_ids = _commit_time_gate_ids(parsed_output, output_path, workspace)
+    gate_ids = commit_time_gate_ids(parsed_output, output_path, workspace)
     validity = _classify_commit_time(rec, gate_ids)
 
     if rec.get("health_gate_enabled") is False:
@@ -1677,7 +1680,7 @@ def restore_prior_state(
         # trial-best fields only exist from P1-C4 onward).
         # Cross-iteration tie rule: strictly-greater replaces, so the
         # ascending walk makes earliest-iteration-wins automatic.
-        gate_ids = _commit_time_gate_ids(parsed, output_path, abs_workspace)
+        gate_ids = commit_time_gate_ids(parsed, output_path, abs_workspace)
         formal_cand = _formal_candidate_from_committed_fields(parsed, manifest, iter_idx)
         if formal_cand is None and parsed.best_valid_formal_denoising_score is None:
             formal_cand = _candidates_from_persisted_verdicts(parsed, gate_ids, want_trial=False)
