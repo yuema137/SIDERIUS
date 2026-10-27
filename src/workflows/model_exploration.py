@@ -119,8 +119,9 @@ from core.layout import package_root
 
 # Step 12 / PR-12a C6 — `core.resume` no longer imports a private symbol from
 # THIS module, so the cycle that forced `RestoredState` under TYPE_CHECKING and
-# `union_key_findings` into a function-local import is gone. Both are ordinary
-# top-level imports again.
+# `union_key_findings` into a function-local import is gone. `RestoredState` is
+# an ordinary top-level import here; `union_key_findings` is imported at top
+# level by `workflows.research_history`, which owns the findings-union call.
 from core.resume import RestoredState, _iter_run_name
 from core.run_invariants import (
     ensure_run_invariants,
