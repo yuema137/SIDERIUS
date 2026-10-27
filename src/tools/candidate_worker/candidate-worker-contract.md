@@ -3,8 +3,8 @@
 `CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None)`
 are the common JSON/Python boundary.
 The CLI decodes the same request and calls that function. The parent imports
-inert declaration/preview/routing schemas; it does not compose a task or import
-native node implementations. `child` verifies captured inputs, binds generated
+inert declaration/preview/routing schemas and public pure evidence projections;
+it never composes tasks, executes task/generated plugins or constructs agents/providers. `child` verifies captured inputs, binds generated
 library discovery to its workspace, and only then imports `native` and task
 consumers. Each launch gets a fresh interpreter through the existing sandbox.
 
@@ -684,7 +684,9 @@ status and may leave completed body records without a successful aggregate.
 an operation-bound, already-claimed, confirmed-running authored finite loop. It
 verifies the saved request/run identity and publishes an immutable `stop.json`
 marker in native control storage. Acknowledgement means requested, not stopped.
-The worker observes it before the next body, finishes any active body, and reports
+The worker checks it before each body dispatch; once that check passes, the body
+counts as active even if the request arrives before its first node starts. It
+finishes that active body and reports
 `stopped` unless the finite limit or a native failure completes first. Repeating
 an identical request is idempotent. Queued/not-yet-claimed operations refuse with
 `not_ready`; this operation does not create their workspace. Stop is neither an

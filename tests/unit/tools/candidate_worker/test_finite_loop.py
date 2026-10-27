@@ -15,6 +15,7 @@ from .test_graph import initial
 from .test_graph_training import graph_training_request
 from .test_interpretation import interpretation_provider as interpretation_provider
 from .test_native import native_runner as native_runner
+from .test_training import training_request as training_request
 from .test_training import training_runner as training_runner
 
 
@@ -290,3 +291,21 @@ def test_omitted_seed_metric_uses_native_stamp_when_completed_cache_needs_cappin
         "cached_5",
     }
     verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
+
+
+@pytest.mark.parametrize("fixture", ["prepared", "training_request"])
+def test_fixed_profile_readback_rejects_loop_stopped_status(request, fixture):
+    from tools.candidate_worker.records import verify_candidate_records
+
+    selected = request.getfixturevalue(fixture)
+    launched = initial(selected)
+    stopped = launched.model_copy(update={"status": "stopped"})
+    with pytest.raises(ValueError, match="fixed candidate receipt cannot claim loop Stop"):
+        verify_candidate_records(
+            selected,
+            launched,
+            expected_request=selected,
+            expected_run_id=launched.run_id,
+            workspace=Path(launched.workspace),
+            receipt=stopped,
+        )
