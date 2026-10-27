@@ -116,13 +116,18 @@ try {
   page.once('dialog', dialog => dialog.accept()); await page.locator('#editor-refresh').click();
   await waitUntil(async () => (await source.inputValue()) === canonical && (await choice.inputValue()) === '');
   await choice.selectOption('synthetic');
-  let release, started;
+  let release, started, forwarded;
   const held = new Promise(resolve => {release = resolve;}), captured = new Promise(resolve => {started = resolve;});
-  await page.route('**/api/editor/versioned/review', async route => {started(); await held; await route.continue();});
+  const continued = new Promise(resolve => {forwarded = resolve;});
+  // Exactly one handling call per route: unrouting while a held handler is still in flight lets
+  // Playwright auto-continue the request, and the handler's own continue() then fails with
+  // 'Route is already handled!'. So the handler is single-use and unroute waits for it.
+  await page.route('**/api/editor/versioned/review', async route => {started(); await held; await route.continue(); forwarded();}, {times: 1});
   await page.locator('#editor-review').click(); await captured;
+  const delayedReview = page.waitForResponse(response => response.url().endsWith('/versioned/review'));
   await source.fill(canonical + '\n# newer than delayed review\n'); release();
-  await page.unroute('**/api/editor/versioned/review');
-  await page.waitForResponse(response => response.url().endsWith('/versioned/review'));
+  await continued; await page.unroute('**/api/editor/versioned/review');
+  await delayedReview;
   assert.match(await source.inputValue(), /newer than delayed review/); assert.ok(await save.isDisabled());
   // Disconnect/reconnect and project conflict preserve the draft and require a fresh review.
   await connect('invalid-token'); await page.locator('#access-status').filter({hasText: /Connection failed|Connection unavailable/}).waitFor();
