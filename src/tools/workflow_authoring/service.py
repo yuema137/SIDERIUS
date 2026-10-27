@@ -16,6 +16,7 @@ from pathlib import Path
 
 from core.durable_io import publish_bytes_atomically, publish_bytes_write_once
 from workflows.definition import AuthoredWorkflowDocument, ReusableWorkflowDocument
+from workflows.definition.draft import inspect_draft
 from workflows.definition.source import (
     WorkflowSourceError,
     parse_workflow_source,
@@ -25,6 +26,9 @@ from workflows.definition.source import (
 from .models import (
     MAX_SOURCE_BYTES,
     DocumentProposal,
+    DraftProposal,
+    DraftRequest,
+    DraftView,
     Project,
     ReviewRequest,
     ReviewView,
@@ -182,6 +186,12 @@ class WorkflowAuthoring:
     def read(self) -> SourceView:
         return self._view(self._read_bytes()[0])
 
+    def inspect_draft(self, request: DraftRequest) -> DraftView:
+        """Inspect a non-executable draft without changing the canonical source."""
+        request = DraftRequest.model_validate_json(request.model_dump_json())
+        self._base(self._read_bytes()[0], request.expected_sha256)
+        return DraftView(draft=request.draft, inspection=inspect_draft(request.draft))
+
     def _base(self, payload: bytes, expected: str) -> SourceView:
         current = self._view(payload)
         if current.sha256 != expected:
@@ -199,6 +209,14 @@ class WorkflowAuthoring:
         current_payload = self._read_bytes()[0]
         base = self._view(current_payload)
         proposal = request.proposal
+        if isinstance(proposal, DraftProposal):
+            self._base(current_payload, request.expected_sha256)
+            inspection = inspect_draft(proposal.draft)
+            if inspection.document is None:
+                raise AuthoringError(
+                    "draft_" + inspection.status, "\n".join(inspection.diagnostics)
+                )
+            proposal = DocumentProposal(kind="document", document=inspection.document)
         task_review = None
         if isinstance(proposal, TaskReferenceUpdateProposal):
             from .task_references import review_task_references
