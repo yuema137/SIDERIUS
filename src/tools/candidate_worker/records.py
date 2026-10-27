@@ -22,6 +22,7 @@ def verify_candidate_records(
         or initial.run_id != expected_run_id
         or initial.status != "launched"
         or initial.graph_trace is not None
+        or initial.loop_trace is not None
         or (receipt is not None and receipt.status == "launched")
         or initial.workspace != str(workspace)
         or initial.run_name != request.run_name
@@ -49,9 +50,14 @@ def verify_candidate_records(
         if saved.preview.execution_profile is not None:
             from .graph_evidence import verify_graph_trace
 
-            verify_graph_trace(saved, initial, receipt)
+            if saved.preview.document.definition.loop is not None:
+                from .loop_evidence import verify_loop
+
+                verify_loop(saved, initial, receipt)
+            else:
+                verify_graph_trace(saved, initial, receipt)
             return
-        if receipt.graph_trace is not None:
+        if receipt.graph_trace is not None or receipt.loop_trace is not None:
             raise ValueError("fixed candidate receipt cannot contain graph evidence")
         if any(node.capability == "tuning" for node in saved.preview.document.definition.nodes):
             if (

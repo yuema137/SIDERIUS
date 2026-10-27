@@ -93,6 +93,13 @@ def execute_native(
         Path(request.preview.project_root) / request.preview.document.definition.task.data_root
     ).resolve()
     with bind_run_task_composition(composition, physical_data_root=str(data)):
+        if request.preview.document.definition.loop is not None:
+            from core.native_writer import iteration_owner
+
+            from .loop import execute_loop
+
+            with iteration_owner(initial.workspace):
+                return execute_loop(request, initial, composition, config)
         if request.preview.execution_profile is not None:
             from .graph import execute_fanout
 

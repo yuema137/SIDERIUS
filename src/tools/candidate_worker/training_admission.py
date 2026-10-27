@@ -81,7 +81,10 @@ def admit_training(
         i for i, item in enumerate(request.files) if item.reference == f"external.{binding.id}"
     )
     control = candidate_control_dir(Path(initial.workspace), iteration=iteration)
-    payload = (control / f"input_{index:03}.snapshot").read_bytes()
+    capture = candidate_control_dir(
+        Path(initial.workspace), iteration=1 if definition.loop else iteration
+    )
+    payload = (capture / f"input_{index:03}.snapshot").read_bytes()
     settings = parse_training_settings(payload)
     root = str((Path(request.preview.project_root) / definition.task.data_root).resolve())
     if settings.launch.data_dir is not None and Path(settings.launch.data_dir).resolve() != Path(

@@ -30,7 +30,7 @@ from .prepared import read_prepared_candidate
 from .read import lookup_operation_request, read_operation, recover_reusable_preparation
 from .reusable import build_reusable_operation
 from .store import digest as operation_request_digest
-from .submit import submit_operation
+from .submit import request_loop_stop, submit_operation
 from .tokens import read_operation_tokens
 
 __all__ = [
@@ -59,6 +59,7 @@ __all__ = [
     "read_operation_tokens",
     "read_prepared_candidate",
     "recover_reusable_preparation",
+    "request_loop_stop",
     "review_native_chain_operation",
     "review_native_chain_resume",
     "submit_operation",

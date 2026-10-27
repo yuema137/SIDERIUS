@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.chain_state import ChainState
 from workflows.attempt_storage import impl_attempt_storage
 from workflows.definition import ExternalRequest, ExternalSource, ProtocolRequest
 from workflows.definition.fanout import execution_families
@@ -36,15 +37,13 @@ def materialize_fanout(
     iteration: int = 1,
     interpretation_output: InterpretationOutput | None = None,
     admitted: "TrainingAdmission | None" = None,
+    history: ChainState | None = None,
 ) -> dict[str, NativeInputs | LiteratureReviewInput | InterpretationInput]:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
     nodes = {node.id: node for node in definition.nodes}
     control = candidate_control_dir(workspace, iteration=iteration)
-    contents = {
-        item.reference: (control / f"input_{index:03}.snapshot").read_bytes()
-        for index, item in enumerate(request.files)
-    }
+    contents = captured_contents(request, workspace, iteration=iteration)
     provider, model = validator_settings(config)
     externals = {item.id: item for item in definition.externals}
     used: set[str] = set()
@@ -61,7 +60,14 @@ def materialize_fanout(
     if shape.interpretation is not None:
         edge = shape.interpretation
         selected, arguments = prepare_interpretation(
-            request, workspace, edge, contents, composition, iteration=iteration, admitted=admitted
+            request,
+            workspace,
+            edge,
+            contents,
+            composition,
+            iteration=iteration,
+            admitted=admitted,
+            history=history,
         )
         result[edge.interpretation] = selected
         used.add(edge.input_binding)
@@ -83,7 +89,9 @@ def materialize_fanout(
             if declared != set(externals):
                 raise ValueError("unused external inputs are unsupported by the candidate worker")
             return result
-        proposal = arguments.apply(interpretation_output)
+        proposal = arguments.apply(
+            interpretation_output, history=history, feedback=selected.recent_formal_validity
+        )
         # Composition owns these task facts, as in the fixed native workflow.
         proposal.task_description = composition.task_description
         proposal.forward_contract = composition.forward_contract
@@ -168,3 +176,42 @@ def materialize_fanout(
     if used != set(externals):
         raise ValueError("unused external inputs are unsupported by the candidate worker")
     return result
+
+
+def captured_contents(
+    request: CandidateRunRequest, workspace: Path, *, iteration: int, verify: bool = False
+) -> dict[str, bytes]:
+    """Read immutable capture; only a declared loop may rebind managed body slots."""
+    import hashlib
+
+    from .graph_evidence import expected_nodes, read_graph_control
+    from .models import CandidateRunReceipt
+
+    loop = request.preview.document.definition.loop
+    control = candidate_control_dir(workspace, iteration=1 if loop else iteration)
+    if loop is None and not verify:
+        return {
+            item.reference: (control / f"input_{index:03}.snapshot").read_bytes()
+            for index, item in enumerate(request.files)
+        }
+    contents = {}
+    for index, observation in enumerate(request.files):
+        payload = read_graph_control(control / f"input_{index:03}.snapshot")
+        if hashlib.sha256(payload).hexdigest() != observation.sha256:
+            raise ValueError("captured input identity changed")
+        contents[observation.reference] = payload
+    if loop is None or iteration == 1:
+        return contents
+    initial = CandidateRunReceipt.model_validate_json(read_graph_control(control / "launch.json"))
+    before = expected_nodes(request, initial)
+    after = expected_nodes(request, initial, iteration=iteration)
+    slots = {old.storage: new.storage for old, new in zip(before, after, strict=True)}
+    for binding in request.preview.document.definition.externals:
+        key = f"external.{binding.id}"
+        if binding.contract == "storage":
+            value = StorageConfig.model_validate_json(contents[key])
+            if value.local is None or value.local.workspace not in slots:
+                raise ValueError("loop storage is not an initial managed body slot")
+            value.local.workspace = slots[value.local.workspace]
+            contents[key] = value.model_dump_json().encode()
+    return contents

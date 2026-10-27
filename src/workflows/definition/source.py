@@ -13,12 +13,14 @@ from pydantic_core import PydanticSerializationError
 
 from .models import (
     ArgumentBinding,
+    AuthoredLoop,
     AuthoredWorkflowDocument,
     CandidatePreparationOptions,
     DeclarationModel,
     ExternalBinding,
     ExternalRequest,
     ExternalSource,
+    LoopFeedback,
     ManagedCandidateBinding,
     NodeInstance,
     NodePosition,
@@ -42,6 +44,8 @@ MAX_AST_DEPTH = 64
 _CONSTRUCTORS: dict[str, type[DeclarationModel]] = {
     model.__name__: model
     for model in (
+        AuthoredLoop,
+        LoopFeedback,
         CandidatePreparationOptions,
         ManagedCandidateBinding,
         ReusableTaskReferences,
@@ -317,7 +321,13 @@ def _render_value(value: object, depth: int) -> str:
             for name in type(value).model_fields
             if not (
                 name
-                in {"training_settings", "task_binding", "execution_profile", "literature_settings"}
+                in {
+                    "training_settings",
+                    "task_binding",
+                    "execution_profile",
+                    "literature_settings",
+                    "loop",
+                }
                 and getattr(value, name) is None
             )
         ]
@@ -351,6 +361,12 @@ def render_workflow_source(document: AuthoredWorkflowDocument) -> str:
     except PydanticSerializationError:
         _fail("validation", "Declaration cannot be serialized for revalidation")
     constructors = _CONSTRUCTORS
+    if validated.definition.loop is None:
+        constructors = {
+            name: model
+            for name, model in constructors.items()
+            if name not in {"AuthoredLoop", "LoopFeedback"}
+        }
     if not isinstance(validated, ReusableWorkflowDocument) or validated.task_binding is None:
         constructors = {
             name: model for name, model in constructors.items() if name != "TaskBinding"

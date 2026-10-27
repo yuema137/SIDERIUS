@@ -4,10 +4,11 @@ import hashlib
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from tools.candidate_prepare import preflight_reusable_candidate
 from tools.candidate_prepare.reusable_models import ReusablePreparationObservations
+from tools.candidate_worker.loop_models import LoopStop
 from tools.candidate_worker.preflight import fresh_preview, require_credentials
 from tools.workflow_preview.models import FileObservation
 
@@ -208,3 +209,57 @@ def submit_operation(
             observed_at=now(),
             observation=observation,
         )
+
+
+def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopStop:
+    """Request graceful Stop on one live, already-claimed finite candidate loop.
+
+    This acknowledges the request, not termination. The active body finishes;
+    read_operation reports whether the finite limit or Stop won the boundary.
+    """
+    from core.control_json import encode_control
+    from core.durable_io import publish_bytes_write_once
+    from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
+    from tools.candidate_worker.records import verify_candidate_records
+
+    from .files import directory, read_model
+    from .read import read_operation
+    from .store import load_record, native_directory
+
+    config = validate_config(config)
+    with locked_store(config, create=False):
+        record = load_record(config, operation_id)
+        submission = record.submission
+        if (
+            submission.kind != "candidate"
+            or submission.request.preview.document.definition.loop is None
+        ):
+            raise OperationFailure("kind", "Stop requires a finite authored candidate loop")
+        validate_submission(config, submission)
+        control = native_directory(submission)
+        try:
+            initial = read_model(control / "launch.json", CandidateRunReceipt)
+            saved = read_model(control / "request.json", CandidateRunRequest)
+        except FileNotFoundError as error:
+            raise OperationFailure(
+                "not_ready", "candidate worker has not claimed its workspace"
+            ) from error
+        verify_candidate_records(
+            saved,
+            initial,
+            expected_request=submission.request,
+            expected_run_id=record.native_id.hex,
+            workspace=control.parent,
+        )
+        marker = LoopStop(run_id=initial.run_id, declaration_digest=initial.declaration_digest)
+        path = control / "stop.json"
+        if path.exists():
+            if read_model(path, LoopStop) != marker:
+                raise OperationFailure("integrity", "Stop marker identity mismatch")
+            return marker
+        snapshot = read_operation(config, operation_id)
+        if snapshot.receipt_available or snapshot.process.status != "alive":
+            raise OperationFailure("not_running", "candidate is terminal or not confirmed running")
+        with directory(control) as descriptor:
+            publish_bytes_write_once(f"/proc/self/fd/{descriptor}/stop.json", encode_control(marker))
+        return marker

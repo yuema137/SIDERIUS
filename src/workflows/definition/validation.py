@@ -10,6 +10,17 @@ if TYPE_CHECKING:
 
 def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefinition") -> None:
     predecessor_facts(definition)
+    if definition.loop is not None:
+        nodes = {node.id: node for node in definition.nodes}
+        feedback = definition.loop.feedback
+        source, target = nodes.get(feedback.source.node), nodes.get(feedback.target)
+        if (
+            source is None
+            or source.capability != "tuning"
+            or target is None
+            or target.capability != "interpretation"
+        ):
+            raise ValueError("loop feedback requires declared tuning and interpretation nodes")
 
 
 def predecessor_facts(

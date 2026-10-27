@@ -90,7 +90,7 @@ from agent.prompt_templates.proposal.task_blocks import load_proposal_task_block
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.external_agents import ExternalAgentOutput
-from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
+from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
     HyperparamTuningOutput,
@@ -100,7 +100,6 @@ from agent.schemas.interpretation import (
     InterpretationInput,
     InterpretationOutput,
     ModelRunSummary,
-    PredictionMemory,
 )
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ExpertContextItem, ProposalOutput, VocabEntry
@@ -122,7 +121,7 @@ from core.layout import package_root
 # THIS module, so the cycle that forced `RestoredState` under TYPE_CHECKING and
 # `union_key_findings` into a function-local import is gone. Both are ordinary
 # top-level imports again.
-from core.resume import RestoredState, _iter_run_name, union_key_findings
+from core.resume import RestoredState, _iter_run_name
 from core.run_invariants import (
     ensure_run_invariants,
     validate_stamped_invariants,
@@ -133,9 +132,7 @@ from core.runtime_control.measurement_capability import ResolvedMeasurementCapab
 from execute_tools.dataset_config import DataScope
 from execute_tools.evaluation_metric import (
     MetricSpec,
-    StampedMetricSpec,
     metric_identity_unavailable_notice,
-    reconcile_metric_specs,
 )
 from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.health_checks.candidate_eligibility import resolve_run_scientific_gate_ids
@@ -177,6 +174,19 @@ from workflows.llm_config import (
     WorkflowLLMConfig,
 )
 from workflows.plugin_staging import stage_native_plugins
+from workflows.research_history import (
+    acquire_iteration_order as _acquire_iteration_order,  # noqa: F401 — compatibility import
+)
+from workflows.research_history import (
+    advance_completed_history,
+    prior_findings,
+)
+from workflows.research_history import (
+    cap_knowledge_cache as _cap_knowledge_cache,  # noqa: F401 — compatibility import
+)
+from workflows.research_history import (
+    recent_formal_feedback as _recent_formal_feedback,
+)
 from workflows.run_bindings import WorkflowRunBindings
 from workflows.run_config import (
     WorkflowLaunchConfig,
@@ -487,18 +497,6 @@ def _synthetic_prior_iter_tune_output(
     )
 
 
-def _recent_formal_feedback(
-    state: ChainState, restored: RestoredState | None
-) -> list[FormalValidityFeedback]:
-    entries = list(restored.accumulated_formal_feedback) if restored is not None else []
-    entries.extend(
-        out.formal_validity_feedback
-        for out in state.recent_tune_outputs
-        if out.formal_validity_feedback is not None
-    )
-    return entries[-3:]
-
-
 def _restored_negative_feedback(
     restored_state: RestoredState | None,
 ) -> list[tuple[GateExhaustionInfo | None, TrialValidityFeedback | None]]:
@@ -745,46 +743,6 @@ def _declared_metric_spec(composition: RunTaskComposition | None) -> MetricSpec 
     return composition.metric.spec if composition is not None else None
 
 
-def _acquire_iteration_order(bindings, tune_output) -> MetricOrder | None:
-    """The reconciled ``MetricOrder`` for one iteration's golden comparisons.
-
-    Step 10 P2a C1, design §4.1. Acquisition is RECONCILIATION, not
-    precedence: the run's bound composition spec and the compared output's own
-    stamp are both offered to the ONE shared authority, so a composed run whose
-    bound metric disagrees with what the artifact was actually scored under
-    FAILS CLOSED instead of silently preferring either.
-
-    Args:
-        bindings: the run's ``WorkflowRunBindings``. ``task_composition`` is
-            ``None`` on a non-composed (legacy) run, in which case the output's
-            own stamp is the only identity available.
-        tune_output: the ``HyperparamTuningOutput`` being folded in.
-
-    Returns:
-        The order to rank with, or ``None`` when no identity is available
-        anywhere — the §4.2 unrankable state, which the caller must honour by
-        NOT ranking rather than by assuming a direction.
-
-    Raises:
-        MetricIdentityConflictError: bound spec and artifact stamp declare
-            different metrics. Deliberately not caught here: ranking an
-            iteration on a metric it was not scored under is worse than
-            stopping, and the message names both offenders.
-    """
-    composition = getattr(bindings, "task_composition", None)
-    bound = getattr(getattr(composition, "metric", None), "spec", None)
-    spec = reconcile_metric_specs(
-        [
-            StampedMetricSpec(
-                label=f"{tune_output.run_name!r} ({tune_output.model_type!r})",
-                spec=getattr(tune_output, "metric_spec", None),
-            )
-        ],
-        bound=bound,
-    )
-    return MetricOrder(spec) if spec is not None else None
-
-
 class _OncePerRunNotice:
     """Prints a named notice the FIRST time a run hits an unrankable state.
 
@@ -815,55 +773,6 @@ class _OncePerRunNotice:
     @property
     def affected(self) -> tuple[str, ...]:
         return tuple(self._contexts)
-
-
-def _cap_knowledge_cache(
-    cache: dict,
-    current_model: str,
-    max_entries: int = 5,
-    *,
-    order: MetricOrder | None,
-) -> tuple[dict, set[str]]:
-    """Keep top-N models by best score + the current iteration's model.
-
-    Interpreter-MEMORY truncation policy, hosted in the workflow file
-    (parent §7, Q-09-3: semantic owner != physical location). Step 09a C3
-    migrates its COMPARISON onto the run's ``MetricOrder`` and moves nothing:
-    the retention count, the current-model exemption and the public
-    orchestration are unchanged.
-
-    Returns:
-        (capped_cache, evicted_model_types)
-    """
-    if len(cache) <= max_entries:
-        return cache, set()
-
-    if order is None:
-        raise ValueError(
-            "capping the knowledge cache evicts models by score, which requires the "
-            "run's MetricOrder. None was supplied and the cache is over its limit — "
-            "refusing rather than evicting on an assumed direction."
-        )
-
-    scored = [
-        (mt, entry.get("_stats", {}).get("best_denoising_score"))
-        for mt, entry in cache.items()
-        if mt != current_model
-    ]
-    # Step 09a C3. Was `reverse=True` with a `-inf` fill — both direction
-    # literals: under a minimised metric that KEEPS the worst models and
-    # evicts the best. `rank` is 1 + (values strictly better) and Python's
-    # sort is stable, so equal ranks keep insertion order exactly as
-    # `reverse=True` did, and a scoreless entry still ranks last because
-    # `worst_sentinel` is the value nothing can be worse than.
-    present = [value for _, value in scored if value is not None]
-    scored.sort(
-        key=lambda x: order.rank(present, x[1] if x[1] is not None else order.worst_sentinel)
-    )
-    keep = {current_model} | {mt for mt, _ in scored[: max_entries - 1]}
-    evicted = set(cache) - keep
-    capped = {mt: entry for mt, entry in cache.items() if mt in keep}
-    return capped, evicted
 
 
 def _commit_candidate_capabilities(impl_output) -> None:
@@ -2561,21 +2470,7 @@ def run_workflow(
             # shows iteration 3 only what iteration 1 saw. (The comment here
             # previously cited `core.resume.load_latest_knowledge`, a function
             # Step 09.5a C1 replaced with `project_knowledge`.)
-            expert_context_for_propose: list[ExpertContextItem] = []
-            if state.accumulated_key_findings:
-                bullet_block = "\n".join(f"- {kf}" for kf in state.accumulated_key_findings)
-                expert_context_for_propose.append(
-                    ExpertContextItem(
-                        source="prior_iters",
-                        kind="findings",
-                        content=(
-                            f"Accumulated key findings from "
-                            f"{len(state.accumulated_key_findings)} prior iter(s):\n"
-                            f"{bullet_block}"
-                        ),
-                        source_ref="prior_iters_key_findings",
-                    )
-                )
+            expert_context_for_propose = prior_findings(state)
 
             try:
                 # --- Propose ---
@@ -2986,44 +2881,20 @@ def run_workflow(
         # ``docs/design/enable_loss_inventory.md § L6c`` for design
         # rationale; the early-promotion fix is tracked as issue #92.
         _promote_loss_to_global(impl_output)
-        # Phase N (§14.N) — append to the bounded FIFO; deque(maxlen=3)
-        # auto-evicts the oldest entry so the next iteration's
-        # local_full_context call sees only the most recent 3.
-        state.recent_tune_outputs.append(tune_output)
-
-        # --- Update long-term memory for next iteration ---
-        state.all_model_types.append(proposal.model_name)
-
-        # Build ModelRunSummary for the newly tuned model (fed to iter N+1 as new_summaries)
-        new_model_summaries = tuning_outputs_to_summaries(
-            [tune_output],
-            order=(
-                MetricOrder(tune_output.metric_spec)
-                if tune_output.metric_spec is not None
+        _iter_order, evicted = advance_completed_history(
+            state,
+            interpretation,
+            proposal,
+            tune_output,
+            required_gate_ids=_run_required_gate_ids,
+            run_metric_spec=run_metric_spec,
+            bound_metric_spec=(
+                bindings.task_composition.metric.spec
+                if bindings.task_composition is not None
                 else None
             ),
-            # W6 — the same resolved set the seeds were classified against,
-            # so an in-run summary and a restored one cannot disagree about
-            # which gates decide validity.
-            required_gate_ids=_run_required_gate_ids,
         )
-        for s in new_model_summaries:
-            # Attach description so iter N+1 interpretation agent can find it
-            # without filesystem access to the attempt directory
-            s.model_description = proposal.model_description
-        state.latest_new_summary = new_model_summaries[0]
-
-        # Update knowledge cache from interpretation output
-        if (
-            hasattr(interpretation, "model_knowledge_cache")
-            and interpretation.model_knowledge_cache
-        ):
-            state.model_knowledge_cache = dict(interpretation.model_knowledge_cache)
-            state.model_knowledge_cache, evicted = _cap_knowledge_cache(
-                state.model_knowledge_cache,
-                current_model=proposal.model_name,
-                order=MetricOrder(run_metric_spec) if run_metric_spec is not None else None,
-            )
+        if interpretation.model_knowledge_cache:
             if evicted:
                 print(
                     f"  [{iteration}] Cache capped: evicted {sorted(evicted)}, "
@@ -3032,98 +2903,13 @@ def run_workflow(
             print(
                 f"  [{iteration}] Knowledge cache: {len(state.model_knowledge_cache)} models cached."
             )
-
-        # Step 09a C5 — carry the interpreter's prediction memory to the next
-        # iteration. Read straight off the digest the interpreter just wrote,
-        # so the in-process loop and the chain-subprocess restore agree by
-        # construction rather than by two independent accumulations.
-        state.current_prediction_memory = PredictionMemory(
-            prediction_outcomes_history=dict(interpretation.prediction_outcomes_history),
-            prediction_outcomes_by_semantics={
-                version: dict(counts)
-                for version, counts in interpretation.prediction_outcomes_by_semantics.items()
-            },
-            cumulative_information_gain=interpretation.cumulative_information_gain,
-            cumulative_information_gain_by_semantics=dict(
-                interpretation.cumulative_information_gain_by_semantics
-            ),
-        )
-
-        # Step 10 / P5+P6 C2 — carry the vocab-link confirmation map, the same
-        # way and for the same reason. LATEST-WINS on the whole mapping:
-        # `update_vocab_link_confirmations` already returned the FULL cumulative
-        # map, so re-merging here would be a second accumulation authority and
-        # could disagree with the producer about the promotion count.
-        state.current_vocab_link_confirmations = {
-            key: list(runs) for key, runs in interpretation.vocab_link_confirmations.items()
-        }
-
-        # Step 10 / P5+P6 C3 — union THIS iteration's findings into the carried
-        # history by CALLING the one authority (`core.resume.union_key_findings`),
-        # which the digest projection also calls. Genuinely applied, not
-        # re-implemented: an uninterrupted in-process trajectory and a
-        # per-iteration chain restore produce EQUAL state by construction, and
-        # the merge rule does not live in this already-large function.
-        #
-        union_key_findings(state.accumulated_key_findings, interpretation.key_findings)
-
-        # Update runtime vocab from interpretation output
-        state.previous_proposal_data = proposal.model_dump()
-        if hasattr(interpretation, "runtime_vocab") and interpretation.runtime_vocab:
-            state.current_runtime_vocab = [
-                v if hasattr(v, "name") else VocabEntry.model_validate(v)
-                for v in interpretation.runtime_vocab
-            ]
+        if interpretation.runtime_vocab:
             print(
                 f"  [{iteration}] Vocab updated: {len(state.current_runtime_vocab)} entries "
                 f"({sum(1 for v in state.current_runtime_vocab if v.kind == 'discovery')} discoveries)"
             )
-
-        # --- Check score target ---
-        # ``best_score_overall`` is the current-workflow RAW-formal
-        # progress tracker (print + workflow summary ONLY — V19 PR 1
-        # two-state design; it no longer feeds the tuner). It must track
-        # FORMAL scores only — a noisy trial score from an iter whose
-        # formal rounds all got gated would otherwise misreport progress.
-        # (Historical context: v15's mamba_multirate_fuser trial 7.65 /
-        # dualpath_spectral_router trial 7.77 motivated formal-only.)
-        # Step 10 P2a C1 — the order these three decisions use is acquired by
-        # RECONCILIATION, not precedence (design §4.1): the run's bound spec
-        # and this output's own stamp are BOTH offered, and a disagreement
-        # fails closed rather than letting either shadow the other. Acquired
-        # ONCE per iteration because all three decisions must rank on the same
-        # metric; a bound-vs-stamp conflict raises out of this call.
-        _iter_order = _acquire_iteration_order(bindings, tune_output)
-
         if _iter_order is None:
-            # Q-10-2 / §4.2 case B-C: no reconciled identity, so NOTHING is
-            # ranked. The trackers are deliberately left untouched — including
-            # the bootstrap, because a tracker seeded with an arbitrary first
-            # value would then be printed as "Best overall" while no
-            # comparison was ever legitimate. Raw scores stay visible in the
-            # per-iteration line and the summary; no direction is assumed.
             _metric_identity_notice.warn_once(f"iteration {iteration}")
-        else:
-            if tune_output.best_formal_denoising_score is not None and (
-                state.best_score_overall is None
-                or _iter_order.is_better(
-                    tune_output.best_formal_denoising_score, state.best_score_overall
-                )
-            ):
-                state.best_score_overall = tune_output.best_formal_denoising_score
-
-            # V19 PR 1 — DECISION-STATE incumbent update (in-process
-            # multi-iteration equivalence with N chained subprocesses,
-            # design §3.4): only this iteration's committed VALID formal may
-            # advance ``chain_formal_incumbent_reference``; strictly-BETTER
-            # keeps the earliest holder on ties (§3.3), which `is_better`
-            # preserves under both directions.
-            _iter_valid_formal = tune_output.best_valid_formal_denoising_score
-            if _iter_valid_formal is not None and (
-                state.chain_formal_incumbent_reference is None
-                or _iter_order.is_better(_iter_valid_formal, state.chain_formal_incumbent_reference)
-            ):
-                state.chain_formal_incumbent_reference = _iter_valid_formal
 
         print(
             f"\n  [{iteration}] Complete: {proposal.model_name} "

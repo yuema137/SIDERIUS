@@ -66,6 +66,10 @@ def require_credentials(
 
 def fresh_preview(request: CandidateRunRequest) -> WorkflowPreview:
     """Reobserve the declaration's files/routes at each new effect boundary."""
+    if request.preview.document.definition.loop is not None:
+        from .loop_models import admit_loop
+
+        admit_loop(request)
     observed = preview_workflow(request.preview)
     if request.declaration_digest != request.preview.document.definition.declaration_digest():
         raise ValueError("stale workflow declaration")
