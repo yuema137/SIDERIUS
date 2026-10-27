@@ -13,7 +13,7 @@
 #editor-graph { min-width: 0; }
 .circuit-viewport { overflow: auto; max-height: 52rem; border: 1px solid var(--control-border); border-radius: .5rem; }
 .circuit-world { position: relative; background: var(--panel); }
-.circuit-world svg { position: absolute; width: 100%; height: 100%; inset: 0; pointer-events: none; overflow: visible; }
+.circuit-world svg { position: absolute; width: 100%; height: 100%; inset: 0; pointer-events: auto; overflow: visible; }
 .circuit-card { position: absolute; width: 260px; background: var(--control); color: var(--text); border: 1px solid var(--control-border); border-radius: .6rem; }
 .editor-node { display: block; width: 100%; padding: .8rem; background: var(--control); color: var(--text); border: 0; border-radius: .5rem; text-align: left; font-weight: bold; touch-action: none; cursor: grab; }
 .editor-node[aria-pressed="true"] { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--hover); }
@@ -31,7 +31,14 @@
 .circuit-socket { position: absolute; width: 12px; height: 12px; top: calc(50% - 6px); left: -7px; border: 2px solid var(--text); background: var(--control); border-radius: 50%; }
 .circuit-output .circuit-socket { left: auto; right: -7px; }
 .circuit-external { display: block; color: var(--muted); overflow-wrap: anywhere; }
-.circuit-wire { fill: none; stroke: var(--edge); stroke-width: 2; }
+.circuit-wire { fill: none; stroke: var(--edge); stroke-width: 2; pointer-events: none; }
+.circuit-wire.selected, .circuit-wire.focused { stroke: var(--focus); stroke-width: 4; }
+.circuit-wire-target { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.circuit-wire-target:focus-visible { outline: none; }
+.circuit-disconnect { margin: .35rem 0; }
+.circuit-port-unbound-label { font-weight: 700; }
+.circuit-port.is-unbound[data-required="true"] { border-color: var(--warning); }
+#editor-cancel-binding-draft { margin-left: .5rem; }
 .circuit-pending { fill: none; stroke: var(--focus); stroke-width: 2; stroke-dasharray: 6 4; opacity: .6; }
 .circuit-port.compatible { outline: 2px solid var(--focus); outline-offset: -3px; }
 .circuit-port.incompatible { opacity: .6; }
