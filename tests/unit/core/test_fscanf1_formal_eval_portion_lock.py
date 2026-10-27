@@ -174,11 +174,21 @@ class TestEveryParticipatingEntryPointThreadsIt:
         "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py": (
             "formal_eval_portion=agent_input.formal_eval_portion,"
         ),
-        "src/workflows/model_exploration.py": "formal_eval_portion=launch.formal_eval_portion,",
+        # run_workflow's lock identity is built by the shared training startup.
+        "src/workflows/training_startup.py": "formal_eval_portion=launch.formal_eval_portion,",
         "src/workflows/run_one_iteration.py": ("formal_eval_portion=args.formal_eval_portion,"),
     }
 
     def test_each_lock_site_threads_the_declared_value(self) -> None:
+        from tests.helpers.workflow_delegation import (
+            WORKFLOW_LOCK_ENTRYPOINT,
+            WORKFLOW_LOCK_SITE,
+            assert_run_workflow_delegates,
+        )
+
+        assert_run_workflow_delegates(
+            WORKFLOW_LOCK_ENTRYPOINT, WORKFLOW_LOCK_SITE, "build_run_invariants"
+        )
         repo = Path(__file__).resolve().parents[3]
         for relative, expected in self.SITES.items():
             source = (repo / relative).read_text(encoding="utf-8")

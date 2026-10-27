@@ -531,9 +531,10 @@ class TestTheDiscoveryComparisonIsDirectionCorrectAndSignSafe:
 
 SCORE_TOKEN = re.compile(r"denoising_score|best_score|worst_score|sota|_score\b")
 
-#: The interpreter surface C3 owns. `_cap_knowledge_cache` lives in the
-#: workflow file (semantic owner 09a, physical location unchanged — Q-09-3),
-#: so it is censused as a FUNCTION rather than by file.
+#: The interpreter surface C3 owns. The knowledge-cache cap lives in the
+#: workflow history policy (`workflows/research_history.py::cap_knowledge_cache`
+#: since PR #940; semantic owner 09a — Q-09-3), so it is censused as a FUNCTION
+#: rather than by file.
 #: Step 09b C1 extended the list with the rendering module the SAME commit the
 #: prompt surface moved there: `_render_health_summary_section`'s best-round
 #: selection is an order consumer (09a row 13), and moving a censused file out
@@ -639,12 +640,12 @@ class TestTheDirectionCensus:
         )
 
     def _cap_offenders(self) -> list[str]:
-        src = (REPO_ROOT / "src/workflows/model_exploration.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/workflows/research_history.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and node.name == "_cap_knowledge_cache":
-                return _offending_comparisons(ast.unparse(node), "_cap_knowledge_cache")
-        raise AssertionError("_cap_knowledge_cache not found — the census lost its subject")
+            if isinstance(node, ast.FunctionDef) and node.name == "cap_knowledge_cache":
+                return _offending_comparisons(ast.unparse(node), "cap_knowledge_cache")
+        raise AssertionError("cap_knowledge_cache not found — the census lost its subject")
 
     def test_the_census_is_not_vacuous(self):
         """It must actually be LOOKING at score comparisons.
