@@ -9,6 +9,7 @@
   let taskAcknowledged = false, taskAdopted = false;
   const trainingDrafts = new Map();
   let inventory = [], selected = null, pending = false, sourceDirty = false, mode = 'source', reviewed = null, conflict = null, saving = false;
+  let bindingDraft = null, bindingDraftConflict = false;
   const clone = value => JSON.parse(JSON.stringify(value));
   const status = message => { $('status').textContent = message; };
   const current = (id, version) => project === id && generation === version;
@@ -16,6 +17,8 @@
     const element = document.createElement(tag); element.textContent = text;
     if (parent) parent.append(element); return element;
   };
+  const cancelDraftButton = node('button', 'Cancel binding draft', $('pending').parentElement);
+  cancelDraftButton.id = 'editor-cancel-binding-draft'; cancelDraftButton.type = 'button'; cancelDraftButton.hidden = true;
   const projection = () => Object.freeze({projectId: project, candidateEnabled,
     savedSha256: base?.sha256 || null, dirty: pending, sourceDirty,
     sourceAvailable, reusableSource: base?.document?.definition?.schema_version === 2, saving, conflict: !!conflict});
@@ -49,8 +52,14 @@
   function selectTask(choiceId) {
     if (!window.consoleSession.connected || saving) return;
     const choice = taskChoices?.find(item => item.choice_id === choiceId);
+    if (mode === 'binding-draft' && choice && base?.document?.task_binding &&
+        !bindingEqual(choice.binding, base.document.task_binding)) {
+      status('A binding draft can only use the configured task choice matching its saved task identity.'); controls(); return;
+    }
     taskSelection = choice ? {kind: 'task_references', selected_choice_id: choice.choice_id, expected_task_binding: clone(choice.binding)} : null;
-    taskMessage = ''; invalidate();
+    taskMessage = '';
+    if (mode === 'binding-draft') { reviewed = null; controls(); return; }
+    invalidate();
   }
   async function loadTaskChoices() {
     if (!window.consoleSession.connected || taskLoadingRevision === window.consoleSession.revision) return;
@@ -62,14 +71,14 @@
       taskChoices = value.choices; taskMessage = '';
       if (taskSelection && !taskChoices.some(choice => choice.choice_id === taskSelection.selected_choice_id && bindingEqual(choice.binding, taskSelection.expected_task_binding))) {
         taskSelection = null; taskMessage = 'Configured choice changed; select and review again.';
-        invalidate();
+        if (mode === 'binding-draft') controls(); else invalidate();
       }
       controls();
     } catch (error) {
       if (!error.stale && revision === window.consoleSession.revision) {
         taskChoices = null; taskSelection = null; taskMessage = 'Task choices unavailable: ' + error.message + ' Refresh task choices to retry.';
         taskAcknowledged = false; taskAdopted = false;
-        if (taskReview()) invalidate(); else { generation++; controls(); }
+        if (taskReview()) invalidate(); else if (mode === 'binding-draft') controls(); else { generation++; controls(); }
       }
     } finally { if (taskLoadingRevision === revision) taskLoadingRevision = null; }
   }
@@ -82,24 +91,33 @@
     const connected = window.consoleSession.connected;
     $('project').disabled = !connected || !$('project').options.length;
     const invalidTraining = trainingDrafts.size > 0;
-    $('review').disabled = !connected || saving || !graph || invalidTraining || (!!(base?.document?.task_binding || graph?.task_binding) && !taskSelection);
+    const draftIncomplete = mode === 'binding-draft' && bindingDraft?.inspection?.status !== 'complete';
+    $('review').disabled = !connected || saving || !graph || invalidTraining || draftIncomplete || bindingDraftConflict || (!!(base?.document?.task_binding || graph?.task_binding) && !taskSelection);
     $('refresh').disabled = !connected || !project;
-    $('save').disabled = !connected || saving || !reviewed || reviewed.source !== $('source').value || invalidTraining || !taskAccepted();
+    $('save').disabled = !connected || saving || !reviewed || reviewed.source !== $('source').value || invalidTraining || bindingDraftConflict || !taskAccepted();
+    cancelDraftButton.hidden = !bindingDraft || bindingDraftConflict;
+    cancelDraftButton.disabled = !connected || saving;
     renderTaskControls();
     window.editorCircuit?.setEnabled(canEditCircuit());
   }
   function invalidate() {
     generation++; reviewed = null; taskAcknowledged = false; taskAdopted = false; controls(); $('diff').textContent = '';
-    $('pending').textContent = pending ? (mode === 'document' ? 'Pending inspector edits · Review changes to update Python source before editing it.' : 'Pending source edits · not saved') : 'No pending edits.';
+    $('pending').textContent = bindingDraft
+      ? `Pending binding draft · ${bindingDraft.inspection?.status || 'checking'}`
+      : pending ? (mode === 'document' ? 'Pending inspector edits · Review changes to update Python source before editing it.' : 'Pending source edits · not saved') : 'No pending edits.';
   }
-  function changed() { pending = true; $('source').disabled = mode === 'document'; invalidate(); }
+  function changed() { pending = true; $('source').disabled = mode === 'document' || mode === 'binding-draft'; invalidate(); }
   const api = (path, body) => window.consoleSession.request('editor/' + path, body);
   function diagnostic(items = []) { $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}`).join('\n'); }
-  function showConflict(value) {
+  function showConflict(value, isBindingDraft = false) {
+    bindingDraftConflict = isBindingDraft;
     conflict = value; reviewed = null; controls();
-    $('conflict').hidden = false; $('rebase').disabled = !value.document;
+    $('conflict').hidden = false; $('rebase').disabled = isBindingDraft || !value.document;
     $('current').textContent = value.source;
-    $('conflict-diff').textContent = 'Current disk file version: ' + value.sha256.slice(0, 12) + '\n--- Current disk source\n+++ Pending proposal\n' + value.source.split('\n').map(line => '- ' + line).join('\n') + '\n' + $('source').value.split('\n').map(line => '+ ' + line).join('\n');
+    const proposal = bindingDraft
+      ? bindingDraft.bindings.map(item => `${item.source ? 'Bind' : 'Disconnect'} ${item.node}.${item.argument ?? 'request'}`).join('\n')
+      : $('source').value;
+    $('conflict-diff').textContent = `Current disk file version: ${value.sha256.slice(0, 12)}\n--- Current disk source\n${value.source.split('\n').map(line => '- ' + line).join('\n')}\n+++ Pending proposal\n${proposal.split('\n').map(line => '+ ' + line).join('\n')}`;
     status('Source changed. Pending proposal preserved; inspect current source before choosing a new base.');
   }
   function showTaskRefusal(proposal, selection) {
@@ -117,6 +135,7 @@
   function adopt(value) {
     trainingDrafts.clear();
     taskSelection = null; taskMessage = '';
+    bindingDraft = null; bindingDraftConflict = false;
     sourceAvailable = true; base = value; graph = value.document ? clone(value.document) : null; inventory = value.port_inventory || []; training = value.training;
     $('source').value = value.source; $('source').disabled = !graph; mode = 'source'; sourceDirty = false; pending = false; conflict = null;
     $('conflict').hidden = true; selected = graph?.definition.nodes.some(n => n.id === selected) ? selected : graph?.definition.nodes[0]?.id;
@@ -127,44 +146,99 @@
     status(graph ? 'Opened supported declaration. References remain literal.' : 'Unsupported source is read-only. Repair externally, then refresh.');
   }
   const canEditCircuit = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict && trainingDrafts.size === 0;
-  function bindArgument(nodeId, argument, source) {
-    if (!canEditCircuit()) return;
-    const option = inventory.find(value => value.node === nodeId && value.argument === argument);
-    const choice = option?.choices.find(value => JSON.stringify(value.source) === JSON.stringify(source));
-    const item = graph.definition.nodes.find(value => value.id === nodeId);
-    if (!choice || !item) return;
-    const previous = option?.source;
-    if (JSON.stringify(previous) === JSON.stringify(choice.source)) return;
-    if (argument === null) item.request.binding = choice.source.binding;
-    else {
-      const existing = item.request.arguments.find(value => value.name === argument);
-      if (existing) existing.source = clone(choice.source);
-      else item.request.arguments.push({name: argument, source: clone(choice.source)});
+  function projectBindingDraft() {
+    inventory = clone(base.port_inventory || []);
+    for (const option of inventory) {
+      const patch = bindingDraft?.bindings.find(value => value.node === option.node && value.argument === option.argument);
+      if (!patch) continue;
+      option.source = patch.source ? clone(patch.source) : null;
+      option.bound = patch.source !== null;
     }
-    option.source = clone(choice.source); option.bound = true;
-    mode = 'document'; changed(); render(); status('Binding changed locally. Review the declaration, then save. Preparation checks the supported execution profile separately.');
   }
+  function updateBindingDraft(nodeId, argument, source) {
+    if (!canEditCircuit() || !base?.document || bindingDraftConflict) return;
+    if (!bindingDraft && base.document.task_binding && taskSelection &&
+        !bindingEqual(taskSelection.expected_task_binding, base.document.task_binding)) {
+      status('Select the configured choice matching the saved task identity before editing its bindings.'); return;
+    }
+    if (pending && mode !== 'binding-draft') {
+      status('Review/save or discard the current edits before starting a connection draft.'); return;
+    }
+    const option = inventory.find(value => value.node === nodeId && value.argument === argument);
+    if (!option) return;
+    if (source !== null && !option.choices.some(value => JSON.stringify(value.source) === JSON.stringify(source))) return;
+    if (source === null && !option.bound) return;
+    if (JSON.stringify(option.source) === JSON.stringify(source)) return;
+    bindingDraft ||= {base_document: clone(base.document), bindings: [], inspection: null};
+    const index = bindingDraft.bindings.findIndex(value => value.node === nodeId && value.argument === argument);
+    if (JSON.stringify(base.port_inventory?.find(value => value.node === nodeId && value.argument === argument)?.source ?? null) === JSON.stringify(source)) {
+      if (index >= 0) bindingDraft.bindings.splice(index, 1);
+    } else {
+      const patch = {node: nodeId, argument, source: source ? clone(source) : null};
+      if (index >= 0) bindingDraft.bindings[index] = patch; else bindingDraft.bindings.push(patch);
+    }
+    mode = 'binding-draft'; pending = true; reviewed = null; projectBindingDraft(); changed(); render();
+    if (bindingDraft.bindings.length === 0) { cancelBindingDraft(); return; }
+    bindingDraft.inspection = null; controls();
+    status('Checking binding draft with the workflow declaration validator…');
+    void inspectBindingDraft();
+  }
+  async function inspectBindingDraft() {
+    if (!bindingDraft || mode !== 'binding-draft' || !window.consoleSession.connected) return;
+    const id = project, version = generation;
+    const request = {base_document: clone(bindingDraft.base_document), bindings: clone(bindingDraft.bindings)};
+    try {
+      const value = await api(`${encodeURIComponent(id)}/draft`, {expected_sha256: base.sha256, draft: request});
+      if (!current(id, version) || mode !== 'binding-draft') return;
+      bindingDraft = {...value.draft, inspection: value.inspection}; projectBindingDraft();
+      $('pending').textContent = `Pending binding draft · ${value.inspection.status}`;
+      diagnostic(value.inspection.diagnostics.map(message => ({code: value.inspection.status, message})));
+      controls(); render();
+      status(value.inspection.status === 'complete'
+        ? 'Declaration valid; execution readiness is not checked. Review the exact Python changes before saving.'
+        : `${value.inspection.status}: ${value.inspection.diagnostics.join(' ')}`);
+    } catch (error) {
+      if (error.stale || !current(id, version)) return;
+      if (hasSourceConflict(error) && error.value?.current) showConflict(error.value.current, true);
+      else status(error.message + ' The connection draft remains local and unchanged.');
+    }
+  }
+  function cancelBindingDraft() {
+    if (!bindingDraft || bindingDraftConflict || saving) return;
+    generation++; bindingDraft = null; bindingDraftConflict = false; conflict = null;
+    mode = 'source'; pending = false; reviewed = null; sourceDirty = false;
+    graph = base?.document ? clone(base.document) : null; inventory = base?.port_inventory || [];
+    $('source').value = base?.source || ''; $('source').disabled = !graph;
+    $('pending').textContent = 'No pending edits.';
+    diagnostic(); $('conflict').hidden = true; $('rebase').disabled = true;
+    render(); status('Binding draft cancelled. Saved workflow source is unchanged.');
+  }
+  cancelDraftButton.addEventListener('click', cancelBindingDraft);
   function renderGraph() {
     $('edges').replaceChildren();
     const id = project, document = graph;
     const live = () => project === id && graph === document;
-    window.editorCircuit.render($('graph'), {document: graph, inventory, selected, enabled: canEditCircuit()}, {
+    window.editorCircuit.render($('graph'), {document: graph, inventory, selected, enabled: canEditCircuit(),
+      allowBindingChange: !pending || mode === 'binding-draft', allowMove: mode !== 'binding-draft'}, {
       select: value => { if (live()) { selected = value; render(); } },
-      bind: (nodeId, argument, source) => { if (live()) bindArgument(nodeId, argument, source); },
+      bind: (nodeId, argument, source) => { if (live()) updateBindingDraft(nodeId, argument, source); },
+      disconnect: (nodeId, argument) => { if (live()) updateBindingDraft(nodeId, argument, null); },
       move: (nodeId, x, y) => {
         if (!live() || !canEditCircuit()) return;
+        if (mode === 'binding-draft') { status('Cancel or review the binding draft before changing node positions.'); return; }
         const position = graph.positions.find(value => value.node === nodeId);
         if (position) { position.x = x; position.y = y; } else graph.positions.push({node: nodeId, x, y});
         mode = 'document'; changed(); render(); status('Node position changed locally. Review and save to keep the layout.');
       }
     });
     if (!graph) return;
-    for (const item of graph.definition.nodes) {
-      const bindings = item.request.kind === 'external' ? [{name: 'request', source: {kind: 'external', binding: item.request.binding}}] : item.request.arguments;
-      for (const binding of bindings) {
-        const source = binding.source;
-        node('li', `${source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port}`} → ${item.id}.${binding.name}`, $('edges'));
-      }
+    for (const option of inventory) {
+      const destination = `${option.node}.${option.argument ?? 'request'}`;
+      const source = option.source;
+      const mapping = source
+        ? `${source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port}`} → ${destination}`
+        : `${option.required ? 'Required' : 'Optional'} · unbound → ${destination}`;
+      node('li', mapping, $('edges'));
     }
   }
   function field(parent, label, value, update) {
@@ -243,7 +317,8 @@
       }
       if (item.capability === 'tuning' && training) renderTraining();
       for (const option of inventory.filter(entry => entry.node === item.id)) {
-        const label = node('label', `${option.argument || 'Request'} · ${option.socket_contract.id} · ${option.required ? 'required' : 'optional'}`, $('inspector'));
+        const state = option.bound ? 'bound' : option.required ? 'Required · unbound' : 'Optional · unbound';
+        const label = node('label', `${option.argument || 'Request'} · ${option.socket_contract.id} · ${state}`, $('inspector'));
         const select = document.createElement('select'); label.append(select);
         if (!option.bound) {
           const empty = node('option', option.required ? 'Required input is unbound' : 'Unbound (optional)', select);
@@ -258,8 +333,14 @@
         select.setAttribute('aria-label', `${item.id}.${option.argument || 'request'} ${option.required ? 'required' : 'optional'} input, ${option.socket_contract.native_type}`);
         select.dataset.node = item.id; select.dataset.argument = option.argument || 'request';
         select.addEventListener('change', () => {
-          if (graph === capturedGraph && select.value !== '') bindArgument(item.id, option.argument, option.choices[Number(select.value)].source);
+          if (graph === capturedGraph && select.value !== '') updateBindingDraft(item.id, option.argument, option.choices[Number(select.value)].source);
         });
+        const disconnect = node('button', 'Disconnect', $('inspector'));
+        disconnect.type = 'button'; disconnect.className = 'editor-disconnect';
+        disconnect.setAttribute('aria-label', `Disconnect ${item.id}.${option.argument || 'request'}`);
+        disconnect.disabled = !option.bound || bindingDraftConflict || (pending && mode !== 'binding-draft');
+        disconnect.hidden = !option.bound;
+        disconnect.addEventListener('click', () => { if (graph === capturedGraph) updateBindingDraft(item.id, option.argument, null); });
       }
     }
     for (const key of Object.keys(graph.definition.task)) field($('references'), `task.${key}`, graph.definition.task[key], value => { graph.definition.task[key] = value; });
@@ -271,12 +352,22 @@
       }
     }
   }
-  function render() { renderGraph(); renderInspector(); if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) input.disabled = true; controls(); }
+  function render() {
+    renderGraph(); renderInspector();
+    if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) input.disabled = true;
+    if (pending && mode !== 'binding-draft') for (const input of document.querySelectorAll('#editor-inspector select[data-node], #editor-inspector .editor-disconnect')) input.disabled = true;
+    if (mode === 'binding-draft') for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) {
+      if (!input.matches('select[data-node], .editor-disconnect')) input.disabled = true;
+      else input.disabled = bindingDraftConflict || saving;
+    }
+    controls();
+  }
   function resetProjectState() {
     taskSelection = null; taskMessage = '';
     sourceAvailable = false; pending = false; sourceDirty = false; mode = 'source';
     trainingDrafts.clear();
     base = null; graph = null; conflict = null; reviewed = null; inventory = []; training = null; selected = null;
+    bindingDraft = null; bindingDraftConflict = false;
     $('conflict').hidden = true; $('rebase').disabled = true;
     $('source').value = ''; $('source').disabled = true;
     $('current').textContent = ''; $('conflict-diff').textContent = '';
@@ -326,6 +417,9 @@
   $('source').addEventListener('input', () => { mode = 'source'; sourceDirty = true; changed(); for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) input.disabled = true; });
   async function reviewProposal(proposal) {
     if (!window.consoleSession.connected || saving || trainingDrafts.size > 0 || !base?.document) return;
+    if (proposal.kind === 'draft' && bindingDraft?.inspection?.status !== 'complete') {
+      status('The binding draft must pass declaration validation before review.'); return;
+    }
     if ((base.document.task_binding || graph?.task_binding) && !taskSelection) { status('Select the configured task version, then review.'); return; }
     invalidate();
     const id = project, version = generation;
@@ -335,6 +429,7 @@
     try {
       const value = await api(`${encodeURIComponent(id)}/review`, body);
       if (!current(id, version)) return;
+      bindingDraft = null; bindingDraftConflict = false;
       $('source').value = value.source; $('source').disabled = false; graph = clone(value.document); mode = 'source'; sourceDirty = false;
       // Choices depend on actual new nodes/externals: refresh projection through
       // the reviewed document using server-derived options returned by review.
@@ -349,13 +444,22 @@
     } catch (error) {
       if (error.stale) return;
       if (!current(id, version)) return;
-      if (error.value?.proposal) { const proposal = error.value.proposal; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training; mode = 'source'; sourceDirty = false; render(); }
-      if (hasSourceConflict(error) && error.value?.current) showConflict(error.value.current);
-      else if (error.value?.proposal?.task_reference_update) showTaskRefusal(error.value.proposal, selection || proposal);
+      if (hasSourceConflict(error) && error.value?.current) {
+        showConflict(error.value.current, mode === 'binding-draft');
+        diagnostic(error.value?.diagnostics); status(error.message); return;
+      }
+      if (error.value?.proposal) { const proposal = error.value.proposal; bindingDraft = null; bindingDraftConflict = false; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training; mode = 'source'; sourceDirty = false; render(); }
+      if (error.value?.proposal?.task_reference_update) showTaskRefusal(error.value.proposal, selection || error.value.proposal);
+      else if (mode === 'binding-draft' && ['draft_incomplete', 'draft_invalid'].includes(error.code)) {
+        bindingDraft.inspection = {status: error.code.slice('draft_'.length), diagnostics: [error.message]};
+        controls(); render();
+      }
       diagnostic(error.value?.diagnostics); status(error.message);
     }
   }
-  $('review').addEventListener('click', () => reviewProposal(mode === 'document' ? {kind: 'document', document: clone(graph)} : {kind: 'source', source: $('source').value}));
+  $('review').addEventListener('click', () => reviewProposal(mode === 'binding-draft'
+    ? {kind: 'draft', draft: {base_document: clone(bindingDraft.base_document), bindings: clone(bindingDraft.bindings)}}
+    : mode === 'document' ? {kind: 'document', document: clone(graph)} : {kind: 'source', source: $('source').value}));
   $('save').addEventListener('click', async () => {
     if (!window.consoleSession.connected || saving || !reviewed || reviewed.source !== $('source').value || !taskAccepted()) return;
     const id = project, version = generation, exact = {...reviewed};
@@ -383,7 +487,7 @@
   });
   $('discard').addEventListener('click', () => { if (conflict) adopt(conflict); });
   $('rebase').addEventListener('click', () => {
-    if (!conflict) return;
+    if (!conflict || bindingDraftConflict) return;
     // A form proposal first becomes source via Review; a changed-base review
     // may fail before rendering, so preserve the form graph for re-review.
     base = conflict; conflict = null; $('conflict').hidden = true;

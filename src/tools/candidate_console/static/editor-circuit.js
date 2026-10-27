@@ -1,7 +1,7 @@
 /* Presentation and ephemeral gestures only; editor.js owns every document mutation. */
 (() => {
   'use strict';
-  let projection = null, actions = null, host = null, pending = null, drag = null;
+  let projection = null, actions = null, host = null, pending = null, drag = null, selectedWire = null;
   const geometry = window.editorCircuitGeometry;
   const presentation = window.editorCapabilityPresentation;
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -31,6 +31,26 @@
       input.title = pending ? (compatible ? 'Type-compatible source. Click to rebind; review before saving.' : 'This source is not offered for this input by the server.') : 'Select an output socket first.';
     }
     for (const output of host.querySelectorAll('[data-output]')) output.setAttribute('aria-pressed', String(output.dataset.node === pending?.node));
+    const disconnect = host.querySelector('.circuit-disconnect');
+    if (disconnect) { disconnect.hidden = !selectedWire; disconnect.disabled = !projection.enabled || projection.allowBindingChange === false; }
+    for (const target of host.querySelectorAll('.circuit-wire-target')) {
+      const selected = same(selectedWire, wireKey(target));
+      target.setAttribute('aria-pressed', String(selected));
+      [...host.querySelectorAll('.circuit-wire')].find(path => same(wireKey(path), wireKey(target)))?.classList.toggle('selected', selected);
+    }
+  }
+  const wireKey = target => ({from: target.dataset.from, to: target.dataset.to, argument: target.dataset.argument || null});
+  function selectWire(target) {
+    if (!projection?.enabled) return;
+    selectedWire = wireKey(target);
+    target.focus({preventScroll: true}); highlight();
+    say(`Selected connection ${selectedWire.from}.result to ${selectedWire.to}.${selectedWire.argument}. Disconnect it with the button or Delete.`);
+  }
+  function disconnectSelectedWire() {
+    if (!projection?.enabled || projection.allowBindingChange === false || !selectedWire) return;
+    const target = {...selectedWire};
+    selectedWire = null; highlight();
+    actions.disconnect(target.to, target.argument);
   }
   const point = socket => {
     const rect = socket.querySelector('.circuit-socket').getBoundingClientRect();
@@ -56,6 +76,19 @@
       path.setAttribute('d', geometry.path(route)); path.classList.add('circuit-wire');
       path.dataset.from = source.node; path.dataset.to = input.dataset.node; path.dataset.argument = option.argument;
       svg.append(path);
+      const target = document.createElementNS(svg.namespaceURI, 'path');
+      target.setAttribute('d', geometry.path(route)); target.classList.add('circuit-wire-target');
+      target.dataset.from = source.node; target.dataset.to = input.dataset.node; target.dataset.argument = option.argument;
+      target.setAttribute('tabindex', '0'); target.setAttribute('role', 'button'); target.setAttribute('aria-pressed', 'false');
+      target.setAttribute('aria-label', `Connection ${source.node}.result to ${input.dataset.node}.${option.argument}`);
+      target.addEventListener('focus', () => path.classList.add('focused'));
+      target.addEventListener('blur', () => path.classList.remove('focused'));
+      target.addEventListener('click', event => { event.stopPropagation(); selectWire(target); });
+      target.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); selectWire(target); }
+        else if (['Delete', 'Backspace'].includes(event.key) && same(selectedWire, wireKey(target))) { event.preventDefault(); event.stopPropagation(); disconnectSelectedWire(); }
+      });
+      svg.append(target);
     }
     highlight();
   }
@@ -75,7 +108,8 @@
       element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
       const type = element('span', contract.id, button, 'circuit-port-contract');
       type.setAttribute('aria-hidden', 'true');
-      element('span', metadata.required ? 'required' : 'optional', button, 'circuit-port-requirement');
+      element('span', metadata.bound ? (metadata.required ? 'required' : 'optional') : `${metadata.required ? 'Required' : 'Optional'} · unbound`, button,
+        `circuit-port-requirement${metadata.bound ? '' : ' circuit-port-unbound-label'}`);
       button.classList.toggle('is-unbound', !metadata.bound);
       button.dataset.contract = contract.id;
       button.dataset.required = String(metadata.required);
@@ -96,6 +130,7 @@
     element('span', '', button, 'circuit-socket');
     button.addEventListener('click', () => {
       if (projection !== snapshot || !projection.enabled) return;
+      if (!projection.allowBindingChange) { say('Review/save or discard the current edits before changing a connection.'); return; }
       if (output) { pending = {kind: 'result', node: node.id, port: 'result'}; highlight(); say(`Selected ${node.id}.result. Choose a highlighted input, or press Escape to cancel.`); return; }
       if (!pending) { say('Select a result output socket first. External bindings remain available in the inspector.'); return; }
       const selected = choice(node.id, argument)?.choices.find(value => same(value.source, pending));
@@ -106,11 +141,13 @@
   }
   function render(container, value, callbacks) {
     const focus = container.contains(document.activeElement) ? document.activeElement.id : null;
-    host = container; projection = value; actions = callbacks; cancel(false); host.replaceChildren();
+    host = container; projection = value; actions = callbacks; cancel(false); selectedWire = null; host.replaceChildren();
     const message = element('p', 'Select a capability to inspect it. Choose an output, then a highlighted input to rebind.', host, 'circuit-message');
     message.setAttribute('role', 'status');
+    const disconnect = element('button', 'Disconnect selected connection', host, 'circuit-disconnect');
+    disconnect.type = 'button'; disconnect.hidden = true; disconnect.addEventListener('click', disconnectSelectedWire);
     const viewport = element('div', '', host, 'circuit-viewport'), world = element('div', '', viewport, 'circuit-world');
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('aria-hidden', 'true'); world.append(svg);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('role', 'group'); svg.setAttribute('aria-label', 'Workflow connections'); world.append(svg);
     if (!value.document) return;
     const saved = new Map(value.document.positions.map(p => [p.node, p]));
     const cards = [];
@@ -125,12 +162,12 @@
       heading.setAttribute('aria-pressed', String(node.id === value.selected));
       heading.addEventListener('click', () => { if (projection === value && projection.enabled) actions.select(node.id); });
       heading.addEventListener('keydown', event => {
-        if (projection !== value || !projection.enabled || !event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        if (projection !== value || !projection.enabled || projection.allowMove === false || !event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
         event.preventDefault(); const position = card._position;
         actions.move(node.id, position.x + (event.key === 'ArrowLeft' ? -20 : event.key === 'ArrowRight' ? 20 : 0), position.y + (event.key === 'ArrowUp' ? -20 : event.key === 'ArrowDown' ? 20 : 0));
       });
       heading.addEventListener('pointerdown', event => {
-        if (projection !== value || !projection.enabled || event.button !== 0 || drag) return;
+        if (projection !== value || !projection.enabled || projection.allowMove === false || event.button !== 0 || drag) return;
         heading.setPointerCapture(event.pointerId);
         drag = {pointerId: event.pointerId, node: node.id, card, startX: event.clientX, startY: event.clientY, position: {...card._position}, left: card.offsetLeft, top: card.offsetTop};
       });
@@ -182,10 +219,18 @@
     if (!projection || !host) return;
     projection.enabled = enabled;
     for (const port of host.querySelectorAll('.circuit-port')) port.disabled = !enabled;
+    const disconnect = host.querySelector('.circuit-disconnect'); if (disconnect) disconnect.disabled = !enabled || projection.allowBindingChange === false;
+    for (const target of host.querySelectorAll('.circuit-wire-target')) {
+      target.setAttribute('aria-disabled', String(!enabled)); target.setAttribute('tabindex', enabled ? '0' : '-1');
+    }
     for (const heading of host.querySelectorAll('.editor-node')) heading.setAttribute('aria-disabled', String(!enabled));
-    if (!enabled) cancel();
+    if (!enabled) { cancel(); selectedWire = null; highlight(); }
   }
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && (pending || drag)) { cancel(); say('Circuit gesture cancelled.'); } });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (pending || drag) { cancel(); say('Circuit gesture cancelled.'); }
+    if (selectedWire) { selectedWire = null; highlight(); say('Wire selection cancelled.'); }
+  });
   document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Connection selection cancelled.'); } });
   document.addEventListener('pointermove', event => {
     if (!pending || !host?.contains(event.target)) return;
