@@ -200,6 +200,7 @@ def resolve_reusable_candidate(
                 for item in document.definition.externals
             ),
             nodes=document.definition.nodes,
+            loop=document.definition.loop,
         ),
         positions=document.positions,
     )

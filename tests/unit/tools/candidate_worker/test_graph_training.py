@@ -12,6 +12,7 @@ import pytest
 from agent.schemas.proposal import ProposalInput
 from tools.candidate_prepare import (
     ReusableCandidatePreparationRequest,
+    preflight_reusable_candidate,
     prepare_reusable_candidate,
 )
 from tools.candidate_prepare.reusable_interpretation import verify_payloads
@@ -21,7 +22,10 @@ from tools.candidate_worker.layout import tuning_input_path
 from tools.candidate_worker.models import CandidateRunRequest
 from tools.workspace_sandbox.runner import ExecutionResult
 from workflows.definition import (
+    AuthoredLoop,
+    LoopFeedback,
     ManagedCandidateBinding,
+    ResultSource,
     ReusableTaskReferences,
     ReusableWorkflowDefinition,
     ReusableWorkflowDocument,
@@ -125,6 +129,7 @@ def reusable_graph_request(request):
             ),
             externals=tuple(externals),
             nodes=tuple(concrete.definition.nodes),
+            loop=concrete.definition.loop,
         ),
         positions=concrete.positions,
         preparation_options=options,
@@ -156,6 +161,37 @@ def reusable_graph_request(request):
         ),
         source_path,
         authored,
+    )
+
+
+def test_reusable_resolution_preserves_authored_loop_declaration(prepared):
+    request = graph_training_request(prepared)
+    reusable, source_path, _ = reusable_graph_request(request)
+    document = parse_workflow_source(source_path.read_text())
+    loop = AuthoredLoop(
+        final_iteration=2,
+        feedback=LoopFeedback(
+            source=ResultSource(node="train"),
+            target="interpret",
+            protocol="tuning-to-interpretation",
+            history="native-research/v1",
+        ),
+    )
+    document = ReusableWorkflowDocument.model_validate_json(
+        document.model_copy(
+            update={"definition": document.definition.model_copy(update={"loop": loop})}
+        ).model_dump_json()
+    )
+    source_path.write_text(render_workflow_source(document))
+    reusable = reusable.model_copy(
+        update={"expected_source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest()}
+    )
+
+    plan = preflight_reusable_candidate(reusable)
+    assert plan.document.definition.loop == loop
+    assert plan.resolved_document.definition.loop == loop
+    assert parse_workflow_source(render_workflow_source(plan.resolved_document)) == (
+        plan.resolved_document
     )
 
 

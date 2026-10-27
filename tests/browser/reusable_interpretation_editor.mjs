@@ -77,6 +77,7 @@ try {
   assert.equal(saved.definition.task.data_root, original.definition.task.data_root);
   assert.equal(saved.definition.nodes.length, 5);
   assert.deepEqual(saved.definition.nodes, original.definition.nodes);
+  assert.deepEqual(saved.definition.loop, original.definition.loop);
   assert.deepEqual(saved.definition.externals, original.definition.externals);
   assert.deepEqual(saved.preparation_options, original.preparation_options);
   assert.deepEqual(saved.training_settings, original.training_settings);

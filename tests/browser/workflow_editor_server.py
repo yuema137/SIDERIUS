@@ -15,8 +15,10 @@ from tools.candidate_console.app import create_app
 from tools.workflow_authoring.models import Project
 from workflows.definition import (
     ArgumentBinding,
+    AuthoredLoop,
     ExternalRequest,
     ExternalSource,
+    LoopFeedback,
     ManagedCandidateBinding,
     NodeInstance,
     ProtocolRequest,
@@ -36,6 +38,15 @@ def interpretation_profile_source() -> str:
     assert isinstance(document, ReusableWorkflowDocument)
     raw = document.model_dump(mode="json")
     raw["execution_profile"] = "native-interpretation-candidate/v1"
+    raw["definition"]["loop"] = AuthoredLoop(
+        final_iteration=2,
+        feedback=LoopFeedback(
+            source=ResultSource(node="fit"),
+            target="interpret",
+            protocol="tuning-to-interpretation",
+            history="native-research/v1",
+        ),
+    ).model_dump(mode="json")
     raw["definition"]["externals"] = [
         item for item in raw["definition"]["externals"] if item["id"] != "initial"
     ]
