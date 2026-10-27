@@ -1,16 +1,38 @@
 """Reachable authored training body; native upstream nodes/staging, offline tuner effects."""
 
+import hashlib
+import importlib
 import json
+import subprocess
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
 from agent.schemas.proposal import ProposalInput
+from tools.candidate_prepare import (
+    ReusableCandidatePreparationRequest,
+    preflight_reusable_candidate,
+    prepare_reusable_candidate,
+)
+from tools.candidate_prepare.reusable_interpretation import verify_payloads
 from tools.candidate_worker import launch_candidate
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.candidate_worker.layout import tuning_input_path
-from workflows.definition import WorkflowDocument
+from tools.candidate_worker.models import CandidateRunRequest
+from tools.workspace_sandbox.runner import ExecutionResult
+from workflows.definition import (
+    AuthoredLoop,
+    LoopFeedback,
+    ManagedCandidateBinding,
+    ResultSource,
+    ReusableTaskReferences,
+    ReusableWorkflowDefinition,
+    ReusableWorkflowDocument,
+    WorkflowDocument,
+    parse_workflow_source,
+    render_workflow_source,
+)
 
 from .conftest import refresh
 from .test_graph import initial
@@ -82,6 +104,97 @@ def graph_training_request(prepared):
     )
 
 
+def reusable_graph_request(request):
+    """Capture this native five-node graph through the existing reusable source path."""
+    project = Path(request.preview.project_root)
+    concrete = request.preview.document
+    raw = concrete.model_dump(mode="json")
+    definition = raw["definition"]
+    externals = [
+        ManagedCandidateBinding(id=item["id"], contract=item["contract"])
+        for item in definition["externals"]
+    ]
+    settings = json.loads((project / "training.json").read_bytes())
+    options = {
+        "proposal_advice": "Preserve the declared feature interface.",
+        "implementation_advice": request.implementation_advice,
+        "validation_advice": request.validation_advice,
+        "allowed_output_types": ("classifier",),
+    }
+    document = ReusableWorkflowDocument(
+        definition=ReusableWorkflowDefinition(
+            task=ReusableTaskReferences(
+                manifest=definition["task"]["manifest"],
+                data_root=definition["task"]["data_root"],
+            ),
+            externals=tuple(externals),
+            nodes=tuple(concrete.definition.nodes),
+            loop=concrete.definition.loop,
+        ),
+        positions=concrete.positions,
+        preparation_options=options,
+        execution_profile="native-interpretation-candidate/v1",
+        training_settings=settings,
+    )
+    source_path = project / "reusable-interpretation.py"
+    authored = "# saved editable source\n" + render_workflow_source(document)
+    source_path.write_text(authored)
+    reopened = parse_workflow_source(source_path.read_text())
+    assert reopened == document
+    runs = project / "runs"
+    runs.mkdir(exist_ok=True)
+    return (
+        ReusableCandidatePreparationRequest(
+            source_path=str(source_path),
+            project_root=str(project),
+            expected_source_sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            runs_root=str(runs),
+            run_id=uuid4(),
+            run_name=request.run_name,
+            llm_config_file=str(project / "llm.json"),
+            preparation_timeout_seconds=30.0,
+            candidate_timeout_seconds=request.timeout_seconds,
+            task_read_only=(),
+            candidate_network=request.network,
+            candidate_devices=request.devices,
+            candidate_environment_names=request.environment_names,
+        ),
+        source_path,
+        authored,
+    )
+
+
+def test_reusable_resolution_preserves_authored_loop_declaration(prepared):
+    request = graph_training_request(prepared)
+    reusable, source_path, _ = reusable_graph_request(request)
+    document = parse_workflow_source(source_path.read_text())
+    loop = AuthoredLoop(
+        final_iteration=2,
+        feedback=LoopFeedback(
+            source=ResultSource(node="train"),
+            target="interpret",
+            protocol="tuning-to-interpretation",
+            history="native-research/v1",
+        ),
+    )
+    document = ReusableWorkflowDocument.model_validate_json(
+        document.model_copy(
+            update={"definition": document.definition.model_copy(update={"loop": loop})}
+        ).model_dump_json()
+    )
+    source_path.write_text(render_workflow_source(document))
+    reusable = reusable.model_copy(
+        update={"expected_source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest()}
+    )
+
+    plan = preflight_reusable_candidate(reusable)
+    assert plan.document.definition.loop == loop
+    assert plan.resolved_document.definition.loop == loop
+    assert parse_workflow_source(render_workflow_source(plan.resolved_document)) == (
+        plan.resolved_document
+    )
+
+
 def test_five_node_native_training_and_parent_evidence(prepared, training_runner):
     request = graph_training_request(prepared)
     receipt = launch_candidate(request)
@@ -106,6 +219,94 @@ def test_five_node_native_training_and_parent_evidence(prepared, training_runner
     proposal_path.write_text(seed.model_copy(update={"expert_context": []}).model_dump_json())
     with pytest.raises(ValueError, match="declared interpretation edge"):
         verify_graph_trace(request, parent, receipt)
+
+
+def test_saved_reusable_interpretation_profile_reaches_same_native_five_node_path(
+    prepared, native_runner, training_runner, monkeypatch
+):
+    """The saved v2 graph resolves managed inputs, then uses the existing native worker path."""
+    interpreter = importlib.import_module(
+        "nodes.result_interpretation_agent.result_interpretation_agent"
+    )
+    monkeypatch.setattr(interpreter, "LLMBridge", native_runner)
+    concrete = graph_training_request(prepared)
+    reusable, source_path, authored = reusable_graph_request(concrete)
+
+    def direct_child(profile, argv):
+        completed = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        if completed.returncode:
+            raise AssertionError(
+                completed.stderr
+                + (
+                    Path(reusable.runs_root)
+                    / str(reusable.run_id)
+                    / "inputs/preparation/worker.log"
+                ).read_text()
+            )
+        return ExecutionResult(status="completed", returncode=0, elapsed_seconds=0.0)
+
+    monkeypatch.setattr(
+        importlib.import_module("tools.candidate_prepare.launch"), "run", direct_child
+    )
+    receipt = prepare_reusable_candidate(reusable)
+    assert receipt.status == "prepared", receipt.error
+    output = Path(receipt.envelope) / "inputs"
+    candidate = CandidateRunRequest.model_validate_json(
+        Path(receipt.candidate_request_path).read_bytes()
+    )
+    assert candidate.preview.execution_profile == "native-interpretation-candidate/v1"
+    assert len(candidate.preview.document.definition.nodes) == 5
+    assert parse_workflow_source(source_path.read_text()) == parse_workflow_source(authored)
+    assert source_path.read_text() == authored
+    managed = {item.id: item.location for item in candidate.preview.document.definition.externals}
+    assert managed["interpret_input"] == str(output / "external.interpret_input.json")
+    assert managed["proposal_slot"] == str(output / "storage.propose.json")
+    assert (output / "training_settings.json").is_file()
+    assert {Path(item.path).name for item in candidate.files} >= {
+        "external.interpret_input.json",
+        "external.data_dir.json",
+        "external.task_ref.json",
+        "external.advice.json",
+        "external.rules.json",
+        "external.constraints.json",
+        "storage.propose.json",
+        "training_settings.json",
+    }
+    prepared_source = parse_workflow_source(source_path.read_text())
+    from tools.candidate_prepare.reusable_models import ReusableBindingCapture
+
+    capture = ReusableBindingCapture.model_validate_json(
+        (output.parent / "binding.json").read_bytes()
+    )
+    verify_payloads(prepared_source, capture.request, output, Path.read_bytes)
+
+    def tampered_read(path):
+        if path.name == "external.advice.json":
+            return b"{}\n"
+        return path.read_bytes()
+
+    with pytest.raises(ValueError, match="managed protocol input differs"):
+        verify_payloads(prepared_source, capture.request, output, tampered_read)
+
+    receipt = launch_candidate(candidate)
+    assert receipt.status == "completed", receipt.error
+    assert receipt.graph_trace is not None
+    assert [item.capability for item in receipt.graph_trace.nodes] == [
+        "proposal",
+        "implementation",
+        "validation",
+        "interpretation",
+        "tuning",
+    ]
+    assert all(item.state == "succeeded" for item in receipt.graph_trace.nodes)
+    proposal = next(value for name, value in training_runner if name == "proposal")
+    tuned = next(value for name, value in training_runner if name == "tuner")
+    assert proposal.task_composition_ref is not None
+    assert any(item.kind == "human" for item in proposal.expert_context)
+    assert tuned.current_run_best_formal_score is None
+    verify_graph_trace(
+        candidate, initial(candidate).model_copy(update={"run_id": receipt.run_id}), receipt
+    )
 
 
 def test_console_graph_results_reuse_native_run_report_without_paths(

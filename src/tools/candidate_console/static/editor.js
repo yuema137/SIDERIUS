@@ -223,11 +223,13 @@
       select: value => { if (live()) { selected = value; render(); } },
       bind: (nodeId, argument, source) => { if (live()) updateBindingDraft(nodeId, argument, source); },
       disconnect: (nodeId, argument) => { if (live()) updateBindingDraft(nodeId, argument, null); },
-      move: (nodeId, x, y) => {
+      move: layout => {
         if (!live() || !canEditCircuit()) return;
         if (mode === 'binding-draft') { status('Cancel or review the binding draft before changing node positions.'); return; }
-        const position = graph.positions.find(value => value.node === nodeId);
-        if (position) { position.x = x; position.y = y; } else graph.positions.push({node: nodeId, x, y});
+        for (const {node: nodeId, x, y} of layout) {
+          const position = graph.positions.find(value => value.node === nodeId);
+          if (position) { position.x = x; position.y = y; } else graph.positions.push({node: nodeId, x, y});
+        }
         mode = 'document'; changed(); render(); status('Node position changed locally. Review and save to keep the layout.');
       }
     });

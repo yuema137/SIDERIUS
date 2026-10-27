@@ -25,6 +25,8 @@
   --port: #159f9b;
   --series-1: #3a7ebb;
   --series-2: #159f9b;
+  --capability-interpretation: #2980b9;
+  --capability-interpretation-tint: #e6f3fb;
   --capability-literature: #5546b8;
   --capability-literature-tint: #f0effb;
   --capability-proposal: #c08a12;
@@ -64,6 +66,8 @@
   --port: #3cc4bf;
   --series-1: #5aa9e0;
   --series-2: #3cc4bf;
+  --capability-interpretation: #5db0e6;
+  --capability-interpretation-tint: #112d42;
   --capability-literature: #9488e6;
   --capability-literature-tint: #25243f;
   --capability-proposal: #dcae45;

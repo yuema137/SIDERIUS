@@ -134,6 +134,9 @@ def verify_reusable_bundle(
     ):
         raise ValueError("saved profile differs from selected bytes")
     verify_payloads(plan, index.composition_fingerprint, read_bytes)
+    from .reusable_interpretation import verify_payloads as verify_interpretation_payloads
+
+    verify_interpretation_payloads(plan.document, binding.request, output, read_bytes)
     from .reusable_training import verify_training_payloads
 
     verify_training_payloads(plan.document, output, read_bytes)

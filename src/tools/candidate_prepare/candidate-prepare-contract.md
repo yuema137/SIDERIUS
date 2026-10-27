@@ -612,3 +612,26 @@ Old fixed/fanout/family sources omit the new field; their declaration identity,
 canonical source and prepared payload conventions remain unchanged. This adds no
 aggregation, conditional routing, buffers, human gates, parallel generation or
 training. A valid empty native review retains its existing successful semantics.
+
+
+## Reusable native interpretation candidate
+
+A reusable v2 source can select
+`execution_profile="native-interpretation-candidate/v1"` for the same typed
+interpretation→proposal→implementation→validation path, with the optional existing
+native tuner and source-owned training settings. Its interpreter input and any
+declared interpretation-protocol externals use managed bindings whose contracts
+come from the native workflow catalog. Preparation generates these artifacts from
+the existing composed-task, proposal-advice and training-settings owners; users do
+not provide literal native requests or a proposal seed. Managed storage remains
+owned by each declared graph node.
+
+The existing source parser, editor save/reopen, resolver, preparation capture and
+parent verifier preserve the authored graph and produce the ordinary v1 worker
+request. The worker then runs the existing native graph executor and checks task,
+storage, constraints and task-reference consistency before provider construction.
+The ordered artifact index includes the generated interpretation/protocol inputs,
+proposal, managed storage, training settings when present, and the same resolved
+workflow files used by other reusable graph profiles. Fixed workflows and profiles
+with no declaration remain unchanged. Graph results continue to use `GraphTrace`;
+this profile does not populate the fixed `training_output` receipt field.

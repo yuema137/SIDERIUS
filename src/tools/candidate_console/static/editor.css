@@ -155,6 +155,7 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
 .connection-list li { overflow-wrap: anywhere; margin: 4px 0; }
 
 .circuit-card { width: 215px; border-radius: 10px; background: var(--capability-generic-tint); }
+.circuit-card.capability-interpretation { --capability-accent: var(--capability-interpretation); --capability-tint: var(--capability-interpretation-tint); }
 .circuit-card.capability-literature { --capability-accent: var(--capability-literature); --capability-tint: var(--capability-literature-tint); }
 .circuit-card.capability-proposal { --capability-accent: var(--capability-proposal); --capability-tint: var(--capability-proposal-tint); }
 .circuit-card.capability-implementation { --capability-accent: var(--capability-implementation); --capability-tint: var(--capability-implementation-tint); }

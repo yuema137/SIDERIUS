@@ -151,6 +151,8 @@
     if (!value.document) return;
     const saved = new Map(value.document.positions.map(p => [p.node, p]));
     const cards = [];
+    // A move persists every displayed position, so later sources never mix stored and fallback layouts.
+    const layout = (moved, x, y) => cards.map(card => card.dataset.node === moved ? {node: moved, x, y} : {node: card.dataset.node, ...card._position});
     for (const node of value.document.definition.nodes) {
       const card = element('article', '', world, 'circuit-card'); card.dataset.node = node.id; card.dataset.capability = node.capability;
       const heading = element('button', '', card, 'editor-node');
@@ -164,7 +166,7 @@
       heading.addEventListener('keydown', event => {
         if (projection !== value || !projection.enabled || projection.allowMove === false || !event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
         event.preventDefault(); const position = card._position;
-        actions.move(node.id, position.x + (event.key === 'ArrowLeft' ? -20 : event.key === 'ArrowRight' ? 20 : 0), position.y + (event.key === 'ArrowUp' ? -20 : event.key === 'ArrowDown' ? 20 : 0));
+        actions.move(layout(node.id, position.x + (event.key === 'ArrowLeft' ? -20 : event.key === 'ArrowRight' ? 20 : 0), position.y + (event.key === 'ArrowUp' ? -20 : event.key === 'ArrowDown' ? 20 : 0)));
       });
       heading.addEventListener('pointerdown', event => {
         if (projection !== value || !projection.enabled || projection.allowMove === false || event.button !== 0 || drag) return;
@@ -179,7 +181,7 @@
         if (projection !== value || !drag || drag.node !== node.id || drag.pointerId !== event.pointerId) return;
         const gesture = drag; drag = null;
         const dx = event.clientX - gesture.startX, dy = event.clientY - gesture.startY;
-        if (projection.enabled && Math.abs(dx) + Math.abs(dy) > 3) actions.move(node.id, Math.round(gesture.position.x + dx), Math.round(gesture.position.y + dy));
+        if (projection.enabled && Math.abs(dx) + Math.abs(dy) > 3) actions.move(layout(node.id, Math.round(gesture.position.x + dx), Math.round(gesture.position.y + dy)));
         else { gesture.card.style.left = gesture.left + 'px'; gesture.card.style.top = gesture.top + 'px'; draw(); }
       });
       heading.addEventListener('pointercancel', event => {
@@ -205,9 +207,10 @@
       const output = port(card, node, null, true); output.id = `circuit-output-${node.id}`;
       cards.push(card);
     }
-    const maxHeight = Math.max(0, ...cards.map(card => card.offsetHeight)) + 90;
-    const arranged = geometry.arrange(value.document.definition.nodes, maxHeight);
-    for (const card of cards) { const position = saved.get(card.dataset.node) || arranged.get(card.dataset.node); card._position = {x: position.x, y: position.y}; }
+    // Card size comes from the rendered cards (editor.css owns it), never a copied constant.
+    const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
+    const placed = geometry.place(value.document.definition.nodes, saved, size, {x: 135, y: 90});
+    for (const card of cards) card._position = placed.get(card.dataset.node);
     const ox = 60 - Math.min(0, ...cards.map(card => card._position.x)), oy = 60 - Math.min(0, ...cards.map(card => card._position.y));
     for (const card of cards) { card.style.left = card._position.x + ox + 'px'; card.style.top = card._position.y + oy + 'px'; }
     world.style.width = Math.max(700, ...cards.map(card => card.offsetLeft + card.offsetWidth + 80)) + 'px';
