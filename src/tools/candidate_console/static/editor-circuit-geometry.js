@@ -135,7 +135,7 @@ function routeOnGrid(start, end, boxes, occupied) {
   return simplifyRoute(points.reverse());
 }
 // Display ranks from declared edges only; this does not admit or execute a graph.
-function arrange(nodes, spacing) {
+function arrange(nodes, spacing, column) {
   const remaining = new Set(nodes.map(node => node.id)), ranks = new Map();
   const parents = id => {
     const request = nodes.find(node => node.id === id).request;
@@ -148,8 +148,22 @@ function arrange(nodes, spacing) {
     for (const id of ready) { ranks.set(id, Math.max(0, ...parents(id).map(parent => (ranks.get(parent) ?? -1) + 1))); remaining.delete(id); }
   }
   const rows = new Map(), positions = new Map();
-  for (const [id, rank] of ranks) { const column = rows.get(rank) || 0; positions.set(id, {x: column * 350, y: rank * spacing}); rows.set(rank, column + 1); }
+  for (const [id, rank] of ranks) { const index = rows.get(rank) || 0; positions.set(id, {x: index * column, y: rank * spacing}); rows.set(rank, index + 1); }
   return positions;
+}
+// Saved positions stay exact. Unsaved nodes keep their ranked layout, shifted
+// right of every saved card, so a fallback card never covers a stored one.
+// `size` is the largest rendered card; `gap` separates cards on both axes.
+function place(nodes, saved, size, gap) {
+  const arranged = arrange(nodes, size.height + gap.y, size.width + gap.x);
+  const stored = nodes.filter(node => saved.has(node.id)), fallback = nodes.filter(node => !saved.has(node.id));
+  const shift = stored.length && fallback.length
+    ? Math.max(...stored.map(node => saved.get(node.id).x)) + size.width + gap.x - Math.min(...fallback.map(node => arranged.get(node.id).x))
+    : 0;
+  return new Map(nodes.map(node => {
+    const position = saved.get(node.id) || {x: arranged.get(node.id).x + shift, y: arranged.get(node.id).y};
+    return [node.id, {x: position.x, y: position.y}];
+  }));
 }
 function route(a, b, boxes, source, target, occupied = new Set()) {
   const start = {x: a.x + 24, y: a.y}, end = {x: b.x - 24, y: b.y};
@@ -160,5 +174,5 @@ function route(a, b, boxes, source, target, occupied = new Set()) {
   return simplifyRoute([a, ...points, b]);
 }
 function path(points) { return points.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' '); }
-globalThis.editorCircuitGeometry = Object.freeze({route, path, segmentClear, arrange});
+globalThis.editorCircuitGeometry = Object.freeze({route, path, segmentClear, arrange, place});
 })();

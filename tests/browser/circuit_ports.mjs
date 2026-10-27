@@ -87,6 +87,7 @@ try {
   await page.locator('#circuit-node-build_left').click();
   assert.equal(await page.locator('#editor-inspector select[data-argument="output"] option:checked').textContent(), 'alternate.result');
   const beforePosition = await page.locator('.circuit-card[data-node="build_left"]').evaluate(element => element._position);
+  const beforeLayout = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => ({node: card.dataset.node, ...card._position})));
   await page.locator('#circuit-node-build_left').focus(); await page.keyboard.press('Alt+ArrowDown');
   const header = page.locator('#circuit-node-build_left'); await header.scrollIntoViewIfNeeded();
   const rect = await header.boundingBox();
@@ -111,7 +112,8 @@ try {
   const saved = await readFile(metadata.source, 'utf8');
   assert.deepEqual(requests.map(item => item.path.split('/').at(-1)), ['review', 'save']);
   const reviewed = requests[0].body.proposal.document;
-  assert.deepEqual(reviewed.positions, [{node: 'build_left', ...position}]);
+  // A move persists every displayed card position, not only the moved card.
+  assert.deepEqual(reviewed.positions, beforeLayout.map(item => item.node === 'build_left' ? {node: 'build_left', ...position} : item));
   assert.equal(reviewed.execution_profile, 'native-proposal-families/v1');
   assert.ok(await page.locator('path.circuit-wire[data-from="alternate"][data-to="build_left"]').count());
   const call = promisify(execFile);
