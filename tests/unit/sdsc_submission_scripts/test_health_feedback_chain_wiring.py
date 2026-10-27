@@ -14,6 +14,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.workflow_delegation import (
+    WORKFLOW_LOCK_ENTRYPOINT,
+    WORKFLOW_LOCK_SITE,
+    assert_run_workflow_delegates,
+)
+
 _REPO = Path(__file__).resolve().parents[3]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
@@ -27,7 +33,8 @@ _spec.loader.exec_module(roi)
 
 LOCK_SITES = {
     "tuner": _REPO / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-    "workflow": _REPO / "src/workflows/model_exploration.py",
+    # run_workflow's lock is built by the shared native training startup.
+    "workflow": WORKFLOW_LOCK_SITE,
     "chain": _REPO / "src/workflows/run_one_iteration.py",
 }
 
@@ -46,6 +53,10 @@ class TestAllThreeLockSites:
 
     @pytest.mark.parametrize("site", sorted(LOCK_SITES))
     def test_site_passes_all_three_policy_fields(self, site):
+        if site == "workflow":
+            assert_run_workflow_delegates(
+                WORKFLOW_LOCK_ENTRYPOINT, WORKFLOW_LOCK_SITE, "build_run_invariants"
+            )
         src = LOCK_SITES[site].read_text()
         # Window scan: a call's kwargs (incl. multi-line parenthesized
         # values) sit within a bounded span after the opening paren, so a

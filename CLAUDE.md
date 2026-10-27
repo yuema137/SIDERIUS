@@ -3,7 +3,8 @@
 This file owns repository contribution policy. Detailed subsystem contracts
 remain with their modules; source and tests establish implemented behavior.
 Start with the [technical reference index](docs/agent-reference/index.md) for
-the owners affected by a change.
+the owners affected by a change, and the [capability map](AGENTS.md#capability-map)
+for the owning document of each framework area.
 
 ## Repository and scientific ownership
 
@@ -106,7 +107,9 @@ agent entrypoints must refer to it rather than maintain competing rules.
   Never print, log, shell-trace, commit or upload secret values. A dotenv
   compatibility loader does not establish per-launch binding; key presence
   does not establish provider access. Follow the
-  [installation contract](docs/getting-started/installation.md#api-keys).
+  [installation contract](docs/getting-started/installation.md#api-keys), which
+  also owns the table of where each entry point (CLI, browser console, paper
+  resolver) reads keys.
 - Use declared external data and workspace locations with the current
   [entrypoints](docs/reference/entrypoints.md); deployment images and launch
   wrappers must not add task defaults or replace the dependency authority.
