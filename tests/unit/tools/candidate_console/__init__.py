@@ -1,0 +1,1 @@
+"""Candidate console test package."""
