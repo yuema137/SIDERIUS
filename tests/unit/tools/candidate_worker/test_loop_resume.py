@@ -435,3 +435,120 @@ def test_uncertain_cleanup_never_publishes_resumable_pause(
     assert (control / "body.json").is_file()
     assert not (control / "iteration_002").exists()
     assert "cleanup" in receipt.error or "clean supervision" in receipt.error
+
+
+def test_resumed_segment_reports_run_total_tokens_from_both_segments(
+    prepared,
+    loop_tuner,
+    native_runner,
+    interpretation_provider,
+    process_segments,
+    monkeypatch,
+    tmp_path,
+):
+    """Gap G4: a successor's reported usage is the root run's whole ledger.
+
+    Every provider double appends one row with fixed counts to the ledger its
+    production run context binds, and one line to a test-owned witness. Fails if
+    the successor token read is segment-local (body 2 only, or the empty
+    continuation directory), if a segment binds rows to another run identity
+    (rows become invalid), or if the operations read path stops redirecting a
+    ``candidate_loop_resume`` record to its root.
+    """
+    from tools.candidate_worker import training
+
+    witness = tmp_path / "reported_calls.log"
+
+    def report(bridge):
+        context = bridge.context
+        assert context is not None, "provider called without a bound run context"
+        row = {
+            "ts": "2026-10-27T10:00:00Z",
+            "run_id": context["run_id"],
+            "run_name": context["run_name"],
+            "label": "response",
+            "provider": "openai",
+            "model": "fixture-model",
+            "served_model": None,
+            "tokens": {"prompt": 11, "completion": 2, "total": 13},
+            "chars": {"system": 0, "user": 0, "total": 0},
+        }
+        with (Path(context["workspace"]) / "token_usage.jsonl").open("a") as ledger:
+            ledger.write(json.dumps(row) + "\n")
+        with witness.open("a") as stream:
+            stream.write("call\n")
+
+    def reporting(method):
+        def call(self, *args, **kwargs):
+            result = method(self, *args, **kwargs)
+            report(self)
+            return result
+
+        return call
+
+    for owner in (native_runner, interpretation_provider):
+        for name in ("generate", "generate_text"):
+            if name in vars(owner):  # wrap each provider method exactly once
+                monkeypatch.setattr(owner, name, reporting(vars(owner)[name]))
+
+    request = loop_request(prepared, final_iteration=2)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    first_id, next_id = uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_after_body_one(self, value):
+        output = real_tune(self, value)
+        if "iteration_001" in value.storage.local.workspace:
+            request_loop_pause(config, first_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_after_body_one)
+    submit_operation(
+        config, CandidateOperation(request_id=first_id, request=request), launch_environment=env
+    )
+    process_segments()
+    first = read_operation(config, first_id)
+    assert first.receipt is not None and first.receipt.status == "paused", first
+    first_segment_calls = len(witness.read_text().splitlines())
+    assert first_segment_calls > 0
+
+    review = review_loop_resume(config, first_id)
+    submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=first_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment=env,
+    )
+    process_segments()
+    second = read_operation(config, next_id)
+    assert second.receipt is not None and second.receipt.status == "completed", second
+    all_calls = len(witness.read_text().splitlines())
+    assert all_calls > first_segment_calls  # the successor segment reported usage too
+
+    segment = read_operation_tokens(config, next_id)
+    assert segment.availability == "available"
+    assert segment.reason == "reported_responses"
+    assert segment.run_id == first.receipt.run_id
+    assert segment.quality.invalid_rows == 0 and not segment.quality.partial
+    assert [
+        (
+            group.provider,
+            group.requested_model,
+            group.response_rows,
+            group.reported_input_tokens,
+            group.reported_output_tokens,
+            group.reported_total_tokens,
+        )
+        for group in segment.groups
+    ] == [("openai", "fixture-model", all_calls, 11 * all_calls, 2 * all_calls, 13 * all_calls)]
+    root = read_operation_tokens(config, first_id)
+    assert segment.model_dump(exclude={"observed_at"}) == root.model_dump(exclude={"observed_at"})
