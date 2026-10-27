@@ -184,6 +184,10 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
 @media (max-width: 800px) {
   body:has(#view-workflow:not([hidden])) main > section[aria-labelledby="access-heading"] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
   body:has(#view-workflow:not([hidden])) #access-heading { white-space: normal; }
+  /* Narrow screens: the desktop 360px form floor and one-line header exceed a 390px viewport. */
+  body:has(#view-workflow:not([hidden])) header { flex-wrap: wrap; padding-inline: 16px; }
+  body:has(#view-workflow:not([hidden])) #access-form { flex-basis: auto; min-width: 0; }
+  body:has(#view-workflow:not([hidden])) #access-form .grow { min-width: min(100%, 220px); }
   .workflow-controls, .editor-workspace { grid-template-columns: minmax(0, 1fr); }
   .workflow-inspector-panel { position: static; max-height: none; }
   .workflow-project { grid-template-columns: auto minmax(0, 1fr); }
