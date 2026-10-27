@@ -15,6 +15,7 @@ from pydantic import TypeAdapter
 from agent.llm_settings import default_model_for_provider
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.llm_settings import VALIDATE
@@ -51,13 +52,20 @@ def require_storage(actual: StorageConfig, expected: StorageConfig) -> None:
         raise ValueError("external storage disagrees with managed storage")
 
 
-def check_constraints(seed: ProposalInput, ref: TaskCompositionRef) -> None:
-    context = seed.constraint_context
+def check_constraints(
+    context: ConstraintContext | None,
+    ref: TaskCompositionRef,
+    *,
+    workflow_rules: ParameterRules | None,
+    trial_time_budget_minutes: float | None,
+    formal_time_budget_minutes: float | None,
+    vram_budget_gb: float | None,
+) -> None:
     if context is None:
         return
     expected = {
         "task_rules": ref.parameter_rules,
-        "workflow_rules": seed.workflow_parameter_rules,
+        "workflow_rules": workflow_rules,
         "objective": ref.objective.model_dump(mode="json") if ref.objective else None,
     }
     for name, value in expected.items():
@@ -81,13 +89,16 @@ def check_constraints(seed: ProposalInput, ref: TaskCompositionRef) -> None:
                     f"constraint_context.execution.{name} has no candidate worker authority"
                 )
         known = "execution" in context.known_sections
-        for name in ("trial_time_budget_minutes", "formal_time_budget_minutes"):
+        for name, expected_value in (
+            ("trial_time_budget_minutes", trial_time_budget_minutes),
+            ("formal_time_budget_minutes", formal_time_budget_minutes),
+        ):
             value = getattr(context.execution, name)
-            if (known or value is not None) and value != getattr(seed, name):
+            if (known or value is not None) and value != expected_value:
                 raise ValueError(f"constraint_context.execution.{name} disagrees with seed")
         budgets = (context.execution.trial_vram_budget_gb, context.execution.formal_vram_budget_gb)
         selected = budgets[0] if budgets[0] is not None else budgets[1]
-        if (known or selected is not None) and selected != seed.vram_budget_gb:
+        if (known or selected is not None) and selected != vram_budget_gb:
             raise ValueError("constraint_context execution VRAM disagrees with seed")
 
 
@@ -140,7 +151,14 @@ def materialize_proposal(
     ):
         raise ValueError("debug prompt path must be inside candidate_run/debug")
     if admitted is None:
-        check_constraints(seed, ref)
+        check_constraints(
+            seed.constraint_context,
+            ref,
+            workflow_rules=seed.workflow_parameter_rules,
+            trial_time_budget_minutes=seed.trial_time_budget_minutes,
+            formal_time_budget_minutes=seed.formal_time_budget_minutes,
+            vram_budget_gb=seed.vram_budget_gb,
+        )
     else:
         from .training_admission import reconcile_proposal
 

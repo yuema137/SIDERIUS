@@ -29,6 +29,12 @@ class ProtocolContract:
 
 CONTRACTS = MappingProxyType(
     {
+        "interpretation.input": "agent.schemas.interpretation.InterpretationInput",
+        "interpretation.output": "agent.schemas.interpretation.InterpretationOutput",
+        "optional.text": "str | None",
+        "optional.expert-advice": "agent.schemas.hyperparam_tuning.ExpertAdviceInput | None",
+        "optional.expert-context": "list[agent.schemas.proposal.ExpertContextItem] | None",
+        "optional.parameter-rules": "agent.schemas.parameter_rules.ParameterRules | None",
         "literature.input": "agent.schemas.literature_review.LiteratureReviewInput",
         "literature.output": "agent.schemas.literature_review.LiteratureReviewOutput",
         "proposal.input": "agent.schemas.proposal.ProposalInput",
@@ -50,6 +56,7 @@ CONTRACTS = MappingProxyType(
 
 CAPABILITIES = MappingProxyType(
     {
+        "interpretation": CapabilityContract("interpretation.input", "interpretation.output"),
         "literature": CapabilityContract("literature.input", "literature.output"),
         "proposal": CapabilityContract("proposal.input", "proposal.output"),
         "implementation": CapabilityContract("implementation.input", "implementation.output"),
@@ -60,6 +67,20 @@ CAPABILITIES = MappingProxyType(
 
 PROTOCOLS = MappingProxyType(
     {
+        "interpretation-to-proposal": ProtocolContract(
+            "agent.schemas.protocols.ml_result_interp_to_ml_model_propose.local_full_context",
+            "proposal.input",
+            (
+                ArgumentContract("output", "interpretation.output"),
+                ArgumentContract("storage", "storage"),
+                ArgumentContract("data_dir", "optional.text", False),
+                ArgumentContract("task_composition_ref", "optional.task-composition-ref", False),
+                ArgumentContract("human_advice", "optional.expert-advice", False),
+                ArgumentContract("expert_context", "optional.expert-context", False),
+                ArgumentContract("constraint_context", "optional.constraint-context", False),
+                ArgumentContract("workflow_parameter_rules", "optional.parameter-rules", False),
+            ),
+        ),
         "literature-to-proposal": ProtocolContract(
             "agent.schemas.protocols.ml_literature_review_to_ml_model_propose.local_typed_evidence",
             "proposal.input",

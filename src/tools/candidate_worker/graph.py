@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import cast
 
 from agent.schemas.implementor import ImplementorOutput
+from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import local_typed_evidence
@@ -16,9 +17,10 @@ from workflows.task_composition import RunTaskComposition
 
 from . import phases
 from .fanout_inputs import materialize_fanout
-from .graph_evidence import record_digest
-from .graph_models import GraphCapability, GraphNodeEvidence, GraphTrace
+from .graph_evidence import expected_nodes, record_digest
+from .graph_models import GraphNodeEvidence, GraphTrace
 from .inputs import NativeInputs
+from .interpretation import run_interpretation
 from .invocation import NativePhase, invocation_from_storage
 from .literature_phase import run_literature
 from .models import CandidateRunReceipt, CandidateRunRequest
@@ -39,32 +41,21 @@ def execute_fanout(
         request, Path(initial.workspace), composition, config, iteration=iteration
     )
     results: dict[
-        str, ProposalOutput | ImplementorOutput | ValidatorOutput | LiteratureReviewOutput
+        str,
+        ProposalOutput
+        | ImplementorOutput
+        | ValidatorOutput
+        | LiteratureReviewOutput
+        | InterpretationOutput,
     ] = {}
+    slots = {item.node_id: item for item in expected_nodes(request, initial, iteration=iteration)}
     evidence: dict[str, GraphNodeEvidence] = {}
     aborted = False
     while len(evidence) < len(definition.nodes):
         for node in definition.nodes:
             if node.id in evidence or not dependencies[node.id].issubset(evidence):
                 continue
-            selected = inputs[node.id]
-            storage = (
-                selected.storage
-                if isinstance(selected, LiteratureReviewInput)
-                else (
-                    selected.proposal.storage
-                    if node.capability == "proposal"
-                    else selected.attempt.storage
-                )
-            )
-            assert storage.local is not None
-            item = GraphNodeEvidence(
-                node_id=node.id,
-                capability=cast(GraphCapability, node.capability),
-                predecessors=tuple(sorted(dependencies[node.id])),
-                storage=storage.local.workspace,
-                state="running",
-            )
+            item = slots[node.id].model_copy(update={"state": "running", "record_path": None})
             if aborted or any(evidence[key].state != "succeeded" for key in dependencies[node.id]):
                 evidence[node.id] = item.model_copy(
                     update={
@@ -74,19 +65,35 @@ def execute_fanout(
                 )
                 break
             try:
-                phase: NativePhase
-                if node.capability == "literature":
-                    phase = "literature"
-                elif node.capability == "proposal":
-                    phase = "proposal"
-                elif node.capability == "implementation":
-                    phase = "implementation"
-                else:
-                    phase = "validation"
+                if shape.interpretation is not None and node.id == shape.interpretation.proposal:
+                    interpreted = results[shape.interpretation.interpretation]
+                    assert isinstance(interpreted, InterpretationOutput)
+                    inputs.update(
+                        materialize_fanout(
+                            request,
+                            Path(initial.workspace),
+                            composition,
+                            config,
+                            iteration=iteration,
+                            interpretation_output=interpreted,
+                        )
+                    )
+                selected = inputs[node.id]
+                storage = (
+                    selected.storage
+                    if isinstance(selected, (LiteratureReviewInput, InterpretationInput))
+                    else selected.proposal.storage
+                    if node.capability == "proposal"
+                    else selected.attempt.storage
+                )
+                phase = cast(NativePhase, node.capability)
                 context = invocation_from_storage(
                     initial, node_id=node.id, phase=phase, storage=storage, iteration=iteration
                 )
-                if phase == "literature":
+                if phase == "interpretation":
+                    assert isinstance(selected, InterpretationInput)
+                    output, path = run_interpretation(context, initial, selected, config)
+                elif phase == "literature":
                     assert isinstance(selected, LiteratureReviewInput)
                     output, path = run_literature(context, request, initial, selected)
                 elif phase == "proposal":

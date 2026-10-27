@@ -26,6 +26,7 @@ def _selected_routes(config: WorkflowLLMConfig, nodes: dict[str, str]) -> tuple[
     selected = []
     roles: tuple[tuple[str, NodeRouteRole], ...] = (
         ("literature", "lit_review"),
+        ("interpretation", "interpret"),
         ("proposal", "propose"),
         ("implementation", "implement"),
         ("validation", "validate"),
@@ -126,6 +127,7 @@ def observe_bindings(
                 {"propose", "implement", "validate_model"}
                 | ({"tune"} if "tuning" in nodes else set())
                 | ({"lit_review"} if "literature" in nodes else set())
+                | ({"interpret"} if "interpretation" in nodes else set())
             )
         ),
     )

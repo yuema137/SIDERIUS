@@ -2,10 +2,11 @@
 
 from pathlib import Path
 
+from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from workflows.attempt_storage import impl_attempt_storage
-from workflows.definition import ExternalRequest, ProtocolRequest
+from workflows.definition import ExternalRequest, ExternalSource, ProtocolRequest
 from workflows.definition.fanout import execution_families
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
@@ -16,6 +17,7 @@ from .inputs import (
     reconcile_protocol_inputs,
     validator_settings,
 )
+from .interpretation import prepare_interpretation
 from .layout import candidate_control_dir, graph_instance_dir, proposal_debug_dir
 from .literature_inputs import materialize_literature
 from .models import CandidateRunRequest
@@ -28,7 +30,8 @@ def materialize_fanout(
     config: WorkflowLLMConfig,
     *,
     iteration: int = 1,
-) -> dict[str, NativeInputs | LiteratureReviewInput]:
+    interpretation_output: InterpretationOutput | None = None,
+) -> dict[str, NativeInputs | LiteratureReviewInput | InterpretationInput]:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
     nodes = {node.id: node for node in definition.nodes}
@@ -40,16 +43,52 @@ def materialize_fanout(
     provider, model = validator_settings(config)
     externals = {item.id: item for item in definition.externals}
     used: set[str] = set()
-    result: dict[str, NativeInputs | LiteratureReviewInput] = {}
+    result: dict[str, NativeInputs | LiteratureReviewInput | InterpretationInput] = {}
+    interpreted_payload = None
+    if shape.interpretation is not None:
+        edge = shape.interpretation
+        selected, arguments = prepare_interpretation(
+            request, workspace, edge, contents, composition, iteration=iteration
+        )
+        result[edge.interpretation] = selected
+        used.add(edge.input_binding)
+        protocol = nodes[edge.proposal].request
+        assert isinstance(protocol, ProtocolRequest)
+        used.update(
+            arg.source.binding
+            for arg in protocol.arguments
+            if isinstance(arg.source, ExternalSource)
+        )
+        if interpretation_output is None:
+            declared = used | {
+                arg.source.binding
+                for node in definition.nodes
+                if isinstance(node.request, ProtocolRequest)
+                for arg in node.request.arguments
+                if isinstance(arg.source, ExternalSource)
+            }
+            if declared != set(externals):
+                raise ValueError("unused external inputs are unsupported by the candidate worker")
+            return result
+        proposal = arguments.apply(interpretation_output)
+        # Composition owns these task facts, as in the fixed native workflow.
+        proposal.task_description = composition.task_description
+        proposal.forward_contract = composition.forward_contract
+        proposal.proposal_blocks = composition.proposal_blocks
+        interpreted_payload = proposal.model_dump_json().encode()
     for family in shape.families:
         proposal_request = nodes[family.proposal].request
-        if shape.literature is not None:
+        if interpreted_payload is not None:
+            seed_binding = None
+        elif shape.literature is not None:
             seed_binding = shape.literature.seed_binding
         else:
             assert isinstance(proposal_request, ExternalRequest)
             seed_binding = proposal_request.binding
         seed, ref = materialize_proposal(
-            contents[f"external.{seed_binding}"],
+            interpreted_payload
+            if interpreted_payload is not None
+            else contents[f"external.{seed_binding}"],
             proposal_storage=StorageConfig(
                 backend="local",
                 local=LocalStorageConfig(
@@ -68,7 +107,8 @@ def materialize_fanout(
                 workspace, request.preview.execution_profile, family.proposal, iteration=iteration
             ),
         )
-        used.add(seed_binding)
+        if seed_binding is not None:
+            used.add(seed_binding)
         for implementation, validation in family.branches:
             attempt = impl_attempt_storage(
                 str(

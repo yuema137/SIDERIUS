@@ -34,6 +34,7 @@ def expected_nodes(
             directory = Path(impl_attempt_dir(str(directory), 1))
         prefix = {
             "literature": "ml_literature_review",
+            "interpretation": "interpretation",
             "proposal": "proposal",
             "implementation": "implementor",
             "validation": "validation",
@@ -199,6 +200,13 @@ def verify_graph_trace(
         is not None
     ):
         verify_literature_evidence(request, initial, trace, iteration=iteration)
+    if (
+        execution_families(
+            request.preview.document.definition, request.preview.execution_profile
+        ).interpretation
+        is not None
+    ):
+        verify_interpretation_evidence(request, initial, trace, iteration=iteration)
 
 
 def verify_literature_evidence(
@@ -296,3 +304,92 @@ def verify_literature_evidence(
         )
         if proposal != local_typed_evidence(output, proposal_input=seed):
             raise ValueError("proposal input does not match the declared literature edge")
+
+
+def verify_interpretation_evidence(
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    trace: GraphTrace,
+    *,
+    iteration: int = 1,
+) -> None:
+    """Replay the directed protocol, not task composition or native execution."""
+    from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
+    from agent.schemas.proposal import ProposalInput
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+    from workflows.definition import ProtocolRequest
+
+    from .inputs import require_storage
+    from .interpretation import read_arguments
+    from .layout import interpretation_input_path, proposal_input_path
+
+    edge = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    ).interpretation
+    assert edge is not None
+    nodes = {item.node_id: item for item in trace.nodes}
+    if nodes[edge.interpretation].state != "succeeded":
+        return
+    workspace = Path(initial.workspace)
+    contents = {}
+    for index, observation in enumerate(request.files):
+        payload = read_graph_control(
+            candidate_control_dir(workspace, iteration=iteration) / f"input_{index:03}.snapshot"
+        )
+        if hashlib.sha256(payload).hexdigest() != observation.sha256:
+            raise ValueError("interpretation captured input digest mismatch")
+        contents[observation.reference] = payload
+    selected = InterpretationInput.model_validate_json(contents[f"external.{edge.input_binding}"])
+    actual = InterpretationInput.model_validate_json(
+        read_graph_control(
+            interpretation_input_path(workspace, edge.interpretation, iteration=iteration)
+        )
+    )
+    if actual != selected or actual.iteration != iteration:
+        raise ValueError("interpretation input capture mismatch")
+    protocol = next(
+        node.request
+        for node in request.preview.document.definition.nodes
+        if node.id == edge.proposal
+    )
+    assert isinstance(protocol, ProtocolRequest)
+    arguments = read_arguments(protocol, contents)
+    for node_id, storage in (
+        (edge.interpretation, selected.storage),
+        (edge.proposal, arguments.storage),
+    ):
+        require_storage(
+            storage,
+            StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(
+                    workspace=nodes[node_id].storage,
+                    run_name=request.run_name,
+                ),
+            ),
+        )
+    path = nodes[edge.interpretation].record_path
+    assert path is not None
+    with open_identity_file(path, require_no_follow=True) as handle:
+        payload = handle.read()
+    if hashlib.sha256(payload).hexdigest() != nodes[edge.interpretation].record_sha256:
+        raise ValueError("interpretation record changed while verifying")
+    output = InterpretationOutput.model_validate_json(payload)
+    if nodes[edge.proposal].state == "succeeded":
+        proposal = ProposalInput.model_validate_json(
+            read_graph_control(
+                proposal_input_path(
+                    workspace, request.preview.execution_profile, edge.proposal, iteration=iteration
+                )
+            )
+        )
+        expected = arguments.apply(output)
+        # These task facts are checked by child composition/materialize_proposal.
+        # Parent never executes task plugins or infers expectations from child fields.
+        composed_fields = {"task_description", "forward_contract", "proposal_blocks"}
+        if (
+            proposal.model_dump(exclude=composed_fields)
+            != expected.model_dump(exclude=composed_fields)
+            or proposal.task_description != selected.task_description
+        ):
+            raise ValueError("proposal input does not match the declared interpretation edge")

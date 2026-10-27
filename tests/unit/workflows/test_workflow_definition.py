@@ -200,23 +200,33 @@ def test_catalog_matches_exact_native_protocol_signatures():
     from agent.llm_settings import ProviderName
     from agent.schemas.constraint_disclosure import ConstraintContext
     from agent.schemas.hyperparam_tuning import (
+        ExpertAdviceInput,
         HyperparamTuningInput,
         HyperparamTuningOutput,
         TaskCompositionRef,
     )
     from agent.schemas.implementor import ImplementorInput, ImplementorOutput
+    from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
     from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
-    from agent.schemas.proposal import ProposalInput, ProposalOutput
+    from agent.schemas.parameter_rules import ParameterRules
+    from agent.schemas.proposal import ExpertContextItem, ProposalInput, ProposalOutput
     from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
         local_typed_evidence,
     )
     from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
     from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
+    from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
     from agent.schemas.storage import StorageConfig
     from agent.schemas.validator import ValidatorInput, ValidatorOutput
     from workflows.candidate_training_settings import CandidateTrainingSettings
 
     native = {
+        "interpretation.input": InterpretationInput,
+        "interpretation.output": InterpretationOutput,
+        "optional.text": str | None,
+        "optional.expert-advice": ExpertAdviceInput | None,
+        "optional.expert-context": list[ExpertContextItem] | None,
+        "optional.parameter-rules": ParameterRules | None,
         "literature.input": LiteratureReviewInput,
         "literature.output": LiteratureReviewOutput,
         "tuning.input": HyperparamTuningInput,
@@ -240,6 +250,7 @@ def test_catalog_matches_exact_native_protocol_signatures():
             cls = native[contract]
             assert CONTRACTS[contract] == f"{cls.__module__}.{cls.__name__}"
     for key, function in [
+        ("interpretation-to-proposal", local_full_context),
         ("literature-to-proposal", local_typed_evidence),
         ("proposal-to-implementation", local_full_spec),
         ("implementation-to-validation", local_all_fields),
@@ -248,7 +259,11 @@ def test_catalog_matches_exact_native_protocol_signatures():
         assert descriptor.owner == f"{function.__module__}.{function.__name__}"
         signature = inspect.signature(function)
         hints = get_type_hints(function)
-        assert tuple(signature.parameters) == tuple(arg.name for arg in descriptor.arguments)
+        if key == "interpretation-to-proposal":
+            # This profile exposes an explicit subset, not an alternative adapter.
+            assert {arg.name for arg in descriptor.arguments} <= signature.parameters.keys()
+        else:
+            assert tuple(signature.parameters) == tuple(arg.name for arg in descriptor.arguments)
         assert hints["return"] is native[descriptor.output]
         for argument in descriptor.arguments:
             assert hints[argument.name] == native[argument.contract]

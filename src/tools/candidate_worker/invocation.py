@@ -11,7 +11,7 @@ from workflows.run_context import bind_agent_run_context
 from .inputs import NativeInputs
 from .models import CandidateRunReceipt, CandidateRunRequest
 
-NativePhase = Literal["proposal", "implementation", "validation", "literature"]
+NativePhase = Literal["proposal", "implementation", "validation", "literature", "interpretation"]
 
 
 @dataclass(frozen=True)
