@@ -192,7 +192,7 @@
       facts($('operation-facts'), [['Operation UUID', status.operation_id], ['Kind', status.kind], ['Observed at', status.observed_at],
         ['Process observation', `${status.process.status}: ${status.process.reason || '(no reason supplied)'}`], ['Native ID', status.native_id],
         ['Validation passed', status.validation_passed === null ? 'Not available' : String(status.validation_passed)], ['Reason', status.reason || '(none)'], ['Native receipt available', String(status.receipt_available)]]);
-      if (status.kind === 'candidate' && status.state === 'completed' && graphResultsAttemptedFor !== id) {
+      if (['candidate', 'candidate_loop_resume'].includes(status.kind) && status.state === 'completed' && graphResultsAttemptedFor !== id) {
         graphResultsAttemptedFor = id;
         try {
           const projection = await api(`operations/${id}/graph-results`);

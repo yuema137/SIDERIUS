@@ -3,9 +3,9 @@
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
-from workflows.definition import AuthoredWorkflowDocument
+from workflows.definition import AuthoredLoop, AuthoredWorkflowDocument
 from workflows.definition.draft import DraftInspection, WorkflowDraft
 from workflows.definition.models import Source
 from workflows.definition.source import SourceDiagnostic
@@ -28,16 +28,30 @@ class Project(Model):
     recovery_directory: Path
 
 
+def _bounded_source(value: str) -> str:
+    if len(value.encode("utf-8")) > MAX_SOURCE_BYTES:
+        raise ValueError("editor source exceeds 32 KiB UTF-8")
+    return value
+
+
+BoundedSource = Annotated[str, AfterValidator(_bounded_source)]
+
+
 class SourceProposal(Model):
     kind: Literal["source"]
-    source: str
+    source: BoundedSource
 
-    @field_validator("source")
-    @classmethod
-    def bounded(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > MAX_SOURCE_BYTES:
-            raise ValueError("editor source exceeds 32 KiB UTF-8")
-        return value
+
+class LoopProposal(Model):
+    """Replace only the authored loop of one complete source declaration.
+
+    Parsing the exact proposal source keeps every other authored value typed as
+    written; a browser JSON document cannot distinguish ``2.0`` from ``2``.
+    """
+
+    kind: Literal["loop"]
+    source: BoundedSource
+    loop: AuthoredLoop | None
 
 
 class DocumentProposal(Model):
@@ -63,7 +77,11 @@ class DraftView(Model):
 class ReviewRequest(Model):
     expected_sha256: Digest
     proposal: Annotated[
-        SourceProposal | DocumentProposal | DraftProposal | TaskReferenceUpdateProposal,
+        SourceProposal
+        | LoopProposal
+        | DocumentProposal
+        | DraftProposal
+        | TaskReferenceUpdateProposal,
         Field(discriminator="kind"),
     ]
     task_reference_selection: TaskReferenceUpdateProposal | None = Field(
@@ -136,6 +154,7 @@ class PortInventoryEntry(Model):
 
 class SourceView(Model):
     training: TrainingInspector | None = None
+    loop_template: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
     project_id: str
     source_path: str
     source: str
@@ -152,6 +171,7 @@ class ReviewView(Model):
         default=None, exclude_if=lambda value: value is None
     )
     training: TrainingInspector | None = None
+    loop_template: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
     binding_options: tuple[BindingOptions, ...]
     port_inventory: tuple[PortInventoryEntry, ...] = ()
     source: str

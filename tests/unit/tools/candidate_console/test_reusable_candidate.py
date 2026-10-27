@@ -34,6 +34,10 @@ def console_config(console_config, tmp_path):
 
 @pytest.fixture
 def captured(published, console_config, monkeypatch):
+    return _captured(published, console_config, monkeypatch)
+
+
+def _captured(published, console_config, monkeypatch):
     request, envelope, _retained = published
     root = Path(request.project_root)
     recovery = root / "recovery"
@@ -310,3 +314,93 @@ def test_output_restriction_direction_and_startup_root_scope(captured):
     )
     with pytest.raises(ValueError, match="within both"):
         CandidateConsole(config.model_copy(update={"operation_store": bad_store}))
+
+
+def test_launch_review_refuses_a_request_loop_absent_from_the_capture(captured, monkeypatch):
+    """Fails if launch review reports a loop for a loop-free capture, or accepts a
+    request loop absent from the capture. The positive end-to-end statement is
+    ``test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops``."""
+    from workflows.definition import AuthoredLoop
+
+    adapter, project, choice, _ = captured
+    selected = adapter.select(project.project_id, choice)
+    plain = adapter.review(project.project_id, selected)
+    assert plain.loop is None and '"loop"' not in plain.model_dump_json()
+
+    loop = AuthoredLoop.model_validate(
+        {
+            "final_iteration": 2,
+            "feedback": {
+                "source": {"kind": "result", "node": "fit", "port": "result"},
+                "target": "interpret",
+                "protocol": "tuning-to-interpretation",
+                "history": "native-research/v1",
+            },
+        }
+    )
+    task, inspected, operation = adapter._operation(project.project_id, selected, uuid4())
+    document = operation.request.preview.document
+    preview = operation.request.preview.model_copy(
+        update={
+            "document": document.model_copy(
+                update={"definition": document.definition.model_copy(update={"loop": loop})}
+            )
+        }
+    )
+    looped = operation.model_copy(
+        update={"request": operation.request.model_copy(update={"preview": preview})}
+    )
+    monkeypatch.setattr(adapter, "_operation", lambda *args: (task, inspected, looped))
+    with pytest.raises(OperationFailure, match="research loop differs from captured"):
+        adapter.review(project.project_id, selected)
+
+
+@pytest.fixture
+def looped_capture(reusable, direct_child, console_config, monkeypatch):
+    """A real five-node interpretation source with an authored loop and stop conditions,
+    captured through the same preparation child as every reusable capture."""
+    from tests.browser.workflow_editor_server import interpretation_profile_source
+    from tools.candidate_prepare import prepare_reusable_candidate, select_reusable_preparation
+    from workflows.definition import parse_workflow_source, render_workflow_source
+
+    document = parse_workflow_source(interpretation_profile_source())
+    raw = document.model_dump(mode="json")
+    raw["definition"]["task"] = parse_workflow_source(
+        Path(reusable.source_path).read_text()
+    ).definition.task.model_dump(mode="json")
+    raw["definition"]["loop"]["final_iteration"] = 4
+    raw["definition"]["loop"]["stop_conditions"] = [
+        {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85},
+        {"kind": "no_improvement", "completed_bodies": 2},
+    ]
+    source = Path(reusable.source_path)
+    source.write_text(render_workflow_source(type(document).model_validate_json(json.dumps(raw))))
+    request = reusable.model_copy(
+        update={"expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+    )
+    receipt = prepare_reusable_candidate(request)
+    assert receipt.status == "prepared", receipt.error
+    envelope = Path(receipt.envelope)
+    published = (request, envelope, select_reusable_preparation(receipt.envelope))
+    return _captured(published, console_config, monkeypatch)
+
+
+def test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops(looped_capture):
+    """Fails if the launch review of a really captured looped source loses the loop,
+    its final_iteration or its stop conditions on the way from source to the request
+    the worker executes (nothing on either side is patched)."""
+    adapter, project, choice, _ = looped_capture
+    review = adapter.review(project.project_id, adapter.select(project.project_id, choice))
+    assert json.loads(review.model_dump_json())["loop"] == {
+        "final_iteration": 4,
+        "feedback": {
+            "source": {"kind": "result", "node": "fit", "port": "result"},
+            "target": "interpret",
+            "protocol": "tuning-to-interpretation",
+            "history": "native-research/v1",
+        },
+        "stop_conditions": [
+            {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85},
+            {"kind": "no_improvement", "completed_bodies": 2},
+        ],
+    }

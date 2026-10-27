@@ -106,6 +106,27 @@ It changes no historical prompts, training defaults or paper execution paths.
 It does not promise that a future graph executor reproduces those paths; that
 requires separate integration and experiment-owned historical configuration.
 
+## Authored loop stop conditions
+
+`AuthoredLoop(final_iteration, feedback, stop_conditions=())` optionally declares
+deterministic hard criteria, a tuple of the discriminated `StopCondition` union
+(`kind` is the discriminator):
+
+| Constructor | Fields | Meaning |
+| --- | --- | --- |
+| `MetricThresholdStop` | `kind="metric_threshold"`, `metric_id: str` (non-empty, required), `threshold: float` (finite) | stop once the loop incumbent is at least `threshold` under the run metric's direction |
+| `NoImprovementStop` | `kind="no_improvement"`, `completed_bodies: int` (> 0, < `final_iteration`) | stop after that many consecutive completed bodies without a strict incumbent improvement |
+| `JudgeStop` | `kind="judge"` | reserved; always refused ("judge stop conditions are deferred to the next stage") |
+
+Direction is never declared: it comes from the run's `MetricSpec`, and
+`metric_id` must equal that spec's opaque id at execution time. Validation refuses
+more than one condition of the same kind and a `completed_bodies` that cannot be
+reached before the final iteration. Conditions are any-of in declared order (a
+disjunctive stop, not a graph join). An empty tuple is omitted from serialization
+and canonical source, so the declaration digest and source bytes of a loop without
+conditions are unchanged. Execution semantics, precedence and readback belong to
+the candidate-worker contract ("Deterministic stop conditions").
+
 ## Static Python source bridge
 
 `parse_workflow_source(source: str) -> AuthoredWorkflowDocument` and
@@ -122,7 +143,9 @@ from this explicit allowlist: `TaskReferences`, `ExternalBinding`,
 `ProtocolRequest`, `NodeInstance`, `WorkflowDefinition`, `NodePosition`,
 `WorkflowDocument`, `ReusableTaskReferences`, `ManagedCandidateBinding`,
 `CandidatePreparationOptions`, `ReusableWorkflowDefinition`,
-`ReusableWorkflowDocument`. Imported unused constructors are allowed; referenced
+`ReusableWorkflowDocument`, plus the loop constructors `AuthoredLoop`, `LoopFeedback`,
+`MetricThresholdStop`, `NoImprovementStop` and the reserved, always-refused
+`JudgeStop`. Imported unused constructors are allowed; referenced
 constructors must be imported. Aliases, wildcard and relative imports fail.
 
 Only imported bare constructors with unique known keyword arguments, literal

@@ -8,6 +8,19 @@
     'native-literature-candidate/v1': ' Native literature review feeds one proposal, implementation and validation.',
     'native-interpretation-candidate/v1': ' Native interpretation feeds one proposal, implementation, validation and tuning.',
   };
+  // The reviewed request's authored loop bound decides how many bodies a launch may run.
+  function researchLoop(value) {
+    if (!value.loop) return 'Research loop: none (one workflow body).';
+    const capability = id => window.editorCapabilityPresentation.label(value.nodes.find(item => item[0] === id)?.[1]);
+    const edge = value.loop.feedback;
+    const stops = (value.loop.stop_conditions || []).map(stopCondition);
+    return `Research loop: up to ${value.loop.final_iteration} iteration${value.loop.final_iteration === 1 ? '' : 's'} · feedback ${capability(edge.source.node)} ${edge.source.node} → ${capability(edge.target)} ${edge.target}${stops.length ? ' · stops early when ' + stops.join(' or ') : ''}.`;
+  }
+  function stopCondition(condition) {
+    if (condition.kind === 'metric_threshold') return `${condition.metric_id} reaches ${condition.threshold} (task metric direction)`;
+    if (condition.kind === 'no_improvement') return `${condition.completed_bodies} completed bod${condition.completed_bodies === 1 ? 'y' : 'ies'} pass without improvement`;
+    return `unsupported condition ${condition.kind}`;
+  }
   let editor = window.workflowEditor.state, generation = 0, selected = null, review = null;
   let handoffGeneration = -1;
   let tasksRevision = null, cursor = null, busy = false, intent = null, terminal = false, refusedInitial = false, storageProblem = false;
@@ -144,11 +157,12 @@
       const nodes = value.nodes.map(item => item[0]).join(value.execution_profile ? ', ' : ' → ');
       $('summary').textContent = `${value.run_name} · ${value.task_label} · Captured workflow.${profile} Nodes: ${nodes}. ${value.credential_readiness.ready ? 'Configured credentials ready (presence only).' : value.credential_readiness.instructions.join(' ')}`;
       const routes = value.routes.map(route => `${route.node_id}: ${route.provider || 'unresolved'} / ${route.model || 'unresolved'}`).join('\n');
-      $('details').textContent = `Task manifest: ${value.task_manifest}\nDataset: ${value.data_root}\nLLM config: ${value.llm_config_file}\nInputs: ${value.inputs}\nWorkspace: ${value.workspace}\nRoutes:\n${routes}\nTimeout: ${value.candidate_timeout_seconds} s\nNetwork: ${value.network}\nDevices: ${value.devices.join(', ') || 'none'}\nEnvironment names: ${value.environment_names.join(', ') || 'none'}\nRead-only paths:\n${value.read_only.join('\n')}\nOutput types: ${value.allowed_output_types?.join(', ') || 'unconstrained'}\nProposal advice: ${value.proposal_advice || 'none'}\nImplementation advice: ${value.implementation_advice || 'none'}\nValidation advice: ${value.validation_advice || 'none'}\nSource: ${value.source_path}\nSource version: ${value.source_sha256}\nComposition: ${value.composition_fingerprint}\nRequest: ${value.request_digest}`;
+      $('details').textContent = `Task manifest: ${value.task_manifest}\nDataset: ${value.data_root}\nLLM config: ${value.llm_config_file}\nInputs: ${value.inputs}\nWorkspace: ${value.workspace}\nRoutes:\n${routes}\nTimeout: ${value.candidate_timeout_seconds} s\nNetwork: ${value.network}\nDevices: ${value.devices.join(', ') || 'none'}\nEnvironment names: ${value.environment_names.join(', ') || 'none'}\nRead-only paths:\n${value.read_only.join('\n')}\nOutput types: ${value.allowed_output_types?.join(', ') || 'unconstrained'}\nProposal advice: ${value.proposal_advice || 'none'}\nImplementation advice: ${value.implementation_advice || 'none'}\nValidation advice: ${value.validation_advice || 'none'}\nSource: ${value.source_path}\nSource version: ${value.source_sha256}\nComposition: ${value.composition_fingerprint}\nRequest: ${value.request_digest}\n${researchLoop(value)}`;
       if (value.literature_settings && Object.keys(value.literature_settings).length) {
         $('details').textContent += '\nCaptured literature settings (omitted fields use native defaults):\n' + JSON.stringify(value.literature_settings, null, 2);
       }
       const workspace = document.createElement('p'); workspace.textContent = 'Output workspace: ' + value.workspace; $('summary').append(workspace);
+      const loop = document.createElement('p'); loop.id = 'capture-loop'; loop.textContent = researchLoop(value); $('summary').append(loop);
       const routeSummary = document.createElement('p'); routeSummary.textContent = 'Model routes: ' + value.routes.map(route => `${route.node_id} → ${route.provider || '?'} / ${route.model || '?'}`).join('; '); $('summary').append(routeSummary);
       status('Capture reviewed. Launch runs the captured stages, inputs and configured model routes.');
     } catch (error) { if (!error.stale && current(version, revision)) status(error.message); }

@@ -21,7 +21,7 @@ from .test_training import training_request as training_request
 from .test_training import training_runner as training_runner
 
 
-def loop_request(prepared, final_iteration=2):
+def loop_request(prepared, final_iteration=2, stop_conditions=()):
     request = graph_training_request(prepared)
     definition = request.preview.document.definition.model_copy(
         update={
@@ -33,6 +33,7 @@ def loop_request(prepared, final_iteration=2):
                     protocol="tuning-to-interpretation",
                     history="native-research/v1",
                 ),
+                stop_conditions=stop_conditions,
             )
         }
     )
@@ -374,3 +375,232 @@ def test_fixed_profile_readback_rejects_loop_stopped_status(request, fixture, st
             workspace=Path(launched.workspace),
             receipt=stopped,
         )
+
+
+def run_metric(prepared):
+    from workflows.task_composition import compose_run_task_bindings
+
+    return compose_run_task_bindings(prepared.preview.document.definition.task.manifest).metric.spec
+
+
+def scored_bodies(monkeypatch, scores, *, fail_at=None, on_body=None):
+    """Per-body valid formal scores by managed slot; everything else stays the loop double."""
+    from tools.candidate_worker import training
+
+    real = training.HyperparamTuningAgent.run
+
+    def run(self, value):
+        output = real(self, value)
+        iteration = next(
+            i for i in range(1, 10) if f"iteration_{i:03d}" in value.storage.local.workspace
+        )
+        if on_body is not None:
+            on_body(iteration)
+        update = {"best_valid_formal_denoising_score": scores[iteration - 1]}
+        if iteration == fail_at:
+            update |= {"termination_reason": "infrastructure_abort", "status": "failed"}
+        return output.model_copy(update=update)
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", run)
+
+
+def threshold_for(prepared):
+    """A threshold the (low, high) pair straddles under the run's declared direction."""
+    metric = run_metric(prepared)
+    if metric.direction == "higher":
+        return metric, 0.8, (0.5, 0.9)
+    return metric, 0.6, (0.9, 0.4)
+
+
+def test_met_threshold_completes_before_limit_and_beats_a_pending_stop(
+    prepared, loop_tuner, monkeypatch
+):
+    from tools.candidate_worker.loop_models import LoopStop
+    from tools.candidate_worker.loop_stop import MetricThresholdReason
+    from tools.candidate_worker.models import CandidateRunReceipt
+    from workflows.definition import MetricThresholdStop
+
+    metric, threshold, (low, high) = threshold_for(prepared)
+    request = loop_request(
+        prepared,
+        final_iteration=4,
+        stop_conditions=(MetricThresholdStop(metric_id=metric.id, threshold=threshold),),
+    )
+    control = Path(request.preview.document.definition.task.workspace) / "candidate_run"
+
+    def stop_during_second(iteration):
+        if iteration == 2:
+            launched = CandidateRunReceipt.model_validate_json(
+                (control / "launch.json").read_bytes()
+            )
+            (control / "stop.json").write_text(
+                LoopStop(
+                    run_id=launched.run_id, declaration_digest=launched.declaration_digest
+                ).model_dump_json()
+            )
+
+    scored_bodies(monkeypatch, (low, high, low, low), on_body=stop_during_second)
+    receipt = launch_candidate(request)
+    # A pending Stop would yield "stopped" if read before the completed-body evaluation.
+    assert receipt.status == "completed", receipt.error
+    assert receipt.loop_trace.attempted_iterations == 2
+    assert not (control / "iteration_003").exists()
+    expected = MetricThresholdReason(
+        condition_index=0,
+        iteration=2,
+        metric_id=metric.id,
+        direction=metric.direction,
+        threshold=threshold,
+        incumbent=high,
+        incumbent_iteration=2,
+    )
+    assert receipt.loop_trace.stop_reason == expected
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    assert len(verify_loop(request, parent, receipt)) == 2
+    # Readback re-derives the reason: a tampered or missing value is refused.
+    for trace in (
+        receipt.loop_trace.model_copy(
+            update={"stop_reason": expected.model_copy(update={"incumbent": low})}
+        ),
+        receipt.loop_trace.model_copy(update={"stop_reason": None}),
+    ):
+        with pytest.raises(ValueError, match="stop reason disagrees"):
+            verify_loop(request, parent, receipt.model_copy(update={"loop_trace": trace}))
+
+
+def test_condition_met_on_final_body_completes_at_limit_without_reason(
+    prepared, loop_tuner, monkeypatch
+):
+    from workflows.definition import MetricThresholdStop
+
+    metric, threshold, scores = threshold_for(prepared)
+    request = loop_request(
+        prepared,
+        stop_conditions=(MetricThresholdStop(metric_id=metric.id, threshold=threshold),),
+    )
+    scored_bodies(monkeypatch, scores)
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    # The final limit wins its boundary; the trace is byte-identical to a condition-free loop.
+    assert receipt.loop_trace.model_dump_json() == '{"attempted_iterations":2}'
+    verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
+
+
+def test_failed_body_never_completes_by_condition(prepared, loop_tuner, monkeypatch):
+    from workflows.definition import MetricThresholdStop
+
+    metric, threshold, (_, high) = threshold_for(prepared)
+    request = loop_request(
+        prepared,
+        final_iteration=3,
+        stop_conditions=(MetricThresholdStop(metric_id=metric.id, threshold=threshold),),
+    )
+    scored_bodies(monkeypatch, (high, high, high), fail_at=1)
+    receipt = launch_candidate(request)
+    assert receipt.status == "failed"
+    assert not (Path(receipt.workspace) / "candidate_run/iteration_002").exists()
+    assert receipt.loop_trace.stop_reason is None
+    verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
+
+
+@pytest.mark.parametrize(
+    ("final_iteration", "leading"),
+    [
+        (3, ()),
+        # Review N2: an earlier no_improvement (k=1 fires at body 2) or a one-body limit
+        # would otherwise hide the mismatch until, or past, the end of the run.
+        (3, ("no_improvement",)),
+        (1, ()),
+    ],
+)
+def test_mismatched_threshold_metric_is_refused_before_any_body_is_dispatched(
+    prepared, loop_tuner, monkeypatch, final_iteration, leading
+):
+    """Review N1: fails if the identity check only runs after body 1 trained and committed."""
+    from workflows.definition import MetricThresholdStop, NoImprovementStop
+
+    _, threshold, (low, _) = threshold_for(prepared)
+    conditions = (
+        *(NoImprovementStop(completed_bodies=1) for _ in leading),
+        MetricThresholdStop(metric_id="undeclared_metric", threshold=threshold),
+    )
+    request = loop_request(prepared, final_iteration=final_iteration, stop_conditions=conditions)
+    dispatched = []
+    scored_bodies(monkeypatch, (low, low, low), on_body=dispatched.append)
+    receipt = launch_candidate(request)
+    assert receipt.status == "failed"
+    assert f"stop condition {len(leading)} (metric_threshold)" in receipt.error
+    assert "'undeclared_metric'" in receipt.error
+    assert dispatched == []
+    # Only the launch capture exists: no body slot, native record or tuner workspace.
+    written = {
+        p.relative_to(receipt.workspace).parts[:2] for p in Path(receipt.workspace).rglob("*")
+    }
+    assert not [
+        parts for parts in written if parts[0] != "candidate_run" or "iteration" in parts[-1]
+    ]
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        "native-proposal-fanout/v1",
+        "native-proposal-families/v1",
+        "native-literature-candidate/v1",
+        None,  # the fixed single-candidate profile
+    ],
+)
+def test_loop_on_unsupported_profile_is_refused_before_record_and_dispatch(
+    prepared, tmp_path, monkeypatch, profile
+):
+    """Gap G2 (R1): only the native interpretation profile may launch an authored loop.
+
+    Fails if launch admission (``fresh_preview`` in ``submit_operation``) stops refusing
+    a looped declaration on another profile: a durable record, the active marker,
+    the run workspace and a worker spawn would then appear. The control submission
+    proves the same loop and credentials dispatch on the supported profile.
+    ``admit_loop`` and each profile's shape check in ``preview_workflow`` refuse these
+    declarations independently, so removing only one of them stays green.
+    """
+    from unittest.mock import Mock
+    from uuid import uuid4
+
+    from tools.candidate_operations import (
+        CandidateOperation,
+        OperationStoreConfig,
+        submit_operation,
+    )
+    from tools.candidate_operations.models import OperationFailure
+
+    supported = loop_request(prepared)
+    assert supported.preview.execution_profile == "native-interpretation-candidate/v1"
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "state"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    spawn = Mock()
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", spawn)
+    unsupported = supported.model_copy(
+        update={"preview": supported.preview.model_copy(update={"execution_profile": profile})}
+    )
+    submission = CandidateOperation(request_id=uuid4(), request=unsupported)
+    with pytest.raises(OperationFailure) as refused:
+        submit_operation(
+            config, submission, launch_environment={"OPENAI_API_KEY": "offline-test-key"}
+        )
+    assert refused.value.detail.code == "candidate_preflight"
+    assert refused.value.detail.message == "candidate inputs or routes changed; review again"
+    state = Path(config.state_root)
+    assert not (state / "operations" / str(submission.request_id)).exists()
+    assert not (state / "active.json").exists()
+    assert not Path(unsupported.preview.document.definition.task.workspace).exists()
+    spawn.assert_not_called()
+
+    handle = submit_operation(
+        config,
+        CandidateOperation(request_id=uuid4(), request=supported),
+        launch_environment={"OPENAI_API_KEY": "offline-test-key"},
+    )
+    assert handle.observation == "starting"
+    spawn.assert_called_once()

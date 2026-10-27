@@ -222,6 +222,26 @@ def test_completed_pause_resumes_actual_body_in_new_process(
     historical = read_operation(config, first_id)
     assert historical.receipt.status == "paused"
     assert historical.successor_operation_id == next_id
+    # Console projections resolve the root through the operations owner, never directories:
+    # the resumed segment keeps the root's bound and shows every verified body so far.
+    from types import SimpleNamespace
+
+    from tools.candidate_console.graph_results import read_graph_results
+    from tools.candidate_console.models import LoopStatusView
+    from tools.candidate_console.service import loop_status
+
+    assert loop_status(config, historical) == LoopStatusView(
+        final_iteration=3, attempted_iterations=1
+    )
+    assert loop_status(config, second) == LoopStatusView(final_iteration=3, attempted_iterations=3)
+    console = SimpleNamespace(operation_store=config)
+    paused_results = read_graph_results(console, first_id)
+    resumed_results = read_graph_results(console, next_id)
+    assert paused_results.available and resumed_results.available
+    assert [body.iteration for body in paused_results.bodies] == [1]
+    assert [body.iteration for body in resumed_results.bodies] == [1, 2, 3]
+    # Body 1 is the same verified record whether read through the root or the segment.
+    assert resumed_results.bodies[0] == paused_results.bodies[0]
     interpreted = InterpretationInput.model_validate_json(
         interpretation_input_path(workspace, "interpret", iteration=2).read_bytes()
     )
@@ -435,3 +455,190 @@ def test_uncertain_cleanup_never_publishes_resumable_pause(
     assert (control / "body.json").is_file()
     assert not (control / "iteration_002").exists()
     assert "cleanup" in receipt.error or "clean supervision" in receipt.error
+
+
+def test_no_improvement_window_spans_paused_segments(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    from tools.candidate_worker import training
+    from tools.candidate_worker.loop_evidence import verify_loop
+    from tools.candidate_worker.loop_stop import NoImprovementReason
+    from tools.candidate_worker.models import CandidateRunReceipt
+    from workflows.definition import NoImprovementStop
+
+    # Every body scores 0.75: body 1 improves, bodies 2 and 3 tie (non-improving).
+    request = loop_request(
+        prepared, final_iteration=5, stop_conditions=(NoImprovementStop(completed_bodies=2),)
+    )
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    root_id, next_id = uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_at_second(self, value):
+        output = real_tune(self, value)
+        if "iteration_002" in value.storage.local.workspace:
+            request_loop_pause(config, root_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_at_second)
+    submit_operation(
+        config, CandidateOperation(request_id=root_id, request=request), launch_environment=env
+    )
+    process_segments()
+    paused = read_operation(config, root_id).receipt
+    assert paused.status == "paused" and paused.loop_trace.attempted_iterations == 2
+    assert paused.loop_trace.stop_reason is None
+    review = review_loop_resume(config, root_id)
+    submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=root_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment=env,
+    )
+    process_segments()
+    resumed = read_operation(config, next_id).receipt
+    # A segment-local window would see one non-improving body at 3 and run body 4.
+    assert resumed.status == "completed", resumed
+    assert resumed.loop_trace.attempted_iterations == 3
+    # Equal to the uninterrupted run's reason: the window and incumbent span segments.
+    assert resumed.loop_trace.stop_reason == NoImprovementReason(
+        condition_index=0,
+        iteration=3,
+        k=2,
+        non_improving_bodies=2,
+        last_improvement_iteration=1,
+        incumbent=0.75,
+    )
+    root = Path(resumed.workspace) / "candidate_run"
+    assert not (root / "iteration_004").exists()
+    launched = CandidateRunReceipt.model_validate_json((root / "launch.json").read_bytes())
+    assert len(verify_loop(request, launched, resumed)) == 3
+    # A condition-completed run is not a resumable checkpoint.
+    with pytest.raises(OperationFailure):
+        review_loop_resume(config, next_id)
+
+
+def test_resumed_segment_reports_run_total_tokens_from_both_segments(
+    prepared,
+    loop_tuner,
+    native_runner,
+    interpretation_provider,
+    process_segments,
+    monkeypatch,
+    tmp_path,
+):
+    """Gap G4: a successor's reported usage is the root run's whole ledger.
+
+    Every provider double appends one row with fixed counts to the ledger its
+    production run context binds, and one line to a test-owned witness. Fails if
+    the successor token read is segment-local (body 2 only, or the empty
+    continuation directory), if a segment binds rows to another run identity
+    (rows become invalid), or if the operations read path stops redirecting a
+    ``candidate_loop_resume`` record to its root.
+    """
+    from tools.candidate_worker import training
+
+    witness = tmp_path / "reported_calls.log"
+
+    def report(bridge):
+        context = bridge.context
+        assert context is not None, "provider called without a bound run context"
+        row = {
+            "ts": "2026-10-27T10:00:00Z",
+            "run_id": context["run_id"],
+            "run_name": context["run_name"],
+            "label": "response",
+            "provider": "openai",
+            "model": "fixture-model",
+            "served_model": None,
+            "tokens": {"prompt": 11, "completion": 2, "total": 13},
+            "chars": {"system": 0, "user": 0, "total": 0},
+        }
+        with (Path(context["workspace"]) / "token_usage.jsonl").open("a") as ledger:
+            ledger.write(json.dumps(row) + "\n")
+        with witness.open("a") as stream:
+            stream.write("call\n")
+
+    def reporting(method):
+        def call(self, *args, **kwargs):
+            result = method(self, *args, **kwargs)
+            report(self)
+            return result
+
+        return call
+
+    for owner in (native_runner, interpretation_provider):
+        for name in ("generate", "generate_text"):
+            if name in vars(owner):  # wrap each provider method exactly once
+                monkeypatch.setattr(owner, name, reporting(vars(owner)[name]))
+
+    request = loop_request(prepared, final_iteration=2)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    first_id, next_id = uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_after_body_one(self, value):
+        output = real_tune(self, value)
+        if "iteration_001" in value.storage.local.workspace:
+            request_loop_pause(config, first_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_after_body_one)
+    submit_operation(
+        config, CandidateOperation(request_id=first_id, request=request), launch_environment=env
+    )
+    process_segments()
+    first = read_operation(config, first_id)
+    assert first.receipt is not None and first.receipt.status == "paused", first
+    first_segment_calls = len(witness.read_text().splitlines())
+    assert first_segment_calls > 0
+
+    review = review_loop_resume(config, first_id)
+    submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=first_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment=env,
+    )
+    process_segments()
+    second = read_operation(config, next_id)
+    assert second.receipt is not None and second.receipt.status == "completed", second
+    all_calls = len(witness.read_text().splitlines())
+    assert all_calls > first_segment_calls  # the successor segment reported usage too
+
+    segment = read_operation_tokens(config, next_id)
+    assert segment.availability == "available"
+    assert segment.reason == "reported_responses"
+    assert segment.run_id == first.receipt.run_id
+    assert segment.quality.invalid_rows == 0 and not segment.quality.partial
+    assert [
+        (
+            group.provider,
+            group.requested_model,
+            group.response_rows,
+            group.reported_input_tokens,
+            group.reported_output_tokens,
+            group.reported_total_tokens,
+        )
+        for group in segment.groups
+    ] == [("openai", "fixture-model", all_calls, 11 * all_calls, 2 * all_calls, 13 * all_calls)]
+    root = read_operation_tokens(config, first_id)
+    assert segment.model_dump(exclude={"observed_at"}) == root.model_dump(exclude={"observed_at"})

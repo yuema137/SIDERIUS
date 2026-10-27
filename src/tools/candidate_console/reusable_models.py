@@ -9,6 +9,7 @@ from agent.schemas.output_types import OutputTypeName
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare import ReusablePreparedSelection
 from tools.workflow_preview.models import PreviewModel
+from workflows.definition import AuthoredLoop
 
 from .models import CredentialReadiness, RouteView
 
@@ -54,6 +55,8 @@ class ReusableCaptureReview(PreviewModel):
     literature_settings: dict[str, dict[str, JsonValue]] = Field(
         default_factory=dict, exclude_if=lambda value: not value
     )
+    # The executed request's authored loop; absent means one body per launch.
+    loop: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
     selection: ReusableCaptureSelection
     request_digest: str
     source_path: str

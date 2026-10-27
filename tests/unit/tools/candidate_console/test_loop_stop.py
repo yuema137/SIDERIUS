@@ -19,6 +19,7 @@ from tools.candidate_operations.models import (
     ProcessObservation,
 )
 from tools.candidate_worker.loop_models import LoopStop, LoopTrace
+from tools.candidate_worker.loop_stop import MetricThresholdReason, NoImprovementReason
 from tools.candidate_worker.models import CandidateRunReceipt
 from workflows.definition import AuthoredLoop, LoopFeedback, ResultSource
 
@@ -153,22 +154,95 @@ def _snapshot(operation_id, receipt):
             ),
             {"final_iteration": 3, "attempted_iterations": 1},
         ),
+        (
+            4,
+            CandidateRunReceipt.model_construct(
+                run_id="f" * 32,
+                status="completed",
+                loop_trace=LoopTrace(
+                    attempted_iterations=3,
+                    stop_reason=MetricThresholdReason(
+                        condition_index=0,
+                        iteration=3,
+                        metric_id="accuracy",
+                        direction="higher",
+                        threshold=0.85,
+                        incumbent=0.9,
+                        incumbent_iteration=2,
+                    ),
+                ),
+            ),
+            {
+                "final_iteration": 4,
+                "attempted_iterations": 3,
+                "stop_reason": {
+                    "kind": "metric_threshold",
+                    "condition_index": 0,
+                    "iteration": 3,
+                    "metric_id": "accuracy",
+                    "direction": "higher",
+                    "threshold": 0.85,
+                    "incumbent": 0.9,
+                    "incumbent_iteration": 2,
+                },
+            },
+        ),
+        (
+            5,
+            CandidateRunReceipt.model_construct(
+                run_id="f" * 32,
+                status="completed",
+                loop_trace=LoopTrace(
+                    attempted_iterations=4,
+                    stop_reason=NoImprovementReason(
+                        condition_index=1,
+                        iteration=4,
+                        k=2,
+                        non_improving_bodies=2,
+                        last_improvement_iteration=2,
+                        incumbent=-1.5,
+                    ),
+                ),
+            ),
+            {
+                "final_iteration": 5,
+                "attempted_iterations": 4,
+                "stop_reason": {
+                    "kind": "no_improvement",
+                    "condition_index": 1,
+                    "iteration": 4,
+                    "k": 2,
+                    "non_improving_bodies": 2,
+                    "last_improvement_iteration": 2,
+                    "incumbent": -1.5,
+                },
+            },
+        ),
         (None, None, None),
     ),
-    ids=("active-loop-no-body-count", "stopped-receipt-body-count", "fixed-candidate"),
+    ids=(
+        "active-loop-no-body-count",
+        "stopped-receipt-body-count",
+        "threshold-stop-reason-from-receipt",
+        "no-improvement-stop-reason-from-receipt",
+        "fixed-candidate",
+    ),
 )
 def test_status_loop_bound_from_submission_and_bodies_only_from_receipt(
     console_config, monkeypatch, final_iteration, receipt, expected
 ):
-    """Fails if an active loop loses its declared bound, or a body count is guessed."""
+    """Fails if an active loop loses its declared bound, a body count is guessed, or a
+    condition-completed receipt's verified stop reason is dropped or reshaped."""
     operation_id = uuid4()
     monkeypatch.setattr(
         "tools.candidate_console.service.read_operation",
         lambda config, value: _snapshot(value, receipt),
     )
     monkeypatch.setattr(
-        "tools.candidate_console.service.lookup_operation_request",
-        lambda config, value: _loop_submission(value, final_iteration),
+        "tools.candidate_console.service.loop_root_operation",
+        lambda config, value: (
+            None if final_iteration is None else _loop_submission(value, final_iteration)
+        ),
     )
     status = client(console_config).get(f"/api/operations/{operation_id}").json()
     assert status.get("loop") == expected

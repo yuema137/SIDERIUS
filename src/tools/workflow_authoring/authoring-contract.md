@@ -95,6 +95,46 @@ Source; untouched rules and advanced fields survive edits. Task rules are resolv
 later by native owners. All controls participate in the existing source-dirty,
 review, save, conflict and generation fences; launch payloads carry no overrides.
 
+## Research-loop editing
+
+`AuthoredLoop` on the declaration remains the only loop authority. Source/read and
+review projections include optional `loop_template`: the one supported
+tuning→interpretation feedback (`protocol="tuning-to-interpretation"`,
+`history="native-research/v1"`, `final_iteration=1`) when the graph has exactly one
+tuning and one interpretation node; otherwise it is absent and feedback stays
+source-authored. The template is inert until reviewed and saved.
+
+`ReviewRequest` accepts `LoopProposal(kind="loop", source, loop)`: the exact
+complete proposal source is parsed, only `definition.loop` is replaced (`null`
+removes it), and the result is rendered through the normal canonical renderer,
+which revalidates endpoints and `final_iteration > 0` (strict integer). It then
+follows the ordinary review, task acceptance and Save boundary. Parsing source
+rather than a browser JSON document keeps other authored values exact (browser
+JSON turns `2.0` into `2`), so add-then-remove on a canonical source restores its
+original bytes and declaration digest, and unchanged loop proposals publish no
+bytes. A declaration without a loop renders and digests exactly as before.
+Endpoint rewiring and loop execution admission (interpretation profile, native
+loop owner) remain outside the editor.
+
+Byte preservation holds only for an already-canonical source (one the canonical
+renderer produced). Review re-renders the whole declaration, so a hand-formatted or
+commented source is rewritten into canonical form by its first reviewed loop edit;
+the diff shows that rewrite before Save.
+
+Stop conditions travel inside the same `LoopProposal.loop` as
+`AuthoredLoop.stop_conditions`; the editor adds no separate proposal, model or
+validator. The declaration stays authoritative: request parsing refuses a
+`metric_threshold` without a non-empty `metric_id` or with a non-finite/non-number
+`threshold`, a non-integer or non-positive `no_improvement.completed_bodies`, and
+the reserved `judge` kind (all 422 `validation`); canonical rendering refuses more
+than one condition per kind and `completed_bodies >= final_iteration` (422
+`source` diagnostics with `field_path`, messages never forwarded). Refusals write
+nothing. An empty tuple is omitted from source with its unused constructors, so a
+condition-free loop keeps its bytes and add-then-remove restores them. The editor
+does not know the task's declared metric: `metric_id` is a validated text field,
+and a mismatch with the run metric fails the loop at execution (the worker
+contract), not at Review.
+
 ## Bound-source publication boundary
 
 Inert read accepts the optional v2 TaskBinding declaration. Bound review and Save
