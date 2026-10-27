@@ -328,6 +328,26 @@ These internal helpers do not admit a new topology or bypass task/artifact owner
 The default path retains exactly one proposal/implementation/validation and its
 existing optional tuning path. The opt-in profile below consumes these same helpers.
 
+Internal phase callers can select a positive integer `iteration` through
+`invocation_from_storage`; `FixedInvocationContext` remains the identity owner.
+The default is one, and attempt remains one. Fixed and graph phase binding checks
+derive the expected native iteration slot before node construction or input writes;
+agreement between an input and context alone does not admit a different slot.
+The same iteration reaches eager proposal accounting and lazy literature bridges.
+
+Native storage retains `iteration_NNN/attempt_001` under its fixed or graph-instance
+owner. Iteration-one diagnostics keep their existing paths exactly. Later phase
+diagnostics live under `candidate_run/iteration_NNN/` with the same per-profile
+proposal/literature names; literature cache remains under its native iteration slot.
+The pure layout helpers accept a keyword iteration from the validated identity.
+Callers must supply independently prepared typed inputs with matching storage and
+debug roots; these helpers never retarget captured requests.
+
+Run request/HTTP admission, input materialization and whole-graph evidence still
+select iteration one. This internal phase boundary supplies no body loop,
+feedback/history policy, scheduler, retries or resume. Multiple phase calls alone
+are not an admitted multi-iteration authored workflow or historical qualification.
+
 ### Opt-in proposal fanout
 
 Set `WorkflowPreviewRequest.execution_profile="native-proposal-fanout/v1"` for a

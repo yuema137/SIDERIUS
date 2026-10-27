@@ -20,7 +20,8 @@ class FixedInvocationContext:
 
     Storage values are copied from materialized inputs, not retained as a mutable
     Pydantic object. Admission derives managed slots from declaration identities.
-    The existing candidate worker exposes only iteration 1 and attempt 1.
+    Run admission still selects iteration 1. Internal phase callers may provide
+    another iteration with independently materialized inputs; attempt stays 1.
     """
 
     workspace: str
@@ -30,8 +31,12 @@ class FixedInvocationContext:
     phase: NativePhase
     storage_workspace: str
     storage_run_name: str
-    iteration: Literal[1] = field(default=1, init=False)
+    iteration: int = 1
     attempt: Literal[1] = field(default=1, init=False)
+
+    def __post_init__(self) -> None:
+        if type(self.iteration) is not int or self.iteration < 1:
+            raise ValueError("native invocation iteration must be a positive integer")
 
     def require_binding(
         self,
@@ -45,11 +50,12 @@ class FixedInvocationContext:
         This compares invocation bindings only. Materialize retains scientific
         and external-input reconciliation; candidate_nodes retains shape checks.
         """
-        if request.preview.execution_profile is not None:
-            from workflows.attempt_storage import impl_attempt_storage
-            from workflows.definition.fanout import execution_families
+        from workflows.attempt_storage import impl_attempt_storage
 
-            from .layout import graph_instance_dir
+        from .layout import candidate_proposal_dir, graph_instance_dir
+
+        if request.preview.execution_profile is not None:
+            from workflows.definition.fanout import execution_families
 
             definition = request.preview.document.definition
             shape = execution_families(definition, request.preview.execution_profile)
@@ -58,17 +64,22 @@ class FixedInvocationContext:
                 raise ValueError("native invocation node/phase binding disagrees")
             parent = dict((validation, impl) for impl, validation in shape.branches)
             owner = parent.get(self.node_id, self.node_id)
-            directory = graph_instance_dir(Path(initial.workspace), request.run_name, owner)
-            expected = (
-                str(directory)
-                if phase == "proposal"
-                else impl_attempt_storage(str(directory), request.run_name, 1).impl_dir
+            directory = graph_instance_dir(
+                Path(initial.workspace), request.run_name, owner, iteration=self.iteration
             )
-            if self.storage_workspace != expected:
-                raise ValueError("native invocation storage binding disagrees")
             node_ids = {phase: self.node_id}
         else:
             node_ids = candidate_nodes(request.preview.document.definition)
+            directory = candidate_proposal_dir(
+                Path(initial.workspace), request.run_name, iteration=self.iteration
+            )
+        expected = (
+            str(directory)
+            if phase == "proposal"
+            else impl_attempt_storage(str(directory), request.run_name, 1).impl_dir
+        )
+        if self.storage_workspace != expected:
+            raise ValueError("native invocation storage binding disagrees")
         self.require_resolved_binding(
             initial,
             run_name=request.run_name,
@@ -145,6 +156,7 @@ def invocation_from_storage(
     node_id: str,
     phase: NativePhase,
     storage: StorageConfig,
+    iteration: int = 1,
 ) -> FixedInvocationContext:
     """Snapshot selected native storage; fixed_invocations owns fixed selection."""
     if storage.local is None:
@@ -157,4 +169,5 @@ def invocation_from_storage(
         phase=phase,
         storage_workspace=storage.local.workspace,
         storage_run_name=storage.local.run_name,
+        iteration=iteration,
     )
