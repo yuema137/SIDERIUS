@@ -89,6 +89,18 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
         "src/workflows/task_composition.py",
         "configs/task_composition/quickstart.yaml",
     ),
+    # The console import-isolation witness imports its subjects only inside a
+    # fresh interpreter's script string, so no static import edge exists. It
+    # guards that importing the console never reaches the generated-plugin
+    # loader through the resume/sandbox chain.
+    "tests/unit/tools/candidate_console/test_import_isolation.py": (
+        "src/tools/candidate_console/",
+        "src/tools/candidate_worker/loop_evidence.py",
+        "src/core/resume.py",
+        "src/core/sandbox_executor.py",
+        "src/core/generated_library.py",
+        "src/ml_models/",
+    ),
     # Host-timezone isolation keeps this import inside a subprocess script.
     "tests/unit/core/test_observation_timestamp_precision.py": (
         "src/core/runtime_control/observation_store.py",
