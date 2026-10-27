@@ -33,6 +33,7 @@ create the output roots before checking):
     "candidate_environment_names": ["OPENAI_API_KEY"],
     "allowed_output_types": null
   }],
+  "recorded_examples": [],
   "bind_host": "127.0.0.1", "port": 8740,
   "browser_origin": "http://127.0.0.1:8740",
   "auth_token_file": "/absolute/project/console-token",
@@ -50,6 +51,26 @@ private reads traverse no-follow directory descriptors. Token syntax encodes at
 least 32 bytes; the operator must generate random bytes. Values never enter native
 requests. Credentials are reread per launch and only configured native environment
 names are passed; native environment validation rejects reserved names.
+
+`recorded_examples` is an optional allowlist for read-only candidate-validation
+records. Each entry has a unique `example_id`, readable `label`, canonical
+`workspace` strictly below an existing `candidate_roots` directory, and the
+expected 32-character lowercase `expected_run_id` from the native launch record.
+The configured run ID protects against selecting another record at that path;
+it is distinct from the candidate ID in the terminal receipt. The console
+validates the fixed request, launch/terminal receipts, proposal, implementation,
+validation and reported-token records before display. This does not import an
+operation or infer process state. Missing captured source remains unavailable;
+no training result, scientific score or billing cost is inferred.
+
+```json
+{
+  "example_id": "tess-validation",
+  "label": "TESS candidate validation example",
+  "workspace": "/absolute/project/candidates/tess",
+  "expected_run_id": "0123456789abcdef0123456789abcdef"
+}
+```
 
 TaskChoice may optionally declare `task_revision: TaskBinding`. None/absence is
 omitted, preserving legacy configuration serialization. Versioned choices project
@@ -226,6 +247,21 @@ owns arithmetic, quality, limits and evidence semantics. Focused HTTP tests prov
 route reachability, auth/Host/Origin/UUID checks before reader entry, no-store/CSP
 and sanitized failures. The browser harness adds null/partial/stale token views,
 replacement polling, token-only failure isolation and old-run epoch fencing.
+
+## Recorded candidate examples
+
+`ConsoleConfig.recorded_examples` defaults to empty. The authenticated
+`GET /api/recorded-examples` lists only configured entries; the detail GET takes
+an allowlist ID, never a browser-supplied filesystem path. Slow control presents
+the captured three-stage proposal/implementation/validation result and reads
+reported provider usage through the existing candidate-token owner and shared
+token presenter. The panel labels this **candidate validation only**. It is not
+a `StatusView`, operation, training result, scientific score or billing record,
+and it offers no prepare, launch, retry, review or import action. A missing
+captured source snapshot is reported as unavailable; source export and editing
+remain separate work. The browser witness checks GET-only requests, forbids
+credential and submission calls, and verifies the configured record files remain
+unchanged.
 
 
 ## Optional ordinary-file Editor

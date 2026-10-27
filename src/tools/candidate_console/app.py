@@ -65,6 +65,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             else {
                 "native_chain_policy": "native chain choice is unavailable or overlaps editor writes",
                 "not_supported": "native-chain token aggregation is not supported",
+                "example": "recorded example is not configured",
+                "example_path": "recorded example is unavailable",
                 "busy": "another operation is active or unresolved",
                 "conflict": "operation ID already identifies different content",
                 "stale_review": "reviewed source or bindings changed; review again",
@@ -119,6 +121,14 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     def tokens(operation_id: UUID):
         return service.tokens(operation_id)
 
+    @app.get("/api/recorded-examples")
+    def recorded_example_choices():
+        return service.recorded_example_choices()
+
+    @app.get("/api/recorded-examples/{example_id}")
+    def recorded_example(example_id: str):
+        return service.recorded_example(example_id)
+
     @app.get("/api/operations/{operation_id}/log")
     def log(
         operation_id: UUID,
@@ -142,6 +152,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "app.js": "text/javascript",
             "native-chain.js": "text/javascript",
             "native-chain-monitor.js": "text/javascript",
+            "token-presenter.js": "text/javascript",
+            "recorded-example.js": "text/javascript",
             "session.js": "text/javascript",
             "navigation.js": "text/javascript",
             "editor-entry.js": "text/javascript",

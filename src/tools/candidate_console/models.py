@@ -1,5 +1,7 @@
 """Inert console selections and curated views; native requests own execution."""
 
+from __future__ import annotations
+
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -10,11 +12,12 @@ from tools.candidate_operations import OperationStoreConfig
 from tools.candidate_operations.models import OperationKind, ProcessObservation
 from tools.candidate_operations.native_chain_models import NativeChainObservation
 from tools.candidate_prepare.models import CandidatePreparationRequest
+from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.graph_models import GraphTrace
 from tools.workflow_authoring.models import Project
 from tools.workflow_preview.models import PreviewModel
 from tools.workspace_sandbox.profile import SandboxProfile
-from workflows.definition import TaskBinding
+from workflows.definition import TaskBinding, WorkflowDefinition
 
 from .native_chain_models import NativeChainChoice
 from .readiness_models import CredentialReadiness as CredentialReadiness
@@ -50,6 +53,7 @@ class ConsoleConfig(PreviewModel):
     operation_store: OperationStoreConfig
     tasks: tuple[TaskChoice, ...] = ()
     native_chain_choices: tuple[NativeChainChoice, ...] = ()
+    recorded_examples: tuple[RecordedExampleChoice, ...] = ()
     bind_host: Literal["127.0.0.1"] = "127.0.0.1"
     port: int = Field(ge=1024, le=65535)
     browser_origin: str
@@ -73,6 +77,8 @@ class ConsoleConfig(PreviewModel):
             raise ValueError("browser_origin must be an exact loopback HTTP origin with port")
         if len({c.choice_id for c in self.native_chain_choices}) != len(self.native_chain_choices):
             raise ValueError("native chain choice IDs must be unique")
+        if len({c.example_id for c in self.recorded_examples}) != len(self.recorded_examples):
+            raise ValueError("recorded example IDs must be unique")
         if len({task.task_id for task in self.tasks}) != len(self.tasks):
             raise ValueError("task IDs must be unique")
         if len({project.project_id for project in self.editor_projects}) != len(
@@ -84,6 +90,43 @@ class ConsoleConfig(PreviewModel):
         ).issubset({project.project_id for project in self.editor_projects}):
             raise ValueError("runnable editor project IDs must be unique configured projects")
         return self
+
+
+class RecordedExampleChoice(PreviewModel):
+    """Explicit read-only selection of one candidate workspace."""
+
+    example_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
+    label: str = Field(min_length=1, max_length=160)
+    workspace: str
+    expected_run_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+class RecordedExampleOption(PreviewModel):
+    """Browser-safe label without configured filesystem or record identities."""
+
+    example_id: str
+    label: str
+
+
+class RecordedStage(PreviewModel):
+    capability: str
+    model_type: str
+    passed: bool | None = None
+
+
+class RecordedExampleView(PreviewModel):
+    example_id: str
+    label: str
+    run_id: str
+    candidate_id: str
+    run_name: str
+    declaration_digest: str
+    declaration: WorkflowDefinition
+    source_snapshot_available: bool
+    candidate_status: Literal["accepted", "rejected"]
+    validation_passed: bool
+    stages: tuple[RecordedStage, ...]
+    tokens: CandidateTokenSnapshot
 
 
 class PrepareSelection(PreviewModel):

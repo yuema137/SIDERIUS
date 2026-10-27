@@ -2,7 +2,8 @@
 
 Prepare, review and explicitly launch one candidate from a configured scientific
 task, or launch an externally reviewed native iteration chain. Reopen status and
-logs and reported LLM tokens by operation ID.
+logs and reported LLM tokens by operation ID, or view an explicitly configured
+read-only candidate-validation example.
 The candidate runs Propose → Implement → Validate, with optional native Tune
 when the saved reusable source declares it. Inspect native outputs for scientific
 results; completion alone does not certify them.
@@ -74,6 +75,13 @@ even when using the default models.
    is needed. The optional remembered ID is labelled **Last opened on this browser**;
    it is not a list of discovered operations. Expand Operation facts, Reported
    token table, or Activity and logs when needed.
+   Configured **Recorded examples** appear in Slow control. They show verified
+   proposal, implementation, validation and reported-token evidence only; they
+   are not live operations, training results, scientific scores or billing
+   records. Configure `recorded_examples` only for fixed canonical workspaces
+   under `operation_store.candidate_roots`, with the expected native run ID.
+   The view has no operation import or execution controls, and a missing saved
+   source is shown as unavailable.
 8. To author a configured declaration, choose **Workflow Editor**. Select a node
    to inspect its supported bindings; expand **References** for task and external
    locations, or **Advanced → Source** for exact Python bytes. Review opens the

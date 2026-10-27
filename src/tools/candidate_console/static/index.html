@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/editor.css">
   <script src="/session.js" defer></script>
+  <script src="/token-presenter.js" defer></script>
   <script src="/native-chain-monitor.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/editor-task-controls.js" defer></script>
@@ -17,6 +18,7 @@
   <script src="/editor-circuit.js" defer></script>
   <script src="/editor.js" defer></script>
   <script src="/navigation.js" defer></script>
+  <script src="/recorded-example.js" defer></script>
   <script src="/reusable-intents.js" defer></script>
   <script src="/reusable-run.js" defer></script>
   <script src="/new-run.js" defer></script>
@@ -166,6 +168,22 @@
   <footer>Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</footer>
 </section>
 <section id="view-slow-control" data-view="slow-control" hidden><h1 tabindex="-1">Slow control</h1>
+  <section class="card" aria-labelledby="recorded-example-heading">
+    <p class="eyebrow">Read-only evidence</p><h2 id="recorded-example-heading">Recorded example</h2>
+    <p>Candidate validation evidence only. This view does not represent a live operation, training run, score, or billing record.</p>
+    <div class="actions"><div class="grow"><label for="recorded-example-choice">Configured example</label><select id="recorded-example-choice" disabled><option value="">Connect to load recorded examples</option></select></div><button id="recorded-example-open" disabled>Read example</button></div>
+    <p id="recorded-example-status" role="status">Connect to load configured read-only examples.</p>
+    <section id="recorded-example-content" hidden aria-label="Recorded candidate evidence">
+      <dl id="recorded-example-facts" class="facts"></dl>
+      <h3>Captured candidate stages</h3><ol id="recorded-example-stages"></ol>
+      <details><summary>Captured declaration (read-only)</summary><dl id="recorded-example-declaration" class="facts"></dl><div id="recorded-example-nodes"></div></details>
+      <h3 id="recorded-token-heading">Reported provider tokens</h3><p id="recorded-token-status" role="status"></p><p id="recorded-token-times" class="muted"></p>
+      <details><summary>Reported token table</summary><p id="recorded-token-provenance" class="muted"></p><div id="recorded-token-table" class="token-table" role="region" aria-labelledby="recorded-token-heading" tabindex="0" hidden>
+        <table><thead><tr><th scope="col">Provider</th><th scope="col">Requested model</th><th scope="col">Served model</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Total</th><th scope="col">Responses</th></tr></thead><tbody id="recorded-token-rows"></tbody></table>
+      </div></details>
+      <p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
+    </section>
+  </section>
   <section class="card" aria-labelledby="monitor-heading">
     <p class="eyebrow">3 · Observe any known operation</p><h2 id="monitor-heading">Status and logs</h2>
     <p>Enter an operation UUID from this console or code. Reading an operation never launches or restarts it. Closing the page does not stop an admitted operation.</p>
@@ -175,7 +193,7 @@
     <h3 id="tokens-heading">Reported LLM tokens</h3>
     <p id="tokens-status" role="status">No operation selected.</p>
     <p id="tokens-times" class="muted"></p>
-    <details><summary>Reported token table</summary><p id="tokens-provenance" class="muted"></p><div class="token-table" role="region" aria-labelledby="tokens-heading" tabindex="0" hidden>
+    <details><summary>Reported token table</summary><p id="tokens-provenance" class="muted"></p><div id="tokens-table" class="token-table" role="region" aria-labelledby="tokens-heading" tabindex="0" hidden>
       <table><thead><tr><th scope="col">Provider</th><th scope="col">Requested model</th><th scope="col">Served model</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Total</th><th scope="col">Responses</th></tr></thead><tbody id="token-rows"></tbody></table>
     </div>
     </details><p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
