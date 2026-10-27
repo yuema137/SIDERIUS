@@ -173,3 +173,13 @@ flow. Existing native settings control root papers, search and synthesis; propos
 advice remains proposal advice. See the
 [literature contract](candidate-prepare-contract.md#reusable-native-literature-candidate)
 for settings, network restrictions and the four-node shape.
+
+To prepare the existing interpretation→proposal→implementation→validation→tuning
+workflow from saved reusable source, select
+`execution_profile="native-interpretation-candidate/v1"`, declare a managed
+`interpretation.input` plus managed protocol externals, and retain the native
+`native-training.settings` binding. Preparation projects these managed roles from
+the composed task, preparation options and source-owned training settings, then
+launch uses the existing native graph worker. The source remains editable and the
+resolved worker declaration retains the exact protocol edges. See the
+[interpretation profile contract](candidate-prepare-contract.md#reusable-native-interpretation-candidate).

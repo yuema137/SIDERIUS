@@ -73,7 +73,10 @@ def build_candidate(
     observe: Callable[[Path, str], tuple[FileObservation, bytes]],
     *,
     execution_profile: Literal[
-        "native-proposal-fanout/v1", "native-proposal-families/v1", "native-literature-candidate/v1"
+        "native-proposal-fanout/v1",
+        "native-proposal-families/v1",
+        "native-literature-candidate/v1",
+        "native-interpretation-candidate/v1",
     ]
     | None = None,
 ) -> tuple[CandidateRunRequest, WorkflowBindings]:

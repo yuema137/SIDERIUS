@@ -115,7 +115,19 @@ class ReusableTaskReferences(DeclarationModel):
 
 class ManagedCandidateBinding(DeclarationModel):
     id: Identifier
-    contract: Literal["proposal.input", "storage", "native-training.settings", "literature.input"]
+    contract: Literal[
+        "proposal.input",
+        "storage",
+        "native-training.settings",
+        "literature.input",
+        "interpretation.input",
+        "optional.text",
+        "optional.expert-advice",
+        "optional.expert-context",
+        "optional.parameter-rules",
+        "optional.constraint-context",
+        "optional.task-composition-ref",
+    ]
     kind: Literal["managed_candidate"] = "managed_candidate"
     literature_settings: dict[str, JsonValue] | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -178,6 +190,7 @@ class ReusableWorkflowDocument(DeclarationModel):
             "native-proposal-fanout/v1",
             "native-proposal-families/v1",
             "native-literature-candidate/v1",
+            "native-interpretation-candidate/v1",
         ]
         | None
     ) = Field(default=None, exclude_if=lambda value: value is None)
@@ -188,8 +201,12 @@ class ReusableWorkflowDocument(DeclarationModel):
 
     @model_validator(mode="after")
     def validate_training(self) -> Self:
-        if self.execution_profile is not None and self.training_settings is not None:
-            raise ValueError("Fanout does not support training_settings")
+        if (
+            self.execution_profile is not None
+            and self.execution_profile != "native-interpretation-candidate/v1"
+            and self.training_settings is not None
+        ):
+            raise ValueError("This reusable graph profile does not support training_settings")
         settings_bindings = [
             item
             for item in self.definition.externals
@@ -213,9 +230,14 @@ class ReusableWorkflowDocument(DeclarationModel):
             parse_training_settings,
         )
 
-        from .candidate import candidate_nodes
+        if self.execution_profile == "native-interpretation-candidate/v1":
+            from .fanout import execution_families
 
-        candidate_nodes(self.definition)
+            execution_families(self.definition, self.execution_profile)
+        else:
+            from .candidate import candidate_nodes
+
+            candidate_nodes(self.definition)
         settings = parse_training_settings(
             effective_training_settings(
                 self.training_settings, self.preparation_options.allowed_output_types
