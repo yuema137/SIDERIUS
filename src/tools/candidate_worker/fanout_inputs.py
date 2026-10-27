@@ -1,6 +1,7 @@
 """Materialize declared branch slots through the existing native input owners."""
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewInput
@@ -22,6 +23,9 @@ from .layout import candidate_control_dir, graph_instance_dir, proposal_debug_di
 from .literature_inputs import materialize_literature
 from .models import CandidateRunRequest
 
+if TYPE_CHECKING:
+    from .training_admission import TrainingAdmission
+
 
 def materialize_fanout(
     request: CandidateRunRequest,
@@ -31,6 +35,7 @@ def materialize_fanout(
     *,
     iteration: int = 1,
     interpretation_output: InterpretationOutput | None = None,
+    admitted: "TrainingAdmission | None" = None,
 ) -> dict[str, NativeInputs | LiteratureReviewInput | InterpretationInput]:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
@@ -43,12 +48,20 @@ def materialize_fanout(
     provider, model = validator_settings(config)
     externals = {item.id: item for item in definition.externals}
     used: set[str] = set()
+    if shape.tuning is not None:
+        protocol = nodes[shape.tuning].request
+        assert isinstance(protocol, ProtocolRequest)
+        used.update(
+            arg.source.binding
+            for arg in protocol.arguments
+            if isinstance(arg.source, ExternalSource)
+        )
     result: dict[str, NativeInputs | LiteratureReviewInput | InterpretationInput] = {}
     interpreted_payload = None
     if shape.interpretation is not None:
         edge = shape.interpretation
         selected, arguments = prepare_interpretation(
-            request, workspace, edge, contents, composition, iteration=iteration
+            request, workspace, edge, contents, composition, iteration=iteration, admitted=admitted
         )
         result[edge.interpretation] = selected
         used.add(edge.input_binding)
@@ -75,7 +88,7 @@ def materialize_fanout(
         proposal.task_description = composition.task_description
         proposal.forward_contract = composition.forward_contract
         proposal.proposal_blocks = composition.proposal_blocks
-        interpreted_payload = proposal.model_dump_json().encode()
+        interpreted_payload = proposal.model_dump_json(exclude_unset=True).encode()
     for family in shape.families:
         proposal_request = nodes[family.proposal].request
         if interpreted_payload is not None:
@@ -101,6 +114,7 @@ def materialize_fanout(
                 ),
             ),
             composition=composition,
+            admitted=admitted,
             data_root=(Path(request.preview.project_root) / definition.task.data_root).resolve(),
             control=control,
             debug_root=proposal_debug_dir(
@@ -127,6 +141,7 @@ def materialize_fanout(
                     contents=contents,
                     externals=externals,
                     seed=seed,
+                    admitted=admitted,
                     ref=ref,
                     attempt=attempt,
                     provider=provider,

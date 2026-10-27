@@ -3,6 +3,7 @@
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
@@ -25,6 +26,9 @@ from .inputs import check_constraints, require_storage
 from .invocation import FixedInvocationContext
 from .layout import graph_instance_dir, interpretation_input_path
 from .models import CandidateRunReceipt, CandidateRunRequest
+
+if TYPE_CHECKING:
+    from .training_admission import TrainingAdmission
 
 
 class InterpretationArguments(BaseModel):
@@ -66,6 +70,7 @@ def prepare_interpretation(
     composition: RunTaskComposition,
     *,
     iteration: int,
+    admitted: "TrainingAdmission | None" = None,
 ) -> tuple[InterpretationInput, InterpretationArguments]:
     definition = request.preview.document.definition
     protocol = next(node.request for node in definition.nodes if node.id == edge.proposal)
@@ -104,21 +109,47 @@ def prepare_interpretation(
         raise ValueError("interpretation protocol data root disagrees with selected task")
     if value.constraint_context != arguments.constraint_context:
         raise ValueError("interpretation and proposal constraints disagree")
-    # These optional native adapter parameters are outside this bounded profile.
-    # Compare disclosures to the native ProposalInput defaults, never invent locks.
-    check_constraints(
-        arguments.constraint_context,
-        arguments.task_composition_ref,
-        workflow_rules=arguments.workflow_parameter_rules,
-        **{
-            name: ProposalInput.model_fields[name].default
-            for name in (
-                "trial_time_budget_minutes",
-                "formal_time_budget_minutes",
-                "vram_budget_gb",
-            )
-        },
-    )
+    if admitted is not None:
+        from workflows.candidate_training_settings import reconcile_constraints
+
+        reconcile_constraints(value.constraint_context, admitted.constraints)
+        rules = admitted.settings.launch.workflow_parameter_rules
+        if (
+            "workflow_parameter_rules" in arguments.model_fields_set
+            and arguments.workflow_parameter_rules != rules
+        ):
+            raise ValueError("interpretation workflow rules disagree with native training")
+        enabled = admitted.bindings.enable_structured_health_feedback
+        if (
+            "enable_structured_health_feedback" in value.model_fields_set
+            and value.enable_structured_health_feedback != enabled
+        ):
+            raise ValueError("interpretation health feedback disagrees with native training")
+        value = value.model_copy(
+            update={
+                "constraint_context": admitted.constraints,
+                "enable_structured_health_feedback": enabled,
+            }
+        )
+        arguments = arguments.model_copy(
+            update={"constraint_context": admitted.constraints, "workflow_parameter_rules": rules}
+        )
+    else:
+        # These optional native adapter parameters are outside this bounded profile.
+        # Compare disclosures to the native ProposalInput defaults, never invent locks.
+        check_constraints(
+            arguments.constraint_context,
+            arguments.task_composition_ref,
+            workflow_rules=arguments.workflow_parameter_rules,
+            **{
+                name: ProposalInput.model_fields[name].default
+                for name in (
+                    "trial_time_budget_minutes",
+                    "formal_time_budget_minutes",
+                    "vram_budget_gb",
+                )
+            },
+        )
     return value, arguments
 
 

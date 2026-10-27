@@ -18,6 +18,7 @@ from workflows.candidate_training_settings import (
     CandidateTrainingSettings,
     parse_training_settings,
     proposal_training_values,
+    reconcile_constraints,
 )
 from workflows.constraint_disclosure import workflow_constraint_context
 from workflows.definition import ExternalSource, ProtocolRequest
@@ -27,6 +28,7 @@ from workflows.run_config import active_vram_budget, bind_runtime_verifier_launc
 from workflows.task_composition import RunTaskComposition, resolve_composed_measurement_capability
 from workflows.training_startup import prepare_training_run
 
+from .layout import candidate_control_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
@@ -35,24 +37,7 @@ class TrainingAdmission:
     settings: CandidateTrainingSettings
     bindings: WorkflowRunBindings
     constraints: ConstraintContext | None
-
-
-def reconcile_constraints(
-    actual: ConstraintContext | None, expected: ConstraintContext | None
-) -> None:
-    """Accept incomplete evidence, but refuse each already known conflicting section."""
-    if actual is None:
-        return
-    if expected is None:
-        raise ValueError("constraint_context conflicts with disabled disclosure")
-    for name in type(actual).model_fields:
-        if name == "known_sections":
-            continue
-        value = getattr(actual, name)
-        if (name in actual.known_sections or value is not None) and value != getattr(
-            expected, name
-        ):
-            raise ValueError(f"constraint_context.{name} disagrees with native training")
+    node_id: str
 
 
 def reconcile_proposal(seed: ProposalInput, admitted: TrainingAdmission) -> ProposalInput:
@@ -81,10 +66,13 @@ def admit_training(
     initial: CandidateRunReceipt,
     composition: RunTaskComposition,
     config: WorkflowLLMConfig,
+    *,
+    iteration: int = 1,
 ) -> TrainingAdmission:
     """Resolve actual scope, Health, hardware and measurement using native owners."""
     definition = request.preview.document.definition
-    tuning = next(node.request for node in definition.nodes if node.capability == "tuning")
+    node = next(node for node in definition.nodes if node.capability == "tuning")
+    tuning = node.request
     assert isinstance(tuning, ProtocolRequest)
     source = next(arg.source for arg in tuning.arguments if arg.name == "settings")
     assert isinstance(source, ExternalSource)
@@ -92,7 +80,7 @@ def admit_training(
     index = next(
         i for i, item in enumerate(request.files) if item.reference == f"external.{binding.id}"
     )
-    control = Path(initial.workspace) / "candidate_run"
+    control = candidate_control_dir(Path(initial.workspace), iteration=iteration)
     payload = (control / f"input_{index:03}.snapshot").read_bytes()
     settings = parse_training_settings(payload)
     root = str((Path(request.preview.project_root) / definition.task.data_root).resolve())
@@ -176,4 +164,6 @@ def admit_training(
     publish_bytes_write_once(
         str(control / "training_settings.json"), settings.model_dump_json(indent=2).encode()
     )
-    return TrainingAdmission(settings, bindings, workflow_constraint_context(launch, composition))
+    return TrainingAdmission(
+        settings, bindings, workflow_constraint_context(launch, composition), node.id
+    )

@@ -38,6 +38,7 @@ def expected_nodes(
             "proposal": "proposal",
             "implementation": "implementor",
             "validation": "validation",
+            "tuning": "run_output",
         }[node.capability]
         evidence.append(
             GraphNodeEvidence(
@@ -133,6 +134,9 @@ def verify_graph_trace(
     expected = expected_nodes(request, initial, iteration=iteration)
     if len(trace.nodes) != len(expected):
         raise ValueError("graph trace membership mismatch")
+    shape = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    )
     states = {item.node_id: item.state for item in trace.nodes}
     for item, slot in zip(trace.nodes, expected, strict=True):
         if (item.node_id, item.capability, item.predecessors, item.storage) != (
@@ -144,7 +148,10 @@ def verify_graph_trace(
             raise ValueError("graph trace binding mismatch")
         if item.state in ("pending", "running"):
             raise ValueError("graph terminal contains unfinished invocation")
-        if item.state in ("succeeded", "rejected"):
+        native_abort = (
+            item.capability == "tuning" and item.state == "failed" and item.record_path is not None
+        )
+        if item.state in ("succeeded", "rejected") or native_abort:
             if any(states[key] != "succeeded" for key in item.predecessors):
                 raise ValueError("graph invocation ran before all predecessors succeeded")
             if (
@@ -153,9 +160,13 @@ def verify_graph_trace(
                 or item.record_sha256 != record_digest(item.record_path)
             ):
                 raise ValueError("graph native record mismatch")
-            if item.reason != ("validation_rejected" if item.state == "rejected" else None) or (
-                item.state == "rejected" and item.capability != "validation"
-            ):
+            if item.reason != (
+                "native_failure"
+                if native_abort
+                else "validation_rejected"
+                if item.state == "rejected"
+                else None
+            ) or (item.state == "rejected" and item.capability != "validation"):
                 raise ValueError("graph terminal reason mismatch")
         elif (
             item.record_path is not None
@@ -179,12 +190,25 @@ def verify_graph_trace(
     status = (
         "failed"
         if "failed" in states.values()
-        else ("rejected" if "rejected" in states.values() else "accepted")
+        else (
+            "rejected"
+            if "rejected" in states.values()
+            else "completed"
+            if shape.tuning
+            else "accepted"
+        )
     )
     if (
-        ("blocked" in states.values() and status == "accepted")
+        ("blocked" in states.values() and status in ("accepted", "completed"))
         or receipt.status != status
-        or receipt.validation_passed != (status == "accepted")
+        or receipt.validation_passed
+        != (
+            all(
+                item.state == "succeeded" for item in trace.nodes if item.capability == "validation"
+            )
+            if shape.tuning
+            else status == "accepted"
+        )
     ):
         raise ValueError("graph aggregate outcome mismatch")
     if (
@@ -193,6 +217,8 @@ def verify_graph_trace(
         or receipt.training_output is not None
     ):
         raise ValueError("graph output index mismatch")
+    if shape.tuning is not None:
+        verify_graph_training(request, initial, trace, iteration=iteration)
     if (
         execution_families(
             request.preview.document.definition, request.preview.execution_profile
@@ -345,6 +371,40 @@ def verify_interpretation_evidence(
             interpretation_input_path(workspace, edge.interpretation, iteration=iteration)
         )
     )
+    shape = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    )
+    settings = None
+    if shape.tuning is not None:
+        from workflows.candidate_training_settings import (
+            parse_training_settings,
+            reconcile_constraints,
+        )
+
+        tuning = next(
+            node.request
+            for node in request.preview.document.definition.nodes
+            if node.id == shape.tuning
+        )
+        assert isinstance(tuning, ProtocolRequest)
+        source = next(arg.source for arg in tuning.arguments if arg.name == "settings")
+        from workflows.definition import ExternalSource
+
+        assert isinstance(source, ExternalSource)
+        settings = parse_training_settings(contents[f"external.{source.binding}"])
+        reconcile_constraints(selected.constraint_context, actual.constraint_context)
+        if (
+            "enable_structured_health_feedback" in selected.model_fields_set
+            and selected.enable_structured_health_feedback
+            != settings.enable_structured_health_feedback
+        ):
+            raise ValueError("interpretation health feedback conflicts with training settings")
+        selected = selected.model_copy(
+            update={
+                "constraint_context": actual.constraint_context,
+                "enable_structured_health_feedback": settings.enable_structured_health_feedback,
+            }
+        )
     if actual != selected or actual.iteration != iteration:
         raise ValueError("interpretation input capture mismatch")
     protocol = next(
@@ -384,12 +444,96 @@ def verify_interpretation_evidence(
             )
         )
         expected = arguments.apply(output)
+        if settings is not None:
+            from workflows.candidate_training_settings import (
+                proposal_training_values,
+                reconcile_constraints,
+            )
+
+            reconcile_constraints(arguments.constraint_context, actual.constraint_context)
+            values = proposal_training_values(settings)
+            for name, value in values.items():
+                if name in expected.model_fields_set and getattr(expected, name) != value:
+                    raise ValueError(
+                        "declared interpretation edge conflicts with training settings"
+                    )
+            expected = expected.model_copy(
+                update=values | {"constraint_context": actual.constraint_context}
+            )
         # These task facts are checked by child composition/materialize_proposal.
         # Parent never executes task plugins or infers expectations from child fields.
         composed_fields = {"task_description", "forward_contract", "proposal_blocks"}
+        if settings is not None:
+            # Child native admission owns actual hardware and full task constraints.
+            # Preparation-known launch values and all authored advice remain compared.
+            composed_fields.add("hardware_context")
         if (
             proposal.model_dump(exclude=composed_fields)
             != expected.model_dump(exclude=composed_fields)
             or proposal.task_description != selected.task_description
         ):
             raise ValueError("proposal input does not match the declared interpretation edge")
+
+
+def verify_graph_training(
+    request: CandidateRunRequest, initial: CandidateRunReceipt, trace: GraphTrace, *, iteration: int
+) -> None:
+    """Verify native identity/transport without running task plugins or training admission."""
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+    from agent.schemas.proposal import ProposalInput, ProposalOutput
+    from agent.schemas.validator import ValidatorOutput
+
+    from .layout import proposal_input_path, tuning_input_path
+    from .training_evidence import NativeOutputIdentity
+
+    shape = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    )
+    nodes = {item.node_id: item for item in trace.nodes}
+    assert shape.tuning is not None
+    tuner = nodes[shape.tuning]
+    if tuner.record_path is None:
+        if tuner.state == "succeeded":
+            raise ValueError("successful tuning lacks native output")
+        return
+    proposal_path = nodes[shape.families[0].proposal].record_path
+    validation_path = nodes[shape.branches[0][1]].record_path
+    assert proposal_path is not None and validation_path is not None
+    proposal = ProposalOutput.model_validate_json(Path(proposal_path).read_bytes())
+    validation = ValidatorOutput.model_validate_json(Path(validation_path).read_bytes())
+    value = HyperparamTuningInput.model_validate_json(
+        read_graph_control(
+            tuning_input_path(Path(initial.workspace), shape.tuning, iteration=iteration)
+        )
+    )
+    seed = ProposalInput.model_validate_json(
+        read_graph_control(
+            proposal_input_path(
+                Path(initial.workspace),
+                request.preview.execution_profile,
+                shape.families[0].proposal,
+                iteration=iteration,
+            )
+        )
+    )
+    output = NativeOutputIdentity.model_validate_json(Path(tuner.record_path).read_bytes())
+    if (
+        not validation.passed
+        or value.storage.local is None
+        or value.storage.local.workspace != tuner.storage
+        or value.storage.local.run_name != initial.run_name
+        or value.model_type != proposal.model_name
+        or value.candidate_id != proposal.candidate_id
+        or value.task_composition_ref is None
+        or value.task_composition_ref != seed.task_composition_ref
+        or validation.candidate_id != proposal.candidate_id
+        or value.constraint_context != seed.constraint_context
+        or value.current_run_best_formal_score is not None
+        or output.run_name != initial.run_name
+        or output.model_type != proposal.model_name
+        or output.candidate_id != proposal.candidate_id
+        or output.task_composition_fingerprint != value.task_composition_ref.semantic_fingerprint
+        or tuner.state
+        != ("failed" if output.termination_reason == "infrastructure_abort" else "succeeded")
+    ):
+        raise ValueError("graph native training identity/termination mismatch")

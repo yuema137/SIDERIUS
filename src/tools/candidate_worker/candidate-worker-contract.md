@@ -539,7 +539,9 @@ executes a concrete `WorkflowDocument` with exactly one externally supplied
 proposal/implementation/validation branch. The existing declaration dependency
 check and serial AND readiness determine order, including declarations whose
 interpreter appears after its consumers in source. This profile does not support
-reusable managed-source preparation, tuning, feedback loops or resume.
+reusable managed-source preparation, feedback loops or resume. An optional fifth
+node may tune that branch using `validated-candidate-to-tuning` with the same
+proposal/validation lineage and an explicit `native-training.settings` binding.
 
 The interpretation input is the existing native `InterpretationInput`: explicit
 `cold_start=True` uses the node's honest no-prior-evidence branch; supplied typed
@@ -585,3 +587,43 @@ Existing execution profiles, default iteration-one paths, fixed native workflow,
 scientific policy and historical prompt profiles are unchanged. Offline stub
 witnesses establish this transport/execution boundary, not scientific training or
 historical rendering qualification.
+
+
+### Native training after interpretation
+
+For the five-node shape, `admit_training` runs before interpretation or provider
+construction. Existing task, measurement, hardware, run-invariant and constraint
+owners admit the selected training settings. Explicit interpreter disclosures,
+workflow rules and the structured-Health flag must agree with those owners;
+omitted launch facts are filled. Human advice and explicit history are preserved.
+The native interpretation adapter still owns the proposal mapping. Its late input
+is serialized with `exclude_unset=True` so schema defaults do not masquerade as
+explicit user choices during `reconcile_proposal`.
+
+Only successful validation dispatches tuning. `training.run_training` shares
+native construction admission, plugin/loss staging and tuner preparation/execution
+with the fixed wrapper. The declared tuner has its own graph storage slot;
+`candidate_run/tuning_inputs/<node>.json` captures the native input (numbered
+control directory for later internal iteration). Existing fixed training keeps
+its model-named directory and four-record receipt. Invocation identity uses
+`FixedInvocationContext`; the shared preparation call requires an explicit
+incumbent reference. Fresh public invocations pass `None`, not a fabricated score.
+Internal callers can transport an explicit incumbent and iteration; this does not
+qualify imported history or implement loop dispatch.
+
+A returned native tuner output produces `completed`, independent of scientific
+score or Formal validity. Native `infrastructure_abort` instead produces `failed`
+with its native record retained. `validation_passed` reports the validator's result
+even when subsequent tuning fails. The parent permits failed-with-record only for
+that verified tuner termination, rechecks graph readiness and native output
+identity, and refuses relabeling it as completion. Other failed nodes cannot claim
+records. Graph training uses `GraphTrace`, not the fixed `training_output` field.
+
+Parent replay compares the declared adapter/advice and preparation-known launch
+projection, managed slots, typed native input/output lineage and explicit constraint
+transport. Actual hardware and fully composed runtime constraints remain checked
+by child admission; comparing their transport does not independently certify them.
+The parent does not run task plugins or derive a scientific expectation from a
+returned score. Offline five-node witnesses stub provider/tuner and external
+hardware/measurement effects: they establish dispatch/evidence behavior, not real
+training or historical-profile/paper qualification.

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from .candidate import check_tuning_edge
 from .models import (
     ExternalRequest,
     ExternalSource,
@@ -41,6 +42,7 @@ class ProposalFamilies:
     predecessors: tuple[tuple[str, frozenset[str]], ...]
     literature: LiteratureEdge | None = None
     interpretation: InterpretationEdge | None = None
+    tuning: str | None = None
 
     @property
     def branches(self) -> tuple[tuple[str, str], ...]:
@@ -206,7 +208,13 @@ def interpretation_candidate(
     facts = predecessor_facts(definition)
     interpreters = [node for node in definition.nodes if node.capability == "interpretation"]
     proposals = [node for node in definition.nodes if node.capability == "proposal"]
-    if len(definition.nodes) != 4 or len(interpreters) != 1 or len(proposals) != 1:
+    tuners = [node for node in definition.nodes if node.capability == "tuning"]
+    if (
+        len(tuners) > 1
+        or len(definition.nodes) != 4 + len(tuners)
+        or len(interpreters) != 1
+        or len(proposals) != 1
+    ):
         raise ValueError("interpretation candidate requires one interpreter and complete candidate")
     interpreter, proposal = interpreters[0], proposals[0]
     if (
@@ -230,11 +238,20 @@ def interpretation_candidate(
     # The complete declaration already passed contract validation. Reuse branch
     # ownership without inventing a proposal seed or changing its request type.
     candidate = definition.model_copy(
-        update={"nodes": tuple(node for node in definition.nodes if node.id != interpreter.id)}
+        update={
+            "nodes": tuple(
+                node
+                for node in definition.nodes
+                if node.id != interpreter.id and node.capability != "tuning"
+            )
+        }
     )
     shape = _proposal_branches(candidate, facts, external_proposals=False)
+    if tuners:
+        check_tuning_edge(tuners[0].request, proposal.id, shape.branches[0][1])
     return ProposalFamilies(
         shape.families,
         facts,
         interpretation=InterpretationEdge(interpreter.id, proposal.id, interpreter.request.binding),
+        tuning=tuners[0].id if tuners else None,
     )
