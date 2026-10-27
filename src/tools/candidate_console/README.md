@@ -57,7 +57,7 @@ even when using the default models.
    Open `http://127.0.0.1:8740`. If the local forwarding port differs, configure
    `browser_origin` to that exact local address before starting the server.
 5. Open **Home**, paste the console token, and select **Connect**. The connection
-   stays available while you switch between Home, Workflow Editor and Slow control,
+   stays available while you switch between Home, Workflow Editor, Run and Slow control,
    and the connect card shrinks to a **Connected** line with **Change token** and
    **Disconnect console**. Reloading or opening a new tab requires Connect again;
    the password field clears immediately and the token stays only in this
@@ -95,14 +95,20 @@ even when using the default models.
    source is shown as unavailable.
 8. To author a configured declaration, choose **Workflow Editor**. Select a node
    to inspect its supported bindings; expand **References** for task and external
-   locations, or **Advanced → Source** for exact Python bytes. Review opens the
+   locations, or **Advanced source** for exact Python bytes. Review opens the
    exact diff; Save writes those reviewed bytes. Switching views retains pending
    edits and review state. A real page exit with pending edits uses the browser's
    unsaved-change guard. Saving does not run the declaration.
    The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
+   Until a workflow is open, the page shows **Start from a task example**: select a
+   task, edit, save, run. Save behavior and concurrent-writer notes are under
+   **Details**. After a successful save, **Next: prepare a run** opens the **Run**
+   page; it stays disabled, with the reason beside it, while edits are unsaved or
+   the project is not enabled for runs.
+   A step line (Task › Workflow › Run › Results) shows where you are.
 
-The entry URLs are `/#home`, `/#workflow` and `/#slow-control`. An old
+The entry URLs are `/#home`, `/#workflow`, `/#run` and `/#slow-control`. An old
 `/editor.html` link redirects to `/#workflow` before asking for credentials.
 Connection sharing applies within one document; separate tabs/windows connect
 independently.
@@ -123,8 +129,8 @@ layout without changing the file.
 Drag a node heading to move it, or focus the heading and use Alt + arrow keys.
 These edits stay local until **Review changes** and **Save reviewed source**.
 For a bound workflow, choose its matching configured task version and acknowledge
-the findings. Prepare a new run separately to check its supported execution profile.
-New nodes and optional input changes still use Advanced → Source.
+the findings. Prepare a new run on the Run page to check its supported execution profile.
+New nodes and optional input changes still use Advanced source.
 
 ## Bind a task version
 
@@ -166,8 +172,9 @@ See the [reusable configuration contract](console-contract.md#reusable-capture-c
 
 1. Connect and open **Workflow Editor**. Review and **Save** your source edits.
    An already saved supported reusable declaration needs no extra Save. Resolve
-   any source conflict before continuing.
-2. In **New run**, explicitly choose the configured task and resources, enter a
+   any source conflict before continuing. Select **Next: prepare a run**; the
+   **Run** page states which saved version it will use.
+2. On the Run page, in **New run**, explicitly choose the configured task and resources, enter a
    run name, and select **Review preparation**. Check the source, dataset, model
    profile, inputs/workspace destinations and resource limits. To use different
    resources, configure another task choice outside the browser.
