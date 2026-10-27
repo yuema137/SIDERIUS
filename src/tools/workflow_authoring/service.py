@@ -32,7 +32,7 @@ from .models import (
     SaveView,
     SourceView,
 )
-from .options import binding_options
+from .options import binding_projection
 from .task_models import TaskReferenceReview, TaskReferenceTarget, TaskReferenceUpdateProposal
 from .training import training_inspector
 
@@ -57,12 +57,14 @@ def reviewed_source(
             tofile="proposed/workflow.py",
         )
     )
+    legacy_options, port_inventory = binding_projection(document)
     return ReviewView(
         source=source,
         sha256=digest(payload),
         diff=diff,
         document=document,
-        binding_options=binding_options(document),
+        binding_options=legacy_options,
+        port_inventory=port_inventory,
         training=training_inspector(document),
         task_reference_update=task_review,
     )
@@ -165,13 +167,15 @@ class WorkflowAuthoring:
                 document=None,
                 diagnostics=error.diagnostics,
             )
+        legacy_options, port_inventory = binding_projection(document)
         return SourceView(
             project_id=self.project.project_id,
             source_path=str(self.project.source_file),
             source=source,
             sha256=digest(payload),
             document=document,
-            binding_options=binding_options(document),
+            binding_options=legacy_options,
+            port_inventory=port_inventory,
             training=training_inspector(document),
         )
 

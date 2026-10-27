@@ -15,11 +15,20 @@ components and unsafe file types refuse. Trusted local directories are required;
 malicious same-user swaps are excluded.
 
 Read returns exact text/byte SHA-256, native document or diagnostics, declaration
-status and native-catalog-derived binding choices. Unsupported source is viewable
-but cannot be overwritten by this API until repaired externally. Review accepts
-an expected base SHA-256 plus a discriminated source/document proposal. It reads
-and validates the base, renders documents with the existing renderer, refuses
-source/rendered output above 32 KiB and returns exact proposed bytes/hash/diff.
+status and native-catalog-derived binding choices. Its legacy `binding_options`
+preserves its original serialized fields, bound-only membership and authored
+argument order for existing consumers;
+`port_inventory` separately lists every declared input socket, including omitted
+optional protocol arguments. Each inventory entry exposes the catalog contract,
+required/bound state, current source, native node input/output contracts, protocol
+owner/output mapping and contract-compatible choices. An unbound optional socket
+has `source=null`, meaning no wire is authored, not a payload value. Both views
+are inert descriptions and do not validate executable readiness. Unsupported
+source is viewable but cannot be overwritten by this API until repaired
+externally. Review accepts an expected base SHA-256 plus a discriminated
+source/document proposal. It reads and validates the base, renders documents
+with the existing renderer, refuses source/rendered output above 32 KiB and
+returns exact proposed bytes/hash/diff.
 Rendering may lose comments and formatting; that change appears in the diff.
 
 Save revalidates its typed request and exact proposal SHA-256. Under the stable
@@ -44,11 +53,12 @@ scientific readiness checks or native launch changes belong to this owner.
 
 Reusable documents round-trip through source/document proposals and read/review
 response models without adding a workspace or discarding preparation_options.
-Binding choices derive from the same catalog for either variant. The browser
-renders managed_candidate externals as read-only managed roles; it never creates
-a location editor or location key for them. Unsupported preparation options have
-no structured editor and remain intact through other edits. Unbound review/save remain
-inert declaration operations without explicit task-reference selection;
+Binding choices and complete port inventory derive from the same catalog for
+either variant. The browser renders managed_candidate externals as read-only
+managed roles; it never creates a location editor or location key for them.
+Unsupported preparation options have no structured editor and remain intact
+through other edits. Unbound review/save remain inert declaration operations
+without explicit task-reference selection;
 reusable preparation/launch retain their candidate preparation/operation owners.
 
 ## Native training inspector

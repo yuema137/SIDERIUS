@@ -73,15 +73,49 @@ class SaveRequest(SourceProposal):
     )
 
 
+class NativeContract(Model):
+    """One inert contract name and its catalog-owned native type label."""
+
+    id: str
+    native_type: str
+
+
 class BindingChoice(Model):
     label: str
     source: Source
+
+
+class PortChoice(Model):
+    label: str
+    source: Source
+    contract: NativeContract
+
+
+class ProtocolMapping(Model):
+    """Catalog-owned protocol route into a node's native input contract."""
+
+    id: str
+    owner: str
+    output_contract: NativeContract
 
 
 class BindingOptions(Model):
     node: str
     argument: str | None
     choices: tuple[BindingChoice, ...]
+
+
+class PortInventoryEntry(Model):
+    node: str
+    argument: str | None
+    choices: tuple[PortChoice, ...]
+    socket_contract: NativeContract
+    required: bool
+    bound: bool
+    source: Source | None
+    node_input_contract: NativeContract
+    node_output_contract: NativeContract
+    protocol_mapping: ProtocolMapping | None
 
 
 class SourceView(Model):
@@ -93,6 +127,7 @@ class SourceView(Model):
     document: AuthoredWorkflowDocument | None
     diagnostics: tuple[SourceDiagnostic, ...] = ()
     binding_options: tuple[BindingOptions, ...] = ()
+    port_inventory: tuple[PortInventoryEntry, ...] = ()
     status: Literal["declaration_only"] = "declaration_only"
 
 
@@ -102,6 +137,7 @@ class ReviewView(Model):
     )
     training: TrainingInspector | None = None
     binding_options: tuple[BindingOptions, ...]
+    port_inventory: tuple[PortInventoryEntry, ...] = ()
     source: str
     sha256: Digest
     diff: str

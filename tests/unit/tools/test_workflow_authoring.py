@@ -229,18 +229,35 @@ def test_transport_escaped_exact_limit_and_rendered_output_limit(editor):
 
 
 def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
-    """Fails if GUI options invent contracts, lose argument order/layout, or add optional args."""
+    """Fails if GUI ports drift from the catalog or metadata projection alters source."""
     import json
 
     from tests.unit.workflows.test_workflow_definition import definition
     from tools.workflow_authoring.models import DocumentProposal
-    from workflows.definition import NodePosition, WorkflowDocument, render_workflow_source
-
-    document = WorkflowDocument(
-        definition=definition(), positions=(NodePosition(node="propose", x=12.0, y=34.0),)
+    from workflows.definition import (
+        NodePosition,
+        WorkflowDefinition,
+        WorkflowDocument,
+        render_workflow_source,
     )
-    editor.project.source_file.write_text(render_workflow_source(document))
+
+    graph = definition().model_dump(mode="json")
+    graph["nodes"][1]["request"]["arguments"].reverse()
+    graph["externals"].append(
+        {
+            "id": "context",
+            "contract": "optional.constraint-context",
+            "location": "inputs/context.json",
+        }
+    )
+    document = WorkflowDocument(
+        definition=WorkflowDefinition.model_validate_json(json.dumps(graph)),
+        positions=(NodePosition(node="propose", x=12.0, y=34.0),),
+    )
+    source = render_workflow_source(document)
+    editor.project.source_file.write_text(source)
     view = editor.read()
+    assert view.source == source
     options = {
         (item.node, item.argument): [choice.label for choice in item.choices]
         for item in view.binding_options
@@ -249,6 +266,74 @@ def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
     assert options[("implement", "output")] == ["propose.result"]
     assert options[("validate", "output")] == ["implement.result"]
     assert options[("implement", "storage")] == ["storage"]
+    assert ("validate", "constraint_context") not in options
+    legacy_json = view.model_dump(mode="json")["binding_options"]
+    assert all(set(item) == {"node", "argument", "choices"} for item in legacy_json)
+    assert all(
+        set(choice) == {"label", "source"} for item in legacy_json for choice in item["choices"]
+    )
+    expected_legacy_order = []
+    for node in document.definition.nodes:
+        arguments = getattr(node.request, "arguments", None)
+        if arguments is None:
+            expected_legacy_order.append((node.id, None))
+        else:
+            expected_legacy_order.extend((node.id, argument.name) for argument in arguments)
+    assert [(item.node, item.argument) for item in view.binding_options] == expected_legacy_order
+
+    from tools.workflow_authoring.models import NativeContract
+    from workflows.definition.catalog import CONTRACTS, PROTOCOLS
+
+    ports = {(item.node, item.argument): item for item in view.port_inventory}
+    optional_context = ports[("validate", "constraint_context")]
+    assert optional_context.required is False
+    assert optional_context.bound is False
+    assert optional_context.source is None
+    assert optional_context.socket_contract == NativeContract(
+        id="optional.constraint-context",
+        native_type=CONTRACTS["optional.constraint-context"],
+    )
+    assert [choice.label for choice in optional_context.choices] == ["context"]
+    assert optional_context.choices[0].contract == optional_context.socket_contract
+    assert optional_context.protocol_mapping is not None
+    assert optional_context.protocol_mapping.id == "implementation-to-validation"
+    assert (
+        optional_context.protocol_mapping.owner == PROTOCOLS["implementation-to-validation"].owner
+    )
+    assert optional_context.protocol_mapping.output_contract == NativeContract(
+        id="validation.input", native_type=CONTRACTS["validation.input"]
+    )
+    assert optional_context.node_input_contract == optional_context.protocol_mapping.output_contract
+    assert optional_context.node_output_contract == NativeContract(
+        id="validation.output", native_type=CONTRACTS["validation.output"]
+    )
+    serialized = view.model_dump(mode="json")
+    serialized_ports = {
+        (item["node"], item["argument"]): item for item in serialized["port_inventory"]
+    }
+    serialized_optional = serialized_ports[("validate", "constraint_context")]
+    assert serialized_optional["required"] is False
+    assert serialized_optional["bound"] is False
+    assert serialized_optional["source"] is None
+    assert serialized_optional["socket_contract"] == {
+        "id": "optional.constraint-context",
+        "native_type": CONTRACTS["optional.constraint-context"],
+    }
+    assert serialized_optional["protocol_mapping"]["id"] == "implementation-to-validation"
+    reviewed_base = editor.review(
+        ReviewRequest(
+            expected_sha256=view.sha256,
+            proposal=DocumentProposal(kind="document", document=document),
+        )
+    )
+    assert reviewed_base.source == source
+    assert reviewed_base.port_inventory == view.port_inventory
+    review_json = reviewed_base.model_dump(mode="json")
+    review_ports = {
+        (item["node"], item["argument"]): item for item in review_json["port_inventory"]
+    }
+    assert review_ports[("validate", "constraint_context")]["source"] is None
+
     edited = document.model_dump(mode="json")
     edited["definition"]["externals"][1]["location"] = "edited-storage.json"
     reviewed = editor.review(
@@ -261,8 +346,8 @@ def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
     )
     assert [(p.node, p.x, p.y) for p in reviewed.document.positions] == [("propose", 12.0, 34.0)]
     assert [a.name for a in reviewed.document.definition.nodes[1].request.arguments] == [
-        "output",
         "storage",
+        "output",
     ]
     assert reviewed.document.definition.externals[1].location == "edited-storage.json"
 
