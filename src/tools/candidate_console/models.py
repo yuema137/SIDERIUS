@@ -8,12 +8,13 @@ from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 
 from agent.schemas.output_types import OutputTypeName
+from execute_tools.run_report import MetricView, RunHeadline
 from tools.candidate_operations import OperationStoreConfig
 from tools.candidate_operations.models import OperationKind, ProcessObservation
 from tools.candidate_operations.native_chain_models import NativeChainObservation
 from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.candidate_worker import CandidateTokenSnapshot
-from tools.candidate_worker.graph_models import GraphTrace
+from tools.candidate_worker.graph_models import GraphState, GraphTrace
 from tools.workflow_authoring.models import Project
 from tools.workflow_preview.models import PreviewModel
 from tools.workspace_sandbox.profile import SandboxProfile
@@ -212,3 +213,34 @@ class StatusView(PreviewModel):
         default=None, exclude_if=lambda value: value is None
     )
     reason: str
+
+
+class GraphRunSummary(PreviewModel):
+    """Path-free subset of the existing one-run report projection."""
+
+    run_name: str
+    model_type: str
+    status: Literal["completed", "partial", "failed"]
+    termination_reason: str
+    started_at: str
+    finished_at: str
+    completed_rounds: int
+    total_attempts: int
+    metric: MetricView | None
+    metric_source: Literal["run_output_metric_spec", "records_reconciled", "unavailable"]
+    ranking_refusal: str | None
+    secondary_metrics: tuple[MetricView, ...]
+    headline: RunHeadline
+    status_counts: dict[str, int]
+
+
+class GraphBodyResult(PreviewModel):
+    iteration: int
+    tuning_state: GraphState
+    result: GraphRunSummary | None
+
+
+class GraphResultsView(PreviewModel):
+    operation_id: UUID
+    available: bool
+    bodies: tuple[GraphBodyResult, ...] = ()

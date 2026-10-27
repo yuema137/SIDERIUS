@@ -24,9 +24,11 @@ from tools.candidate_worker.models import CandidateRunReceipt
 
 from .config import validate_config
 from .files import credentials
+from .graph_results import read_graph_results
 from .models import (
     ChoiceView,
     ConsoleConfig,
+    GraphResultsView,
     LaunchSelection,
     PreparedReview,
     PreparedSelection,
@@ -188,6 +190,9 @@ class CandidateConsole:
             if isinstance(receipt, CandidateRunReceipt)
             else None,
         )
+
+    def graph_results(self, operation_id: UUID) -> GraphResultsView:
+        return read_graph_results(self.config, operation_id)
 
     def tokens(self, operation_id: UUID) -> CandidateTokenSnapshot:
         return read_operation_tokens(self.config.operation_store, operation_id)
