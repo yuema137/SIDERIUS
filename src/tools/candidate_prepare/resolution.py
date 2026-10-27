@@ -24,7 +24,12 @@ from workflows.definition.candidate import candidate_nodes
 from workflows.definition.fanout import execution_families
 from workflows.definition.models import DeclarationModel, Identifier, Location
 
-from .layout import graph_literature_bindings, graph_proposal_bindings, graph_storage_bindings
+from .layout import (
+    graph_literature_bindings,
+    graph_proposal_bindings,
+    graph_storage_bindings,
+    interpretation_external_bindings,
+)
 
 
 class ResolvedExternalLocation(DeclarationModel):
@@ -55,6 +60,7 @@ class ResolvedReusableCandidate(DeclarationModel):
             "native-proposal-fanout/v1",
             "native-proposal-families/v1",
             "native-literature-candidate/v1",
+            "native-interpretation-candidate/v1",
         ]
         | None
     ) = Field(default=None, exclude_if=lambda value: value is None)
@@ -66,6 +72,18 @@ def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[
     if document.execution_profile is not None:
         result_roles.add("implementation")
     managed_roles = {("storage", "storage"), ("native-training.settings", "settings")}
+    if document.execution_profile == "native-interpretation-candidate/v1":
+        managed_roles.update(
+            (contract, name)
+            for name, contract in {
+                "data_dir": "optional.text",
+                "task_composition_ref": "optional.task-composition-ref",
+                "human_advice": "optional.expert-advice",
+                "expert_context": "optional.expert-context",
+                "constraint_context": "optional.constraint-context",
+                "workflow_parameter_rules": "optional.parameter-rules",
+            }.items()
+        )
     if document.execution_profile == "native-literature-candidate/v1":
         managed_roles.add(("proposal.input", "proposal_input"))
     externals = {item.id: item for item in document.definition.externals}
@@ -82,6 +100,11 @@ def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[
                         document.execution_profile == "native-literature-candidate/v1"
                         and node.capability == "literature"
                         and external.contract == "literature.input"
+                    )
+                    or (
+                        document.execution_profile == "native-interpretation-candidate/v1"
+                        and node.capability == "interpretation"
+                        and external.contract == "interpretation.input"
                     )
                 )
             ):
@@ -114,7 +137,12 @@ def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[
         for item in externals.values()
         if isinstance(item, ManagedCandidateBinding) and item.contract == "proposal.input"
     ]
-    if len(proposals) != len(proposal_ids):
+    expected_proposals = (
+        0
+        if document.execution_profile == "native-interpretation-candidate/v1"
+        else len(proposal_ids)
+    )
+    if len(proposals) != expected_proposals:
         raise ValueError("Exactly one managed proposal binding per proposal is required")
 
 
@@ -154,6 +182,7 @@ def resolve_reusable_candidate(
         graph_files = graph_storage_bindings(document)
         graph_files.update(graph_proposal_bindings(document))
         graph_files.update(graph_literature_bindings(document))
+        graph_files.update(interpretation_external_bindings(document))
         for alias, filename in graph_files.items():
             if locations[alias] != str(output / filename):
                 raise ValueError("Graph storage differs from generated branch location")
@@ -171,6 +200,7 @@ def resolve_reusable_candidate(
                 for item in document.definition.externals
             ),
             nodes=document.definition.nodes,
+            loop=document.definition.loop,
         ),
         positions=document.positions,
     )

@@ -16,7 +16,12 @@ from workflows.definition import (
 from workflows.definition.source import MAX_INPUT_BYTES
 
 from .admission import absent_destination, admit, canonical, overlap
-from .layout import graph_literature_bindings, graph_proposal_bindings, graph_storage_bindings
+from .layout import (
+    graph_literature_bindings,
+    graph_proposal_bindings,
+    graph_storage_bindings,
+    interpretation_external_bindings,
+)
 from .limits import PREPARATION_FILE_LIMIT
 from .models import CandidatePreparationRequest
 from .resolution import (
@@ -95,6 +100,7 @@ def reusable_locations(
             **graph_storage_bindings(document),
             **graph_proposal_bindings(document),
             **graph_literature_bindings(document),
+            **interpretation_external_bindings(document),
         }
         if document.execution_profile is not None
         else {}
