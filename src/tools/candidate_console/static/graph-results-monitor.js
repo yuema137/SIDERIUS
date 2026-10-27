@@ -6,7 +6,14 @@
     const list = document.createElement('dl'); list.className = 'facts';
     for (const [label, content] of rows) {
       const term = document.createElement('dt'), detail = document.createElement('dd');
-      term.textContent = label; detail.textContent = value(content); list.append(term, detail);
+      term.textContent = label; detail.textContent = value(content);
+      // Display rounding only; the exact reported number stays available as a tooltip.
+      if (typeof content === 'number' && window.consoleNumbers?.differs(content)) {
+        detail.textContent = window.consoleNumbers.format(content);
+        detail.title = 'Exact reported value: ' + window.consoleNumbers.exact(content);
+        detail.dataset.exact = window.consoleNumbers.exact(content);
+      }
+      list.append(term, detail);
     }
     return list;
   }

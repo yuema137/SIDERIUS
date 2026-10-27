@@ -57,9 +57,12 @@ even when using the default models.
    Open `http://127.0.0.1:8740`. If the local forwarding port differs, configure
    `browser_origin` to that exact local address before starting the server.
 5. Open **Home**, paste the console token, and select **Connect**. The connection
-   stays available while you switch between Home, Workflow Editor and Slow control.
-   Reloading or opening a new tab requires Connect again; the password field clears
-   immediately and the token stays only in this document's memory.
+   stays available while you switch between Home, Workflow Editor and Slow control,
+   and the connect card shrinks to a **Connected** line with **Change token** and
+   **Disconnect console**. Reloading or opening a new tab requires Connect again;
+   the password field clears immediately and the token stays only in this
+   document's memory. Home's main path is **Open workflow**: edit and review the
+   workflow, prepare a new run, then launch and monitor it.
 6. To generate a candidate from the server's configured task, expand **Prepare
    configured task** on Home. Select a task, fill the run name and optional advice,
    and expand **Configured paths** to inspect the inputs and output parents.
@@ -68,12 +71,13 @@ even when using the default models.
    **Launch candidate**, which starts code execution and may call paid APIs.
    Native Prepare generates its configured candidate independently of the declaration
    selected in Workflow Editor. Preparation never launches automatically.
-7. To observe an existing operation, choose **Slow control** and enter its complete
-   operation UUID. You can also open a link such as
+7. To observe an existing operation, choose **Slow control** and select it under
+   **Recent operations** (operations this console admitted, newest first), or
+   enter its complete operation UUID. You can also open a link such as
    `http://127.0.0.1:8740/#slow-control/22222222-2222-4222-8222-222222222222`
    (replace the example UUID), then Connect. No task or editor project selection
    is needed. The optional remembered ID is labelled **Last opened on this browser**;
-   it is not a list of discovered operations. Expand Operation facts, Reported
+   it is separate from the Recent operations list. Expand Operation facts, Reported
    token table, or Activity and logs when needed. When a workflow run has
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.

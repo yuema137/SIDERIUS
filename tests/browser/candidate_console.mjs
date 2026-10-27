@@ -122,6 +122,7 @@ try {
   const uncertainId = await page.locator('#prepare-id').textContent();
   await page.locator('nav a[href="#slow-control"]').click();
   await page.locator('nav a[href="#home"]').click();
+  await page.locator('#access-change').click(); // Connected pages collapse the token form.
   await page.locator('#token').fill('browser-fixture-token');
   await page.locator('#access-form button').click();
   await page.getByText('Connected. Observations', {exact: false}).waitFor();

@@ -152,6 +152,10 @@ def create_app(config: ConsoleConfig) -> FastAPI:
         selection = LaunchSelection.model_validate_json(await request.body())
         return await run_in_threadpool(service.launch, selection)
 
+    @app.get("/api/operations")
+    def operations(limit: int = Query(50, gt=0, le=200)):
+        return service.operations(limit)
+
     @app.get("/api/operations/{operation_id}")
     def status(operation_id: UUID):
         return service.status(operation_id)
@@ -231,6 +235,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "token-presenter.js": "text/javascript",
             "recorded-example.js": "text/javascript",
             "session.js": "text/javascript",
+            "number-format.js": "text/javascript",
+            "operations-list.js": "text/javascript",
             "navigation.js": "text/javascript",
             "editor-entry.js": "text/javascript",
             "styles.css": "text/css",

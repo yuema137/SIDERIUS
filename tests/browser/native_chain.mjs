@@ -40,6 +40,7 @@ async function until(predicate, timeout = 15000) {
   while (!(await predicate())) {assert.ok(Date.now() < end, 'Timed out waiting for browser evidence'); await new Promise(r => setTimeout(r, 100));}
 }
 async function connect(page, token) {
+  if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); 
   await page.locator('#token').fill(token); await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
 }
