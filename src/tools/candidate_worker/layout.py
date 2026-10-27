@@ -30,7 +30,11 @@ def proposal_input_path(
 ) -> Path:
     """Isolate family diagnostics while retaining fixed and G1 bytes/paths."""
     control = candidate_control_dir(workspace, iteration=iteration)
-    if profile in ("native-proposal-families/v1", "native-literature-candidate/v1"):
+    if profile in (
+        "native-proposal-families/v1",
+        "native-literature-candidate/v1",
+        "native-interpretation-candidate/v1",
+    ):
         return control / "proposal_inputs" / f"{node_id}.json"
     return control / "proposal_input.json"
 
@@ -41,7 +45,12 @@ def proposal_debug_dir(
     directory = candidate_control_dir(workspace, iteration=iteration) / "debug"
     return (
         directory / node_id
-        if profile in ("native-proposal-families/v1", "native-literature-candidate/v1")
+        if profile
+        in (
+            "native-proposal-families/v1",
+            "native-literature-candidate/v1",
+            "native-interpretation-candidate/v1",
+        )
         else directory
     )
 
@@ -62,4 +71,12 @@ def literature_cache_dir(
         graph_instance_dir(workspace, run_name, node_id, iteration=iteration)
         / "cache"
         / "root_papers"
+    )
+
+
+def interpretation_input_path(workspace: Path, node_id: str, *, iteration: int = 1) -> Path:
+    return (
+        candidate_control_dir(workspace, iteration=iteration)
+        / "interpretation_inputs"
+        / f"{node_id}.json"
     )

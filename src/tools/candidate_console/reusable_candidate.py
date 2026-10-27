@@ -137,12 +137,18 @@ class ReusableCandidate:
         task, inspected, operation = self._operation(project_id, selection, uuid4())
         binding, request = inspected.binding, operation.request
         saved = binding.request
+        plan, _ = captured_plan(Path(binding.envelope), binding, CapturedBytes())
+        profile = plan.document.execution_profile
+        if request.preview.execution_profile != profile:
+            raise OperationFailure(
+                "reusable_preparation",
+                "candidate profile differs from captured reusable declaration",
+            )
         literature_settings = {}
-        if request.preview.execution_profile == "native-literature-candidate/v1":
+        if profile == "native-literature-candidate/v1":
             from tools.candidate_prepare.reusable_literature import review_settings
             from workflows.definition import ManagedCandidateBinding
 
-            plan, _ = captured_plan(Path(binding.envelope), binding, CapturedBytes())
             selected = review_settings(plan.document)
             assert selected is not None
             authored = next(
@@ -154,7 +160,7 @@ class ReusableCandidate:
             literature_settings = {selected[0]: authored}
         return ReusableCaptureReview(
             literature_settings=literature_settings,
-            execution_profile=request.preview.execution_profile,
+            execution_profile=profile,
             selection=selection,
             request_digest=operation_request_digest(operation),
             source_path=binding.original_source.path,

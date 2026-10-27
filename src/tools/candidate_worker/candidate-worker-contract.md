@@ -530,3 +530,58 @@ advice field, N-way aggregation, parallelism, training, conditional routing, buf
 human pause or resume. Shared proposal advice is not literature advice. Historical
 scientific settings remain experiment-owned. Omitted/default fixed, fanout and
 family profiles retain their serialization and native scientific payloads.
+
+## Opt-in native interpretation candidate
+
+`WorkflowPreviewRequest.execution_profile="native-interpretation-candidate/v1"`
+executes a concrete `WorkflowDocument` with exactly one externally supplied
+`interpretation.input`, one `interpretation-to-proposal` edge, and one complete
+proposal/implementation/validation branch. The existing declaration dependency
+check and serial AND readiness determine order, including declarations whose
+interpreter appears after its consumers in source. This profile does not support
+reusable managed-source preparation, tuning, feedback loops or resume.
+
+The interpretation input is the existing native `InterpretationInput`: explicit
+`cold_start=True` uses the node's honest no-prior-evidence branch; supplied typed
+summaries use the ordinary interpretation path. No tuner result or prior history
+is synthesized. Storage, iteration, composed task description/blocks, metric
+identity, description-source policy and constraint disclosures are checked before
+node construction. Native schema/constraint owners retain scientific validation.
+
+The bounded protocol exposes these native `local_full_context` arguments:
+
+| Argument | Source |
+| --- | --- |
+| `output` | This interpretation node's result |
+| `storage` | Explicit managed proposal `StorageConfig` |
+| `data_dir` | Explicit physical task root |
+| `task_composition_ref` | Explicit native task projection |
+| `human_advice`, `expert_context` | Optional native advice/context values |
+| `constraint_context`, `workflow_parameter_rules` | Optional native disclosures/rules |
+
+All arguments except `output` use captured external bindings. Although the native
+function accepts a null task projection/data root for other callers, this composed
+execution profile requires their actual values. Unlisted arguments are refused by
+the catalog; omitted optional parameters retain the native adapter's defaults.
+There is no proposal seed to overlay. After interpretation completes, the unchanged
+native adapter creates `ProposalInput`; composition supplies task description,
+forward contract and proposer blocks, and existing proposal/branch materialization
+checks the resulting input before downstream execution. Human advice reaches the
+existing protocol unchanged; this slice does not modify prompt precedence.
+
+Invocation accounting uses the existing node/run/iteration identity. Input capture
+is under `candidate_run/interpretation_inputs/<node>.json` for iteration one, with
+later internal invocations using B1b's numbered control directory. Output uses the
+native `interpretation_<run>.json` record in that node's managed graph slot. The
+worker captures missing native persistence (including the cold-start early return)
+and preserves existing native bytes. Parent verification checks captured inputs,
+record identities, readiness and the native protocol projection independently.
+Task description is also compared with the captured interpretation input. Forward
+contract and proposer blocks remain checked by child composition and
+`materialize_proposal`; the parent does not execute task plugins or claim an
+independent reconstruction of those two task fields.
+
+Existing execution profiles, default iteration-one paths, fixed native workflow,
+scientific policy and historical prompt profiles are unchanged. Offline stub
+witnesses establish this transport/execution boundary, not scientific training or
+historical rendering qualification.
