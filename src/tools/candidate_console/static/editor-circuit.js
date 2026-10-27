@@ -46,7 +46,6 @@
     const occupied = new Set();
     for (const input of world.querySelectorAll('[data-input]')) {
       const option = choice(input.dataset.node, input.dataset.argument || null);
-      const node = projection.document.definition.nodes.find(value => value.id === input.dataset.node);
       const source = option?.source;
       if (source?.kind !== 'result') continue;
       const output = [...world.querySelectorAll('[data-output]')].find(value => value.dataset.node === source.node);
@@ -55,7 +54,7 @@
       if (!route) { say('Some wires could not be routed around the current cards. Move overlapping cards; the connection list retains every binding.'); continue; }
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', geometry.path(route)); path.classList.add('circuit-wire');
-      path.dataset.from = source.node; path.dataset.to = node.id; path.dataset.argument = option.argument;
+      path.dataset.from = source.node; path.dataset.to = input.dataset.node; path.dataset.argument = option.argument;
       svg.append(path);
     }
     highlight();
