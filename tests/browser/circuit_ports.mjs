@@ -89,6 +89,8 @@ try {
   const beforePosition = await page.locator('.circuit-card[data-node="build_left"]').evaluate(element => element._position);
   const beforeLayout = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => ({node: card.dataset.node, ...card._position})));
   await page.locator('#circuit-node-build_left').focus(); await page.keyboard.press('Alt+ArrowDown');
+  // Pointer deltas below are screen pixels; compare them at 100 % (fit-on-open may have zoomed out).
+  await page.locator('#circuit-zoom-reset').click();
   const header = page.locator('#circuit-node-build_left'); await header.scrollIntoViewIfNeeded();
   const rect = await header.boundingBox();
   await header.evaluate(element => element.addEventListener('pointerdown', event => { element.dataset.testPointer = event.pointerId; }, {once: true}));

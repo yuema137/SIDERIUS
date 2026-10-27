@@ -222,11 +222,10 @@ def interpretation_profile_source() -> str:
         ).model_dump(mode="json"),
         *(node.model_dump(mode="json") for node in candidate_nodes),
     ]
-    raw["positions"] = [
-        *raw["positions"],
-        {"node": "interpret", "x": -80.0, "y": 20.0},
-        {"node": "fit", "x": 520.0, "y": 20.0},
-    ]
+    # Complete, disjoint saved layout. The example's partial set (build at x=120)
+    # plus interpret at x=-80 overlapped by 15 px and left two cards on fallback
+    # placement off to the right (UX walkthrough 2026-10-27).
+    raw["positions"] = [{"node": node, "x": x, "y": y} for node, x, y in FIVE_NODE_POSITIONS]
     validated = ReusableWorkflowDocument.model_validate_json(json.dumps(raw))
     return render_workflow_source(validated)
 

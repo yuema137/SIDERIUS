@@ -90,9 +90,9 @@
     <button id="editor-inspect" type="button" hidden>Inspect source</button><p id="editor-status" role="status">Connect to open a configured project.</p>
     <details><summary>Save behavior</summary><p class="muted">Saving updates source for future New run captures. It does not launch a run or change existing captures. Task-bound publication checks the explicitly selected native task identity.</p></details>
   </section>
-  <details class="card workflow-task-details"><summary>Task package and version</summary>
-    <section class="editor-task-controls" id="editor-task-controls" aria-label="Task package and version"></section>
-  </details>
+  <section class="card workflow-task-details" aria-label="Task package and version">
+    <section class="editor-task-controls" id="editor-task-controls" aria-label="Task package and version"><h2>Task package and version</h2><p id="editor-task-state">Connect to see which task package and version this workflow uses.</p></section>
+  </section>
   </div>
   <section class="card workflow-actions">
     <div class="actions">
@@ -113,7 +113,7 @@
   <div class="editor-workspace">
     <section class="card workflow-canvas-panel">
       <h2>Workflow canvas</h2>
-      <details class="canvas-help"><summary>Canvas controls</summary><p>Select a capability to inspect its request. Select an output and then a highlighted input to rebind it. Drag a capability heading to move it; Alt + arrow keys also move the selected capability.</p></details>
+      <details class="canvas-help"><summary>Canvas controls</summary><p>Select a capability to inspect its request. Select an output and then a highlighted input to rebind it. Drag a capability heading to move it; Alt + arrow keys also move the selected capability. Optional inputs that are not connected are folded into an "optional inputs" row on each card; expand it to connect one. Fit to view, zoom and Arrange view change only what you see: saved positions change only when you move a card, review and save.</p></details>
       <div id="editor-graph"></div>
       <details class="connection-list"><summary>Connection mappings</summary><ul id="editor-edges"></ul></details>
     </section>

@@ -454,6 +454,25 @@ Bindings/profile/options are not inferred from card order or geometry. Request
 protocols display as adaptor labels inside their actual consumer, not extra nodes.
 External source chips remain inspector bindings. Omitted optional ports, argument
 creation/deletion and new nodes are not graphical controls in this slice.
+Required and bound inputs always render as card rows; optional unbound inputs fold
+into one `.circuit-optional` disclosure per card ("N optional inputs"), expandable
+and remembered across re-renders of the same graph. While an output is pending,
+the summary is highlighted when a folded input is type-compatible.
+
+Canvas view state (zoom, scroll, Arrange view, expanded optional rows) is owned by
+`editor-circuit.js`, keyed by project and node IDs, and never reaches a document:
+viewing sends no request and cannot change saved bytes. The canvas is a CSS
+`transform: scale()` of the world, with positions kept in document pixels
+(drags divide screen deltas by the zoom). On opening a graph it fits once
+(`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
+canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size and
+Arrange view. The canvas grows with its zoomed content up to
+`clamp(420px, 100vh - 200px, 860px)`, shows edge shadows toward unseen content,
+and a note states how many capabilities are partly outside the view. Arrange view
+displays `geometry.place` with no stored positions (display only); a move made
+there records the displayed layout as an ordinary local edit and leaves Arrange
+view. Overlapping saved cards (`geometry.overlaps`) and unrouteable wires are
+reported with that display-only way out.
 
 The workflow-level Research loop panel (`editor-loop-controls.js`, view only;
 `editor.js` owns the draft) shows "No research loop declared" with an Add action
@@ -528,7 +547,12 @@ node tests/browser/workflow_editor.mjs
 `tests/browser/capability_layout.mjs` (same variables) opens a five-node authored
 loop and checks paper headings, no generic card, pairwise-disjoint cards in light
 and dark themes, and full-layout persistence for pointer and keyboard moves;
-`tests/browser/circuit_geometry.mjs` checks fallback placement without a browser.
+`tests/browser/circuit_geometry.mjs` checks fallback placement, fit-scale bounds
+and overlap detection without a browser. `tests/browser/editor_canvas_fit.mjs`
+(same variables) checks at 1440x900 that all five cards are in view after
+fit-on-open, that view controls send nothing and keep bytes, folded optional
+inputs, the disjoint fully wired interpretation fixture, Arrange view on an
+overlapping layout, zoomed drag arithmetic and a non-empty task panel.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
@@ -888,6 +912,13 @@ are present. Empty choices preserve ordinary unbound editing. This inert GET
 does not inspect files, compose/import tasks or start native observations; internal
 resource paths/settings and credentials are absent. Metadata is configured intent,
 not verification of current task contents or execution readiness.
+
+The Task package and version panel is always visible and never empty: it states
+the saved binding (`This workflow uses task package …, version …`) or that the
+workflow is unbound, then either the version selector with Update workflow
+references (when choices exist) or `#editor-task-unavailable`, which explains that
+no configured task declares `task_revision` and links the README's "Bind a task
+version". Refresh task choices is always present.
 
 Workflow builder shows saved binding separately and starts with no task selection.
 Users explicitly select a choice (or click the unique matching saved-choice action).
