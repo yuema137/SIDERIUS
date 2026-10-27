@@ -238,8 +238,9 @@ Professional, Assistant and GUI use this same reader.
 These steps are for a saved workflow that repeats as a research loop. The
 browser console offers the same actions in Slow control.
 
-1. Stop ends the whole run after the current iteration; Pause ends only this
-   segment after the current iteration and can be resumed:
+1. Stop ends the whole run after the current iteration. Pause ends only the
+   current part of the run (a segment) after the current iteration, and you can
+   resume it later:
 
    ```sh
    .venv/bin/python -m tools.candidate_operations pause-loop \
@@ -247,7 +248,9 @@ browser console offers the same actions in Slow control.
    ```
 
    Use `stop-loop` instead of `pause-loop` to stop. The answer means the request
-   was recorded; check `status` until the run reports `paused` or `stopped`.
+   was recorded; check `status` until the run reports `paused`, `stopped` or
+   `completed`. If the request arrives during the last iteration, that iteration
+   finishes and the run reports `completed`.
 
 2. To resume a paused loop, review it and save the resume request once:
 
@@ -257,7 +260,8 @@ browser console offers the same actions in Slow control.
      --output loop-resume.json
    ```
 
-3. Bind the same provider credentials as the original launch, then submit:
+3. Make the same provider API keys available in this shell as for the original
+   launch, then submit:
 
    ```sh
    .venv/bin/python -m tools.candidate_operations submit \

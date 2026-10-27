@@ -16,7 +16,7 @@ Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
 [TREE paper](https://doi.org/10.1038/s41551-024-01312-5) ·
 [Comparison data and evaluation conditions](docs/assets/results/provenance.md).
 
-- **Run a research loop:** go from a hypothesis to model code, measured results
+- **Run an experiment cycle:** go from a hypothesis to model code, measured results
   and the next experiment, with a record of each attempt.
 - **Evaluate more than a score:** declare task-specific validity checks alongside
   your metric, with controlled data access and reproducible evaluation rules.
@@ -101,6 +101,11 @@ you control the scientific choices and paid execution; the agent asks about
 missing decisions before launching. A [configuration review and HTML report](src/tools/setup_review/README.md)
 is optional. See [getting started](docs/getting-started/README.md) for installation
 and detailed setup.
+
+Your agent can also save the experiment as an editable workflow file. The optional
+[browser console](src/tools/candidate_console/README.md) opens that file, can repeat
+it as a research loop that ends at an iteration limit or a stop condition you set,
+and lets you stop, pause and later resume the loop between iterations.
 
 ### Choose the execution: workflow or orchestration
 

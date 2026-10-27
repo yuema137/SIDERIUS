@@ -836,6 +836,7 @@ Failures use the ordinary one-line JSON error and exit status 2.
 ```python
 from pathlib import Path
 from uuid import UUID, uuid4
+from core.durable_io import publish_bytes_write_once
 from tools.candidate_operations import (
     CandidateLoopResumeOperation, CandidateLoopResumeRequest, OperationStoreConfig,
     read_operation, request_loop_pause, request_loop_stop, review_loop_resume,
@@ -855,7 +856,14 @@ resume = CandidateLoopResumeOperation(
         expected_receipt_digest=review.receipt_digest,
     ),
 )
-Path("loop-resume.json").write_text(resume.model_dump_json(indent=2))
+# Create the file once, as the CLI does. FileExistsError means a saved request
+# already exists: submit that file unchanged, never overwrite it.
+publish_bytes_write_once(
+    str(Path("loop-resume.json").absolute()), resume.model_dump_json().encode()
+)
+# environment_with_root_provider_names: placeholder for the launching process's
+# environment mapping (e.g. dict(os.environ)); it must contain the provider
+# environment names the root request declared.
 submit_operation(config, resume, launch_environment=environment_with_root_provider_names)
 ```
 
