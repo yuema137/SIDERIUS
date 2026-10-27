@@ -54,14 +54,20 @@
       const group = element('details', '', list, 'palette-category'); group.open = true; group.dataset.capability = capability;
       element('summary', `${label(capability)} · ${entries.length} route${entries.length === 1 ? '' : 's'}`, group);
       for (const [entry, index] of entries) {
-        const button = element('button', `${label(capability)} ${routeText(entry)}`, group, 'palette-entry');
-        button.type = 'button'; button.draggable = true; button.dataset.capability = capability; button.dataset.protocol = entry.protocol || '';
+        // Chromium never starts an HTML5 drag from <button>, so the entry is a focusable
+        // role=button element; aria-disabled (not `disabled`) gates click, keys and drag.
+        const button = element('div', `${label(capability)} ${routeText(entry)}`, group, 'palette-entry');
+        button.setAttribute('role', 'button'); button.tabIndex = 0; button.draggable = true; button.dataset.capability = capability; button.dataset.protocol = entry.protocol || '';
         const inputs = entry.arguments.length ? entry.arguments.map(item => `${item.name} (${item.required ? 'required' : 'optional'}, ${item.contract.id})`).join('; ') : `request (${entry.input_contract.id})`;
         button.title = `Add a ${capability} node ${routeText(entry)}. Inputs: ${inputs}. Output: ${entry.output_contract.id}. Click to add, or drag onto the canvas.`;
         button.setAttribute('aria-label', `Add ${label(capability)} ${routeText(entry)}`);
-        button.disabled = !state.enabled;
+        button.setAttribute('aria-disabled', String(!state.enabled));
         button.addEventListener('click', () => add(entry));
-        button.addEventListener('dragstart', event => { event.dataTransfer.setData('text/plain', PREFIX + index); event.dataTransfer.effectAllowed = 'copy'; });
+        button.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); add(entry); } });
+        button.addEventListener('dragstart', event => {
+          if (!state.enabled) { event.preventDefault(); return; }
+          event.dataTransfer.setData('text/plain', PREFIX + index); event.dataTransfer.effectAllowed = 'copy';
+        });
       }
     }
   }
@@ -94,7 +100,7 @@
   function setState(next) {
     state = {...state, ...next};
     if (!host) return;
-    for (const button of host.querySelectorAll('.palette-entry')) button.disabled = !state.enabled;
+    for (const entry of host.querySelectorAll('.palette-entry')) entry.setAttribute('aria-disabled', String(!state.enabled));
     const cancel = host.querySelector('.palette-cancel');
     cancel.hidden = !state.pendingNode; cancel.textContent = state.pendingNode ? `Cancel new node ${state.pendingNode}` : 'Cancel new node';
     if (!catalog) void load();

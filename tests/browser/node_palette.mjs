@@ -53,6 +53,7 @@ try {
   await page.locator('#circuit-node-validation').waitFor();
   await waitUntil(async () => (await pendingText()).includes('Pending new node validation · incomplete'), 'incomplete draft');
   assert.match(await page.locator('#circuit-input-validation-output').textContent(), /Required · unbound/);
+  assert.equal(await entry.getAttribute('aria-disabled'), 'true', 'Palette is inactive while a new node is pending');
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'A draft node never touches disk');
@@ -101,6 +102,7 @@ try {
 
   // Drag a palette entry onto the canvas, then cancel the draft without a request to review.
   await palette.locator('.palette-search').fill('');
+  assert.equal(await palette.locator('.palette-entry[data-capability="proposal"][data-protocol=""]').getAttribute('aria-disabled'), 'false');
   const reviews = posts.filter(item => item.url.endsWith('/review')).length;
   await palette.locator('.palette-entry[data-capability="proposal"][data-protocol=""]').dragTo(page.locator('.circuit-viewport'));
   await page.locator('#circuit-node-proposal').waitFor();

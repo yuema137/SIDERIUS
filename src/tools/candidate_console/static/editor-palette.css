@@ -5,8 +5,10 @@
 .editor-palette .palette-list { display: flex; flex-wrap: wrap; gap: .4rem .8rem; }
 .editor-palette .palette-category { min-width: 12rem; }
 .editor-palette .palette-category summary { font-size: .75rem; font-weight: 700; color: var(--muted); cursor: pointer; }
-.editor-palette .palette-entry { display: block; margin: .25rem 0; text-align: left; cursor: grab; }
-.editor-palette .palette-entry:disabled { cursor: not-allowed; }
+.editor-palette .palette-entry { display: block; margin: .25rem 0; padding: .3rem .55rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--control); color: var(--text); text-align: left; cursor: grab; user-select: none; }
+.editor-palette .palette-entry:hover:not([aria-disabled="true"]) { border-color: var(--focus); }
+.editor-palette .palette-entry:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.editor-palette .palette-entry[aria-disabled="true"] { color: var(--muted); opacity: .6; cursor: not-allowed; }
 .editor-palette .palette-note, .editor-palette .palette-empty { margin: .3rem 0 0; color: var(--muted); font-size: .75rem; }
 .editor-palette .palette-cancel { margin-top: .4rem; }
 .editor-remove-node { margin: .4rem 0; }
