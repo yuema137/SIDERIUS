@@ -1,6 +1,7 @@
 """Authenticated editor routes preserve ordinary file authority and body bounds."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -202,3 +203,66 @@ def test_oversized_source_is_bounded_unavailable_not_console_startup_failure(edi
         assert response.json()["error"]["code"] == "limit"
         assert "source" not in response.json()
         assert client.get("/api/choices", headers=headers).status_code == 200
+
+
+STATIC = Path(__file__).resolve().parents[4] / "src/tools/candidate_console/static"
+# Capability names from the paper's discovery-loop figure (docs/assets/discovery-loop.svg).
+PAPER_LABELS = {
+    "interpretation": "INTERPRET",
+    "literature": "LITERATURE",
+    "proposal": "PROPOSE",
+    "implementation": "IMPLEMENT",
+    "validation": "VALIDATE",
+    "tuning": "TRAIN & TUNE",
+}
+
+
+def presentation_entries() -> dict[str, tuple[str, str]]:
+    """Parse ``{capability: (label, role)}`` from the browser's presentation table."""
+    script = (STATIC / "editor-capability-presentation.js").read_text()
+    block = re.search(r"const entries = Object\.freeze\(\{\n(.*?)\n  \}\);", script, re.S)
+    assert block, "presentation entries table not found"
+    rows = block.group(1).splitlines()
+    parsed = [re.match(r"    (\w+): \{label: '([^']+)', role: '([^']+)'", row) for row in rows]
+    assert all(parsed), f"unparsed presentation rows: {rows}"
+    return {match[1]: (match[2], match[3]) for match in parsed if match}
+
+
+def test_every_catalog_capability_has_its_paper_label_and_theme_role():
+    """Fails if a catalog capability renders the generic CAPABILITY fallback (the
+    interpretation gap), carries a non-paper name, or has no card style/theme tokens."""
+    from workflows.definition.catalog import CAPABILITIES
+
+    assert set(CAPABILITIES) == set(PAPER_LABELS)
+    entries = presentation_entries()
+    assert {name: label for name, (label, _) in entries.items()} == PAPER_LABELS
+    card_css = (STATIC / "editor.css").read_text()
+    theme = (STATIC / "theme.css").read_text()
+    for capability, (_, role) in entries.items():
+        assert role == capability
+        assert f".circuit-card.capability-{role} {{" in card_css, role
+        # One accent and one tint in each of the light and dark themes.
+        assert theme.count(f"--capability-{role}:") == 2, role
+        assert theme.count(f"--capability-{role}-tint:") == 2, role
+
+
+def test_five_node_browser_fixture_saves_every_node_position():
+    """Fails if the layout witness fixture stops parsing as the five-node authored loop
+    or leaves a node to fallback placement instead of its saved coordinates."""
+    from tests.browser.workflow_editor_server import five_node_source
+    from workflows.definition import WorkflowDocument, parse_workflow_source
+
+    document = parse_workflow_source(five_node_source())
+    assert isinstance(document, WorkflowDocument)
+    assert [node.capability for node in document.definition.nodes] == [
+        "interpretation",
+        "proposal",
+        "implementation",
+        "validation",
+        "tuning",
+    ]
+    assert document.definition.loop is not None
+    assert document.definition.loop.feedback.target == "interpret"
+    assert sorted(position.node for position in document.positions) == sorted(
+        node.id for node in document.definition.nodes
+    )

@@ -25,6 +25,32 @@ const positions = globalThis.editorCircuitGeometry.arrange([
   {id: 'validator', request: {kind: 'protocol', arguments: [{source: {kind: 'result', node: 'builder'}}]}},
   {id: 'builder', request: {kind: 'protocol', arguments: [{source: {kind: 'result', node: 'proposal'}}]}},
   {id: 'proposal', request: {kind: 'external'}},
-], 300);
+], 300, 350);
 assert.ok(positions.get('proposal').y < positions.get('builder').y);
 assert.ok(positions.get('builder').y < positions.get('validator').y, 'Default display order follows actual edges even when source nodes are interleaved');
+
+// Fallback placement (G5). Fails if an unsaved card lands on a stored one, two
+// unsaved cards share a point, stored positions move, or an empty stored set
+// yields non-finite coordinates.
+const {place} = globalThis.editorCircuitGeometry;
+const chain = ['interpret', 'hypothesis', 'build', 'check', 'fit'].map((id, index, ids) => ({
+  id, request: index ? {kind: 'protocol', arguments: [{source: {kind: 'result', node: ids[index - 1]}}]} : {kind: 'external'},
+}));
+const size = {width: 215, height: 180}, gap = {x: 135, y: 90};
+const disjoint = (placed, label) => {
+  const boxes = [...placed].map(([id, p]) => ({id, left: p.x, top: p.y, right: p.x + size.width, bottom: p.y + size.height}));
+  for (const box of boxes) assert.ok(Number.isFinite(box.left) && Number.isFinite(box.top), `${label}: ${box.id} is finite`);
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j];
+    assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${label}: ${a.id} overlaps ${b.id}`);
+  }
+};
+disjoint(place(chain, new Map(), size, gap), 'no stored positions');
+const partial = new Map([['build', {x: 120, y: -30}], ['check', {x: 400, y: 300}]]);
+const placedPartial = place(chain, partial, size, gap);
+assert.deepEqual(placedPartial.get('build'), {x: 120, y: -30}, 'Stored positions are exact');
+assert.deepEqual(placedPartial.get('check'), {x: 400, y: 300}, 'Stored positions are exact');
+disjoint(placedPartial, 'partial stored positions');
+const fanout = [{id: 'seed', request: {kind: 'external'}}, ...['a', 'b', 'c'].map(id => ({id, request: {kind: 'protocol', arguments: [{source: {kind: 'result', node: 'seed'}}]}}))];
+disjoint(place(fanout, new Map([['seed', {x: 0, y: 0}]]), size, gap), 'same-rank unsaved siblings');
+console.log('PASS fallback placement keeps stored positions exact and every card disjoint');
