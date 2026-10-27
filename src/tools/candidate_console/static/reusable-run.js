@@ -13,7 +13,13 @@
     if (!value.loop) return 'Research loop: none (one workflow body).';
     const capability = id => window.editorCapabilityPresentation.label(value.nodes.find(item => item[0] === id)?.[1]);
     const edge = value.loop.feedback;
-    return `Research loop: up to ${value.loop.final_iteration} iteration${value.loop.final_iteration === 1 ? '' : 's'} · feedback ${capability(edge.source.node)} ${edge.source.node} → ${capability(edge.target)} ${edge.target}.`;
+    const stops = (value.loop.stop_conditions || []).map(stopCondition);
+    return `Research loop: up to ${value.loop.final_iteration} iteration${value.loop.final_iteration === 1 ? '' : 's'} · feedback ${capability(edge.source.node)} ${edge.source.node} → ${capability(edge.target)} ${edge.target}${stops.length ? ' · stops early when ' + stops.join(' or ') : ''}.`;
+  }
+  function stopCondition(condition) {
+    if (condition.kind === 'metric_threshold') return `${condition.metric_id} reaches ${condition.threshold} (task metric direction)`;
+    if (condition.kind === 'no_improvement') return `${condition.completed_bodies} completed bod${condition.completed_bodies === 1 ? 'y' : 'ies'} pass without improvement`;
+    return `unsupported condition ${condition.kind}`;
   }
   let editor = window.workflowEditor.state, generation = 0, selected = null, review = null;
   let handoffGeneration = -1;

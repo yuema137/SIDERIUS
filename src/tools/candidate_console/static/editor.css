@@ -194,3 +194,5 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
 .workflow-loop-panel fieldset { margin: 0 0 12px; }
 .workflow-loop-panel legend { font-weight: 600; }
 .workflow-loop-panel input[type="number"] { max-width: 10rem; }
+.workflow-loop-panel .editor-loop-stop { display: grid; gap: 4px; margin: 0 0 10px; }
+.workflow-loop-panel .editor-loop-stop button { justify-self: start; }

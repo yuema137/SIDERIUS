@@ -121,6 +121,20 @@ renderer produced). Review re-renders the whole declaration, so a hand-formatted
 commented source is rewritten into canonical form by its first reviewed loop edit;
 the diff shows that rewrite before Save.
 
+Stop conditions travel inside the same `LoopProposal.loop` as
+`AuthoredLoop.stop_conditions`; the editor adds no separate proposal, model or
+validator. The declaration stays authoritative: request parsing refuses a
+`metric_threshold` without a non-empty `metric_id` or with a non-finite/non-number
+`threshold`, a non-integer or non-positive `no_improvement.completed_bodies`, and
+the reserved `judge` kind (all 422 `validation`); canonical rendering refuses more
+than one condition per kind and `completed_bodies >= final_iteration` (422
+`source` diagnostics with `field_path`, messages never forwarded). Refusals write
+nothing. An empty tuple is omitted from source with its unused constructors, so a
+condition-free loop keeps its bytes and add-then-remove restores them. The editor
+does not know the task's declared metric: `metric_id` is a validated text field,
+and a mismatch with the run metric fails the loop at execution (the worker
+contract), not at Review.
+
 ## Bound-source publication boundary
 
 Inert read accepts the optional v2 TaskBinding declaration. Bound review and Save

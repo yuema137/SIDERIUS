@@ -83,6 +83,7 @@ def loop_status(
     return LoopStatusView(
         final_iteration=loop.final_iteration,
         attempted_iterations=None if trace is None else trace.attempted_iterations,
+        stop_reason=None if trace is None else trace.stop_reason,
     )
 
 

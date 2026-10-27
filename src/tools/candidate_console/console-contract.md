@@ -305,7 +305,12 @@ scientific training. No public paired prepared/completed example exists yet.
 `StatusView.loop` is present only for a `candidate` operation whose admitted
 submission (`lookup_operation_request`) declares `definition.loop`:
 `final_iteration` comes from that declaration and `attempted_iterations` only from
-the native receipt's `loop_trace` (`null` while no receipt exists). The console
+the native receipt's `loop_trace` (`null` while no receipt exists). `stop_reason`
+is the receipt's verified `loop_trace.stop_reason`, present only when a declared
+stop condition completed the loop early; Slow control renders it in plain words
+("Research loop stopped early after body 3 of up to 5: accuracy reached 0.9
+(threshold 0.85, higher is better; best at body 3)", or "… no improvement for 2
+bodies …") from the existing status poll, with recorded values unrounded. The console
 never infers per-body progress from an active process. Fixed and non-candidate
 operations omit the field.
 
@@ -403,17 +408,25 @@ fieldset per facet: Iteration limit (`final_iteration`, whole number ≥ 1; inva
 or empty values stay local and block Review) and Feedback (paper capability labels
 from `editorCapabilityPresentation.label`, read-only endpoints). Remove deletes the
 loop. Loop-only edits review as `LoopProposal` on the current exact source; with
-other inspector edits pending, the whole document proposal carries them. Later loop
-facets (stop conditions) are added as further sections in that module. An invalid
-limit stays in the loop draft state (`loopDrafts`, separate from training drafts)
-and blocks Review and circuit edits. Loop edits preserve bytes only for an
-already-canonical source; Review re-renders the whole declaration, so
-hand-formatted or commented sources are rewritten (visible in the diff). The panel
+other inspector edits pending, the whole document proposal carries them. A third
+fieldset, Stop conditions, adds/removes at most one `metric_threshold` (metric id
+text plus threshold; the editor does not know the task metric) and one
+`no_improvement` (completed bodies); `judge` is never offered. All stop-condition
+UI logic lives in `editor-loop-controls.js`, mutating the draft loop through one
+`edit` action from `editor.js`. Empty, padded, non-finite or non-integer values
+stay local in the loop draft state (`loopDrafts`, separate from training drafts)
+and block Review and circuit edits exactly as an invalid limit does. Cross-field
+rules (one per kind, `completed_bodies < final_iteration`) are the declaration's:
+a refused loop review reads "Review refused the research loop: …" with the
+diagnostic `field_path`. Loop edits preserve bytes only for an already-canonical
+source; Review re-renders the whole declaration, so hand-formatted or commented
+sources are rewritten (visible in the diff). The panel
 does not draw a back-edge or annotate cards, and it shares the source-dirty,
 binding-draft, conflict and saving fences. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
 from the captured declaration, and the launch summary states "up to N iterations"
-or "none (one workflow body)".
+or "none (one workflow body)", followed by "stops early when …" for each declared
+stop condition.
 
 Socket/drag gestures send no requests. Source editing, disconnection, conflict,
 saving and invalid training drafts gate mutations; stale rendered projections

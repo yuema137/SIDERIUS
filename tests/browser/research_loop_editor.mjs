@@ -1,4 +1,4 @@
-/** Research-loop GUI round trip: add, limit, review, save, reopen, remove on the five-node source. */
+/** Research-loop GUI round trip: add, limit, stop conditions, review, save, reopen, remove on the five-node source. */
 import assert from 'node:assert/strict';
 import {spawn, execFileSync} from 'node:child_process';
 import {mkdir, readFile} from 'node:fs/promises';
@@ -109,6 +109,64 @@ try {
   for (const key of ['nodes', 'externals', 'task']) assert.deepEqual(looped.definition[key], original.definition[key]);
   for (const key of ['execution_profile', 'training_settings', 'preparation_options', 'positions']) assert.deepEqual(looped[key], original[key]);
   await page.screenshot({path: join(evidence, 'research-loop-reopened.png'), fullPage: true});
+
+  // Stop conditions: add both kinds, incomplete values block Review, review shows them.
+  const loopedBytes = await readFile(metadata.interpretation_source);
+  await page.locator('#editor-loop-stop-conditions').filter({hasText: 'None. The loop runs until its iteration limit.'}).waitFor();
+  assert.equal(await page.locator('#editor-loop-add-judge').count(), 0, 'judge stopping is never offered');
+  await page.locator('#editor-loop-add-metric-threshold').click();
+  assert.equal(await page.locator('#editor-loop-add-metric-threshold').count(), 0, 'one condition per kind');
+  assert.equal(await page.locator('#editor-review').isDisabled(), true, 'an incomplete threshold blocks Review');
+  const metricId = page.locator('#editor-loop-stop-metric-id'), threshold = page.locator('#editor-loop-stop-threshold');
+  await metricId.fill('accuracy');
+  assert.equal(await page.locator('#editor-review').isDisabled(), true, 'a missing threshold blocks Review');
+  await threshold.fill('0.85');
+  assert.equal(await page.locator('#editor-review').isDisabled(), false);
+  await metricId.fill(' accuracy');
+  assert.equal(await page.locator('#editor-review').isDisabled(), true, 'a padded metric id blocks Review');
+  await metricId.fill('accuracy');
+  await page.locator('#editor-loop-add-no-improvement').click();
+  const bodies = page.locator('#editor-loop-stop-completed-bodies');
+  assert.equal(await bodies.inputValue(), '1');
+  for (const invalid of ['0', '1.5', '']) {
+    await bodies.fill(invalid);
+    assert.equal(await page.locator('#editor-review').isDisabled(), true, `invalid bodies ${JSON.stringify(invalid)} must block Review`);
+  }
+  // A cross-field value the server owns: bodies must stay below final_iteration (3).
+  await bodies.fill('3');
+  assert.equal(await page.locator('#editor-review').isDisabled(), false);
+  await page.locator('#editor-review').click();
+  await waitUntil(async () => (await status.textContent()).startsWith('Review refused the research loop'));
+  assert.match(await status.textContent(), /below the final iteration/);
+  assert.match(await page.locator('#editor-diagnostics').textContent(), /validation: Declaration validation failed/);
+  assert.ok((await readFile(metadata.interpretation_source)).equals(loopedBytes), 'a refused review writes nothing');
+  await bodies.fill('2');
+  await page.screenshot({path: join(evidence, 'research-loop-stop-conditions.png'), fullPage: true});
+  const stopsDiff = await reviewAndSave();
+  assert.match(stopsDiff, /MetricThresholdStop\(/);
+  assert.match(stopsDiff, /metric_id='accuracy'/);
+  assert.match(stopsDiff, /threshold=0\.85/);
+  assert.match(stopsDiff, /NoImprovementStop\(/);
+  assert.match(stopsDiff, /completed_bodies=2/);
+  await reopen();
+  assert.equal(await page.locator('#editor-loop-stop-metric-id').inputValue(), 'accuracy');
+  assert.equal(await page.locator('#editor-loop-stop-threshold').inputValue(), '0.85');
+  assert.equal(await page.locator('#editor-loop-stop-completed-bodies').inputValue(), '2');
+  assert.deepEqual(parsed().definition.loop.stop_conditions, [
+    {kind: 'metric_threshold', metric_id: 'accuracy', threshold: 0.85},
+    {kind: 'no_improvement', completed_bodies: 2},
+  ]);
+  await page.screenshot({path: join(evidence, 'research-loop-stop-conditions-reopened.png'), fullPage: true});
+
+  // Remove both conditions: the condition-free loop bytes return exactly.
+  await page.locator('#editor-loop-remove-metric-threshold').click();
+  await page.locator('#editor-loop-remove-no-improvement').click();
+  await page.locator('#editor-loop-add-metric-threshold').waitFor();
+  const unstopDiff = await reviewAndSave();
+  assert.match(unstopDiff, /-\s+MetricThresholdStop\(/);
+  await reopen();
+  await page.locator('#editor-loop-stop-conditions').filter({hasText: 'None.'}).waitFor();
+  assert.ok((await readFile(metadata.interpretation_source)).equals(loopedBytes), 'removing every stop condition must restore the condition-free bytes');
 
   // Remove, save, reopen: the original non-loop bytes return.
   await page.locator('#editor-loop-remove').click();

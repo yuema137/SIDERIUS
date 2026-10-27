@@ -79,6 +79,7 @@ even when using the default models.
    verified iteration separately; it never combines or ranks iterations.
    A running authored research loop shows **Stop at next boundary**: the current
    iteration finishes, and status says stopped only once the native receipt does.
+   A loop ended early by a declared stop condition says why, in plain words.
    Configured **Recorded examples** appear in Slow control. They show verified
    proposal, implementation, validation and reported-token evidence only; they
    are not live operations, training results, scientific scores or billing
@@ -92,6 +93,7 @@ even when using the default models.
    exact diff; Save writes those reviewed bytes. Switching views retains pending
    edits and review state. A real page exit with pending edits uses the browser's
    unsaved-change guard. Saving does not run the declaration.
+   The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
 
 The entry URLs are `/#home`, `/#workflow` and `/#slow-control`. An old

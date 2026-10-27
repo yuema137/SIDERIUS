@@ -15,6 +15,8 @@ const lines = createInterface({input: server.stdout});
 const running = '33333333-3333-4333-8333-333333333333';
 const fixed = '44444444-4444-4444-8444-444444444444';
 const finished = '55555555-5555-4555-8555-555555555555';
+const thresholdStop = '66666666-6666-4666-8666-666666666666';
+const patienceStop = '77777777-7777-4777-8777-777777777777';
 let browser;
 try {
   const metadata = await new Promise((accept, reject) => {
@@ -58,6 +60,18 @@ try {
     if (url.pathname === `/api/operations/${running}`) return reply(runningTerminal ? terminal(running, 'stopped', 1) : status(running, {loop: {final_iteration: 3, attempted_iterations: null}}));
     if (url.pathname === `/api/operations/${fixed}`) return reply(status(fixed, {}));
     if (url.pathname === `/api/operations/${finished}`) return reply(terminal(finished, 'completed', 3));
+    if (url.pathname === `/api/operations/${thresholdStop}`) {
+      const value = terminal(thresholdStop, 'completed', 3);
+      value.loop = {final_iteration: 5, attempted_iterations: 3, stop_reason: {kind: 'metric_threshold', condition_index: 0, iteration: 3,
+        metric_id: 'accuracy', direction: 'higher', threshold: 0.85, incumbent: 0.9, incumbent_iteration: 3}};
+      return reply(value);
+    }
+    if (url.pathname === `/api/operations/${patienceStop}`) {
+      const value = terminal(patienceStop, 'completed', 4);
+      value.loop = {final_iteration: 6, attempted_iterations: 4, stop_reason: {kind: 'no_improvement', condition_index: 1, iteration: 4,
+        k: 2, non_improving_bodies: 2, last_improvement_iteration: 2, incumbent: -1.25}};
+      return reply(value);
+    }
     throw new Error('unexpected path ' + url.pathname);
   });
   await page.goto(`${metadata.origin}/#slow-control/${running}`);
@@ -94,9 +108,19 @@ try {
   assert.ok(await stop.isHidden(), 'a finished loop has no Stop');
   assert.ok(!(await state.textContent()).includes('Stop'), 'Stop state does not leak across operations');
   assert.equal(posts.length, 1);
-  assert.deepEqual(faults, []);
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-finished.png'), fullPage: true});
-  console.log('PASS: Stop shows only for a running authored loop, posts once, reads "Stop requested" until the receipt says stopped.');
+
+  // A declared stop condition completed the loop early: the receipt's reason reads in plain words.
+  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, thresholdStop);
+  await state.filter({hasText: 'Research loop stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85, higher is better; best at body 3).'}).waitFor();
+  assert.ok(await stop.isHidden());
+  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, patienceStop);
+  await state.filter({hasText: 'Research loop stopped early after body 4 of up to 6: no improvement for 2 bodies (condition: 2 bodies; best -1.25 at body 2).'}).waitFor();
+  assert.ok(!(await state.textContent()).includes('finished after'), 'an early stop never reads as reaching the limit');
+  await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-stop-reason.png'), fullPage: true});
+  assert.equal(posts.length, 1);
+  assert.deepEqual(faults, []);
+  console.log('PASS: Stop shows only for a running authored loop, posts once, reads "Stop requested" until the receipt says stopped; a receipt stop_reason reads in plain words.');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM'); lines.close();

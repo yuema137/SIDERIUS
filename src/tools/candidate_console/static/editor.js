@@ -113,7 +113,7 @@
   }
   function changed() { pending = true; $('source').disabled = ['document', 'loop', 'binding-draft'].includes(mode); invalidate(); }
   const api = (path, body) => window.consoleSession.request('editor/' + path, body);
-  function diagnostic(items = []) { $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}`).join('\n'); }
+  function diagnostic(items = []) { $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}${item.field_path ? ` at ${item.field_path.join('.')}` : ''}`).join('\n'); }
   function showConflict(value, isBindingDraft = false) {
     bindingDraftConflict = isBindingDraft;
     conflict = value; reviewed = null; controls();
@@ -393,6 +393,11 @@
           status('Invalid iteration limits are not reviewed. Enter a whole number of at least 1.');
         }
         loopMode(); changed();
+      },
+      // Stop-condition edits (editor-loop-controls.js) mutate only the live draft loop.
+      edit: (mutate, message, rerender = false) => {
+        if (!live() || !graph.definition.loop) return;
+        mutate(graph.definition.loop); loopMode(); changed(); if (rerender) render(); status(message);
       }
     });
   }
@@ -498,7 +503,8 @@
         bindingDraft.inspection = {status: error.code.slice('draft_'.length), diagnostics: [error.message]};
         controls(); render();
       }
-      diagnostic(error.value?.diagnostics); status(error.message);
+      diagnostic(error.value?.diagnostics);
+      status(proposal.kind === 'loop' ? `Review refused the research loop: ${error.message}.${proposal.loop?.stop_conditions?.length ? ' ' + window.editorLoopControls.refusalHint : ''}` : error.message);
     }
   }
   $('review').addEventListener('click', () => reviewProposal(mode === 'binding-draft'

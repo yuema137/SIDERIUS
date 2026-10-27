@@ -375,6 +375,90 @@ def test_research_loop_add_limit_remove_round_trip_over_editor_routes(editor_con
         assert "loop" not in reopened["document"]["definition"]
 
 
+def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_config):
+    """Fails if a GUI stop-condition edit bypasses the typed declaration (invalid k,
+    missing metric id, duplicate kind or the reserved judge reach disk), if a
+    condition-free loop's bytes drift, or if add-then-remove does not restore them."""
+    from tests.browser.workflow_editor_server import interpretation_profile_source
+    from workflows.definition import parse_workflow_source
+
+    path = editor_config.editor_projects[0].source_file
+    path.write_text(interpretation_profile_source())
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    threshold = {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85}
+    patience = {"kind": "no_improvement", "completed_bodies": 1}
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        base = client.get("/api/editor/example", headers=headers).json()
+        loop = base["document"]["definition"]["loop"]
+        assert loop["final_iteration"] == 2 and "stop_conditions" not in loop
+
+        def review(stops):
+            current = client.get("/api/editor/example", headers=headers).json()
+            proposal = {
+                "kind": "loop",
+                "source": current["source"],
+                "loop": {**loop, "stop_conditions": stops},
+            }
+            body = {"expected_sha256": current["sha256"], "proposal": proposal}
+            return current, client.post("/api/editor/example/review", headers=headers, json=body)
+
+        def review_and_save(stops):
+            current, response = review(stops)
+            assert response.status_code == 200, response.text
+            view = response.json()
+            saved = client.post(
+                "/api/editor/example/save",
+                headers=headers,
+                json={
+                    "expected_sha256": current["sha256"],
+                    "proposal_sha256": view["sha256"],
+                    "source": view["source"],
+                },
+            )
+            assert saved.status_code == 200, saved.text
+            return view
+
+        original = path.read_bytes()
+        # An explicit empty list is the same declaration: no bytes move.
+        assert review_and_save([])["diff"] == "" and path.read_bytes() == original
+
+        # Each refusal is typed; the file is untouched.
+        for invalid in (
+            [{"kind": "no_improvement", "completed_bodies": 0}],
+            [{"kind": "no_improvement", "completed_bodies": 1.5}],
+            [{"kind": "no_improvement", "completed_bodies": 2}],  # == final_iteration
+            [{"kind": "metric_threshold", "threshold": 0.85}],
+            [{**threshold, "metric_id": ""}],
+            [{**threshold, "threshold": "0.85"}],
+            [threshold, {**threshold, "threshold": 0.9}],
+            [{"kind": "judge"}],
+        ):
+            _, refused = review(invalid)
+            assert refused.status_code == 422, (invalid, refused.text)
+        assert path.read_bytes() == original
+
+        # Add both kinds: only the loop's stop conditions (and their constructors) move.
+        view = review_and_save([threshold, patience])
+        added = [line for line in view["diff"].splitlines() if line.startswith("+ ")]
+        assert any("MetricThresholdStop(" in line for line in added), view["diff"]
+        assert any("NoImprovementStop(" in line for line in added), view["diff"]
+        assert not any(
+            line.startswith("-") and not line.startswith("---")
+            for line in view["diff"].splitlines()
+        )
+        saved = parse_workflow_source(path.read_text()).model_dump(mode="json")
+        assert saved["definition"]["loop"]["stop_conditions"] == [threshold, patience]
+
+        # Remove one, then the other: the condition-free bytes return exactly.
+        review_and_save([patience])
+        assert "MetricThresholdStop" not in path.read_text()
+        review_and_save([])
+        assert path.read_bytes() == original
+
+
 def test_loop_proposal_against_a_stale_source_version_is_a_conflict(editor_config):
     """Fails if a loop proposal is reviewed against bytes other than the current file:
     an outdated ``expected_sha256`` must refuse with ``conflict`` and write nothing."""
