@@ -28,13 +28,40 @@ from core.chain_state import chain_state_field_names
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = REPO_ROOT / "src/workflows" / "model_exploration.py"
+# The completed-body history policy `run_workflow` delegates to; it owns most
+# carrier writes since the finite-loop extraction (PR #940).
+HISTORY = REPO_ROOT / "src/workflows" / "research_history.py"
+HISTORY_ENTRYPOINT = "advance_completed_history"
+
+
+def _function_ast(path: Path, name: str) -> ast.FunctionDef:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name)
 
 
 def _run_workflow_ast() -> ast.FunctionDef:
-    tree = ast.parse(WORKFLOW.read_text(encoding="utf-8"))
-    return next(
-        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "run_workflow"
-    )
+    return _function_ast(WORKFLOW, "run_workflow")
+
+
+def _carrier_writes(fn: ast.FunctionDef) -> set[str]:
+    """Carried fields assigned as ``state.<field>`` inside ``fn``'s own body."""
+    carried = chain_state_field_names()
+    out: set[str] = set()
+    for node in ast.walk(fn):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets = [node.target]
+        for t in targets:
+            if (
+                isinstance(t, ast.Attribute)
+                and isinstance(t.value, ast.Name)
+                and t.value.id == "state"
+                and t.attr in carried
+            ):
+                out.add(t.attr)
+    return out
 
 
 def _bare_local_writes(fn: ast.FunctionDef) -> dict[str, list[int]]:
@@ -74,9 +101,24 @@ class TestSingleWriter:
 
     def test_the_carrier_is_actually_written_in_the_loop(self):
         """Anti-vacuity: a workflow that stopped writing state entirely would
-        satisfy the check above."""
-        src = WORKFLOW.read_text(encoding="utf-8")
-        written = {f for f in chain_state_field_names() if f"state.{f} =" in src}
+        satisfy the check above.
+
+        Carrier writes live in `run_workflow` and in the history policy it
+        calls; only writes inside those two function bodies count, so a write
+        moved into a helper the loop never reaches does not keep this green.
+        """
+        run_workflow = _run_workflow_ast()
+        calls = [
+            n
+            for n in ast.walk(run_workflow)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == HISTORY_ENTRYPOINT
+        ]
+        assert len(calls) == 1, f"run_workflow must call {HISTORY_ENTRYPOINT} exactly once"
+        written = _carrier_writes(run_workflow) | _carrier_writes(
+            _function_ast(HISTORY, HISTORY_ENTRYPOINT)
+        )
         assert len(written) >= 5, (
             f"only {sorted(written)} are written through the carrier — if the "
             "loop legitimately stopped mutating the rest, re-derive this floor"
