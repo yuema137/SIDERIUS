@@ -90,7 +90,10 @@ def materialize_fanout(
                 raise ValueError("unused external inputs are unsupported by the candidate worker")
             return result
         proposal = arguments.apply(
-            interpretation_output, history=history, feedback=selected.recent_formal_validity
+            interpretation_output,
+            config=config,
+            history=history,
+            feedback=selected.recent_formal_validity,
         )
         # Composition owns these task facts, as in the fixed native workflow.
         proposal.task_description = composition.task_description
