@@ -394,7 +394,22 @@ one editor.js mutation; dragging writes positions through that same draft owner.
 Bindings/profile/options are not inferred from card order or geometry. Request
 protocols display as adaptor labels inside their actual consumer, not extra nodes.
 External source chips remain inspector bindings. Omitted optional ports, argument
-creation/deletion, new nodes and loops are not graphical controls in this slice.
+creation/deletion and new nodes are not graphical controls in this slice.
+
+The workflow-level Research loop panel (`editor-loop-controls.js`, view only;
+`editor.js` owns the draft) shows "No research loop declared" with an Add action
+enabled only when the server returned `loop_template`, or the declared loop as one
+fieldset per facet: Iteration limit (`final_iteration`, whole number ≥ 1; invalid
+or empty values stay local and block Review) and Feedback (paper capability labels
+from `editorCapabilityPresentation.label`, read-only endpoints). Remove deletes the
+loop. Loop-only edits review as `LoopProposal` on the current exact source; with
+other inspector edits pending, the whole document proposal carries them. Later loop
+facets (stop conditions) are added as further sections in that module. The panel
+does not draw a back-edge or annotate cards, and it shares the source-dirty,
+binding-draft, conflict and saving fences. Capture review (`ReusableCaptureReview.loop`)
+reports the executed request's authored loop, refusing a request loop that differs
+from the captured declaration, and the launch summary states "up to N iterations"
+or "none (one workflow body)".
 
 Socket/drag gestures send no requests. Source editing, disconnection, conflict,
 saving and invalid training drafts gate mutations; stale rendered projections
