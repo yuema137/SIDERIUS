@@ -486,27 +486,56 @@ def test_condition_met_on_final_body_completes_at_limit_without_reason(
     verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
 
 
-@pytest.mark.parametrize("case", ["failed_body", "unknown_metric_id"])
-def test_failed_body_or_unevaluable_condition_never_completes_by_condition(
-    prepared, loop_tuner, monkeypatch, case
-):
+def test_failed_body_never_completes_by_condition(prepared, loop_tuner, monkeypatch):
     from workflows.definition import MetricThresholdStop
 
     metric, threshold, (_, high) = threshold_for(prepared)
-    metric_id = metric.id if case == "failed_body" else "undeclared_metric"
     request = loop_request(
         prepared,
         final_iteration=3,
-        stop_conditions=(MetricThresholdStop(metric_id=metric_id, threshold=threshold),),
+        stop_conditions=(MetricThresholdStop(metric_id=metric.id, threshold=threshold),),
     )
-    scored_bodies(monkeypatch, (high, high, high), fail_at=1 if case == "failed_body" else None)
+    scored_bodies(monkeypatch, (high, high, high), fail_at=1)
     receipt = launch_candidate(request)
     assert receipt.status == "failed"
     assert not (Path(receipt.workspace) / "candidate_run/iteration_002").exists()
-    if case == "failed_body":
-        assert receipt.loop_trace.stop_reason is None
-        verify_loop(
-            request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
-        )
-    else:
-        assert "undeclared_metric" in receipt.error and "stop condition 0" in receipt.error
+    assert receipt.loop_trace.stop_reason is None
+    verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
+
+
+@pytest.mark.parametrize(
+    ("final_iteration", "leading"),
+    [
+        (3, ()),
+        # Review N2: an earlier no_improvement (k=1 fires at body 2) or a one-body limit
+        # would otherwise hide the mismatch until, or past, the end of the run.
+        (3, ("no_improvement",)),
+        (1, ()),
+    ],
+)
+def test_mismatched_threshold_metric_is_refused_before_any_body_is_dispatched(
+    prepared, loop_tuner, monkeypatch, final_iteration, leading
+):
+    """Review N1: fails if the identity check only runs after body 1 trained and committed."""
+    from workflows.definition import MetricThresholdStop, NoImprovementStop
+
+    _, threshold, (low, _) = threshold_for(prepared)
+    conditions = (
+        *(NoImprovementStop(completed_bodies=1) for _ in leading),
+        MetricThresholdStop(metric_id="undeclared_metric", threshold=threshold),
+    )
+    request = loop_request(prepared, final_iteration=final_iteration, stop_conditions=conditions)
+    dispatched = []
+    scored_bodies(monkeypatch, (low, low, low), on_body=dispatched.append)
+    receipt = launch_candidate(request)
+    assert receipt.status == "failed"
+    assert f"stop condition {len(leading)} (metric_threshold)" in receipt.error
+    assert "'undeclared_metric'" in receipt.error
+    assert dispatched == []
+    # Only the launch capture exists: no body slot, native record or tuner workspace.
+    written = {
+        p.relative_to(receipt.workspace).parts[:2] for p in Path(receipt.workspace).rglob("*")
+    }
+    assert not [
+        parts for parts in written if parts[0] != "candidate_run" or "iteration" in parts[-1]
+    ]

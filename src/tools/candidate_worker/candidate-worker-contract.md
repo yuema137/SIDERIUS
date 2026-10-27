@@ -785,9 +785,16 @@ its own status and is never evaluated; the last declared iteration completes at 
 limit without a reason; otherwise a met condition yields status `completed` with
 `loop_trace.stop_reason` (a discriminated `metric_threshold`/`no_improvement`
 reason carrying `condition_index` and the observed values) and wins over a pending
-Stop or Pause at that boundary. No evaluation precedes body 1. A run without a bound
-metric, or a `metric_threshold` naming another metric id, fails the loop with a
-typed error naming the condition rather than ignoring it or guessing a direction.
+Stop or Pause at that boundary. No evaluation precedes body 1. Admission
+(`admit_stop_conditions`, called by `execute_loop` before any body is dispatched)
+reconciles the captured seed metric with the composed run metric — the spec every
+body's tuning record stamps — and refuses with a typed `StopConditionError` naming
+the condition when any `metric_threshold` names another metric id, so no body trains,
+commits or is orphaned and no earlier-met condition or one-iteration limit can hide
+the mismatch. The evaluator keeps the same check (`require_threshold_metrics`, the
+one shared function) as its own precondition for replay over persisted records; a
+run without a reconcilable metric also fails with a typed error rather than ignoring
+a condition or guessing a direction.
 
 `verify_loop` trusts no recorded value: it re-runs the evaluator at every verified
 boundary, refuses a loop that continued past a met condition, and requires the

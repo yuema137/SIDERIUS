@@ -113,6 +113,15 @@ def test_unknown_metric_or_mismatched_id_fails_instead_of_ignoring_the_condition
         decide((0.5,), [NoImprovementStop(completed_bodies=1)], metric=False)
     with pytest.raises(StopConditionError, match=r"'accuracy'.*'score'"):
         decide((0.5,), [MetricThresholdStop(metric_id="accuracy", threshold=0.1)])
+    # Replay precondition: an earlier met condition must not hide a later mismatch.
+    with pytest.raises(StopConditionError, match=r"condition 1 .*'accuracy'"):
+        decide(
+            (0.5, 0.4),
+            [
+                NoImprovementStop(completed_bodies=1),
+                MetricThresholdStop(metric_id="accuracy", threshold=0.1),
+            ],
+        )
 
 
 def test_incumbent_matches_native_completed_history_fold():
