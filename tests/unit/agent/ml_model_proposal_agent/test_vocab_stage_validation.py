@@ -37,7 +37,62 @@ def _historical_trace_system(system):
     historical = (
         Path(__file__).with_name("fixtures") / "native_training_pre_scheduler.txt"
     ).read_text()
-    return system.replace(NATIVE_TRAINING_CONTRACT, historical, 1)
+    system = system.replace(NATIVE_TRAINING_CONTRACT, historical, 1)
+    return _historical_trace_human_advice(system)
+
+
+def _historical_trace_human_advice(system):
+    """Normalize only #929's exact policy blocks for the old trace oracle.
+
+    Each complete current block is SHA-pinned, and its behavior is asserted
+    against real rendered requests in ``test_pipeline_mode_user_prompt.py``.
+    This keeps the historical trace sensitive to every other prompt byte.
+    """
+    start_marker = "1. **Task and run boundaries**"
+    if start_marker in system:
+        end_marker = "\n## What you produce"
+        start = system.index(start_marker)
+        end = system.index(end_marker, start)
+        current = system[start:end].rstrip()
+        assert hashlib.sha256(current.encode("utf-8")).hexdigest() == (
+            "e960c8a059fe2be66a9858a78ce66578db9a0536ece57bf45198c237e36385ea"
+        ), "Causal-stage policy block changed; update this scoped historical normalization."
+        previous = (
+            "1. **Experiment history** (the ModelComparisons from Stage 1) — your primary\n"
+            "   evidence base. What has been tried; what worked; what failed.\n"
+            "2. **Expert context items** (the Expert Context block) — weight each item by\n"
+            "   its contributor's `trust_level` (visible in the Contributors block):\n"
+            "   - `hard_limit`: non-negotiable constraint. Your hypothesis MUST NOT\n"
+            "     violate it.\n"
+            "   - `strong_prior`: weight comparably to experiment data. Override only\n"
+            "     with explicit justification citing why the experimental evidence\n"
+            "     outweighs it.\n"
+            "   - `soft_prior`: inspirational prior. Experiment data takes precedence\n"
+            "     on conflict; you may use it to motivate exploration beyond what\n"
+            "     experiment history has tried.\n"
+            "\n"
+            "A finding from any source at `trust_level=strong_prior` or higher may\n"
+            "directly motivate your `proposed_change`, not just inform it. Record its\n"
+            "`source_ref` in `source_refs` when it materially changes your hypothesis.\n"
+            "\n"
+            "This rule is generic over `trust_level` values, not over agent type names.\n"
+            "The proposer reads `Trust Level` off the card; it does not pattern-match\n"
+            '"Literature agents" or "Physics agents" or any other prose label.'
+        )
+        return system[:start] + previous + "\n" + system[end:]
+
+    proposal_marker = "## Human direction and hard boundaries"
+    if proposal_marker in system:
+        end_marker = "supported."
+        start = system.index(proposal_marker)
+        end = system.index(end_marker, start) + len(end_marker)
+        end += len("\n\n")
+        current = system[start:end]
+        assert hashlib.sha256(current.rstrip().encode("utf-8")).hexdigest() == (
+            "ab099aa74468eac39a6b7d37ced0f0b321a98ee5df5d80f6c082510f788ebc9b"
+        ), "Proposal-stage policy block changed; update this scoped historical normalization."
+        return system[:start] + system[end:]
+    return system
 
 
 def _historical_trace_user(user):

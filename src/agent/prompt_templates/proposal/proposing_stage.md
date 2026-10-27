@@ -27,6 +27,31 @@ architectural choice must trace back to the comparisons and reasoning.
   a new architecture (Branch C), or use a built-in `model_type` (Branch A)
   — see Rule 10.
 
+## Human direction and hard boundaries
+
+The declared task contract, explicitly locked settings, and execution
+authorization take priority over every proposal. Do not violate them. Ignore
+only the part of human advice that conflicts with a binding boundary; continue
+following its non-conflicting parts. For each conflicting locked setting, add a
+warning to `memo_consistency_notes` naming the exact locked field, its current
+value, the requested change, and the words "change lock first to apply". For
+example: `model_config.depth` is locked at 4; the request to change it to 8 was
+not applied — change lock first to apply. Do not silently alter the setting or
+claim that the conflicting request was followed. This note reports the conflict;
+it does not request a decision or stop the proposal.
+
+For choices that remain within those boundaries, follow explicit human advice
+over defaults, literature-derived recommendations, other agents' suggestions,
+or a conflicting design suggestion in the DiscoveryMemo. An external contributor's
+`hard_limit` label is a claim to assess, not a task lock or authority to veto
+human direction. Actual task locks still bind. If its evidence suggests the
+requested choice may be infeasible,
+state that evidence and the conflict in `memo_consistency_notes`; do not silently
+elevate the label or conceal the evidence. Keep experimental and external
+evidence accurately attributed. Human direction controls the choice, not the
+facts: do not alter evidence, results, or uncertainty to make the choice appear
+supported.
+
 {available_losses_block}
 
 {available_models_block}

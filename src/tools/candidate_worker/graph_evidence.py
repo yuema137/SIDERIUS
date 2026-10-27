@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import cast
 
+from core.chain_state import ChainState
 from core.control_json import JSON_LIMIT, encode_control
 from core.file_identity import open_identity_file, regular_file_snapshot
 from execute_tools.impl_attempts import impl_attempt_dir
@@ -110,7 +111,10 @@ def verify_graph_trace(
     receipt: CandidateRunReceipt,
     *,
     iteration: int = 1,
+    history: ChainState | None = None,
 ) -> None:
+    if receipt.loop_trace is not None:
+        raise ValueError("one-body graph receipt cannot contain loop aggregate evidence")
     if any(
         value is not None
         for value in (
@@ -218,7 +222,13 @@ def verify_graph_trace(
     ):
         raise ValueError("graph output index mismatch")
     if shape.tuning is not None:
-        verify_graph_training(request, initial, trace, iteration=iteration)
+        verify_graph_training(
+            request,
+            initial,
+            trace,
+            iteration=iteration,
+            incumbent=None if history is None else history.chain_formal_incumbent_reference,
+        )
     if (
         execution_families(
             request.preview.document.definition, request.preview.execution_profile
@@ -232,7 +242,9 @@ def verify_graph_trace(
         ).interpretation
         is not None
     ):
-        verify_interpretation_evidence(request, initial, trace, iteration=iteration)
+        verify_interpretation_evidence(
+            request, initial, trace, iteration=iteration, history=history
+        )
 
 
 def verify_literature_evidence(
@@ -338,6 +350,7 @@ def verify_interpretation_evidence(
     trace: GraphTrace,
     *,
     iteration: int = 1,
+    history: ChainState | None = None,
 ) -> None:
     """Replay the directed protocol, not task composition or native execution."""
     from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
@@ -357,15 +370,26 @@ def verify_interpretation_evidence(
     if nodes[edge.interpretation].state != "succeeded":
         return
     workspace = Path(initial.workspace)
-    contents = {}
-    for index, observation in enumerate(request.files):
-        payload = read_graph_control(
-            candidate_control_dir(workspace, iteration=iteration) / f"input_{index:03}.snapshot"
-        )
-        if hashlib.sha256(payload).hexdigest() != observation.sha256:
-            raise ValueError("interpretation captured input digest mismatch")
-        contents[observation.reference] = payload
+    from .fanout_inputs import captured_contents
+
+    contents = captured_contents(request, workspace, iteration=iteration, verify=True)
     selected = InterpretationInput.model_validate_json(contents[f"external.{edge.input_binding}"])
+    if history is not None and iteration > 1:
+        from workflows.research_history import interpretation_history
+
+        selected = selected.model_copy(
+            update={
+                **interpretation_history(history, selected),
+                "iteration": iteration,
+                "storage": StorageConfig(
+                    backend="local",
+                    local=LocalStorageConfig(
+                        workspace=nodes[edge.interpretation].storage,
+                        run_name=request.run_name,
+                    ),
+                ),
+            }
+        )
     actual = InterpretationInput.model_validate_json(
         read_graph_control(
             interpretation_input_path(workspace, edge.interpretation, iteration=iteration)
@@ -443,7 +467,9 @@ def verify_interpretation_evidence(
                 )
             )
         )
-        expected = arguments.apply(output)
+        expected = arguments.apply(
+            output, history=history, feedback=selected.recent_formal_validity
+        )
         if settings is not None:
             from workflows.candidate_training_settings import (
                 proposal_training_values,
@@ -476,7 +502,12 @@ def verify_interpretation_evidence(
 
 
 def verify_graph_training(
-    request: CandidateRunRequest, initial: CandidateRunReceipt, trace: GraphTrace, *, iteration: int
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    trace: GraphTrace,
+    *,
+    iteration: int,
+    incumbent: float | None = None,
 ) -> None:
     """Verify native identity/transport without running task plugins or training admission."""
     from agent.schemas.hyperparam_tuning import HyperparamTuningInput
@@ -528,7 +559,7 @@ def verify_graph_training(
         or value.task_composition_ref != seed.task_composition_ref
         or validation.candidate_id != proposal.candidate_id
         or value.constraint_context != seed.constraint_context
-        or value.current_run_best_formal_score is not None
+        or value.current_run_best_formal_score != incumbent
         or output.run_name != initial.run_name
         or output.model_type != proposal.model_name
         or output.candidate_id != proposal.candidate_id

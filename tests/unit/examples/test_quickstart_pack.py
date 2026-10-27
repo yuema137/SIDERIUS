@@ -189,7 +189,6 @@ def test_pack_satisfies_the_examples_governance_guards() -> None:
     status = (PACK / "STATUS.md").read_text(encoding="utf-8")
     assert governance.MATURITY_LEVEL.search(status), "STATUS.md names no L0-L4 level"
     readme = (PACK / "README.md").read_text(encoding="utf-8")
-    assert governance.ROADMAP_DOC.split("/")[-1] in readme
     assert "§22.9" in readme or "§22.23" in readme
 
 

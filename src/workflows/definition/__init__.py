@@ -2,12 +2,14 @@
 
 from .models import (
     ArgumentBinding,
+    AuthoredLoop,
     AuthoredWorkflowDocument,
     CandidatePreparationOptions,
     DeclarationReport,
     ExternalBinding,
     ExternalRequest,
     ExternalSource,
+    LoopFeedback,
     ManagedCandidateBinding,
     NodeInstance,
     NodePosition,
@@ -32,12 +34,14 @@ from .source import (
 
 __all__ = [
     "ArgumentBinding",
+    "AuthoredLoop",
     "AuthoredWorkflowDocument",
     "CandidatePreparationOptions",
     "DeclarationReport",
     "ExternalBinding",
     "ExternalRequest",
     "ExternalSource",
+    "LoopFeedback",
     "ManagedCandidateBinding",
     "NodeInstance",
     "NodePosition",

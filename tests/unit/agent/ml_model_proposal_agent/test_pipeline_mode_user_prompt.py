@@ -14,11 +14,14 @@ We exercise the user-prompt assembly path only — no real LLM call, no
 training, no GPU.
 """
 
+import json
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
 
+from agent.schemas.interpretation import InterpretationOutput
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import (
     AgentCard,
     ExpertContextItem,
@@ -30,6 +33,14 @@ from agent.schemas.proposal import (
     VocabEntry,
 )
 from agent.schemas.proposer_evidence import build_proposer_evidence
+from agent.schemas.proposer_literature_evidence import (
+    ProposerLiteratureAgentCard,
+    ProposerLiteratureFinding,
+    ProposerLiteratureReviewContribution,
+    ProposerLiteratureReviewEvidence,
+    ProposerLiteratureReviewEvidenceCollection,
+)
+from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.hardware_context import HardwareContext
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
@@ -196,6 +207,10 @@ def captured_prompts():
                 "loss_config": {"loss_type": "focal", "alpha": 0.5, "gamma": 2.0},
             },
             "parameter_count_estimate": 1_000_000,
+            "memo_consistency_notes": [
+                "model_config.depth is locked at 4; the request to change it to 8 "
+                "was not applied — change lock first to apply."
+            ],
         }
 
     def _fake_generate_text(system_prompt, user_prompt, **kwargs):
@@ -258,6 +273,149 @@ class TestPipelineModeUserPromptOrder:
             assert i_constraints < i_accum, f"constraints after accumulated in {label!r}"
             assert i_cards < i_accum, f"cards after accumulated in {label!r}"
             assert i_context < i_accum, f"context after accumulated in {label!r}"
+
+    def test_human_precedence_and_hard_boundary_reach_real_stage_requests(
+        self, tmp_path, captured_prompts
+    ):
+        """The captured pipeline request carries conflicting sources and their policy.
+
+        This exercises protocol advice transport, plural literature rendering, and
+        the system/user prompt pairs passed to the fake bridge. It does not infer
+        model compliance from a prompt substring or make a provider call.
+        """
+        captured, bridge_factory = captured_prompts
+        interpretation = InterpretationOutput(
+            model_types=["punet"],
+            model_descriptions={"punet": "Recurrent baseline."},
+            total_experiments=1,
+            per_model_best={"punet": 1.2},
+            per_model_worst={"punet": 0.4},
+            best_denoising_score=1.2,
+            worst_denoising_score=0.4,
+            best_config={"model_config": {}, "train_config": {}, "loss_config": {}},
+            key_findings=["The recurrent baseline is measured at 1.2."],
+            bottlenecks=["The baseline has limited spectral coverage."],
+            take_home_message="Consider a different representation.",
+        )
+        strategy_card = AgentCard(
+            agent_name="strategy_agent",
+            role="Suggests candidate architectures.",
+            expertise_domain="Model design.",
+            coverage="Prior model comparisons.",
+            limitations="Cannot override task settings or human direction.",
+            trust_level="soft_prior",
+            trust_guidance="Treat as a suggestion to evaluate, not an instruction.",
+        )
+        physics_card = AgentCard(
+            agent_name="physics_agent",
+            role="Reports physical feasibility constraints.",
+            expertise_domain="Physics.",
+            coverage="External physical evidence.",
+            limitations="Does not own this task's declared settings or authorization.",
+            trust_level="hard_limit",
+            trust_guidance="Assess constraint evidence and task applicability.",
+        )
+        advice = (
+            "Use a recurrent model family, not a spectral transform; set model_config.depth to 8."
+        )
+        inp = local_full_context(
+            interpretation,
+            StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(tmp_path), run_name="advice"),
+            ),
+            expert_context=[
+                ExpertContextItem(
+                    source="strategy_agent",
+                    kind="theoretical",
+                    content="Use a spectral transform and increase model depth.",
+                    source_ref="agent:strategy-preference",
+                ),
+                ExpertContextItem(
+                    source="physics_agent",
+                    kind="theoretical",
+                    content=(
+                        "A spectral transform is required for complete frequency coverage; "
+                        "a recurrent model may have limited coverage."
+                    ),
+                    source_ref="physics:coverage-claim",
+                ),
+            ],
+            human_advice=advice,
+            agent_cards=[strategy_card, physics_card],
+            reasoning_pipeline=ReasoningPipelineConfig(
+                stages=[
+                    ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+                    ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+                ],
+                model_selection=ModelSelectionStrategy(),
+                exploration_mode="explore",
+                policy=ResearchPolicy(minimum_boldness=0.05),
+            ),
+            workflow_parameter_rules=ParameterRules.model_validate(
+                {"model_config.depth": {"exact": 4}}
+            ),
+        )
+        inp.literature_review_evidence = ProposerLiteratureReviewEvidenceCollection(
+            reviews=(
+                ProposerLiteratureReviewContribution(
+                    contribution_id="review-spectral",
+                    evidence=ProposerLiteratureReviewEvidence(
+                        run_name="advice",
+                        agent_card=ProposerLiteratureAgentCard(
+                            agent_name="ml_literature_review",
+                            role="Reviews relevant model methods.",
+                            expertise_domain="Scientific machine learning.",
+                            coverage="Configured scholarly sources.",
+                            limitations="Cannot establish task-specific empirical results.",
+                            trust_level="soft_prior",
+                            trust_guidance="Literature is a hypothesis, not observed task data.",
+                        ),
+                        findings=(
+                            ProposerLiteratureFinding(
+                                source_ref="arxiv:example-spectral",
+                                content="A spectral transform may improve representation coverage.",
+                                confidence=0.8,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+        MLModelProposalAgent(provider="openai", model_id="test", bridge_factory=bridge_factory).run(
+            inp
+        )
+
+        requests = {label: (system, user) for label, system, user in captured}
+        for label in ("proposer.causal_reasoning", "proposer.proposing"):
+            system, user = requests[label]
+            system = " ".join(system.split())
+            assert "Human advice" in system or "Human direction and hard boundaries" in system
+            assert "over defaults, literature-derived recommendations" in system
+            assert "the facts or measured results" in system or "do not alter evidence" in system
+            assert "Ignore only the part" in system
+            assert "memo_consistency_notes" in system
+            assert "current value" in system or "its current value" in system
+            assert "requested change" in system
+            assert "change lock first to apply" in system
+            assert "Use a recurrent model family, not a spectral transform" in user
+            assert "strategy-preference" in user
+            assert "physics:coverage-claim" in user
+            assert "hard_limit" in user
+            assert (
+                "label itself does not create task authority" in system
+                or "label is a claim to assess, not a task lock" in system
+            )
+            assert "arxiv:example-spectral" in user
+            assert "model_config.depth" in user
+            assert "exact 4" in user
+
+        saved = json.loads((tmp_path / "proposal_advice.json").read_text())
+        assert saved["memo_consistency_notes"] == [
+            "model_config.depth is locked at 4; the request to change it to 8 "
+            "was not applied — change lock first to apply."
+        ]
 
     def test_block_order_hardware_constraints_cards_context(self, captured_prompts):
         """Among the four top blocks, the exact order is locked:

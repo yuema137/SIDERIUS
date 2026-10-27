@@ -13,6 +13,7 @@ from agent.schemas.proposal import ProposalOutput
 from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import local_typed_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorOutput
+from core.chain_state import ChainState
 from workflows.definition.fanout import execution_families
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
@@ -39,6 +40,7 @@ def execute_fanout(
     config: WorkflowLLMConfig,
     *,
     iteration: int = 1,
+    history: ChainState | None = None,
 ) -> CandidateRunReceipt:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
@@ -55,6 +57,7 @@ def execute_fanout(
         config,
         iteration=iteration,
         admitted=admitted,
+        history=history,
     )
     results: dict[
         str,
@@ -94,6 +97,7 @@ def execute_fanout(
                             iteration=iteration,
                             interpretation_output=interpreted,
                             admitted=admitted,
+                            history=history,
                         )
                     )
                 selected = inputs[
@@ -136,7 +140,9 @@ def execute_fanout(
                         validation,
                         admitted,
                         storage=storage,
-                        chain_formal_incumbent_reference=None,
+                        chain_formal_incumbent_reference=(
+                            None if history is None else history.chain_formal_incumbent_reference
+                        ),
                         input_path=tuning_input_path(
                             Path(initial.workspace), node.id, iteration=iteration
                         ),

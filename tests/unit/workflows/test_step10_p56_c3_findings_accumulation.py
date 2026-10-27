@@ -380,7 +380,7 @@ def test_the_union_rule_has_exactly_ONE_authority_and_both_consumers_call_it():
 
     root = Path(__file__).resolve().parents[3]
     resume_src = (root / "src/core" / "resume.py").read_text(encoding="utf-8")
-    workflow_src = (root / "src/workflows" / "model_exploration.py").read_text(encoding="utf-8")
+    workflow_src = (root / "src/workflows" / "research_history.py").read_text(encoding="utf-8")
 
     # 1. Exactly one definition, and it is in core.resume.
     defs = [
@@ -397,7 +397,7 @@ def test_the_union_rule_has_exactly_ONE_authority_and_both_consumers_call_it():
     #    `run_workflow`'s loop closure is the in-process half.
     for src, fn_name, path in (
         (resume_src, "project_knowledge", "src/core/resume.py"),
-        (workflow_src, "run_workflow", "src/workflows/model_exploration.py"),
+        (workflow_src, "advance_completed_history", "src/workflows/research_history.py"),
     ):
         fn = next(
             n

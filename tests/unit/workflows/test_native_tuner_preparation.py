@@ -294,6 +294,7 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
 
     if case in ("controls", "split_routes"):
         assert actual.train_portion == 0.32
+        assert actual.trial_max_epochs == 3
         assert actual.formal_max_epochs == 9
         assert actual.experiment_arm == "n1-distinct-arm"
         assert actual.human_advice == "Keep this explicit advice."

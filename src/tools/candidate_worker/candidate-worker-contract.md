@@ -3,8 +3,8 @@
 `CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None)`
 are the common JSON/Python boundary.
 The CLI decodes the same request and calls that function. The parent imports
-inert declaration/preview/routing schemas; it does not compose a task or import
-native node implementations. `child` verifies captured inputs, binds generated
+inert declaration/preview/routing schemas and public pure evidence projections;
+it never composes tasks, executes task/generated plugins or constructs agents/providers. `child` verifies captured inputs, binds generated
 library discovery to its workspace, and only then imports `native` and task
 consumers. Each launch gets a fresh interpreter through the existing sandbox.
 
@@ -16,7 +16,7 @@ only the claim winner can publish records with that invocation identity.
 
 ## Selected inputs and task authority
 
-The parent revalidates the supported three- or four-node graph, canonical selected
+The parent revalidates the selected supported execution profile, canonical selected
 paths, bytes/size hashes, declaration digest and constructor routes against the
 request. Canvas positions do not enter declaration identity. It exclusively
 creates `candidate_run/` in an absent/empty workspace; losers cannot publish
@@ -78,9 +78,10 @@ provider authentication, network access or quota. The sandbox remains the owner
 of environment forwarding. No request validator, historical reader, offline
 preparation, dotenv behavior or general `LLMBridge` constructor policy changes.
 
-## Native sequence and persistence
+## Fixed-candidate sequence and persistence
 
-One immutable run ID, run name and logical iteration 1 reach the proposer
+For the fixed candidate profile, one immutable run ID, run name and logical
+iteration 1 reach the proposer
 (including its eager/lazy stage bridges), implementor and validator through the
 existing accounting helper. `WorkflowLLMConfig.get` owns constructor routing.
 Native retries remain native; the worker has no retry or replay loop.
@@ -627,3 +628,72 @@ The parent does not run task plugins or derive a scientific expectation from a
 returned score. Offline five-node witnesses stub provider/tuner and external
 hardware/measurement effects: they establish dispatch/evidence behavior, not real
 training or historical-profile/paper qualification.
+
+## Declared finite research body
+
+A concrete `WorkflowDefinition.loop` optionally carries `AuthoredLoop` with a
+positive `final_iteration` and explicit `LoopFeedback`. The feedback names the
+body's tuner result, interpreter target, `protocol="tuning-to-interpretation"`,
+and `history="native-research/v1"`. Admission requires the supported
+`native-interpretation-candidate/v1` interpretation→proposal→implementation→
+validation→tuning body. The optional declaration is omitted from serialized
+source when absent; the existing single-body path remains unchanged. Reusable
+source preserves this declaration but its profile preparation has a separate owner.
+
+The worker claims one fresh workspace, captures source and external inputs once,
+and holds the existing native writer lease throughout finite execution. Each body
+uses its explicit invocation iteration and managed node storage. Later-body input
+materialization reads the original captures and changes only declared managed
+storage, iteration and native history fields. It does not rewrite authored source,
+change its digest, replace static task/launch/advice inputs, or launch another
+fresh-workspace request against used storage.
+
+`workflows.research_history` owns the extracted completed-body transition shared
+with the fixed native workflow: bounded tuner feedback, cache retention, prediction
+memory, vocabulary confirmations, accumulated findings, previous proposal and
+strictly-better valid Formal incumbent updates. An authored initial summary is
+not by itself a qualified Formal incumbent. An explicit seed metric binds identity;
+when omitted, committed native tuner metric stamps supply history/cache ordering
+and later interpretation inputs. Subsequent stamps reconcile against the prior
+known metric. Missing identity remains unknown; no task name supplies a default. Authored replay resolves Health roles
+through `core.resume.commit_time_gate_ids`, using the committed output's stamped
+effective policy as native resume does. Unknown policy remains unknown; an
+explicitly health-disabled record retains the native classifier's semantics.
+The existing fixed workflow retains its task-resolved Health roster and early
+abort/promotion ordering. No new scientific ranking or feedback policy is added.
+
+A body must finish with successful required producers before the next body can
+start. Rejected validation, missing/failed producer records, infrastructure abort,
+or failed evidence verification stop progression. Native failed tuner records
+remain available as failed body evidence. Experiment-source inheritance is still
+explicitly unsupported; this is not full fixed-native parity.
+
+Each attempted body publishes an ordinary graph receipt at
+`candidate_control_dir(workspace, iteration=N)/body.json`. The aggregate receipt
+has `loop_trace.attempted_iterations`; it does not impersonate one graph trace or
+flatten repeated node IDs into root scientific fields. `verify_loop` verifies
+contiguous body identities and native record bindings, replays the same history
+transition, checks actual generated inputs/incumbent transport, and rejects an
+aggregate hiding a later dispatched body. Parent verification never composes task
+plugins or invokes agents. Child native admission retains ownership of actual
+task, hardware, full constraints and Health execution; replay is not additional
+scientific certification. Timeout/interruption retains the existing supervisor
+status and may leave completed body records without a successful aggregate.
+
+`tools.candidate_operations.request_loop_stop(config, operation_id)` accepts only
+an operation-bound, already-claimed, confirmed-running authored finite loop. It
+verifies the saved request/run identity and publishes an immutable `stop.json`
+marker in native control storage. Acknowledgement means requested, not stopped.
+The worker checks it before each body dispatch; once that check passes, the body
+counts as active even if the request arrives before its first node starts. It
+finishes that active body and reports
+`stopped` unless the finite limit or a native failure completes first. Repeating
+an identical request is idempotent. Queued/not-yet-claimed operations refuse with
+`not_ready`; this operation does not create their workspace. Stop is neither an
+immediate signal nor resumable Pause. Completed-boundary Pause/Resume and GUI
+controller presentation are subsequent closures.
+
+Offline acceptance covers two actual native bodies with typed feedback and advice,
+source roundtrip, parent input-tamper refusal, operation-bound graceful Stop, and
+failed required feedback preventing another dispatch. Provider/training effects
+are doubled; these witnesses make no real-training or paper qualification claim.

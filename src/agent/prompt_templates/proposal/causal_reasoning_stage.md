@@ -74,26 +74,45 @@ as a design constraint to be solved alongside the scientific bottlenecks.
 
 Before forming your hypothesis, synthesize all available evidence channels:
 
-1. **Experiment history** (the ModelComparisons from Stage 1) — your primary
-   evidence base. What has been tried; what worked; what failed.
-2. **Expert context items** (the Expert Context block) — weight each item by
-   its contributor's `trust_level` (visible in the Contributors block):
-   - `hard_limit`: non-negotiable constraint. Your hypothesis MUST NOT
-     violate it.
-   - `strong_prior`: weight comparably to experiment data. Override only
-     with explicit justification citing why the experimental evidence
-     outweighs it.
-   - `soft_prior`: inspirational prior. Experiment data takes precedence
-     on conflict; you may use it to motivate exploration beyond what
-     experiment history has tried.
+1. **Task and run boundaries** — the declared task contract, explicitly locked
+   settings, and execution authorization are non-negotiable. Do not propose a
+   choice that violates one. Ignore only the part of human advice that conflicts
+   with a binding boundary, and continue following its non-conflicting parts.
+   Never alter a lock or claim that you followed the conflicting request. Stage
+   3 must record the conflict in `memo_consistency_notes`, naming the locked
+   field, current value, requested change, and the instruction "change lock first
+   to apply".
+2. **Human advice** — explicit human directions control scientific and design
+   choices that remain within those boundaries. Follow them over defaults,
+   literature-derived recommendations, and other agents' suggestions. Keep
+   contrary experimental or external evidence visible and accurately attributed:
+   a human preference changes the choice, not the facts or measured results.
+   State the concrete conflict and why the choice follows the human direction;
+   never imply that contrary evidence supports it.
+3. **Other expert context items** (the Expert Context block) — weight each item
+   by its contributor's `trust_level` (visible in the Contributors block):
+   - `hard_limit`: a contributor's claim of a constraint. Treat it seriously
+     and assess its evidence and applicability, but the label itself does not
+     create task authority or override human direction. Only the declared task
+     contract, explicitly locked settings, and execution authorization are
+     binding boundaries. If a claim suggests the human-preferred choice may be
+     physically or scientifically infeasible, state the evidence and conflict
+     clearly; do not silently promote the claim to a task lock or misstate the
+     underlying facts. This does not permit violating an actual task boundary.
+   - `strong_prior`: for non-human sources, weight comparably to experiment
+     data; experiment data may outweigh it when you state the specific evidence.
+   - `soft_prior`: a possible direction, not a controlling instruction. Use it
+     as a hypothesis where it does not conflict with the human direction or
+     stronger evidence.
 
 A finding from any source at `trust_level=strong_prior` or higher may
 directly motivate your `proposed_change`, not just inform it. Record its
 `source_ref` in `source_refs` when it materially changes your hypothesis.
 
-This rule is generic over `trust_level` values, not over agent type names.
-The proposer reads `Trust Level` off the card; it does not pattern-match
-"Literature agents" or "Physics agents" or any other prose label.
+Use the contributor's `trust_level` to assess non-human evidence; it does not
+create task authority or execution permission. Human direction controls the
+choice within binding task and run boundaries, while contrary evidence remains
+visible and accurately described.
 
 ## What you produce
 

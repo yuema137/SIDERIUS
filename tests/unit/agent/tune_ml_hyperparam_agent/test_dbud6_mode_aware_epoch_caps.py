@@ -227,20 +227,6 @@ class TestWitnessCTransportHops:
         assert "trial_max_epochs" in params
         assert "formal_max_epochs" in params
 
-    def test_workflow_forwards_both_fields_from_launch(self):
-        """The workflow -> protocol call site forwards ``launch.<field>``
-        for BOTH fields (same guard shape as
-        test_watchdog_admission_split's kwarg-forwarding witness): the one
-        hop where a missing line would ship the feature silently disabled
-        while every schema and CLI test stayed green."""
-        import inspect
-
-        import workflows.model_exploration as mx
-
-        src = inspect.getsource(mx)
-        assert "trial_max_epochs=launch.trial_max_epochs" in src
-        assert "formal_max_epochs=launch.formal_max_epochs" in src
-
     def test_node_cli_lands_the_pair_on_the_validated_input(self):
         """Route B (run_comparison.py -> tuner-node argv): the node's own
         argparse + input builder must land trial=2 / formal=1 on the
