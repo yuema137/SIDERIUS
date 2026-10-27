@@ -103,6 +103,7 @@ def evaluate_stop(value: StopEvaluationInput) -> StopEvaluationOutput:
         raise StopConditionError(
             f"stop condition 0 ({value.conditions[0].kind}) requires a run metric; none is bound"
         )
+    require_threshold_metrics(value.conditions, value.metric)
     order = MetricOrder(value.metric)
     incumbent: float | None = None
     incumbent_iteration: int | None = None
@@ -116,11 +117,6 @@ def evaluate_stop(value: StopEvaluationInput) -> StopEvaluationOutput:
     for index, condition in enumerate(value.conditions):
         match condition:
             case MetricThresholdStop():
-                if condition.metric_id != value.metric.id:
-                    raise StopConditionError(
-                        f"stop condition {index} (metric_threshold) names metric "
-                        f"{condition.metric_id!r}; the run metric is {value.metric.id!r}"
-                    )
                 if incumbent is not None and order.is_at_least(incumbent, condition.threshold):
                     assert incumbent_iteration is not None
                     reason: MetricThresholdReason | NoImprovementReason = MetricThresholdReason(
@@ -149,18 +145,57 @@ def evaluate_stop(value: StopEvaluationInput) -> StopEvaluationOutput:
     return StopEvaluationOutput(decision="continue")
 
 
+def require_threshold_metrics(conditions: tuple[StopCondition, ...], metric: MetricSpec) -> None:
+    """The one identity check: every ``metric_threshold`` must name the run metric.
+
+    Checked over ALL conditions, so an earlier met condition cannot hide a mismatch.
+    """
+    for index, condition in enumerate(conditions):
+        if isinstance(condition, MetricThresholdStop) and condition.metric_id != metric.id:
+            raise StopConditionError(
+                f"stop condition {index} (metric_threshold) names metric "
+                f"{condition.metric_id!r}; the run metric is {metric.id!r}"
+            )
+
+
+def reconcile_stop_metric(
+    seed_metric: MetricSpec | None, stamped: list[StampedMetricSpec]
+) -> MetricSpec | None:
+    """The run metric the evaluator ranks by: the captured seed reconciled with stamps."""
+    return reconcile_metric_specs(
+        stamped, bound=seed_metric, bound_label="the loop's captured interpretation seed"
+    )
+
+
+def admit_stop_conditions(
+    loop: AuthoredLoop, seed_metric: MetricSpec | None, composed_metric: MetricSpec
+) -> None:
+    """Refuse an unevaluable declaration before any body is dispatched.
+
+    Every body's tuning record stamps the composed run metric, so reconciling the seed
+    with that spec yields exactly the identity ``evaluate_stop`` will later rank by.
+    """
+    if not loop.stop_conditions:
+        return
+    metric = reconcile_stop_metric(
+        seed_metric,
+        [StampedMetricSpec(label="the run's bound task composition", spec=composed_metric)],
+    )
+    assert metric is not None
+    require_threshold_metrics(loop.stop_conditions, metric)
+
+
 def stop_input(
     loop: AuthoredLoop, seed_metric: MetricSpec | None, bodies: tuple[BodyScore, ...]
 ) -> StopEvaluationInput:
     """Build the evaluator input; the metric is reconciled once over seed and body stamps."""
-    metric = reconcile_metric_specs(
+    metric = reconcile_stop_metric(
+        seed_metric,
         [
             StampedMetricSpec(label=f"loop body {body.iteration}", spec=body.metric_spec)
             for body in bodies
             if body.metric_spec is not None
         ],
-        bound=seed_metric,
-        bound_label="the loop's captured interpretation seed",
     )
     return StopEvaluationInput(
         iteration=len(bodies),

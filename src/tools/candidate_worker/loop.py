@@ -11,7 +11,14 @@ from workflows.task_composition import RunTaskComposition
 from .graph_evidence import read_graph_control
 from .layout import candidate_control_dir
 from .loop_models import LoopContinuation, LoopPause, LoopStop, LoopTrace, admit_loop
-from .loop_stop import BodyScore, captured_metric, evaluate_stop, project_body_score, stop_input
+from .loop_stop import (
+    BodyScore,
+    admit_stop_conditions,
+    captured_metric,
+    evaluate_stop,
+    project_body_score,
+    stop_input,
+)
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
@@ -60,6 +67,9 @@ def execute_loop(
     admit_loop(request)
     loop = request.preview.document.definition.loop
     assert loop is not None
+    if loop.stop_conditions:
+        # Before any dispatch: a mismatch found after body 1 would orphan its records.
+        admit_stop_conditions(loop, captured_metric(request, initial), composition.metric.spec)
     history = initial_history(request, initial)
     attempted = 0
     segment_id = None
