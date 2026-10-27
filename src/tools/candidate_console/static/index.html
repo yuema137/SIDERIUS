@@ -12,6 +12,7 @@
   <script src="/token-presenter.js" defer></script>
   <script src="/native-chain-monitor.js" defer></script>
   <script src="/graph-results-monitor.js" defer></script>
+  <script src="/loop-control.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/editor-task-controls.js" defer></script>
   <script src="/editor-capability-presentation.js" defer></script>
@@ -190,6 +191,9 @@
     <p>Enter an operation UUID from this console or code. Reading an operation never launches or restarts it. Closing the page does not stop an admitted operation.</p>
     <form id="monitor-form" class="actions"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" disabled>Read operation</button></form>
     <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="operation-observed" class="muted"></p><details><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
+    <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p>
+      <div id="loop-stop-group" class="actions" hidden><button id="loop-stop" type="button">Stop at next boundary</button><p class="muted">The current body completes; no partial body is kept as a result.</p></div>
+      <p id="loop-stop-status" role="status"></p></section>
     <section id="native-chain-observation" hidden></section>
     <section id="graph-results-observation" hidden aria-live="polite"></section>
     <h3 id="tokens-heading">Reported LLM tokens</h3>

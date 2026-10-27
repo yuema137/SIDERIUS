@@ -18,7 +18,13 @@ from .boundary import RequestBoundary
 from .edited_routes import edited_router
 from .editor import editor_router, task_reference_targets
 from .files import token
-from .models import ConsoleConfig, LaunchSelection, PreparedSelection, PrepareSelection
+from .models import (
+    ConsoleConfig,
+    LaunchSelection,
+    LoopStopSelection,
+    PreparedSelection,
+    PrepareSelection,
+)
 from .native_chain_routes import native_chain_router
 from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_preparation_routes import reusable_preparation_router
@@ -28,6 +34,14 @@ from .service import CandidateConsole
 
 def error_response(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+
+
+# Route-local: ``kind`` is also raised by unrelated operation readers.
+LOOP_STOP_REFUSALS = {
+    "kind": "Stop is available only for an authored candidate research loop",
+    "not_ready": "candidate loop has not claimed its workspace yet; read status and retry",
+    "not_running": "candidate loop is terminal or not confirmed running; Stop was not recorded",
+}
 
 
 def create_app(config: ConsoleConfig) -> FastAPI:
@@ -117,6 +131,16 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     def status(operation_id: UUID):
         return service.status(operation_id)
 
+    @app.post("/api/operations/{operation_id}/loop-stop")
+    async def loop_stop(operation_id: UUID, request: Request):
+        LoopStopSelection.model_validate_json(await request.body())
+        try:
+            return await run_in_threadpool(service.request_loop_stop, operation_id)
+        except OperationFailure as error:
+            if error.detail.code not in LOOP_STOP_REFUSALS:
+                raise
+            return error_response(409, error.detail.code, LOOP_STOP_REFUSALS[error.detail.code])
+
     @app.get("/api/operations/{operation_id}/graph-results")
     def graph_results(operation_id: UUID):
         return service.graph_results(operation_id)
@@ -157,6 +181,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "native-chain.js": "text/javascript",
             "native-chain-monitor.js": "text/javascript",
             "graph-results-monitor.js": "text/javascript",
+            "loop-control.js": "text/javascript",
             "token-presenter.js": "text/javascript",
             "recorded-example.js": "text/javascript",
             "session.js": "text/javascript",

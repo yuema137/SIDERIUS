@@ -196,6 +196,28 @@ class PreparedReview(PreviewModel):
     read_only: tuple[str, ...]
 
 
+class LoopStatusView(PreviewModel):
+    """Declared finite-loop bound plus the receipt's verified attempted bodies.
+
+    ``attempted_iterations`` is ``None`` while no native receipt exists; the
+    console never infers per-body progress from an active process.
+    """
+
+    final_iteration: int = Field(gt=0)
+    attempted_iterations: int | None = Field(default=None, ge=0)
+
+
+class LoopStopSelection(PreviewModel):
+    """Empty JSON body: the path UUID is the only Stop input."""
+
+
+class LoopStopAcknowledgement(PreviewModel):
+    """Stop was recorded for the loop; the active body still completes."""
+
+    operation_id: UUID
+    outcome: Literal["requested"] = "requested"
+
+
 class StatusView(PreviewModel):
     operation_id: UUID
     kind: OperationKind
@@ -212,6 +234,7 @@ class StatusView(PreviewModel):
     native_chain: NativeChainObservation | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
     reason: str
 
 
