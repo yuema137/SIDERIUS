@@ -154,7 +154,7 @@ single map; the linked procedures own the details.
 | Entry point | Where keys are read from | Procedure |
 | --- | --- | --- |
 | Command-line chain and node CLIs (`scripts/launch/run_chain.sh`, `src/workflows/run_one_iteration.py`, node `main()`s) | Environment of the launching process. Recommended: a trusted external mode-`600` credential file sourced in that shell, or managed secret injection. Compatibility only: a gitignored `.env` in the checkout (see [Compatibility `.env` loading](#compatibility-env-loading)) | This section, below |
-| Browser candidate console (`candidate_console`) | Only the JSON `credential_file` named in the console configuration (mode `600`), limited to the task's `candidate_environment_names`. Shell exports and a project `.env` do not satisfy its readiness or Launch check | [Console credentials](../../src/tools/candidate_console/README.md#credentials), [configuration contract](../../src/tools/candidate_console/console-contract.md#configuration) |
+| Browser candidate console (`candidate_console`) | Only the `credential_file` named in the console configuration (owner-only mode `600`; a JSON object or a dotenv file, which may be the checkout `.env`), limited to the task's `candidate_environment_names`. Shell exports and a `.env` that `credential_file` does not name do not satisfy its readiness or Launch check | [Console credentials](../../src/tools/candidate_console/README.md#credentials), [configuration contract](../../src/tools/candidate_console/console-contract.md#configuration) |
 | Paper resolver (Semantic Scholar) | `S2_API_KEY` in the calling process; source checkouts fall back to the checkout `.env` when the variable is absent | [Semantic Scholar key](#semantic-scholar-key) |
 
 Key names are declared in `src/agent/llm_settings.py` — `KNOWN_PROVIDERS`
@@ -249,7 +249,8 @@ for effectful runs:
   procedure avoids.
 
 The browser console does not accept this route: its readiness and Launch checks
-read only `credential_file`. Its operation contract records that downstream
+read only `credential_file`, which may name a mode-`600` dotenv file such as this
+`.env`. Its operation contract records that downstream
 native processes may still call the bridge's loader; see
 [candidate operations](../../src/tools/candidate_operations/candidate-operations-contract.md).
 

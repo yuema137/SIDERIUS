@@ -73,11 +73,39 @@ def token(value: str) -> str:
     return text
 
 
+def parse_credential_payload(payload: bytes) -> dict[str, str]:
+    """Parse already-checked private credential bytes as JSON or dotenv.
+
+    Detection rule: if the first non-whitespace byte is ``{`` the payload is a
+    strict JSON object of string names to string values; otherwise it is
+    dotenv text (``KEY=value``, ``export`` prefixes, comments and quotes as
+    python-dotenv defines them). Dotenv parsing never interpolates ``${...}``
+    references and reads only these bytes, never a second path. Names without
+    a value are absent. Errors never carry values or line contents.
+    """
+    import io
+
+    from dotenv import dotenv_values
+    from pydantic import ValidationError
+
+    text: str | None = None
+    try:
+        if payload.lstrip()[:1] == b"{":
+            return TypeAdapter(dict[str, str]).validate_json(payload, strict=True)
+        text = payload.decode("utf-8")
+    except (ValidationError, UnicodeDecodeError):
+        pass  # Raised below, outside the handler: the original text can quote values.
+    if text is None:
+        raise ValueError("credential file must be a JSON object of strings or UTF-8 dotenv text")
+    parsed = dotenv_values(stream=io.StringIO(text), interpolate=False)
+    return {name: item for name, item in parsed.items() if item is not None}
+
+
 def credential_values(value: str | None) -> dict[str, str]:
-    """Read the selected private JSON source; callers must never expose values."""
+    """Read the selected private JSON or dotenv source; callers must never expose values."""
     if value is None:
         return {}
-    return TypeAdapter(dict[str, str]).validate_json(private_bytes(value), strict=True)
+    return parse_credential_payload(private_bytes(value))
 
 
 def credentials(value: str | None, names: tuple[str, ...]) -> dict[str, str]:
