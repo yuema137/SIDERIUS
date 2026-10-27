@@ -73,6 +73,13 @@ FULL_SUITE_TRIGGERS: tuple[str, ...] = (
 #: `Path(__file__).resolve().parents[2] / "nodes" / "ml_hyperparameter_tune_agent"`,
 #: which 31 modules / 838 cases depend on. Declared, because derivation cannot.
 DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
+    # The optional-dependency isolation witness imports the gateway only inside
+    # a fresh interpreter's script string, beyond static import discovery.
+    "tests/unit/agent/llm_bridge/test_optional_dependency.py": (
+        "src/agent/llm_bridge.py",
+        "src/agent/llm_transport/",
+        "src/agent/llm_settings.py",
+    ),
     # Imports live inside a subprocess script string to prove fresh registries;
     # the AST cannot derive these runtime dependencies from that string.
     "tests/unit/agent/tune_ml_hyperparam_agent/test_seed_plugin_fresh_process.py": (

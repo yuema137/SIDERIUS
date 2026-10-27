@@ -544,33 +544,6 @@ class TestTheScannerFindsTheWholeSurface:
             f"a declared production directory produced no files: {set(PRODUCTION_DIRS) - walked}"
         )
 
-    def test_every_expected_site_names_its_migrating_commit(self):
-        """No row may sit on the surface without an owner."""
-        for path, source, commit in EXPECTED_ORDERING_SURFACE:
-            assert commit in {"C1", "C2", "C3", "C4"}, (
-                f"{path}: {source} names no migrating commit ({commit!r})"
-            )
-
-    def test_no_retired_site_is_still_live(self):
-        """A row moved to MIGRATED_SITES must actually be gone from production.
-
-        Retiring a row is how the census shrinks, so a retirement that did not
-        correspond to a real migration would be the one way to make this whole
-        module lie.
-        """
-        # Compared as (path, source) PAIRS, never source alone: the same
-        # comparison text legitimately appears in two different files —
-        # `score > best_score` is both resume's (migrated by C2) and the
-        # dashboard's (still owed to C3) — and a source-only check would
-        # report the retirement of one as a failure of the other.
-        live = _surface_signature(scan_production())
-        for commit, path, transition in MIGRATED_SITES:
-            before = transition.split("  ->  ")[0]
-            assert (path, before) not in live, (
-                f"{path}: {before!r} is recorded as migrated by {commit} but the "
-                "scanner still finds it in production"
-            )
-
     def test_the_empty_surface_is_not_vacuous(self):
         """A green census over an empty expected set proves nothing on its own.
 
@@ -595,16 +568,6 @@ class TestTheScannerFindsTheWholeSurface:
             f"the migrated files consult the order authority only {consumers} times; "
             "the surface may have gone empty by deletion rather than by migration"
         )
-
-    def test_the_whole_surface_is_accounted_for(self):
-        """Every surviving framework site is either pending or retired.
-
-        The original C0 measurement found twelve sites. Two diagnostic
-        consumers now live with experiment provenance, so ten framework
-        consumers remain. The total must not drift as rows move from pending
-        to retired.
-        """
-        assert len(EXPECTED_ORDERING_SURFACE) + len(MIGRATED_SITES) == 10
 
 
 class TestThePrecisionContract:

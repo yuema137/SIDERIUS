@@ -61,6 +61,26 @@ through other edits. Unbound review/save remain inert declaration operations
 without explicit task-reference selection;
 reusable preparation/launch retain their candidate preparation/operation owners.
 
+## Non-executable binding drafts
+
+`workflows.definition.draft.WorkflowDraft` holds a validated base document and
+unique binding patches. An absent patch retains the original binding; a patch
+with `source=null` disconnects the socket, never supplies a null scientific
+payload. Targets must be existing capability inputs or catalog protocol arguments.
+Required disconnections remain inspectable but cannot become a published document;
+optional disconnections remove that argument. Promotion uses the existing native
+document validator for source contracts, references and acyclicity.
+
+`POST /api/editor/{project_id}/draft` accepts `DraftRequest` and returns the draft
+plus its inspection (`incomplete`, `invalid`, or `complete`). It checks the saved
+source digest, performs no publication and writes no recovery copy. Only complete
+inspection contains a complete declaration document; this does not certify execution
+readiness. The normal review route
+also accepts `DraftProposal(kind="draft")` and promotes it before the existing
+source review, task acceptance and Save boundary. Neither draft route changes
+preparation or launch admission. A stale base refuses and leaves the caller's draft
+intact. Drafts are not persisted by this API.
+
 ## Native training inspector
 
 Source/read and review projections include optional typed `training` presentation

@@ -3331,7 +3331,7 @@ def main():
         "--provider",
         type=str,
         default=None,
-        choices=["gemini", "openai"],
+        choices=["gemini", "openai", "deepseek", "anthropic", "moonshot", "zai"],
         help="LLM provider for ALL nodes (shorthand — overridden by --llm_config).",
     )
     parser.add_argument(

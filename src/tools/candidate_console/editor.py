@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from tools.setup_review.composition_models import TaskCheckSettings
-from tools.workflow_authoring.models import Project, ReviewRequest, SaveRequest
+from tools.workflow_authoring.models import DraftRequest, Project, ReviewRequest, SaveRequest
 from tools.workflow_authoring.service import AuthoringError, WorkflowAuthoring
 from tools.workflow_authoring.task_models import TaskReferenceTarget
 from workflows.definition import TaskBinding
@@ -125,6 +125,12 @@ def editor_router(
         service = selected(project_id)
         proposal = ReviewRequest.model_validate_json(await request.body())
         return await run_in_threadpool(perform, lambda: service.review(proposal))
+
+    @router.post("/{project_id}/draft")
+    async def draft(project_id: str, request: Request):
+        service = selected(project_id)
+        proposal = DraftRequest.model_validate_json(await request.body())
+        return await run_in_threadpool(perform, lambda: service.inspect_draft(proposal))
 
     @router.post("/{project_id}/save")
     async def save(project_id: str, request: Request):

@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from workflows.definition import AuthoredWorkflowDocument
+from workflows.definition.draft import DraftInspection, WorkflowDraft
 from workflows.definition.models import Source
 from workflows.definition.source import SourceDiagnostic
 
@@ -44,10 +45,25 @@ class DocumentProposal(Model):
     document: AuthoredWorkflowDocument
 
 
+class DraftProposal(Model):
+    kind: Literal["draft"]
+    draft: WorkflowDraft
+
+
+class DraftRequest(Model):
+    expected_sha256: Digest
+    draft: WorkflowDraft
+
+
+class DraftView(Model):
+    draft: WorkflowDraft
+    inspection: DraftInspection
+
+
 class ReviewRequest(Model):
     expected_sha256: Digest
     proposal: Annotated[
-        SourceProposal | DocumentProposal | TaskReferenceUpdateProposal,
+        SourceProposal | DocumentProposal | DraftProposal | TaskReferenceUpdateProposal,
         Field(discriminator="kind"),
     ]
     task_reference_selection: TaskReferenceUpdateProposal | None = Field(

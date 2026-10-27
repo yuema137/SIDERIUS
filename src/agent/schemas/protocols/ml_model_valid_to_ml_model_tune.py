@@ -21,7 +21,7 @@ the proposal provides expert_advice and baseline_config for the tuning agent.
 
 from typing import Any, Literal
 
-from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import (
     HealthGateMode,
@@ -71,12 +71,12 @@ def local_validated_model(
     healthgate_mode: HealthGateMode | None = None,
     result_authority: ResultAuthority | None = None,
     file_index: int = 6,
-    llm_provider: Literal["gemini", "openai", "deepseek"] = DEFAULT_LLM_PROVIDER,
+    llm_provider: ProviderName = DEFAULT_LLM_PROVIDER,
     llm_model_id: str | None = None,
     reasoning_effort: str | None = None,
     planner_strategy: str | None = None,
     expected_planner_strategy: PlannerStrategyIdentity | None = None,
-    reflect_provider: Literal["gemini", "openai", "deepseek"] | None = None,
+    reflect_provider: ProviderName | None = None,
     reflect_model_id: str | None = None,
     reflect_reasoning_effort: str | None = None,
     reflect_retry_policy: RetryPolicy | None = None,
@@ -216,6 +216,8 @@ def local_validated_model(
     runtime_verification_max_wall_seconds: float | None = None,
     *,
     constraint_context: ConstraintContext | None = None,
+    max_output_tokens: int | None = None,
+    reflect_max_output_tokens: int | None = None,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -368,6 +370,8 @@ def local_validated_model(
             llm_model_id if llm_model_id is not None else default_model_for_provider(llm_provider)
         ),
         reasoning_effort=reasoning_effort,
+        max_output_tokens=max_output_tokens,
+        reflect_max_output_tokens=reflect_max_output_tokens,
         planner_strategy=planner_strategy,
         expected_planner_strategy=expected_planner_strategy,
         reflect_provider=reflect_provider,

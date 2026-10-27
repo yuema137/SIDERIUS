@@ -162,7 +162,9 @@ class TestHyperparamTuningInput:
     @pytest.mark.parametrize(
         "override_key, override_value, named_in_error",
         [
-            pytest.param("llm_provider", "anthropic", "llm_provider", id="invalid_provider"),
+            pytest.param(
+                "llm_provider", "unsupported-provider", "llm_provider", id="invalid_provider"
+            ),
             pytest.param("max_rounds", 0, "max_rounds", id="zero_max_rounds"),
             pytest.param("file_index", -1, "file_index", id="negative_file_index"),
         ],

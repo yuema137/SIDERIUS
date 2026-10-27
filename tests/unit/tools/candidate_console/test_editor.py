@@ -101,6 +101,58 @@ def test_empty_editor_selection_keeps_existing_console(console_config):
         assert client.get("/editor.html").status_code == 200
 
 
+def test_binding_draft_disconnect_promote_and_conflict(editor_config):
+    """Real routes must not publish an unbound draft or bypass native promotion/conflicts."""
+    from tests.unit.workflows.test_workflow_definition import definition
+    from workflows.definition import WorkflowDocument
+    from workflows.definition.source import render_workflow_source
+
+    path = editor_config.editor_projects[0].source_file
+    original = render_workflow_source(WorkflowDocument(definition=definition()))
+    path.write_text(original)
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        base = client.get("/api/editor/example", headers=headers).json()
+        draft = {
+            "base_document": base["document"],
+            "bindings": [{"node": "implement", "argument": "output", "source": None}],
+        }
+        inspected = client.post(
+            "/api/editor/example/draft",
+            headers=headers,
+            json={"expected_sha256": base["sha256"], "draft": draft},
+        )
+        assert inspected.status_code == 200, inspected.text
+        assert inspected.json()["inspection"]["status"] == "incomplete"
+        assert inspected.json()["inspection"]["document"] is None
+        body = {"expected_sha256": base["sha256"], "proposal": {"kind": "draft", "draft": draft}}
+        refused = client.post("/api/editor/example/review", headers=headers, json=body)
+        assert refused.status_code == 409, refused.text
+        assert "required input is unbound" in refused.text
+        assert path.read_text() == original
+        assert not tuple(editor_config.editor_projects[0].recovery_directory.iterdir())
+        # A typed but incompatible source must still reach the native validator.
+        draft["bindings"][0]["source"] = {"kind": "result", "node": "validate", "port": "result"}
+        refused = client.post("/api/editor/example/review", headers=headers, json=body)
+        assert refused.status_code == 409
+        assert "requires proposal.output" in refused.text
+        draft["bindings"][0]["source"]["node"] = "propose"
+        review = client.post("/api/editor/example/review", headers=headers, json=body)
+        assert review.status_code == 200, review.text
+        assert review.json()["source"] == original  # Reconnection preserves argument order.
+        path.write_text("# external edit\n" + original)
+        stale = client.post(
+            "/api/editor/example/draft",
+            headers=headers,
+            json={"expected_sha256": base["sha256"], "draft": draft},
+        )
+        assert stale.status_code == 409, stale.text
+        assert path.read_text().startswith("# external edit")
+
+
 def test_task_choice_metadata_is_safe_and_inert(editor_config, monkeypatch):
     """Fails if GET leaks target paths, inspects task content, or starts native observation."""
     pin = TaskBinding(

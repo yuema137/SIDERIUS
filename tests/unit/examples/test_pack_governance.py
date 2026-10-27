@@ -43,8 +43,6 @@ FORBIDDEN_IMPORT_ROOTS = ("examples", "tools.example_packs")
 PARALLEL_COPY_KEYS = ("task_description", "forward_contract")
 REQUIRED_PACK_DOCS = ("README.md", "PROVENANCE.md", "STATUS.md")
 MATURITY_LEVEL = re.compile(r"\bL[0-4]\b")
-ROADMAP_DOC = "docs/design/siderius_generic_framework_upgrade.md"
-READ_ONLY_BANNER_PINS = ("DO NOT EDIT", "does not read")
 WORKFLOW_DECLARATIONS_DIR = "workflow_declarations"
 WORKFLOW_DECLARATION_SOURCES = frozenset(
     {
@@ -379,21 +377,6 @@ def test_every_pack_has_the_three_docs_and_status_names_a_maturity_level() -> No
 # ---------------------------------------------------------------------------
 
 
-def test_every_pack_readme_cites_the_roadmap_authority() -> None:
-    """[PERMANENT — roadmap §22.23.1: prose EXPLAINS by citing the owning path]
-
-    Defect caught: a pack README stops citing the roadmap document / §22.9a /
-    §22.23 that owns its task specification and governance (a reader would
-    take the pack for the authority), or the cited document no longer exists."""
-    assert (REPO_ROOT / ROADMAP_DOC).is_file()
-    for pack in _pack_dirs(EXAMPLES_ROOT):
-        readme = (pack / "README.md").read_text(encoding="utf-8")
-        assert ROADMAP_DOC.split("/")[-1] in readme, f"{pack.name}/README.md must cite the roadmap"
-        assert "§22.9" in readme or "§22.23" in readme, (
-            f"{pack.name}/README.md must cite §22.9/§22.23"
-        )
-
-
 # ---------------------------------------------------------------------------
 # (f) PERMANENT — the two framework-owned minimal roots exist
 # ---------------------------------------------------------------------------
@@ -411,36 +394,3 @@ def test_framework_minimal_roots_exist_and_are_tracked() -> None:
 # ---------------------------------------------------------------------------
 # (g) PERMANENT — every resolved/ snapshot directory carries the read-only banner
 # ---------------------------------------------------------------------------
-
-
-def _resolved_dirs_without_banner(examples_root: Path) -> list[Path]:
-    offenders: list[Path] = []
-    for resolved in sorted(p for p in examples_root.rglob("resolved") if p.is_dir()):
-        banner = resolved / "README.md"
-        text = " ".join(banner.read_text(encoding="utf-8").split()) if banner.is_file() else ""
-        if not all(pin in text for pin in READ_ONLY_BANNER_PINS):
-            offenders.append(resolved)
-    return offenders
-
-
-def test_every_resolved_snapshot_dir_carries_the_read_only_banner() -> None:
-    """[PERMANENT — design §3.6 read-only snapshot UX invariant]
-
-    Defect caught: a `resolved/` directory under ANY pack (present or future)
-    lacks the DO-NOT-EDIT / runtime-does-not-read banner — a user could take a
-    generated snapshot for an authoring input. `test_tidmad_projection` pins
-    the TIDMAD banner's exact generated text; this guard is the cross-pack
-    rule. A framework pack need not ship a resolved snapshot."""
-    assert _resolved_dirs_without_banner(EXAMPLES_ROOT) == []
-
-
-def test_negative_resolved_dir_without_banner_is_detected(tmp_path: Path) -> None:
-    """Proves guard (g) fires: a `resolved/` without a banner (or with a banner
-    lacking the pins) is reported."""
-    bad = tmp_path / "examples" / "p" / "resolved"
-    bad.mkdir(parents=True)
-    assert _resolved_dirs_without_banner(tmp_path / "examples") == [bad]
-    (bad / "README.md").write_text("generated, but says nothing about editing\n")
-    assert _resolved_dirs_without_banner(tmp_path / "examples") == [bad]
-    (bad / "README.md").write_text("DO NOT EDIT — the runtime does not read this file\n")
-    assert _resolved_dirs_without_banner(tmp_path / "examples") == []

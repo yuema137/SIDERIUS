@@ -36,6 +36,7 @@ def node_bridge_kwargs(
     max_retries: int | None,
     reasoning_effort: str | None,
     omit_unset_retries: bool = False,
+    max_output_tokens: int | None = None,
 ) -> dict[str, Any]:
     """Preserve existing node keyword omission, including DA's retry policy."""
     result: dict[str, Any] = {"provider": provider, "model_id": model_id}
@@ -43,6 +44,8 @@ def node_bridge_kwargs(
         result["max_retries"] = max_retries
     if reasoning_effort is not None:
         result["reasoning_effort"] = reasoning_effort
+    if max_output_tokens is not None:
+        result["max_output_tokens"] = max_output_tokens
     return result
 
 
@@ -64,6 +67,8 @@ def literature_bridge_arguments(
     search_reasoning_effort: str | None,
     max_retries: int | None = None,
     search_retry_policy: RetryPolicy | None = None,
+    max_output_tokens: int | None = None,
+    search_max_output_tokens: int | None = None,
 ) -> LiteratureBridgeArguments:
     """Project validated literature input; main routing has no default here."""
     main = node_bridge_kwargs(
@@ -71,11 +76,16 @@ def literature_bridge_arguments(
         model_id=model_id,
         max_retries=max_retries,
         reasoning_effort=reasoning_effort,
+        max_output_tokens=max_output_tokens,
         omit_unset_retries=True,
     )
     search = None
     search_routing_override = bool(search_provider or search_model_id or search_reasoning_effort)
-    if search_routing_override or search_retry_policy is not None:
+    if (
+        search_routing_override
+        or search_retry_policy is not None
+        or search_max_output_tokens is not None
+    ):
         search = node_bridge_kwargs(
             provider=search_provider or provider,
             model_id=search_model_id or model_id,
@@ -84,6 +94,11 @@ def literature_bridge_arguments(
             ),
             reasoning_effort=(
                 search_reasoning_effort if search_routing_override else reasoning_effort
+            ),
+            max_output_tokens=(
+                search_max_output_tokens
+                if search_max_output_tokens is not None
+                else max_output_tokens
             ),
             omit_unset_retries=True,
         )

@@ -75,6 +75,8 @@ def prepare_native_tuner_input(
         llm_provider=tune_llm["provider"],
         llm_model_id=tune_llm["model_id"],
         reasoning_effort=tune_llm.get("reasoning_effort"),
+        max_output_tokens=tune_llm.get("max_output_tokens"),
+        reflect_max_output_tokens=tune_llm.get("reflect_max_output_tokens"),
         planner_strategy=tune_llm.get("planner_strategy"),
         expected_planner_strategy=run_invariants.planner_strategy_identity,
         reflect_provider=tune_llm.get("reflect_provider"),

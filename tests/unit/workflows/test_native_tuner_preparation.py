@@ -3,9 +3,12 @@
 Full payload equality catches dropped/swapped forwarding that schema validation
 cannot detect. Expectations were captured from run_workflow before extraction;
 only the pytest temporary root is normalized. The source-derived composition
-fingerprint is checked separately against the real binding and persisted lock;
-the verifier source-content digest is likewise checked against its source owner.
-Every other payload field is compared exactly. Node effects use existing seams.
+fingerprint is checked separately against the real binding and persisted lock.
+Planner assembly and verifier source digests are likewise checked against their
+current declared owners and persisted lock; frozen baseline digests stay pinned.
+Every other payload field is compared exactly. This checks input forwarding,
+not equivalence of live model outputs or scientific artifacts. Node effects use
+existing seams.
 """
 
 import json
@@ -223,16 +226,35 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
         baseline_fingerprint == "7f8103588d30aa06fdecd1d3c81e318dee7a7b3733838174829f7770843f9fd6"
     )
     assert actual_fingerprint == workflow_env["composition"].semantic_fingerprint
+    # The assembly includes llm_bridge.py, so transport changes legitimately
+    # change its source identity even when all forwarded settings are unchanged.
+    # Keep the captured oracle intact and compare only this digest separately.
+    actual_planner_assembly = payload["expected_planner_strategy"].pop("assembly_sha256")
+    baseline_planner_assembly = expected["expected_planner_strategy"].pop("assembly_sha256")
+    assert (
+        baseline_planner_assembly
+        == "419a018c994132cc127c5562a9a234ddf5f67ce0ee7a1147657b07380a71e942"
+    )
+    current_planner = planner_strategy.resolve_planner_strategy("native-timing-v1")
+    assert actual_planner_assembly == current_planner.identity.assembly_sha256
+    assert actual.expected_planner_strategy == current_planner.identity
     if case == "split_routes":
-        # The shared VRAM selector changed this fixture provider's declared source.
-        # Preserve the oracle bytes and compare only that honest source-derived digest
-        # separately; every other verifier identity field remains in full equality.
+        # The verifier source and execution assembly have evolved independently.
+        # Preserve the oracle bytes and verify these source-derived digests against
+        # their current owners; verifier name/version remain in exact equality.
         actual_content = payload["runtime_verifier_identity"].pop("content_sha256")
         baseline_content = expected["runtime_verifier_identity"].pop("content_sha256")
         assert (
             baseline_content == "bda92755c56c34ad817e387230b08ffcff0233d3dd7574bd9269a54c307568e6"
         )
         assert actual_content == profile.identity().content_sha256
+        actual_verifier_assembly = payload["runtime_verifier_identity"].pop("assembly_sha256")
+        baseline_verifier_assembly = expected["runtime_verifier_identity"].pop("assembly_sha256")
+        assert (
+            baseline_verifier_assembly
+            == "63ec1733cf6b1a1e7b0b9403e67e02c5784a2379f45df013a216604b6085bdb2"
+        )
+        assert actual_verifier_assembly == verifier_provider.verifier_assembly_digest()
         assert actual.runtime_verifier_identity == profile.identity()
     assert payload == expected
     from core.preflight_estimation import estimation_assembly_digest
@@ -259,6 +281,7 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     )
     assert actual_fingerprint == lock.task_composition_fingerprint
     assert actual.expected_planner_strategy == lock.planner_strategy_identity
+    assert actual.runtime_verifier_identity == lock.runtime_verifier_identity
     for field in (
         "experiment_arm",
         "lit_review_enabled",

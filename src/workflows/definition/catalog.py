@@ -43,7 +43,7 @@ CONTRACTS = MappingProxyType(
         "storage": "agent.schemas.storage.StorageConfig",
         "optional.constraint-context": "agent.schemas.constraint_disclosure.ConstraintContext | None",
         "optional.task-composition-ref": "agent.schemas.hyperparam_tuning.TaskCompositionRef | None",
-        "llm-provider": "Literal['gemini', 'openai', 'deepseek']",
+        "llm-provider": "Literal['gemini', 'openai', 'deepseek', 'anthropic', 'moonshot', 'zai']",
         "optional.model-id": "str | None",
     }
 )

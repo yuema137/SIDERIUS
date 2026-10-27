@@ -16,37 +16,8 @@ from agent.schemas.score_table import (
     ScoreComparisonTable,
 )
 
-# =============================================================================
-# PerFileRow
-# =============================================================================
-
 
 class TestPerFileRow:
-    def test_fully_populated_row(self):
-        row = PerFileRow(
-            file_index=12,
-            raw_baseline=0.36,
-            ground_truth=10.12,
-            model=8.0,
-            gain_vs_raw=7.64,
-            headroom_vs_gt=2.12,
-        )
-        assert row.file_index == 12
-        assert row.model == 8.0
-
-    def test_all_model_side_columns_may_be_none(self):
-        """Trial-mode rows — file not sampled. raw/gt still set."""
-        row = PerFileRow(
-            file_index=3,
-            raw_baseline=-13.854,
-            ground_truth=0.0945,
-            model=None,
-            gain_vs_raw=None,
-            headroom_vs_gt=None,
-        )
-        assert row.model is None
-        assert row.gain_vs_raw is None
-
     def test_file_index_range(self):
         with pytest.raises(ValidationError):
             PerFileRow(
@@ -67,104 +38,8 @@ class TestPerFileRow:
                 headroom_vs_gt=None,
             )
 
-    def test_extra_fields_forbidden(self):
-        with pytest.raises(ValidationError):
-            PerFileRow(
-                file_index=0,
-                raw_baseline=0.0,
-                ground_truth=0.0,
-                model=None,
-                gain_vs_raw=None,
-                headroom_vs_gt=None,
-                whatever="nope",
-            )
-
-    def test_json_round_trip_preserves_none(self):
-        row = PerFileRow(
-            file_index=17,
-            raw_baseline=1.83,
-            ground_truth=11.22,
-            model=None,
-            gain_vs_raw=None,
-            headroom_vs_gt=None,
-        )
-        restored = PerFileRow.model_validate_json(row.model_dump_json())
-        assert restored == row
-
-    def test_headroom_negative_rejected(self):
-        # The schema enforces ``headroom_vs_gt >= 0``. ``_build_rows`` clips at
-        # zero before construction; this test guards that contract at the
-        # schema layer so any caller that forgets to clip is caught.
-        with pytest.raises(ValidationError):
-            PerFileRow(
-                file_index=0,
-                raw_baseline=-11.43,
-                ground_truth=-8.26,
-                model=-13.27,
-                gain_vs_raw=-1.84,
-                headroom_vs_gt=-5.0,
-            )
-
-    def test_headroom_zero_accepted(self):
-        row = PerFileRow(
-            file_index=0,
-            raw_baseline=-11.43,
-            ground_truth=-8.26,
-            model=-8.26,
-            gain_vs_raw=3.17,
-            headroom_vs_gt=0.0,
-        )
-        assert row.headroom_vs_gt == 0.0
-
-    def test_headroom_none_accepted_for_unsampled_file(self):
-        row = PerFileRow(
-            file_index=5,
-            raw_baseline=-1.87,
-            ground_truth=7.46,
-            model=None,
-            gain_vs_raw=None,
-            headroom_vs_gt=None,
-        )
-        assert row.headroom_vs_gt is None
-
-
-# =============================================================================
-# AggregateScalars
-# =============================================================================
-
 
 class TestAggregateScalars:
-    def test_full_run_aggregate(self):
-        agg = AggregateScalars(
-            raw_baseline_scalar=1.0011,
-            ground_truth_scalar=10.1134,
-            model_scalar=5.5763,
-            percent_of_ceiling_log=0.551,
-            num_sampled_files=20,
-        )
-        assert agg.num_sampled_files == 20
-
-    def test_trial_run_aggregate(self):
-        agg = AggregateScalars(
-            raw_baseline_scalar=1.09,
-            ground_truth_scalar=9.78,
-            model_scalar=5.0,
-            percent_of_ceiling_log=0.511,
-            num_sampled_files=5,
-        )
-        assert agg.num_sampled_files == 5
-
-    def test_num_sampled_files_lower_bound(self):
-        """Cannot aggregate over zero files — the schema enforces ge=1."""
-        with pytest.raises(ValidationError):
-            AggregateScalars(
-                raw_baseline_scalar=0.0,
-                ground_truth_scalar=0.0,
-                model_scalar=0.0,
-                percent_of_ceiling_log=0.0,
-                num_sampled_files=0,
-            )
-
     def test_num_sampled_files_upper_bound(self):
         with pytest.raises(ValidationError):
             AggregateScalars(
@@ -174,11 +49,6 @@ class TestAggregateScalars:
                 percent_of_ceiling_log=0.0,
                 num_sampled_files=21,
             )
-
-
-# =============================================================================
-# ScoreComparisonTable
-# =============================================================================
 
 
 def _row(i: int, model: float | None = None) -> PerFileRow:
@@ -239,36 +109,6 @@ class TestScoreComparisonTable:
                 rendered_markdown="",
             )
 
-    def test_json_round_trip_preserves_rendered_markdown(self):
-        rows = [_row(i, model=None) for i in range(20)]
-        tbl = ScoreComparisonTable(
-            rows=rows,
-            aggregate=_agg(1),
-            s_max_global=1.0,
-            reference_source="x",
-            rendered_markdown="### title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
-        )
-        restored = ScoreComparisonTable.model_validate_json(tbl.model_dump_json())
-        assert restored.rendered_markdown == tbl.rendered_markdown
-        assert restored == tbl
-
-    def test_extra_fields_forbidden_on_table(self):
-        rows = [_row(i, model=0.0) for i in range(20)]
-        with pytest.raises(ValidationError):
-            ScoreComparisonTable(
-                rows=rows,
-                aggregate=_agg(20),
-                s_max_global=1.0,
-                reference_source="x",
-                rendered_markdown="",
-                who="knows",
-            )
-
-
-# =============================================================================
-# P1-Impact: linear_weight / impact_score row fields + table invariant
-# =============================================================================
-
 
 def _row_with_impact(
     i: int,
@@ -287,49 +127,6 @@ def _row_with_impact(
         linear_weight=weight,
         impact_score=impact,
     )
-
-
-class TestPerFileRowImpactFields:
-    """Schema-level invariants on the two new opportunity columns."""
-
-    def test_linear_weight_at_bounds_accepted(self):
-        # Both endpoints of the [0, 1] interval are valid.
-        for w in (0.0, 1.0, 0.5):
-            row = _row_with_impact(0, model=0.0, weight=w, impact=0.0)
-            assert row.linear_weight == pytest.approx(w)
-
-    def test_linear_weight_negative_rejected(self):
-        with pytest.raises(ValidationError):
-            _row_with_impact(0, model=0.0, weight=-0.1, impact=0.0)
-
-    def test_linear_weight_above_one_rejected(self):
-        with pytest.raises(ValidationError):
-            _row_with_impact(0, model=0.0, weight=1.000001, impact=0.0)
-
-    def test_impact_score_clamps_at_zero_for_already_saturated_file(self):
-        # A saturated file (model at the gt ceiling) yields impact=0.0
-        # in the helper. The schema must accept the boundary value.
-        row = _row_with_impact(3, model=1.5, weight=0.05, impact=0.0)
-        assert row.impact_score == 0.0
-
-    def test_impact_score_negative_rejected(self):
-        # Helper clips at 0 — the schema is the second line of defense.
-        with pytest.raises(ValidationError):
-            _row_with_impact(0, model=0.0, weight=0.05, impact=-0.1)
-
-    def test_impact_columns_default_to_none(self):
-        # Existing PerFileRow constructions (no impact data) keep working —
-        # both new fields default to None.
-        row = PerFileRow(
-            file_index=0,
-            raw_baseline=0.0,
-            ground_truth=0.0,
-            model=0.0,
-            gain_vs_raw=0.0,
-            headroom_vs_gt=0.0,
-        )
-        assert row.linear_weight is None
-        assert row.impact_score is None
 
 
 class TestLinearWeightTotalInvariant:

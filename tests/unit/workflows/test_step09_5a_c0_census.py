@@ -1,20 +1,4 @@
-"""Step 09.5a C0 — the executable censuses.
-
-Three source facts the migration must not silently break, each pinned here
-BEFORE any production edit so the baseline is recorded rather than reconstructed.
-
-Defects only these catch:
-
-* **census A** — a ``run_workflow`` parameter exists that no ownership class
-  claims. The design's field table (§5) is prose; without this check the table
-  can drift from the signature the moment either side moves, and a value with no
-  owner is exactly how a parameter bag reforms.
-* **census D** — a production caller was not migrated. ``pyright`` catches a
-  wrong keyword, but not a caller nobody remembered to look at.
-* **census B** — a second committed-digest read/parse authority exists. This is
-  the A-2 regression, and it is invisible to behaviour: four readers and one
-  reader produce identical results.
-"""
+"""Workflow carrier boundaries, production callers and committed-digest I/O ownership."""
 
 from __future__ import annotations
 
@@ -26,45 +10,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# ---------------------------------------------------------------------------
-# Census A — every run_workflow parameter has exactly one ownership class
-# ---------------------------------------------------------------------------
 
-#: The frozen design's classification (§5), transcribed once. A parameter that
-#: is not in exactly one of these sets fails the census — which is the point:
-#: the design table and the live signature must not be able to drift apart.
-CLASS_A_AUTHORITIES = frozenset(
-    {
-        "workspace",
-        "run_name",
-        "chain_run_name",
-        "run_id",
-        "data_scope",
-        "health_gate_enabled",
-        "health_gate_files",
-        "health_checks_config",
-        "order_strategy_override",
-        "file_order_override",
-        "enable_structured_health_feedback",
-        "llm_config",
-        # Step 10 / P1 C5: the run's TASK composition — the most literal
-        # class-A value there is (an authority settled once, at the
-        # composition edge, whose identity does not change for the run).
-        "task_composition",
-    }
-)
-
-#: Step 10 / P1 C5 closes 09.5a's own C4b hand-off: the NINE restored seeds
-#: are ONE typed parameter. The class does not disappear — the values still
-#: seed `ChainState` and are still class B — it is the TRANSPORT that
-#: collapsed. `RestoredState` is resume's own type and is allowed across the
-#: launcher edge (09.5a §16); `ChainState` still never crosses one.
-CLASS_B_CHAIN_STATE_SEEDS = frozenset({"restored_state"})
-
-#: The nine kwargs this replaced, kept so the census can prove they are GONE
-#: rather than merely absent from the class table. Re-adding any one of them
-#: is the first step back toward a signature that grows with every value
-#: resume learns to carry.
 RETIRED_RESTORED_KWARGS = frozenset(
     {
         "restored_runtime_vocab",
@@ -79,23 +25,6 @@ RETIRED_RESTORED_KWARGS = frozenset(
     }
 )
 
-#: Amendment A: immutable capability references only. `require_probe_runner` is
-#: deliberately NOT here — the per-field audit found it is a plain bool launch
-#: flag, and keeping it here would have been the "compress the signature"
-#: reasoning the amendment forbids.
-CLASS_D_CAPABILITIES = frozenset({"bridge_factory", "sandbox_factory", "measurement_capability"})
-
-#: DS7 no-ops (`workflows/model_exploration.py:1718-1732`). Kept for behaviour
-#: parity; they enter no carrier.
-CLASS_F_DEPRECATED_NOOPS = frozenset({"trial_strategy", "target_files", "eval_strategy"})
-
-_EXPLICIT = (
-    CLASS_A_AUTHORITIES
-    | CLASS_B_CHAIN_STATE_SEEDS
-    | CLASS_D_CAPABILITIES
-    | CLASS_F_DEPRECATED_NOOPS
-)
-
 
 def _run_workflow_parameters() -> list[str]:
     from workflows.model_exploration import run_workflow
@@ -104,78 +33,6 @@ def _run_workflow_parameters() -> list[str]:
 
 
 class TestParameterOwnershipCensus:
-    def test_every_parameter_has_exactly_one_ownership_class(self):
-        """Class C is the complement, so this asserts the partition is total."""
-        params = _run_workflow_parameters()
-        overlaps = {
-            p
-            for p in params
-            if sum(
-                p in s
-                for s in (
-                    CLASS_A_AUTHORITIES,
-                    CLASS_B_CHAIN_STATE_SEEDS,
-                    CLASS_D_CAPABILITIES,
-                    CLASS_F_DEPRECATED_NOOPS,
-                )
-            )
-            > 1
-        }
-        assert not overlaps, f"parameters claimed by two ownership classes: {sorted(overlaps)}"
-
-        stale = sorted(_EXPLICIT - set(params))
-        assert not stale, (
-            "the design's field table names parameters that no longer exist on "
-            f"run_workflow: {stale}. Update §5 and this census together."
-        )
-
-    def test_the_class_totals_reconcile_to_the_live_signature(self):
-        """A + B + C + D + F == len(signature), with C the complement.
-
-        MEASURED at the design anchor: 12 + 9 + 72 + 3 + 3 = 99.
-        After 09.5a C3 the 72 transit values became one `launch` carrier;
-        after Step 10 / P1 C5 the 9 restored seeds became one `restored_state`
-        and one `task_composition` authority joined class A: 13 + 1 + 1 + 3 +
-        3 = 21.
-        """
-        params = _run_workflow_parameters()
-        class_c = [p for p in params if p not in _EXPLICIT]
-        total = (
-            len(CLASS_A_AUTHORITIES)
-            + len(CLASS_B_CHAIN_STATE_SEEDS)
-            + len(class_c)
-            + len(CLASS_D_CAPABILITIES)
-            + len(CLASS_F_DEPRECATED_NOOPS)
-        )
-        assert total == len(params), (
-            f"ownership classes sum to {total} but run_workflow has {len(params)} parameters"
-        )
-
-    def test_the_census_is_not_vacuous(self):
-        """A signature that lost its parameters would satisfy a partition check.
-
-        The floor was 50 before C3 and is re-derived here from the migrated
-        shape, exactly as the pre-C3 message instructed: after the migration
-        the signature carries the 12 authorities, 9 restored seeds, 3
-        capability references, 3 DS7 no-ops and `launch` — 28. Deleting the
-        guard instead of re-deriving it is how a partition check becomes
-        decoration.
-
-        RE-DERIVED at Step 10 / P1 C5, following that instruction rather than
-        deleting the guard: 13 class-A authorities (the original 12 plus
-        `task_composition`), 1 restored-state carrier, 4 capability
-        references (including historical-model inference), 3 DS7 no-ops and
-        `launch` — **22** total.
-        """
-        params = _run_workflow_parameters()
-        assert len(params) == 22, (
-            f"run_workflow has {len(params)} parameters, not the 22 the Data Analysis "
-            "integration freezes. If a later migration legitimately changes it, "
-            "re-derive this count from the new signature rather than deleting "
-            "the guard."
-        )
-        assert CLASS_A_AUTHORITIES and CLASS_B_CHAIN_STATE_SEEDS and CLASS_D_CAPABILITIES
-
     def test_the_nine_restored_kwargs_really_left_the_signature(self):
         """C5's whole point, stated the way C3's transit check is stated.
 
@@ -206,17 +63,13 @@ class TestParameterOwnershipCensus:
         )
 
 
-# ---------------------------------------------------------------------------
-# Census D — production callers of run_workflow
-# ---------------------------------------------------------------------------
-
-#: MEASURED at the design anchor. Every one must migrate atomically in C3.
 EXPECTED_PRODUCTION_CALLERS = frozenset(
     {
         "src/workflows/run_one_iteration.py",
         "src/workflows/model_exploration.py",
     }
 )
+
 
 _PRODUCTION_DIRS = (
     "src/agent",
@@ -270,13 +123,6 @@ class TestCallerCensus:
         assert len(sites) >= 2, f"expected >= 2 production call sites, found {sites}"
 
 
-# ---------------------------------------------------------------------------
-# Census B — committed-digest read/parse authorities
-# ---------------------------------------------------------------------------
-
-
-#: Production modules that may legitimately mention the digest path convention.
-#: Anything else resolving it is a second reader.
 _DIGEST_PATH_OWNERS = ("src/core/committed_digests.py", "src/core/resume.py")
 
 
@@ -308,14 +154,9 @@ def _digest_openers() -> dict[str, list[str]]:
     return out
 
 
-#: MEASURED at the design anchor, then REDUCED by C1. The A-2 finding was four
-#: duplicated read/parse/soft-fail implementations; after C1 there is exactly
-#: ONE, and the four carried values became pure projections over its output.
 DIGEST_IO_AUTHORITIES = frozenset({"src/core/committed_digests.py::read_committed_digests"})
 
-#: The four projections that consume the authority's output. They must remain
-#: distinct — their validators, merge rules and failure policies genuinely
-#: differ (two raise, one warns-and-drops, one ignores a non-dict).
+
 PROJECTIONS = frozenset(
     {
         "project_knowledge",

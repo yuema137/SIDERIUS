@@ -7,7 +7,11 @@ from typing import Any, Literal
 
 from pydantic import TypeAdapter
 
-from agent.llm_settings import KNOWN_PROVIDERS, resolve_main_transport, resolve_reflect_transport
+from agent.llm_settings import (
+    provider_configuration,
+    resolve_main_transport,
+    resolve_reflect_transport,
+)
 from nodes.llm_settings import (
     ANALYZE,
     IMPLEMENT,
@@ -47,7 +51,7 @@ def _route(name: str, kwargs: dict[str, Any], applicability: RouteApplicability)
         transport=RouteTransport(**asdict(main), max_retries=kwargs.get("max_retries")),
         issue=(
             "Credential name unresolved: this provider has no known key-name declaration."
-            if main.provider not in KNOWN_PROVIDERS
+            if provider_configuration(main.provider) is None
             else None
         ),
     )
@@ -64,6 +68,8 @@ def _tuner_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> list[
         reflect_model_id=options.get("reflect_model_id"),
         max_retries=options.get("max_retries"),
         reasoning_effort=options.get("reasoning_effort"),
+        max_output_tokens=options.get("max_output_tokens"),
+        reflect_max_output_tokens=options.get("reflect_max_output_tokens"),
         reflect_reasoning_effort=options.get("reflect_reasoning_effort"),
         reflect_retry_policy=options.get("reflect_retry_policy"),
     )
@@ -119,6 +125,8 @@ def _literature_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> 
         provider=options["llm_provider"],
         model_id=options["llm_model_id"],
         reasoning_effort=options.get("llm_reasoning_effort"),
+        max_output_tokens=options.get("llm_max_output_tokens"),
+        search_max_output_tokens=options.get("search_llm_max_output_tokens"),
         search_provider=options.get("search_llm_provider"),
         search_model_id=options.get("search_llm_model_id"),
         search_reasoning_effort=options.get("search_llm_reasoning_effort"),
@@ -166,6 +174,7 @@ def node_llm_routes(
         model_id=options.get("model_id", defaults.model_id),
         max_retries=options.get("max_retries", defaults.max_retries),
         reasoning_effort=options.get("reasoning_effort", defaults.reasoning_effort),
+        max_output_tokens=options.get("max_output_tokens"),
         omit_unset_retries=role == "data_analysis",
     )
     return [_route(role, kwargs, state)]
@@ -180,6 +189,7 @@ def _proposer_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> li
             model_id=options.get("model_id", PROPOSE.model_id),
             max_retries=options.get("max_retries", PROPOSE.max_retries),
             reasoning_effort=options.get("reasoning_effort", PROPOSE.reasoning_effort),
+            max_output_tokens=options.get("max_output_tokens"),
         ),
         options,
     )

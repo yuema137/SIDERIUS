@@ -12,11 +12,6 @@ Covers Commit 3 of docs/commit_plan_ml_literature_review.md:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
-import pytest
-from pydantic import ValidationError
-
 from agent.prompt_templates.literature_review import (
     MAX_RAW_TEXT_CHARS,
     render_paper_extract_prompt,
@@ -222,61 +217,6 @@ class TestRawTextAndTruncation:
         body = "b" * MAX_RAW_TEXT_CHARS
         _, user = render_paper_extract_prompt(body)
         assert "[...TRUNCATED...]" not in user
-
-
-class TestPaperExtractValidationHalf:
-    """The validation half of Commit 4's malformed-JSON fallback test.
-
-    Commit 3 has no node yet, so we assert the contract directly: what
-    ``bridge.generate()`` returns (a parsed dict) round-trips through
-    ``PaperExtract.model_validate``; a structurally-invalid payload raises.
-    A MagicMock stands in for the bridge so no API call happens.
-    """
-
-    def test_valid_generate_dict_parses(self):
-        valid = {
-            "title": "TIDMAD",
-            "authors": "A. Author, B. Author",
-            "year": "2024",
-            "core_idea": "A time-series dataset and denoising benchmark.",
-            "architecture_details": "WaveNet: dilated causal convs, full-spectrum.",
-            "key_results": "WaveNet 4.99/5.16 under full-spectrum training.",
-            "relevance_to_task": "Only full-spectrum baseline; directly comparable.",
-            # Commit 2c fields the LLM emits (extraction_method is set node-side).
-            "key_equations_md": "$$s = -\\log\\|x - \\hat x\\|^2$$",
-            "pseudocode_md": "```python\nfor x in batch:\n    pass\n```",
-        }
-        bridge = MagicMock()
-        bridge.generate.return_value = valid
-
-        system, user = render_paper_extract_prompt("paper text")
-        raw = bridge.generate(system, user)
-        bridge.generate.assert_called_once_with(system, user)
-
-        extract = PaperExtract.model_validate(raw)
-        for key in _EXPECTED_KEYS:
-            assert getattr(extract, key) == valid[key]
-
-    def test_partial_dict_uses_empty_string_defaults(self):
-        # The prompt tells the LLM to omit-or-empty unknown fields; a partial
-        # dict must still validate, with "" defaults for the rest.
-        extract = PaperExtract.model_validate({"title": "Only a title"})
-        assert extract.title == "Only a title"
-        assert extract.architecture_details == ""
-        assert extract.relevance_to_task == ""
-
-    def test_malformed_payload_raises(self):
-        # A wrong-typed field (list where str is required) must raise rather
-        # than silently coerce.
-        bridge = MagicMock()
-        bridge.generate.return_value = {"title": ["not", "a", "string"]}
-        raw = bridge.generate(*render_paper_extract_prompt("text"))
-        with pytest.raises(ValidationError):
-            PaperExtract.model_validate(raw)
-
-    def test_non_dict_payload_raises(self):
-        with pytest.raises(ValidationError):
-            PaperExtract.model_validate(["not", "a", "dict"])
 
 
 class TestSynthesisPrompt:

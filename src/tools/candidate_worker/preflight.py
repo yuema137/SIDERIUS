@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 
-from agent.llm_settings import KNOWN_PROVIDERS
+from agent.llm_settings import provider_configuration
 from tools.setup_review.environment import credential_name_checks
 from tools.setup_review.route_models import LLMRoute
 from tools.workflow_preview import preview_workflow
@@ -33,7 +33,7 @@ def credential_requirements(
         route.name
         for route in routes
         if route.applicability not in {"disabled", "pseudo"}
-        and (route.transport is None or route.transport.provider not in KNOWN_PROVIDERS)
+        and (route.transport is None or provider_configuration(route.transport.provider) is None)
     )
     return CandidateCredentialRequirements(
         required_names=required,
