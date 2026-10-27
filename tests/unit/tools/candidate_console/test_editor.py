@@ -425,19 +425,32 @@ def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_co
         # An explicit empty list is the same declaration: no bytes move.
         assert review_and_save([])["diff"] == "" and path.read_bytes() == original
 
-        # Each refusal is typed; the file is untouched.
+        # Each refusal is typed by the layer that owns it; the file is untouched.
+        # Per-condition shape is refused by the request schema before any source work.
         for invalid in (
             [{"kind": "no_improvement", "completed_bodies": 0}],
             [{"kind": "no_improvement", "completed_bodies": 1.5}],
-            [{"kind": "no_improvement", "completed_bodies": 2}],  # == final_iteration
             [{"kind": "metric_threshold", "threshold": 0.85}],
             [{**threshold, "metric_id": ""}],
             [{**threshold, "threshold": "0.85"}],
-            [threshold, {**threshold, "threshold": 0.9}],
             [{"kind": "judge"}],
         ):
             _, refused = review(invalid)
             assert refused.status_code == 422, (invalid, refused.text)
+            assert refused.json()["error"]["code"] == "validation", (invalid, refused.text)
+        # Cross-field rules (k below the final iteration, one condition per kind) are
+        # refused by the declaration, located at the definition, not as a source error.
+        for invalid in (
+            [{"kind": "no_improvement", "completed_bodies": 2}],  # == final_iteration
+            [threshold, {**threshold, "threshold": 0.9}],
+        ):
+            _, refused = review(invalid)
+            assert refused.status_code == 422, (invalid, refused.text)
+            body = refused.json()
+            assert body["error"]["code"] == "source", (invalid, refused.text)
+            assert [(item["code"], item["field_path"]) for item in body["diagnostics"]] == [
+                ("validation", ["definition"])
+            ], (invalid, refused.text)
         assert path.read_bytes() == original
 
         # Add both kinds: only the loop's stop conditions (and their constructors) move.

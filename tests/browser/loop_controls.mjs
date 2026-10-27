@@ -19,6 +19,7 @@ const pausing = '66666666-6666-4666-8666-666666666666';
 const digest = 'c'.repeat(64);
 const thresholdStop = '77777777-7777-4777-8777-777777777777';
 const patienceStop = '88888888-8888-4888-8888-888888888888';
+const resumedStop = '99999999-9999-4999-8999-999999999999';
 let browser;
 try {
   const metadata = await new Promise((accept, reject) => {
@@ -87,6 +88,13 @@ try {
       const value = terminal(patienceStop, 'completed', 4);
       value.loop = {final_iteration: 6, attempted_iterations: 4, stop_reason: {kind: 'no_improvement', condition_index: 1, iteration: 4,
         k: 2, non_improving_bodies: 2, last_improvement_iteration: 2, incumbent: -1.25}};
+      return reply(value);
+    }
+    if (url.pathname === `/api/operations/${resumedStop}`) {
+      // Resumed at body 3 after a pause at body 2: every iteration in the receipt counts the whole run.
+      const value = {...terminal(resumedStop, 'completed', 3), kind: 'candidate_loop_resume'};
+      value.loop = {final_iteration: 5, attempted_iterations: 3, stop_reason: {kind: 'no_improvement', condition_index: 0, iteration: 3,
+        k: 2, non_improving_bodies: 2, last_improvement_iteration: 1, incumbent: 0.75}};
       return reply(value);
     }
     throw new Error('unexpected path ' + url.pathname);
@@ -186,11 +194,14 @@ try {
   await page.evaluate(id => { location.hash = 'slow-control/' + id; }, patienceStop);
   await state.filter({hasText: 'Research loop stopped early after body 4 of up to 6: no improvement for 2 bodies (condition: 2 bodies; best -1.25 at body 2).'}).waitFor();
   assert.ok(!(await state.textContent()).includes('finished after'), 'an early stop never reads as reaching the limit');
+  assert.ok(!(await state.textContent()).includes('whole run'), 'a root segment needs no whole-run note');
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-stop-reason.png'), fullPage: true});
+  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, resumedStop);
+  await state.filter({hasText: 'Resumed segment. Research loop stopped early after body 3 of up to 5: no improvement for 2 bodies (condition: 2 bodies; best 0.75 at body 1). Body numbers count the whole run, including earlier segments.'}).waitFor();
   assert.equal(resumePosts.length, 1);
   assert.equal(posts.length, 1);
   assert.deepEqual(faults, []);
-  console.log('PASS: Stop and Pause post once and read "requested" until the receipt; a paused loop is resumable after review, Resume posts once with the retained UUID, and the resumed segment shows Stop and its bodies; a receipt stop_reason reads in plain words.');
+  console.log('PASS: Stop and Pause post once and read "requested" until the receipt; a paused loop is resumable after review, Resume posts once with the retained UUID, and the resumed segment shows Stop and its bodies; a receipt stop_reason reads in plain words, with whole-run body numbers on a resumed segment.');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM'); lines.close();

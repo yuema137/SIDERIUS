@@ -43,11 +43,16 @@
       else if (request?.pause.acknowledged) text += ' Pause requested: the current body completes first, and the final iteration, a Stop or a native failure may still end the loop. Not yet paused.';
       return text;
     }
-    if (status.native_status === 'stopped') return segment + counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
-    if (status.native_status === 'paused') return segment + counted(loop, 'Research loop paused at a completed body boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.' : ' No partial body is kept; it can be resumed from the next body after review.');
-    if (status.native_status === 'completed' && loop.stop_reason) return segment + `Research loop ${stopReason(loop.stop_reason, loop.final_iteration)}.`;
-    if (status.native_status === 'completed') return segment + counted(loop, 'Research loop finished') + (request?.stop.acknowledged || request?.pause.acknowledged ? ' The request did not take effect before the final iteration.' : '');
-    return segment + counted(loop, `Research loop ended (${status.native_status})`);
+    // Receipt body numbers (attempted, stop_reason iterations) are cumulative over the whole run,
+    // so a resumed segment says so rather than reading as a segment-local count.
+    return segment + outcome(status, loop) + (segment && ' Body numbers count the whole run, including earlier segments.');
+  }
+  function outcome(status, loop) {
+    if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
+    if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed body boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.' : ' No partial body is kept; it can be resumed from the next body after review.');
+    if (status.native_status === 'completed' && loop.stop_reason) return `Research loop ${stopReason(loop.stop_reason, loop.final_iteration)}.`;
+    if (status.native_status === 'completed') return counted(loop, 'Research loop finished') + (request?.stop.acknowledged || request?.pause.acknowledged ? ' The request did not take effect before the final iteration.' : '');
+    return counted(loop, `Research loop ended (${status.native_status})`);
   }
   function render(status) {
     last = status;

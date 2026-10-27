@@ -135,6 +135,10 @@
     $('diff').textContent = proposal.diff || '(No source changes)';
     diagnostic(); render();
   }
+  // Only a 422 refusal of the loop's fields (request schema) or of the declaration at its
+  // definition earns the stop-condition hint; auth, size, conflict and source-text errors do not.
+  const loopDeclarationRefusal = error => error.status === 422 && (error.code === 'validation' ||
+    (error.code === 'source' && (error.value?.diagnostics || []).some(item => item.code === 'validation' && item.field_path?.[0] === 'definition')));
   const hasSourceConflict = error => error.code === 'conflict' ||
     (error.value?.current && error.value.current.sha256 !== base?.sha256);
   function adopt(value) {
@@ -504,7 +508,7 @@
         controls(); render();
       }
       diagnostic(error.value?.diagnostics);
-      status(proposal.kind === 'loop' ? `Review refused the research loop: ${error.message}.${proposal.loop?.stop_conditions?.length ? ' ' + window.editorLoopControls.refusalHint : ''}` : error.message);
+      status(proposal.kind === 'loop' ? `Review refused the research loop: ${error.message}.${proposal.loop?.stop_conditions?.length && loopDeclarationRefusal(error) ? ' ' + window.editorLoopControls.refusalHint : ''}` : error.message);
     }
   }
   $('review').addEventListener('click', () => reviewProposal(mode === 'binding-draft'

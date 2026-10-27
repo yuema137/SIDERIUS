@@ -319,7 +319,10 @@ verified `loop_trace.stop_reason`, present only when a declared stop condition
 completed the loop early; Slow control renders it in plain words ("Research loop
 stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
 higher is better; best at body 3)", or "… no improvement for 2 bodies …") from
-the existing status poll, with recorded values unrounded. The console never
+the existing status poll, with recorded values unrounded. The receipt's body
+numbers (`attempted_iterations`, `stop_reason.iteration` and its incumbent
+iterations) are whole-run indices, so a resumed segment's line says "Body numbers
+count the whole run, including earlier segments." The console never
 infers per-body progress from an active process. Fixed and non-candidate
 operations omit the field. `StatusView.successor_operation_id` forwards the
 operations readback for a segment that a Resume has continued; the segment keeps
