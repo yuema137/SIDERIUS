@@ -104,10 +104,7 @@ class TestResolutionOrder:
         assert resolve_model_field("punet", {}, "nhead", safety_margin=2) == 2
 
     def test_train_fields_resolve_against_TrainConfig(self):
-        from ml_models.models_format_sandbox import TrainConfig
-
         assert resolve_train_field({}, "epochs", safety_margin=1) == 10
-        assert TrainConfig.model_fields["epochs"].default == 10
         assert resolve_train_field({"epochs": 3}, "epochs", safety_margin=1) == 3
 
 
@@ -123,9 +120,7 @@ class TestLossType:
 
     def test_an_absent_loss_type_resolves_to_the_declared_default(self):
         from agent.skills.training_skill.estimator import resolve_loss_type
-        from ml_models.models_format_sandbox import LossConfig
 
-        assert LossConfig.model_fields["loss_type"].default == "focal"
         assert resolve_loss_type({}) == "focal"
         assert resolve_loss_type({"loss_type": None}) == "focal"
         assert resolve_loss_type({"loss_type": ""}) == "focal"

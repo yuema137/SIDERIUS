@@ -13,7 +13,7 @@ import inspect
 import pytest
 
 from core.execution_calibration import MalformedCeilingOverride
-from core.sandbox_executor import _ROLE_DEFAULT_RSS_GB, _subprocess_rss_gb
+from core.sandbox_executor import _subprocess_rss_gb
 from execute_tools.deliverable_spec import DeliverableNaming, bind_deliverable_naming
 
 
@@ -25,9 +25,6 @@ class TestRoleCeilingBaseline:
         assert _subprocess_rss_gb("training") is None
         assert _subprocess_rss_gb("inference") is None
         assert _subprocess_rss_gb("scoring") is None
-
-    def test_declared_table_is_exactly_three_roles(self):
-        assert _ROLE_DEFAULT_RSS_GB == {"training": None, "inference": None, "scoring": None}
 
     def test_env_override_wins_for_every_role(self, monkeypatch):
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "7")

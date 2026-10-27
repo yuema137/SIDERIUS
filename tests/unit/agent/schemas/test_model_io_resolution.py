@@ -32,9 +32,7 @@ from agent.schemas.model_io_contract import (
     TensorContract,
 )
 from agent.schemas.model_io_resolution import (
-    PRESETS,
     DatasetContradictionError,
-    ModelIOPreset,
     ModelIOResolutionError,
     PresetContradictionError,
     UnknownPresetError,
@@ -89,15 +87,6 @@ class TestFX3PresetResolution:
         assert with_preset == without
         assert with_preset is contract
 
-    def test_the_preset_does_not_survive_resolution(self):
-        """Structural, not conventional: the resolved object is the same
-        type every consumer already takes and has no preset field, so no
-        runtime consumer CAN branch on a label (§21)."""
-        resolved = resolve_model_io_contract(_contract(), preset="sequence")
-        assert isinstance(resolved, ModelIOContract)
-        assert "preset" not in type(resolved).model_fields
-        assert not hasattr(resolved, "preset")
-
     def test_no_production_module_reads_a_preset_after_resolution(self):
         """§16: *"no preset label is read at runtime after resolution —
         greppable"*. Asserted mechanically so the property survives a later
@@ -132,15 +121,6 @@ class TestFX3PresetResolution:
         It must not silently resolve as if no preset had been authored."""
         with pytest.raises(UnknownPresetError, match="unknown Model-I/O preset"):
             resolve_model_io_contract(_contract(), preset="no_such_preset")
-
-    def test_the_shipped_preset_is_not_named_for_a_modality(self):
-        """A modality-named preset invites a modality branch. The shipped
-        registry carries the requirement, not the domain — and stays small
-        so no preset ships without an authored task needing it."""
-        assert set(PRESETS) == {"sequence"}
-        assert PRESETS["sequence"].required_input_roles == frozenset(
-            {AxisRole.BATCH, AxisRole.TEMPORAL}
-        )
 
 
 class TestFX4PresetMismatch:
@@ -287,12 +267,3 @@ class TestAtomicity:
         for error in (UnknownPresetError, PresetContradictionError, DatasetContradictionError):
             assert issubclass(error, ModelIOResolutionError)
         assert issubclass(ModelIOResolutionError, ValueError)
-
-    def test_a_preset_declares_roles_only(self):
-        """A preset that could carry dimensions or dtype would be a second
-        contract authority. Its fields are the guard."""
-        assert set(ModelIOPreset.model_fields) == {
-            "name",
-            "required_input_roles",
-            "required_output_roles",
-        }

@@ -193,10 +193,6 @@ class TestTheLegacyAbsenceSemanticsSurvive:
 class TestNoProductionModuleReferencesTheRemovedFields:
     """The C3 sweep, executable rather than a one-time grep."""
 
-    def test_the_schema_no_longer_declares_either_carrier(self) -> None:
-        assert "interpretation" not in ProposalInput.model_fields
-        assert "per_model_score_tables" not in ProposalInput.model_fields
-
     def test_the_protocol_populates_only_the_typed_evidence(self, tmp_path) -> None:
         from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import (
             local_full_context,

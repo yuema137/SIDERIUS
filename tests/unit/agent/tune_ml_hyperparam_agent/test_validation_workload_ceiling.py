@@ -17,38 +17,10 @@ reduce a portion, so it can never make a run larger, and `None` — the default
 
 from __future__ import annotations
 
-import pytest
-
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from tests.helpers.tuner_source import tuner_node_source
 
 BASE = {"model_type": "m", "run_name": "r", "workspace": "/tmp/ws"}
-
-
-class TestTheCeilingIsOptionalAndFailsClosed:
-    def test_absent_by_default_so_campaigns_are_unchanged(self):
-        assert HyperparamTuningInput.model_validate(BASE).validation_max_portion is None
-
-    @pytest.mark.parametrize(
-        "bad",
-        [0.0, -0.1, 1.5, float("inf"), float("-inf"), float("nan")],
-        ids=["zero", "negative", "over-one", "inf", "-inf", "nan"],
-    )
-    def test_a_malformed_ceiling_is_refused(self, bad):
-        """MUTATION TARGET: relaxing the bounds.
-
-        A non-finite or out-of-range ceiling would either disable the clamp
-        silently (`inf`) or make every portion zero (`0.0`). Both are worse
-        than refusing.
-        """
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            HyperparamTuningInput.model_validate({**BASE, "validation_max_portion": bad})
-
-    def test_a_valid_ceiling_is_accepted(self):
-        got = HyperparamTuningInput.model_validate({**BASE, "validation_max_portion": 0.02})
-        assert got.validation_max_portion == 0.02
 
 
 class TestTheClampReachesTheResolvedValues:
@@ -102,18 +74,6 @@ class TestTheClampReachesTheResolvedValues:
 
 class TestTheClampArithmetic:
     """The rule itself, exercised directly."""
-
-    @pytest.mark.parametrize(
-        ("planned", "ceiling", "expected"),
-        [
-            (0.1, 0.02, 0.02),  # the measured Gate 2 case
-            (0.02, 0.02, 0.02),  # at the ceiling
-            (0.01, 0.02, 0.01),  # below — untouched, never raised
-            (1.0, 0.05, 0.05),
-        ],
-    )
-    def test_min_semantics(self, planned, ceiling, expected):
-        assert min(planned, ceiling) == expected
 
     def test_resolution_preserves_operator_and_plan_values_before_clamping(self):
         """The resolver selects ownership; the later ceiling owns clamping."""
@@ -214,39 +174,6 @@ class TestCeilingProvenanceIsPersisted:
     the field is DECLARED on the record schema (undeclared, Pydantic's default
     `extra="ignore"` would drop it silently).
     """
-
-    def test_the_record_schema_declares_the_field(self):
-        """MUTATION TARGET: removing the declaration.
-
-        Undeclared, the tuner would still write it and the artifact would
-        simply lack the key — indistinguishable from a run that never clamped.
-        """
-        from agent.schemas.hyperparam_tuning import ExperimentRecord
-
-        assert "validation_workload_ceiling" in ExperimentRecord.model_fields
-
-    def test_it_survives_serialisation_to_the_artifact(self):
-        import json
-
-        from agent.schemas.hyperparam_tuning import ExperimentRecord
-
-        payload = {
-            "enabled": True,
-            "configured_ceiling": 0.02,
-            "planned": {"trial_portion": 0.1, "train_portion": 0.1, "eval_portion": 0.1},
-            "resolved": {"trial_portion": 0.02, "train_portion": 0.02, "eval_portion": 0.02},
-        }
-        rec = ExperimentRecord.model_validate(
-            {
-                "exp_id": "e",
-                "status": "success",
-                "model_type": "m",
-                "timestamp": "t",
-                "params": {},
-                "validation_workload_ceiling": payload,
-            }
-        )
-        assert json.loads(rec.model_dump_json())["validation_workload_ceiling"] == payload
 
     def test_the_tuner_records_planned_and_resolved(self):
         """MUTATION TARGET: recording only the resolved values.

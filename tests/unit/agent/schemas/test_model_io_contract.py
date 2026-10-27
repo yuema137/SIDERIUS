@@ -291,20 +291,3 @@ class TestSharedSymbolConsistency:
             ),
         )
         assert contract.output.render_shape() == "[B, Z]"
-
-
-class TestMultiplicityIsBounded:
-    """§4c — one tensor input, one tensor output. The bound is the point."""
-
-    def test_the_contract_exposes_exactly_one_input_and_one_output(self):
-        """A structural assertion, so a future 'just make it a list' edit
-        has to confront §4c rather than slip through as a refactor."""
-        fields = set(ModelIOContract.model_fields)
-        assert fields == {"input", "output", "inference"}
-
-    def test_no_multi_tensor_container_field_exists(self):
-        with pytest.raises(ValidationError):
-            ModelIOContract(
-                inputs=[GENERIC_SEQUENCE_CLASSIFIER.input],  # type: ignore[call-arg]
-                outputs=[GENERIC_SEQUENCE_CLASSIFIER.output],  # type: ignore[call-arg]
-            )

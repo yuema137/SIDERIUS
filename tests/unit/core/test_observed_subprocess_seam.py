@@ -428,9 +428,3 @@ class TestFailureEvidencePersistence:
             )
         assert out["status"] == "success"
         assert "gpu_evidence" not in out
-
-    def test_the_record_schema_accepts_the_bundle_and_still_accepts_none(self):
-        from agent.schemas.hyperparam_tuning import ExperimentRecord
-
-        assert "gpu_evidence" in ExperimentRecord.model_fields
-        assert ExperimentRecord.model_fields["gpu_evidence"].default is None

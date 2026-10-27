@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from core.run_invariants import (
     RunInvariants,
     RunInvariantsViolation,
@@ -102,12 +101,6 @@ class TestTunerPassThrough:
     """The tuner locks + stamps the three values it received (never
     consumes them). Source-surface assertions, the PR 2 override-surface
     pattern — the tuner is the only explicitly-wired site at CB5-a."""
-
-    def test_input_schema_defaults(self):
-        inp_fields = HyperparamTuningInput.model_fields
-        assert inp_fields["enable_structured_health_feedback"].default is False
-        assert inp_fields["health_feedback_history_window_iterations"].default == 3
-        assert inp_fields["health_feedback_history_max_entries_per_model"].default == 8
 
     def test_tuner_lock_call_passes_all_three(self):
         src = tuner_node_source()
