@@ -21,6 +21,8 @@ from .files import token
 from .models import (
     ConsoleConfig,
     LaunchSelection,
+    LoopPauseSelection,
+    LoopResumeSelection,
     LoopStopSelection,
     PreparedSelection,
     PrepareSelection,
@@ -42,6 +44,29 @@ LOOP_STOP_REFUSALS = {
     "not_ready": "candidate loop has not claimed its workspace yet; read status and retry",
     "not_running": "candidate loop is terminal or not confirmed running; Stop was not recorded",
 }
+
+
+LOOP_PAUSE_REFUSALS = {
+    "kind": "Pause is available only for an authored candidate research loop",
+    "not_ready": "candidate loop has not claimed its workspace yet; read status and retry",
+    "not_running": "loop segment is terminal or not confirmed running; Pause was not recorded",
+}
+LOOP_RESUME_REFUSALS = {
+    "kind": "Resume is available only for an authored candidate research loop",
+    "not_ready": "candidate loop has not claimed its workspace yet; read status and retry",
+    "loop_resume": (
+        "operation is not an exited, cleanly paused loop segment that can continue, "
+        "or it changed since review; read status and review again"
+    ),
+    "runtime": "the console runtime differs from the one that started this loop",
+}
+
+
+def refusal(table: dict[str, str], error: OperationFailure) -> JSONResponse:
+    """Route-local fixed message; unknown codes keep the global (path-free) mapping."""
+    if error.detail.code not in table:
+        raise error
+    return error_response(409, error.detail.code, table[error.detail.code])
 
 
 def create_app(config: ConsoleConfig) -> FastAPI:
@@ -137,9 +162,30 @@ def create_app(config: ConsoleConfig) -> FastAPI:
         try:
             return await run_in_threadpool(service.request_loop_stop, operation_id)
         except OperationFailure as error:
-            if error.detail.code not in LOOP_STOP_REFUSALS:
-                raise
-            return error_response(409, error.detail.code, LOOP_STOP_REFUSALS[error.detail.code])
+            return refusal(LOOP_STOP_REFUSALS, error)
+
+    @app.post("/api/operations/{operation_id}/loop-pause")
+    async def loop_pause(operation_id: UUID, request: Request):
+        LoopPauseSelection.model_validate_json(await request.body())
+        try:
+            return await run_in_threadpool(service.request_loop_pause, operation_id)
+        except OperationFailure as error:
+            return refusal(LOOP_PAUSE_REFUSALS, error)
+
+    @app.get("/api/operations/{operation_id}/loop-resume-review")
+    def loop_resume_review(operation_id: UUID):
+        try:
+            return service.review_loop_resume(operation_id)
+        except OperationFailure as error:
+            return refusal(LOOP_RESUME_REFUSALS, error)
+
+    @app.post("/api/loop-resumes", status_code=202)
+    async def loop_resume(request: Request):
+        selection = LoopResumeSelection.model_validate_json(await request.body())
+        try:
+            return await run_in_threadpool(service.resume_loop, selection)
+        except OperationFailure as error:
+            return refusal(LOOP_RESUME_REFUSALS, error)
 
     @app.get("/api/operations/{operation_id}/graph-results")
     def graph_results(operation_id: UUID):

@@ -1,7 +1,7 @@
 """Detached local candidate operations; no native task imports or provider construction."""
 
 from .logs import read_operation_log
-from .loop_resume import request_loop_pause, review_loop_resume
+from .loop_resume import loop_root_operation, request_loop_pause, review_loop_resume
 from .models import (
     CandidateLoopResumeOperation,
     CandidateLoopResumeRequest,
@@ -58,6 +58,7 @@ __all__ = [
     "ReusablePrepareOperation",
     "build_reusable_operation",
     "lookup_operation_request",
+    "loop_root_operation",
     "operation_request_digest",
     "read_operation",
     "read_operation_log",
