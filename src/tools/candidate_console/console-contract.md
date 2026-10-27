@@ -459,7 +459,8 @@ one editor.js mutation; dragging writes positions through that same draft owner.
 Bindings/profile/options are not inferred from card order or geometry. Request
 protocols display inside their actual consumer, not as extra nodes: a protocol
 node's card carries a `.circuit-adapter` chip ("Mapping: <protocol id>", coloured by
-the protocol's output contract) that expands, per card and remembered across
+the protocol's output contract) below its output row, where upward port tooltips
+(which take no pointer events) cannot cover it, that expands, per card and remembered across
 re-renders of the same graph, into one row per inventory argument
 (`<source> → <argument>` with the socket contract) and the native owner function
 that maps them into `protocol_mapping.output_contract`. External-request nodes have

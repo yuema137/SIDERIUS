@@ -304,7 +304,6 @@
       heading.addEventListener('pointercancel', event => {
         if (projection === value && drag?.node === node.id && drag.pointerId === event.pointerId) { cancel(); say('Node move cancelled.'); }
       });
-      contracts.adapter(card, node.id, value.inventory, view.adapters, () => { if (projection === value) draw(); });
       const mapping = element('details', '', card, 'circuit-mapping');
       mapping.addEventListener('toggle', draw);
       element('summary', 'Mapping details', mapping);
@@ -338,6 +337,8 @@
       }
       if (group) card.append(group);
       const output = port(card, node, null, true); output.id = `circuit-output-${node.id}`;
+      // Below the output row: port tooltips open upward and never cover the chip.
+      contracts.adapter(card, node.id, value.inventory, view.adapters, () => { if (projection === value) draw(); });
       cards.push(card);
     }
     // Card size comes from the rendered cards (editor.css owns it), never a copied constant.

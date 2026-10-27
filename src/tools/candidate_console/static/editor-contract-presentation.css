@@ -40,7 +40,7 @@
 .circuit-contract-legend-list li { display: inline-flex; align-items: center; gap: 6px; }
 .circuit-contract-legend-list code { color: var(--muted); font-size: .7rem; }
 .circuit-contract-swatch { display: inline-block; flex: none; width: 10px; height: 10px; box-sizing: border-box; }
-.circuit-adapter { padding: 4px 10px 6px; font-size: .72rem; }
+.circuit-adapter { padding: 4px 10px 6px; border-top: 1px solid var(--control-border); border-bottom: 0; font-size: .72rem; }
 .circuit-adapter-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 0; margin: 0; padding: 2px 8px; border: 1px solid var(--contract-colour, var(--control-border)); border-radius: 999px; background: var(--control); color: var(--text); font-size: .7rem; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
 .circuit-adapter-fields ul { margin: 6px 0 4px; padding: 0; list-style: none; }
 .circuit-adapter-fields li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 2px 0; overflow-wrap: anywhere; }
