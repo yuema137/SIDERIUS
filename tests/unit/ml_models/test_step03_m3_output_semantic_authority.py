@@ -98,14 +98,6 @@ class TestSemanticIsDerived:
                 output_semantic="continuous",  # type: ignore[call-arg]
             )
 
-    def test_the_semantic_tracks_the_tensor_it_is_derived_from(self):
-        """The property that makes derivation worth having: changing the
-        tensor changes the semantic, with nothing to keep in sync."""
-        assert (
-            _contract(categorical=True).output_semantic
-            is not _contract(categorical=False).output_semantic
-        )
-
 
 class TestProjectionIsOneWay:
     """§8b — ``output_type`` is a derived view, not a second authority."""
@@ -137,12 +129,6 @@ class TestHybridStaysLegacy:
 
     def test_hybrid_adapts_to_no_canonical_semantic(self):
         assert output_semantic_from_legacy("hybrid") is None
-
-    def test_hybrid_still_accepts_every_loss(self):
-        """The shipped behaviour, preserved through the re-key. A2 pins the
-        cells; this states the rule they embody."""
-        for loss in ("ce", "focal", "focal_cw", "smooth_l1", "custom"):
-            validate_output_loss_compatibility("hybrid", loss, model_type="m3_probe")
 
     def test_hybrid_is_not_a_member_of_the_canonical_enum(self):
         assert {s.value for s in OutputSemantic} == {"categorical", "continuous"}

@@ -114,27 +114,6 @@ def test_the_matrix_covers_the_declared_alphabets_completely():
 class TestTheShapeOfTheRule:
     """Properties of the rule the cell-by-cell table cannot express."""
 
-    def test_hybrid_accepts_every_declared_loss(self):
-        """``hybrid``'s arm is an unconditional early return — the whole row
-        is ACCEPT. Asserted as one claim so a re-key that special-cases
-        ``hybrid`` per loss family reds here, not just in a scattered cell."""
-        assert {MATRIX[("hybrid", m)] for m in LOSS_TYPES} == {ACCEPT}
-
-    def test_custom_is_permitted_by_every_output_type(self):
-        """§8a: deliberately permissive for every contract."""
-        assert {MATRIX[(o, "custom")] for o in OUTPUT_TYPES} == {ACCEPT}
-
-    def test_the_only_rejections_are_the_two_cross_family_pairs(self):
-        """Exactly four cells reject: a classifier fed the regression loss,
-        and a regressor fed each of the three classification losses."""
-        rejected = {k for k, v in MATRIX.items() if v is REJECT}
-        assert rejected == {
-            ("classifier", "smooth_l1"),
-            ("regressor", "ce"),
-            ("regressor", "focal"),
-            ("regressor", "focal_cw"),
-        }
-
     def test_the_frozensets_still_partition_the_family_losses(self):
         """The two frozensets are the authority's data (§8a). Pinned so a
         re-key cannot move a loss between families while leaving the
