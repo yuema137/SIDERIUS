@@ -677,7 +677,9 @@ has `loop_trace.attempted_iterations`; it does not impersonate one graph trace o
 flatten repeated node IDs into root scientific fields. `verify_loop` verifies
 contiguous body identities and native record bindings, replays the same history
 transition, checks actual generated inputs/incumbent transport, and rejects an
-aggregate hiding a later dispatched body. Parent verification never composes task
+aggregate hiding a later dispatched body; it returns the accepted body receipts in
+iteration order (empty when no body index is verified) for read-only consumers
+such as the console graph-results projection. Parent verification never composes task
 plugins or invokes agents. Child native admission retains ownership of actual
 task, hardware, full constraints and Health execution; replay is not additional
 scientific certification. Timeout/interruption retains the existing supervisor
