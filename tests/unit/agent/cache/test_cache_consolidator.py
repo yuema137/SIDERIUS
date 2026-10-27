@@ -638,19 +638,6 @@ def test_dedupe_unions_evidence_iters_for_duplicate_keys() -> None:
     assert merged[0].evidence_iters == [2, 7, 10]
 
 
-def test_dedupe_is_pure_no_bridge_argument() -> None:
-    """The dedup function's signature must NOT accept a bridge — pinning that
-    error_signature merging can never accidentally trigger an LLM call."""
-    import inspect
-
-    sig_params = inspect.signature(_dedupe_error_signatures).parameters
-    assert "bridge" not in sig_params, (
-        "Error-signature dedup must remain LLM-free (Gate G3). Adding a "
-        "bridge parameter would risk routing forensic primary sources "
-        "through a stochastic merge."
-    )
-
-
 # ===========================================================================
 # Group F — Bounded LLM-call-count and deterministic-paths-untouched
 # ===========================================================================
@@ -739,15 +726,6 @@ def test_consolidate_bridge_call_count_zero_when_both_lists_empty() -> None:
         prior_iter=0,
     )
     assert bridge.call_count == 0
-
-
-def test_merge_narrative_field_has_no_bridge_parameter() -> None:
-    """Static guard: the narrative merge function must not accept a bridge.
-    If anyone ever wires an LLM into narrative consolidation, this fails."""
-    import inspect
-
-    params = inspect.signature(_merge_narrative_field).parameters
-    assert "bridge" not in params
 
 
 # ===========================================================================

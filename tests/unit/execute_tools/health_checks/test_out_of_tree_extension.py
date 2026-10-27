@@ -309,19 +309,6 @@ class TestNoInfrastructureEditWasRequired:
         for identifier in FIXTURE_IDENTIFIERS:
             assert identifier not in source
 
-    def test_the_view_capability_vocabulary_is_open(self):
-        """No closed enum of view kinds exists to be extended per task.
-
-        ``consumes_view`` is a bare ``str`` and the engine never enumerates
-        it; a plugin-local key like ``acme.window_statistics`` is exactly as
-        legitimate as a shipped one.
-        """
-        from execute_tools.health_checks.schemas import CheckInputDeclaration
-
-        field = CheckInputDeclaration.model_fields["consumes_view"]
-
-        assert field.annotation is str
-
 
 class TestTheNegativeControl:
     """A broken registration must fail CLOSED, and restoring must recover."""

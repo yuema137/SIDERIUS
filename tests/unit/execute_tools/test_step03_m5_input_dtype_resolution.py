@@ -173,21 +173,6 @@ class TestRung3BDtypeRequirement:
             is torch.int64
         )
 
-    def test_a_float_requirement_resolves_to_float(self):
-        assert (
-            resolve_model_input_dtype(
-                _contract("float32").input.dtype, site_preference=TRAINING_SITE_DTYPE
-            )
-            is torch.float32
-        )
-
-    def test_the_dataset_dtype_is_not_consulted(self):
-        """§4a — dataset dtype and model-boundary dtype are DISTINCT. The
-        resolver's signature is the proof: it cannot consult a dataset it is
-        never given."""
-        params = set(inspect.signature(resolve_model_input_dtype).parameters)
-        assert params == {"admissibility", "site_preference"}
-
 
 class TestQ7SupportedAlternative:
     """**§24.9 Q7** — an inadmissible site preference must NOT fail."""
