@@ -16,7 +16,7 @@ from .inputs import (
     reconcile_protocol_inputs,
     validator_settings,
 )
-from .layout import graph_instance_dir, proposal_debug_dir
+from .layout import candidate_control_dir, graph_instance_dir, proposal_debug_dir
 from .literature_inputs import materialize_literature
 from .models import CandidateRunRequest
 
@@ -26,11 +26,13 @@ def materialize_fanout(
     workspace: Path,
     composition: RunTaskComposition,
     config: WorkflowLLMConfig,
+    *,
+    iteration: int = 1,
 ) -> dict[str, NativeInputs | LiteratureReviewInput]:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
     nodes = {node.id: node for node in definition.nodes}
-    control = workspace / "candidate_run"
+    control = candidate_control_dir(workspace, iteration=iteration)
     contents = {
         item.reference: (control / f"input_{index:03}.snapshot").read_bytes()
         for index, item in enumerate(request.files)
@@ -51,7 +53,11 @@ def materialize_fanout(
             proposal_storage=StorageConfig(
                 backend="local",
                 local=LocalStorageConfig(
-                    workspace=str(graph_instance_dir(workspace, request.run_name, family.proposal)),
+                    workspace=str(
+                        graph_instance_dir(
+                            workspace, request.run_name, family.proposal, iteration=iteration
+                        )
+                    ),
                     run_name=request.run_name,
                 ),
             ),
@@ -59,13 +65,17 @@ def materialize_fanout(
             data_root=(Path(request.preview.project_root) / definition.task.data_root).resolve(),
             control=control,
             debug_root=proposal_debug_dir(
-                workspace, request.preview.execution_profile, family.proposal
+                workspace, request.preview.execution_profile, family.proposal, iteration=iteration
             ),
         )
         used.add(seed_binding)
         for implementation, validation in family.branches:
             attempt = impl_attempt_storage(
-                str(graph_instance_dir(workspace, request.run_name, implementation)),
+                str(
+                    graph_instance_dir(
+                        workspace, request.run_name, implementation, iteration=iteration
+                    )
+                ),
                 request.run_name,
                 1,
             )
@@ -97,6 +107,7 @@ def materialize_fanout(
             node_id=edge.review,
             seed=candidate.proposal,
             config=config,
+            iteration=iteration,
         )
         used.add(edge.review_binding)
     if used != set(externals):

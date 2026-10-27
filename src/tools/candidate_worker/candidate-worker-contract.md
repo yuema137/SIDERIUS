@@ -343,10 +343,25 @@ The pure layout helpers accept a keyword iteration from the validated identity.
 Callers must supply independently prepared typed inputs with matching storage and
 debug roots; these helpers never retarget captured requests.
 
-Run request/HTTP admission, input materialization and whole-graph evidence still
-select iteration one. This internal phase boundary supplies no body loop,
-feedback/history policy, scheduler, retries or resume. Multiple phase calls alone
-are not an admitted multi-iteration authored workflow or historical qualification.
+Internal `execute_fanout`, `materialize_fanout` and graph evidence functions accept
+a keyword-only iteration, default one. `candidate_control_dir` names the snapshot
+set for that body: `candidate_run/input_NNN.snapshot` for one and
+`candidate_run/iteration_NNN/input_NNN.snapshot` thereafter. The caller supplies
+independently captured inputs and corresponding request observations before body
+execution; materialization still checks explicit native storage and debug roots,
+task facts and routes. Nothing silently retargets the previous capture.
+
+The expected iteration must also reach `admit_graph_control` and
+`verify_graph_trace` from the caller, independently of the child trace. The parent
+derives expected native slots and reconstructs the literature edge from that
+iteration's captured inputs and diagnostics. Existing record checks and typed
+protocols remain their authorities; trace serialization is unchanged.
+
+Run request/HTTP admission and public preparation still select iteration one and
+require a fresh workspace. These internal body functions supply no append
+admission, feedback/history policy, scheduler, retries or resume. Multiple body
+calls alone are not an admitted multi-iteration authored workflow or historical
+qualification. Fixed candidate/training execution also remains default-one.
 
 ### Opt-in proposal fanout
 

@@ -11,12 +11,12 @@ from execute_tools.impl_attempts import impl_attempt_dir
 from workflows.definition.fanout import execution_families
 
 from .graph_models import GraphCapability, GraphNodeEvidence, GraphTrace
-from .layout import graph_instance_dir
+from .layout import candidate_control_dir, graph_instance_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
 def expected_nodes(
-    request: CandidateRunRequest, initial: CandidateRunReceipt
+    request: CandidateRunRequest, initial: CandidateRunReceipt, *, iteration: int = 1
 ) -> tuple[GraphNodeEvidence, ...]:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
@@ -25,7 +25,10 @@ def expected_nodes(
     evidence = []
     for node in definition.nodes:
         directory = graph_instance_dir(
-            Path(initial.workspace), request.run_name, parents.get(node.id, node.id)
+            Path(initial.workspace),
+            request.run_name,
+            parents.get(node.id, node.id),
+            iteration=iteration,
         )
         if node.capability in ("implementation", "validation"):
             directory = Path(impl_attempt_dir(str(directory), 1))
@@ -48,7 +51,9 @@ def expected_nodes(
     return tuple(evidence)
 
 
-def admit_graph_control(request: CandidateRunRequest, initial: CandidateRunReceipt) -> None:
+def admit_graph_control(
+    request: CandidateRunRequest, initial: CandidateRunReceipt, *, iteration: int = 1
+) -> None:
     """Reserve actual encoded space for every node's largest terminal representation."""
     encode_control(request)
     encode_control(initial)
@@ -60,7 +65,7 @@ def admit_graph_control(request: CandidateRunRequest, initial: CandidateRunRecei
                 "reason": "dependency_not_successful",
             }
         )
-        for item in expected_nodes(request, initial)
+        for item in expected_nodes(request, initial, iteration=iteration)
     )
     encode_control(
         initial.model_copy(
@@ -98,7 +103,11 @@ def record_digest(path: str) -> str:
 
 
 def verify_graph_trace(
-    request: CandidateRunRequest, initial: CandidateRunReceipt, receipt: CandidateRunReceipt
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    receipt: CandidateRunReceipt,
+    *,
+    iteration: int = 1,
 ) -> None:
     if any(
         value is not None
@@ -120,7 +129,7 @@ def verify_graph_trace(
         ):
             raise ValueError("graph receipt lacks terminal trace")
         return
-    expected = expected_nodes(request, initial)
+    expected = expected_nodes(request, initial, iteration=iteration)
     if len(trace.nodes) != len(expected):
         raise ValueError("graph trace membership mismatch")
     states = {item.node_id: item.state for item in trace.nodes}
@@ -189,11 +198,15 @@ def verify_graph_trace(
         ).literature
         is not None
     ):
-        verify_literature_evidence(request, initial, trace)
+        verify_literature_evidence(request, initial, trace, iteration=iteration)
 
 
 def verify_literature_evidence(
-    request: CandidateRunRequest, initial: CandidateRunReceipt, trace: GraphTrace
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    trace: GraphTrace,
+    *,
+    iteration: int = 1,
 ) -> None:
     """Reconstruct the typed edge from captured source inputs, not child claims."""
     from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
@@ -221,7 +234,9 @@ def verify_literature_evidence(
             for index, item in enumerate(request.files)
             if item.reference == f"external.{binding}"
         )
-        payload = read_graph_control(workspace / "candidate_run" / f"input_{index:03}.snapshot")
+        payload = read_graph_control(
+            candidate_control_dir(workspace, iteration=iteration) / f"input_{index:03}.snapshot"
+        )
         if hashlib.sha256(payload).hexdigest() != observation.sha256:
             raise ValueError("literature captured input digest mismatch")
         return payload
@@ -237,7 +252,7 @@ def verify_literature_evidence(
     require_storage(selected.storage, managed)
     selected.storage = managed
     actual = LiteratureReviewInput.model_validate_json(
-        read_graph_control(literature_input_path(workspace, edge.review))
+        read_graph_control(literature_input_path(workspace, edge.review, iteration=iteration))
     )
     seed_payload = json.loads(captured(edge.seed_binding))
     seed_storage = StorageConfig(
@@ -274,7 +289,9 @@ def verify_literature_evidence(
     if nodes[edge.proposal].state == "succeeded":
         proposal = ProposalInput.model_validate_json(
             read_graph_control(
-                proposal_input_path(workspace, request.preview.execution_profile, edge.proposal)
+                proposal_input_path(
+                    workspace, request.preview.execution_profile, edge.proposal, iteration=iteration
+                )
             )
         )
         if proposal != local_typed_evidence(output, proposal_input=seed):
