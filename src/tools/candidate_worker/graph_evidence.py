@@ -467,8 +467,16 @@ def verify_interpretation_evidence(
                 )
             )
         )
+        from tools.workflow_preview.config import parse_config
+        from workflows.llm_config import WorkflowLLMConfig
+
+        config = (
+            parse_config(contents["llm_config"])
+            if "llm_config" in contents
+            else WorkflowLLMConfig.default()
+        )
         expected = arguments.apply(
-            output, history=history, feedback=selected.recent_formal_validity
+            output, config=config, history=history, feedback=selected.recent_formal_validity
         )
         if settings is not None:
             from workflows.candidate_training_settings import (

@@ -571,6 +571,9 @@ native adapter creates `ProposalInput`; composition supplies task description,
 forward contract and proposer blocks, and existing proposal/branch materialization
 checks the resulting input before downstream execution. Human advice reaches the
 existing protocol unchanged; this slice does not modify prompt precedence.
+Captured workflow proposer routing selects the reasoning pipeline through the
+shared `get_reasoning_pipeline` owner, and parent replay uses the same captured
+configuration without introducing stage configuration.
 
 Invocation accounting uses the existing node/run/iteration identity. Input capture
 is under `candidate_run/interpretation_inputs/<node>.json` for iteration one, with
