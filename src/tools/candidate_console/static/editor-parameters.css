@@ -1,0 +1,28 @@
+/* Required/default/problems presentation (editor-problems.js, editor-node-parameters.js). */
+.circuit-card.has-required-unbound { border: 2px solid var(--error); box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 30%, transparent), 0 0 14px color-mix(in srgb, var(--error) 45%, transparent); }
+.circuit-problem-badge { display: inline-block; margin: 0 .8rem .4rem; padding: 1px 7px; border-radius: 999px; background: var(--error); color: var(--panel); font-size: .68rem; font-weight: 700; }
+.circuit-port.is-unbound[data-required="true"] { color: var(--error); }
+.problem-focus { outline: 3px solid var(--error); outline-offset: 2px; }
+
+#editor-problems { margin: .75rem 0; padding: .6rem .8rem; border: 2px solid var(--error); border-radius: .5rem; }
+#editor-problems h2 { margin: 0 0 .3rem; font-size: 1rem; color: var(--error); }
+#editor-problems p { margin: 0 0 .4rem; }
+#editor-problems ul { margin: 0; padding: 0; list-style: none; }
+.editor-problem { display: block; width: 100%; margin: .2rem 0; text-align: left; overflow-wrap: anywhere; }
+
+#editor-inspector label.field-problem { padding: .3rem .4rem; border-left: 4px solid var(--error); }
+#editor-inspector label.field-problem select { border-color: var(--error); }
+#editor-inspector h3 { margin: 1rem 0 .3rem; font-size: .95rem; }
+
+.training-settings { margin: 1rem 0; }
+.training-settings > summary { font-weight: bold; }
+.training-field { margin: .6rem 0; padding-left: .5rem; border-left: 3px solid transparent; }
+.training-field[data-modified="true"] { border-left-color: var(--focus); }
+.training-field[data-unsaved="true"] { border-left-color: var(--warning); }
+#editor-inspector .training-field label { margin: 0; }
+.training-badge { display: inline-block; margin: 0 .4rem; padding: 0 6px; border: 1px solid var(--control-border); border-radius: 999px; color: var(--muted); font-size: .68rem; font-weight: 600; }
+.training-field[data-modified="true"] .training-badge { color: var(--text); border-color: var(--focus); }
+.training-field[data-unsaved="true"] .training-badge { color: var(--text); border-color: var(--warning); background: var(--warning-bg); }
+.training-field .field-help { display: block; color: var(--muted); }
+.training-reset { margin: .2rem 0; font-size: .8rem; }
+.model-hyperparameters dd, .model-hyperparameters dt { overflow-wrap: anywhere; }

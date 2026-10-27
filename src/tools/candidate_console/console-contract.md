@@ -432,7 +432,7 @@ refuses recovery/output-root overlap. No source is required when selection is
 absent. `CandidateConsole` retains only native operation policy; `editor.py`
 constructs separate `WorkflowAuthoring` services and routes.
 
-`/editor.html`, `/editor.js` and `/editor.css` are static assets. The editor shares
+`/editor.html`, `/editor.js`, `/editor.css` and the editor modules named below are static assets (`app.py` serves an exact name map). The editor shares
 the persistent shell and memory-only session with the operation monitor; its
 source/review policy remains owned by `editor.js`. `GET /api/editor/projects`
 returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
@@ -532,6 +532,28 @@ reports the executed request's authored loop, refusing a request loop that diffe
 from the captured declaration, and the launch summary states "up to N iterations"
 or "none (one workflow body)", followed by "stops early when …" for each declared
 stop condition.
+
+The Selection inspector groups one node's parameters (`editor-node-parameters.js`,
+view only; `editor.js` owns every mutation): **Inputs** (one binding select per
+socket, required/optional and bound state in its label; a required unbound one is
+marked `.field-problem`), **Training settings** on a tuning node (a
+`#editor-training-settings` disclosure, open on selection, listing every
+`TrainingInspector` control with its mode select, value, a per-field "Reset to
+default" that removes the authored key, a `Default` / `Modified` / `Changed, not
+saved` badge against the native default and the loaded source, and inline help
+from `TrainingControl.help` plus the native preview), **Loop and stop settings**
+on a feedback endpoint (a summary and a button to the workflow-level Research loop
+panel) and **Model hyperparameters** on a tuning node (read-only: they are owned
+by the task manifest, shown as `definition.task.manifest` and any task binding;
+no control edits them). A card whose server inventory has a required unbound input
+gets `.has-required-unbound` (red outline/glow) and a `.circuit-problem-badge`.
+`#editor-problems` (`editor-problems.js`, beside Review) lists "N problems" from
+server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
+(`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
+focuses the inspector select for `field` (and marks the canvas input
+`.problem-focus`); an unlocated item opens Advanced → Source at its line. The
+list never enables Review: Review remains disabled for an incomplete draft.
+Witness: `tests/browser/required_defaults.mjs`.
 
 Socket/drag gestures send no requests. Source editing, disconnection, conflict,
 saving and invalid training drafts gate mutations; stale rendered projections
