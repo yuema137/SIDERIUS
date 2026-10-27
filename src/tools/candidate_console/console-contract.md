@@ -404,7 +404,11 @@ or empty values stay local and block Review) and Feedback (paper capability labe
 from `editorCapabilityPresentation.label`, read-only endpoints). Remove deletes the
 loop. Loop-only edits review as `LoopProposal` on the current exact source; with
 other inspector edits pending, the whole document proposal carries them. Later loop
-facets (stop conditions) are added as further sections in that module. The panel
+facets (stop conditions) are added as further sections in that module. An invalid
+limit stays in the loop draft state (`loopDrafts`, separate from training drafts)
+and blocks Review and circuit edits. Loop edits preserve bytes only for an
+already-canonical source; Review re-renders the whole declaration, so
+hand-formatted or commented sources are rewritten (visible in the diff). The panel
 does not draw a back-edge or annotate cards, and it shares the source-dirty,
 binding-draft, conflict and saving fences. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs

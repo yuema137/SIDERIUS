@@ -18,8 +18,9 @@
       const wrapper = node('label', 'Final iteration ', group);
       const input = control(node('input', '', wrapper));
       input.id = 'editor-loop-final-iteration'; input.type = 'number'; input.min = '1'; input.step = '1'; input.required = true;
-      input.value = state.draft ?? String(state.loop.final_iteration);
-      if (state.draft !== undefined) input.setCustomValidity('Enter a whole number of at least 1.');
+      const draft = state.drafts.get('final_iteration');
+      input.value = draft ?? String(state.loop.final_iteration);
+      if (draft !== undefined) input.setCustomValidity('Enter a whole number of at least 1.');
       input.addEventListener('input', () => actions.limit(input));
       node('small', 'The loop runs at most this many complete workflow bodies.', group);
     },

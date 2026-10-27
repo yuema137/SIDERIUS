@@ -373,3 +373,35 @@ def test_research_loop_add_limit_remove_round_trip_over_editor_routes(editor_con
         )
         reopened = client.get("/api/editor/example", headers=headers).json()
         assert "loop" not in reopened["document"]["definition"]
+
+
+def test_loop_proposal_against_a_stale_source_version_is_a_conflict(editor_config):
+    """Fails if a loop proposal is reviewed against bytes other than the current file:
+    an outdated ``expected_sha256`` must refuse with ``conflict`` and write nothing."""
+    from tests.browser.workflow_editor_server import interpretation_profile_source
+
+    path = editor_config.editor_projects[0].source_file
+    path.write_text(interpretation_profile_source())
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        stale = client.get("/api/editor/example", headers=headers).json()
+        path.write_text(path.read_text() + "\n")  # another writer changes the file
+        current = path.read_bytes()
+        response = client.post(
+            "/api/editor/example/review",
+            headers=headers,
+            json={
+                "expected_sha256": stale["sha256"],
+                "proposal": {
+                    "kind": "loop",
+                    "source": stale["source"],
+                    "loop": stale["document"]["definition"]["loop"],
+                },
+            },
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "conflict"
+        assert path.read_bytes() == current

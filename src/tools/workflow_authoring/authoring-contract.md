@@ -116,6 +116,11 @@ bytes. A declaration without a loop renders and digests exactly as before.
 Endpoint rewiring and loop execution admission (interpretation profile, native
 loop owner) remain outside the editor.
 
+Byte preservation holds only for an already-canonical source (one the canonical
+renderer produced). Review re-renders the whole declaration, so a hand-formatted or
+commented source is rewritten into canonical form by its first reviewed loop edit;
+the diff shows that rewrite before Save.
+
 ## Bound-source publication boundary
 
 Inert read accepts the optional v2 TaskBinding declaration. Bound review and Save
