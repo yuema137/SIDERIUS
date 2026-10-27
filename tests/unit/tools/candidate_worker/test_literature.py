@@ -255,3 +255,57 @@ def test_explicit_shape_and_captured_review_are_required(prepared, defect):
     with pytest.raises((ValueError, OSError)):
         preview_workflow(WorkflowPreviewRequest.model_validate_json(json.dumps(raw)))
     assert not Path(raw["document"]["definition"]["task"]["workspace"]).exists()
+
+
+def test_native_review_iterations_keep_lazy_usage_and_cache_separate(
+    prepared, literature_sdk, monkeypatch
+):
+    """The lazy native bridge and root cache must follow the selected iteration."""
+    from agent.schemas.literature_review import LiteratureReviewInput
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+    from tools.candidate_worker import literature_phase
+    from tools.candidate_worker.invocation import invocation_from_storage
+
+    request = literature_request(prepared)
+    receipt = initial(request)
+    workspace = Path(receipt.workspace)
+    raw = json.loads((Path(request.preview.project_root) / "review.json").read_bytes())
+    caches = []
+    original = literature_phase.MLLiteratureReviewAgent.__init__
+
+    def construct(self, **kwargs):
+        caches.append(kwargs["root_cache_dir"])
+        original(self, **kwargs)
+
+    monkeypatch.setattr(literature_phase.MLLiteratureReviewAgent, "__init__", construct)
+    preserved = {}
+    for iteration in (1, 2):
+        directory = (
+            workspace
+            / request.run_name
+            / "graph_instances/review"
+            / f"iteration_{iteration:03d}/attempt_001"
+        )
+        storage = StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=str(directory), run_name=request.run_name),
+        )
+        value = LiteratureReviewInput.model_validate({**raw, "storage": storage})
+        context = invocation_from_storage(
+            receipt, node_id="review", phase="literature", storage=storage, iteration=iteration
+        )
+        output, record = literature_phase.run_literature(context, request, receipt, value)
+        assert not output.findings
+        diagnostic = workspace / "candidate_run"
+        if iteration == 2:
+            diagnostic /= "iteration_002"
+        diagnostic /= "literature_inputs/review.json"
+        assert json.loads(diagnostic.read_bytes())["storage"] == storage.model_dump(mode="json")
+        assert caches[-1] == str(directory / "cache/root_papers")
+        assert record == directory / "ml_literature_review_candidate.json"
+        assert all(path.read_bytes() == content for path, content in preserved.items())
+        preserved.update({record: record.read_bytes(), diagnostic: diagnostic.read_bytes()})
+    rows = [json.loads(line) for line in Path(receipt.ledger_path).read_text().splitlines()]
+    assert [row["iter"] for row in rows] == [1, 2]
+    assert all(row["run_id"] == receipt.run_id and row["tokens"]["total"] == 18 for row in rows)
+    assert len(literature_sdk[0]) == 2

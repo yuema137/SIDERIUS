@@ -27,7 +27,9 @@ def run_literature(
     edge = shape.literature
     if edge is None or edge.review != context.node_id:
         raise ValueError("literature invocation is not the declared review")
-    directory = graph_instance_dir(Path(initial.workspace), request.run_name, edge.review)
+    directory = graph_instance_dir(
+        Path(initial.workspace), request.run_name, edge.review, iteration=context.iteration
+    )
     if context.storage_workspace != str(directory):
         raise ValueError("literature invocation storage binding disagrees")
     context.require_resolved_binding(
@@ -38,7 +40,9 @@ def run_literature(
         storage=inputs.storage,
         implementation_directory="",
     )
-    input_path = literature_input_path(Path(initial.workspace), edge.review)
+    input_path = literature_input_path(
+        Path(initial.workspace), edge.review, iteration=context.iteration
+    )
     input_path.parent.mkdir(parents=True, exist_ok=True)
     publish_bytes_write_once(str(input_path), inputs.model_dump_json(indent=2).encode())
     factory = contextual_bridge_factory(
@@ -51,7 +55,9 @@ def run_literature(
     agent = MLLiteratureReviewAgent(
         bridge_factory=factory,
         root_cache_dir=str(
-            literature_cache_dir(Path(initial.workspace), request.run_name, edge.review)
+            literature_cache_dir(
+                Path(initial.workspace), request.run_name, edge.review, iteration=context.iteration
+            )
         ),
     )
     output = LiteratureReviewOutput.model_validate(agent.run(inputs))

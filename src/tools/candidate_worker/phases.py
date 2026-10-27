@@ -36,7 +36,10 @@ def run_proposal(
     proposal_dir = Path(context.storage_workspace)
     proposal_dir.mkdir(parents=True, exist_ok=True)
     input_path = proposal_input_path(
-        Path(context.workspace), request.preview.execution_profile, context.node_id
+        Path(context.workspace),
+        request.preview.execution_profile,
+        context.node_id,
+        iteration=context.iteration,
     )
     input_path.parent.mkdir(parents=True, exist_ok=True)
     publish_bytes_write_once(

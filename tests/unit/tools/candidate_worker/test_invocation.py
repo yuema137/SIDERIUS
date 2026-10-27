@@ -282,3 +282,95 @@ def test_extracted_implementation_verification_precedes_validation(
     assert expected in receipt.error
     assert len(recorded) == 1 and validators == []
     assert recorded[0][0].read_bytes() == recorded[0][1]
+
+
+@pytest.mark.parametrize("graph", [False, True])
+def test_native_proposal_iterations_preserve_records_and_accounting(
+    prepared, native_runner, monkeypatch, graph
+):
+    """A second native phase must neither overwrite the first nor charge its iteration."""
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+    from tests.helpers.candidate_fanout import fanout_request
+    from tools.candidate_worker.inputs import NativeInputs, materialize_proposal
+    from tools.candidate_worker.invocation import invocation_from_storage
+    from tools.candidate_worker.layout import (
+        candidate_proposal_dir,
+        graph_instance_dir,
+        proposal_debug_dir,
+    )
+    from tools.candidate_worker.phases import run_proposal
+    from workflows.attempt_storage import impl_attempt_storage
+    from workflows.llm_config import WorkflowLLMConfig
+    from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+    from .test_graph import initial
+
+    request = fanout_request(prepared) if graph else prepared
+    receipt = initial(request)
+    workspace = Path(receipt.workspace)
+    project = Path(request.preview.project_root)
+    composition = compose_run_task_bindings(request.preview.document.definition.task.manifest)
+    config = WorkflowLLMConfig.model_validate_json((project / "llm.json").read_bytes())
+    originals = {}
+    with bind_run_task_composition(composition, physical_data_root=str(project / "data")):
+        for iteration in (1, 2):
+            directory = (
+                graph_instance_dir(workspace, request.run_name, "propose", iteration=iteration)
+                if graph
+                else candidate_proposal_dir(workspace, request.run_name, iteration=iteration)
+            )
+            storage = StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(directory), run_name=request.run_name),
+            )
+            # Build independent inputs from the declared seed, never retarget a capture.
+            raw = json.loads((project / "seed.json").read_bytes())
+            debug_root = proposal_debug_dir(
+                workspace, request.preview.execution_profile, "propose", iteration=iteration
+            )
+            raw["debug_dump_proposing_prompt_path"] = str(debug_root / "prompt.md")
+            seed, _ = materialize_proposal(
+                json.dumps(raw).encode(),
+                proposal_storage=storage,
+                composition=composition,
+                data_root=project / "data",
+                control=workspace / "candidate_run",
+                debug_root=debug_root,
+            )
+            inputs = NativeInputs(
+                proposal=seed,
+                attempt=impl_attempt_storage(str(directory), request.run_name, 1),
+                validator_provider="openai",
+                validator_model="validate-test",
+            )
+            context = invocation_from_storage(
+                receipt, node_id="propose", phase="proposal", storage=storage, iteration=iteration
+            )
+            if iteration == 2:
+                with monkeypatch.context() as patch:
+                    patch.setattr(
+                        "tools.candidate_worker.phases.MLModelProposalAgent",
+                        lambda **kwargs: pytest.fail("crossed iteration reached constructor"),
+                    )
+                    with pytest.raises(ValueError, match="storage binding"):
+                        run_proposal(
+                            replace(context, iteration=1), request, receipt, inputs, config
+                        )
+                assert not directory.exists()
+                assert not (workspace / "candidate_run/iteration_002").exists()
+            _, record = run_proposal(context, request, receipt, inputs, config)
+            diagnostic = workspace / "candidate_run"
+            if iteration == 2:
+                diagnostic /= "iteration_002"
+            diagnostic /= "proposal_input.json"
+            assert record == directory / "proposal_candidate.json"
+            assert json.loads(diagnostic.read_bytes())["storage"] == storage.model_dump(mode="json")
+            assert json.loads(diagnostic.read_bytes())["debug_dump_proposing_prompt_path"] == str(
+                debug_root / "prompt.md"
+            )
+            assert all(path.read_bytes() == content for path, content in originals.items())
+            originals.update({record: record.read_bytes(), diagnostic: diagnostic.read_bytes()})
+    contexts = [context for _, context in native_runner.calls]
+    assert {context["iter"] for context in contexts} == {1, 2}
+    assert all(context["run_id"] == receipt.run_id for context in contexts)
+    assert len(originals) == 4
