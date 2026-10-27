@@ -60,9 +60,12 @@ try {
   await waitUntil(async () => (await page.locator('#editor-pending').textContent()) === 'Pending binding draft · complete');
   assert.equal(await dirty(), true);
   assert.deepEqual(await mark(), {title: '* SIDERIUS · Workflow', badge: true});
+  // The fixture stores no positions: cards use the display-only fallback layout, which follows
+  // card sizes, and the disconnection folds a row. Undo targets this pre-move display, not the loaded one.
+  const beforeMovePosition = await position();
   await page.locator('#circuit-node-validate').focus(); await page.keyboard.press('Alt+ArrowDown');
   const movedPosition = await position();
-  assert.notDeepEqual(movedPosition, loadedPosition, 'A move is accepted while a connection edit is pending');
+  assert.notDeepEqual(movedPosition, beforeMovePosition, 'A move is accepted while a connection edit is pending');
   assert.match(await page.locator('#editor-pending').textContent(), /Pending binding draft · complete/, 'A move keeps the keyed inspection');
   await page.getByText('References', {exact: true}).click();
   await manifest.fill('edited-task.json');
@@ -74,7 +77,7 @@ try {
   assert.equal(await manifest.inputValue(), loadedManifest, 'Ctrl+Z undoes the inspector edit');
   assert.deepEqual(await position(), movedPosition);
   await page.locator('#editor-undo').click();
-  assert.deepEqual(await position(), loadedPosition, 'Undo restores the card position');
+  assert.deepEqual(await position(), beforeMovePosition, 'Undo restores the card position');
   assert.equal(await disconnect.isVisible(), false, 'The disconnection is still pending after two undos');
   await shortcut('Control+Shift+z');
   assert.deepEqual(await position(), movedPosition, 'Ctrl+Shift+Z redoes the move');
