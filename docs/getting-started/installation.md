@@ -148,6 +148,21 @@ Task-specific scoring references, including TIDMAD anchor maps, belong to the ex
 
 ## API keys
 
+Each entry point reads credentials from a different source. This table is the
+single map; the linked procedures own the details.
+
+| Entry point | Where keys are read from | Procedure |
+| --- | --- | --- |
+| Command-line chain and node CLIs (`scripts/launch/run_chain.sh`, `src/workflows/run_one_iteration.py`, node `main()`s) | Environment of the launching process. Recommended: a trusted external mode-`600` credential file sourced in that shell, or managed secret injection. Compatibility only: a gitignored `.env` in the checkout (see [Compatibility `.env` loading](#compatibility-env-loading)) | This section, below |
+| Browser candidate console (`candidate_console`) | Only the JSON `credential_file` named in the console configuration (mode `600`), limited to the task's `candidate_environment_names`. Shell exports and a project `.env` do not satisfy its readiness or Launch check | [Console credentials](../../src/tools/candidate_console/README.md#credentials), [configuration contract](../../src/tools/candidate_console/console-contract.md#configuration) |
+| Paper resolver (Semantic Scholar) | `S2_API_KEY` in the calling process; source checkouts fall back to the checkout `.env` when the variable is absent | [Semantic Scholar key](#semantic-scholar-key) |
+
+Provider key names come from the LLM bridge's provider table:
+`OPENAI_API_KEY`, `GEMINI_API_KEY` and `DEEPSEEK_API_KEY`. Offline
+installation, focused tests and `--dry-run` need none of them.
+
+### Command-line procedure
+
 Real runs need credentials from the machine that launches that experiment.
 Keep them in a trusted, machine-owned file outside this checkout (permission
 `600`), or use your scheduler/secret manager to inject them into the launch
@@ -209,10 +224,34 @@ Managed injection is equivalent when the secret manager exports the reviewed
 variables before this check and the launch command remains in this process.
 Adapt `required_credentials` and the routing configuration when another
 provider or optional service is enabled; disabled providers remain omitted.
-Do not rely on an implicit path search or on the bridge's existing dotenv
-compatibility loading; that behavior is retained for compatibility, not a
-reliable per-launch binding. Offline installation, focused tests, and
-`--dry-run` onboarding do not need an API key.
+Offline installation, focused tests, and `--dry-run` onboarding do not need an
+API key.
+
+### Compatibility `.env` loading
+
+Command-line processes also load dotenv files. This is retained for
+compatibility; it is not a reliable per-launch binding, so do not depend on it
+for effectful runs:
+
+- In a source checkout, `src/workflows/run_one_iteration.py` (which
+  `run_chain.sh` invokes) loads `<checkout>/.env` when the module is imported.
+- Every `LLMBridge` construction calls `load_dotenv()` without a path.
+  python-dotenv then uses the nearest `.env` found by walking upward from the
+  bridge module's directory (from the current working directory only in a REPL
+  or debugger). In a source checkout this is normally `<checkout>/.env`.
+- Neither loader overrides a variable that is already set; both add every
+  missing variable in the file, not only keys. `PYTHON_DOTENV_DISABLED=1`
+  disables both.
+- `.env` is ignored by the checkout's `.gitignore` (pattern `*.env`). Keeping
+  values there still places secrets inside the source tree, which this
+  procedure avoids.
+
+The browser console does not accept this route: its readiness and Launch checks
+read only `credential_file`. Its operation contract records that downstream
+native processes may still call the bridge's loader; see
+[candidate operations](../../src/tools/candidate_operations/candidate-operations-contract.md).
+
+### Semantic Scholar key
 
 For authenticated Semantic Scholar lookup, export `S2_API_KEY` in the process
 that calls the paper resolver; an LLM key is not required for that standalone
