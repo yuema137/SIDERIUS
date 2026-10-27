@@ -222,6 +222,26 @@ def test_completed_pause_resumes_actual_body_in_new_process(
     historical = read_operation(config, first_id)
     assert historical.receipt.status == "paused"
     assert historical.successor_operation_id == next_id
+    # Console projections resolve the root through the operations owner, never directories:
+    # the resumed segment keeps the root's bound and shows every verified body so far.
+    from types import SimpleNamespace
+
+    from tools.candidate_console.graph_results import read_graph_results
+    from tools.candidate_console.models import LoopStatusView
+    from tools.candidate_console.service import loop_status
+
+    assert loop_status(config, historical) == LoopStatusView(
+        final_iteration=3, attempted_iterations=1
+    )
+    assert loop_status(config, second) == LoopStatusView(final_iteration=3, attempted_iterations=3)
+    console = SimpleNamespace(operation_store=config)
+    paused_results = read_graph_results(console, first_id)
+    resumed_results = read_graph_results(console, next_id)
+    assert paused_results.available and resumed_results.available
+    assert [body.iteration for body in paused_results.bodies] == [1]
+    assert [body.iteration for body in resumed_results.bodies] == [1, 2, 3]
+    # Body 1 is the same verified record whether read through the root or the segment.
+    assert resumed_results.bodies[0] == paused_results.bodies[0]
     interpreted = InterpretationInput.model_validate_json(
         interpretation_input_path(workspace, "interpret", iteration=2).read_bytes()
     )

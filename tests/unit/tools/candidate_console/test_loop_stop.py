@@ -167,8 +167,10 @@ def test_status_loop_bound_from_submission_and_bodies_only_from_receipt(
         lambda config, value: _snapshot(value, receipt),
     )
     monkeypatch.setattr(
-        "tools.candidate_console.service.lookup_operation_request",
-        lambda config, value: _loop_submission(value, final_iteration),
+        "tools.candidate_console.service.loop_root_operation",
+        lambda config, value: (
+            None if final_iteration is None else _loop_submission(value, final_iteration)
+        ),
     )
     status = client(console_config).get(f"/api/operations/{operation_id}").json()
     assert status.get("loop") == expected

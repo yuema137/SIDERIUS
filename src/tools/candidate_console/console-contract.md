@@ -150,6 +150,9 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | GET /api/operations/{UUID}/graph-results | GraphResultsView, read-only per-body native tuning report projection |
 | GET /api/operations/{UUID}/log | kind=native or operation, offset>=0, max_bytes=1..65536 → LogChunk |
 | POST /api/operations/{UUID}/loop-stop | empty `LoopStopSelection` `{}` → `LoopStopAcknowledgement` (`outcome="requested"`), 200 |
+| POST /api/operations/{UUID}/loop-pause | empty `LoopPauseSelection` `{}` → `LoopPauseAcknowledgement` (`outcome="requested"`), 200 |
+| GET /api/operations/{UUID}/loop-resume-review | `LoopResumeReview` (owner-verified paused segment, digest, bound, names-only `credential_readiness`) |
+| POST /api/loop-resumes | `LoopResumeSelection` (`request_id`, `predecessor_operation_id`, `expected_receipt_digest`) → OperationHandle, 202 |
 
 Outer ASGI RequestBoundary checks exact Host (configured bind/browser authorities),
 rejects proxy/forwarded headers and requires constant-time bearer authentication
@@ -261,7 +264,11 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
 
 - `available=false` unless the snapshot state is `completed`, its receipt is a
   `CandidateRunReceipt` with `graph_trace` or `loop_trace`, and the admitted
-  submission is a `CandidateOperation`. Fixed (non-graph) candidates, active,
+  submission is a `CandidateOperation`, or a `CandidateLoopResumeOperation` whose
+  root candidate comes from `candidate_operations.loop_root_operation` (immutable
+  predecessor records only). A paused or resumed segment therefore lists every body
+  that `verify_loop(root request, root launch.json, segment receipt)` accepts up to
+  that segment's own receipt. Fixed (non-graph) candidates, active,
   failed or integrity-unknown operations return `available=false` with no bodies.
 - Bodies: a standalone graph yields its one receipt. A loop yields exactly the body
   receipts returned by `verify_loop(request, launch.json receipt, receipt)`, in
@@ -302,12 +309,15 @@ scientific training. No public paired prepared/completed example exists yet.
 
 ## Authored loop Stop and state
 
-`StatusView.loop` is present only for a `candidate` operation whose admitted
-submission (`lookup_operation_request`) declares `definition.loop`:
-`final_iteration` comes from that declaration and `attempted_iterations` only from
-the native receipt's `loop_trace` (`null` while no receipt exists). The console
-never infers per-body progress from an active process. Fixed and non-candidate
-operations omit the field.
+`StatusView.loop` is present only for an authored-loop `candidate` or
+`candidate_loop_resume` segment. `final_iteration` comes from the root candidate's
+declaration (`candidate_operations.loop_root_operation`, which follows immutable
+`predecessor_operation_id` records, never directories) and `attempted_iterations`
+only from this segment's native receipt `loop_trace` (`null` while no receipt
+exists; counts are cumulative over the run). The console never infers per-body
+progress from an active process. Fixed and non-candidate operations omit the
+field. `StatusView.successor_operation_id` forwards the operations readback for a
+segment that a Resume has continued; the segment keeps its own receipt.
 
 `CandidateConsole.request_loop_stop(UUID)` delegates once to
 `candidate_operations.request_loop_stop`, which owns admission, identity checks,
@@ -328,18 +338,58 @@ never evidence that the loop is still running.
 
 Slow control: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
-**Stop at next boundary** is shown only for a `candidate` with `loop`, state
-`active` and no receipt. A click disables the button for the pending request, so
+**Stop at next boundary** is shown only for a status with `loop` (root or resumed
+segment), state `active` and no receipt. A click disables the button for the pending request, so
 one click sequence issues one POST; after acknowledgement the button is hidden and
 the state reads "Stop requested … Not yet stopped." until a receipt arrives. A
 receipt `stopped` reads "stopped at a completed body boundary after N of M
 bodies"; `completed` reads "finished after N of M bodies" (and notes that a
-requested Stop did not take effect); other statuses read "ended (status)". The
+requested Stop did not take effect); `paused` is described under Pause and Resume;
+other statuses read "ended (status)". The
 acknowledgement is memory-only for the selected operation: a reload or another
 selection forgets it, because no marker read exists and the receipt is the
 authority. Witnesses: `tests/unit/tools/candidate_console/test_loop_stop.py` and
 `tests/browser/loop_controls.mjs` (stubbed API). The worker Stop semantics are
 witnessed by `candidate_worker/test_finite_loop.py`.
+
+### Pause and Resume
+
+`CandidateConsole.request_loop_pause(UUID)` delegates once to
+`candidate_operations.request_loop_pause` (same boundary and body rules as Stop).
+Success is `{"operation_id": UUID, "outcome": "requested"}`: requested, never
+paused. Pause applies to the selected segment only; a resumed segment is paused by
+its own UUID. Refusals: unknown 404; `kind`, `not_ready`, `not_running` 409 with
+route-local fixed messages; others the generic message.
+
+`CandidateConsole.review_loop_resume(UUID)` calls `review_loop_resume` and returns
+`LoopResumeReview`: the predecessor UUID, the owner's `receipt_digest` as
+`expected_receipt_digest`, completed bodies, the root bound and name-only
+`credential_readiness` for the root request (no values). `resume_loop` submits
+`CandidateLoopResumeOperation` through `submit_operation`. If the request UUID is
+already admitted it replays with an empty environment before any root or credential
+read, so a retry after an unconfirmed outcome returns the same operation. Otherwise
+the root's `environment_names` are read from the configured `credential_file` with
+the same `credentials` helper as Launch. Refusals on both routes: `loop_resume`
+(not an exited, cleanly paused segment, already continued, terminal, or a stale
+digest), `kind`, `not_ready` and `runtime` 409 with route-local fixed messages;
+`credentials` 409 carrying missing names only; `busy`/`conflict` use the global
+messages. Unknown predecessor 404.
+
+Slow control shows **Pause at next boundary** beside Stop for an active loop
+segment with no receipt; after acknowledgement it reads "Pause requested … Not yet
+paused." A `paused` receipt reads "paused at a completed body boundary after N of M
+bodies" and is resumable, never "ended". Without a successor it offers **Review
+resume** (one GET on click, never polled), then **Resume loop**, disabled unless
+credentials are ready. The client generates one request UUID per reviewed digest
+and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
+the POST; a retry reuses it, and the record is released once status shows the
+successor. A 409 clears the review. On success the monitor selects the resumed
+segment, which reads "Resumed segment." and shows Stop and Pause while active and
+its per-body results once completed. A continued predecessor shows "Continued by
+<UUID>" (a Slow-control link) and no Resume. Witnesses:
+`tests/unit/tools/candidate_console/test_loop_pause_resume.py`, the console
+projections in `candidate_worker/test_loop_resume.py` (real two-segment store), and
+`tests/browser/loop_controls.mjs` (stubbed API).
 
 ## Recorded candidate examples
 
