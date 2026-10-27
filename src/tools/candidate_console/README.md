@@ -74,7 +74,9 @@ even when using the default models.
    (replace the example UUID), then Connect. No task or editor project selection
    is needed. The optional remembered ID is labelled **Last opened on this browser**;
    it is not a list of discovered operations. Expand Operation facts, Reported
-   token table, or Activity and logs when needed.
+   token table, or Activity and logs when needed. When a workflow run has
+   finished, **Workflow training results** shows the tuner report of each
+   verified iteration separately; it never combines or ranks iterations.
    Configured **Recorded examples** appear in Slow control. They show verified
    proposal, implementation, validation and reported-token evidence only; they
    are not live operations, training results, scientific scores or billing

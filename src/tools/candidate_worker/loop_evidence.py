@@ -71,7 +71,8 @@ def advance_body(
 
 def verify_loop(
     request: CandidateRunRequest, initial: CandidateRunReceipt, receipt: CandidateRunReceipt
-) -> None:
+) -> tuple[CandidateRunReceipt, ...]:
+    """Verify the loop terminal; return its accepted body receipts in iteration order."""
     from .loop import pause_requested, stop_requested
     from .loop_models import admit_loop
 
@@ -100,7 +101,7 @@ def verify_loop(
             or receipt.validation_passed is not None
         ):
             raise ValueError("loop terminal lacks completed-body index")
-        return
+        return ()
     if trace.attempted_iterations > loop.final_iteration:
         raise ValueError("loop exceeds declared finite limit")
     from .loop_resume import has_successor, verify_segment
@@ -109,7 +110,8 @@ def verify_loop(
     resumed_at = verify_segment(initial, receipt)
     if trace.attempted_iterations < loop.final_iteration and not has_successor(initial, receipt):
         require_unused_next(request, initial, trace.attempted_iterations)
-    _, last = replay_completed(request, initial, trace.attempted_iterations)
+    _, bodies = replay_completed(request, initial, trace.attempted_iterations)
+    last = bodies[-1] if bodies else None
     expected = (
         last.status
         if last is not None and last.status != "completed"
@@ -126,6 +128,7 @@ def verify_loop(
         or (expected == "paused" and not pause_requested(initial, trace.segment_id))
     ):
         raise ValueError("loop terminal disagrees with completed bodies or Stop/Pause evidence")
+    return bodies
 
 
 def require_unused_next(
@@ -142,10 +145,13 @@ def require_unused_next(
 
 def replay_completed(
     request: CandidateRunRequest, initial: CandidateRunReceipt, completed: int
-) -> tuple[ChainState, CandidateRunReceipt | None]:
-    """Shared verified-prefix fold for readback and continuation history."""
+) -> tuple[ChainState, tuple[CandidateRunReceipt, ...]]:
+    """Shared verified-prefix fold for readback and continuation history.
+
+    Returns the folded history and the verified body receipts in iteration order.
+    """
     state = initial_history(request, initial)
-    last = None
+    bodies: list[CandidateRunReceipt] = []
     for iteration in range(1, completed + 1):
         control = candidate_control_dir(Path(initial.workspace), iteration=iteration)
         body = CandidateRunReceipt.model_validate_json(read_graph_control(control / "body.json"))
@@ -162,9 +168,9 @@ def replay_completed(
             if getattr(body, name) != getattr(initial, name):
                 raise ValueError("loop body identity changed")
         verify_graph_trace(request, initial, body, iteration=iteration, history=state)
+        bodies.append(body)
         if body.status != "completed" and iteration != completed:
             raise ValueError("loop continued without successful required feedback")
         if body.status == "completed":
             advance_body(request, initial, body, state)
-        last = body
-    return state, last
+    return state, tuple(bodies)

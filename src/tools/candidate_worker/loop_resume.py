@@ -137,7 +137,8 @@ def resume_history(
     if stop_requested(initial):
         raise ValueError("stopped loop cannot resume")
     require_unused_next(request, initial, binding.completed_iterations)
-    state, last = replay_completed(request, initial, binding.completed_iterations)
+    state, bodies = replay_completed(request, initial, binding.completed_iterations)
+    last = bodies[-1] if bodies else None
     if last is None or last.status != "completed":
         raise ValueError("resume requires completed required feedback")
     return state, last
