@@ -803,11 +803,14 @@ subtotal. Root source/captures and earlier receipts remain immutable.
 callers (the console's loop bound, Resume credential names and per-body results).
 It returns the root `CandidateOperation` of an authored-loop operation or segment,
 or `None` for any other operation, by following immutable
-`predecessor_operation_id` records only; it reads no native file, process or
-credential, and an unknown operation raises `FileNotFoundError`.
+`predecessor_operation_id` records only; a resume segment whose root is not an
+authored loop raises `kind` (reachable only with tampered records). It reads no
+native file, process or credential, and an unknown operation raises `FileNotFoundError`.
+Predecessor-link cycles raise `integrity`.
 
 These authored controls do not use fixed native-chain capture recipes or shell
 resume flags. No arbitrary iteration cap, new history policy or mid-body recovery
-is introduced; the console's Pause/Resume controls only call these functions. Offline tests separate operation and worker processes,
-exercise real native body/evidence construction with provider/training doubles, and
-cover required lifecycle/admission refusals; they are not paper qualification.
+is introduced; the console's Pause/Resume controls only call these functions.
+Offline tests separate operation and worker processes, exercise real native
+body/evidence construction with provider/training doubles, and cover required
+lifecycle/admission refusals; they are not paper qualification.

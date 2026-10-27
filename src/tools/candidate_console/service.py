@@ -88,7 +88,8 @@ def loop_status(
     if root is None:
         return None
     loop = root.request.preview.document.definition.loop
-    assert loop is not None
+    if loop is None:
+        raise OperationFailure("kind", "operation loop definition is missing")
     receipt = snapshot.receipt
     trace = receipt.loop_trace if isinstance(receipt, CandidateRunReceipt) else None
     return LoopStatusView(
@@ -244,9 +245,12 @@ class CandidateConsole:
         snapshot = review_loop_resume(self.config.operation_store, operation_id)
         root = loop_root_operation(self.config.operation_store, operation_id)
         receipt = snapshot.receipt
-        assert root is not None and root.request.preview.document.definition.loop is not None
-        assert isinstance(receipt, CandidateRunReceipt) and receipt.loop_trace is not None
-        assert snapshot.receipt_digest is not None
+        if root is None or root.request.preview.document.definition.loop is None:
+            raise OperationFailure("kind", "resume segment root is not an authored loop")
+        if not isinstance(receipt, CandidateRunReceipt) or receipt.loop_trace is None:
+            raise OperationFailure("integrity", "loop resume receipt missing trace")
+        if snapshot.receipt_digest is None:
+            raise OperationFailure("integrity", "loop resume receipt has no digest")
         return LoopResumeReview(
             predecessor_operation_id=operation_id,
             expected_receipt_digest=snapshot.receipt_digest,

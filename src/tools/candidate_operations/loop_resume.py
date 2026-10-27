@@ -61,22 +61,27 @@ def loop_root_operation(
 ) -> CandidateOperation | None:
     """Read-only: the admitted root candidate of an authored-loop operation or segment.
 
-    Returns ``None`` for any operation that is not an authored loop. Only immutable
-    operation records are followed (``predecessor_operation_id``); no native file,
-    process or credential is read, so callers may use it before the worker claims
-    its workspace (declared bound, credential names, results root).
+    Returns ``None`` for any operation that is not an authored loop. A resume segment
+    whose root is not an authored loop raises ``OperationFailure`` with kind ``"kind"``
+    (reachable only with tampered records). Only immutable operation records are followed
+    (``predecessor_operation_id``); no native file, process or credential is read, so
+    callers may use it before the worker claims its workspace (declared bound, credential
+    names, results root). Predecessor-link cycles raise ``OperationFailure`` with kind
+    ``"integrity"``.
     """
     record = load_record(validate_config(config), operation_id)
     if not is_authored_loop(record):
         return None
     root = root_record(record)
-    assert root.submission.kind == "candidate"
+    if root.submission.kind != "candidate":
+        raise OperationFailure("integrity", "loop root submission is not a candidate")
     return root.submission
 
 
 def root_inputs(record: OperationRecord):
     root = root_record(record)
-    assert root.submission.kind == "candidate"
+    if root.submission.kind != "candidate":
+        raise OperationFailure("integrity", "loop root submission is not a candidate")
     control = native_directory(root.submission)
     saved = read_model(control / "request.json", CandidateRunRequest)
     initial = read_model(control / "launch.json", CandidateRunReceipt)
