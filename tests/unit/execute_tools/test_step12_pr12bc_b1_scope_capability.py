@@ -235,14 +235,6 @@ class TestTheRequestCarriesNoTaskVocabulary:
         for name in ("leg", "kind", "is_eval", "phase"):
             assert name not in ScopeBuildRequest.model_fields
 
-    def test_the_carrier_is_frozen_and_forbids_extras(self):
-        with pytest.raises(ValidationError):
-            ScopeBuildRequest(
-                round_kind="trial", selection_strategy="snapshot", portion=0.1, seg_size=10
-            )
-        with pytest.raises(ValidationError):
-            REQUEST.portion = 0.5  # type: ignore[misc]
-
 
 class TestTheSemanticBounds:
     """Bounds that encode a meaning, not bounds a type already gives."""

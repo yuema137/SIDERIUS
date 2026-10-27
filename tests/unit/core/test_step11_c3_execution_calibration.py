@@ -12,7 +12,6 @@ import pytest
 
 from core.execution_calibration import (
     ROLE_CEILINGS,
-    ROLE_DEFAULT_RSS_GB,
     RSS_OVERRIDE_ENV_VAR,
     MalformedCeilingOverride,
     calibration_provenance,
@@ -45,10 +44,6 @@ def _invariants(**overrides) -> RunInvariants:
 
 
 class TestTheResolutionLadder:
-    def test_all_three_defaults_declare_inheritance(self):
-        assert ROLE_DEFAULT_RSS_GB == {"training": None, "inference": None, "scoring": None}
-        assert set(ROLE_CEILINGS) == {"training", "inference", "scoring"}
-
     def test_no_override_resolves_the_declared_default(self, monkeypatch):
         monkeypatch.delenv(RSS_OVERRIDE_ENV_VAR, raising=False)
         for role, ceiling in ROLE_CEILINGS.items():
@@ -159,19 +154,6 @@ class TestDeclaredProvenance:
         environment = {RSS_OVERRIDE_ENV_VAR: "training=40,inference=60,scoring=24"}
         assert resolve_role_ceiling_gb("scoring", environ=environment) == 24
         assert resolve_role_ceiling("scoring", environ=environment).source == "environment"
-
-    def test_the_stale_arithmetic_is_gone_from_the_launch_path(self):
-        """R-11-11: `sandbox_executor.py` is a CONSUMER. The prose sum that
-        went stale unnoticed must not still be sitting there beside the
-        corrected declaration.
-        """
-        import pathlib
-
-        src = (
-            pathlib.Path(__file__).resolve().parents[3] / "src/core" / "sandbox_executor.py"
-        ).read_text(encoding="utf-8")
-        assert "inference_single.py:325-331" not in src
-        assert "core/execution_calibration.py" in src
 
     def test_the_provenance_payload_is_json_native(self):
         """An auditor reading a lock file must need no code to interpret

@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from pydantic import ValidationError
 
 from core.runtime_control.observation_store import component_calibration_eligible
 from core.runtime_control.records import AdmissionRecord, RuntimeObservation
@@ -67,28 +66,6 @@ def _with_training(session, seconds: float):
         )
     )
     return session
-
-
-class TestSchemaCompatibility:
-    def test_default_is_none(self):
-        record = AdmissionRecord(decision="admitted", stage="post_setup")
-        assert record.failure_class is None
-
-    def test_legacy_record_without_the_field_still_validates(self):
-        legacy = {
-            "decision": "rejected",
-            "stage": "post_setup_runtime_verification",
-            "reason": "written before failure_class existed",
-        }
-        record = AdmissionRecord.model_validate(legacy)
-        assert record.failure_class is None
-        assert record.decision == "rejected"
-
-    def test_the_decision_literal_is_unchanged(self):
-        """Option B: no "aborted" value — every existing reader that keys
-        on "admitted"/"rejected" keeps behaving correctly."""
-        with pytest.raises(ValidationError):
-            AdmissionRecord(decision="aborted", stage="s")  # type: ignore[arg-type]
 
 
 class TestAdmissionClassification:

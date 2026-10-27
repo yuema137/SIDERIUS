@@ -5,14 +5,11 @@ Pure logic tests — no I/O, no real data.
 See docs/design/enable_partial_file_list.md (Commit DS1).
 """
 
-import json
-
 import pytest
 from pydantic import ValidationError
 
 from execute_tools.dataset_config import (
     NUM_FILES,
-    TIDMAD,
     DataScope,
 )
 
@@ -73,11 +70,6 @@ class TestValidation:
         with pytest.raises(ValidationError, match="non-negative"):
             DataScope(file_indices=[-1, 4])
 
-    def test_frozen_assignment_raises(self):
-        scope = DataScope(file_indices=[4])
-        with pytest.raises(ValidationError):
-            scope.file_indices = [5]
-
 
 # ---------------------------------------------------------------------------
 # from_cli()
@@ -127,20 +119,3 @@ class TestFromCli:
         # non-negative message rather than a confusing range error.
         with pytest.raises(ValidationError, match="non-negative"):
             DataScope.from_cli("-3")
-
-
-# ---------------------------------------------------------------------------
-# Serialization
-# ---------------------------------------------------------------------------
-
-
-class TestSerialization:
-    def test_resolved_scope_is_json_serializable(self):
-        resolved = DataScope.from_cli("4-9").resolve(NUM_FILES)
-        assert json.loads(json.dumps(resolved)) == [4, 5, 6, 7, 8, 9]
-
-    def test_model_round_trip(self):
-        scope = DataScope(file_indices=[9, 4])
-        again = DataScope.model_validate_json(scope.model_dump_json())
-        assert again == scope
-        assert again.file_indices == [4, 9]

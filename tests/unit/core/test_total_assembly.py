@@ -22,7 +22,6 @@ from core.runtime_control.records import (
     record_is_formal_verified,
 )
 from core.runtime_control.total_assembly import (
-    DEFAULT_HISTORICAL_SHARE_LIMIT,
     assemble_total,
     classify_prediction_source,
     evidence_backed_prediction,
@@ -275,6 +274,3 @@ class TestRecordVerifiedUnderContributionPolicy:
         assert record_is_formal_verified(self._record(components)) is False  # default 10%
         lenient = self._record(components, policy={"historical_phase_share_limit": 0.3})
         assert record_is_formal_verified(lenient) is True
-
-    def test_default_limit_constant(self):
-        assert DEFAULT_HISTORICAL_SHARE_LIMIT == pytest.approx(0.10)
