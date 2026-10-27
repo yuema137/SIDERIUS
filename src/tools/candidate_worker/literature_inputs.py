@@ -45,6 +45,8 @@ def materialize_literature(
         provider=value.llm_provider,
         model_id=value.llm_model_id,
         reasoning_effort=value.llm_reasoning_effort,
+        max_output_tokens=value.llm_max_output_tokens,
+        search_max_output_tokens=value.search_llm_max_output_tokens,
         search_provider=value.search_llm_provider,
         search_model_id=value.search_llm_model_id,
         search_reasoning_effort=value.search_llm_reasoning_effort,

@@ -124,6 +124,43 @@ def test_source_digest_covers_helpers_and_ignores_insertion_order():
     assert old != source_fingerprint({"template": b"prompt", "helper": b"new"})
 
 
+@pytest.mark.parametrize(
+    "relative", ["llm_settings.py", "llm_transport/runtime.py", "llm_transport/providers.py"]
+)
+def test_changed_transport_owner_refuses_preflight_identity_before_request(monkeypatch, relative):
+    """Moving request logic out of the bridge must not remove it from its identity."""
+    from pathlib import Path
+
+    from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
+    from tests.helpers.tuner_prompt_fixtures import planner_kwargs
+
+    identity = strategies.resolve_planner_strategy("native-timing-v1").identity
+    assert (
+        strategies.resolve_planner_strategy("native-timing-v1", expected=identity).identity
+        == identity
+    )
+    target = Path(strategies.__file__).parent / relative
+    original_read = Path.read_bytes
+
+    def changed_read(path):
+        original = original_read(path)
+        return original + b"\n# changed transport implementation\n" if path == target else original
+
+    monkeypatch.setattr(Path, "read_bytes", changed_read)
+    bridge = BoundaryRecorderBridge()
+    with pytest.raises(ValueError, match="changed after run preflight"):
+        bridge.plan(
+            **(
+                planner_kwargs()
+                | {
+                    "planner_strategy": "native-timing-v1",
+                    "expected_planner_strategy": identity,
+                }
+            )
+        )
+    assert bridge.captures == []
+
+
 def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
     """Bypassing the provider hook must lose its task-dependent text and fail."""
     from dataclasses import replace

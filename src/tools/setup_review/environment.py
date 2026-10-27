@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
-from agent.llm_settings import KNOWN_PROVIDERS
+from agent.llm_settings import provider_configuration
 from tools.setup_review.route_models import CredentialNameCheck, LLMRoute
 
 
@@ -16,7 +16,7 @@ def credential_name_checks(
     groups: dict[str, list[LLMRoute]] = {}
     for route in routes:
         if route.transport is not None:
-            provider = KNOWN_PROVIDERS.get(route.transport.provider)
+            provider = provider_configuration(route.transport.provider)
             if provider is not None:
                 groups.setdefault(provider["api_key_env"], []).append(route)
     checks = []

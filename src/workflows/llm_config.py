@@ -37,7 +37,12 @@ from pydantic import (
     model_validator,
 )
 
-from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.llm_settings import (
+    DEFAULT_LLM_PROVIDER,
+    OPTIONAL_PROVIDERS,
+    ProviderName,
+    default_model_for_provider,
+)
 from agent.schemas.llm_retry import RetryPolicy
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
@@ -96,13 +101,16 @@ class NodeLLMConfig(BaseModel):
     gemini, reflector on openai) — the underlying LLMBridge supports this.
     """
 
-    provider: Literal["gemini", "openai", "deepseek"] = Field(
+    provider: ProviderName = Field(
         default=DEFAULT_LLM_PROVIDER,
         description="LLM provider.",
     )
     model_id: str = Field(
         default_factory=lambda data: default_model_for_provider(data["provider"]),
         description="Specific model ID passed to the provider.",
+    )
+    max_output_tokens: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
     )
     reasoning_effort: ReasoningEffort | None = Field(
         default=None,
@@ -386,6 +394,8 @@ class WorkflowLLMConfig(BaseModel):
             }
             if "max_retries" in self.interpret.model_fields_set:
                 result["llm_max_retries"] = self.interpret.max_retries
+            if self.interpret.max_output_tokens is not None:
+                result["llm_max_output_tokens"] = self.interpret.max_output_tokens
             if self.interpret.reasoning_effort is not None:
                 result["llm_reasoning_effort"] = self.interpret.reasoning_effort
             return result
@@ -416,8 +426,12 @@ class WorkflowLLMConfig(BaseModel):
             # Omitted reflector limits retain the planner's retry config.
             if config.planner.max_retries is not None:
                 result["max_retries"] = config.planner.max_retries
+            if config.planner.max_output_tokens is not None:
+                result["max_output_tokens"] = config.planner.max_output_tokens
             if config.planner.reasoning_effort is not None:
                 result["reasoning_effort"] = config.planner.reasoning_effort
+            if config.reflector.max_output_tokens is not None:
+                result["reflect_max_output_tokens"] = config.reflector.max_output_tokens
             if config.reflector.reasoning_effort is not None:
                 result["reflect_reasoning_effort"] = config.reflector.reasoning_effort
             return result
@@ -444,6 +458,13 @@ class WorkflowLLMConfig(BaseModel):
                 stage = getattr(config, stage_name)
                 result[f"{stage_name}_reasoning_effort"] = stage.reasoning_effort
                 result[f"{stage_name}_max_retries"] = stage.max_retries
+                if any(
+                    route.max_output_tokens is not None
+                    for route in (config.comparison, config.reasoning, config.proposing)
+                ):
+                    result[f"{stage_name}_max_output_tokens"] = stage.max_output_tokens
+            if config.reasoning.max_output_tokens is not None:
+                result["max_output_tokens"] = config.reasoning.max_output_tokens
             if config.reasoning.reasoning_effort is not None:
                 result["reasoning_effort"] = config.reasoning.reasoning_effort
             return result
@@ -466,8 +487,12 @@ class WorkflowLLMConfig(BaseModel):
                 result["search_llm_retry_policy"] = RetryPolicy(
                     max_retries=config.search.max_retries
                 )
+            if config.main.max_output_tokens is not None:
+                result["llm_max_output_tokens"] = config.main.max_output_tokens
             if config.main.reasoning_effort is not None:
                 result["llm_reasoning_effort"] = config.main.reasoning_effort
+            if config.search.max_output_tokens is not None:
+                result["search_llm_max_output_tokens"] = config.search.max_output_tokens
             if config.search.reasoning_effort is not None:
                 result["search_llm_reasoning_effort"] = config.search.reasoning_effort
             return result
@@ -475,6 +500,8 @@ class WorkflowLLMConfig(BaseModel):
         result = {"provider": config.provider, "model_id": config.model_id}
         if config.max_retries is not None:
             result["max_retries"] = config.max_retries
+        if config.max_output_tokens is not None:
+            result["max_output_tokens"] = config.max_output_tokens
         if config.reasoning_effort is not None:
             result["reasoning_effort"] = config.reasoning_effort
         return result
@@ -546,6 +573,14 @@ class WorkflowLLMConfig(BaseModel):
         `reflect_model_id="gpt-4o-mini"`, the reflector uses an entirely
         different provider — the bridge will hold two clients internally.
         """
+        if (
+            reflect_provider in OPTIONAL_PROVIDERS
+            and reflect_provider != provider
+            and not reflect_model_id
+        ):
+            raise ValueError(
+                "An explicit reflect_model_id is required for a different optional provider"
+            )
         # Cast to Literal at runtime; pydantic will validate the value.
         base_cfg = NodeLLMConfig(provider=provider, model_id=model_id)  # type: ignore[arg-type]
         propose_cfg = ProposalLLMConfig(

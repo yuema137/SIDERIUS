@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProposerRoute(BaseModel):
@@ -16,6 +16,9 @@ class ProposerRoute(BaseModel):
     provider: str
     model_id: str | None
     reasoning_effort: str | None
+    max_output_tokens: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
+    )
     max_retries: int | None
 
     def bridge_kwargs(self) -> dict[str, Any]:

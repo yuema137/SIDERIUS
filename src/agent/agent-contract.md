@@ -16,7 +16,8 @@ executes training, inference or scoring.
 
 | file | surface |
 |---|---|
-| `llm_bridge.py` | `LLMBridge` — every provider is accessed through the OpenAI SDK. Known providers `openai` / `gemini` / `deepseek` resolve `base_url` + key env var automatically; **any OpenAI-compatible endpoint** works via explicit `base_url`/`api_key`. Also the `reflect_provider` split (route the reflector to a second provider/model) and the stub-mode bridge for $0 pseudo runs |
+| `llm_bridge.py` | `LLMBridge` — default OpenAI-compatible transport plus optional Pydantic AI Direct API adapters. Known providers `openai` / `gemini` / `deepseek` resolve `base_url` + key env var automatically; **any OpenAI-compatible endpoint** works via explicit `base_url`/`api_key`. Also the `reflect_provider` split (route the reflector to a second provider/model) and the stub-mode bridge for $0 pseudo runs |
+| `llm_transport/` | Optional provider adapters; [transport contract](llm_transport/transport-contract.md) owns selection, protocol translation, limitations and validation |
 | `llm_settings.py` | Pure provider/model/timeout and reflector-inheritance resolution used by the bridge and offline inspection; no credentials or client construction |
 | `prompts.py` + `prompt_templates/` | per-node prompt rendering (`proposal/`, `implementor/`, `interpretation/`, `tuner/`, `literature_review/`). Task science enters ONLY as caller-supplied task-blocks values parsed by `prompt_templates/_task_blocks_loader.py` — the shared mechanics of the three adapters (proposal / implementor / interpretation) |
 | `schemas/` | node input/output contracts and the typed edge protocols — see [`schemas/README.md`](schemas/README.md) |
@@ -45,7 +46,7 @@ explicitly when selecting a different provider.
 ## Inputs
 
 API keys from the environment (`OPENAI_API_KEY` / `GEMINI_API_KEY` /
-`DEEPSEEK_API_KEY`; `LLMBridge` calls `load_dotenv()`, so a repo-root `.env`
+`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / `MOONSHOT_API_KEY` / `ZAI_API_KEY`; `LLMBridge` calls `load_dotenv()`, so a repo-root `.env`
 works); per-stage routing from `configs/llm/*.json`
 (`workflows/llm_config.py` loads them); task-block YAML paths supplied by the
 caller, never discovered.
@@ -85,10 +86,17 @@ reads it (CLAUDE.md binding rule).
 
 ## Extension points
 
-- **A new LLM endpoint needs no code** when it is OpenAI-compatible: pass
-  `base_url` and `api_key` explicitly (or route via `configs/llm/*.json`).
-  The `llm_settings.KNOWN_PROVIDERS` table supplies convenience defaults, not a gate.
+- **An OpenAI-compatible endpoint** can use explicit bridge `base_url` and
+  `api_key` arguments. Workflow routing accepts the declared `ProviderName`
+  values; arbitrary endpoint configuration is not a workflow JSON field.
+  `KNOWN_PROVIDERS` retains legacy defaults; `OPTIONAL_PROVIDERS` declares
+  additional credential/endpoint metadata without inventing model defaults.
+  `provider_configuration` is the combined metadata lookup, and
   `llm_bridge._KNOWN_PROVIDERS` remains a compatibility export.
+- **Anthropic, Moonshot, and Z.AI** select the optional Direct API backend
+  through `provider` and explicit `model_id`. Install the extra and follow the
+  [adapter guide](llm_transport/README.md). Python callers can explicitly
+  override transport protocol; see the [transport contract](llm_transport/transport-contract.md).
 - **New task science** for the proposer/implementor/interpreter is a
   task-owned blocks YAML named by the composition manifest — no template
   edit, no new adapter.

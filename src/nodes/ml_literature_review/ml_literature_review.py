@@ -322,6 +322,8 @@ class MLLiteratureReviewAgent:
             provider=inp.llm_provider,
             model_id=inp.llm_model_id,
             reasoning_effort=inp.llm_reasoning_effort,
+            max_output_tokens=inp.llm_max_output_tokens,
+            search_max_output_tokens=inp.search_llm_max_output_tokens,
             search_provider=inp.search_llm_provider,
             search_model_id=inp.search_llm_model_id,
             search_reasoning_effort=inp.search_llm_reasoning_effort,

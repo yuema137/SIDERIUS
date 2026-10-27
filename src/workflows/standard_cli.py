@@ -164,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--reflect_provider",
         type=str,
         default=None,
-        choices=["gemini", "openai"],
+        choices=["gemini", "openai", "deepseek", "anthropic", "moonshot", "zai"],
         help="Optional separate provider for the tuner's reflector sub-call. "
         "When unset, the reflector uses the same provider as the planner.",
     )

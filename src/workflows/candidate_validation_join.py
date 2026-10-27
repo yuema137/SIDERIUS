@@ -1,8 +1,8 @@
 """Opt-in two-result mapping; fixed native assembly source identity is unchanged."""
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
-from agent.llm_settings import DEFAULT_LLM_PROVIDER
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName
 from agent.schemas.validator import ValidatorInput
 from workflows.candidate_requests import enrich_validation_request
 
@@ -17,7 +17,7 @@ def proposed_implementation_to_validation(
     proposal: "ProposalOutput",
     implementation: "ImplementorOutput",
     storage: "StorageConfig",
-    llm_provider: "Literal['gemini', 'openai', 'deepseek']" = DEFAULT_LLM_PROVIDER,
+    llm_provider: ProviderName = DEFAULT_LLM_PROVIDER,
     llm_model_id: str | None = None,
     *,
     constraint_context: "ConstraintContext | None" = None,

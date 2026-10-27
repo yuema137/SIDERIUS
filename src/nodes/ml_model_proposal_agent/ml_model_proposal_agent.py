@@ -1573,6 +1573,7 @@ class MLModelProposalAgent:
         reasoning_effort: str | None = PROPOSE.reasoning_effort,
         bridge_factory=None,
         capability_index_path: str | None = None,
+        max_output_tokens: int | None = None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
@@ -1582,6 +1583,7 @@ class MLModelProposalAgent:
                 model_id=model_id,
                 max_retries=max_retries,
                 reasoning_effort=reasoning_effort,
+                max_output_tokens=max_output_tokens,
             ),
             kwargs,
         )

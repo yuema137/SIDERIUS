@@ -4,7 +4,7 @@ import inspect
 import json
 import subprocess
 import sys
-from typing import Literal, get_type_hints
+from typing import get_type_hints
 
 import pytest
 from pydantic import ValidationError
@@ -197,6 +197,7 @@ assert not any(n.startswith(('agent.', 'nodes.', 'torch')) and n not in {'agent.
 
 
 def test_catalog_matches_exact_native_protocol_signatures():
+    from agent.llm_settings import ProviderName
     from agent.schemas.constraint_disclosure import ConstraintContext
     from agent.schemas.hyperparam_tuning import (
         HyperparamTuningInput,
@@ -230,7 +231,7 @@ def test_catalog_matches_exact_native_protocol_signatures():
         "storage": StorageConfig,
         "optional.constraint-context": ConstraintContext | None,
         "optional.task-composition-ref": TaskCompositionRef | None,
-        "llm-provider": Literal["gemini", "openai", "deepseek"],
+        "llm-provider": ProviderName,
         "optional.model-id": str | None,
     }
     assert native.keys() == CONTRACTS.keys()

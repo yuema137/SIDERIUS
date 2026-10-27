@@ -17,14 +17,15 @@ authors = [{ name = "SIDERIUS developers" }]
 requires-python = ">=3.12"
 dependencies = [
     "h5py>=3.16.0",
-    # llm_bridge imports httpx.Timeout directly. OpenAI SDK releases may use
-    # httpx2 instead, so this cannot be left as an SDK-transitive dependency.
+    # The bridge accepts legacy httpx Timeout objects and constructs SDK-native
+    # httpx2 timeouts. Both are direct imports, not incidental SDK dependencies.
     "httpx>=0.28,<1",
+    "httpx2>=2.16,<3",
     "iminuit>=2.32.0",
     "jax[cpu]>=0.9.1",
     "matplotlib>=3.10.8",
     "numpy>=2.4.3",
-    "openai>=2.26.0",
+    "openai>=3.39,<4",
     "pandas>=3.0.1",
     "pdfplumber>=0.11.0",
     # Direct dependency: externally supplied image-task plugins may decode
@@ -45,6 +46,12 @@ dependencies = [
     "pyyaml>=6.0.2",
     "torchinfo>=1.8.0",
     "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+# Pin the qualified Direct API release; SDK compatibility is covered by bridge tests.
+pydantic-ai = [
+    "pydantic-ai-slim[anthropic,openai,zai]==2.61.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -70,7 +77,9 @@ dashboard = ["static/*.html", "static/*.js", "static/*.css"]
 tools = ["ci/weights.json", "claude_hooks/templates/*.md", "candidate_console/static/*.html", "candidate_console/static/*.js", "candidate_console/static/*.css"]
 
 [dependency-groups]
+# Exercise the opt-in adapter in normal CI without making it a runtime default.
 dev = [
+    "pydantic-ai-slim[anthropic,openai,zai]==2.61.0",
     "pyright>=1.1.409",
     "pytest>=9.0.2",
     "ruff>=0.15.13",

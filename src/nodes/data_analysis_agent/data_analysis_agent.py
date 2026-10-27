@@ -123,6 +123,7 @@ class DataAnalysisAgent:
         max_retries: int | None = ANALYZE.max_retries,
         reasoning_effort: str | None = ANALYZE.reasoning_effort,
         bridge_factory: Callable[..., object] | None = None,
+        max_output_tokens: int | None = None,
         historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
     ) -> None:
         self._capability = task_analysis_capability
@@ -130,6 +131,7 @@ class DataAnalysisAgent:
         self._model_id = model_id
         self._max_retries = max_retries
         self._reasoning_effort = reasoning_effort
+        self._max_output_tokens = max_output_tokens
         self._bridge_factory = bridge_factory or LLMBridge
         self._historical_inference_capability = historical_model_inference_capability
 
@@ -139,6 +141,7 @@ class DataAnalysisAgent:
             model_id=self._model_id,
             max_retries=self._max_retries,
             reasoning_effort=self._reasoning_effort,
+            max_output_tokens=self._max_output_tokens,
             omit_unset_retries=True,
         )
         return self._bridge_factory(**kwargs)

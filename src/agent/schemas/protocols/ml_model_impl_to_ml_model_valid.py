@@ -15,9 +15,7 @@ Per the inter-node communication principle: the validator never reads the implem
 output file from storage. All required data is mapped explicitly by this protocol.
 """
 
-from typing import Literal
-
-from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.storage import StorageConfig
@@ -27,7 +25,7 @@ from agent.schemas.validator import ValidatorInput
 def local_all_fields(
     output: ImplementorOutput,
     storage: StorageConfig,
-    llm_provider: Literal["gemini", "openai", "deepseek"] = DEFAULT_LLM_PROVIDER,
+    llm_provider: ProviderName = DEFAULT_LLM_PROVIDER,
     llm_model_id: str | None = None,
     *,
     constraint_context: ConstraintContext | None = None,

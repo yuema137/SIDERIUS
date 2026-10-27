@@ -43,7 +43,7 @@ class TestNodeLLMConfig:
 
     def test_invalid_provider_raises(self):
         with pytest.raises(ValidationError):
-            NodeLLMConfig(provider="anthropic", model_id="claude-3")
+            NodeLLMConfig(provider="unregistered-provider", model_id="unknown")
 
     def test_round_trip_through_json(self):
         c = NodeLLMConfig(provider="gemini", model_id="gemini-2.5-flash")

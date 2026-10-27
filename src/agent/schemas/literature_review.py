@@ -511,6 +511,12 @@ class LiteratureReviewInput(BaseModel):
     run_name: str = Field(description="Run identifier shared with the workflow.")
     llm_provider: str = Field(description="LLMBridge provider name (e.g. 'openai').")
     llm_model_id: str = Field(description="LLMBridge model id (e.g. 'gpt-4o-mini').")
+    llm_max_output_tokens: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
+    )
+    search_llm_max_output_tokens: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
+    )
     llm_reasoning_effort: str | None = Field(
         default=None, description="Explicit OpenAI main-bridge reasoning effort."
     )

@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.model_io_contract import ModelIOContract
@@ -89,7 +89,7 @@ class ValidatorInput(BaseModel):
         description="Precise mathematical/architectural specification from the proposal. "
         "Passed to the LLM reviewer to verify the implementation matches the spec.",
     )
-    llm_provider: Literal["gemini", "openai", "deepseek"] = Field(
+    llm_provider: ProviderName = Field(
         default=DEFAULT_LLM_PROVIDER,
         description="LLM provider for the code review step.",
     )

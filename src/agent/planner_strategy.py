@@ -119,11 +119,15 @@ def _with_assembly_identity(
     root = Path(__file__).parent
     paths = [
         root / "llm_bridge.py",
+        root / "llm_settings.py",
         root / "prompts.py",
         Path(__file__),
         root / "prompt_templates" / "timing_attribution.py",
     ]
     paths.extend((root / "prompt_templates" / "tuner").glob("*.py"))
+    # The bridge delegates request construction and response admission to these
+    # owners. An adapter edit must invalidate preflight just like a bridge edit.
+    paths.extend((root / "llm_transport").rglob("*.py"))
     digest = source_fingerprint({str(p.relative_to(root)): p.read_bytes() for p in paths})
     identity = strategy.identity.model_copy(update={"assembly_sha256": digest})
     if expected is not None and identity != expected:

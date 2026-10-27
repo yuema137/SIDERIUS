@@ -13,6 +13,7 @@ that matches the behavior you are changing.
 | Understand messages between steps | [Schemas and protocols](schemas/README.md) |
 | Inspect prompt assembly | [Prompt resources](prompt_templates/README.md) |
 | Find a callable tool | [Skills](skills/README.md) |
+| Configure an additional model provider | [Model providers](llm_transport/README.md) |
 
 ## Technical detail
 
