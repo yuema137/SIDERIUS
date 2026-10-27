@@ -117,6 +117,10 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     def status(operation_id: UUID):
         return service.status(operation_id)
 
+    @app.get("/api/operations/{operation_id}/graph-results")
+    def graph_results(operation_id: UUID):
+        return service.graph_results(operation_id)
+
     @app.get("/api/operations/{operation_id}/tokens")
     def tokens(operation_id: UUID):
         return service.tokens(operation_id)
@@ -152,6 +156,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "app.js": "text/javascript",
             "native-chain.js": "text/javascript",
             "native-chain-monitor.js": "text/javascript",
+            "graph-results-monitor.js": "text/javascript",
             "token-presenter.js": "text/javascript",
             "recorded-example.js": "text/javascript",
             "session.js": "text/javascript",

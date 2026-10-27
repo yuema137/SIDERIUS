@@ -1,6 +1,8 @@
 """Two real authored bodies and declared feedback; only provider/training effects are doubled."""
 
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 
@@ -86,7 +88,7 @@ def loop_tuner(prepared, training_runner, native_runner, monkeypatch):
 
 
 def test_two_native_bodies_preserve_advice_and_verify_feedback(
-    prepared, loop_tuner, native_runner, interpretation_provider
+    prepared, loop_tuner, native_runner, interpretation_provider, monkeypatch
 ):
     request = loop_request(prepared)
     receipt = launch_candidate(request)
@@ -117,10 +119,43 @@ def test_two_native_bodies_preserve_advice_and_verify_feedback(
         for value in proposals
     )
     parent = initial(request).model_copy(update={"run_id": receipt.run_id})
-    verify_loop(request, parent, receipt)
+    assert len(verify_loop(request, parent, receipt)) == 2
+    from tools.candidate_console import graph_results
+    from tools.candidate_operations.models import CandidateOperation, OperationFailure
+
+    operation_id = UUID(hex=receipt.run_id)
+    submission = CandidateOperation(request_id=operation_id, request=request)
+    monkeypatch.setattr(
+        graph_results,
+        "read_operation",
+        lambda *_: SimpleNamespace(state="completed", receipt=receipt),
+    )
+    monkeypatch.setattr(
+        graph_results,
+        "lookup_operation_request",
+        lambda *_: submission,
+    )
+    monkeypatch.setattr(graph_results, "read_model", lambda *_args, **_kwargs: parent)
+    projection = graph_results.read_graph_results(
+        SimpleNamespace(operation_store=object()), operation_id
+    )
+    assert [item.iteration for item in projection.bodies] == [1, 2]
+    assert [item.tuning_state for item in projection.bodies] == ["succeeded", "succeeded"]
+    assert [item.result.headline.best_score for item in projection.bodies] == [0.75, 0.75]
+    # Each body keeps its own native report in verified order (model names differ per body).
+    assert [item.result.model_type for item in projection.bodies] == [
+        "worker_linear_1",
+        "worker_linear_2",
+    ]
+    assert "iteration_002" not in projection.model_dump_json()
+
     second_path.write_text(second.model_copy(update={"human_advice": "tampered"}).model_dump_json())
     with pytest.raises(ValueError, match="capture mismatch"):
         verify_loop(request, parent, receipt)
+    # The console maps a refused loop body to a typed, path-free integrity failure.
+    with pytest.raises(OperationFailure, match="verified loop bodies are unavailable") as refused:
+        graph_results.read_graph_results(SimpleNamespace(operation_store=object()), operation_id)
+    assert refused.value.detail.code == "integrity"
 
 
 def test_operation_stop_finishes_active_body_without_next_dispatch(

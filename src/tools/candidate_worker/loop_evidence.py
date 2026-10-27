@@ -71,7 +71,7 @@ def advance_body(
 
 def verify_loop(
     request: CandidateRunRequest, initial: CandidateRunReceipt, receipt: CandidateRunReceipt
-) -> None:
+) -> tuple[CandidateRunReceipt, ...]:
     from .loop import stop_requested
     from .loop_models import admit_loop
 
@@ -100,7 +100,7 @@ def verify_loop(
             or receipt.validation_passed is not None
         ):
             raise ValueError("loop terminal lacks completed-body index")
-        return
+        return ()
     if trace.attempted_iterations > loop.final_iteration:
         raise ValueError("loop exceeds declared finite limit")
     if trace.attempted_iterations < loop.final_iteration:
@@ -113,6 +113,7 @@ def verify_loop(
             raise ValueError("loop terminal omits an already-dispatched body")
     state = initial_history(request, initial)
     last = None
+    bodies: list[CandidateRunReceipt] = []
     for iteration in range(1, trace.attempted_iterations + 1):
         control = candidate_control_dir(Path(initial.workspace), iteration=iteration)
         body = CandidateRunReceipt.model_validate_json(read_graph_control(control / "body.json"))
@@ -129,6 +130,7 @@ def verify_loop(
             if getattr(body, name) != getattr(initial, name):
                 raise ValueError("loop body identity changed")
         verify_graph_trace(request, initial, body, iteration=iteration, history=state)
+        bodies.append(body)
         if body.status != "completed" and iteration != trace.attempted_iterations:
             raise ValueError("loop continued without successful required feedback")
         if body.status == "completed":
@@ -147,3 +149,4 @@ def verify_loop(
         or (expected == "stopped" and not stop_requested(initial))
     ):
         raise ValueError("loop terminal disagrees with completed bodies or Stop evidence")
+    return tuple(bodies)
