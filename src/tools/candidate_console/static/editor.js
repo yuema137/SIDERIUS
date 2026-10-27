@@ -13,6 +13,8 @@
   const draftsPending = () => trainingDrafts.size > 0 || loopDrafts.size > 0;
   let inventory = [], selected = null, pending = false, sourceDirty = false, mode = 'source', reviewed = null, conflict = null, saving = false;
   let bindingDraft = null, bindingDraftConflict = false;
+  let nodeDraft = null; // Pending palette node {proposal, view, graph, inventory}; editor-palette.js projects it.
+  const drafting = () => mode === 'binding-draft' || mode === 'node-draft';
   const clone = value => JSON.parse(JSON.stringify(value));
   const status = message => { $('status').textContent = message; };
   const current = (id, version) => project === id && generation === version;
@@ -95,7 +97,7 @@
     const connected = window.consoleSession.connected;
     $('project').disabled = !connected || !$('project').options.length;
     const invalidTraining = draftsPending();
-    const draftIncomplete = mode === 'binding-draft' && bindingDraft?.inspection?.status !== 'complete';
+    const draftIncomplete = (mode === 'binding-draft' && bindingDraft?.inspection?.status !== 'complete') || (mode === 'node-draft' && nodeDraft?.view?.status !== 'complete');
     $('review').disabled = !connected || saving || !graph || invalidTraining || draftIncomplete || bindingDraftConflict || (!!(base?.document?.task_binding || graph?.task_binding) && !taskSelection);
     $('refresh').disabled = !connected || !project;
     $('save').disabled = !connected || saving || !reviewed || reviewed.source !== $('source').value || invalidTraining || bindingDraftConflict || !taskAccepted();
@@ -104,15 +106,16 @@
     renderTaskControls();
     window.editorCircuit?.setEnabled(canEditCircuit());
     window.editorLoopControls?.setEnabled($('loop'), canEditLoop());
+    window.editorNodePalette?.setState({enabled: canAddNode(), pendingNode: nodeDraft?.proposal.node || null});
   }
   function invalidate() {
     generation++; reviewed = null; taskAcknowledged = false; taskAdopted = false; controls(); $('diff').textContent = '';
-    $('pending').textContent = bindingDraft
+    $('pending').textContent = nodeDraft ? `Pending new node ${nodeDraft.proposal.node} · ${nodeDraft.view?.status || 'checking'}` : bindingDraft
       ? `Pending binding draft · ${bindingDraft.inspection?.status || 'checking'}`
       : pending ? (mode === 'document' ? 'Pending inspector edits · Review changes to update Python source before editing it.'
         : mode === 'loop' ? 'Pending research-loop edits · Review changes to update Python source before editing it.' : 'Pending source edits · not saved') : 'No pending edits.';
   }
-  function changed() { pending = true; $('source').disabled = ['document', 'loop', 'binding-draft'].includes(mode); invalidate(); }
+  function changed() { pending = true; $('source').disabled = ['document', 'loop', 'binding-draft', 'node-draft'].includes(mode); invalidate(); }
   const api = (path, body) => window.consoleSession.request('editor/' + path, body);
   function diagnostic(items = []) { $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}${item.field_path ? ` at ${item.field_path.join('.')}` : ''}`).join('\n'); }
   function showConflict(value, isBindingDraft = false) {
@@ -145,7 +148,7 @@
   function adopt(value) {
     trainingDrafts.clear(); loopDrafts.clear();
     taskSelection = null; taskMessage = '';
-    bindingDraft = null; bindingDraftConflict = false;
+    bindingDraft = null; bindingDraftConflict = false; nodeDraft = null;
     sourceAvailable = true; base = value; graph = value.document ? clone(value.document) : null; inventory = value.port_inventory || []; training = value.training; loopTemplate = value.loop_template || null;
     $('source').value = value.source; $('source').disabled = !graph; mode = 'source'; sourceDirty = false; pending = false; conflict = null;
     $('conflict').hidden = true; selected = graph?.definition.nodes.some(n => n.id === selected) ? selected : graph?.definition.nodes[0]?.id;
@@ -158,7 +161,7 @@
   const canEditCircuit = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict && !draftsPending();
   // An invalid limit draft must stay editable so the author can correct it.
   const canEditLoop = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict &&
-    mode !== 'binding-draft' && trainingDrafts.size === 0;
+    !drafting() && trainingDrafts.size === 0;
   function projectBindingDraft() {
     inventory = clone(base.port_inventory || []);
     for (const option of inventory) {
@@ -170,6 +173,7 @@
   }
   function updateBindingDraft(nodeId, argument, source) {
     if (!canEditCircuit() || !base?.document || bindingDraftConflict) return;
+    if (nodeDraft) { bindNodeDraft(nodeId, argument, source); return; }
     if (!bindingDraft && base.document.task_binding && taskSelection &&
         !bindingEqual(taskSelection.expected_task_binding, base.document.task_binding)) {
       status('Select the configured choice matching the saved task identity before editing its bindings.'); return;
@@ -227,12 +231,49 @@
     render(); status('Binding draft cancelled. Saved workflow source is unchanged.');
   }
   cancelDraftButton.addEventListener('click', cancelBindingDraft);
+  // Node add/remove: the palette proposes; the server inspects (node-draft) and reviews exact bytes.
+  const canAddNode = () => canEditCircuit() && !bindingDraft && !nodeDraft && (!pending || (mode === 'source' && reviewed?.source === $('source').value));
+  const projectNodeDraft = () => { ({graph, inventory} = window.editorNodePalette.project(nodeDraft)); };
+  function startNodeDraft(fields) {
+    if (!canAddNode()) { status('Review/save or discard the current edits before adding a capability.'); return; }
+    nodeDraft = {proposal: {kind: 'add_node', source: $('source').value, binding: null, arguments: [], ...fields}, view: null, graph: clone(graph), inventory: clone(inventory)};
+    mode = 'node-draft'; selected = fields.node; projectNodeDraft(); changed(); render(); void inspectNodeDraft();
+  }
+  async function inspectNodeDraft() {
+    const id = project, version = generation, draft = nodeDraft;
+    try {
+      const value = await api(`${encodeURIComponent(id)}/node-draft`, {expected_sha256: base.sha256, proposal: clone(draft.proposal)});
+      if (!current(id, version) || nodeDraft !== draft) return;
+      draft.view = value; projectNodeDraft(); invalidate(); render();
+      diagnostic(value.diagnostics.map(message => ({code: value.status, message})));
+      status(window.editorNodePalette.draftMessage(value));
+    } catch (error) {
+      if (!error.stale && current(id, version)) { if (hasSourceConflict(error) && error.value?.current) showConflict(error.value.current, true); else status(error.message + ' The new node draft remains local.'); }
+    }
+  }
+  function bindNodeDraft(nodeId, argument, source) {
+    if (nodeId !== nodeDraft.proposal.node) { status(`Review or cancel the new node ${nodeDraft.proposal.node} before rewiring other capabilities.`); return; }
+    window.editorNodePalette.bind(nodeDraft, argument, source); projectNodeDraft(); changed(); render(); void inspectNodeDraft();
+  }
+  function cancelNodeDraft() {
+    if (!nodeDraft || saving) return;
+    ({graph, inventory} = nodeDraft); nodeDraft = null; mode = 'source'; pending = $('source').value !== base.source; selected = graph.definition.nodes[0]?.id;
+    invalidate(); diagnostic(); render(); status(pending ? 'New node cancelled. Review again to keep the earlier source edits.' : 'New node cancelled. Saved workflow source is unchanged.');
+  }
+  function removeNodes(ids) {
+    if (nodeDraft && ids.includes(nodeDraft.proposal.node)) { cancelNodeDraft(); return; }
+    if (!canAddNode()) { status('Review/save or discard the current edits before removing a capability.'); return; }
+    if (ids.length > 1 && !window.confirm(`Remove ${ids.length} capabilities (${ids.join(', ')})? Review still shows the exact change before saving.`)) return;
+    void reviewProposal({kind: 'remove_node', source: $('source').value, nodes: [...ids]});
+  }
+  window.editorNodePalette?.mount($('palette'), $('graph'), {add: startNodeDraft, cancel: cancelNodeDraft});
   function renderGraph() {
     $('edges').replaceChildren();
     const id = project, document = graph;
     const live = () => project === id && graph === document;
     window.editorCircuit.render($('graph'), {viewKey: id, document: graph, inventory, selected, enabled: canEditCircuit(),
-      allowBindingChange: !pending || mode === 'binding-draft', allowMove: mode !== 'binding-draft'}, {
+      allowBindingChange: !pending || drafting(), allowMove: !drafting()}, {
+      remove: ids => { if (live()) removeNodes(ids); }, menu: (nodeId, event) => { if (live()) window.editorNodePalette.contextMenu(event, nodeId, removeNodes); },
       select: value => { if (live()) { selected = value; render(); } },
       bind: (nodeId, argument, source) => { if (live()) updateBindingDraft(nodeId, argument, source); },
       disconnect: (nodeId, argument) => { if (live()) updateBindingDraft(nodeId, argument, null); },
@@ -315,6 +356,7 @@
       const heading = node('div', '', $('inspector'));
       const capabilityLabel = window.editorCapabilityPresentation.append(heading, item.capability, item.id, 'inspector-capability-heading');
       heading.setAttribute('aria-label', `${capabilityLabel}, instance ${item.id}`);
+      window.editorNodePalette?.inspectorActions($('inspector'), item.id, {remove: removeNodes, enabled: canEditCircuit()});
       const mapping = node('details', '', $('inspector')); mapping.className = 'inspector-mapping';
       node('summary', 'Mapping details', mapping);
       const mappingList = node('dl', '', mapping); mappingList.className = 'inspector-mapping-list';
@@ -353,7 +395,7 @@
         const disconnect = node('button', 'Disconnect', $('inspector'));
         disconnect.type = 'button'; disconnect.className = 'editor-disconnect';
         disconnect.setAttribute('aria-label', `Disconnect ${item.id}.${option.argument || 'request'}`);
-        disconnect.disabled = !option.bound || bindingDraftConflict || (pending && mode !== 'binding-draft');
+        disconnect.disabled = !option.bound || bindingDraftConflict || (pending && !drafting());
         disconnect.hidden = !option.bound;
         disconnect.addEventListener('click', () => { if (graph === capturedGraph) updateBindingDraft(item.id, option.argument, null); });
       }
@@ -409,9 +451,9 @@
   function render() {
     renderGraph(); renderInspector(); renderLoop();
     if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) input.disabled = true;
-    if (pending && mode !== 'binding-draft') for (const input of document.querySelectorAll('#editor-inspector select[data-node], #editor-inspector .editor-disconnect')) input.disabled = true;
-    if (mode === 'binding-draft') for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) {
-      if (!input.matches('select[data-node], .editor-disconnect')) input.disabled = true;
+    if (pending && !drafting()) for (const input of document.querySelectorAll('#editor-inspector select[data-node], #editor-inspector .editor-disconnect')) input.disabled = true;
+    if (drafting()) for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) {
+      if (!input.matches('select[data-node], .editor-disconnect, .editor-remove-node')) input.disabled = true;
       else input.disabled = bindingDraftConflict || saving;
     }
     controls();
@@ -421,7 +463,7 @@
     sourceAvailable = false; pending = false; sourceDirty = false; mode = 'source';
     trainingDrafts.clear(); loopDrafts.clear();
     base = null; graph = null; conflict = null; reviewed = null; inventory = []; training = null; loopTemplate = null; selected = null;
-    bindingDraft = null; bindingDraftConflict = false;
+    bindingDraft = null; bindingDraftConflict = false; nodeDraft = null;
     $('conflict').hidden = true; $('rebase').disabled = true;
     $('source').value = ''; $('source').disabled = true;
     $('current').textContent = ''; $('conflict-diff').textContent = '';
@@ -483,7 +525,7 @@
     try {
       const value = await api(`${encodeURIComponent(id)}/review`, body);
       if (!current(id, version)) return;
-      bindingDraft = null; bindingDraftConflict = false;
+      bindingDraft = null; bindingDraftConflict = false; nodeDraft = null;
       $('source').value = value.source; $('source').disabled = false; graph = clone(value.document); mode = 'source'; sourceDirty = false;
       // Choices depend on actual new nodes/externals: refresh projection through
       // the reviewed document using server-derived options returned by review.
@@ -494,7 +536,7 @@
       $('review-disclosure').open = true;
       $('diff').textContent = value.diff || '(No source changes)'; diagnostic(); render();
       $('pending').textContent = pending ? 'Pending reviewed source · not saved' : 'No source changes; review acceptance may still be required.';
-      status(value.task_reference_update ? 'Inspect the Python diff and task findings. Confirm supported findings before saving.' : 'Declaration validated. Inspect the exact Python diff, then save.');
+      status(value.node_edit ? value.node_edit.message + ' Inspect the exact Python diff, then save.' : value.task_reference_update ? 'Inspect the Python diff and task findings. Confirm supported findings before saving.' : 'Declaration validated. Inspect the exact Python diff, then save.');
     } catch (error) {
       if (error.stale) return;
       if (!current(id, version)) return;
@@ -502,7 +544,7 @@
         showConflict(error.value.current, mode === 'binding-draft');
         diagnostic(error.value?.diagnostics); status(error.message); return;
       }
-      if (error.value?.proposal) { const proposal = error.value.proposal; bindingDraft = null; bindingDraftConflict = false; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training; loopTemplate = proposal.loop_template || null; mode = 'source'; sourceDirty = false; render(); }
+      if (error.value?.proposal) { const proposal = error.value.proposal; bindingDraft = null; bindingDraftConflict = false; nodeDraft = null; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training; loopTemplate = proposal.loop_template || null; mode = 'source'; sourceDirty = false; render(); }
       if (error.value?.proposal?.task_reference_update) showTaskRefusal(error.value.proposal, selection || error.value.proposal);
       else if (mode === 'binding-draft' && ['draft_incomplete', 'draft_invalid'].includes(error.code)) {
         bindingDraft.inspection = {status: error.code.slice('draft_'.length), diagnostics: [error.message]};
@@ -514,6 +556,7 @@
   }
   $('review').addEventListener('click', () => reviewProposal(mode === 'binding-draft'
     ? {kind: 'draft', draft: {base_document: clone(bindingDraft.base_document), bindings: clone(bindingDraft.bindings)}}
+    : mode === 'node-draft' ? clone(nodeDraft.proposal)
     : mode === 'document' ? {kind: 'document', document: clone(graph)}
     : mode === 'loop' ? {kind: 'loop', source: $('source').value, loop: graph.definition.loop ? clone(graph.definition.loop) : null}
     : {kind: 'source', source: $('source').value}));

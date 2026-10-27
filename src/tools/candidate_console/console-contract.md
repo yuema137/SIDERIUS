@@ -437,7 +437,9 @@ the persistent shell and memory-only session with the operation monitor; its
 source/review policy remains owned by `editor.js`. `GET /api/editor/projects`
 returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
 `POST /api/editor/{project_id}/review` validates `ReviewRequest`; `POST
-/api/editor/{project_id}/save` validates `SaveRequest`. The existing console
+/api/editor/{project_id}/save` validates `SaveRequest`. `GET /api/editor/node-catalog`
+and `POST /api/editor/{project_id}/node-draft` serve the node palette (a project
+named `node-catalog`, like `projects`, is shadowed by the fixed route). The existing console
 Bearer token, origin, host and 256 KiB wire-body admission apply to every API
 route. Browser requests select project IDs and never filesystem destinations.
 The [authoring contract](../workflow_authoring/authoring-contract.md) owns source
@@ -458,8 +460,26 @@ rebinding uses exact existing server BindingChoices. Circuit and inspector call
 one editor.js mutation; dragging writes positions through that same draft owner.
 Bindings/profile/options are not inferred from card order or geometry. Request
 protocols display as adaptor labels inside their actual consumer, not extra nodes.
-External source chips remain inspector bindings. Omitted optional ports, argument
-creation/deletion and new nodes are not graphical controls in this slice.
+External source chips remain inspector bindings. Omitted optional ports and argument
+creation/deletion are not graphical controls in this slice.
+
+The node palette (`editor-palette.js`, `editor-palette.css`; presentation only,
+`editor.js` owns the draft) is mounted above the canvas. It lists
+`GET /api/editor/node-catalog` entries grouped by capability with a text search,
+and adds one by click (placed right of the existing cards) or by dragging an entry
+onto the canvas (dropped at that world position). It proposes an unused instance
+id (`<capability>`, `<capability>2`, ...). The pending node is a local
+`nodeDraft` (mode `node-draft`): the canvas and Selection draw it from the proposal
+plus the server's `node-draft` ports, its required inputs show as unbound, and
+binding them goes through the same canvas/inspector gestures (other nodes cannot
+be rewired until it is reviewed or cancelled). Review is disabled until
+`node-draft` reports `complete`; "Cancel new node" drops it without a request.
+Adding is allowed with no pending edits or on top of a reviewed, unsaved source.
+Removal is offered by Delete/Backspace on a focused capability heading, its
+context menu and "Remove capability" in Selection; it sends a `remove_node` review
+directly (Review is the explanation: refusal text or `node_edit.message` plus the
+exact diff). Removing several nodes at once asks for confirmation; the canvas has
+no multi-selection yet, so current gestures remove one node without a prompt.
 Required and bound inputs always render as card rows; optional unbound inputs fold
 into one `.circuit-optional` disclosure per card ("N optional inputs"), expandable
 and remembered across re-renders of the same graph. While an output is pending,
@@ -559,6 +579,12 @@ and overlap detection without a browser. `tests/browser/editor_canvas_fit.mjs`
 fit-on-open, that view controls send nothing and keep bytes, folded optional
 inputs, the disjoint fully wired interpretation fixture, Arrange view on an
 overlapping layout, zoomed drag arithmetic and a non-empty task panel.
+`tests/browser/node_palette.mjs` (same variables; unit owner
+`tests/unit/tools/test_workflow_node_edits.py`) checks palette categories/search,
+click and drag add, the incomplete-draft Review gate with no disk write, binding the
+new node, review/save keeping author comments, refused removal of a node others
+read (Delete key), the context menu, byte-identical inspector removal of the added
+node and cancelling a dragged draft.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser

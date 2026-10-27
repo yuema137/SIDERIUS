@@ -1,0 +1,14 @@
+/* Node palette (editor-palette.js): presentation only. */
+.editor-palette { margin: 0 0 .6rem; padding: .5rem .6rem; border: 1px solid var(--control-border); border-radius: .5rem; }
+.editor-palette h3 { margin: 0 0 .4rem; font-size: .9rem; }
+.editor-palette .palette-search { width: 100%; max-width: 22rem; margin-bottom: .4rem; }
+.editor-palette .palette-list { display: flex; flex-wrap: wrap; gap: .4rem .8rem; }
+.editor-palette .palette-category { min-width: 12rem; }
+.editor-palette .palette-category summary { font-size: .75rem; font-weight: 700; color: var(--muted); cursor: pointer; }
+.editor-palette .palette-entry { display: block; margin: .25rem 0; text-align: left; cursor: grab; }
+.editor-palette .palette-entry:disabled { cursor: not-allowed; }
+.editor-palette .palette-note, .editor-palette .palette-empty { margin: .3rem 0 0; color: var(--muted); font-size: .75rem; }
+.editor-palette .palette-cancel { margin-top: .4rem; }
+.editor-remove-node { margin: .4rem 0; }
+.node-context-menu { position: fixed; z-index: 20; padding: .25rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--panel); box-shadow: 0 4px 14px #0003; }
+.node-context-menu button { display: block; width: 100%; text-align: left; }
