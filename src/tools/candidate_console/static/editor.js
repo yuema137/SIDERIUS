@@ -521,6 +521,7 @@
     if (!window.consoleSession.connected || saving || !reviewed || reviewed.source !== $('source').value || !taskAccepted()) return;
     const id = project, version = generation, exact = {...reviewed};
     const body = {source: exact.source, proposal_sha256: exact.sha256, expected_sha256: exact.base};
+    const versionName = window.editorVersions?.saveName(); if (versionName) body.version_name = versionName;
     if (exact.taskReview) body.task_reference_acceptance = {selection: clone(exact.taskSelection),
       acknowledged_findings: exact.taskReview.findings.map(({code, reference}) => ({code, reference})), adopt_current_snapshot: taskAdopted};
     saving = true; controls();
@@ -529,10 +530,13 @@
       if (!current(id, version)) return;
       const value = await api(encodeURIComponent(id)); if (!current(id, version)) return;
       if (value.sha256 !== saved.sha256) { showConflict(value); status('Save completed, then source changed again. Pending reviewed bytes retained.'); return; }
-      adopt(value); status(saved.unchanged ? 'Source unchanged; confirmed from disk.' : 'Saved reviewed bytes and reloaded from disk. Recovery copies preserved.');
+      adopt(value); status(saved.unchanged ? 'Source unchanged; confirmed from disk. No new version recorded.' : `Saved reviewed bytes as version "${saved.version_name}" and reloaded from disk. Recovery copies preserved.`);
     } catch (error) {
       if (error.stale) return;
       if (!current(id, version)) return;
+      // Source bytes were published; only the version record write failed.
+      if (error.code === 'version_record' && error.value?.current) { adopt(error.value.current); status(error.message); return; }
+      if (error.code === 'version_record') { status(error.message + ' Save refused before writing; reviewed proposal retained.'); return; }
       if (hasSourceConflict(error) && error.value?.current) { showConflict(error.value.current); reviewed = null; }
       else if (error.value?.proposal?.task_reference_update) {
         showTaskRefusal(error.value.proposal, exact.taskSelection);

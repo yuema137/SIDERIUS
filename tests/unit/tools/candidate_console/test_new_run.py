@@ -214,3 +214,30 @@ def test_submit_failure_is_not_presubmit_refusal(fresh, monkeypatch):
     )
     assert response.status_code == 409
     assert "admission_not_attempted" not in response.json()["error"]
+
+
+def test_review_shows_recorded_version_name_without_changing_identity(fresh):
+    """Fails if the Save name is not projected for the bound SHA or alters the expectation."""
+    from tools.workflow_authoring.versions import VersionRecord, encode_record, version_record_path
+
+    adapter, selection, project = fresh
+    unnamed = adapter.review("fresh", selection)
+    assert unnamed.source_version_name is None
+    record = VersionRecord.model_validate(
+        {
+            "source_name": project.source_file.name,
+            "versions": [
+                {
+                    "sha256": selection.expected_source_sha256,
+                    "name": "baseline",
+                    "recorded_at": "2026-10-27T00:00:00Z",
+                    "origin": "saved",
+                }
+            ],
+        }
+    )
+    version_record_path(project.source_file).write_bytes(encode_record(record))
+    named = adapter.review("fresh", selection)
+    assert named.source_version_name == "baseline"
+    assert named.expectation == unnamed.expectation
+    assert "source_version_name" not in intent(named).model_dump()

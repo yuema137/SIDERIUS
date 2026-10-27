@@ -522,3 +522,21 @@ def test_interpretation_fixture_saves_complete_disjoint_positions():
     placed = sorted(positions.values())
     for (x1, y1), (x2, y2) in pairwise(placed):
         assert x2 - x1 >= 300 or abs(y2 - y1) >= 600, (placed, (x1, y1), (x2, y2))
+
+
+def test_http_version_routes(editor_config):
+    """Fails if history routes bypass console auth or the list/detail wire shape breaks."""
+    config = editor_config
+    headers = {
+        "Authorization": "Bearer " + open(config.auth_token_file).read(),
+        "Origin": config.browser_origin,
+    }
+    with TestClient(create_app(config), base_url=config.browser_origin) as client:
+        assert client.get("/api/editor/example/versions").status_code == 401
+        listed = client.get("/api/editor/example/versions", headers=headers).json()
+        assert listed["next_name"] == "v1" and listed["record_present"] is False
+        sha = listed["versions"][0]["sha256"]
+        detail = client.get(f"/api/editor/example/versions/0?sha256={sha}", headers=headers)
+        assert detail.status_code == 200 and detail.json()["source"] == SOURCE
+        stale = client.get(f"/api/editor/example/versions/0?sha256={'0' * 64}", headers=headers)
+        assert stale.status_code == 409 and stale.json()["error"]["code"] == "conflict"

@@ -212,3 +212,9 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
 .workflow-loop-panel input[type="number"] { max-width: 10rem; }
 .workflow-loop-panel .editor-loop-stop { display: grid; gap: 4px; margin: 0 0 10px; }
 .workflow-loop-panel .editor-loop-stop button { justify-self: start; }
+/* Named versions (editor-versions.js) */
+#editor-version-name { max-width: 14rem; }
+.editor-history-list { display: grid; gap: 6px; padding-left: 1.4rem; }
+.editor-history-list li.current { font-weight: 600; }
+.editor-history-list button { margin-left: 8px; }
+.editor-history-detail pre { max-height: 24rem; overflow: auto; }
