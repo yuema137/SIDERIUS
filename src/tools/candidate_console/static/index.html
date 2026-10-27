@@ -12,6 +12,7 @@
   <script src="/native-chain-monitor.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/editor-task-controls.js" defer></script>
+  <script src="/editor-capability-presentation.js" defer></script>
   <script src="/editor-circuit-geometry.js" defer></script>
   <script src="/editor-circuit.js" defer></script>
   <script src="/editor.js" defer></script>
@@ -22,7 +23,7 @@
   <script src="/native-chain.js" defer></script>
 </head>
 <body>
-<header><div class="brand">SIDERIUS <span>Local candidate console</span></div><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p>
+<header><div class="brand">SIDERIUS <span>Local candidate console</span></div><details class="console-intro"><summary>About this console</summary><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></details>
   <div class="theme-control"><label for="theme-preference">Color theme</label><select id="theme-preference"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
 </header>
 <nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#slow-control">Slow control</a></nav>
@@ -30,7 +31,7 @@
 <p id="route-status" role="status"></p>
   <section class="card" aria-labelledby="access-heading">
     <h1 id="access-heading">Connect to the console</h1>
-    <p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p>
+    <details class="access-help"><summary>About the console token</summary><p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p></details>
     <form id="access-form" class="actions"><div class="grow"><label for="token">Console token</label><input id="token" type="password" autocomplete="off" required></div><button type="submit">Connect</button></form>
     <p id="access-status" role="status">Not connected.</p>
   </section>
@@ -77,15 +78,18 @@
     </section>
   </div>
   </details></section>
-<section id="view-workflow" data-view="workflow" hidden><h1 tabindex="-1">Workflow builder</h1>
-  <h2>Editing current workflow</h2>
-  <section class="card">
-    <label>Project <select id="editor-project" disabled></select></label>
+<section id="view-workflow" data-view="workflow" hidden><h1 tabindex="-1">Workflow</h1>
+  <div class="workflow-controls">
+  <section class="card workflow-project">
+    <label for="editor-project">Project</label><select id="editor-project" disabled></select>
     <button id="editor-inspect" type="button" hidden>Inspect source</button><p id="editor-status" role="status">Connect to open a configured project.</p>
-    <p class="warning">Saving updates source for future New run captures. It does not launch a run or change existing captures. Task-bound publication checks the explicitly selected native task identity.</p>
+    <details><summary>Save behavior</summary><p class="muted">Saving updates source for future New run captures. It does not launch a run or change existing captures. Task-bound publication checks the explicitly selected native task identity.</p></details>
   </section>
-  <section class="card editor-task-controls" id="editor-task-controls" aria-label="Task package and version"></section>
-  <section class="card">
+  <details class="card workflow-task-details"><summary>Task package and version</summary>
+    <section class="editor-task-controls" id="editor-task-controls" aria-label="Task package and version"></section>
+  </details>
+  </div>
+  <section class="card workflow-actions">
     <div class="actions">
       <button id="editor-refresh" disabled>Refresh from disk</button>
       <button id="editor-review" disabled>Review changes</button>
@@ -102,14 +106,14 @@
     </div>
   </section>
   <div class="editor-workspace">
-    <section class="card">
-      <h2>Declaration graph</h2>
+    <section class="card workflow-canvas-panel">
+      <h2>Workflow canvas</h2>
+      <details class="canvas-help"><summary>Canvas controls</summary><p>Select a capability to inspect its request. Select an output and then a highlighted input to rebind it. Drag a capability heading to move it; Alt + arrow keys also move the selected capability.</p></details>
       <div id="editor-graph"></div>
-      <h3>Connections</h3>
-      <ul id="editor-edges"></ul>
+      <details class="connection-list"><summary>Connection mappings</summary><ul id="editor-edges"></ul></details>
     </section>
-    <section class="card">
-      <h2>Selected node</h2>
+    <section class="card workflow-inspector-panel">
+      <h2>Selection</h2>
       <div id="editor-inspector"></div>
 
     </section>
@@ -126,7 +130,8 @@
     <pre id="editor-diff"></pre>
     <p>Every edit invalidates review. Save writes exactly the reviewed bytes.</p>
   </details>
-  <section class="card" aria-labelledby="new-run-heading">
+  <details class="card workflow-run-details"><summary>Prepare a new run</summary>
+  <section aria-labelledby="new-run-heading">
     <h2 id="new-run-heading">New run</h2>
     <p id="new-run-prerequisites">Select a runnable project and save source edits.</p>
     <label for="new-run-task">Configured task and resources</label><select id="new-run-task"><option value="">Choose task and resources</option></select>
@@ -139,7 +144,7 @@
       <div class="actions"><button id="new-run-check" disabled>Check status</button><button id="new-run-retry" disabled>Retry same preparation</button><a id="new-run-monitor">Monitor preparation</a><button id="new-run-open" disabled>Open prepared run</button><button id="new-run-dismiss" disabled>Dismiss terminal or refused preparation</button></div>
     </section>
   </section>
-  <section class="card" aria-labelledby="capture-heading">
+  <section aria-labelledby="capture-heading">
     <h2 id="capture-heading">Prepared run</h2>
     <p>Open a prepared capture, review its saved inputs, then start a candidate. Current edits apply to future captures.</p>
     <label for="capture-task">Configured task</label><select id="capture-task" disabled></select>
@@ -157,7 +162,7 @@
       <p id="capture-operation-status" role="status"></p><p id="capture-operation-id" class="mono"></p>
       <div class="actions"><button id="capture-check" disabled>Check status</button><button id="capture-retry" disabled>Retry same operation</button><a id="capture-monitor" hidden>Monitor operation</a><button id="capture-finish" hidden>Dismiss completed operation</button></div>
     </section>
-  </section>
+  </section></details>
   <footer>Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</footer>
 </section>
 <section id="view-slow-control" data-view="slow-control" hidden><h1 tabindex="-1">Slow control</h1>

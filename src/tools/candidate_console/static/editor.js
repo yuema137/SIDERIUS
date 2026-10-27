@@ -218,7 +218,20 @@
     const capturedGraph = graph;
     const item = graph.definition.nodes.find(n => n.id === selected);
     if (item) {
-      node('p', `${item.id} · ${item.capability}`, $('inspector'));
+      const heading = node('div', '', $('inspector'));
+      const capabilityLabel = window.editorCapabilityPresentation.append(heading, item.capability, item.id, 'inspector-capability-heading');
+      heading.setAttribute('aria-label', `${capabilityLabel}, instance ${item.id}`);
+      const mapping = node('details', '', $('inspector')); mapping.className = 'inspector-mapping';
+      node('summary', 'Mapping details', mapping);
+      const mappingList = node('dl', '', mapping); mappingList.className = 'inspector-mapping-list';
+      node('dt', 'Capability ID', mappingList); node('dd', item.capability, mappingList);
+      node('dt', 'Instance ID', mappingList); node('dd', item.id, mappingList);
+      if (item.request.kind === 'protocol') { node('dt', 'Protocol', mappingList); node('dd', item.request.protocol, mappingList); }
+      for (const option of options.filter(entry => entry.node === item.id)) {
+        const source = option.argument === null ? {kind: 'external', binding: item.request.binding} : item.request.arguments.find(argument => argument.name === option.argument).source;
+        node('dt', option.argument || 'Request', mappingList);
+        node('dd', source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port}`, mappingList);
+      }
       if (item.capability === 'tuning' && training) renderTraining();
       for (const option of options.filter(entry => entry.node === item.id)) {
         const label = node('label', option.argument || 'Request binding', $('inspector'));
