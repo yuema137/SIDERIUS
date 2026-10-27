@@ -20,10 +20,13 @@ from .models import (
     ExternalBinding,
     ExternalRequest,
     ExternalSource,
+    JudgeStop,
     LoopFeedback,
     ManagedCandidateBinding,
+    MetricThresholdStop,
     NodeInstance,
     NodePosition,
+    NoImprovementStop,
     ProtocolRequest,
     ResultSource,
     ReusableTaskReferences,
@@ -46,6 +49,9 @@ _CONSTRUCTORS: dict[str, type[DeclarationModel]] = {
     for model in (
         AuthoredLoop,
         LoopFeedback,
+        MetricThresholdStop,
+        NoImprovementStop,
+        JudgeStop,
         CandidatePreparationOptions,
         ManagedCandidateBinding,
         ReusableTaskReferences,
@@ -330,6 +336,7 @@ def _render_value(value: object, depth: int) -> str:
                 }
                 and getattr(value, name) is None
             )
+            and not (name == "stop_conditions" and not getattr(value, name))
         ]
         return f"{type(value).__name__}(\n" + "\n".join(fields) + f"\n{indentation})"
     if isinstance(value, tuple):
@@ -360,13 +367,17 @@ def render_workflow_source(document: AuthoredWorkflowDocument) -> str:
         _validation_error(error)
     except PydanticSerializationError:
         _fail("validation", "Declaration cannot be serialized for revalidation")
-    constructors = _CONSTRUCTORS
-    if validated.definition.loop is None:
-        constructors = {
-            name: model
-            for name, model in constructors.items()
-            if name not in {"AuthoredLoop", "LoopFeedback"}
-        }
+    loop = validated.definition.loop
+    # Unused loop constructors stay out of the import block to keep existing bytes stable.
+    used = set() if loop is None else {type(item).__name__ for item in loop.stop_conditions}
+    if loop is not None:
+        used |= {"AuthoredLoop", "LoopFeedback"}
+    loop_names = {"AuthoredLoop", "LoopFeedback", "MetricThresholdStop", "NoImprovementStop"}
+    constructors = {
+        name: model
+        for name, model in _CONSTRUCTORS.items()
+        if name not in loop_names - used and name != "JudgeStop"
+    }
     if not isinstance(validated, ReusableWorkflowDocument) or validated.task_binding is None:
         constructors = {
             name: model for name, model in constructors.items() if name != "TaskBinding"

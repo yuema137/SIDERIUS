@@ -755,3 +755,44 @@ paths and minted candidate IDs. The same witnesses cover Stop and native failure
 winning over Pause, the final body winning over a successor Pause, and an unresolved
 lease or uncertain supervision publishing failure. Provider/training effects remain
 doubled.
+
+### Deterministic stop conditions
+
+`AuthoredLoop.stop_conditions` optionally declares hard criteria that complete the
+loop before `final_iteration` (declaration fields: the workflow definition contract).
+They are evaluated by `tools.candidate_worker.loop_stop.evaluate_stop`, a pure,
+stateless function of a typed `StopEvaluationInput` (`iteration`, `final_iteration`,
+`conditions`, every completed body's `BodyScore(iteration, valid_formal,
+metric_spec)` from 1 to now, and the reconciled run `metric`) returning a typed
+`StopEvaluationOutput(decision="continue"|"stop", reason)`. `BodyScore` is projected
+from each verified body's committed tuning record; the evaluator never reads or
+mutates `ChainState` or native history. The metric is reconciled once over the
+captured seed metric and every body stamp. A future judge implements the same
+contract.
+
+The score is the loop incumbent: the best HealthGate-valid Formal score
+(`best_valid_formal_denoising_score`) over all completed bodies, advanced only by a
+strictly better value under the declared `MetricOrder` (the same rule as the native
+history fold). `metric_threshold` stops once the incumbent exists and is at least
+the threshold (ties stop); `no_improvement` stops after `completed_bodies`
+consecutive bodies that did not strictly improve the incumbent (a body without a
+valid Formal score is non-improving; the first valid value is an improvement).
+Conditions are any-of in declared order; the first met condition wins.
+
+Evaluation happens once per completed-body boundary, after the body is verified,
+published and folded. Precedence: a body that is not completed ends the loop with
+its own status and is never evaluated; the last declared iteration completes at the
+limit without a reason; otherwise a met condition yields status `completed` with
+`loop_trace.stop_reason` (a discriminated `metric_threshold`/`no_improvement`
+reason carrying `condition_index` and the observed values) and wins over a pending
+Stop or Pause at that boundary. No evaluation precedes body 1. A run without a bound
+metric, or a `metric_threshold` naming another metric id, fails the loop with a
+typed error naming the condition rather than ignoring it or guessing a direction.
+
+`verify_loop` trusts no recorded value: it re-runs the evaluator at every verified
+boundary, refuses a loop that continued past a met condition, and requires the
+recorded `stop_reason` to equal the re-derived one exactly (absent otherwise).
+A resumed segment rebuilds its score carrier from the same whole-run replay, so the
+incumbent and the no-improvement window span segments. A condition-completed run is
+`completed`, not a resumable checkpoint. Receipts and source without conditions are
+byte-identical to those before this feature.

@@ -766,7 +766,8 @@ when requested through a resumed segment. Neither request sends a process signal
 `OperationSnapshot` only when its native receipt is paused, its Completion binds
 that receipt, the wrapper is observably exited, and recorded native supervision
 proves clean process-group shutdown. Missing/unknown lifecycle evidence, a reached
-finite limit, a root Stop or an existing successor refuses with `loop_resume`. A
+finite limit, a met stop condition (a `completed` receipt with `loop_trace.stop_reason`),
+a root Stop or an existing successor refuses with `loop_resume`. A
 partial next body already invalidates the paused readback, so the review finds no
 verified paused segment. The review constructs no process and reads no credentials.
 
