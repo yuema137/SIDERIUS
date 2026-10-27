@@ -135,9 +135,14 @@ def test_operation_stop_finishes_active_body_without_next_dispatch(
         OperationStoreConfig,
         request_loop_pause,
         request_loop_stop,
+        review_loop_resume,
         submit_operation,
     )
-    from tools.candidate_operations.models import OperationSnapshot, ProcessObservation
+    from tools.candidate_operations.models import (
+        OperationFailure,
+        OperationSnapshot,
+        ProcessObservation,
+    )
     from tools.candidate_operations.store import load_record
     from tools.candidate_worker import training
 
@@ -153,6 +158,11 @@ def test_operation_stop_finishes_active_body_without_next_dispatch(
     )
     submit_operation(config, submission, launch_environment={"OPENAI_API_KEY": "offline-stub"})
     record = load_record(config, submission.request_id)
+    # Before the worker claims its workspace, Pause and Resume review are typed not_ready.
+    for control in (request_loop_pause, review_loop_resume):
+        with pytest.raises(OperationFailure) as refused:
+            control(config, submission.request_id)
+        assert refused.value.detail.code == "not_ready"
     observed = OperationSnapshot(
         operation_id=submission.request_id,
         kind="candidate",

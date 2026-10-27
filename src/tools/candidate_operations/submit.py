@@ -146,28 +146,11 @@ def submit_operation(
             except ValueError as error:
                 # This boundary emits only names from the candidate credential policy.
                 raise OperationFailure("credentials", str(error)) from error
-        loop_root = None
+        loop_names = None
         if submission.kind == "candidate_loop_resume":
-            from .loop_resume import review_locked, root_record
-            from .store import load_record
+            from .loop_resume import admit
 
-            review = review_locked(config, submission.request.predecessor_operation_id)
-            if review.receipt_digest != submission.request.expected_receipt_digest:
-                raise OperationFailure("loop_resume", "reviewed paused receipt changed")
-            loop_root = root_record(
-                load_record(config, submission.request.predecessor_operation_id)
-            )
-            assert loop_root.submission.kind == "candidate"
-            if runtime_identity() != loop_root.runtime:
-                raise OperationFailure("runtime", "continuation runtime changed")
-            try:
-                require_credentials(
-                    loop_root.submission.request.selected_constructor_routes,
-                    loop_root.submission.request.environment_names,
-                    launch_environment,
-                )
-            except ValueError as error:
-                raise OperationFailure("credentials", str(error)) from error
+            loop_names = admit(config, submission, launch_environment)
         chain_admission = None
         resume_admission = None
         if submission.kind == "native_chain_resume":
@@ -202,9 +185,8 @@ def submit_operation(
             if resume_admission is not None
             else ()
         )
-        if loop_root is not None:
-            assert loop_root.submission.kind == "candidate"
-            names = loop_root.submission.request.environment_names
+        if loop_names is not None:
+            names = loop_names
         env = environment(names, launch_environment)
         record = OperationRecord(
             native_id=uuid4(),

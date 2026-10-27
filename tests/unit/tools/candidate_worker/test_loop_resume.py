@@ -286,6 +286,98 @@ def test_completed_pause_resumes_actual_body_in_new_process(
     )
 
 
+def test_paused_continuation_resumes_again_across_two_hops(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    from tools.candidate_worker import training
+    from tools.candidate_worker.loop_models import LoopContinuation
+    from tools.candidate_worker.loop_resume import verify_segment
+    from tools.candidate_worker.models import CandidateRunReceipt
+
+    request = loop_request(prepared, final_iteration=4)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    root_id, first_id, second_id = uuid4(), uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+    # Forked segments inherit this map: body 1 pauses the root, body 2 pauses hop A.
+    pause_during = {"iteration_001": root_id, "iteration_002": first_id}
+
+    def pause_by_slot(self, value):
+        output = real_tune(self, value)
+        for slot, operation_id in pause_during.items():
+            if slot in value.storage.local.workspace:
+                request_loop_pause(config, operation_id)
+        return output
+
+    def resume(predecessor_id, request_id):
+        review = review_loop_resume(config, predecessor_id)
+        submit_operation(
+            config,
+            CandidateLoopResumeOperation(
+                request_id=request_id,
+                request=CandidateLoopResumeRequest(
+                    predecessor_operation_id=predecessor_id,
+                    expected_receipt_digest=review.receipt_digest,
+                ),
+            ),
+            launch_environment=env,
+        )
+        process_segments()
+        return read_operation(config, request_id)
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_by_slot)
+    submit_operation(
+        config, CandidateOperation(request_id=root_id, request=request), launch_environment=env
+    )
+    process_segments()
+    root = Path(read_operation(config, root_id).receipt.workspace) / "candidate_run"
+    # An edited captured input refuses BEFORE reservation, so the one Resume stays unused.
+    source = Path(request.files[0].path)
+    original = source.read_bytes()
+    source.write_bytes(original + b"\n")
+    with pytest.raises(OperationFailure, match="captured loop inputs changed"):
+        resume(root_id, first_id)
+    source.write_bytes(original)
+    assert not (root / "successor.json").exists()
+
+    first = resume(root_id, first_id)
+    assert first.receipt.status == "paused", first
+    assert first.receipt.loop_trace.attempted_iterations == 2
+    assert first.receipt.loop_trace.segment_id == first_id
+    paused_tree = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+    second = resume(first_id, second_id)
+    assert second.receipt.status == "completed", second
+    assert second.receipt.loop_trace.attempted_iterations == 4
+    assert second.receipt.loop_trace.segment_id == second_id
+    # Hop B is bound to A's own paused receipt, reserved beside A's own Pause marker.
+    hop = root / f"continuations/{first_id}"
+    assert (hop / "pause.json").is_file()
+    binding = LoopContinuation.model_validate_json((hop / "successor.json").read_bytes())
+    assert binding.operation_id == second_id
+    assert binding.predecessor_segment == first_id
+    assert binding.predecessor_receipt_digest == first.receipt_digest
+    assert binding.completed_iterations == 2
+    # Ancestry B -> A -> root verifies, and B resumed after two completed bodies.
+    initial = CandidateRunReceipt.model_validate_json((root / "launch.json").read_bytes())
+    assert verify_segment(initial, second.receipt) == 2
+    assert {path: path.read_bytes() for path in paused_tree} == paused_tree
+    historical = read_operation(config, root_id)
+    assert historical.receipt.status == "paused"
+    assert historical.receipt.loop_trace.segment_id is None
+    assert historical.successor_operation_id == first_id
+    assert read_operation(config, first_id).successor_operation_id == second_id
+    tokens = [
+        read_operation_tokens(config, operation_id).model_dump(exclude={"observed_at"})
+        for operation_id in (root_id, first_id, second_id)
+    ]
+    assert tokens[1] == tokens[0] and tokens[2] == tokens[0]
+
+
 @pytest.mark.parametrize("fault", ["native_lease", "supervisor"])
 def test_uncertain_cleanup_never_publishes_resumable_pause(
     prepared, loop_tuner, monkeypatch, fault

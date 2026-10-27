@@ -62,6 +62,15 @@ def validate_config(config: OperationStoreConfig) -> OperationStoreConfig:
     return config
 
 
+def is_authored_loop(record: OperationRecord) -> bool:
+    """True for an authored-loop root candidate or any of its continuation segments."""
+    submission = record.submission
+    return submission.kind == "candidate_loop_resume" or (
+        submission.kind == "candidate"
+        and submission.request.preview.document.definition.loop is not None
+    )
+
+
 def native_directory(submission: OperationSubmission) -> Path:
     if submission.kind in {"native_chain", "native_chain_resume", "candidate_loop_resume"}:
         raise OperationFailure("kind", "continuation requires its resolved root record")
