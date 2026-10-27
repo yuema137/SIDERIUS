@@ -55,8 +55,8 @@ For training and scientific scores, use [first-run checks](first-run.md) and
 your external project's saved launch script. This route reads credentials from
 the launch process: use a trusted external shell-compatible credential file or
 managed injection, with the name-only check in the
-[API-key procedure](installation.md#api-keys). The console's JSON credential
-file is a different format. Have your agent show the saved settings, command
+[API-key procedure](installation.md#api-keys). The browser console instead
+reads the `credential_file` named in its configuration. Have your agent show the saved settings, command
 and output directory before execution. An optional
 [setup review](../../src/tools/setup_review/README.md) produces an HTML report.
 
