@@ -62,9 +62,18 @@ def validate_config(config: OperationStoreConfig) -> OperationStoreConfig:
     return config
 
 
+def is_authored_loop(record: OperationRecord) -> bool:
+    """True for an authored-loop root candidate or any of its continuation segments."""
+    submission = record.submission
+    return submission.kind == "candidate_loop_resume" or (
+        submission.kind == "candidate"
+        and submission.request.preview.document.definition.loop is not None
+    )
+
+
 def native_directory(submission: OperationSubmission) -> Path:
-    if submission.kind == "native_chain" or submission.kind == "native_chain_resume":
-        raise OperationFailure("kind", "chain has no native receipt directory")
+    if submission.kind in {"native_chain", "native_chain_resume", "candidate_loop_resume"}:
+        raise OperationFailure("kind", "continuation requires its resolved root record")
     if submission.kind == "prepare":
         return canonical(submission.request.output_dir) / "preparation"
     if submission.kind == "prepare_reusable":
@@ -73,6 +82,7 @@ def native_directory(submission: OperationSubmission) -> Path:
             / str(submission.request.run_id)
             / "inputs/preparation"
         )
+    assert submission.kind == "candidate"
     request = submission.request
     project = canonical(request.preview.project_root)
     workspace = resolve_location(
@@ -90,7 +100,7 @@ def validate_submission(
     config: OperationStoreConfig, submission: OperationSubmission
 ) -> OperationSubmission:
     submission = SUBMISSION.validate_json(SUBMISSION.dump_json(submission))
-    if submission.kind == "native_chain_resume":
+    if submission.kind in {"native_chain_resume", "candidate_loop_resume"}:
         # Syntax only: same-ID lookup precedes every mutable predecessor/input check.
         return submission
     state = canonical(config.state_root)
@@ -126,6 +136,7 @@ def validate_submission(
         inputs = (request.source_path, request.llm_config_file, *request.task_read_only)
         validate_destination_overlap(envelope, tuple(canonical(value) for value in inputs))
     else:
+        assert submission.kind == "candidate"
         if submission.reusable_preparation is not None:
             validate_selection_root(config, submission.reusable_preparation)
         request = submission.request

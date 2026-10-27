@@ -36,6 +36,7 @@ def _poison(lease: WriterLease) -> None:
 def iteration_owner(workspace: str, *, read_only: bool = False):
     """Protect the full native entry, before package/failure-brake mutations.
 
+    Yields the existing lease on Linux; callers may inspect sticky cleanup uncertainty.
     Legacy non-Linux execution remains unchanged and has no guarded-resume claim.
     Registered roots must use their captured chain, never an implicit direct restart.
     """
@@ -58,7 +59,7 @@ def iteration_owner(workspace: str, *, read_only: bool = False):
                 raise WriterRefusal("writer_participant_active") from error
         try:
             with observe_process_lifecycle(lambda lifecycle: _observe(lease, lifecycle)):
-                yield
+                yield lease
         except SystemExit as error:
             # Controlled native failures retain existing shell continuation.
             # Cleanup observations, not this exit code, decide ownership safety.

@@ -19,7 +19,12 @@ from .native_chain_models import NativeChainAdmission, NativeChainObservation, N
 from .native_resume_models import NativeChainResumeOperation, NativeResumeAdmission, review_digest
 
 OperationKind = Literal[
-    "prepare", "prepare_reusable", "candidate", "native_chain", "native_chain_resume"
+    "prepare",
+    "prepare_reusable",
+    "candidate",
+    "native_chain",
+    "native_chain_resume",
+    "candidate_loop_resume",
 ]
 
 
@@ -55,12 +60,24 @@ class CandidateOperation(PreviewModel):
     reusable_preparation: ReusablePreparedSelection | None = None
 
 
+class CandidateLoopResumeRequest(PreviewModel):
+    predecessor_operation_id: UUID
+    expected_receipt_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CandidateLoopResumeOperation(PreviewModel):
+    kind: Literal["candidate_loop_resume"] = "candidate_loop_resume"
+    request_id: UUID
+    request: CandidateLoopResumeRequest
+
+
 OperationSubmission = Annotated[
     PrepareOperation
     | ReusablePrepareOperation
     | CandidateOperation
     | NativeChainOperation
-    | NativeChainResumeOperation,
+    | NativeChainResumeOperation
+    | CandidateLoopResumeOperation,
     Field(discriminator="kind"),
 ]
 SUBMISSION = TypeAdapter(OperationSubmission)
@@ -184,6 +201,9 @@ class OperationSnapshot(PreviewModel):
     observed_at: str
     state: Literal["active", "completed", "operation_failed", "unknown"]
     process: ProcessObservation
+    successor_operation_id: UUID | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     finishing: bool = False
     receipt_available: bool = False
     receipt_digest: str | None = None

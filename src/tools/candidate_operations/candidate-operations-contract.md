@@ -751,3 +751,56 @@ requests are idempotent. Read the ordinary operation snapshot for the eventual
 native outcome; acknowledgement alone does not mean stopped. The worker's
 [candidate contract](../candidate_worker/candidate-worker-contract.md#declared-finite-research-body)
 owns completed-body observation, the `stopped` receipt and evidence replay.
+
+
+### Authored completed-boundary Pause/Resume
+
+`request_loop_pause(config, operation_id)` shares the Stop identity, configured-root
+and live-process admission. It writes the selected segment's immutable Pause marker;
+acknowledgement means requested, not paused. Before the root worker has claimed
+its workspace, Pause (like Stop) and the Resume review refuse with `not_ready`. A
+successor never inherits its predecessor's marker; Pause it by its own operation ID. Stop applies to the whole root run even
+when requested through a resumed segment. Neither request sends a process signal.
+
+`review_loop_resume(config, predecessor_operation_id)` returns the selected verified
+`OperationSnapshot` only when its native receipt is paused, its Completion binds
+that receipt, the wrapper is observably exited, and recorded native supervision
+proves clean process-group shutdown. Missing/unknown lifecycle evidence, a reached
+finite limit, a root Stop or an existing successor refuses with `loop_resume`. A
+partial next body already invalidates the paused readback, so the review finds no
+verified paused segment. The review constructs no process and reads no credentials.
+
+Submit `CandidateLoopResumeOperation(request_id=..., request=CandidateLoopResumeRequest(
+predecessor_operation_id=..., expected_receipt_digest=review.receipt_digest))` through
+`submit_operation`. The ordinary store lock serializes review, immutable operation
+claim and predecessor successor reservation before dispatch. Reusing the same request
+ID returns the existing operation before mutable checks. Before claiming, admission
+re-verifies the root's captured input files and source snapshot (the same identity
+check the continuation child repeats), so an edited input refuses with `loop_resume`
+without consuming the reservation.
+
+The single-successor reservation is the predecessor segment's immutable write-once
+`successor.json`, published after the continuation's own `continuation.json`. A
+competing ID cannot obtain a second successor. A crash after the continuation operation
+record is claimed but before `successor.json` exists leaves an unresolved, never
+dispatched orphan record (possibly with an unreferenced
+`continuations/<id>/continuation.json`) and does not consume the reservation. The
+orphan is not releasable, so the store stays `busy` and admits no new ID until it is
+resolved. A crash or spawn failure after `successor.json` exists remains fail-closed
+and never re-dispatches: this scope does not recycle reservations or automatically
+retry uncertain dispatch.
+New execution rechecks the original runtime and provider environment names (missing
+names refuse with `credentials`); values are never stored. Native worker admission owns task plugins and scientific validation.
+
+`read_operation` retains the selected segment's receipt and exposes an optional
+`successor_operation_id`, rather than replacing history with a descendant's status.
+Its ordinary completed/finishing process projection remains unchanged. Native log
+reads select that segment's worker log. Reported-token reads use the original run
+identity and ledger, so they describe the run total, not a fabricated per-segment
+subtotal. Root source/captures and earlier receipts remain immutable.
+
+These authored controls do not use fixed native-chain capture recipes or shell
+resume flags. No arbitrary iteration cap, new history policy, mid-body recovery or
+GUI control is introduced. Offline tests separate operation and worker processes,
+exercise real native body/evidence construction with provider/training doubles, and
+cover required lifecycle/admission refusals; they are not paper qualification.

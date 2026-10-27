@@ -695,10 +695,63 @@ finishes that active body and reports
 `stopped` unless the finite limit or a native failure completes first. Repeating
 an identical request is idempotent. Queued/not-yet-claimed operations refuse with
 `not_ready`; this operation does not create their workspace. Stop is neither an
-immediate signal nor resumable Pause. Completed-boundary Pause/Resume and GUI
-controller presentation are subsequent closures.
+immediate signal nor resumable Pause. GUI controller presentation is a separate
+closure; completed-boundary Pause/Resume follows below.
 
 Offline acceptance covers two actual native bodies with typed feedback and advice,
 source roundtrip, parent input-tamper refusal, operation-bound graceful Stop, and
 failed required feedback preventing another dispatch. Provider/training effects
 are doubled; these witnesses make no real-training or paper qualification claim.
+
+
+### Clean completed-boundary Pause and Resume
+
+`request_loop_pause(config, operation_id)` requests Pause for the selected running
+segment. A request before that segment's first body lets one body finish; later
+requests are observed at the next boundary check. The declared finite limit or a
+native failure wins over Pause; Stop wins when both control requests are pending.
+Pause is not immediate cancellation. A paused receipt's completed-body count exceeds
+its segment's resume point (zero for the initial segment), so a successor never pauses
+before dispatching its own body, and it cannot represent unfinished required feedback.
+A resumed segment that reaches its boundary without dispatching keeps the last
+completed body's `validation_passed`.
+
+Native iteration ownership must close cleanly before child receipt publication.
+The loop launcher retains `run_observed` supervision before publishing the final
+receipt: successful child exit, reaping and proven absent process group are required
+for `paused`. An unresolved native lease or uncertain supervision produces failure,
+not a resumable checkpoint. The existing `iteration_owner` context now yields its
+lease on Linux; callers ignoring the context value retain their behavior. Guarded
+Pause is unavailable without that lease. Fixed profiles reject loop control statuses.
+
+A continuation has a distinct operation/segment UUID but preserves the original
+run_id, task/source/input snapshots, routes, finite limit, advice and token ledger.
+Its controls live at `candidate_run/continuations/<operation-id>/`; the original
+request, receipts and completed body records are never rewritten. Each segment owns
+its Pause marker, so an old Pause never pauses the successor; Pause the successor by
+its own operation ID. Root Stop remains run-wide and terminal. `loop_trace.segment_id`
+is omitted on the initial segment and identifies later segments. Native body records
+keep their existing numbered iteration slots. Logs are selected by operation;
+the receipt's root log identity remains unchanged with the original invocation.
+
+Only the internal admitted continuation entry can restart execution. Under the
+native writer lease it verifies the immutable predecessor/successor binding, rejects
+a partial next slot, and reconstructs ChainState through the same native completed
+history fold before dispatching N+1. Captured inputs and original external identities
+must still match; changing workflow source or configuration requires a new run.
+Historical paused receipts can coexist with later bodies only through the exact
+verified successor binding. There is no general partial-record acceptance switch.
+
+Resume does not recover failed, stopped, interrupted, timed-out or uncertain runs.
+It does not change the declared loop limit or scientific history policy. The existing
+sandbox timeout applies independently to each launch. The operation contract owns
+single-successor reservation and requires the predecessor wrapper to have exited;
+a visible paused receipt while that wrapper is finishing is not authorization.
+
+Offline acceptance adds a process-separated witness: body 1 pauses, both processes
+exit, a new operation dispatches bodies 2 and 3 despite the old Pause, and the
+resumed body-2 interpretation input equals an uninterrupted run's except storage
+paths and minted candidate IDs. The same witnesses cover Stop and native failure
+winning over Pause, the final body winning over a successor Pause, and an unresolved
+lease or uncertain supervision publishing failure. Provider/training effects remain
+doubled.

@@ -12,7 +12,7 @@ from core.durable_io import publish_bytes_write_once
 from execute_tools.impl_attempts import impl_attempt_dir
 from tools.workflow_preview.files import observe_file
 from tools.workspace_sandbox.profile import SandboxProfile
-from tools.workspace_sandbox.runner import ExecutionResult, run
+from tools.workspace_sandbox.runner import ExecutionResult, run, run_observed
 
 from .admission import admit_input_paths
 from .layout import candidate_proposal_dir
@@ -167,10 +167,15 @@ def launch_candidate(
             (Path(observed.data_root), *(Path(item.path) for item in observed.files)),
             request.read_only,
         )
-        result = run(
-            profile,
-            [sys.executable, "-m", "tools.candidate_worker.child", str(control / "request.json")],
-        )
+        argv = [sys.executable, "-m", "tools.candidate_worker.child", str(control / "request.json")]
+        if definition.loop is not None:
+            observed_result = run_observed(profile, argv)
+            publish_bytes_write_once(
+                str(control / "supervision.json"), encode_control(observed_result)
+            )
+            result = observed_result.execution
+        else:
+            result = run(profile, argv)
         terminal = reconcile(
             initial,
             result,
@@ -178,6 +183,10 @@ def launch_candidate(
             training=any(node.capability == "tuning" for node in definition.nodes),
             graph_request=request if graph else None,
         )
+        if terminal.status == "paused":
+            from .loop_resume import require_clean
+
+            require_clean(control)
     except KeyboardInterrupt:
         terminal = initial.model_copy(
             update={"status": "interrupted", "error": "worker interrupted"}
