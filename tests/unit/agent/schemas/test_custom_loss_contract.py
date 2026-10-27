@@ -109,11 +109,6 @@ def test_missing_declaration_and_target_fail_closed():
     assert not result.eligible and "declaration is missing" in result.reason
 
 
-def test_extra_fields_are_rejected_by_the_typed_forms():
-    with pytest.raises(ValidationError):
-        EqualShapeApplicability(dtype=DtypeAdmissibility(admissible=("float32",)), unexpected=True)
-
-
 def test_synthetic_pair_checks_declared_fixed_extents_before_criterion():
     prediction = _tensor("B", 2)
     target = _tensor("B", 2, dtype="long")

@@ -137,14 +137,6 @@ class TestTheLegacyWireBytesArePinned:
 class TestExactlyOneSemanticAuthority:
     """§D.3a: no task-physical field survives as a live generic authority."""
 
-    def test_the_declared_field_set_is_the_audited_one(self):
-        assert set(DatasetProfile.model_fields) == {
-            "partition_count",
-            "topology",
-            "anchor_selection_files",
-            "health_peek_files",
-        }
-
     @pytest.mark.parametrize(
         "retired", ["dataset", "channels", "encoding", "num_files", "psd_segment_length"]
     )

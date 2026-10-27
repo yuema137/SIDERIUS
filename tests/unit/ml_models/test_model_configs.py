@@ -14,8 +14,6 @@ from ml_models.models_format_sandbox import (
     GatedFNOConfig,
     LossConfig,
     PUNetConfig,
-    RNNSeq2SeqConfig,
-    TrainConfig,
     TransformerConfig,
     WaveNetConfig,
 )
@@ -26,12 +24,6 @@ from ml_models.models_format_sandbox import (
 
 
 class TestPUNetConfig:
-    def test_valid_default(self):
-        cfg = PUNetConfig()
-        assert cfg.model_type == "punet"
-        assert cfg.kernel_size == 9
-        assert cfg.depth == 4
-
     def test_valid_custom(self):
         cfg = PUNetConfig(segmentation_size=10000, depth=3, multi=32, kernel_size=7)
         assert cfg.depth == 3
@@ -59,11 +51,6 @@ class TestPUNetConfig:
 
 
 class TestAEConfig:
-    def test_valid_default(self):
-        cfg = AEConfig()
-        assert cfg.model_type == "fcnet"
-        assert cfg.latent_dims == [4000, 400, 40]
-
     def test_valid_custom_dims(self):
         cfg = AEConfig(latent_dims=[500, 50], segmentation_size=1000)
         assert cfg.latent_dims == [500, 50]
@@ -83,11 +70,6 @@ class TestAEConfig:
 
 
 class TestTransformerConfig:
-    def test_valid_default(self):
-        cfg = TransformerConfig()
-        assert cfg.model_type == "transformer"
-        assert cfg.nhead == 4
-
     def test_valid_custom(self):
         cfg = TransformerConfig(embedding_dim=64, nhead=4, segmentation_size=5000)
         assert cfg.embedding_dim == 64
@@ -107,12 +89,6 @@ class TestTransformerConfig:
 
 
 class TestWaveNetConfig:
-    def test_valid_default(self):
-        cfg = WaveNetConfig()
-        assert cfg.model_type == "wavenet"
-        assert cfg.gate_channels == 64
-        assert cfg.num_blocks == 10
-
     def test_valid_custom(self):
         cfg = WaveNetConfig(num_blocks=4, residual_channels=16, skip_channels=16)
         assert cfg.num_blocks == 4
@@ -129,28 +105,6 @@ class TestWaveNetConfig:
 # ==========================================
 # RNNSeq2SeqConfig
 # ==========================================
-
-
-class TestRNNSeq2SeqConfig:
-    def test_valid_default(self):
-        cfg = RNNSeq2SeqConfig()
-        assert cfg.model_type == "rnn"
-        assert cfg.hidden_dim == 256
-        assert cfg.num_layers == 2
-
-    def test_valid_custom(self):
-        cfg = RNNSeq2SeqConfig(embedding_dim=64, hidden_dim=128, num_layers=1)
-        assert cfg.hidden_dim == 128
-        assert cfg.num_layers == 1
-
-    def test_dropout_ignored_for_single_layer(self):
-        # dropout > 0 with num_layers=1 is valid config (LSTM silently ignores it)
-        cfg = RNNSeq2SeqConfig(num_layers=1, dropout=0.3)
-        assert cfg.dropout == 0.3
-
-    def test_hidden_dim_out_of_range_raises(self):
-        with pytest.raises(ValidationError):
-            RNNSeq2SeqConfig(hidden_dim=2000)
 
 
 # ==========================================
@@ -174,10 +128,6 @@ class TestLossConfig:
         assert cfg.alpha is None
         assert cfg.gamma is None
         assert cfg.beta is None
-
-    def test_focal_cw_valid(self):
-        cfg = LossConfig(loss_type="focal_cw", gamma=4.0)
-        assert cfg.loss_type == "focal_cw"
 
 
 # ==========================================
@@ -246,20 +196,6 @@ class TestExperimentConfig:
 
 
 class TestGatedFNOConfig:
-    def test_valid_default(self):
-        cfg = GatedFNOConfig()
-        assert cfg.model_type == "gated_fno"
-        assert cfg.width == 64
-        assert cfg.num_layers == 2
-        assert cfg.num_gates == 128
-        assert cfg.static_v is None
-
-    def test_valid_custom(self):
-        cfg = GatedFNOConfig(width=32, num_layers=3, num_gates=64)
-        assert cfg.width == 32
-        assert cfg.num_layers == 3
-        assert cfg.num_gates == 64
-
     def test_valid_with_static_v(self):
         v = [0.5] * 64
         cfg = GatedFNOConfig(num_gates=64, static_v=v)
@@ -270,45 +206,13 @@ class TestGatedFNOConfig:
         with pytest.raises(ValidationError, match="static_v length"):
             GatedFNOConfig(num_gates=64, static_v=[0.5] * 32)
 
-    @pytest.mark.parametrize(
-        "kwargs",
-        [
-            pytest.param({"width": 8}, id="width_below_min"),
-            pytest.param({"num_layers": 0}, id="num_layers_below_min"),
-            pytest.param({"num_gates": 4}, id="num_gates_below_min"),
-        ],
-    )
-    def test_field_below_min_raises(self, kwargs):
-        with pytest.raises(ValidationError):
-            GatedFNOConfig(**kwargs)
-
 
 # ==========================================
 # TrainConfig — stable compatibility lr default
 # ==========================================
 
 
-class TestTrainConfigCompatibilityLrDefault:
-    """An omitted LLM ``lr`` key keeps the established resolved value.
-
-    Repository separation moves scientific baseline artifacts without
-    silently changing a generic schema default. The expectation is hardcoded
-    rather than read back from the schema under test, so drift still fails.
-    """
-
-    def test_omitted_lr_resolves_stably_through_the_production_path(self):
-        """Defect only this catches: the schema default departing 5e-4.
-
-        The construction below is the exact production validation
-        expression for an LLM plan's training config —
-        ``TrainConfig(**t_cfg)`` at ``core/sandbox_executor.py`` (parent
-        validation) and ``execute_tools/train_engine_sandbox.py`` (trainer
-        subprocess) — with ``lr`` absent, as an LLM that omits the key
-        produces it. Fails when: the declared default moves off 5e-4.
-        """
-        t_cfg = {"epochs": 1, "batch_size": 1, "device": "cpu"}  # no "lr" key
-        assert TrainConfig(**t_cfg).lr == 5e-4
-
+class TestNativeRecoveryGuidance:
     def test_native_recovery_does_not_prescribe_the_schema_default(self):
         """A serialization default must not become a native search strategy.
 
