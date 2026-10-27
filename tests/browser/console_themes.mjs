@@ -213,7 +213,7 @@ try {
   await page.getByText('Connected. Observations', {exact: false}).waitFor();
   await page.locator('#run-name').fill('unsaved-run-fixture');
   await page.locator('nav a[href="#slow-control"]').click();
-  await page.getByText('Reported token table', {exact: true}).click();
+  await page.locator('details', {has: page.locator('#tokens-table')}).getByText('Reported token table', {exact: true}).click(); // Recorded example has its own table.
   await page.locator('#operation-id').fill(operation); await page.locator('#monitor-button').click();
   await page.locator('#tokens-status').filter({hasText: 'Partial evidence'}).waitFor();
   const monitor = () => page.evaluate(() => ({run: document.querySelector('#run-name').value, task: document.querySelector('#task').value, operation: document.querySelector('#operation-id').value, rows: document.querySelector('#token-rows').textContent, timers: window.themeTimerCount, launch: document.querySelector('#launch-button').disabled}));

@@ -93,7 +93,8 @@ try {
   assert.equal(posts, 2);
   await page.locator('#native-chain-monitor').click();
   await page.locator('#native-chain-observation').waitFor();
-  await page.locator('#tokens-status').filter({hasText: 'Native-chain token aggregation is not supported.'}).waitFor();
+  // Native chains report whole-run cumulative tokens (ab2f40dd), not an unsupported notice.
+  await page.locator('#tokens-status').filter({hasText: 'Whole-run cumulative usage.'}).waitFor();
   let final;
   await until(async () => {
     final = await page.evaluate(id => window.consoleSession.request('operations/' + id), intent.operation_id);

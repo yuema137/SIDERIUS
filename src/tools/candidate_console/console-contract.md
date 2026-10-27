@@ -508,7 +508,8 @@ or "none (one workflow body)", followed by "stops early when …" for each decla
 stop condition.
 
 Socket/drag gestures send no requests. Source editing, disconnection, conflict,
-saving and invalid training drafts gate mutations; stale rendered projections
+saving and invalid training/loop drafts gate mutations (invalid drafts do not block
+capability selection, which is navigation); stale rendered projections
 cannot mutate a replacement document. Required whole-declaration checks remain
 Review/Save, with execution-profile/alias admission owned by separate native
 preparation. Type-compatible highlights do not claim runtime compatibility. Existing

@@ -32,8 +32,10 @@ const screenshots = process.env.CONSOLE_SCREENSHOT_DIR || await mkdtemp(join(tmp
 await mkdir(screenshots, { recursive: true });
 const server = createServer(async (req, res) => {
   const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/theme.js': ['theme.js', 'text/javascript'], '/theme.css': ['theme.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
-  for (const name of ['session.js', 'navigation.js', 'editor.js', 'editor-entry.js']) files['/' + name] = [name, 'text/javascript'];
-  files['/editor.css'] = ['editor.css', 'text/css'];
+  // Serve every static script/style index.html loads, as production does; a missing module
+  // (for example editor-task-controls.js) breaks session listeners before Connect completes.
+  const asset = /^\/([a-z0-9-]+)\.(js|css)$/.exec(req.url);
+  if (asset) files[req.url] = [asset[1] + '.' + asset[2], asset[2] === 'js' ? 'text/javascript' : 'text/css'];
   const file = files[req.url];
   if (!file) { res.writeHead(404); res.end(); return; }
   try {
@@ -77,6 +79,10 @@ try {
     requests.push({ method: request.method(), path: url.pathname, body: request.postDataJSON() });
     const reply = (body, code = 200) => route.fulfill({ status: code, contentType: 'application/json', body: JSON.stringify(body) });
     if (disconnected) { await route.abort(); return; }
+    // Read-only lists owned by other panels; empty fixtures keep this witness on its own flow.
+    if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
+    if (url.pathname === '/api/operations') return reply({ operations: [], unreadable: 0, examined: 0, incomplete: false });
+    if (url.pathname.endsWith('/graph-results')) return reply({ error: { code: 'not_found', message: 'Fixture has no workflow results' } }, 404);
     if (url.pathname === '/api/choices') return reply([{ task_id: 'synthetic', label: 'Synthetic ' + hostile, task_manifest: '/fixture/task.json', data_root: '/fixture/data', llm_config_file: '/fixture/llm.json', preparation_root: '/fixture/preparations', candidate_root: '/fixture/candidates', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300 }]);
     if (url.pathname === '/api/preparations') {
       preparation = request.postDataJSON();
@@ -155,7 +161,7 @@ try {
   assert.equal(launches.length, 3);
   assert.deepEqual(launches[0].body, launches[1].body); assert.deepEqual(launches[1].body, launches[2].body);
   await page.locator('nav a[href="#slow-control"]').click();
-  await page.getByText('Reported token table', {exact: true}).click();
+  await page.locator('details', {has: page.locator('#tokens-table')}).getByText('Reported token table', {exact: true}).click(); // Recorded example has its own table.
   await page.getByText('Activity and logs', {exact: true}).click();
   await page.locator('#monitor-status').filter({ hasText: 'Native: rejected' }).waitFor({state: 'attached'});
   assert.equal(await page.locator('#log img').count(), 0);
