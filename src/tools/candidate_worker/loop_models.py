@@ -10,12 +10,16 @@ if TYPE_CHECKING:
 
 from tools.workflow_preview.models import PreviewModel
 
+from .loop_stop import StopReason
+
 
 class LoopTrace(PreviewModel):
     """Body receipts live in managed iteration slots, not an unbounded root array."""
 
     attempted_iterations: int = Field(ge=0)
     segment_id: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Present only when a declared stop condition completed the loop before its limit.
+    stop_reason: StopReason | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class LoopStop(PreviewModel):

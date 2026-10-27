@@ -13,6 +13,14 @@ from workflows.research_history import advance_completed_history, history_metric
 from .fanout_inputs import captured_contents
 from .graph_evidence import expected_nodes, read_graph_control, verify_graph_trace
 from .layout import candidate_control_dir
+from .loop_stop import (
+    BodyScore,
+    StopReason,
+    captured_metric,
+    evaluate_stop,
+    project_body_score,
+    stop_input,
+)
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
@@ -110,13 +118,16 @@ def verify_loop(
     resumed_at = verify_segment(initial, receipt)
     if trace.attempted_iterations < loop.final_iteration and not has_successor(initial, receipt):
         require_unused_next(request, initial, trace.attempted_iterations)
-    _, bodies = replay_completed(request, initial, trace.attempted_iterations)
+    _, bodies, scores = replay_completed(request, initial, trace.attempted_iterations)
     last = bodies[-1] if bodies else None
+    derived = derive_stop(request, initial, scores)
+    if trace.stop_reason != derived:
+        raise ValueError("loop stop reason disagrees with re-derived stop conditions")
     expected = (
         last.status
         if last is not None and last.status != "completed"
         else "completed"
-        if trace.attempted_iterations == loop.final_iteration
+        if trace.attempted_iterations == loop.final_iteration or derived is not None
         else "paused"
         if receipt.status == "paused" and trace.attempted_iterations > resumed_at
         else "stopped"
@@ -129,6 +140,28 @@ def verify_loop(
     ):
         raise ValueError("loop terminal disagrees with completed bodies or Stop/Pause evidence")
     return bodies
+
+
+def derive_stop(
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    scores: tuple[BodyScore, ...],
+) -> StopReason | None:
+    """Re-run the stateless evaluator at every completed boundary; trust no recorded value.
+
+    Returns the reason that must end the loop at its last completed body, if any.
+    """
+    loop = request.preview.document.definition.loop
+    assert loop is not None
+    if not loop.stop_conditions:
+        return None
+    seed = captured_metric(request, initial)
+    reason = None
+    for count in range(1, len(scores) + 1):
+        if reason is not None:
+            raise ValueError("loop continued past a met stop condition")
+        reason = evaluate_stop(stop_input(loop, seed, scores[:count])).reason
+    return reason
 
 
 def require_unused_next(
@@ -145,13 +178,15 @@ def require_unused_next(
 
 def replay_completed(
     request: CandidateRunRequest, initial: CandidateRunReceipt, completed: int
-) -> tuple[ChainState, tuple[CandidateRunReceipt, ...]]:
+) -> tuple[ChainState, tuple[CandidateRunReceipt, ...], tuple[BodyScore, ...]]:
     """Shared verified-prefix fold for readback and continuation history.
 
-    Returns the folded history and the verified body receipts in iteration order.
+    Returns the folded history, the verified body receipts in iteration order and the
+    completed bodies' scores, projected from the same records and never from the history.
     """
     state = initial_history(request, initial)
     bodies: list[CandidateRunReceipt] = []
+    scores: list[BodyScore] = []
     for iteration in range(1, completed + 1):
         control = candidate_control_dir(Path(initial.workspace), iteration=iteration)
         body = CandidateRunReceipt.model_validate_json(read_graph_control(control / "body.json"))
@@ -173,4 +208,5 @@ def replay_completed(
             raise ValueError("loop continued without successful required feedback")
         if body.status == "completed":
             advance_body(request, initial, body, state)
-    return state, tuple(bodies)
+            scores.append(project_body_score(request, body, iteration))
+    return state, tuple(bodies), tuple(scores)

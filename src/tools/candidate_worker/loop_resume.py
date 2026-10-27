@@ -19,6 +19,8 @@ from .models import CandidateRunReceipt, CandidateRunRequest
 if TYPE_CHECKING:
     from core.chain_state import ChainState
 
+    from .loop_stop import BodyScore
+
 
 def segment_control(initial: CandidateRunReceipt, segment_id: UUID | None) -> Path:
     root = Path(initial.workspace) / "candidate_run"
@@ -125,8 +127,12 @@ def has_successor(initial: CandidateRunReceipt, receipt: CandidateRunReceipt) ->
 
 def resume_history(
     request: CandidateRunRequest, initial: CandidateRunReceipt, binding: LoopContinuation
-) -> tuple["ChainState", CandidateRunReceipt]:
-    """Run under the native lease: recheck the binding, then rebuild history by replay."""
+) -> tuple["ChainState", CandidateRunReceipt, tuple["BodyScore", ...]]:
+    """Run under the native lease: recheck the binding, then rebuild history by replay.
+
+    The stop-score carrier is rebuilt from the same whole-run replay, so conditions span
+    segments.
+    """
     from .loop import stop_requested
     from .loop_evidence import replay_completed, require_unused_next, verify_loop
 
@@ -137,11 +143,11 @@ def resume_history(
     if stop_requested(initial):
         raise ValueError("stopped loop cannot resume")
     require_unused_next(request, initial, binding.completed_iterations)
-    state, bodies = replay_completed(request, initial, binding.completed_iterations)
+    state, bodies, scores = replay_completed(request, initial, binding.completed_iterations)
     last = bodies[-1] if bodies else None
     if last is None or last.status != "completed":
         raise ValueError("resume requires completed required feedback")
-    return state, last
+    return state, last, scores
 
 
 def launch_continuation(

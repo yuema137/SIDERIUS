@@ -5,7 +5,13 @@ from typing import TYPE_CHECKING
 from .catalog import CAPABILITIES, CONTRACTS, PROTOCOLS
 
 if TYPE_CHECKING:
-    from .models import NodeInstance, NodePosition, ReusableWorkflowDefinition, WorkflowDefinition
+    from .models import (
+        AuthoredLoop,
+        NodeInstance,
+        NodePosition,
+        ReusableWorkflowDefinition,
+        WorkflowDefinition,
+    )
 
 
 def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefinition") -> None:
@@ -21,6 +27,22 @@ def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefini
             or target.capability != "interpretation"
         ):
             raise ValueError("loop feedback requires declared tuning and interpretation nodes")
+        validate_stop_conditions(definition.loop)
+
+
+def validate_stop_conditions(loop: "AuthoredLoop") -> None:
+    """At most one condition per kind; each must be reachable before the final limit."""
+    from .models import NoImprovementStop
+
+    kinds = [condition.kind for condition in loop.stop_conditions]
+    if len(set(kinds)) != len(kinds):
+        raise ValueError("loop declares more than one stop condition of the same kind")
+    for condition in loop.stop_conditions:
+        if (
+            isinstance(condition, NoImprovementStop)
+            and condition.completed_bodies >= loop.final_iteration
+        ):
+            raise ValueError("no_improvement completed_bodies must be below final_iteration")
 
 
 def predecessor_facts(

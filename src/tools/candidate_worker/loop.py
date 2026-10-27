@@ -11,6 +11,7 @@ from workflows.task_composition import RunTaskComposition
 from .graph_evidence import read_graph_control
 from .layout import candidate_control_dir
 from .loop_models import LoopContinuation, LoopPause, LoopStop, LoopTrace, admit_loop
+from .loop_stop import BodyScore, captured_metric, evaluate_stop, project_body_score, stop_input
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
@@ -64,14 +65,17 @@ def execute_loop(
     segment_id = None
     # Last body of the whole run, so a segment that dispatches none keeps its validation.
     last: CandidateRunReceipt | None = None
+    # Immutable verified-score carrier for the stateless stop evaluator (never history).
+    scores: tuple[BodyScore, ...] = ()
     if continuation is not None:
         from .loop_resume import resume_history
 
-        history, last = resume_history(request, initial, continuation)
+        history, last, scores = resume_history(request, initial, continuation)
         attempted = continuation.completed_iterations
         segment_id = continuation.operation_id
     resumed_at = attempted
     status = "completed"
+    reason = None
     for iteration in range(attempted + 1, loop.final_iteration + 1):
         if stop_requested(initial):
             status = "stopped"
@@ -91,10 +95,20 @@ def execute_loop(
             status = last.status
             break
         advance_body(request, initial, last, history)
+        if loop.stop_conditions:
+            # A met condition completes the loop before any pending Stop/Pause is read.
+            scores = (*scores, project_body_score(request, last, iteration))
+            reason = evaluate_stop(
+                stop_input(loop, captured_metric(request, initial), scores)
+            ).reason
+            if reason is not None:
+                break
     return initial.model_copy(
         update={
             "status": status,
-            "loop_trace": LoopTrace(attempted_iterations=attempted, segment_id=segment_id),
+            "loop_trace": LoopTrace(
+                attempted_iterations=attempted, segment_id=segment_id, stop_reason=reason
+            ),
             "validation_passed": None if last is None else last.validation_passed,
         }
     )

@@ -78,9 +78,46 @@ class LoopFeedback(DeclarationModel):
     history: Literal["native-research/v1"]
 
 
+class MetricThresholdStop(DeclarationModel):
+    """Stop once the loop incumbent reaches ``threshold`` under the run metric's direction.
+
+    Direction is never declared here: it comes from the run's ``MetricSpec``.
+    """
+
+    kind: Literal["metric_threshold"] = "metric_threshold"
+    metric_id: str = Field(min_length=1)
+    threshold: float = Field(allow_inf_nan=False)
+
+
+class NoImprovementStop(DeclarationModel):
+    """Stop after this many consecutive completed bodies leave the incumbent unimproved."""
+
+    kind: Literal["no_improvement"] = "no_improvement"
+    completed_bodies: Annotated[int, Field(gt=0)]
+
+
+class JudgeStop(DeclarationModel):
+    """Reserved slot for a future judge implementation of the stop contract."""
+
+    kind: Literal["judge"] = "judge"
+
+    @model_validator(mode="after")
+    def refuse(self) -> Self:
+        raise ValueError("judge stop conditions are deferred to the next stage")
+
+
+StopCondition = Annotated[
+    MetricThresholdStop | NoImprovementStop | JudgeStop, Field(discriminator="kind")
+]
+
+
 class AuthoredLoop(DeclarationModel):
     final_iteration: Annotated[int, Field(gt=0)]
     feedback: LoopFeedback
+    # Any-of, evaluated in declared order at each completed-body boundary.
+    stop_conditions: tuple[StopCondition, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
 
 class WorkflowDefinition(DeclarationModel):
