@@ -158,6 +158,9 @@ try {
   await page.locator('#access-form button').click();
   await page.getByText('Opened supported declaration.', {exact: false}).waitFor();
   await page.locator('#editor-inspector select').selectOption({label: 'other'});
+  // Selecting a binding starts an asynchronous draft check (POST editor/<project>/draft);
+  // snapshot only the settled state, never the transient 'checking' label.
+  await waitUntil(async () => (await page.locator('#editor-pending').textContent()) === 'Pending binding draft · complete');
   const snapshot = () => page.evaluate(() => ({
     source: document.querySelector('#editor-source').value,
     pending: document.querySelector('#editor-pending').textContent,

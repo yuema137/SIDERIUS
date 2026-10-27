@@ -37,6 +37,9 @@ try {
   await page.locator('#editor-advanced > summary').click();
   const original = await source.inputValue();
   await page.locator('#editor-inspector select').selectOption({label: 'other'});
+  // Selecting a binding starts an asynchronous draft check (POST editor/<project>/draft);
+  // snapshot only the settled state, never the transient 'checking' label.
+  await waitUntil(async () => (await page.locator('#editor-pending').textContent()) === 'Pending binding draft · complete');
   const posts = []; page.on('request', request => { if (request.method() === 'POST') posts.push(request.url()); });
   const editorSnapshot = () => page.evaluate(() => ({
     text: ['editor-source', 'editor-revision', 'editor-diff', 'editor-pending'].map(id => {
@@ -60,7 +63,8 @@ try {
   assert.equal(await source.isDisabled(), true);
   await assert.rejects(source.fill(original + '# attempted source switch\n', {timeout: 100}));
   assert.equal(await source.inputValue(), original);
-  assert.match(await page.locator('#editor-pending').textContent(), /Review changes to update Python source/);
+  // Inspector binding selection is a validated binding draft (6026b798), not a document-mode edit.
+  assert.equal(await page.locator('#editor-pending').textContent(), 'Pending binding draft · complete');
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   assert.match(await page.locator('#editor-edges').textContent(), /external:other → p.request/);
