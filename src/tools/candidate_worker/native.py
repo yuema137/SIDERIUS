@@ -13,6 +13,7 @@ from workflows.task_composition import bind_run_task_composition, compose_run_ta
 from . import phases
 from .inputs import NativeInputs, materialize
 from .invocation import fixed_invocations
+from .loop_models import LoopContinuation
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
@@ -77,7 +78,10 @@ def sequence(
 
 
 def execute_native(
-    request: CandidateRunRequest, initial: CandidateRunReceipt
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    *,
+    continuation: LoopContinuation | None = None,
 ) -> CandidateRunReceipt:
     config = WorkflowLLMConfig.default()
     for index, observation in enumerate(request.files):
@@ -98,8 +102,13 @@ def execute_native(
 
             from .loop import execute_loop
 
-            with iteration_owner(initial.workspace):
-                return execute_loop(request, initial, composition, config)
+            with iteration_owner(initial.workspace) as lease:
+                result = execute_loop(
+                    request, initial, composition, config, continuation=continuation
+                )
+                if result.status == "paused" and (lease is None or lease.unresolved):
+                    raise ValueError("native cleanup cannot authorize paused checkpoint")
+            return result
         if request.preview.execution_profile is not None:
             from .graph import execute_fanout
 

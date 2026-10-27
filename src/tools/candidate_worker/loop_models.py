@@ -1,6 +1,7 @@
 """Bounded finite-loop receipt and operation-bound graceful Stop marker."""
 
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from pydantic import Field
 
@@ -14,11 +15,25 @@ class LoopTrace(PreviewModel):
     """Body receipts live in managed iteration slots, not an unbounded root array."""
 
     attempted_iterations: int = Field(ge=0)
+    segment_id: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class LoopStop(PreviewModel):
     run_id: str
     declaration_digest: str
+
+
+class LoopPause(LoopStop):
+    segment_id: UUID | None = None
+
+
+class LoopContinuation(LoopStop):
+    """Immutable successor reservation, bound to one completed paused segment."""
+
+    operation_id: UUID
+    predecessor_segment: UUID | None
+    predecessor_receipt_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    completed_iterations: int = Field(gt=0)
 
 
 def admit_loop(request: "CandidateRunRequest") -> None:
