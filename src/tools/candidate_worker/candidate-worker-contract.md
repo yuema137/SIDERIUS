@@ -16,7 +16,7 @@ only the claim winner can publish records with that invocation identity.
 
 ## Selected inputs and task authority
 
-The parent revalidates the supported three- or four-node graph, canonical selected
+The parent revalidates the selected supported execution profile, canonical selected
 paths, bytes/size hashes, declaration digest and constructor routes against the
 request. Canvas positions do not enter declaration identity. It exclusively
 creates `candidate_run/` in an absent/empty workspace; losers cannot publish
@@ -78,9 +78,10 @@ provider authentication, network access or quota. The sandbox remains the owner
 of environment forwarding. No request validator, historical reader, offline
 preparation, dotenv behavior or general `LLMBridge` constructor policy changes.
 
-## Native sequence and persistence
+## Fixed-candidate sequence and persistence
 
-One immutable run ID, run name and logical iteration 1 reach the proposer
+For the fixed candidate profile, one immutable run ID, run name and logical
+iteration 1 reach the proposer
 (including its eager/lazy stage bridges), implementor and validator through the
 existing accounting helper. `WorkflowLLMConfig.get` owns constructor routing.
 Native retries remain native; the worker has no retry or replay loop.
@@ -651,7 +652,10 @@ fresh-workspace request against used storage.
 with the fixed native workflow: bounded tuner feedback, cache retention, prediction
 memory, vocabulary confirmations, accumulated findings, previous proposal and
 strictly-better valid Formal incumbent updates. An authored initial summary is
-not by itself a qualified Formal incumbent. Authored replay resolves Health roles
+not by itself a qualified Formal incumbent. An explicit seed metric binds identity;
+when omitted, committed native tuner metric stamps supply history/cache ordering
+and later interpretation inputs. Subsequent stamps reconcile against the prior
+known metric. Missing identity remains unknown; no task name supplies a default. Authored replay resolves Health roles
 through `core.resume.commit_time_gate_ids`, using the committed output's stamped
 effective policy as native resume does. Unknown policy remains unknown; an
 explicitly health-disabled record retains the native classifier's semantics.

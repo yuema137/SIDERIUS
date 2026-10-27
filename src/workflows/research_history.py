@@ -192,11 +192,26 @@ def seed_history(value: InterpretationInput) -> ChainState:
     )
 
 
+def history_metric(state: ChainState, declared: MetricSpec | None) -> MetricSpec | None:
+    """An explicit seed binds identity; otherwise retain the latest known native stamp."""
+    if declared is not None:
+        return declared
+    return next(
+        (
+            output.metric_spec
+            for output in reversed(state.iteration_results)
+            if output.metric_spec is not None
+        ),
+        None,
+    )
+
+
 def interpretation_history(state: ChainState, seed: InterpretationInput) -> dict:
     """Project only native carried fields; task, advice and launch values stay authored."""
     summaries = [] if state.latest_new_summary is None else [state.latest_new_summary]
     return {
         "summaries": summaries,
+        "metric_spec": history_metric(state, seed.metric_spec),
         "model_knowledge_cache": state.model_knowledge_cache,
         "cold_start": not summaries and not state.model_knowledge_cache,
         **state.current_prediction_memory.model_dump(),

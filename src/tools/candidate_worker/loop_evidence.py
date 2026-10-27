@@ -8,7 +8,7 @@ from agent.schemas.proposal import ProposalOutput
 from core.chain_state import ChainState
 from core.resume import commit_time_gate_ids
 from workflows.definition.fanout import execution_families
-from workflows.research_history import advance_completed_history, seed_history
+from workflows.research_history import advance_completed_history, history_metric, seed_history
 
 from .fanout_inputs import captured_contents
 from .graph_evidence import expected_nodes, read_graph_control, verify_graph_trace
@@ -53,6 +53,7 @@ def advance_body(
     edge = shape.interpretation
     contents = captured_contents(request, Path(initial.workspace), iteration=1)
     seed = InterpretationInput.model_validate_json(contents[f"external.{edge.input_binding}"])
+    bound_metric = history_metric(state, seed.metric_spec)
     state.iteration_results.append(tuning)
     state.current_collapse_fingerprint_history = dict(interpretation.collapse_fingerprint_history)
     tuning_path = nodes[shape.tuning].record_path
@@ -63,8 +64,8 @@ def advance_body(
         proposal,
         tuning,
         required_gate_ids=commit_time_gate_ids(tuning, tuning_path, initial.workspace),
-        run_metric_spec=seed.metric_spec,
-        bound_metric_spec=seed.metric_spec,
+        run_metric_spec=seed.metric_spec or tuning.metric_spec or bound_metric,
+        bound_metric_spec=bound_metric,
     )
 
 

@@ -244,3 +244,49 @@ def test_native_completed_fold_retains_first_qualified_incumbent_on_tie():
     assert state.chain_formal_incumbent_reference is first_score
     assert state.best_score_overall == 1.8
     assert state.all_model_types == ["first_model", "second_model"]
+
+
+def test_omitted_seed_metric_uses_native_stamp_when_completed_cache_needs_capping(
+    prepared, loop_tuner, interpretation_provider, monkeypatch
+):
+    import importlib
+    import json
+
+    request = loop_request(prepared)
+    seed_path = Path(request.preview.project_root) / "interpret_input.json"
+    seed = json.loads(seed_path.read_bytes())
+    seed.pop("metric_spec")
+    seed_path.write_text(json.dumps(seed))
+    request = refresh(request)
+    agent = importlib.import_module(
+        "nodes.result_interpretation_agent.result_interpretation_agent"
+    ).ResultInterpretationAgent
+    real = agent.run
+
+    def complete_cache(self, value):
+        output = real(self, value)
+        if value.iteration == 1:
+            output.model_knowledge_cache = {
+                name: {"_stats": {"best_denoising_score": score}}
+                for name, score in (
+                    ("worker_linear_1", 0.75),
+                    *((f"cached_{i}", i) for i in range(1, 6)),
+                )
+            }
+        return output
+
+    monkeypatch.setattr(agent, "run", complete_cache)
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    second = InterpretationInput.model_validate_json(
+        interpretation_input_path(Path(receipt.workspace), "interpret", iteration=2).read_bytes()
+    )
+    assert second.metric_spec is not None
+    assert set(second.model_knowledge_cache) == {
+        "worker_linear_1",
+        "cached_2",
+        "cached_3",
+        "cached_4",
+        "cached_5",
+    }
+    verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
