@@ -39,7 +39,7 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   let context = await browser.newContext(), page = await context.newPage();
-  const connect = async () => { await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click(); await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor(); };
+  const connect = async () => { if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click(); await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor(); };
   const open = async run => {
     await page.locator('#capture-run option[value="' + run.run_id + '"]').waitFor({state: 'attached'});
     await page.locator('#capture-run').selectOption(run.run_id); await page.locator('#capture-open').click();

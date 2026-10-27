@@ -145,6 +145,7 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | POST /api/preparations | PrepareSelection → OperationHandle, 202 |
 | GET /api/preparations/{UUID}/review | PreparedReview |
 | POST /api/candidates | LaunchSelection → OperationHandle, 202 |
+| GET /api/operations | `limit=1..200` (default 50) → `OperationListView`, read-only; see "Operation list" |
 | GET /api/operations/{UUID} | StatusView |
 | GET /api/operations/{UUID}/tokens | CandidateTokenSnapshot, read-only fixed native projection |
 | GET /api/operations/{UUID}/graph-results | GraphResultsView, read-only per-body native tuning report projection |
@@ -298,6 +299,11 @@ clears the section. 404/409 are final for that selection; other failures retry o
 the next existing poll. Each body is its own section (`Iteration N` for several
 bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
 (`TRAIN & TUNE`). No cross-body score or ordering is computed or displayed.
+Non-integer numbers are display-rounded by `number-format.js` (up to four
+decimals; four significant digits for magnitudes below 1e-3 or from 1e9); the
+exact reported value stays in the cell's tooltip. Stop-condition values in the
+loop state are rounded the same way, with exact values in its tooltip. Stored and
+transported values are unchanged.
 
 Witnesses: `test_console_graph_results_reuse_native_run_report_without_paths`
 (native graph record vs `project_run`, no path, failed stage has no score, changed
@@ -560,6 +566,32 @@ existing admissions fail closed. Clients must retain the same UUID on ambiguous
 responses and may inspect it through the existing monitor.
 
 
+## Operation list
+
+`GET /api/operations` lists operations admitted by this console's own operation
+store, most recently admitted first, at most `limit` rows. The owner is
+`tools.candidate_operations.list_operations`: it enumerates only
+`{state_root}/operations/<UUID>` entries, verifies each through the same
+`load_record` path as a single read, sorts by the record's `admitted_at`, and
+projects at most `limit` rows through `read_operation`. It creates nothing,
+claims nothing, and never launches. A non-canonical entry name or a record that
+fails verification (unreadable, invalid JSON, identity or configuration
+mismatch) is skipped and counted in `unreadable`, never guessed into a row. At
+most 4096 directory entries are examined per request; a larger store reports
+`incomplete=true`, and other operations remain readable by UUID.
+
+`OperationListView.operations[]` carries `operation_id`, `kind`, `run_name`,
+`project_id` (the reviewed editor project, when recorded), `admitted_at`,
+`state`, `native_status` and, for authored loops, the same `LoopStatusView` as
+status. Receipts, digests, workspace/log/output paths and credentials are not
+part of the projection.
+
+Slow control: `operations-list.js` renders the list as links to
+`#slow-control/<UUID>`, so selecting a row uses the existing route and Status and
+logs owner. It loads when a bare `#slow-control` route is shown while connected,
+and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
+operation for live status). Manual UUID entry remains available.
+
 ## Persistent views, routing and session
 
 `index.html` owns a single document with persistent Home, Workflow and Slow control
@@ -585,7 +617,11 @@ Theme enum, optional last-operation UUID and the versioned exact reusable launch
 intent are persisted. The launch intent contains only origin/project navigation
 context, retained preparation identity, request digest and operation UUID; never
 source bytes, native requests or credentials.
-Reload/new tab requires Connect again.
+Reload/new tab requires Connect again. Once connected, the access card collapses
+on every view to one status line with **Change token** (reopens the form; the
+current connection stays until a new Connect) and **Disconnect console** (clears the
+in-memory token, bumps the revision and publishes a disconnected state, exactly as a
+401 does). Any disconnect reopens the form.
 
 Connect validates through the explicit deep-link operation GET, otherwise choices
 GET. Operation 404/409 means unavailable data and does not reject valid access.
@@ -600,6 +636,12 @@ reconnect restart for the new revision without replacing a loaded pending draft.
 Editor projects load only on Workflow entry. Choices/project failures remain local;
 known-operation reads need neither task choices nor editor configuration. The one
 existing visible-document two-second polling loop retains its cursor/epoch owners.
+
+Home leads with the workflow journey (open the workflow, edit and review, prepare
+a new run, launch and monitor) and its **Open workflow** action. The native chain
+and configured-task flows follow under **Advanced**. All views share one shell:
+a compact header (title, about, theme), navigation and content aligned on one
+left edge, up to 1920px wide.
 
 Home's configured-task flow is a secondary disclosure independent of the editor
 selection. Prepared workspace, identity, routes, limits, devices/network and

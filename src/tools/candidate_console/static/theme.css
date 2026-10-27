@@ -10,16 +10,16 @@
   --control-border: #163e6945;
   --control: #fbfcfe;
   --hover: #163e690b;
-  --primary: #3a7ebb;
+  --primary: #3574ae;
   --primary-hover: #245f93;
   --on-primary: #ffffff;
-  --secondary: #159f9b;
+  --secondary: #0f7f7b;
   --focus: #3a7ebb;
-  --error: #d6455c;
-  --warning: #c08a12;
+  --error: #c43a51;
+  --warning: #8a6100;
   --warning-bg: #fff5e2;
   --success: #58b947;
-  --disabled: #163e690b;
+  --disabled: #eef3f8;
   --grid: #163e6921;
   --edge: #526c87;
   --port: #159f9b;
@@ -60,7 +60,7 @@
   --warning: #dcae45;
   --warning-bg: #302a1d;
   --success: #72cc62;
-  --disabled: #96c8f50d;
+  --disabled: #13283a;
   --grid: #96c8f524;
   --edge: #8ba6c2;
   --port: #3cc4bf;
@@ -86,7 +86,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 16px;
+  margin: 0 0 0 auto;
 }
 .theme-control label { margin: 0; }
-.theme-control select { width: auto; min-height: 44px; }
+.theme-control select { width: auto; min-height: 36px; padding: 5px 9px; }

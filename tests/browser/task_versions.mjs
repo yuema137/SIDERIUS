@@ -33,7 +33,7 @@ try {
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => {if (request.method() === 'POST') requests.push({path: new URL(request.url()).pathname, body: request.postDataJSON()});});
   await page.goto(metadata.origin + '/#workflow');
-  const connect = async token => {await page.locator('#token').fill(token); await page.locator('#access-form button').click();};
+  const connect = async token => {if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); await page.locator('#token').fill(token); await page.locator('#access-form button').click();};
   await connect(metadata.token);
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
   await page.waitForFunction(() => document.querySelector('#editor-source').value.length > 0 && document.querySelector('#editor-task-choice').options.length === 3);

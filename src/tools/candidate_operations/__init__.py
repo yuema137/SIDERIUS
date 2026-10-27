@@ -1,5 +1,6 @@
 """Detached local candidate operations; no native task imports or provider construction."""
 
+from .listing import list_operations
 from .logs import read_operation_log
 from .loop_resume import loop_root_operation, request_loop_pause, review_loop_resume
 from .models import (
@@ -9,6 +10,8 @@ from .models import (
     LogChunk,
     LogReadRequest,
     OperationHandle,
+    OperationListEntry,
+    OperationListing,
     OperationSnapshot,
     OperationStoreConfig,
     OperationSubmission,
@@ -49,6 +52,8 @@ __all__ = [
     "NativeChainResumeRequest",
     "NativeResumeReview",
     "OperationHandle",
+    "OperationListEntry",
+    "OperationListing",
     "OperationSnapshot",
     "OperationStoreConfig",
     "OperationSubmission",
@@ -57,6 +62,7 @@ __all__ = [
     "ReusablePreparationExpectation",
     "ReusablePrepareOperation",
     "build_reusable_operation",
+    "list_operations",
     "lookup_operation_request",
     "loop_root_operation",
     "operation_request_digest",

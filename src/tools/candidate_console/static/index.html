@@ -8,12 +8,14 @@
   <link rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/editor.css">
+  <script src="/number-format.js" defer></script>
   <script src="/session.js" defer></script>
   <script src="/token-presenter.js" defer></script>
   <script src="/native-chain-monitor.js" defer></script>
   <script src="/graph-results-monitor.js" defer></script>
   <script src="/loop-control.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/operations-list.js" defer></script>
   <script src="/editor-task-controls.js" defer></script>
   <script src="/editor-loop-controls.js" defer></script>
   <script src="/editor-capability-presentation.js" defer></script>
@@ -28,19 +30,31 @@
   <script src="/native-chain.js" defer></script>
 </head>
 <body>
-<header><div class="brand">SIDERIUS <span>Local candidate console</span></div><details class="console-intro"><summary>About this console</summary><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></details>
+<header class="console-header"><div class="brand">SIDERIUS <span>Local candidate console</span></div><details class="console-intro"><summary>About this console</summary><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></details>
   <div class="theme-control"><label for="theme-preference">Color theme</label><select id="theme-preference"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
 </header>
 <nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#slow-control">Slow control</a></nav>
 <main>
 <p id="route-status" role="status"></p>
-  <section class="card" aria-labelledby="access-heading">
+  <section class="card" id="access-section" aria-labelledby="access-heading">
     <h1 id="access-heading">Connect to the console</h1>
-    <details class="access-help"><summary>About the console token</summary><p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p></details>
+    <details class="access-help" id="access-help"><summary>About the console token</summary><p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p></details>
     <form id="access-form" class="actions"><div class="grow"><label for="token">Console token</label><input id="token" type="password" autocomplete="off" required></div><button type="submit">Connect</button></form>
     <p id="access-status" role="status">Not connected.</p>
+    <div id="access-connected" class="access-connected" hidden><button id="access-change" type="button" class="secondary">Change token</button><button id="access-disconnect" type="button" class="secondary">Disconnect console</button></div>
   </section>
-  <section id="view-home" data-view="home"><h1 tabindex="-1">Home</h1><p><a href="#workflow">Open workflow</a> · <a href="#slow-control">Open known operation</a></p>
+  <section id="view-home" data-view="home"><h1 tabindex="-1">Home</h1>
+<section class="card journey" aria-labelledby="journey-heading">
+  <p class="eyebrow">Main path</p><h2 id="journey-heading">Run a workflow</h2>
+  <ol class="journey-steps">
+    <li><strong>Open the workflow</strong> and choose a configured project.</li>
+    <li><strong>Edit and review</strong> the workflow on the canvas, then save the reviewed source.</li>
+    <li><strong>Prepare a new run</strong> from the saved source and review its inputs and limits.</li>
+    <li><strong>Launch and monitor</strong> the run; follow it in Slow control.</li>
+  </ol>
+  <div class="actions"><a class="button-link" href="#workflow">Open workflow</a><a href="#slow-control">See recent operations</a></div>
+</section>
+<h2 class="section-heading">Advanced</h2>
 <section class="card" aria-labelledby="native-chain-heading">
 <h2 id="native-chain-heading">Run a configured native chain</h2>
 <p>Launch the captured native recipe independently of the workflow editor. Review the original capture for complete scientific settings. Each new destination needs a new externally reviewed capture and fresh envelope.</p>
@@ -172,26 +186,17 @@
   <footer>Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</footer>
 </section>
 <section id="view-slow-control" data-view="slow-control" hidden><h1 tabindex="-1">Slow control</h1>
-  <section class="card" aria-labelledby="recorded-example-heading">
-    <p class="eyebrow">Read-only evidence</p><h2 id="recorded-example-heading">Recorded example</h2>
-    <p>Candidate validation evidence only. This view does not represent a live operation, training run, score, or billing record.</p>
-    <div class="actions"><div class="grow"><label for="recorded-example-choice">Configured example</label><select id="recorded-example-choice" disabled><option value="">Connect to load recorded examples</option></select></div><button id="recorded-example-open" disabled>Read example</button></div>
-    <p id="recorded-example-status" role="status">Connect to load configured read-only examples.</p>
-    <section id="recorded-example-content" hidden aria-label="Recorded candidate evidence">
-      <dl id="recorded-example-facts" class="facts"></dl>
-      <h3>Captured candidate stages</h3><ol id="recorded-example-stages"></ol>
-      <details><summary>Captured declaration (read-only)</summary><dl id="recorded-example-declaration" class="facts"></dl><div id="recorded-example-nodes"></div></details>
-      <h3 id="recorded-token-heading">Reported provider tokens</h3><p id="recorded-token-status" role="status"></p><p id="recorded-token-times" class="muted"></p>
-      <details><summary>Reported token table</summary><p id="recorded-token-provenance" class="muted"></p><div id="recorded-token-table" class="token-table" role="region" aria-labelledby="recorded-token-heading" tabindex="0" hidden>
-        <table><thead><tr><th scope="col">Provider</th><th scope="col">Requested model</th><th scope="col">Served model</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Total</th><th scope="col">Responses</th></tr></thead><tbody id="recorded-token-rows"></tbody></table>
-      </div></details>
-      <p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
-    </section>
+<div class="slow-control-layout">
+  <section class="card operations-panel" aria-labelledby="operations-heading">
+    <p class="eyebrow">This console's operations</p><h2 id="operations-heading">Recent operations</h2>
+    <div class="actions operations-actions"><button id="operations-refresh" type="button" class="secondary" disabled>Refresh list</button></div>
+    <p id="operations-status" role="status">Connect to list operations.</p>
+    <ol id="operations-list" class="operations-list" aria-labelledby="operations-heading"></ol>
   </section>
   <section class="card" aria-labelledby="monitor-heading">
-    <p class="eyebrow">3 · Observe any known operation</p><h2 id="monitor-heading">Status and logs</h2>
-    <p>Enter an operation UUID from this console or code. Reading an operation never launches or restarts it. Closing the page does not stop an admitted operation.</p>
-    <form id="monitor-form" class="actions"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" disabled>Read operation</button></form>
+    <p class="eyebrow">Observe an operation</p><h2 id="monitor-heading">Status and logs</h2>
+    <p class="muted">Choose an operation from the list, or enter its UUID. Reading an operation never launches or restarts it. Closing the page does not stop an admitted operation.</p>
+    <form id="monitor-form" class="actions manual-operation"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" class="secondary" disabled>Read operation</button></form>
     <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="operation-observed" class="muted"></p><details><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
     <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p>
       <div id="loop-stop-group" class="actions" hidden><button id="loop-stop" type="button">Stop at next boundary</button><p class="muted">The current body completes; no partial body is kept as a result.</p></div>
@@ -211,6 +216,23 @@
     </details><p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
     <details><summary>Activity and logs</summary><div class="actions"><label for="log-kind">Log source</label><select id="log-kind"><option value="native">Native</option><option value="operation">Operation</option></select></div>
     <p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre></details>
+  </section>
+</div>
+  <section class="card" aria-labelledby="recorded-example-heading">
+    <p class="eyebrow">Read-only evidence</p><h2 id="recorded-example-heading">Recorded example</h2>
+    <p>Candidate validation evidence only. This view does not represent a live operation, training run, score, or billing record.</p>
+    <div class="actions"><div class="grow"><label for="recorded-example-choice">Configured example</label><select id="recorded-example-choice" disabled><option value="">Connect to load recorded examples</option></select></div><button id="recorded-example-open" disabled>Read example</button></div>
+    <p id="recorded-example-status" role="status">Connect to load configured read-only examples.</p>
+    <section id="recorded-example-content" hidden aria-label="Recorded candidate evidence">
+      <dl id="recorded-example-facts" class="facts"></dl>
+      <h3>Captured candidate stages</h3><ol id="recorded-example-stages"></ol>
+      <details><summary>Captured declaration (read-only)</summary><dl id="recorded-example-declaration" class="facts"></dl><div id="recorded-example-nodes"></div></details>
+      <h3 id="recorded-token-heading">Reported provider tokens</h3><p id="recorded-token-status" role="status"></p><p id="recorded-token-times" class="muted"></p>
+      <details><summary>Reported token table</summary><p id="recorded-token-provenance" class="muted"></p><div id="recorded-token-table" class="token-table" role="region" aria-labelledby="recorded-token-heading" tabindex="0" hidden>
+        <table><thead><tr><th scope="col">Provider</th><th scope="col">Requested model</th><th scope="col">Served model</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Total</th><th scope="col">Responses</th></tr></thead><tbody id="recorded-token-rows"></tbody></table>
+      </div></details>
+      <p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
+    </section>
   </section>
 </section></main>
 <footer>Candidate generation and validation, with native training when declared. Inspect native outputs for scientific results.</footer>
