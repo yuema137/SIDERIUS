@@ -21,6 +21,7 @@ from ml_models.model_descriptions import DescriptionSourcePolicy
 from workflows.definition import ExternalSource, ProtocolRequest
 from workflows.definition.fanout import InterpretationEdge
 from workflows.llm_config import WorkflowLLMConfig
+from workflows.proposal_pipeline import get_reasoning_pipeline
 from workflows.research_history import (
     interpretation_history,
     prior_findings,
@@ -54,6 +55,7 @@ class InterpretationArguments(BaseModel):
         self,
         output: InterpretationOutput,
         *,
+        config: WorkflowLLMConfig,
         history: ChainState | None = None,
         feedback: list[FormalValidityFeedback] | None = None,
     ) -> ProposalInput:
@@ -67,7 +69,9 @@ class InterpretationArguments(BaseModel):
                 if feedback is not None
                 else recent_formal_feedback(history, None),
             )
-        result = local_full_context(output, **values)
+        result = local_full_context(
+            output, reasoning_pipeline=get_reasoning_pipeline(config), **values
+        )
         if history is not None:
             result.existing_model_types = list(history.all_model_types)
         return result

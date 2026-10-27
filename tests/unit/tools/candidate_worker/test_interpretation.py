@@ -8,12 +8,14 @@ from typing import ClassVar
 import pytest
 
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput, ModelRunSummary
-from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposal import ProposalInput, ReasoningPipelineConfig
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from tests.helpers.candidate_fanout import fanout_request
 from tools.candidate_worker import launch_candidate
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.candidate_worker.layout import graph_instance_dir
+from tools.workflow_preview.config import parse_config
+from workflows.proposal_pipeline import get_reasoning_pipeline
 from workflows.task_composition import compose_run_task_bindings
 
 from .conftest import refresh
@@ -151,11 +153,18 @@ def interpretation_provider(native_runner, monkeypatch):
     return Interpreter
 
 
-@pytest.mark.parametrize("cold_start", [True, False])
+@pytest.mark.parametrize("cold_start,staged", [(True, True), (False, True), (True, False)])
 def test_native_interpretation_reaches_proposal_and_parent_replays_edge(
-    prepared, native_runner, interpretation_provider, cold_start
+    prepared, native_runner, interpretation_provider, cold_start, staged
 ):
     request = interpretation_request(prepared, cold_start=cold_start)
+    config_path = Path(request.preview.project_root) / "llm.json"
+    if not staged:
+        config = json.loads(config_path.read_bytes())
+        config["propose"] = None
+        config_path.write_text(json.dumps(config))
+        request = refresh(request)
+    expected_pipeline = get_reasoning_pipeline(parse_config(config_path.read_bytes()))
     receipt = launch_candidate(request)
     assert receipt.status == "accepted", receipt.error
     assert (
@@ -175,6 +184,11 @@ def test_native_interpretation_reaches_proposal_and_parent_replays_edge(
     assert output.model_types == ([] if cold_start else ["prior_linear"])
     path = Path(receipt.workspace) / "candidate_run/proposal_inputs/propose.json"
     proposal = ProposalInput.model_validate_json(path.read_bytes())
+    assert proposal.reasoning_pipeline == (expected_pipeline or ReasoningPipelineConfig())
+    assert (expected_pipeline is not None) is staged
+    labels = [label for label, _ in native_runner.calls]
+    assert ("proposer.comparison" in labels) is staged
+    assert ("proposer.causal_reasoning" in labels) is staged
     assert proposal.cold_start is cold_start
     assert any(
         item.kind == "human" and "both output logits" in item.content
@@ -189,7 +203,10 @@ def test_native_interpretation_reaches_proposal_and_parent_replays_edge(
     parent = initial(request).model_copy(update={"run_id": receipt.run_id})
     verify_graph_trace(request, parent, receipt)
     # A valid declaration is insufficient: a lost adapter/advice projection is rejected.
-    path.write_text(proposal.model_copy(update={"expert_context": []}).model_dump_json())
+    mutation = (
+        {"reasoning_pipeline": ReasoningPipelineConfig()} if staged else {"expert_context": []}
+    )
+    path.write_text(proposal.model_copy(update=mutation).model_dump_json())
     with pytest.raises(ValueError, match="declared interpretation edge"):
         verify_graph_trace(request, parent, receipt)
 
