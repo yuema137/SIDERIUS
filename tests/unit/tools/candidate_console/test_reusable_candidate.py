@@ -107,6 +107,23 @@ def test_policy_selection_curated_review_and_native_builder_parity(captured):
     assert not (envelope / "workspace").exists()
 
 
+def test_review_refuses_concrete_only_profile_against_captured_declaration(captured, monkeypatch):
+    """A wider concrete preview cannot expand reusable preparation admission."""
+    adapter, project, choice, envelope = captured
+    selected = adapter.select(project.project_id, choice)
+    task, inspected, operation = adapter._operation(project.project_id, selected, uuid4())
+    preview = operation.request.preview.model_copy(
+        update={"execution_profile": "native-interpretation-candidate/v1"}
+    )
+    changed = operation.model_copy(
+        update={"request": operation.request.model_copy(update={"preview": preview})}
+    )
+    monkeypatch.setattr(adapter, "_operation", lambda *args: (task, inspected, changed))
+    with pytest.raises(OperationFailure, match="profile differs from captured reusable declaration"):
+        adapter.review(project.project_id, selected)
+    assert not (envelope / "workspace").exists()
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
