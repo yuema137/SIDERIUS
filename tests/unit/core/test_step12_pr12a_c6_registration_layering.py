@@ -34,6 +34,15 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CORE = REPO_ROOT / "src/core"
 MODEL_EXPLORATION = REPO_ROOT / "src/workflows" / "model_exploration.py"
+# Owns the findings-union call since the finite-loop history extraction (PR #940).
+RESEARCH_HISTORY = REPO_ROOT / "src/workflows" / "research_history.py"
+
+
+def _top_level_import_names(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        alias.name for node in tree.body if isinstance(node, ast.ImportFrom) for alias in node.names
+    }
 
 
 def _import_sources(path: Path) -> list[str]:
@@ -173,14 +182,17 @@ class TestTheCycleWorkaroundsAreDissolved:
 
     def test_restored_state_is_an_ordinary_top_level_import(self):
         tree = ast.parse(MODEL_EXPLORATION.read_text(encoding="utf-8"))
-        top_level = {
-            alias.name
-            for node in tree.body
-            if isinstance(node, ast.ImportFrom)
-            for alias in node.names
-        }
-        assert "RestoredState" in top_level
-        assert "union_key_findings" in top_level
+        assert "RestoredState" in _top_level_import_names(MODEL_EXPLORATION)
+        # The findings union is called by the history policy, so the ordinary
+        # top-level import must live where the call lives.
+        history = ast.parse(RESEARCH_HISTORY.read_text(encoding="utf-8"))
+        assert any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "union_key_findings"
+            for n in ast.walk(history)
+        )
+        assert "union_key_findings" in _top_level_import_names(RESEARCH_HISTORY)
 
         type_checking_blocks = [
             node
@@ -194,19 +206,21 @@ class TestTheCycleWorkaroundsAreDissolved:
     def test_no_function_local_import_of_the_resume_symbols_remains(self):
         """The workaround that mattered most: `union_key_findings` was
         imported INSIDE `run_workflow`, which hid a cross-layer dependency in
-        the middle of an already-large function."""
-        tree = ast.parse(MODEL_EXPLORATION.read_text(encoding="utf-8"))
+        the middle of an already-large function. The history policy that now
+        owns the union call is held to the same rule."""
         offenders: list[str] = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                continue
-            for sub in ast.walk(node):
-                if (
-                    isinstance(sub, ast.ImportFrom)
-                    and sub.module == "core.resume"
-                    and sub is not node
-                ):
-                    offenders.append(f"{node.name}: from {sub.module} import ...")
+        for path in (MODEL_EXPLORATION, RESEARCH_HISTORY):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.ImportFrom)
+                        and sub.module == "core.resume"
+                        and sub is not node
+                    ):
+                        offenders.append(f"{path.name}:{node.name}: from {sub.module} import ...")
         assert offenders == []
 
     def test_the_annotation_is_no_longer_quoted(self):

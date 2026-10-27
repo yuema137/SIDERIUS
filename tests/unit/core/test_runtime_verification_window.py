@@ -68,11 +68,18 @@ def test_override_crosses_the_typed_launch_boundaries() -> None:
     )[FIELD]
     assert launcher_value == "args.runtime_verification_max_wall_seconds"
 
-    workflow_value = _call_keyword_value(
-        REPO_ROOT / "src/workflows" / "model_exploration.py",
-        "local_validated_model",
-        FIELD,
+    from tests.helpers.workflow_delegation import (
+        TUNER_PREPARATION,
+        TUNER_PREPARATION_ENTRYPOINT,
+        assert_run_workflow_delegates,
     )
+
+    # run_workflow hands its launch to the shared tuner preparation, which
+    # owns the validator-to-tuner protocol call.
+    assert_run_workflow_delegates(
+        TUNER_PREPARATION_ENTRYPOINT, TUNER_PREPARATION, "local_validated_model"
+    )
+    workflow_value = _call_keyword_value(TUNER_PREPARATION, "local_validated_model", FIELD)
     assert workflow_value == "launch.runtime_verification_max_wall_seconds"
 
 

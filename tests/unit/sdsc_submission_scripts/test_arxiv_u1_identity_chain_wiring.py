@@ -30,6 +30,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.workflow_delegation import (
+    WORKFLOW_LOCK_ENTRYPOINT,
+    WORKFLOW_LOCK_SITE,
+    assert_run_workflow_delegates,
+)
+
 _REPO = Path(__file__).resolve().parents[3]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
@@ -45,7 +51,9 @@ _CHAIN_COMMON = _REPO / "scripts" / "launch" / "_chain_common.sh"
 
 LOCK_SITES = {
     "tuner": _REPO / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-    "workflow": _REPO / "src/workflows/model_exploration.py",
+    # run_workflow's lock and LockLaunchIdentity are built by the shared
+    # native training startup (also used by the candidate worker).
+    "workflow": WORKFLOW_LOCK_SITE,
     "chain": _REPO / "src/workflows/run_one_iteration.py",
 }
 
@@ -99,6 +107,10 @@ class TestLockSiteCensus:
         drop the carrier from a lock call → the first assertion names the
         site; drop one field from a site's constructor (or its extracted
         helper) → the second names the kwarg."""
+        if site == "workflow":
+            assert_run_workflow_delegates(
+                WORKFLOW_LOCK_ENTRYPOINT, WORKFLOW_LOCK_SITE, "build_run_invariants"
+            )
         src = LOCK_SITES[site].read_text(encoding="utf-8")
         windows = _call_windows(src)
         assert windows, f"{site}: no build_run_invariants call found"
@@ -154,6 +166,9 @@ class TestLockSiteCensus:
             assert len(calls) == 1, path
             return {kw.arg for kw in calls[0].keywords if kw.arg is not None}
 
+        assert_run_workflow_delegates(
+            WORKFLOW_LOCK_ENTRYPOINT, WORKFLOW_LOCK_SITE, "build_run_invariants"
+        )
         chain = constructor_kwargs(LOCK_SITES["chain"])
         workflow = constructor_kwargs(LOCK_SITES["workflow"])
         assert chain == workflow, {
@@ -358,13 +373,19 @@ class TestMainWiring:
         the identity would leave a labelled iteration unattributable exactly
         when it failed."""
         tree = ast.parse(LOCK_SITES["chain"].read_text(encoding="utf-8"))
-        entry = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
-        assert any(
-            isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Name)
-            and n.func.id == "_run_bound_iteration"
-            for n in ast.walk(entry)
-        ), "main must reach the package-bound lifecycle"
+
+        def calls(caller: str, callee: str) -> bool:
+            fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == caller)
+            return any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == callee
+                for n in ast.walk(fn)
+            )
+
+        # main -> native-writer-owned scope -> package-bound lifecycle.
+        assert calls("main", "_run_owned_iteration"), "main must reach the writer-owned lifecycle"
+        assert calls("_run_owned_iteration", "_run_bound_iteration"), (
+            "main must reach the package-bound lifecycle"
+        )
         main = next(
             n
             for n in tree.body

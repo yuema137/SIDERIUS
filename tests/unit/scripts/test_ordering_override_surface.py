@@ -18,11 +18,18 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.workflow_delegation import (
+    WORKFLOW_LOCK_ENTRYPOINT,
+    WORKFLOW_LOCK_SITE,
+    assert_run_workflow_delegates,
+)
+
 REPO = Path(__file__).resolve().parents[3]
 
 LOCK_SITES = [
     REPO / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-    REPO / "src/workflows/model_exploration.py",
+    # run_workflow's lock is built by the shared native training startup.
+    WORKFLOW_LOCK_SITE,
     REPO / "src/workflows/run_one_iteration.py",
 ]
 
@@ -53,6 +60,11 @@ def _build_invariants_calls(source: str) -> list[str]:
 def test_every_lock_site_passes_the_ordering_override(path):
     """A lock site that omits the override writes a contradictory lock, and
     the run dies on the next site's validation."""
+    if path == WORKFLOW_LOCK_SITE:
+        # The startup's call only guards run_workflow while run_workflow uses it.
+        assert_run_workflow_delegates(
+            WORKFLOW_LOCK_ENTRYPOINT, WORKFLOW_LOCK_SITE, "build_run_invariants"
+        )
     source = path.read_text()
     calls = _build_invariants_calls(source)
     assert calls, f"expected a build_run_invariants call in {path.name}"
