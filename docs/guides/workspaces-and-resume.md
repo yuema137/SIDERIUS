@@ -29,10 +29,23 @@ writer registration also blocks direct restarts. This applies equally to foregro
 detached and GUI launches. Inspect ownership with
 `.venv/bin/python -m core.native_writer inspect --workspace /external/runs/run`.
 An `unresolved` result means cleanup could not be established; do not delete the
-claim or interpret a missing process as permission to resume. Verified recovery is
-not yet supported. See the [writer contract](../../src/core/native_writer/native-writer-contract.md).
+claim or interpret a missing process as permission to resume; an unresolved claim
+is never recoverable. Continuing an exited, cleanly finished captured chain is a
+separate operation ([steps](../../src/tools/candidate_operations/README.md#continue-a-captured-native-chain)).
+See the [writer contract](../../src/core/native_writer/native-writer-contract.md).
 Create the workspace's parent before launching; ownership metadata occupies a
 private sibling directory there, outside scientific artifacts.
+
+## Which resume?
+
+Three different mechanisms continue earlier work. They do not substitute for
+each other.
+
+| You ran | How to continue | Steps |
+| --- | --- | --- |
+| The command-line chain (`run_chain.sh`) | Rerun on the same workspace (`--auto_resume`, on by default) | [Operating a run](operating-a-run.md#resume) |
+| A captured native chain through the operations store | Review and submit a continuation operation | [Continue a captured native chain](../../src/tools/candidate_operations/README.md#continue-a-captured-native-chain) |
+| A saved workflow's research loop | Pause it, then resume it as a new segment of the same run | [Stop, pause or resume a research loop](../../src/tools/candidate_operations/README.md#stop-pause-or-resume-a-research-loop) |
 
 ## What a chain workspace contains
 

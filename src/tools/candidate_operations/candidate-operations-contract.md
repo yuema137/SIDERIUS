@@ -24,7 +24,10 @@ credential values and never dispatch again.
 
 The CLI has `submit --store-config FILE --request FILE`, `status --store-config
 FILE --operation-id UUID`, and `log --store-config FILE --operation-id UUID
---kind native|operation --offset N --limit N`. Outputs are schema JSON. Submit
+--kind native|operation --offset N --limit N`, plus `review`, `review-resume` and
+`tokens` (native chains, below) and the authored-loop controls `stop-loop`,
+`pause-loop`, `review-loop-resume` and `write-loop-resume`
+([authored-loop CLI](#control-an-authored-loop-from-code-or-the-cli)). Outputs are schema JSON. Submit
 exit zero establishes admission/existing identity, not native success. Status
 exit zero includes rejected/failed/unknown observations. Invalid records/config
 produce a nonzero typed error; CLI argument grammar errors use argparse's normal
@@ -808,6 +811,58 @@ or `None` for any other operation, by following immutable
 authored loop raises `kind` (reachable only with tampered records). It reads no
 native file, process or credential, and an unknown operation raises `FileNotFoundError`.
 Predecessor-link cycles raise `integrity`.
+
+### Control an authored loop from code or the CLI
+
+CLI `review-resume` and the native continuation above serve captured native
+chains only and refuse an authored loop; use these routes instead. Each CLI
+subcommand parses its arguments and calls the Python function on the same line, so
+admission, refusals and idempotency are the owner's:
+
+| CLI (`--store-config FILE --operation-id UUID`) | Python | Output |
+| --- | --- | --- |
+| `stop-loop` | `request_loop_stop(config, operation_id)` | `LoopStop` marker (requested) |
+| `pause-loop` | `request_loop_pause(config, operation_id)` | `LoopPause` marker (requested) |
+| `review-loop-resume` | `review_loop_resume(config, operation_id)` | paused `OperationSnapshot` with `receipt_digest` |
+| `write-loop-resume ... --output FILE` | review, then construct the request below | the saved `CandidateLoopResumeOperation` |
+
+`write-loop-resume` reviews the paused segment and creates `FILE` once; an existing
+file refuses with `output_exists` and is left unchanged, so a retry after a lost
+response submits the same request ID. It does not launch. Launch is the ordinary
+`submit --store-config FILE --request FILE`, which reads the launching process
+environment; admission requires the root request's provider environment names.
+Failures use the ordinary one-line JSON error and exit status 2.
+
+```python
+from pathlib import Path
+from uuid import UUID, uuid4
+from tools.candidate_operations import (
+    CandidateLoopResumeOperation, CandidateLoopResumeRequest, OperationStoreConfig,
+    read_operation, request_loop_pause, request_loop_stop, review_loop_resume,
+    submit_operation,
+)
+
+config = OperationStoreConfig.model_validate_json(Path("store.json").read_bytes())
+segment = UUID("RUNNING_SEGMENT_UUID")
+request_loop_pause(config, segment)  # or request_loop_stop: run-wide and terminal
+# Poll read_operation(config, segment) until the receipt is paused and the wrapper exited.
+review = review_loop_resume(config, segment)
+assert review.receipt_digest is not None
+resume = CandidateLoopResumeOperation(
+    request_id=uuid4(),
+    request=CandidateLoopResumeRequest(
+        predecessor_operation_id=segment,
+        expected_receipt_digest=review.receipt_digest,
+    ),
+)
+Path("loop-resume.json").write_text(resume.model_dump_json(indent=2))
+submit_operation(config, resume, launch_environment=environment_with_root_provider_names)
+```
+
+Acknowledgement is not the outcome: read `read_operation` until the receipt says
+`stopped`, `paused` or `completed`. The resumed segment is a new operation UUID on
+the same native run; pause it by its own UUID. Witnesses for the CLI routing:
+`tests/unit/tools/candidate_operations/test_cli_loop_controls.py`.
 
 These authored controls do not use fixed native-chain capture recipes or shell
 resume flags. No arbitrary iteration cap, new history policy or mid-body recovery
