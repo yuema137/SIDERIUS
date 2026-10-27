@@ -19,6 +19,14 @@
 .editor-node[aria-pressed="true"] { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--hover); }
 .circuit-adapter { display: block; padding: .5rem .8rem; overflow-wrap: anywhere; border-bottom: 1px solid var(--control-border); }
 .circuit-port { position: relative; display: block; width: 100%; border: 0; border-radius: 0; padding: .55rem 1rem; text-align: left; background: transparent; color: var(--text); }
+.circuit-port:not(:disabled):hover { background: var(--hover); color: var(--text); }
+.circuit-port-contract { display: inline-block; margin-left: .45rem; padding: 1px 5px; border: 1px solid var(--control-border); border-radius: 999px; color: var(--muted); font-size: .64rem; font-weight: 500; vertical-align: .08em; }
+.circuit-port-requirement { float: right; color: var(--muted); font-size: .65rem; font-weight: 500; }
+.circuit-port-tooltip { display: none; position: absolute; z-index: 8; top: auto; bottom: calc(100% - 2px); left: .5rem; width: max-content; max-width: min(360px, 72vw); padding: .45rem .6rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--panel); color: var(--text); box-shadow: 0 4px 14px #0003; font-size: .7rem; font-weight: 500; line-height: 1.35; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.circuit-port:hover .circuit-port-tooltip, .circuit-port:focus-visible .circuit-port-tooltip { display: block; }
+.circuit-port.is-unbound { color: var(--muted); }
+.circuit-port[data-contract] .circuit-socket { border-radius: 50%; }
+.circuit-port[data-contract^="optional."] .circuit-socket { border-radius: 2px; transform: rotate(45deg); }
 .circuit-output { text-align: right; border-top: 1px solid var(--control-border); }
 .circuit-socket { position: absolute; width: 12px; height: 12px; top: calc(50% - 6px); left: -7px; border: 2px solid var(--text); background: var(--control); border-radius: 50%; }
 .circuit-output .circuit-socket { left: auto; right: -7px; }

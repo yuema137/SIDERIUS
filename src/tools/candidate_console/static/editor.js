@@ -8,7 +8,7 @@
   let taskChoices = null, taskSelection = null, taskMessage = '', taskLoadingRevision = null;
   let taskAcknowledged = false, taskAdopted = false;
   const trainingDrafts = new Map();
-  let options = [], selected = null, pending = false, sourceDirty = false, mode = 'source', reviewed = null, conflict = null, saving = false;
+  let inventory = [], selected = null, pending = false, sourceDirty = false, mode = 'source', reviewed = null, conflict = null, saving = false;
   const clone = value => JSON.parse(JSON.stringify(value));
   const status = message => { $('status').textContent = message; };
   const current = (id, version) => project === id && generation === version;
@@ -104,7 +104,7 @@
   }
   function showTaskRefusal(proposal, selection) {
     $('source').value = proposal.source; $('source').disabled = false;
-    graph = clone(proposal.document); options = proposal.binding_options; training = proposal.training;
+    graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training;
     mode = 'source'; sourceDirty = false; pending = proposal.source !== base.source;
     taskAcknowledged = false; taskAdopted = false;
     reviewed = {source: proposal.source, sha256: proposal.sha256, base: base.sha256,
@@ -117,7 +117,7 @@
   function adopt(value) {
     trainingDrafts.clear();
     taskSelection = null; taskMessage = '';
-    sourceAvailable = true; base = value; graph = value.document ? clone(value.document) : null; options = value.binding_options; training = value.training;
+    sourceAvailable = true; base = value; graph = value.document ? clone(value.document) : null; inventory = value.port_inventory || []; training = value.training;
     $('source').value = value.source; $('source').disabled = !graph; mode = 'source'; sourceDirty = false; pending = false; conflict = null;
     $('conflict').hidden = true; selected = graph?.definition.nodes.some(n => n.id === selected) ? selected : graph?.definition.nodes[0]?.id;
     invalidate(); diagnostic(value.diagnostics); render();
@@ -129,21 +129,26 @@
   const canEditCircuit = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict && trainingDrafts.size === 0;
   function bindArgument(nodeId, argument, source) {
     if (!canEditCircuit()) return;
-    const option = options.find(value => value.node === nodeId && value.argument === argument);
+    const option = inventory.find(value => value.node === nodeId && value.argument === argument);
     const choice = option?.choices.find(value => JSON.stringify(value.source) === JSON.stringify(source));
     const item = graph.definition.nodes.find(value => value.id === nodeId);
     if (!choice || !item) return;
-    const previous = argument === null ? {kind: 'external', binding: item.request.binding} : item.request.arguments.find(value => value.name === argument)?.source;
+    const previous = option?.source;
     if (JSON.stringify(previous) === JSON.stringify(choice.source)) return;
     if (argument === null) item.request.binding = choice.source.binding;
-    else item.request.arguments.find(value => value.name === argument).source = clone(choice.source);
+    else {
+      const existing = item.request.arguments.find(value => value.name === argument);
+      if (existing) existing.source = clone(choice.source);
+      else item.request.arguments.push({name: argument, source: clone(choice.source)});
+    }
+    option.source = clone(choice.source); option.bound = true;
     mode = 'document'; changed(); render(); status('Binding changed locally. Review the declaration, then save. Preparation checks the supported execution profile separately.');
   }
   function renderGraph() {
     $('edges').replaceChildren();
     const id = project, document = graph;
     const live = () => project === id && graph === document;
-    window.editorCircuit.render($('graph'), {document: graph, options, selected, enabled: canEditCircuit()}, {
+    window.editorCircuit.render($('graph'), {document: graph, inventory, selected, enabled: canEditCircuit()}, {
       select: value => { if (live()) { selected = value; render(); } },
       bind: (nodeId, argument, source) => { if (live()) bindArgument(nodeId, argument, source); },
       move: (nodeId, x, y) => {
@@ -227,23 +232,33 @@
       node('dt', 'Capability ID', mappingList); node('dd', item.capability, mappingList);
       node('dt', 'Instance ID', mappingList); node('dd', item.id, mappingList);
       if (item.request.kind === 'protocol') { node('dt', 'Protocol', mappingList); node('dd', item.request.protocol, mappingList); }
-      for (const option of options.filter(entry => entry.node === item.id)) {
-        const source = option.argument === null ? {kind: 'external', binding: item.request.binding} : item.request.arguments.find(argument => argument.name === option.argument).source;
+      const protocolMapping = inventory.find(entry => entry.node === item.id)?.protocol_mapping;
+      if (protocolMapping) {
+        node('dt', 'Protocol owner', mappingList); node('dd', protocolMapping.owner, mappingList);
+        node('dt', 'Mapped input contract', mappingList); node('dd', protocolMapping.output_contract.id, mappingList);
+      }
+      for (const option of inventory.filter(entry => entry.node === item.id)) {
         node('dt', option.argument || 'Request', mappingList);
-        node('dd', source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port}`, mappingList);
+        node('dd', option.source ? (option.source.kind === 'external' ? `external:${option.source.binding}` : `${option.source.node}.${option.source.port}`) : 'unbound', mappingList);
       }
       if (item.capability === 'tuning' && training) renderTraining();
-      for (const option of options.filter(entry => entry.node === item.id)) {
-        const label = node('label', option.argument || 'Request binding', $('inspector'));
+      for (const option of inventory.filter(entry => entry.node === item.id)) {
+        const label = node('label', `${option.argument || 'Request'} · ${option.socket_contract.id} · ${option.required ? 'required' : 'optional'}`, $('inspector'));
         const select = document.createElement('select'); label.append(select);
-        const active = option.argument === null ? {kind: 'external', binding: item.request.binding} : item.request.arguments.find(a => a.name === option.argument).source;
+        if (!option.bound) {
+          const empty = node('option', option.required ? 'Required input is unbound' : 'Unbound (optional)', select);
+          empty.value = ''; empty.disabled = true; empty.selected = true;
+        }
         option.choices.forEach((choice, index) => {
           const el = node('option', choice.label, select); el.value = String(index);
-          if (JSON.stringify(choice.source) === JSON.stringify(active)) el.selected = true;
+          el.title = `${choice.contract.id}: ${choice.contract.native_type}`;
+          if (option.source && JSON.stringify(choice.source) === JSON.stringify(option.source)) el.selected = true;
         });
+        select.title = `${option.socket_contract.native_type}${option.protocol_mapping ? `; mapped by ${option.protocol_mapping.owner} (${option.protocol_mapping.id}) to ${option.protocol_mapping.output_contract.id}` : ''}`;
+        select.setAttribute('aria-label', `${item.id}.${option.argument || 'request'} ${option.required ? 'required' : 'optional'} input, ${option.socket_contract.native_type}`);
         select.dataset.node = item.id; select.dataset.argument = option.argument || 'request';
         select.addEventListener('change', () => {
-          if (graph === capturedGraph) bindArgument(item.id, option.argument, option.choices[Number(select.value)].source);
+          if (graph === capturedGraph && select.value !== '') bindArgument(item.id, option.argument, option.choices[Number(select.value)].source);
         });
       }
     }
@@ -261,7 +276,7 @@
     taskSelection = null; taskMessage = '';
     sourceAvailable = false; pending = false; sourceDirty = false; mode = 'source';
     trainingDrafts.clear();
-    base = null; graph = null; conflict = null; reviewed = null; options = []; training = null; selected = null;
+    base = null; graph = null; conflict = null; reviewed = null; inventory = []; training = null; selected = null;
     $('conflict').hidden = true; $('rebase').disabled = true;
     $('source').value = ''; $('source').disabled = true;
     $('current').textContent = ''; $('conflict-diff').textContent = '';
@@ -323,7 +338,7 @@
       $('source').value = value.source; $('source').disabled = false; graph = clone(value.document); mode = 'source'; sourceDirty = false;
       // Choices depend on actual new nodes/externals: refresh projection through
       // the reviewed document using server-derived options returned by review.
-      options = value.binding_options; training = value.training; selected = graph.definition.nodes.some(n => n.id === selected) ? selected : graph.definition.nodes[0]?.id;
+      inventory = value.port_inventory || []; training = value.training; selected = graph.definition.nodes.some(n => n.id === selected) ? selected : graph.definition.nodes[0]?.id;
       pending = value.source !== base.source;
       reviewed = {source: value.source, sha256: value.sha256, base: base.sha256, taskReview: value.task_reference_update,
         taskSelection: value.task_reference_update ? (proposal.kind === 'task_references' ? clone(proposal) : selection) : null};
@@ -334,7 +349,7 @@
     } catch (error) {
       if (error.stale) return;
       if (!current(id, version)) return;
-      if (error.value?.proposal) { const proposal = error.value.proposal; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); options = proposal.binding_options; training = proposal.training; mode = 'source'; sourceDirty = false; render(); }
+      if (error.value?.proposal) { const proposal = error.value.proposal; $('source').value = proposal.source; $('source').disabled = false; graph = clone(proposal.document); inventory = proposal.port_inventory || []; training = proposal.training; mode = 'source'; sourceDirty = false; render(); }
       if (hasSourceConflict(error) && error.value?.current) showConflict(error.value.current);
       else if (error.value?.proposal?.task_reference_update) showTaskRefusal(error.value.proposal, selection || proposal);
       diagnostic(error.value?.diagnostics); status(error.message);
