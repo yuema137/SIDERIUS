@@ -46,10 +46,9 @@ try {
   await page.locator('#access-form button').click();
   await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
   await page.locator('#editor-project').selectOption('interpretation');
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
-  await page.locator('#editor-advanced > summary').click();
   const source = page.locator('#editor-source');
-  assert.match(await source.inputValue(), /native-interpretation-candidate\/v1/);
+  await waitUntil(async () => (await source.inputValue()).includes('native-interpretation-candidate/v1'));
+  await page.locator('#editor-advanced > summary').click();
   const original = JSON.parse(execFileSync(
     process.env.EDITOR_PYTHON,
     ['-c', 'import sys; from pathlib import Path; from workflows.definition import parse_workflow_source; print(parse_workflow_source(Path(sys.argv[1]).read_text()).model_dump_json())', metadata.interpretation_source],
@@ -57,6 +56,7 @@ try {
   ));
   assert.equal(original.execution_profile, 'native-interpretation-candidate/v1');
   assert.equal(original.definition.nodes.length, 5);
+  assert.equal(original.definition.task.data_root, 'data');
 
   await page.getByText('References', {exact: true}).click();
   await page.getByLabel('task.manifest', {exact: true}).fill('edited-task.yaml');
@@ -74,9 +74,11 @@ try {
   ));
   assert.equal(saved.definition.task.manifest, 'edited-task.yaml');
   assert.equal(saved.execution_profile, original.execution_profile);
+  assert.equal(saved.definition.task.data_root, original.definition.task.data_root);
   assert.equal(saved.definition.nodes.length, 5);
   assert.deepEqual(saved.definition.nodes, original.definition.nodes);
   assert.deepEqual(saved.definition.externals, original.definition.externals);
+  assert.deepEqual(saved.preparation_options, original.preparation_options);
   assert.deepEqual(saved.training_settings, original.training_settings);
   assert.deepEqual(saved.positions, original.positions);
   assert.deepEqual(faults, []);
