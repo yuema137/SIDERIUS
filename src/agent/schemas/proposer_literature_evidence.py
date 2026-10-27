@@ -1,4 +1,9 @@
-"""Typed Proposer consumer view of a Literature Review output."""
+"""Typed Proposer views of one or more separately attributed review outputs.
+
+The legacy singular projection remains the wire shape for one review. The
+collection wraps named projections in caller order and applies the same
+65,536-byte ceiling to the complete collection as well as to every review.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +12,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+MAX_PROPOSER_LITERATURE_EVIDENCE_BYTES = 65_536
 
 
 class _LiteratureProjection(BaseModel):
@@ -40,6 +47,31 @@ class ProposerLiteratureReviewEvidence(_LiteratureProjection):
 
     @model_validator(mode="after")
     def validate_prompt_budget(self) -> ProposerLiteratureReviewEvidence:
-        if len(self.model_dump_json().encode("utf-8")) > 65_536:
+        if len(self.model_dump_json().encode("utf-8")) > MAX_PROPOSER_LITERATURE_EVIDENCE_BYTES:
             raise ValueError("literature evidence exceeds the 65536-byte proposer limit")
+        return self
+
+
+class ProposerLiteratureReviewContribution(_LiteratureProjection):
+    """One named review with its own contributor and cited evidence."""
+
+    contribution_id: NonEmptyStr = Field(max_length=256)
+    evidence: ProposerLiteratureReviewEvidence
+
+
+class ProposerLiteratureReviewEvidenceCollection(_LiteratureProjection):
+    """Ordered, separately attributed reviews admitted as one proposer value."""
+
+    reviews: tuple[ProposerLiteratureReviewContribution, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_collection(self) -> ProposerLiteratureReviewEvidenceCollection:
+        contribution_ids = [item.contribution_id for item in self.reviews]
+        if len(contribution_ids) != len(set(contribution_ids)):
+            raise ValueError("literature evidence contribution IDs must be unique")
+        run_names = {item.evidence.run_name for item in self.reviews}
+        if len(run_names) != 1:
+            raise ValueError("all literature reviews must share the same run_name")
+        if len(self.model_dump_json().encode("utf-8")) > MAX_PROPOSER_LITERATURE_EVIDENCE_BYTES:
+            raise ValueError("literature evidence collection exceeds the 65536-byte proposer limit")
         return self

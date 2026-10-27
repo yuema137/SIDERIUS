@@ -45,6 +45,12 @@ no hidden contracts, no silent defaults.
 ## Owned semantics
 
 - The field-mapping between nodes happens **only** in a protocol function.
+- Proposer literature input accepts either the existing singular bounded
+  projection or an ordered `reviews` collection of named projections. The
+  collection preserves each contributor card, run identity, citation and claim;
+  it does not combine or rank them. Each review and the complete collection
+  must fit the 65,536-byte limit owned by
+  `proposer_literature_evidence.py`.
 - Record vocabularies (statuses, verdicts as persisted strings) are declared
   here and are load-bearing for persisted history — additive evolution only.
 - `extra="forbid"` on record-facing types where a misspelled key must refuse.

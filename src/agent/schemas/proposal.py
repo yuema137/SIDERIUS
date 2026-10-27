@@ -28,7 +28,10 @@ from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.prediction_reference import ObservedPredictionReference
 from agent.schemas.proposer_data_analysis_evidence import ProposerDataAnalysisEvidence
 from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
-from agent.schemas.proposer_literature_evidence import ProposerLiteratureReviewEvidence
+from agent.schemas.proposer_literature_evidence import (
+    ProposerLiteratureReviewEvidence,
+    ProposerLiteratureReviewEvidenceCollection,
+)
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from agent.schemas.vocab import VocabEntry
@@ -813,12 +816,16 @@ class ProposalInput(BaseModel):
             "storage or a raw report mapping."
         ),
     )
-    literature_review_evidence: ProposerLiteratureReviewEvidence | None = Field(
+    literature_review_evidence: (
+        ProposerLiteratureReviewEvidence | ProposerLiteratureReviewEvidenceCollection | None
+    ) = Field(
         default=None,
         exclude_if=lambda value: value is None,
         description=(
-            "Typed, bounded literature evidence attached by a workflow edge. It remains "
-            "distinct from observed Data Analysis evidence and prior interpretation."
+            "Typed, bounded literature evidence attached by a workflow edge. A single review "
+            "retains its existing shape; a collection carries separately attributed named "
+            "reviews in caller order. It remains distinct from observed Data Analysis evidence "
+            "and prior interpretation."
         ),
     )
     existing_model_types: list[str] = Field(

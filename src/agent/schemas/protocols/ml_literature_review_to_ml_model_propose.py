@@ -15,6 +15,9 @@ Implemented
 local_typed_evidence    Project one review into the Proposer-owned bounded
                         ``ProposerLiteratureReviewEvidence`` field. This is the
                         composed-workflow path.
+local_typed_evidence_many
+                        Attach an ordered, named collection of complete reviews
+                        without merging attribution or claims.
 local_all_channels      Legacy compatibility adapter for callers that still
                         use the generic four-channel external-agent surface.
 
@@ -51,15 +54,29 @@ proposer inline inside ``ExpertContextItem.content``, which travels
 through ``expert_context``.
 """
 
-from typing import Any
+from collections.abc import Sequence
+from typing import Annotated, Any
+
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from agent.schemas.literature_review import LiteratureReviewOutput
 from agent.schemas.proposal import ProposalInput
 from agent.schemas.proposer_literature_evidence import (
     ProposerLiteratureAgentCard,
     ProposerLiteratureFinding,
+    ProposerLiteratureReviewContribution,
     ProposerLiteratureReviewEvidence,
+    ProposerLiteratureReviewEvidenceCollection,
 )
+
+
+class NamedLiteratureReviewOutput(BaseModel):
+    """Complete literature result paired with its caller-owned local ID."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    contribution_id: Annotated[str, Field(strict=True, min_length=1, max_length=256)]
+    output: LiteratureReviewOutput
 
 
 def _project(output: LiteratureReviewOutput) -> ProposerLiteratureReviewEvidence:
@@ -90,6 +107,39 @@ def local_typed_evidence(
 
     payload = proposal_input.model_dump(mode="python")
     payload["literature_review_evidence"] = _project(output)
+    return ProposalInput.model_validate(payload)
+
+
+def local_typed_evidence_many(
+    reviews: Sequence[NamedLiteratureReviewOutput],
+    *,
+    proposal_input: ProposalInput,
+) -> ProposalInput:
+    """Attach complete, same-run reviews while preserving attribution and order.
+
+    This adapter only projects already validated in-memory outputs. It does not
+    read records, infer graph readiness, merge claims, or select among evidence.
+    """
+
+    if not isinstance(proposal_input, ProposalInput):
+        raise TypeError("proposal_input must be a validated ProposalInput")
+    if proposal_input.literature_review_evidence is not None:
+        raise ValueError("proposal_input already contains literature review evidence")
+    named_reviews = TypeAdapter(list[NamedLiteratureReviewOutput]).validate_python(reviews)
+    if not named_reviews:
+        raise ValueError("at least one named literature review is required")
+
+    collection = ProposerLiteratureReviewEvidenceCollection(
+        reviews=tuple(
+            ProposerLiteratureReviewContribution(
+                contribution_id=item.contribution_id,
+                evidence=_project(item.output),
+            )
+            for item in named_reviews
+        )
+    )
+    payload = proposal_input.model_dump(mode="python")
+    payload["literature_review_evidence"] = collection
     return ProposalInput.model_validate(payload)
 
 
