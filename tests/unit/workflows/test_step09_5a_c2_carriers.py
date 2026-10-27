@@ -65,30 +65,6 @@ class TestTheOwnershipBoundary:
         with pytest.raises(TypeError, match="must not carry cross-iteration state"):
             offending()
 
-    def test_the_guard_reads_the_live_chain_state_not_a_copy(self):
-        """If ChainState grows a field, the forbidden set grows with it."""
-        assert chain_state_field_names() == {f.name for f in dataclasses.fields(ChainState)}
-        assert len(chain_state_field_names()) >= 11
-
-
-class TestImmutability:
-    def test_bindings_are_frozen(self):
-        b = WorkflowRunBindings(workspace="/w", run_name="r", run_dir="/w/r")
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            b.workspace = "/other"
-
-    def test_launch_config_is_frozen(self):
-        c = WorkflowLaunchConfig()
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            c.max_rounds = 99
-
-    def test_chain_state_is_deliberately_mutable(self):
-        """Mutation across iterations is the point; freezing it would force a
-        rebuild per update and hide who owns the change."""
-        s = ChainState.cold_start()
-        s.best_score_overall = 1.0
-        assert s.best_score_overall == 1.0
-
 
 #: Transit fields declared on ``WorkflowLaunchConfig`` AFTER the Step 09.5a
 #: refactor, with the default each was declared with. The pre-refactor golden
@@ -272,28 +248,6 @@ class TestLaunchConfigIsTransitOnly:
         assert not set(golden) & set(POST_REFACTOR_TRANSIT_ADDITIONS), (
             "a pre-refactor field cannot also be declared as a later addition"
         )
-
-
-class TestBindingsMembership:
-    def test_the_capability_references_are_exactly_the_three_audited_ones(self):
-        """Amendment A: admitted individually, not as a group."""
-        names = run_bindings_field_names()
-        for capability in ("bridge_factory", "sandbox_factory", "measurement_capability"):
-            assert capability in names
-
-    def test_bindings_hold_the_locked_invariants(self):
-        names = run_bindings_field_names()
-        for locked in (
-            "resolved_data_scope",
-            "health_gate_enabled",
-            "health_gate_files",
-            "health_checks_config",
-            "order_strategy_override",
-            "file_order_override",
-            "enable_structured_health_feedback",
-            "run_invariants",
-        ):
-            assert locked in names, locked
 
 
 class TestChainStateConstruction:

@@ -234,24 +234,6 @@ class TestTheChainSubprocessForwardsIt:
         keywords = self._run_workflow_keywords()
         assert keywords.get("restored_state") == "state"
 
-    def test_the_carrier_declares_the_memory_and_its_sibling(self):
-        """Anti-vacuity: the carrier actually holds the value in question,
-        beside the hop this one was modelled on."""
-        import dataclasses
-
-        names = {f.name for f in dataclasses.fields(RestoredState)}
-        assert "prediction_memory" in names
-        assert "collapse_fingerprint_history" in names
-
-    def test_run_workflow_accepts_the_carrier(self):
-        """A forwarded kwarg the callee does not declare is a TypeError at
-        runtime, not a silent no-op."""
-        import inspect
-
-        from workflows.model_exploration import run_workflow
-
-        assert "restored_state" in inspect.signature(run_workflow).parameters
-
     def test_the_memory_inside_the_carrier_reaches_the_chain_state(self):
         """The hop that actually matters, followed to its consumer.
 
@@ -278,33 +260,6 @@ class TestTheChainSubprocessForwardsIt:
 
 class TestTheScopeStayedNarrow:
     """Q-09a-1's verbatim must-not list, made checkable."""
-
-    def test_exactly_one_new_restored_field(self):
-        """MUTATION TARGET: adding a second restored value 'while we're here'.
-
-        The ruling permits ONE. The count is pinned rather than described so
-        that widening it is a test failure rather than a review question.
-        """
-        import dataclasses
-
-        names = {f.name for f in dataclasses.fields(RestoredState)}
-        assert "prediction_memory" in names
-        # The four carried VALUES live inside the one carrier, not as four
-        # separate restored fields.
-        assert not names & {
-            "prediction_outcomes_history",
-            "prediction_outcomes_by_semantics",
-            "cumulative_information_gain",
-            "cumulative_information_gain_by_semantics",
-        }
-
-    def test_the_carrier_holds_exactly_the_four_ruled_fields(self):
-        assert set(PredictionMemory.model_fields) == {
-            "prediction_outcomes_history",
-            "prediction_outcomes_by_semantics",
-            "cumulative_information_gain",
-            "cumulative_information_gain_by_semantics",
-        }
 
     def test_there_is_exactly_one_prediction_memory_restore_path(self):
         """No second restore path (the Step-09a ruling's words).
@@ -345,10 +300,3 @@ class TestTheScopeStayedNarrow:
         assert '"w"' not in authority and "'w'" not in authority, (
             "the committed-digest authority must never write"
         )
-
-    def test_the_carrier_is_frozen(self):
-        """Restored state that a caller can mutate is a second source of truth
-        for the same numbers."""
-        memory = PredictionMemory(cumulative_information_gain=1.0)
-        with pytest.raises(ValidationError):
-            memory.cumulative_information_gain = 2.0

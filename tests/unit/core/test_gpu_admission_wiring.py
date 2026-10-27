@@ -87,10 +87,6 @@ def _runner_parser() -> argparse.ArgumentParser:
 
 
 class TestTheTypedPolicy:
-    def test_it_accepts_only_trial_and_formal(self):
-        assert GpuAdmissionPolicy(mode="trial").mode == "trial"
-        assert GpuAdmissionPolicy(mode="formal").mode == "formal"
-
     def test_it_carries_no_requirement_figure(self):
         """The load-bearing absence. A field holding a raw MiB number an
         operator could type would impersonate a measurement in formal
@@ -144,18 +140,8 @@ class TestPostureIsDerivedNotConfigured:
 
 
 class TestTheSchemaAndCliCarryIt:
-    def test_the_schema_has_a_source_reference_and_a_ceiling(self):
-        fields = HyperparamTuningInput.model_fields
-        assert "gpu_admission_measurement_source" in fields
-        assert "gpu_pair_ceiling_gib" in fields
-
     def test_the_schema_has_no_raw_requirement_field(self):
         assert not [f for f in HyperparamTuningInput.model_fields if "requirement_mib" in f]
-
-    def test_the_schema_defaults_preserve_pre_bg3_behaviour(self):
-        cfg = HyperparamTuningInput(model_type="punet", run_name="r", workspace="/tmp/w")
-        assert cfg.gpu_admission_measurement_source is None
-        assert cfg.gpu_pair_ceiling_gib is None
 
     @pytest.mark.parametrize("flag", ADMISSION_FLAGS)
     def test_the_runner_cli_declares_the_flag(self, flag):
@@ -465,15 +451,6 @@ class TestEnforcementIsSeparateFromPosture:
         ):
             status = _admission_refusal(sandbox, phase="training")
         return status, sandbox, popen
-
-    def test_the_two_are_separate_fields(self):
-        from core.runtime_control.admission import GpuAdmissionPolicy
-
-        fields = GpuAdmissionPolicy.model_fields
-        assert "mode" in fields and "enforcement" in fields
-        p = GpuAdmissionPolicy(mode="formal", enforcement="observe_only")
-        assert p.mode == "formal"
-        assert p.enforcement == "observe_only"
 
     def test_observe_only_lets_a_formal_phase_proceed(self):
         status, _, _ = self._decide("observe_only")

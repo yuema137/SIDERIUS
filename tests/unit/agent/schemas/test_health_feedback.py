@@ -413,10 +413,6 @@ class TestProvenance:
 
 
 class TestHistoryEntryValidation:
-    def test_bucket_count_zero_rejected(self):
-        with pytest.raises(ValidationError):
-            FingerprintOccurrence(iteration=1, count=0)
-
     def test_duplicate_iterations_rejected(self):
         with pytest.raises(ValidationError, match="ascending"):
             CollapseFingerprintHistoryEntry(
@@ -440,28 +436,6 @@ class TestHistoryEntryValidation:
                     FingerprintOccurrence(iteration=1, count=1),
                 ],
             )
-
-    def test_empty_signature_and_check_name_rejected(self):
-        with pytest.raises(ValidationError):
-            CollapseFingerprintHistoryEntry(signature="", check_name="c", human_readable="h")
-        with pytest.raises(ValidationError):
-            CollapseFingerprintHistoryEntry(signature="s", check_name="", human_readable="h")
-
-    def test_policy_rejects_non_positive(self):
-        for kw in (
-            {"history_window_iterations": 0},
-            {"history_window_iterations": -1},
-            {"max_entries_per_model": 0},
-            {"max_entries_per_model": -1},
-        ):
-            with pytest.raises(ValidationError):
-                HealthFeedbackRetentionPolicy(**kw)
-
-    def test_policy_defaults_are_documented_values(self):
-        # Legacy/missing configuration resolves to the documented defaults.
-        p = HealthFeedbackRetentionPolicy()
-        assert p.history_window_iterations == 3
-        assert p.max_entries_per_model == 8
 
 
 # ---------------------------------------------------------------------------

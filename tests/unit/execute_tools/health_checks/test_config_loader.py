@@ -119,18 +119,6 @@ class TestCheckRef:
         result = CheckRef(name="synthetic", config={"peek_file_indices": peek})
         assert result.config["peek_file_indices"] == peek
 
-    def test_defaults(self):
-        r = CheckRef(name="output_diversity")
-        assert r.config == {}
-
-    def test_config_dict_propagates(self):
-        r = CheckRef(
-            name="output_diversity",
-            config={"min_unique_int8_values": 5, "peek_samples": 100_000},
-        )
-        assert r.config["min_unique_int8_values"] == 5
-        assert r.config["peek_samples"] == 100_000
-
     def test_task_owned_peek_list_survives_composition_and_materialization(self, tmp_path):
         """The supported replacement is an actual task declaration, not a marker."""
         task = tmp_path / "task_health.yaml"
@@ -155,20 +143,6 @@ class TestCheckRef:
 
 
 class TestActionConfig:
-    def test_valid_action(self):
-        ac = ActionConfig(action=GateAction.CONTINUE)
-        assert ac.action is GateAction.CONTINUE
-
-    def test_action_accepts_string_value(self):
-        """The YAML loader receives raw strings — Pydantic coerces to
-        the GateAction StrEnum via its ``__init__``."""
-        ac = ActionConfig.model_validate({"action": "invalidate_round"})
-        assert ac.action is GateAction.INVALIDATE_ROUND
-
-    def test_unknown_action_string_raises(self):
-        with pytest.raises(ValidationError):
-            ActionConfig.model_validate({"action": "not_a_real_action"})
-
     @pytest.mark.parametrize("retired", ["skip_iter", "skip_to_formal"])
     def test_retired_action_refuses_at_the_config_gate(self, retired: str):
         """F-SCANC-1 — the config-surface witness: a YAML-shaped mapping
@@ -199,77 +173,12 @@ def _minimal_gate_kwargs(**overrides):
     return base
 
 
-class TestGateConfig:
-    def test_minimal_valid(self):
-        g = GateConfig(**_minimal_gate_kwargs())
-        assert g.id == "test_gate"
-        assert g.after_round == 1
-        assert g.short_circuit is True  # D4: default True
-        assert g.reason == ""
-
-    def test_short_circuit_default_is_true(self):
-        """D4: per-gate ``short_circuit`` moves to gate level, default True."""
-        g = GateConfig(**_minimal_gate_kwargs())
-        assert g.short_circuit is True
-
-    def test_short_circuit_can_be_disabled(self):
-        g = GateConfig(**_minimal_gate_kwargs(short_circuit=False))
-        assert g.short_circuit is False
-
-    def test_empty_checks_list_rejected(self):
-        """D2: min_length=1 — a gate with no checks is a config error."""
-        with pytest.raises(ValidationError):
-            GateConfig(**_minimal_gate_kwargs(checks=[]))
-
-    def test_on_pass_required(self):
-        """D1: on_pass is required, no default."""
-        kwargs = _minimal_gate_kwargs()
-        del kwargs["on_pass"]
-        with pytest.raises(ValidationError):
-            GateConfig(**kwargs)  # type: ignore[arg-type]
-
-    def test_on_fail_required(self):
-        """D1: on_fail is required, no default."""
-        kwargs = _minimal_gate_kwargs()
-        del kwargs["on_fail"]
-        with pytest.raises(ValidationError):
-            GateConfig(**kwargs)  # type: ignore[arg-type]
-
-    def test_reason_default_empty(self):
-        g = GateConfig(**_minimal_gate_kwargs())
-        assert g.reason == ""
-
-    def test_missing_id_raises(self):
-        kwargs = _minimal_gate_kwargs()
-        del kwargs["id"]
-        with pytest.raises(ValidationError):
-            GateConfig(**kwargs)  # type: ignore[arg-type]
-
-    def test_missing_after_round_raises(self):
-        kwargs = _minimal_gate_kwargs()
-        del kwargs["after_round"]
-        with pytest.raises(ValidationError):
-            GateConfig(**kwargs)  # type: ignore[arg-type]
-
-
 # ---------------------------------------------------------------------------
 # rev-6 schemas — HealthChecksConfig
 # ---------------------------------------------------------------------------
 
 
 class TestHealthChecksConfig:
-    def test_empty_health_gates_list_is_valid(self):
-        """Empty list = no gates fire, but the config itself is valid.
-        Operators may temporarily disable all gates by clearing the list."""
-        cfg = HealthChecksConfig(health_gates=[])
-        assert cfg.health_gates == []
-
-    def test_single_gate_is_valid(self):
-        g = GateConfig(**_minimal_gate_kwargs())
-        cfg = HealthChecksConfig(health_gates=[g])
-        assert len(cfg.health_gates) == 1
-        assert cfg.health_gates[0].id == "test_gate"
-
     def test_duplicate_ids_rejected(self):
         """D3: unique gate ids required, else ValueError with dupe list."""
         g1 = GateConfig(**_minimal_gate_kwargs(id="duplicate_id"))

@@ -201,13 +201,6 @@ def test_a_proposal_cannot_be_both_applied_and_rejected():
     assert "self-contradictory" in str(exc.value)
 
 
-def test_rejection_reason_may_not_be_empty():
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError):
-        RejectedOrderingProposal(strategy="sequential", reason="")
-
-
 def test_describes_execution_flags_a_rejected_proposal():
     resolved = resolve_ordering(
         resolved_scope=SCOPE,

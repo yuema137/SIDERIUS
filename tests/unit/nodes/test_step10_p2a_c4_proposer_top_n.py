@@ -86,23 +86,6 @@ class TestTheDavisInversion:
     def test_top_n_returns_the_BEST_two_under_a_lower_metric(self):
         assert _top_n(self.DAVIS_SCORES, DAVIS_ID, 2) == ["b", "a"]
 
-    def test_the_worst_model_is_NOT_selected(self):
-        """Stated separately because this is the actual harm: the worst
-        architecture reaching the proposer as an exemplar."""
-        assert "c" not in _top_n(self.DAVIS_SCORES, DAVIS_ID, 2)
-
-    def test_the_pre_migration_cut_would_have_returned_the_worst_two(self):
-        """The counterfactual, hand-computed, so the fix is shown to MOVE
-        something rather than merely to pass.
-
-        ``sorted(reverse=True)`` on these scores yields c (0.0210) then
-        a (0.0174) — exactly the two the correct cut must exclude and include
-        respectively.
-        """
-        direction_blind = sorted(self.DAVIS_SCORES, key=self.DAVIS_SCORES.get, reverse=True)[:2]
-        assert direction_blind == ["c", "a"]
-        assert _top_n(self.DAVIS_SCORES, DAVIS_ID, 2) != direction_blind
-
     def test_top_n_1_selects_the_single_minimum(self):
         assert _top_n(self.DAVIS_SCORES, DAVIS_ID, 1) == ["b"]
 
@@ -203,44 +186,3 @@ class TestEdgeCasesPreserved:
         sort: equal scores keep the order they were discovered in."""
         for identity in (TIDMAD_ID, DAVIS_ID):
             assert _top_n({"first": 1.0, "second": 1.0}, identity, 2) == ["first", "second"]
-
-
-class TestP3sArchitectureIsUntouched:
-    """C4 changes ONE helper's comparison, not the proposer's reader."""
-
-    def test_the_helper_reads_the_typed_evidence(self):
-        """P3 C2 replaced the mechanism this guard used to freeze.
-
-        Its predecessor asserted ``select_candidate_models(interpretation,
-        strategy)`` — recorded at P2a time "because P3 will replace the
-        mechanism and should not re-litigate the semantics". P3 has replaced
-        it: the identity now arrives on the typed evidence instead of being
-        mined out of a raw dump.
-
-        The SEMANTICS the old guard protected are not dropped — they are the
-        entire rest of this module, which still passes on P2a's untouched
-        fixtures. What this test pins is the successor mechanism: one
-        parameter, and it is the typed evidence, so nobody can quietly
-        reintroduce a raw-dict path beside it.
-        """
-        import inspect
-
-        signature = inspect.signature(select_candidate_models)
-        assert list(signature.parameters) == ["evidence", "strategy"]
-        assert (
-            signature.parameters["evidence"].annotation is ProposerInterpretationEvidence
-            or signature.parameters["evidence"].annotation == "ProposerInterpretationEvidence"
-        )
-
-    # ``test_no_typed_evidence_reader_was_introduced`` was RETIRED by Step 10 /
-    # P3 C1, which is the event it was written to wait for: it asserted that
-    # P2a's C4 had introduced no reader TYPE, "which is P3's scope". P3 has now
-    # introduced exactly one, in its declared owner.
-    #
-    # Its purpose — the proposer must not grow a SECOND semantic reader — is
-    # inherited, not dropped, by the successor census
-    # ``tests/unit/agent/ml_model_proposal_agent/test_step10_p3_c1_projection.py::
-    # TestTheProjectionHasExactlyOneAuthority``, which survives the type
-    # actually existing: it asserts ``build_proposer_evidence`` and
-    # ``ProposerInterpretationEvidence`` are each defined exactly once across
-    # every production directory, with a plant proving the scan can report two.

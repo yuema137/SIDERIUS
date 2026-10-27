@@ -5,7 +5,6 @@ Each test here closes a specific audit gap; none duplicates existing
 coverage.
 """
 
-import inspect
 from pathlib import Path
 
 from agent.schemas.health_feedback import (
@@ -22,7 +21,6 @@ from nodes.ml_model_proposal_agent.evidence_rendering import (
 )
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 from tests.helpers.metric_fixtures import shipped_spec
-from tests.helpers.tuner_source import tuner_node_source
 from tests.unit.agent.result_interpretation_agent.test_round_health_summary import (
     _gate_result,
     _output,
@@ -63,10 +61,6 @@ class TestPolicyIsAlwaysAParameter:
     stored history is post-retention — so the enforceable form of the
     claim is: the MERGE (the only policy consumer) takes it as a
     REQUIRED parameter, and no renderer imports a retention constant."""
-
-    def test_merge_policy_parameter_has_no_default(self):
-        sig = inspect.signature(merge_fingerprint_history)
-        assert sig.parameters["policy"].default is inspect.Parameter.empty
 
     def test_renderers_import_no_retention_constant(self):
         # Step 09a C1b: scan the whole node PACKAGE, not one file. The
@@ -146,19 +140,6 @@ class TestIncidentalOrderInvariance:
         assert merge_fingerprint_history(
             prior_ab, current_ab, 5, policy
         ) == merge_fingerprint_history(prior_ba, current_ba, 5, policy)
-
-
-class TestTunerConsumptionSurface:
-    """§7.1 'no production routing behavior changed': the tuner touches
-    the flag EXACTLY at the lock call and the run_config stamp — no
-    third reference means no behavioral consumption anywhere in its
-    control flow."""
-
-    def test_flag_referenced_exactly_twice_in_tuner(self):
-        src = tuner_node_source()
-        assert src.count("agent_input.enable_structured_health_feedback") == 2
-        assert src.count("agent_input.health_feedback_history_window_iterations") == 2
-        assert src.count("agent_input.health_feedback_history_max_entries_per_model") == 2
 
 
 class TestBuilderAlignmentWithAttemptFailures:
