@@ -218,7 +218,9 @@ directory gains `placement.json`, which names the GPU it was given. If the budge
 is currently full, the submission returns `queued`: it waits its turn, in the
 order submissions arrived, and starts by itself once earlier runs end (status
 shows `queued` until then). To drop a waiting run, cancel it; it is removed from
-the queue without running. A run that could never fit is refused with
+the queue without running. Each waiting run keeps a process of about 0.56 GiB of
+memory open while it waits, and nothing limits how many can wait, so do not
+queue more runs than the host's memory can hold. A run that could never fit is refused with
 `resource_refused`. Two runs sharing one GPU slow each other
 down, which can change what a time budget admits. So a `time_budgeted` run is only
 placed on a GPU no other run is using, and no run is placed beside it. If every

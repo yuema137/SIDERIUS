@@ -80,7 +80,11 @@ class QueuedOperation(PreviewModel):
         return self
 
     def evidence(self) -> ReservationEvidence:
-        """A waiting child has no sandbox yet; only its own session is observed."""
+        """The same evidence as a reservation (``reservation_evidence``).
+
+        The child is the bound identity, or else its own ``process.json``; a
+        ``sandbox.json`` is read when published, which a waiting child never does.
+        """
         return reservation_evidence(
             self.state_root, self.operation_id, self.request_digest, self.process
         )

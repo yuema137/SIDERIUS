@@ -62,8 +62,9 @@ def request_cancel(config: OperationStoreConfig, operation_id: UUID) -> CancelRe
     """Record cancel for one live candidate operation; idempotent, never a termination claim.
 
     A repeated call returns the first recorded request unchanged. Only a verified
-    ``active`` snapshot (live wrapper, no completion, readable records) records a
-    new request. Refusals: a native receipt or failed admission is ``terminal``; an
+    ``active`` or ``queued`` snapshot (live wrapper, no completion, readable
+    records; ``cancel.LIVE_STATES``) records a new request. A queued operation's
+    waiting child then leaves the host-ledger queue without running (B3-5b). Refusals: a native receipt or failed admission is ``terminal``; an
     integrity failure is ``integrity`` (a later intent must never vouch for an
     unverified receipt); no published process identity yet is ``starting``; any
     other wrapper that is not alive is ``not_running``. Read ``read_operation`` for

@@ -384,6 +384,13 @@ to the slot UUID (for a GPU unit) and continues as a placed operation
 (`sandbox.json`, release). Submissions also promote: admission promotes the
 swept ledger before planning the new unit.
 
+Waiting cost (known limit). Each waiting child is a full operation child that
+has already imported the operation stack: about 0.56 GiB resident while idle
+(review measurement, 2026-10-28). That memory is not counted in any reservation,
+and the queue has no length cap, so many queued submissions can exhaust host
+memory before any of them runs. Tracked in #1073 (lazy imports in the waiting
+child and/or a queue cap).
+
 Snapshot. While `queued.json` exists without `placement.json` and the child is
 alive, `read_operation` reports `state="queued"`, `reason="host_queued"`;
 afterwards the ordinary states apply.
