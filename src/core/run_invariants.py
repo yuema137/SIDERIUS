@@ -748,6 +748,15 @@ def load_run_invariants(workspace: str) -> RunInvariants | None:
             raw = f.read()
     except FileNotFoundError:
         return None
+    return parse_run_invariants(raw, workspace)
+
+
+def parse_run_invariants(raw: str | bytes, workspace: str) -> RunInvariants:
+    """Validate lock bytes already read by the caller (``workspace`` names it in errors).
+
+    Raises:
+        RunInvariantsViolation: the bytes are not a structurally valid lock.
+    """
     try:
         return RunInvariants.model_validate(json.loads(raw))
     except Exception as exc:

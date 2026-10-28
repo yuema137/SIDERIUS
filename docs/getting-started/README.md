@@ -80,8 +80,10 @@ backend as the CLI. Both routes are available whether you work in Professional
 or Assistant mode.
 
 Follow the [console setup](../../src/tools/candidate_console/README.md) in order:
-check the Linux sandbox, configure existing task/data/profile paths and output
-parents, create private token/key files, then run `check` and `serve`. The
+check the Linux sandbox, run `init` to create the console workspace and its
+access token, add your task's manifest, LLM profile and resource policy to the
+created `console.json`, place task data in `data/<task_id>/`, create a private
+provider-key file, then run `check` and `serve`. The
 [configuration example](../../src/tools/candidate_console/console-contract.md#configuration)
 lists all fields. The [credential instructions](../../src/tools/candidate_console/README.md#credentials)
 show the required JSON format: the console access token unlocks the page, while
