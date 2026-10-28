@@ -150,7 +150,7 @@ try {
   assert.equal((await readFile(join(root, 'provider-calls.jsonl'), 'utf8')).trim().split('\n').length, callsBeforeRecovery);
   // Restore native output location for monitor reads; exact-ID recovery above required no envelope.
   await rename(join(root, 'first-native-evidence'), metadata.captures[0].envelope);
-  await page.locator('#capture-monitor').click(); await page.locator('#monitor-status').filter({hasText: 'completed'}).waitFor();
+  await page.locator('#capture-monitor').click(); await page.locator('#monitor-status').filter({hasText: 'Finished: the candidate passed validation.'}).waitFor();
   await page.screenshot({path: join(evidence, 'recovered-monitor.png'), fullPage: true});
   // Restore configured resources for the other fresh admissions; recovery above ran without them.
   await rename(metadata.source + '.saved', metadata.source); await rename(metadata.credential + '.saved', metadata.credential);
