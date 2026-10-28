@@ -32,8 +32,9 @@ SeedSource = Literal["operator", "generated"]
 SeedPurpose = Literal[
     "tuner.train_sampling",
     "tuner.eval_sampling",
-    "trainer.unit",
     "trainer.init",
+    "trainer.init_numpy",
+    "trainer.init_python",
     "trainer.epoch_subsample",
     "trainer.epoch_order",
     "trainer.epoch_shuffle",

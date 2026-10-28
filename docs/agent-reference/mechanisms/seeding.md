@@ -38,10 +38,19 @@ console may import it.
 
 ## Purposes
 
-`SeedPurpose` values: `tuner.train_sampling`, `tuner.eval_sampling`,
-`trainer.unit`, `trainer.init`, `trainer.epoch_subsample`,
-`trainer.epoch_order`, `trainer.epoch_shuffle`, `data_analysis.sampling`,
-`data_analysis.program`, `validation.probe`.
+| group | `SeedPurpose` values |
+|---|---|
+| tuner | `tuner.train_sampling`, `tuner.eval_sampling` |
+| trainer | `trainer.init` (torch), `trainer.init_numpy`, `trainer.init_python`, `trainer.epoch_subsample`, `trainer.epoch_order`, `trainer.epoch_shuffle` |
+| data analysis | `data_analysis.sampling`, `data_analysis.program` |
+| validation | `validation.probe` |
+
+There is no per-unit intermediate purpose: every seed is derived directly
+from the 53-bit `run_seed` plus coordinates. A 63-bit derived value is never
+passed back to `derive_seed` as a root; `derive_seed` refuses it because the
+`run_seed` argument is validated as `RunSeed`. A trainer therefore derives
+its seeds from the run seed it is given (the planned `SeedContext.run_seed`),
+never from a derived value.
 
 Each purpose is an independent stream. A consumer that draws a
 data-size-dependent number of values from one purpose cannot shift the values
@@ -51,8 +60,8 @@ of another purpose.
 
 | field | type | meaning |
 |---|---|---|
-| `iteration` | `int ≥ 1 \| None` | native-chain iteration or loop iteration |
-| `node_id` | non-empty `str \| None` | authored graph node id; unique within a graph |
+| `iteration` | `int ≥ 1 \| None` | global iteration index: native-chain iteration, or candidate-loop iteration continued across resume segments (never restarted at 1) |
+| `node_id` | non-empty `str \| None` | authored graph node id on candidate graphs, unique within a graph; `None` on the native chain |
 | `branch` | `int ≥ 0 \| None` | fan-out family index, only where one node runs several families |
 | `round` | `int ≥ 1 \| None` | tuner round |
 | `attempt` | `int ≥ 1 \| None` | tuner `total_attempts` |
@@ -110,6 +119,11 @@ without `hash()`.
 
 ## Not yet provided
 
-Process and generator seeding helpers, the 32-bit reduction for legacy
-`np.random.seed`, admission and lock integration, record fields and the RNG
-census guard belong to later #983 PRs.
+These belong to later #983 PRs, not to `core/seeding.py`:
+
+- `SeedContext` and the pure `TrainingSeedPlan`, in a torch-free
+  `core/training_seeds.py`.
+- Torch/NumPy process and generator seeding helpers, in
+  `execute_tools/process_seeding.py`. The planned legacy `np.random.seed`
+  reduction is `derive_seed(..., "trainer.init_numpy", at) & (2**32 - 1)`.
+- Admission and lock integration, record fields and the RNG census guard.

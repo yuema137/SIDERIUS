@@ -31,8 +31,17 @@ C = SeedCoordinates
 # (run_seed, purpose, coordinates, literal expected seed). The literals were
 # computed once and are pinned: any change to the tuple order, the JSON
 # encoding, the digest slice or the mask changes at least one of them.
+# Design revision 3 removed the ``trainer.unit`` purpose, so its vector
+# (0, "trainer.unit", C()) was replaced by the two purposes it added; the
+# remaining v1 vectors are unchanged because the encoding is unchanged.
 KNOWN_ANSWERS = [
-    (0, "trainer.unit", C(), 8750898368869048702),
+    (0, "trainer.init_python", C(), 162581914680118109),
+    (
+        0,
+        "trainer.init_numpy",
+        C(iteration=1, attempt=1, epoch=0),
+        850440478084799134,
+    ),
     (
         1,
         "tuner.train_sampling",
@@ -140,14 +149,14 @@ def test_equal_values_in_different_slots_give_different_seeds():
     """Defect: coordinates hashed as an unordered or name-less bag would let
     iteration=1 collide with round=1 or attempt=1."""
     slots = [C(iteration=1), C(round=1), C(attempt=1)]
-    assert len({derive_seed(9, "trainer.unit", s) for s in slots}) == len(slots)
+    assert len({derive_seed(9, "trainer.init", s) for s in slots}) == len(slots)
 
 
 @pytest.mark.parametrize("value", [0, RUN_SEED_MAX])
 def test_run_seed_bounds_are_inclusive(value):
     """Defect: an off-by-one bound rejects a seed the console can display."""
     assert resolve_run_seed(value) == RunSeedBinding(value=value, source="operator")
-    assert 0 <= derive_seed(value, "trainer.unit", C()) < 2**63
+    assert 0 <= derive_seed(value, "trainer.init", C()) < 2**63
 
 
 @pytest.mark.parametrize("value", [-1, RUN_SEED_MAX + 1, True, 3.0, "7"])
@@ -157,13 +166,16 @@ def test_out_of_range_or_coerced_run_seeds_fail_closed(value):
     with pytest.raises(ValidationError):
         resolve_run_seed(value)
     with pytest.raises(ValidationError):
-        derive_seed(value, "trainer.unit", C())
+        derive_seed(value, "trainer.init", C())
 
 
-def test_unknown_purpose_is_refused():
-    """Defect: a free-form purpose string would create an unreviewed stream."""
+@pytest.mark.parametrize("purpose", ["trainer.whatever", "trainer.unit"])
+def test_unknown_or_retired_purpose_is_refused(purpose):
+    """Defect: a free-form purpose string would create an unreviewed stream,
+    and the retired ``trainer.unit`` would reintroduce a 63-bit intermediate
+    root that later seeds are derived from instead of the run seed."""
     with pytest.raises(ValueError, match="unknown seed purpose"):
-        derive_seed(1, "trainer.whatever", C())  # pyright: ignore[reportArgumentType]
+        derive_seed(1, purpose, C())
 
 
 def test_generation_spans_the_full_range_without_python_hash(monkeypatch):
@@ -176,7 +188,7 @@ def test_generation_spans_the_full_range_without_python_hash(monkeypatch):
     monkeypatch.setattr(builtins, "hash", _no_hash)
     for _ in range(64):
         assert 0 <= generate_run_seed() <= RUN_SEED_MAX
-    derive_seed(1, "trainer.unit", C(node_id="x"))
+    derive_seed(1, "trainer.init", C(node_id="x"))
 
     bounds: list[int] = []
 
