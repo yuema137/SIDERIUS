@@ -30,6 +30,7 @@ import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.adaptive import AdaptiveVerificationConfig
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.steady_state import SteadyStateConfig
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     EpochSamplingParams,
@@ -131,6 +132,7 @@ def _run(setup, runtime_session, exp_id: str, **kwargs):
         data_dir=setup["data_dir"],
         sandbox_dirs=setup["sandbox_dirs"],
         exp_id=exp_id,
+        seed_plan=TrainingSeedPlan(SeedContext(run_seed=0)),
         runtime_session=runtime_session,
         task_scope=setup["sample_set"],
         profile=setup["profile"],

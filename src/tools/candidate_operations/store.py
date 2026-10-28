@@ -46,6 +46,8 @@ def digest(submission: OperationSubmission) -> str:
         content["request"].pop("workflow_source")
     if submission.kind == "candidate" and submission.reusable_preparation is not None:
         content["reusable_preparation"] = submission.reusable_preparation.model_dump(mode="json")
+    if submission.kind == "candidate" and submission.resources is not None:
+        content["resources"] = submission.resources.model_dump(mode="json")
     return hashlib.sha256(
         json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

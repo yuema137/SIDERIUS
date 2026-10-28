@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -25,13 +25,20 @@ class ExecutionResult(BaseModel):
     elapsed_seconds: float
 
 
-def run(profile: SandboxProfile, argv: Sequence[str]) -> ExecutionResult:
+#: Called with the sandbox (bwrap) PID right after ``Popen``, while it is unreaped.
+SpawnObserver = Callable[[int], None]
+
+
+def run(
+    profile: SandboxProfile, argv: Sequence[str], *, on_spawn: SpawnObserver | None = None
+) -> ExecutionResult:
     """Stream child output unchanged; never serialize credentials or child argv."""
     command, env = build_command(profile, argv)
     started = time.monotonic()
     process = subprocess.Popen(command, env=env, close_fds=True, start_new_session=True)
     timed_out = False
     try:
+        _observe_spawn(process, on_spawn)
         try:
             process.wait(timeout=profile.timeout_seconds)
         except subprocess.TimeoutExpired:
@@ -59,7 +66,9 @@ class ObservedSpawnFailure(RuntimeError):
     """Command construction or Popen failed before a child was created."""
 
 
-def run_observed(profile: SandboxProfile, argv: Sequence[str]) -> ObservedExecutionResult:
+def run_observed(
+    profile: SandboxProfile, argv: Sequence[str], *, on_spawn: SpawnObserver | None = None
+) -> ObservedExecutionResult:
     """Run one group; retain uncertainty and never change legacy run semantics.
 
     Exceptions after spawn propagate only after attempting observed cleanup. The
@@ -73,6 +82,7 @@ def run_observed(profile: SandboxProfile, argv: Sequence[str]) -> ObservedExecut
         raise ObservedSpawnFailure("sandbox child was not created") from error
     timed_out = False
     try:
+        _observe_spawn(process, on_spawn)
         try:
             process.wait(timeout=profile.timeout_seconds)
         except subprocess.TimeoutExpired:
@@ -99,3 +109,9 @@ def run_observed(profile: SandboxProfile, argv: Sequence[str]) -> ObservedExecut
         cleanup=cleanup,
         direct_child_reaped=process.returncode is not None,
     )
+
+
+def _observe_spawn(process: subprocess.Popen, on_spawn: SpawnObserver | None) -> None:
+    """Report the live sandbox before waiting; the caller's finally still reaps it."""
+    if on_spawn is not None:
+        on_spawn(process.pid)

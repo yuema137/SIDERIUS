@@ -1,0 +1,75 @@
+{
+  "inputs": {
+    "reviews": [
+      {
+        "agent_card": {
+          "agent_name": "ml_literature_review",
+          "role": "Reviews literature.",
+          "expertise_domain": "signal denoising",
+          "coverage": "synthetic fixture",
+          "limitations": "synthetic",
+          "trust_level": "soft_prior",
+          "trust_guidance": "Treat as soft priors."
+        },
+        "findings": [
+          {
+            "source": "ml_literature_review",
+            "kind": "literature",
+            "content": "Dilated convolutions widen the receptive field.",
+            "source_ref": "a1",
+            "produced_at": null,
+            "confidence": 0.6
+          },
+          {
+            "source": "ml_literature_review",
+            "kind": "literature",
+            "content": "Skip connections stabilise depth.",
+            "source_ref": "a2",
+            "produced_at": null,
+            "confidence": 0.9
+          }
+        ],
+        "new_vocab_candidates": [],
+        "suggested_mindset": null,
+        "retrieved_papers": [],
+        "search_rounds_used": 0,
+        "search_decisions": [],
+        "run_name": "review-a",
+        "started_at": "2026-01-01T00:00:00Z",
+        "finished_at": "2026-01-01T00:01:00Z"
+      },
+      {
+        "agent_card": {
+          "agent_name": "ml_literature_review",
+          "role": "Reviews literature.",
+          "expertise_domain": "signal denoising",
+          "coverage": "synthetic fixture",
+          "limitations": "synthetic",
+          "trust_level": "soft_prior",
+          "trust_guidance": "Treat as soft priors."
+        },
+        "findings": [
+          {
+            "source": "ml_literature_review",
+            "kind": "literature",
+            "content": "Attention helps long-range structure.",
+            "source_ref": "b1",
+            "produced_at": null,
+            "confidence": 0.6
+          }
+        ],
+        "new_vocab_candidates": [],
+        "suggested_mindset": null,
+        "retrieved_papers": [],
+        "search_rounds_used": 0,
+        "search_decisions": [],
+        "run_name": "review-b",
+        "started_at": "2026-01-01T00:00:00Z",
+        "finished_at": "2026-01-01T00:01:00Z"
+      }
+    ]
+  },
+  "parameters": {
+    "max_items": 2
+  }
+}

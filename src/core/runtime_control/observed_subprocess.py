@@ -123,6 +123,16 @@ def _notify_lifecycle(lifecycle: ProcessLifecycle) -> None:
             observer(lifecycle)
 
 
+def replay_process_lifecycle(lifecycle: ProcessLifecycle) -> None:
+    """Deliver lifecycle evidence a delegated child process observed.
+
+    A caller that runs work in its own child process returns the lifecycles
+    that work observed; replaying them in order gives the active observer the
+    same evidence it received when the work ran in this process.
+    """
+    _notify_lifecycle(lifecycle)
+
+
 class ProcessSupervisionError(RuntimeError):
     """Infrastructure failure, never a model-size or CUDA-capacity judgment."""
 
