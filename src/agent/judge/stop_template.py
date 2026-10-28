@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from agent.judge.template import JudgeTemplate
-from agent.schemas.judge import CallRequest, StopVerdict
+from agent.schemas.judge import CallRequest, StopJudgeRequest, StopVerdict
 
 _SYSTEM = (
     "You are the stopping judge of a closed-loop research run. The deterministic "
@@ -31,6 +31,8 @@ _USER_FRAME = (
 
 def _render_user(request: CallRequest) -> str:
     stop = request.content
+    if not isinstance(stop, StopJudgeRequest):
+        raise TypeError(f"judge.stop/v1 cannot render content kind {stop.kind!r}")
     words = stop.direction_words
     facts = json.dumps(stop.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=False)
     return _USER_FRAME.format(

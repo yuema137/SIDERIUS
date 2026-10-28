@@ -83,9 +83,12 @@ constructs `LLMBridge` from the route).
    writing, when: the stop request's `iteration` differs from
    `context.iteration`; `max_calls <= 0` or `request.call_index >=
    max_calls`; `evidence_path` already exists (evidence is never reused); the
-   execution deadline has already expired; the bridge cannot be constructed
-   (for example a missing credential); or `set_run_context` fails. The last
-   three carry the original exception as `__cause__`.
+   bridge cannot be constructed (for example a missing credential); or
+   `set_run_context` fails. The last two carry the original exception as
+   `__cause__`. An execution deadline that has already expired is not a
+   refusal: `ExecutionDeadlineExceeded` propagates unchanged from the
+   pre-request checkpoint, nothing is written, and no provider is contacted,
+   so callers keep classifying deadlines by exception type.
 2. The bridge is bound with `set_run_context(workspace, iter, run_name,
    run_id)`, so the call's rows land in the run's `token_usage.jsonl` under
    label `template.usage_label`.
@@ -108,8 +111,8 @@ Failures after admission are recorded, not raised: `TimeoutError` (including
 `ExecutionDeadlineExceeded`) during the call → `status="timed_out"`,
 `failure_code="deadline"`; any other bridge exception →
 `failed`/`provider_error`; a schema `ValidationError` →
-`failed`/`invalid_payload`; a `check_payload` message →
-`failed`/`inadmissible_choice`. `failure_message` is the exception type and
+`failed`/`invalid_payload`; a `check_payload` message, or an exception raised
+by `check_payload`, → `failed`/`inadmissible_choice`. `failure_message` is the exception type and
 text (or the check message), truncated to 2000 characters. The consumer
 applies its declared failure policy (default: fail).
 

@@ -12,7 +12,12 @@ from unittest.mock import Mock
 import httpx
 import pytest
 
-from agent.judge.call import JudgeCallRefused, JudgeRunContext, run_judge_call
+from agent.judge.call import (
+    JudgeCallRefused,
+    JudgeEvidenceConflict,
+    JudgeRunContext,
+    run_judge_call,
+)
 from agent.judge.evidence import (
     JudgeEvidenceError,
     chain_prior_turns,
@@ -30,7 +35,7 @@ from agent.schemas.judge import (
     JudgeRoute,
     StopJudgeRequest,
 )
-from core.execution_deadline import ExecutionDeadlineExceeded
+from core.execution_deadline import ExecutionDeadlineExceeded, execution_deadline
 
 _SRC = Path(__file__).resolve().parents[4] / "src"
 ROUTE = JudgeRoute(
@@ -365,3 +370,70 @@ def test_stop_request_refuses_incoherent_facts(overrides, message):
     """Defect: the judge sees a final-boundary call or facts the core could not produce."""
     with pytest.raises(ValueError, match=message):
         stop_content(**overrides)
+
+
+def _refuse_all(_request, _payload):
+    return "stop not allowed"
+
+
+def test_replay_refuses_a_decided_payload_the_check_now_refuses(tmp_path):
+    """Defect: replay accepts a decided choice that is inadmissible for its request."""
+    recorded = run(tmp_path, StubBridge())
+    assert recorded.status == "decided"
+    with pytest.raises(JudgeEvidenceError, match="inadmissible"):
+        replay(tmp_path, recorded, replace(STOP_TEMPLATE, check_payload=_refuse_all))
+
+
+def _raising_check(_request, _payload):
+    raise KeyError("unknown item")
+
+
+def test_a_raising_payload_check_is_recorded_as_inadmissible(tmp_path):
+    """Defect: a crashing admissibility check escapes without evidence of the paid call."""
+    checked = replace(STOP_TEMPLATE, check_payload=_raising_check)
+    recorded = run(tmp_path, StubBridge(), template=checked)
+    assert (recorded.status, recorded.failure_code) == ("failed", "inadmissible_choice")
+    assert recorded.failure_message == "KeyError: 'unknown item'"
+
+
+def test_an_expired_deadline_propagates_unchanged_without_evidence(tmp_path, monkeypatch):
+    """Defect: a deadline is disguised as a refusal, so callers misclassify it."""
+    now = [0.0]
+    monkeypatch.setattr("core.execution_deadline.time.monotonic", lambda: now[0])
+    bridge = StubBridge()
+    with execution_deadline(1.0):
+        now[0] = 2.0
+        with pytest.raises(ExecutionDeadlineExceeded):
+            run(tmp_path, bridge)
+    assert not bridge.calls and not (tmp_path / "judge").exists()
+
+
+def test_a_stop_call_cannot_extend_a_chain():
+    """Defect: a stop judgement is chained onto earlier calls and judged twice."""
+    with pytest.raises(ValueError, match="single call"):
+        CallRequest(
+            invocation_sha256=None,
+            call_role="stop",
+            call_index=1,
+            prior_turns=("a" * 64,),
+            content=stop_content(),
+        )
+
+
+class RacingBridge(StubBridge):
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self.path = path
+
+    def generate(self, system_prompt: str, user_prompt: str, *, label: str):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_bytes(b"{}")
+        return super().generate(system_prompt, user_prompt, label=label)
+
+
+def test_a_concurrent_publish_raises_a_typed_conflict(tmp_path):
+    """Defect: a second writer's record is overwritten or the race surfaces untyped."""
+    path = tmp_path / "judge" / "0.json"
+    with pytest.raises(JudgeEvidenceConflict):
+        run(tmp_path, RacingBridge(path))
+    assert path.read_bytes() == b"{}"

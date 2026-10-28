@@ -91,8 +91,8 @@ def _bound_bridge(
     context: JudgeRunContext,
     bridge_factory: Callable[[JudgeRoute], JudgeBridge],
 ) -> JudgeBridge:
+    remaining_seconds("judge.before_request")  # ExecutionDeadlineExceeded propagates
     try:
-        remaining_seconds("judge.before_request")
         bridge = bridge_factory(route)
         bridge.set_run_context(
             workspace=context.workspace,
@@ -122,7 +122,10 @@ def _call(
         payload = template.response_model.model_validate_json(json.dumps(raw))
     except ValidationError as exc:
         return _failure("invalid_payload", _described(exc))
-    refusal = template.check_payload(request, payload) if template.check_payload else None
+    try:
+        refusal = template.check_payload(request, payload) if template.check_payload else None
+    except Exception as exc:
+        return _failure("inadmissible_choice", _described(exc))
     if refusal is not None:
         return _failure("inadmissible_choice", refusal)
     return {"status": "decided", "payload": payload, "failure_code": None, "failure_message": None}
