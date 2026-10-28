@@ -36,7 +36,10 @@
       button.append(window.consoleIcons?.make('circle-alert', 16) || '');
       node('span', sentence(item, actions), button, 'editor-problem-text');
       // The raw located diagnostic stays available as advanced detail.
-      const raw = node('code', `${item.node ? `${item.node}.${item.field || 'request'}` : item.line ? `line ${item.line}` : 'source'} · ${item.message}`, button, 'editor-problem-raw');
+      // Server messages may already start with their location ("build.output: …"): say it once.
+      const where = item.node ? `${item.node}.${item.field || 'request'}` : item.line ? `line ${item.line}` : 'source';
+      const message = item.message.startsWith(`${where}: `) ? item.message.slice(where.length + 2) : item.message;
+      const raw = node('code', `${where} · ${message}`, button, 'editor-problem-raw');
       raw.dataset.uiFlag = 'advanced';
       button.addEventListener('click', () => {
         container.classList.remove('open');
