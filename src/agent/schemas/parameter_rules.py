@@ -105,8 +105,10 @@ class NumericRange(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    min: float | None = None
-    max: float | None = None
+    # Strict bounds: lax coercion would silently read ``true`` as 1.0 or "3" as
+    # 3.0, while the enforced parameter value itself must be a non-bool number.
+    min: float | None = Field(default=None, strict=True)
+    max: float | None = Field(default=None, strict=True)
 
     @model_validator(mode="after")
     def validate_interval(self) -> NumericRange:
@@ -145,6 +147,13 @@ class ParameterRule(BaseModel):
 
     @model_validator(mode="after")
     def validate_rule(self) -> ParameterRule:
+        # Only ``exact`` may carry null. A null range/allowed/predicate would
+        # otherwise fall through ``kind`` and silently become an exact-null lock.
+        for kind in ("range", "allowed", "predicate"):
+            if kind in self.model_fields_set and getattr(self, kind) is None:
+                raise ValueError(
+                    f"{kind} rule must not be null; declare {{'exact': null}} to lock a null value"
+                )
         if self.allowed is not None and not self.allowed:
             raise ValueError("allowed must contain at least one value")
         if self.predicate is not None and not self.predicate.strip():

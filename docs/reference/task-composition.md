@@ -505,7 +505,13 @@ Notes:
 - `parameter_rules` constrains leaves under `model_config`, `train_config`, or
   `loss_config` through dotted paths. Each path declares exactly one of `exact`, `range`, `allowed`,
   or `predicate`. `exact` supplies the executed leaf value even when the agent
-  omitted it; the other forms validate the agent's choice. Predicate names
+  omitted it; the other forms validate the agent's choice. Only `exact` may be
+  null (`{exact: null}` locks a null value); a null `range`, `allowed` or
+  `predicate` is refused rather than read as an exact-null lock. `range`
+  bounds must be JSON/YAML numbers: booleans and numeric strings are refused
+  rather than coerced. Write exponent bounds with a decimal point in YAML,
+  for example `1.0e-5`, not `1e-5`: YAML 1.1 reads `1e-5` as a string, which
+  is then refused. Predicate names
   must be registered with `register_parameter_predicate`; executable Python
   expressions and raw lambdas are not accepted in YAML. The complete rule set
   is part of the composition fingerprint, so changing it requires a fresh
