@@ -27,7 +27,8 @@
     const element = document.createElement(tag); element.textContent = text;
     if (parent) parent.append(element); return element;
   };
-  const draftOperable = () => !!draft && !sourceDirty && !saving && !conflict;
+  // An invalid training/loop field draft blocks undo/redo: restoring a state would drop its typed text.
+  const draftOperable = () => !!draft && !sourceDirty && !saving && !conflict && !draftsPending();
   const draftControls = Draft.mount({header: document.querySelector('#view-workflow h1'), actions: $('review').parentElement,
     undo: () => step('undo'), redo: () => step('redo'), discard: discardChanges, active: () => window.consoleNavigation?.view === 'workflow'});
   const projection = () => Object.freeze({projectId: project, candidateEnabled,
@@ -226,17 +227,21 @@
     } finally { if (inspecting === key) inspecting = null; }
   }
   function adoptDraftState(state, message) {
-    restore(state); sourceDirty = false; $('source').value = anchor.source;
+    // Undoing a Discard of typed Source text restores that text as dirty Source text.
+    restore(state); sourceDirty = typeof state.sourceText === 'string'; $('source').value = sourceDirty ? state.sourceText : anchor.source;
     diagnostic(); invalidate(); render(); inspectIfNeeded(); status(message);
   }
   function step(direction) {
+    if (draft && draftsPending()) { status('Correct or reset the invalid field first; undo and redo would drop its typed text.'); return; }
     if (!draftOperable()) return;
     const result = direction === 'undo' ? draft.undo() : draft.redo();
     if (result) adoptDraftState(result.state, `${direction === 'undo' ? 'Undid' : 'Redid'}: ${result.label}. Nothing is saved until you review and save.`);
   }
   function discardChanges() {
     if (!draft || saving || conflict || !pending()) return;
-    adoptDraftState(draft.discard(), 'Changes discarded; showing the workflow as loaded. Undo restores them. Disk was not re-read.');
+    const typed = sourceDirty ? $('source').value : null, invalid = draftsPending();
+    adoptDraftState(draft.discard(typed), `Changes ${typed === null ? '' : 'and typed source text '}discarded; showing the workflow as loaded. ` +
+      `Undo restores them${invalid ? ' (invalid field text is not kept)' : ''}. Disk was not re-read.`);
   }
   function renderGraph() {
     $('edges').replaceChildren();
@@ -522,10 +527,22 @@
   $('discard').addEventListener('click', () => { if (conflict) adopt(conflict); });
   $('rebase').addEventListener('click', () => {
     if (!conflict || bindingConflict()) return;
-    // A form proposal first becomes source via Review; a changed-base review
-    // may fail before rendering, so preserve the form graph for re-review.
+    // Structured edits are re-applied onto the disk projection, so later proposals keep the
+    // newer disk change; history restarts there (older states hold the superseded source).
+    // Pending Source text (typed, or reviewed into the anchor) is a whole-file proposal: kept as is.
+    const loaded = viewState(conflict), text = sourceDirty || (!!anchor && anchor.source !== base.source);
+    const rebased = draft && !text ? Draft.reapply(base.document || anchor.document, draftState(), loaded) : null;
     base = conflict; conflict = null; $('conflict').hidden = true;
     $('revision').textContent = 'File version: ' + base.sha256.slice(0, 12);
-    draft?.rebase(viewState(base)); invalidate(); status('Current disk source chosen as base. Reconcile your proposal, then review again.');
+    if (!draft) { invalidate(); status('Current disk source chosen as base. Reconcile your proposal, then review again.'); return; }
+    if (text) {
+      draft.rebase(loaded, draftState(), 'Keep pending source on the current disk version'); invalidate();
+      status('Current disk source chosen as base. Your pending Source text still replaces the whole file and does not include the disk change; reconcile it, or Discard to the disk version, before review.');
+      return;
+    }
+    draft.rebase(loaded, rebased.state, 'Re-apply edits on the current disk version');
+    restore(rebased.state); $('source').value = anchor.source; invalidate(); render();
+    status('Current disk source chosen as base; your edits were re-applied onto it and history restarts here.' +
+      (rebased.conflicts.length ? ` Both changed ${rebased.conflicts.join(', ')}; your value was kept.` : '') + ' Review again before saving.');
   });
 })();

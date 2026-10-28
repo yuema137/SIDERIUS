@@ -107,6 +107,15 @@ try {
   assert.equal(await badge('trial_max_epochs').textContent(), 'Changed, not saved', 'Undo reverts only the last operation');
   await page.locator('#editor-redo').click();
   assert.equal(await settings.locator('[data-training-mode="sampling_seed"]').inputValue(), 'unset');
+  // An invalid field being typed blocks undo/redo: restoring a state would drop the typed text.
+  await settings.locator('[data-training="trial_max_epochs"]').fill('');
+  assert.equal(await page.locator('#editor-undo').isDisabled(), true, 'Undo waits for the invalid field');
+  await page.locator('#view-workflow h1').focus(); await page.keyboard.press('Control+z');
+  assert.equal(await settings.locator('[data-training="trial_max_epochs"]').inputValue(), '', 'Ctrl+Z keeps the invalid typed text');
+  assert.equal(await settings.locator('[data-training-mode="sampling_seed"]').inputValue(), 'unset', 'Ctrl+Z did not undo');
+  assert.match(await page.locator('#editor-status').textContent(), /Correct or reset the invalid field first/);
+  await settings.locator('[data-training="trial_max_epochs"]').fill('4');
+  assert.equal(await page.locator('#editor-undo').isDisabled(), false, 'A valid value re-enables undo');
 
   // Read-only model hyperparameters name their task-manifest owner; the loop endpoint points to loop settings.
   const owner = page.locator('#editor-model-hyperparameters');

@@ -31,6 +31,8 @@
   const identity = state => canonical({document: state.document, bindings: state.bindings, source: state.anchor.source});
   const sameTarget = (patch, node, argument) => patch.node === node && patch.argument === argument;
 
+  const withoutText = state => { const {sourceText, ...rest} = state; return rest; };
+
   /** History over DraftState values. `loaded` is the state Discard restores. */
   function create(loaded) {
     let baseline = clone(loaded), current = clone(loaded), coalescing = null;
@@ -54,23 +56,36 @@
         }
         redoStack.length = 0; current = clone(state); return true;
       },
+      // A returned state may carry `sourceText` (typed Source text a Discard dropped); the
+      // caller restores it as dirty text. History states themselves never keep it.
       undo() {
         const entry = undoStack.pop(); if (!entry) return null;
-        push(redoStack, {state: current, label: entry.label}); current = entry.state; coalescing = null;
-        return {state: clone(current), label: entry.label};
+        push(redoStack, {state: current, label: entry.label}); current = withoutText(entry.state); coalescing = null;
+        return {state: clone(entry.state), label: entry.label};
       },
       redo() {
         const entry = redoStack.pop(); if (!entry) return null;
-        push(undoStack, {state: current, label: entry.label}); current = entry.state; coalescing = null;
-        return {state: clone(current), label: entry.label};
+        push(undoStack, {state: current, label: entry.label}); current = withoutText(entry.state); coalescing = null;
+        return {state: clone(entry.state), label: entry.label};
       },
-      /** Restore the loaded state (never a disk re-read); a dirty discard is itself undoable. */
-      discard() {
-        if (identity(current) !== identity(baseline)) { push(undoStack, {state: current, label: 'Discard changes'}); redoStack.length = 0; }
+      /** Restore the loaded state (never a disk re-read). A dirty discard, including dirty
+       * Source text passed as `sourceText`, is itself undoable. */
+      discard(sourceText = null) {
+        const typed = typeof sourceText === 'string';
+        if (typed || identity(current) !== identity(baseline)) {
+          push(undoStack, {state: typed ? {...current, sourceText} : current, label: typed ? 'Discard changes and typed source' : 'Discard changes'});
+          redoStack.length = 0;
+        }
         current = clone(baseline); coalescing = null; return clone(current);
       },
-      /** The author chose a newer disk version as base: Discard now restores that version. */
-      rebase(loaded) { baseline = clone(loaded); coalescing = null; }
+      /** The author chose a newer disk version as base: Discard restores `loaded`, and history
+       * restarts there, because older states would rebuild proposals on the superseded source.
+       * `state` (edits re-applied onto `loaded`, see `reapply`) becomes one undoable step. */
+      rebase(loaded, state, label) {
+        baseline = clone(loaded); current = clone(loaded); coalescing = null;
+        undoStack.length = 0; redoStack.length = 0;
+        if (state) this.record(state, label);
+      }
     });
   }
 
@@ -109,6 +124,45 @@
       return {kind: 'loop', source: state.anchor.source, loop: clone(state.document.definition.loop ?? null)};
     }
     return {kind: 'source', source: state.anchor.source};
+  }
+
+  // Array elements merge by their identity field when every side has a unique one.
+  const arrayKey = lists => ['id', 'node', 'name'].find(key => lists.every(list => Array.isArray(list) &&
+    list.every(item => item && typeof item === 'object' && typeof item[key] === 'string') &&
+    new Set(list.map(item => item[key])).size === list.length));
+  const isRecord = value => !!value && typeof value === 'object' && !Array.isArray(value);
+  /** Three-way merge: `ours` changes relative to `ancestor` applied onto `theirs`. Where both
+   * sides changed one value differently, ours wins and the path is reported in `conflicts`. */
+  function merge(ancestor, ours, theirs, path, conflicts) {
+    const [a, o, t] = [ancestor, ours, theirs].map(canonical);
+    if (o === a || o === t) return clone(theirs);
+    if (t === a) return clone(ours);
+    if ([ancestor, ours, theirs].every(isRecord)) {
+      const result = {};
+      for (const key of new Set([...Object.keys(theirs), ...Object.keys(ours)])) {
+        const value = merge(ancestor[key], ours[key], theirs[key], [...path, key], conflicts);
+        if (value !== undefined) result[key] = value;
+      }
+      return result;
+    }
+    const key = arrayKey([ancestor, ours, theirs]);
+    if (key) {
+      const [byA, byO, byT] = [ancestor, ours, theirs].map(list => new Map(list.map(item => [item[key], item])));
+      const result = [];
+      for (const id of new Set([...byT.keys(), ...byO.keys()])) {
+        const value = merge(byA.get(id), byO.get(id), byT.get(id), [...path, id], conflicts);
+        if (value !== undefined) result.push(value);
+      }
+      return result;
+    }
+    conflicts.push(path.join('.') || '(document)'); return clone(ours);
+  }
+  /** Re-apply the structured edits of `state` (made against `ancestorDocument`) onto the
+   * newer `loaded` projection. Binding patches are not re-applied (Rebase refuses them). */
+  function reapply(ancestorDocument, state, loaded) {
+    const conflicts = [];
+    const document = merge(ancestorDocument, state.document, loaded.document, [], conflicts);
+    return {state: {...clone(loaded), document}, conflicts};
   }
 
   /** Undo/Redo/Discard buttons, dirty badge, page-title mark and keyboard shortcuts. */
@@ -154,5 +208,5 @@
     });
   }
 
-  window.editorDraft = Object.freeze({create, inventory, withBinding, proposal, canonical, mount});
+  window.editorDraft = Object.freeze({create, inventory, withBinding, proposal, reapply, canonical, mount});
 })();

@@ -1,11 +1,12 @@
 /** Browser witness for the unified editor draft (editor-draft.js): wiring, layout and
  * inspector edits share one draft with undo/redo, Discard to the loaded state, a dirty
- * title/header mark, confirmed Refresh, a beforeunload guard and one reviewed save.
+ * title/header mark, confirmed Refresh, a beforeunload guard and one reviewed save; an undoable
+ * Discard of typed Source text; and Rebase re-applying a layout edit onto a newer disk source.
  * Uses EDITOR_PYTHON, CONSOLE_PLAYWRIGHT_MODULE and CONSOLE_BROWSER_EXECUTABLE; no API/GPU.
  */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {readFile} from 'node:fs/promises';
+import {readFile, writeFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -133,6 +134,49 @@ try {
   assert.equal(await page.locator('#editor-undo').isDisabled(), true, 'Saving starts a new loaded state');
   assert.deepEqual(await position(), movedPosition, 'The saved layout reloads from disk');
 
+  // Discarding typed Source text is undoable too: Undo brings the text back as dirty Source text.
+  const sourceDirty = () => page.evaluate(() => window.workflowEditor.state.sourceDirty);
+  await page.locator('#editor-advanced').evaluate(details => { details.open = true; });
+  const typedSource = saved + '# typed, not reviewed\n';
+  await source.fill(typedSource);
+  assert.equal(await sourceDirty(), true);
+  assert.equal(await page.locator('#editor-undo').isDisabled(), true, 'Undo waits while Source text is dirty');
+  assert.equal(await page.locator('#editor-discard-draft').isDisabled(), false);
+  await page.locator('#editor-discard-draft').click();
+  assert.equal(await source.inputValue(), saved);
+  assert.equal(await dirty(), false);
+  assert.match(await page.locator('#editor-status').textContent(), /typed source text discarded.*Undo restores them/);
+  await page.locator('#editor-undo').click();
+  assert.equal(await source.inputValue(), typedSource, 'Undo after Discard restores the typed Source text');
+  assert.equal(await sourceDirty(), true);
+  assert.equal(await dirty(), true);
+  await page.locator('#editor-discard-draft').click();
+  assert.equal(await source.inputValue(), saved);
+  await page.locator('#editor-advanced').evaluate(details => { details.open = false; });
+
+  // Rebase after a conflict re-applies structured edits onto the newer disk source:
+  // the next proposal keeps the disk change instead of silently reverting it.
+  await page.locator('#circuit-node-validate').focus(); await page.keyboard.press('Alt+ArrowDown');
+  const rebasedPosition = await position();
+  const diskSource = saved.replace("manifest='task/manifest.json'", "manifest='task/disk-manifest.json'");
+  assert.notEqual(diskSource, saved);
+  await writeFile(metadata.source, diskSource);
+  await page.locator('#editor-review').click();
+  await page.locator('#editor-conflict').waitFor({state: 'visible'});
+  await page.locator('#editor-rebase').click();
+  assert.match(await page.locator('#editor-status').textContent(), /edits were re-applied/);
+  assert.equal(await manifest.inputValue(), 'task/disk-manifest.json', 'The draft now carries the disk change');
+  assert.deepEqual(await position(), rebasedPosition, 'The draft keeps the layout edit');
+  await page.locator('#editor-review').click();
+  await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
+  const rebasedReview = posts.findLast(item => item.path.endsWith('/review'));
+  assert.equal(rebasedReview.body.proposal.kind, 'document');
+  assert.equal(rebasedReview.body.proposal.document.definition.task.manifest, 'task/disk-manifest.json');
+  assert.match(await source.inputValue(), /task\/disk-manifest\.json/);
+  await page.locator('#editor-discard-draft').click();
+  assert.equal(await source.inputValue(), diskSource, 'Discard after Rebase restores the chosen disk version');
+  assert.equal(await dirty(), false);
+
   // An unsaved edit arms the beforeunload guard.
   await page.locator('#circuit-node-validate').focus(); await page.keyboard.press('Alt+ArrowUp');
   assert.equal(await dirty(), true);
@@ -143,7 +187,7 @@ try {
   await page.reload({timeout: 3000}).catch(() => {});
   assert.equal(unloadDialog, 'beforeunload');
   assert.equal(await dirty(), true, 'Declining the exit keeps the unsaved draft');
-  console.log('PASS unified draft: wire+move+inspector edit in one draft, keyboard/button undo/redo, local undoable Discard, dirty title/header, confirmed refresh, beforeunload guard and one reviewed byte-exact save.');
+  console.log('PASS unified draft: wire+move+inspector edit in one draft, keyboard/button undo/redo, local undoable Discard (including typed Source text), Rebase re-applying edits onto the disk source, dirty title/header, confirmed refresh, beforeunload guard and one reviewed byte-exact save.');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');

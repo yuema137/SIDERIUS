@@ -586,11 +586,22 @@ History: every operation records one undo step (consecutive typing in one field
 coalesces, limit 200). **Undo**/**Redo** buttons and Ctrl/Cmd+Z,
 Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only) restore
 earlier states and invalidate any review. **Discard changes** restores the loaded
-state without reading disk and is itself undoable; **Refresh from disk** re-reads
-and asks first when dirty. Undo/Redo/Discard are disabled while Source text is
-dirty, during Save and while a conflict is shown (the conflict panel's own
-Discard/Rebase apply; Rebase makes the current disk version Discard's target and
-stays disabled while binding patches are pending). A dirty draft prefixes the
+state without reading disk and is itself undoable, including dirty Source text:
+the discard step carries the typed text (`sourceText`) and Undo restores it as
+dirty Source text (invalid training/loop field text is not kept). **Refresh from
+disk** re-reads and asks first when dirty. Undo/Redo are disabled while Source
+text is dirty or an invalid training/loop field draft is pending (Ctrl/Cmd+Z
+then reports why and keeps the typed text); Undo/Redo/Discard are disabled
+during Save and while a conflict is shown (the conflict panel's own
+Discard/Rebase apply). Rebase stays disabled while binding patches are pending;
+it makes the current disk version Discard's target and restarts history there.
+Structured edits are re-applied onto the disk projection by a three-way merge
+(`editorDraft.reapply`, ancestor = the previous base document; arrays merge by
+`id`/`node`/`name`; where both sides changed one value the draft's value wins
+and the status names the paths), so later proposals keep the disk change.
+Pending Source text (dirty, or reviewed into the anchor) is a whole-file
+proposal and is kept unchanged; the status states that it does not include the
+disk change. A dirty draft prefixes the
 page title with `* `, shows an "Unsaved changes" badge in the Workflow heading and
 arms the `beforeunload` guard. Save still writes exactly the reviewed bytes and
 resets history to the saved state.
