@@ -14,7 +14,13 @@ from workflows.task_composition import RunTaskComposition
 from workflows.termination import infrastructure_abort_reason
 
 from . import readiness, route_phase, unit_runner
-from .adaptor_phase import body_outcome, execute_adaptor, expected_adaptors, tuning_branch
+from .adaptor_phase import (
+    body_outcome,
+    execute_adaptor,
+    expected_adaptors,
+    skipped_inputs,
+    tuning_branch,
+)
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
 from .graph_models import GraphNodeEvidence, GraphRouteEvidence, GraphTrace
@@ -74,6 +80,7 @@ def execute_fanout(
                 aborted=aborted,
                 decisions=tuple(item.decision for item in routes),
                 routing=routing,
+                skipped_inputs=skipped_inputs(definition, outcomes),
             )
         )
         for node_id, state, reason in decision.terminal:
@@ -129,6 +136,7 @@ def execute_fanout(
                     selected=selected,
                     shape=shape,
                     results=results,
+                    outcomes=outcomes,
                     iteration=iteration,
                     admitted=admitted,
                     tuning_branch=tuning_branch(shape, outcomes)

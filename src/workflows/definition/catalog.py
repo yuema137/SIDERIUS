@@ -53,6 +53,10 @@ CONTRACTS = MappingProxyType(
         "optional.parameter-rules": "agent.schemas.parameter_rules.ParameterRules | None",
         "literature.input": "agent.schemas.literature_review.LiteratureReviewInput",
         "literature.output": "agent.schemas.literature_review.LiteratureReviewOutput",
+        "literature.collection": (
+            "list[agent.schemas.protocols.ml_literature_review_to_ml_model_propose"
+            ".NamedLiteratureReviewOutput]"
+        ),
         "proposal.input": "agent.schemas.proposal.ProposalInput",
         "proposal.output": "agent.schemas.proposal.ProposalOutput",
         "implementation.input": "agent.schemas.implementor.ImplementorInput",
@@ -102,6 +106,15 @@ PROTOCOLS = MappingProxyType(
             "proposal.input",
             (
                 ArgumentContract("output", "literature.output"),
+                ArgumentContract("proposal_input", "proposal.input"),
+            ),
+        ),
+        "literature-collection-to-proposal": ProtocolContract(
+            "agent.schemas.protocols.ml_literature_review_to_ml_model_propose"
+            ".local_typed_evidence_many",
+            "proposal.input",
+            (
+                ArgumentContract("reviews", "literature.collection"),
                 ArgumentContract("proposal_input", "proposal.input"),
             ),
         ),
@@ -224,6 +237,11 @@ class RankableField:
     provenance: str
 
 
+# Element contract -> the catalogued contract of its ``collect/v1`` collection. A
+# collection is the ordered named list its consumer protocol reads, one entry per
+# admissible input with ``contribution_id`` = the source node id (B6-4).
+COLLECTION_CONTRACTS = MappingProxyType({"literature.output": "literature.collection"})
+
 # Contract -> its one list field that adaptors may concatenate or split.
 SPLITTABLE_ITEMS = MappingProxyType({"literature.output": "findings"})
 
@@ -247,10 +265,11 @@ _COMBINE_OWNER = "workflows.adaptors.combine.combine"
 _SELECT_OWNER = "workflows.adaptors.select.select"
 _DISTRIBUTE_OWNER = "workflows.adaptors.run.run_deterministic_adaptor"
 
-# Closed set of adaptor strategy kinds (B6). ``collect/v1`` is reserved: its model is
-# declarable but validation refuses it until its ``<contract>.collection`` output and
-# consumer protocol are catalogued (B6-4/B6-9). The kind string carries its
-# version; a changed semantic is a new row. LLM kinds join with their B2 owner.
+# Closed set of adaptor strategy kinds (B6). ``collect/v1`` is admitted only over an
+# element contract with a ``COLLECTION_CONTRACTS`` entry and its consumer protocol
+# (``literature.output`` since B6-4; ``tuning.output`` waits for B6-9). The kind
+# string carries its version; a changed semantic is a new row. LLM kinds join with
+# their B2 owner.
 ADAPTOR_STRATEGIES = MappingProxyType(
     {
         "pass/v1": AdaptorStrategyContract(

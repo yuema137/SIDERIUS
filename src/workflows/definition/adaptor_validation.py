@@ -22,7 +22,13 @@ from .adaptor_strategies import (
     derive_cardinality,
     incompatible_pair,
 )
-from .catalog import CONTRACTS, METRIC_SCORED_CONTRACTS, RANKABLE_FIELDS, SPLITTABLE_ITEMS
+from .catalog import (
+    COLLECTION_CONTRACTS,
+    CONTRACTS,
+    METRIC_SCORED_CONTRACTS,
+    RANKABLE_FIELDS,
+    SPLITTABLE_ITEMS,
+)
 from .models import (
     AdaptorInstance,
     AdaptorRequest,
@@ -57,8 +63,12 @@ def check_adaptor_format(definition: WorkflowDefinition | ReusableWorkflowDefini
 
 
 def output_contract(adaptor: AdaptorInstance) -> str:
-    """Derived, never authored: every admitted kind preserves the element contract."""
-    return adaptor.inputs[0].contract
+    """Derived, never authored: ``collect/v1`` yields the element contract's catalogued
+    collection; every other admitted kind preserves the element contract."""
+    element = adaptor.inputs[0].contract
+    if isinstance(adaptor.combine, CollectCombine):
+        return COLLECTION_CONTRACTS[element]  # _check_combine refuses an uncatalogued one
+    return element
 
 
 def output_count(adaptor: AdaptorInstance) -> int | None:
@@ -121,7 +131,7 @@ def _capacity(adaptor: AdaptorInstance) -> int:
 
 def _check_strategies(adaptor: AdaptorInstance) -> None:
     combine, select, distribute = adaptor.combine, adaptor.select, adaptor.distribute
-    contract = output_contract(adaptor)
+    contract = adaptor.inputs[0].contract  # the element contract (one per adaptor)
     if (incompatible := incompatible_pair(combine, distribute)) is not None:
         raise ValueError(incompatible)
     _check_combine(adaptor, contract)
@@ -145,9 +155,9 @@ def _check_strategies(adaptor: AdaptorInstance) -> None:
 
 def _check_combine(adaptor: AdaptorInstance, contract: str) -> None:
     combine = adaptor.combine
-    if isinstance(combine, CollectCombine):
-        # Its <contract>.collection output joins the catalogue with its consumer protocol.
-        raise ValueError("collect/v1 output contract is not catalogued yet")
+    if isinstance(combine, CollectCombine) and contract not in COLLECTION_CONTRACTS:
+        # A collection joins the catalogue together with its consumer protocol.
+        raise ValueError(f"collect/v1 has no catalogued collection contract for {contract}")
     if isinstance(combine, ConcatItemsCombine) and SPLITTABLE_ITEMS.get(contract) != combine.field:
         raise ValueError(f"concat-items/v1 field {combine.field!r} is not catalogued")
     if isinstance(combine, MetricRankCombine) and contract not in METRIC_SCORED_CONTRACTS:

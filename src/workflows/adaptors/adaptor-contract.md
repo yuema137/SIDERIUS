@@ -151,13 +151,18 @@ direction iff metric, rankable-field guard, record literal digest.
 
 ## Limitations
 
-- Reachable since B6-3 only through the v1 selection profile
-  `native-proposal-fanout-selection/v1` with `pass/v1`, `first-admissible/v1`,
-  `single/v1` over `validation.output` (executor, record publication and verifier
-  recomputation: `tools/candidate_worker/adaptor_phase.py`, described in the
-  candidate-worker contract). Every other kind is declarable but not executed; no
-  paper or existing digest is affected.
+- Reachable since B6-3 through the v1 selection (and routed) profile with
+  `pass/v1`, `first-admissible/v1`, `single/v1` over `validation.output`, and since
+  B6-4 through the literature profiles: `collect/v1` + `all/v1` + `single/v1` over
+  `literature.output` (S2; the `CollectedItems` output becomes the catalogued
+  `literature.collection` at its consumer, `tools/candidate_worker/literature_edges.py`)
+  and any validated COMBINE/SELECT pair before `split-items/v1` over one
+  `literature.output` (S3). Executor, record publication and verifier recomputation:
+  `tools/candidate_worker/adaptor_phase.py`, described in the candidate-worker
+  contract. `metric-rank/v1`, `threshold/v1`, `per-item/v1` and `replicate/v1` are
+  declarable but not executed; no paper or existing digest is affected.
 - Decided (review of B6-2): shortfall is monotonic; under `on_short="fail"`
   any shortfall fails, otherwise an empty result is `rejected`.
-- Open semantics to confirm: `too_many_items` for split (never truncated);
-  `field-rank` over exactly one value.
+- `too_many_items` (split never truncates) is a graph reason since B6-4: the
+  adaptor closes `failed/too_many_items` with its record.
+- Open semantics to confirm: `field-rank` over exactly one value.

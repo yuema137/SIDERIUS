@@ -19,9 +19,12 @@ GraphReason = Literal[
     "validation_rejected",
     "route_not_selected",
     # Adaptor outcomes (B6-3); `judge_failure` is reserved for LLM strategies (B6-8).
+    # `insufficient_items` also skips a consumer of a non-emitted output index (B6-4).
     "no_admissible_input",
     "insufficient_items",
     "judge_failure",
+    # split-items/v1 found more list entries than declared outputs (B6-4).
+    "too_many_items",
 ]
 
 
