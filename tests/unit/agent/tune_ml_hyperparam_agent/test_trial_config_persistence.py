@@ -11,7 +11,8 @@ from tests.unit.agent.tune_ml_hyperparam_agent.test_execution_provenance_scope i
 
 planning = import_module("nodes.ml_hyperparameter_tune_agent.planning")
 
-# Captured from the pre-extraction writer at b9ae7f40. No trailing newline.
+# Captured from the pre-extraction writer at b9ae7f40; issue #983 replaced the
+# seed-owned ``train_base_seed`` with ``seed_context``. No trailing newline.
 TRIAL_CONFIG_BYTES = b"""{
   "is_trial": true,
   "mode": "trial",
@@ -33,7 +34,17 @@ TRIAL_CONFIG_BYTES = b"""{
   ],
   "train_sampling_seed": 19,
   "eval_sampling_seed": 29,
-  "train_base_seed": 23
+  "seed_context": {
+    "run_seed": 23,
+    "at": {
+      "iteration": null,
+      "node_id": null,
+      "branch": null,
+      "round": null,
+      "attempt": null,
+      "epoch": null
+    }
+  }
 }"""
 
 

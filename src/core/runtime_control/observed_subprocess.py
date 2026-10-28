@@ -123,12 +123,34 @@ def _notify_lifecycle(lifecycle: ProcessLifecycle) -> None:
             observer(lifecycle)
 
 
-class ProcessSupervisionError(RuntimeError):
-    """Infrastructure failure, never a model-size or CUDA-capacity judgment."""
+def replay_process_lifecycle(lifecycle: ProcessLifecycle) -> None:
+    """Deliver lifecycle evidence a delegated child process observed.
 
-    def __init__(self, message: str, lifecycle: ProcessLifecycle):
+    A caller that runs work in its own child process returns the lifecycles
+    that work observed; replaying them in order gives the active observer the
+    same evidence it received when the work ran in this process.
+    """
+    _notify_lifecycle(lifecycle)
+
+
+class ProcessSupervisionError(RuntimeError):
+    """Infrastructure failure, never a model-size or CUDA-capacity judgment.
+
+    ``stdout``/``stderr`` carry the drained child output when the failure is
+    raised after the child ran; ``None`` means no output was captured.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        lifecycle: ProcessLifecycle,
+        *,
+        stdout: str | None = None,
+        stderr: str | None = None,
+    ):
         super().__init__(message)
         self.lifecycle = lifecycle
+        self.stdout, self.stderr = stdout, stderr
 
 
 class ProcessControlError(ProcessSupervisionError):
@@ -503,7 +525,9 @@ def supervise_process(
             stderr_tail=(stderr or "")[-2000:],
         )
         if cleanup_errors:
-            raise ProcessSupervisionError("Process cleanup failed", lifecycle)
+            raise ProcessSupervisionError(
+                "Process cleanup failed", lifecycle, stdout=stdout, stderr=stderr
+            )
         return ObservedProcessResult(completed=None, timeout=timeout, lifecycle=lifecycle)
     if (
         stop_reason is not None
@@ -511,7 +535,12 @@ def supervise_process(
         or not lifecycle.child_reaped
         or (group is not None and (group.required or group.final.status != "absent"))
     ):
-        raise ProcessSupervisionError(stop_reason or "Process lifecycle was not clean", lifecycle)
+        raise ProcessSupervisionError(
+            stop_reason or "Process lifecycle was not clean",
+            lifecycle,
+            stdout=stdout,
+            stderr=stderr,
+        )
     return ObservedProcessResult(
         completed=subprocess.CompletedProcess(cmd, proc.returncode, stdout=stdout, stderr=stderr),
         lifecycle=lifecycle,

@@ -20,6 +20,7 @@ from tools.candidate_worker.loop_resume import (
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.candidate_worker.preflight import require_credentials
 from tools.candidate_worker.records import verify_candidate_records
+from tools.workspace_sandbox.runner import CancelProbe
 
 from .files import directory, read_bytes, read_model
 from .models import (
@@ -280,12 +281,12 @@ def reserve(record: OperationRecord) -> None:
         )
 
 
-def execute_resume(record: OperationRecord) -> None:
+def execute_resume(record: OperationRecord, *, cancel_requested: CancelProbe) -> None:
     # Read the selected binding against the admitted operation before native dispatch.
     read_segment(record)
     _, request, initial = root_inputs(record)
     binding = read_continuation(initial, record.submission.request_id)
-    launch_continuation(request, initial, binding)
+    launch_continuation(request, initial, binding, cancel_requested=cancel_requested)
 
 
 def request_loop_pause(config: OperationStoreConfig, operation_id: UUID) -> LoopPause:

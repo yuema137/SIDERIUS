@@ -127,9 +127,11 @@ from core.run_invariants import (
     ensure_run_invariants,
     validate_stamped_invariants,
 )
+from core.run_seed_lock import resolve_workspace_run_seed
 from core.runtime_control.construction_memory import CandidateAdmissionError
 from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+from core.seeding import SeedCoordinates
 from execute_tools.dataset_config import DataScope
 from execute_tools.evaluation_metric import (
     MetricSpec,
@@ -1611,8 +1613,6 @@ def run_workflow(
         eval_strategy: DEPRECATED no-op (DS7) — warns when non-default.
         eval_portion: Fraction of segments per file for validation.
         train_validation_align: When True, train and eval scopes share segment indices.
-        sampling_seed: Seed for SampleSet construction.
-        train_base_seed: Base seed for per-epoch training subsampling.
         cleanup_denoised: Delete denoised H5 files after scoring.
         trial_time_budget_minutes: Wall-time budget (minutes) for the
             evaluate_time_skill gate on trial-mode rounds (plan.is_trial=True).
@@ -1884,6 +1884,10 @@ def run_workflow(
     # history is checked. Per-iteration tuner startup re-validates the full
     # input via validate_runtime_config; this pre-flight mirrors only the
     # subset needed to fail fast.
+    # Issue #983 — the run seed is resolved (lock, then --run_seed, then
+    # generation) and printed before any node runs; the lock below records it.
+    run_seed = resolve_workspace_run_seed(workspace, launch.run_seed)
+    print(run_seed.log_line(), flush=True)
     preparation = prepare_training_run(
         launch=launch,
         workspace=workspace,
@@ -1896,6 +1900,7 @@ def run_workflow(
         order_strategy_override=order_strategy_override,
         file_order_override=file_order_override,
         enable_structured_health_feedback=enable_structured_health_feedback,
+        run_seed=run_seed,
     )
     _run_partitions = preparation.partition_count
     _resolved_scope = list(preparation.resolved_scope)
@@ -2508,7 +2513,6 @@ def run_workflow(
                     # run_workflow gains ZERO branch nodes (§12.1 tripwire).
                     trial_portion=_portion_or(launch.trial_portion, UNCONSTRAINED_TRIAL_PORTION),
                     train_portion=_portion_or(launch.train_portion, UNCONSTRAINED_TRAIN_PORTION),
-                    sampling_seed=launch.sampling_seed,
                     trial_time_budget_minutes=launch.trial_time_budget_minutes,
                     formal_time_budget_minutes=launch.formal_time_budget_minutes,
                     data_dir=launch.data_dir,
@@ -2844,6 +2848,8 @@ def run_workflow(
             run_invariants=_run_invariants,
             constraint_context=current_constraints,
             chain_formal_incumbent_reference=state.chain_formal_incumbent_reference,
+            # Issue #983 — the global chain iteration is the tuner's seed position.
+            seed_coordinates=SeedCoordinates(iteration=iteration),
         )
 
         _tune_agent = HyperparamTuningAgent(

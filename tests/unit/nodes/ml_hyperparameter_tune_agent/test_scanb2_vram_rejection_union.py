@@ -38,11 +38,13 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, PhysicalRejection
 from agent.schemas.ordering import ResolvedOrdering
 from agent.skills.evaluate_vram_skill.preflight_worker_main import _bounded_rich_fields
+from core.training_seeds import SeedContext
 from nodes.ml_hyperparameter_tune_agent.contracts import (
     AdmissionOutcome,
     AttemptIdentity,
     AttemptStage,
 )
+from tests.helpers.run_seed import TEST_RUN_SEED
 
 # The node package rebinds ``sys.modules[...]`` to its main module (see the
 # package ``__init__``), so the private module is reached by its full dotted
@@ -167,6 +169,7 @@ def _drive_admission(monkeypatch, payload: dict):
 
     bindings = SimpleNamespace(
         agent_input=HyperparamTuningInput(
+            run_seed=TEST_RUN_SEED,
             model_type="synthetic_model",
             run_name="scanb2",
             workspace="/tmp/scanb2-unused",
@@ -213,7 +216,7 @@ def _drive_admission(monkeypatch, payload: dict):
         record_params={},
         train_sample_set=None,
         trial_config=SimpleNamespace(
-            train_base_seed=None,
+            seed_context=SeedContext(run_seed=0),
             train_portion=None,
         ),
         task_scopes=None,

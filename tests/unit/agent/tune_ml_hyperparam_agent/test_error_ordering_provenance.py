@@ -25,6 +25,7 @@ from execute_tools.evaluation_metric import (
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.scoring_stubs import stub_scoring
 from workflows.run_one_iteration import write_manifest
 from workflows.task_composition import (
@@ -114,6 +115,7 @@ def run_failure(tmp_path):
             stub_scoring(sandbox, [1.75] * 4, 1.75)
             composition = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
             agent_input = HyperparamTuningInput(
+                run_seed=TEST_RUN_SEED,
                 planner_strategy="native-timing-v1",
                 model_type="quickstart_reference_mlp",
                 run_name="error_ordering",

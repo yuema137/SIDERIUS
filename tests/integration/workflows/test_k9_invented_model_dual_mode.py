@@ -50,6 +50,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.tuner_composed_effects import (
     recording_sandbox_for_attempts,
     synthetic_cuda_context,
@@ -146,6 +147,7 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
     run_name = "k9_invented"
 
     agent_input = HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type=_PLUGIN_MODEL_TYPE,
         # ``max_rounds`` must be >= 2 so the agent does NOT promote round 1

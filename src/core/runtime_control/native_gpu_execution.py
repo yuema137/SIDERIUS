@@ -24,6 +24,7 @@ from core.runtime_control.inference_startup import (
 from core.runtime_control.observed_subprocess import ProcessControlError, supervise_subprocess
 from core.runtime_control.training_measurement_binding import training_measurement_binding
 from core.subprocess_env import subprocess_env
+from core.training_seeds import SeedContext, TrainingSeedPlan
 
 
 def active_attempt(sandbox) -> AttemptGpuExecution | None:
@@ -43,7 +44,7 @@ def validate_native_inputs(
     train_config: dict | None = None,
     inference_batch: int | None = None,
     train_portion: float | None = None,
-    train_base_seed: int | None = None,
+    seed_context: SeedContext | None = None,
     custom_loss_snapshot=None,
 ) -> None:
     state = active_attempt(sandbox)
@@ -100,7 +101,8 @@ def validate_native_inputs(
             raise ValueError("protected native training config differs from its measurement")
         if (
             train_portion != probe.sampling.train_portion
-            or train_base_seed != probe.sampling.epoch_seed
+            or seed_context is None
+            or TrainingSeedPlan(seed_context).epoch(0).subsample != probe.sampling.epoch_seed
         ):
             raise ValueError("protected native training sampling differs from its measurement")
     elif inference_batch != spec.inference_batch_size:

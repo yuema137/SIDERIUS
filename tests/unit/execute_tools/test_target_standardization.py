@@ -6,6 +6,7 @@ import torch
 from torch import nn
 from torch.utils.data import TensorDataset
 
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.target_standardization import fit_training_target_standardization
 from execute_tools.task_data_path import EpochSamplingParams, bind_task_data_path
 from ml_models.target_standardization import (
@@ -99,6 +100,7 @@ def test_native_training_exports_fitted_transform_with_best_checkpoint(tmp_path,
             data_dir=str(tmp_path),
             sandbox_dirs=dirs,
             exp_id="test",
+            seed_plan=TrainingSeedPlan(SeedContext(run_seed=0)),
             profile=fixture.profile,
             train_portion=1,
             task_scope="train",
