@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Self, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.judge_task import JudgeTaskBlocks, RubricSpec
@@ -161,12 +161,44 @@ class RubricScoringRequest(JudgeModel):
         return self
 
 
+def _distinct_items(items: tuple[JudgedItem, ...]) -> None:
+    ids = [item.item_id for item in items]
+    if len(set(ids)) != len(ids):
+        raise ValueError("a judge call lists each item once")
+
+
+class MergeRequest(JudgeModel):
+    """One ``judge-merge/v1`` call: synthesize ``synthesize_count`` new values from ``items``.
+
+    ``output_contract`` names the catalogue contract every synthesized value must
+    satisfy; each value cites at least ``min_parents`` distinct listed items.
+    """
+
+    kind: Literal["merge"] = "merge"
+    criterion: str = Field(min_length=1, max_length=2000)
+    output_contract: str = Field(min_length=1)
+    synthesize_count: int = Field(ge=1)
+    min_parents: int = Field(ge=2)
+    items: tuple[JudgedItem, ...] = Field(min_length=2)
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        _distinct_items(self.items)
+        if self.min_parents > len(self.items):
+            raise ValueError("min_parents cannot exceed the listed items")
+        return self
+
+
 # Role content kind -> the call roles that may carry it. Further strategy content
 # kinds join the CallContent union and this table in their own changes.
-CallContent = Annotated[StopJudgeRequest | RubricScoringRequest, Field(discriminator="kind")]
+CallContent = Annotated[
+    StopJudgeRequest | RubricScoringRequest | MergeRequest, Field(discriminator="kind")
+]
 _ROLES_BY_CONTENT: dict[str, frozenset[str]] = {
     "stop": frozenset({"stop"}),
     "rubric_scoring": frozenset({"scorer"}),
+    "merge": frozenset({"merger"}),
 }
 
 
@@ -218,8 +250,25 @@ class RubricVerdict(JudgeModel):
     rationale: str = Field(min_length=1, max_length=2000)
 
 
+class SynthesizedDraft(JudgeModel):
+    """One synthesized value as the LLM wrote it, before contract validation and stamping.
+
+    ``value`` is checked against the request's output contract by the consumer's
+    ``check_payload``; ``parents`` are the listed item ids it draws on.
+    """
+
+    parents: tuple[str, ...] = Field(min_length=1)
+    value: dict[str, JsonValue]
+
+
+class SynthesisVerdict(JudgeModel):
+    kind: Literal["synthesis"]
+    items: tuple[SynthesizedDraft, ...] = Field(min_length=1)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
 # Further strategy payload kinds join this union in their own changes.
-CallPayload = Annotated[StopVerdict | RubricVerdict, Field(discriminator="kind")]
+CallPayload = Annotated[StopVerdict | RubricVerdict | SynthesisVerdict, Field(discriminator="kind")]
 
 
 class PromptIdentity(JudgeModel):
