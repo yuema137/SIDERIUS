@@ -83,7 +83,7 @@ try {
     await page.locator('#editor-save-confirm').waitFor();
     await until(async () => !(await page.locator('#editor-save').isDisabled()));
     await page.locator('#editor-save').click();
-    await until(async () => (await status()).includes('Saved reviewed bytes'));
+    await until(async () => (await status()).includes('Saved as "'));
   };
   await save();
   const checkInputs = async () => {
