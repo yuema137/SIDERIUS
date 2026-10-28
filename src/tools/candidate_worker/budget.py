@@ -13,6 +13,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Imported lazily: worker entries bind the workspace before heavier imports.
+    from agent.skills.generated_pytest import PytestLimit
 
 #: Smallest limit handed to a child once the budget is spent: a positive value
 #: keeps the child's declared-limit contract valid and makes it stop at its
@@ -32,3 +37,9 @@ class WorkerBudget:
 
     def remaining_seconds(self) -> float:
         return max(self.deadline - time.monotonic(), _EXHAUSTED_SECONDS)
+
+    def pytest_limit(self) -> PytestLimit:
+        """The remaining budget as a validator pytest limit naming its source."""
+        from agent.skills.generated_pytest import PytestLimit
+
+        return PytestLimit(seconds=self.remaining_seconds(), source="worker_budget")

@@ -179,7 +179,7 @@ def _real_validator_cls():
                 return_value=(True, "Supplied validator test result; no subprocess executed."),
             ) as run_tests:
                 output = self._agent.run(inp)
-            run_tests.assert_called_once_with(inp.test_file_path, test_timeout_seconds=None)
+            run_tests.assert_called_once_with(inp.test_file_path, test_limit=None)
             return output
 
     return _RealValidatorMockBridge

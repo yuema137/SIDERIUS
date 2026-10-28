@@ -302,7 +302,8 @@ Each worker process entry (`child.execute`, `loop_resume.execute_continuation`)
 anchors one `budget.WorkerBudget` from `CandidateRunRequest.timeout_seconds` and
 passes it explicitly through `execute_native`/`execute_loop`/`execute_fanout`/
 `run_candidate_phases` to `phases.run_validation`, which bounds the validator's
-pytest child by `remaining_seconds()` (issue #984). The anchor follows sandbox
+pytest child by `pytest_limit()`, the `remaining_seconds()` as a
+`PytestLimit(source="worker_budget")` (issue #984). The anchor follows sandbox
 launch, so the value is an upper bound; the sandbox limit still governs. A spent
 budget yields a minimal positive limit, failing the pytest check at its first
 deadline poll. Direct callers that pass no budget run pytest group-supervised

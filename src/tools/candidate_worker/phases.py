@@ -160,7 +160,7 @@ def run_validation(
     context.bind(validator)
     validated = validator.run(
         validation,
-        test_timeout_seconds=budget.remaining_seconds() if budget is not None else None,
+        test_limit=budget.pytest_limit() if budget is not None else None,
     )
     validation_path = Path(attempt.impl_dir) / f"validation_{context.run_name}.json"
     capture_record(validation_path, validated)

@@ -62,7 +62,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import LLMCodeReview, ValidatorInput, ValidatorOutput
 from agent.skills.forbidden_pattern_skill import check_file as _check_forbidden_patterns
 from agent.skills.forbidden_pattern_skill import check_source as _check_forbidden_source
-from agent.skills.generated_pytest import run_generated_pytest
+from agent.skills.generated_pytest import PytestLimit, run_generated_pytest
 from agent.skills.model_io_probe_skill import (
     ProbeConstructionError,
     build_model_input,
@@ -341,7 +341,7 @@ def _run_tests(
     test_file_path: str,
     model_probe_context: ModelProbeContext | None = None,
     *,
-    test_timeout_seconds: float | None = None,
+    test_limit: PytestLimit | None = None,
 ) -> tuple[bool, str]:
     """
     Run pytest on ``test_file_path``.
@@ -361,8 +361,8 @@ def _run_tests(
     wasted work and, as v16 showed, actively harmful.
 
     Pytest runs as a group-supervised child (issue #984, ``generated_pytest``).
-    ``test_timeout_seconds`` is the caller's declared limit; ``None`` applies no
-    deadline. Exceeding it fails the check with ``pytest exceeded N seconds``.
+    ``test_limit`` is the caller's declared limit; ``None`` applies no
+    deadline. Exceeding it fails the check (``PytestLimit.exceeded_message``).
 
     Returns (passed, full_stdout_stderr).
     """
@@ -374,10 +374,8 @@ def _run_tests(
     if model_probe_context is not None:
         from agent.skills.task_model_validation import run_task_model_tests
 
-        return run_task_model_tests(test_file_path, timeout_seconds=test_timeout_seconds)
-    return run_generated_pytest(
-        test_file_path, subprocess_env(), timeout_seconds=test_timeout_seconds
-    )
+        return run_task_model_tests(test_file_path, limit=test_limit)
+    return run_generated_pytest(test_file_path, subprocess_env(), limit=test_limit)
 
 
 def _check_description(description_file_path: str) -> tuple[bool, str | None]:
@@ -768,12 +766,10 @@ class MLCodeValidatorAgent:
         )
         self.bridge = self._bridge_factory(**bridge_kwargs)
 
-    def run(
-        self, inp: ValidatorInput, *, test_timeout_seconds: float | None = None
-    ) -> ValidatorOutput:
+    def run(self, inp: ValidatorInput, *, test_limit: PytestLimit | None = None) -> ValidatorOutput:
         """Validate one candidate.
 
-        ``test_timeout_seconds`` is the caller's declared pytest limit (issue
+        ``test_limit`` is the caller's declared pytest limit (issue
         #984); ``None`` keeps pytest group-supervised without a deadline.
         """
         if inp.storage.local is not None:
@@ -790,7 +786,7 @@ class MLCodeValidatorAgent:
             else {}
         )
         tests_ok, test_output = _run_tests(
-            inp.test_file_path, **probe_options, test_timeout_seconds=test_timeout_seconds
+            inp.test_file_path, **probe_options, test_limit=test_limit
         )
 
         # 3. Description

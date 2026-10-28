@@ -5,12 +5,16 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_probe import ModelProbeContext, ModelProbeFailure, ModelProbeSetupError
 from agent.skills.model_io_probe_skill import ProbeConstructionError, candidate_probe_extent
 from agent.skills.task_model_probe import task_model_probe_cases
 from core.local_code.failure import raise_if_code_package_failure
+
+if TYPE_CHECKING:
+    from agent.skills.generated_pytest import PytestLimit
 
 FAILURE_PATH_ENV = "SIDERIUS_MODEL_PROBE_FAILURE_PATH"
 
@@ -76,11 +80,11 @@ def raise_child_setup_failure(path: Path) -> None:
 
 
 def run_task_model_tests(
-    test_file_path: str, *, timeout_seconds: float | None = None
+    test_file_path: str, *, limit: PytestLimit | None = None
 ) -> tuple[bool, str]:
     """Preserve task setup failures across pytest without parsing its prose.
 
-    ``timeout_seconds`` is the caller's declared limit; ``None`` runs the
+    ``limit`` is the caller's declared limit; ``None`` runs the
     group-supervised child without a deadline (see ``generated_pytest``).
     """
     from agent.skills.generated_pytest import run_generated_pytest
@@ -90,7 +94,7 @@ def run_task_model_tests(
         failure_path = Path(directory) / "setup-failure.json"
         env = subprocess_env()
         env[FAILURE_PATH_ENV] = str(failure_path)
-        passed, output = run_generated_pytest(test_file_path, env, timeout_seconds=timeout_seconds)
+        passed, output = run_generated_pytest(test_file_path, env, limit=limit)
         raise_child_setup_failure(failure_path)
         return passed, output
 

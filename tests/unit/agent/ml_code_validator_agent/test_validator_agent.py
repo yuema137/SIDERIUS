@@ -209,13 +209,14 @@ class TestRunTests:
 
     def test_declared_limit_reaches_the_supervised_pytest_child(self, tmp_path, mock_llm_bridge):
         """Fails if the agent drops the caller's pytest limit (issue #984)."""
+        from agent.skills.generated_pytest import PytestLimit
+
+        declared = PytestLimit(seconds=7.5)
         with patch(
             "nodes.ml_code_validator_agent.run_generated_pytest", return_value=(True, "ok")
         ) as launched:
-            MLCodeValidatorAgent(**_AGENT_KWARGS).run(
-                make_input(tmp_path), test_timeout_seconds=7.5
-            )
-        assert launched.call_args.kwargs["timeout_seconds"] == 7.5
+            MLCodeValidatorAgent(**_AGENT_KWARGS).run(make_input(tmp_path), test_limit=declared)
+        assert launched.call_args.kwargs["limit"] is declared
 
     # --- Branch B empty/nonexistent-path guard (v16 fix) ---
 

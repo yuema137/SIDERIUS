@@ -642,3 +642,77 @@ def test_resumed_segment_reports_run_total_tokens_from_both_segments(
     ] == [("openai", "fixture-model", all_calls, 11 * all_calls, 2 * all_calls, 13 * all_calls)]
     root = read_operation_tokens(config, first_id)
     assert segment.model_dump(exclude={"observed_at"}) == root.model_dump(exclude={"observed_at"})
+
+
+def test_resumed_segment_bounds_validator_pytest_by_its_own_worker_budget(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """Fails if loop.py or the continuation entry drops ``budget=`` (issue #984)."""
+    from tools.candidate_worker import training
+
+    validator = importlib.import_module("nodes.ml_code_validator_agent.ml_code_validator_agent")
+    record = tmp_path / "pytest_limits.jsonl"
+
+    # Forked segments inherit this double; a file carries their observations back.
+    def launched(test_file_path, env, *, limit=None):
+        with record.open("a") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "path": test_file_path,
+                        "limit": None if limit is None else limit.model_dump(),
+                    }
+                )
+                + "\n"
+            )
+        return True, "1 passed"
+
+    monkeypatch.setattr(validator, "run_generated_pytest", launched)
+    request = loop_request(prepared, final_iteration=2)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    first_id = uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_after_first_body(self, value):
+        output = real_tune(self, value)
+        if "iteration_001" in value.storage.local.workspace:
+            request_loop_pause(config, first_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_after_first_body)
+    submit_operation(
+        config,
+        CandidateOperation(request_id=first_id, request=request),
+        launch_environment={"OPENAI_API_KEY": "offline-stub"},
+    )
+    process_segments()
+    first = read_operation(config, first_id)
+    assert first.receipt is not None and first.receipt.status == "paused", first
+    review = review_loop_resume(config, first_id)
+    next_id = uuid4()
+    submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=first_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment={"OPENAI_API_KEY": "offline-stub"},
+    )
+    process_segments()
+    second = read_operation(config, next_id)
+    assert second.receipt is not None and second.receipt.status == "completed", second
+    rows = [json.loads(line) for line in record.read_text().splitlines()]
+    resumed = [row for row in rows if "iteration_002" in row["path"]]
+    assert resumed and len(resumed) < len(rows)
+    assert all(
+        row["limit"] is not None
+        and row["limit"]["source"] == "worker_budget"
+        and 0 < row["limit"]["seconds"] <= request.timeout_seconds
+        for row in rows
+    )

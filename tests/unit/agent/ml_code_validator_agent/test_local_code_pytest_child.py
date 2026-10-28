@@ -50,10 +50,14 @@ def test_real_validator_pytest_child_uses_capture_and_refuses_changed_helper(
     with bind_code_package(package), bind_run_model_plugins(binding):
         if changed:
             with pytest.raises(LocalCodeError, match="mismatch"):
-                validator._run_tests(str(test_file), test_timeout_seconds=60.0)
+                validator._run_tests(
+                    str(test_file), test_limit=generated_pytest.PytestLimit(seconds=60.0)
+                )
             assert not marker.exists()
         else:
-            passed, output = validator._run_tests(str(test_file), test_timeout_seconds=60.0)
+            passed, output = validator._run_tests(
+                str(test_file), test_limit=generated_pytest.PytestLimit(seconds=60.0)
+            )
             assert passed, output
             assert marker.exists()
             assert "1 passed" in output
