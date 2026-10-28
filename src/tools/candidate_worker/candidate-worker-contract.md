@@ -399,6 +399,24 @@ exception aborts further effects; remaining instances become blocked. Training,
 routing, loops, human pauses, buffers, cross-branch aggregation and graph resume
 are not supported by this profile.
 
+`tools.candidate_worker.readiness.next_dispatch` is the single readiness
+authority. It is pure: `ReadinessInput` carries every declared node in
+declaration order as `NodeReadiness(node_id, predecessors, state)` (`pending`
+for undecided nodes) plus `aborted`; it refuses duplicate ids and undeclared
+predecessors. It inspects the first `pending` node whose predecessors are all
+terminal (neither `pending` nor `running`) and returns one action as
+`ReadinessOutput`: `next=<node_id>` to dispatch it, or
+`terminal=((node_id, "blocked", "dependency_not_successful"),)` when `aborted`
+is true or any predecessor is not `succeeded`; `next=None, terminal=()` means no
+node can act. `execute_fanout` dispatches from this decision, and
+`verify_graph_trace` replays the recorded terminal states through the same
+function and refuses a trace whose `blocked` states differ from it. The
+per-node rule `_close_reason` is the extension point for additional node
+classes; this profile has only capability nodes. If no node can act while some remain
+undecided (unreachable for a validated acyclic declaration), `execute_fanout`
+raises `RuntimeError("graph readiness found no dispatchable node")` and
+`verify_graph_trace` raises `ValueError` (formerly an uncaught `StopIteration`).
+
 The final optional `graph_trace` contains every declared node exactly once: its
 capability, predecessor IDs, managed storage, terminal state, fixed reason code and
 native record path/digest. Native records remain scientific authority. The existing

@@ -19,6 +19,12 @@ Tests compare their complete parameter names, annotations, requiredness and
 return types with the catalog. Omitted optional arguments retain native default
 ownership; this package neither resolves nor certifies those effective values.
 
+`adaptor_strategies.py` holds the closed, versioned adaptor strategy declarations
+and the shared B6 types (`SelectStrategy`, `CardinalityBound`, `Fallback`,
+`derive_cardinality`); `catalog.py` holds `SPLITTABLE_ITEMS` and `RANKABLE_FIELDS`.
+They are not yet fields of any document. Semantics:
+[adaptor contract](../adaptors/adaptor-contract.md).
+
 ## Construction and interchange
 
 ```python
