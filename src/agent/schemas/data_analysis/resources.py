@@ -75,7 +75,7 @@ class AnalysisResourceEnvelope(FrozenModel):
     @field_serializer("sampling_policy", mode="wrap")
     def _omit_undeclared_seed(
         self, value: SamplingPolicy, handler: SerializerFunctionWrapHandler
-    ) -> Any:
+    ) -> dict[str, Any]:
         """Serialize ``seed`` only when the operator declared it (issue #983).
 
         An undeclared seed is derived from the run seed at execution, so the

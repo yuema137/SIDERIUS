@@ -257,7 +257,8 @@ class DataAnalysisAgent:
         return tuple(by_identity[key] for key in sorted(by_identity))
 
     def run(self, inp: DataAnalysisInput) -> DataAnalysisReport:
-        if self._run_seed is None:
+        run_seed = self._run_seed
+        if run_seed is None:
             raise MissingRunSeed(
                 "DataAnalysisAgent requires the run seed (issue #983); only an entry "
                 "boundary may generate one"
@@ -271,7 +272,7 @@ class DataAnalysisAgent:
         with execution_deadline(inp.resource_envelope.wall_time_budget_s) as budget:
             status: Literal["completed", "failed", "deadline_exceeded"] = "failed"
             try:
-                report = self._run_active(inp, store, budget)
+                report = self._run_active(inp, store, budget, run_seed)
                 budget.remaining("report publication")
                 store.write_report(report, markdown=render_report_markdown(report))
                 status = "completed"
@@ -283,7 +284,11 @@ class DataAnalysisAgent:
                 store.write_budget_receipt(budget.receipt(status))
 
     def _run_active(
-        self, inp: DataAnalysisInput, store: AnalysisRunStore, budget: ExecutionDeadline
+        self,
+        inp: DataAnalysisInput,
+        store: AnalysisRunStore,
+        budget: ExecutionDeadline,
+        run_seed: int,
     ) -> DataAnalysisReport:
         discovery = discover_skills(
             inp.allowed_skill_packs,
@@ -380,9 +385,8 @@ class DataAnalysisAgent:
                 user=plan_user,
                 semantic_projection=self._plan_semantics,
             )
-            assert self._run_seed is not None
             resolved, sampling_seeds = apply_sampling_seed(
-                resolved, envelope=inp.resource_envelope, run_seed=self._run_seed
+                resolved, envelope=inp.resource_envelope, run_seed=run_seed
             )
         except DataAnalysisStructuredOutputError as exc:
             # Only LLM representation failures before plan publication are local.
