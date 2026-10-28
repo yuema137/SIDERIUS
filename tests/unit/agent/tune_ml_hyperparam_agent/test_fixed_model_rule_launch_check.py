@@ -83,8 +83,13 @@ with bind_run_task_composition(composition, physical_data_root=str(workspace / "
             "OUTCOME refused workflow parameter rule for 'model_config.model_type'",
         ),
         ({"model_config.segmentation_size": {"exact": 4}}, "OUTCOME reached-bridge"),
+        # The planner chooses this value later; launch must defer, not refuse.
+        (
+            {"model_config.segmentation_size": {"range": {"min": 1, "max": 8}}},
+            "OUTCOME reached-bridge",
+        ),
     ],
-    ids=["typo-target", "model-type-allowed-list", "valid-lock"],
+    ids=["typo-target", "model-type-allowed-list", "valid-lock", "deferred-range"],
 )
 def test_fixed_model_refuses_impossible_model_rule_before_any_attempt(
     tmp_path: Path, rules: dict, expected: str

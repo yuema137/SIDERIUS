@@ -550,8 +550,11 @@ Notes:
   With a fixed `--force_model`, the tuner resolves the `model_config` rules
   once at launch against the forced model, before any LLM call or attempt:
   an unknown target, a `model_config.model_type` rule of any kind that the
-  forced model cannot satisfy, or an invalid exact value is refused there.
-  Rules on values the planner chooses later are still checked per plan.
+  forced model cannot satisfy, or an exact value that another declared rule
+  on the same path rejects is refused there. The forced model's own field
+  constraints (for example `ge=1000` on a config field) are not evaluated at
+  launch; they are checked when each attempt builds the config. Rules on
+  values the planner chooses later are still checked per plan.
   Without a fixed model, the tuner checks each plan and refuses a
   `model_config` rule when the executed model has no registered config class.
   A proposal baseline judges `model_config` rules against the proposed model
