@@ -40,9 +40,7 @@ try {
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   let context = await browser.newContext(), page = await context.newPage();
   const connect = async () => { if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click(); await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
-    // The run controls live in the collapsed "Prepare a new run" disclosure; open it as a user would.
-    const runDetails = page.locator('.workflow-run-details');
-    if (await runDetails.isVisible() && !(await runDetails.evaluate(element => element.open))) await runDetails.locator('> summary').click(); };
+  };
   const open = async run => {
     await page.locator('#capture-run option[value="' + run.run_id + '"]').waitFor({state: 'attached'});
     await page.locator('#capture-run').selectOption(run.run_id); await page.locator('#capture-open').click();
@@ -56,10 +54,12 @@ try {
   await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
   assert.equal(requests.length, 0, 'Opening workflow must not prepare/review/launch');
   await page.locator('#editor-project').selectOption('disabled');
+  // Prepared runs live on the Run page; the project is chosen on Workflow.
+  await page.locator('nav a[href="#run"]').click();
   await page.locator('#capture-status').filter({hasText: 'not enabled'}).waitFor();
   assert.equal(await page.locator('#capture-open').isDisabled(), true);
-  await page.locator('#editor-project').selectOption('capture');
-  await page.locator('nav a[href="#run"]').click(); // Prepared runs live on the Run page.
+  await page.locator('nav a[href="#workflow"]').click(); await page.locator('#editor-project').selectOption('capture');
+  await page.locator('nav a[href="#run"]').click();
   await page.locator('#capture-task').selectOption('synthetic');
   await open(metadata.captures[0]);
   assert.match(await page.locator('#capture-summary').textContent(), /hypothesis → build → check/);

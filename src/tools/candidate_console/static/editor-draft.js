@@ -117,11 +117,11 @@
     return {kind: 'source', source: state.anchor.source};
   }
 
-  /** Undo/Redo/Discard buttons, dirty badge, page-title mark and keyboard shortcuts. */
+  /** Undo/Redo/Discard buttons (secondary: Save stays the one primary action), dirty badge, page-title mark and keyboard shortcuts. */
   function mount({header, actions, undo, redo, discard, active}) {
     const button = (id, text) => {
       const element = document.createElement('button');
-      element.id = id; element.type = 'button'; element.textContent = text; element.disabled = true;
+      element.id = id; element.type = 'button'; element.className = 'secondary'; element.textContent = text; element.disabled = true;
       actions.append(element); return element;
     };
     const undoButton = button('editor-undo', 'Undo'), redoButton = button('editor-redo', 'Redo');

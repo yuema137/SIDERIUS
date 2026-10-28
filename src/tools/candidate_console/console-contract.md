@@ -500,7 +500,8 @@ source and the canvas share the screen; under 900px it collapses to a drawer ope
 by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
 Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
 drag payload. It lists
-`GET /api/editor/node-catalog` entries grouped by capability with a text search,
+`GET /api/editor/node-catalog` entries (fetched once per connection, only while the
+Workflow view is shown; other pages never request it) grouped by capability with a text search,
 and adds one by click (placed right of the existing cards) or by dragging an entry
 onto the canvas (dropped at that world position). It proposes an unused instance
 id (`<capability>`, `<capability>2`, ...). The pending node is the unified
