@@ -874,8 +874,25 @@ Monitor: `operations-list.js` renders the list as links to
 `#monitor/<UUID>`, so selecting a row uses the existing route and Status and
 logs owner. It loads once per connection (session revision) when any Monitor
 route is shown while connected, including `#monitor/<UUID>`, again whenever the
-bare `#monitor` route is entered, and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
-operation for live status). Manual UUID entry remains available.
+bare `#monitor` route is entered, on **Refresh list**, and every 10 s while Monitor is
+visible, the tab is shown and a listed operation is neither `completed` nor
+`operation_failed` (M-4). Each row reads `<project> · <run name> · <local admitted
+time>` (ISO and UUID on hover) and states its outcome with the shared
+`operationOutcome.sentence`. With advanced tools on, unverified records get a next
+step (`python -m tools.candidate_operations status --store-config … --operation-id …`).
+Manual UUID entry remains available.
+
+Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
+(M-2); `state`, `native_status`, process, reason and validation stay in the developer
+Operation facts. `#operation-observed` shows local time (ISO and UUID in its title).
+After one full read of a terminal state (`completed`/`operation_failed`, process
+`exited`, not `finishing`) the operation is no longer polled (status, log, tokens) and
+the line reads `Final status · observed …` (M-5); a 404 `unknown_operation` reads "This
+console has no operation with this ID…" and also stops polling (M-3). Re-entering
+Monitor or an explicit **Read operation** reads it again. Network failures keep the
+"stale" wording. Displayed log text has ANSI CSI sequences removed (M-6; the source log
+is unchanged) and `#log-notice` states that logs are shown as written and not redacted
+(SEC-1).
 
 ## Persistent views, routing and session
 

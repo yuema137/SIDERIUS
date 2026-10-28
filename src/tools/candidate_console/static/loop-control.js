@@ -3,7 +3,9 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const session = () => window.consoleSession;
-  // request: per selected operation; acknowledgements are memory-only, the receipt is the authority.
+  // request: per selected operation. Recorded Stop/Pause comes from the server status
+  // (loop.stop_requested/pause_requested, read from the worker's durable markers), so a
+  // reload or another tab still sees it (M-1); the receipt decides what took effect.
   let request = null, last = null;
   const counted = (loop, verb) => loop.attempted_iterations == null
     ? `${verb}; the body count is unavailable.`
@@ -36,13 +38,15 @@
     localStorage.setItem(key, JSON.stringify(value));
     return value.request_id;
   }
+  const stopRecorded = status => !!(request?.stop.acknowledged || status.loop?.stop_requested);
+  const pauseRecorded = status => !!(request?.pause.acknowledged || status.loop?.pause_requested);
   function describe(status) {
     const loop = status.loop, segment = status.kind === 'candidate_loop_resume' ? 'Resumed segment. ' : '';
     if (status.state === 'operation_failed' && !status.receipt_available) return segment + 'Research loop outcome unavailable: the operation failed without a native receipt.';
     if (!status.receipt_available) {
       let text = segment + `Research loop: up to ${loop.final_iteration} bodies. The body count is reported by the native receipt at a completed boundary.`;
-      if (request?.stop.acknowledged) text += ' Stop requested: the current body completes first, and the final iteration or a native failure may still end the loop. Not yet stopped.';
-      else if (request?.pause.acknowledged) text += ' Pause requested: the current body completes first, and the final iteration, a Stop or a native failure may still end the loop. Not yet paused.';
+      if (stopRecorded(status)) text += ' Stop requested: the current body completes first, and the final iteration or a native failure may still end the loop. Not yet stopped.';
+      else if (pauseRecorded(status)) text += ' Pause requested: the current body completes first, and the final iteration, a Stop or a native failure may still end the loop. Not yet paused.';
       return text;
     }
     // Receipt body numbers (attempted, stop_reason iterations) are cumulative over the whole run,
@@ -53,7 +57,7 @@
     if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
     if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed body boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.' : ' No partial body is kept; it can be resumed from the next body after review.');
     if (status.native_status === 'completed' && loop.stop_reason) return `Research loop ${stopReason(loop.stop_reason, loop.final_iteration)}.`;
-    if (status.native_status === 'completed') return counted(loop, 'Research loop finished') + (request?.stop.acknowledged || request?.pause.acknowledged ? ' The request did not take effect before the final iteration.' : '');
+    if (status.native_status === 'completed') return counted(loop, 'Research loop finished') + (stopRecorded(status) || pauseRecorded(status) ? ' The request did not take effect before the final iteration.' : '');
     return counted(loop, `Research loop ended (${status.native_status})`);
   }
   function render(status) {
@@ -72,8 +76,8 @@
     const connected = session().connected;
     const running = status.state === 'active' && !status.receipt_available;
     const pending = request.stop.pending || request.pause.pending;
-    $('loop-stop-group').hidden = !(running && !request.stop.acknowledged);
-    $('loop-pause-group').hidden = !(running && !request.stop.acknowledged && !request.pause.acknowledged);
+    $('loop-stop-group').hidden = !(running && !stopRecorded(status));
+    $('loop-pause-group').hidden = !(running && !stopRecorded(status) && !pauseRecorded(status));
     $('loop-stop').disabled = $('loop-pause').disabled = pending || !connected;
     $('loop-stop-status').textContent = !running ? '' : request.stop.pending ? 'Submitting Stop request…' : request.pause.pending ? 'Submitting Pause request…' : request.stop.error || request.pause.error;
 

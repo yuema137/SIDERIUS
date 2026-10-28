@@ -39,7 +39,7 @@ try {
   showAllConsoleSections(browser);
   const page = await browser.newPage(), posts = [], faults = [];
   page.on('pageerror', error => faults.push(error.message));
-  let runningTerminal = false, pausingTerminal = false, resumedTerminal = false, resumed = null;
+  let stopRecorded = false, runningTerminal = false, pausingTerminal = false, resumedTerminal = false, resumed = null;
   const pausePosts = [], resumePosts = [];
   const status = (operation, fields) => ({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture',
     state: 'active', process: {status: 'alive', reason: 'observed'}, finishing: false, receipt_available: false, native_status: null,
@@ -80,7 +80,7 @@ try {
     if (url.pathname === `/api/operations/${pausing}`) return reply(!pausingTerminal ? status(pausing, {loop: {final_iteration: 3, attempted_iterations: null}})
       : {...terminal(pausing, 'paused', 1), ...(resumed ? {successor_operation_id: resumed} : {})});
     if (resumed && url.pathname === `/api/operations/${resumed}`) return reply({...(resumedTerminal ? terminal(resumed, 'completed', 3) : status(resumed, {loop: {final_iteration: 3, attempted_iterations: null}})), kind: 'candidate_loop_resume'});
-    if (url.pathname === `/api/operations/${running}`) return reply(runningTerminal ? terminal(running, 'stopped', 1) : status(running, {loop: {final_iteration: 3, attempted_iterations: null}}));
+    if (url.pathname === `/api/operations/${running}`) return reply(runningTerminal ? terminal(running, 'stopped', 1) : status(running, {loop: {final_iteration: 3, attempted_iterations: null, stop_requested: stopRecorded, pause_requested: false}}));
     if (url.pathname === `/api/operations/${fixed}`) return reply(status(fixed, {}));
     if (url.pathname === `/api/operations/${finished}`) return reply(terminal(finished, 'completed', 3));
     if (url.pathname === `/api/operations/${thresholdStop}`) {
@@ -122,6 +122,16 @@ try {
   assert.match(requested, /Not yet stopped\./);
   assert.ok(!/stopped at/i.test(requested), 'acknowledgement alone never reads as stopped');
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-stop-requested.png'), fullPage: true});
+  // M-1: the recorded Stop comes from server status, so a reload still shows it and
+  // offers neither Stop nor Pause again (no second control POST).
+  stopRecorded = true;
+  await page.reload();
+  await page.locator('#token').fill(metadata.token);
+  await page.locator('#access-form button').click();
+  await state.filter({hasText: 'Stop requested'}).waitFor();
+  assert.ok(await stop.isHidden(), 'reload keeps Stop hidden once recorded');
+  assert.ok(await page.locator('#loop-pause-group').isHidden(), 'Pause is hidden once a Stop is recorded');
+  assert.equal(posts.length + pausePosts.length, 1, 'no further control request after reload');
 
   runningTerminal = true;
   await state.filter({hasText: 'Research loop stopped at a completed body boundary after 1 of 3 bodies.'}).waitFor();
@@ -129,8 +139,8 @@ try {
   assert.equal(posts.length, 1);
 
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, fixed);
-  await page.locator('#monitor-status').filter({hasText: 'State: active'}).waitFor();
-  await page.locator('#operation-observed').filter({hasText: fixed}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Run in progress.'}).waitFor();
+  await page.locator(`#operation-observed[title*="${fixed}"]`).waitFor({state: 'attached'});
   assert.ok(await page.locator('#loop-control').isHidden(), 'a candidate without a declared loop has no loop control');
 
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, finished);

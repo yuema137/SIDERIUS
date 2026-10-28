@@ -110,7 +110,7 @@ try {
   assert.ok(Math.abs((await left('#view-monitor .operations-panel')) - (await left('nav.actions a'))) <= 2, 'Monitor content aligns with nav');
   await items.nth(0).locator('a').click();
   assert.equal(new URL(page.url()).hash, '#monitor/' + loopRun);
-  await page.locator('#monitor-status').filter({hasText: 'State: completed · Native: completed'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Finished: the candidate passed validation.'}).waitFor();
   assert.equal(await page.locator('#operation-id').inputValue(), loopRun);
   assert.equal(await items.nth(0).locator('a').getAttribute('aria-current'), 'true');
 
@@ -125,6 +125,9 @@ try {
 
   // E-6: a failed fetch turns the header chip to "Server unreachable"; the next success restores it.
   fault = 'down';
+  // The selected operation is finished, so Monitor no longer polls it (M-5); any request
+  // that fails to reach the server flips the chip.
+  await page.evaluate(() => window.consoleSession.request('choices').catch(() => {}));
   await page.locator('#access-status').filter({hasText: 'Server unreachable'}).waitFor();
   assert.equal(await page.locator('#access-section').evaluate(el => el.classList.contains('access-unreachable')), true);
   assert.equal(await page.locator('#token').isHidden(), true, 'Unreachable keeps the token and drafts; it is not a disconnect');
@@ -145,7 +148,7 @@ try {
   assert.equal(await page.locator('#access-connected').isHidden(), true);
   assert.equal(await page.locator('#monitor-button').isDisabled(), true);
 
-  assert.equal(await page.evaluate(() => window.pollTimers), 4, 'Monitor status poll, Run preparation and launch polls (idle without a retained intent), and one reachability probe');
+  assert.equal(await page.evaluate(() => window.pollTimers), 5, 'Monitor status poll, operation-list refresh, Run preparation and launch polls (idle without their condition), and one reachability probe');
   assert.equal(requests.filter(item => item.path === '/api/operations').length >= 1, true);
   assert.deepEqual(faults, []);
   console.log('PASS: compact connection, operation list opens Status and logs, rounded scores, journey-first Home, aligned shell');

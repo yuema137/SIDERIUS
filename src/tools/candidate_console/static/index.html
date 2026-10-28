@@ -282,6 +282,7 @@
     <p class="eyebrow">This console's operations</p><h2 id="operations-heading">Recent operations</h2>
     <div class="actions operations-actions"><button id="operations-refresh" type="button" class="secondary" disabled>Refresh list</button></div>
     <p id="operations-status" role="status">Connect to list operations.</p>
+    <p id="operations-unreadable" class="muted" data-ui-flag="advanced" hidden>Unverified records stay in this console's operation store under <code>operations/&lt;UUID&gt;/</code>. Inspect one with <code>python -m tools.candidate_operations status --store-config &lt;store.json&gt; --operation-id &lt;UUID&gt;</code>.</p>
     <ol id="operations-list" class="operations-list" aria-labelledby="operations-heading"></ol>
   </section>
   <section class="card" aria-labelledby="monitor-heading">
@@ -306,7 +307,7 @@
     </div>
     </details><p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
     <details><summary>Activity and logs</summary><div class="actions"><label for="log-kind">Log source</label><select id="log-kind"><option value="native">Native</option><option value="operation">Operation</option></select></div>
-    <p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre></details>
+    <p id="log-notice" class="muted">Logs are shown exactly as native code and plugins wrote them; they are not redacted. Don't share them without checking for secrets.</p><p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre></details>
   </section>
 </div>
   <section class="card" aria-labelledby="recorded-example-heading" data-ui-flag="advanced">

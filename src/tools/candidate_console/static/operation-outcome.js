@@ -11,7 +11,7 @@
   function sentence(value) {
     const what = subject(value.kind), native = value.native_status;
     if (!value.state) return `${what} request accepted; waiting for its first status.`;
-    if (value.state === 'active' || value.finishing) return `${what} is running.`;
+    if (value.state === 'active' || value.finishing) return `${what} in progress.`;
     if (value.state === 'operation_failed') return value.reason === 'spawn_failed'
       ? `${what} did not start: the worker could not be launched.`
       : `${what} failed before reporting a result.`;
