@@ -153,18 +153,24 @@ and canonical source, so the declaration digest and source bytes of a loop witho
 conditions are unchanged. Execution semantics, precedence and readback belong to
 the candidate-worker contract ("Deterministic stop conditions").
 
-## Route declarations (inert)
+## Route declarations
 
 `WorkflowDefinition.routes` and `ReusableWorkflowDefinition.routes` optionally carry
 up to 32 `Branch` declarations. An empty tuple is omitted from serialization and
 canonical source, so existing declaration digests, source bytes and receipts are
-unchanged. Routing is **declaration only**: `candidate.refuse_declaration_only`, called first by
-the shared shape checks `candidate.candidate_nodes` and `fanout.execution_families`,
-refuses any document with routes ("conditional routing is declared but this execution
-profile does not admit it"). Preview, preparation, worker and verifier admission all
-pass through those checks, so no current profile executes a routed document. A v2
-document with `training_settings` runs those checks during declaration validation and
-is therefore refused at declaration until a routed profile exists.
+unchanged. `candidate.refuse_declaration_only(definition, *, admits_adaptors=False,
+admits_routes=False)`, called first by the shared shape checks
+`candidate.candidate_nodes` and `fanout.execution_families`, refuses any document with
+routes ("conditional routing is declared but this execution profile does not admit
+it", `ROUTING_NOT_ADMITTED`) unless `admits_routes=True`. Only `execution_families`
+for `fanout.ROUTED_PROFILE` (`native-routed-candidate/v1`, v1 preview and worker only;
+B1-PR5) passes it: that profile admits the S1 selection node set
+(`fanout.selection_candidate`) plus at least one route, and refuses a document without
+routes ("the routed profile requires at least one declared route"). Every other
+profile, the fixed candidate, v2 reusable sources (including a v2 document with
+`training_settings`, whose declaration validation runs those checks), managed
+preparation and the console still refuse routed documents. Run-time semantics: the
+candidate-worker contract, "Routed execution profile".
 
 ### Readable fields
 
@@ -197,7 +203,7 @@ Combinators contain leaves only (no nesting), so a predicate has at most 8 leave
 Every leaf reads the branch's single source result; cross-node predicates need a typed
 aggregation owner and are not expressible. Direction is never declared: `metric_id` must
 equal the run `MetricSpec` id, checked by `tools.candidate_worker.route_eval.admit_route_metrics`,
-to be called by execution admission before dispatch (PR5; not by this package). An absent metric makes `MetricAtLeast` false, never
+called by the routed worker before any dispatch (`route_phase.admit_route_metric`). An absent metric makes `MetricAtLeast` false, never
 an error; `IsMissing` makes that case explicit. Evaluation belongs to the pure route
 evaluator (candidate-worker contract, "Route evaluator").
 
@@ -234,8 +240,20 @@ direct control edge from the source. A merge is a deterministic select keyed by 
 recorded decision, not an OR/race join; its consumer depends on every candidate for
 scheduling. Readiness skip semantics (`skipped`/`route_not_selected`, merge resolution,
 skip propagation) are owned by `tools.candidate_worker.readiness` (candidate-worker
-contract, readiness authority); decision evidence and routed execution admission belong
-to later candidate-worker work.
+contract, readiness authority); decision evidence belongs to the candidate-worker
+`route_phase`.
+
+Public arm helpers (`workflows.definition.routes`, for a validated definition):
+`route_entries(branch)` (entry targets per case, then the default);
+`branch_arms(definition, facts)` (each branch's arms in that order; `facts` from
+`validation.predecessor_facts`, control edges included); `route_targets(definition)`
+(entry target → `RouteTarget(branch, source, control_only)`, where `control_only`
+means the target binds no data from the branch source, so readiness lets a `rejected`
+source's decision run it: the B1-Q1 fallback); `merge_arms(definition, facts)`
+(merge consumer → one `MergeArms(branch, candidates=(MergeArm(node, entry), ...))` per
+`SelectedSource` argument). An adaptor carries no arm label (it runs whichever arm was
+selected, B6-D8), which the routed profile relies on: its selection adaptor reads one
+validator outside and one inside the fallback arm.
 
 ## Adaptor declarations (inert)
 
@@ -247,14 +265,14 @@ serialization and canonical source, so documents without adaptors keep their
 declaration digests and source bytes (pinned: the shipped examples in
 `test_workflow_routes.py`, a loop document with stop conditions in
 `test_adaptor_declarations.py`). Adaptors execute only under the opt-in v1
-execution profile `fanout.SELECTION_PROFILE` (`native-proposal-fanout-selection/v1`,
+execution profiles `fanout.SELECTION_PROFILE` (`native-proposal-fanout-selection/v1`,
 B6-3; shape and run-time semantics in the candidate-worker contract, "Opt-in
-first-passing selection"). `candidate.refuse_declaration_only(definition, *,
+first-passing selection") and `fanout.ROUTED_PROFILE` (same node set plus routes). `candidate.refuse_declaration_only(definition, *,
 admits_adaptors=False)` refuses any document with `adaptor_format` ("adaptors are
 declared but this execution profile does not admit them", `ADAPTORS_NOT_ADMITTED`),
 after the routing refusal, in every shape check that preview, preparation, worker and
-verifier admission use; only `execution_families` for the selection profile passes
-`admits_adaptors=True`. The reusable (v2) document, preparation and console profile
+verifier admission use; only `execution_families` for the selection and routed
+profiles passes `admits_adaptors=True`. The reusable (v2) document, preparation and console profile
 lists do not include the selection profile yet, so a v2 document cannot declare
 adaptors. `candidate_prepare.resolution` nevertheless carries `routes`,
 `adaptor_format` and `adaptors` verbatim into the effective v1 definition.

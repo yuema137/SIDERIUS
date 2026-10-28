@@ -375,8 +375,12 @@ def test_other_profiles_still_refuse_the_selection_document(prepared):
         execution_families(definition, "native-proposal-fanout/v1")
 
 
-def test_a_skipped_adaptor_input_is_refused_with_a_typed_error(prepared):
-    """Unreachable until routed execution: no skip record exists for provenance."""
+def test_a_skipped_adaptor_input_without_a_skip_record_is_refused(prepared):
+    """A route skip cites its decision (B1-PR5); any other uncited skip stays refused.
+
+    Fails if an uncited skip became an item with invented provenance, or if a cited
+    one did not carry exactly the citation as its record digest.
+    """
     from tools.candidate_worker.adaptor_phase import SkippedAdaptorInputError, adaptor_items
     from tools.candidate_worker.graph_models import GraphNodeEvidence
 
@@ -392,8 +396,14 @@ def test_a_skipped_adaptor_input_is_refused_with_a_typed_error(prepared):
         )
         for node in ("check0", "check1")
     }
-    with pytest.raises(SkippedAdaptorInputError, match="B1-PR5"):
+    with pytest.raises(SkippedAdaptorInputError, match="skip record to cite"):
         adaptor_items(definition.adaptors[0], entries)
+    citations = {"check0": "a" * 64, "check1": "b" * 64}
+    items = adaptor_items(definition.adaptors[0], entries, citations)
+    assert [(item.state, item.ref.record_sha256) for item in items] == [
+        ("skipped", "a" * 64),
+        ("skipped", "b" * 64),
+    ]
 
 
 @pytest.fixture

@@ -196,7 +196,9 @@ def verify_graph_trace(
             raise ValueError("graph receipt lacks terminal trace")
         return
     from .adaptor_phase import body_outcome, expected_adaptors, verify_adaptors
+    from .route_phase import node_routing, skip_citations, verify_routes
 
+    definition = request.preview.document.definition
     expected = expected_nodes(request, initial, iteration=iteration)
     expected_adaptor = expected_adaptors(request, initial, iteration=iteration)
     if len(trace.nodes) != len(expected) or len(trace.adaptors) != len(expected_adaptor):
@@ -207,6 +209,15 @@ def verify_graph_trace(
     states: dict[str, GraphState] = {
         item.node_id: item.state for item in (*trace.nodes, *trace.adaptors)
     }
+    routing = node_routing(definition)
+    decisions = tuple(item.decision for item in trace.routes)
+    recorded = readiness.readiness_input(
+        (*trace.nodes, *trace.adaptors),
+        {item.node_id: item for item in (*trace.nodes, *trace.adaptors)},
+        aborted=False,
+        decisions=decisions,
+        routing=routing,
+    )
     for item, slot in zip(trace.nodes, expected, strict=True):
         if (item.node_id, item.capability, item.predecessors, item.storage) != (
             slot.node_id,
@@ -221,7 +232,9 @@ def verify_graph_trace(
             item.capability == "tuning" and item.state == "failed" and item.record_path is not None
         )
         if item.state in ("succeeded", "rejected") or native_abort:
-            if any(states[key] != "succeeded" for key in item.predecessors):
+            # Merge consumers against the selected candidate only; a control-only
+            # route source may be rejected (readiness owns the per-node rule).
+            if not readiness.may_run(item.node_id, recorded):
                 raise ValueError("graph invocation ran before all predecessors succeeded")
             if (
                 item.record_path is None
@@ -247,8 +260,9 @@ def verify_graph_trace(
             raise ValueError("graph incomplete invocation claims output")
     for item, slot in zip(trace.adaptors, expected_adaptor, strict=True):
         _check_adaptor_entry(item, slot, states)
-    replay_readiness((*trace.nodes, *trace.adaptors))
-    status, validation_passed = body_outcome(shape, request.preview.document.definition, trace)
+    verify_routes(definition, trace.nodes, trace.routes, iteration=iteration)
+    replay_readiness((*trace.nodes, *trace.adaptors), decisions=decisions, routing=routing)
+    status, validation_passed = body_outcome(shape, definition, trace)
     if (
         ("blocked" in states.values() and status in ("accepted", "completed"))
         or receipt.status != status
@@ -261,8 +275,14 @@ def verify_graph_trace(
         or receipt.training_output is not None
     ):
         raise ValueError("graph output index mismatch")
+    entries = {item.node_id: item for item in (*trace.nodes, *trace.adaptors)}
     outcomes = verify_adaptors(
-        request, trace.nodes, trace.adaptors, workspace=Path(initial.workspace), iteration=iteration
+        request,
+        trace.nodes,
+        trace.adaptors,
+        workspace=Path(initial.workspace),
+        iteration=iteration,
+        skips=skip_citations(entries, trace.routes, routing),
     )
     if shape.tuning is not None:
         verify_graph_training(

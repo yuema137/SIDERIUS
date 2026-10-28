@@ -153,13 +153,13 @@ def route(selected_case, selected, skipped, branch="r"):
     )
 
 
-def node(node_id, preds=(), state="pending", reason=None, route_id=None, merges=()):
+def node(node_id, preds=(), state="pending", reason=None, route_id=None, merges=(), control=None):
     return NodeReadiness(
         node_id=node_id,
         predecessors=tuple(preds),
         state=state,
         reason=reason,
-        routing=NodeRouting(route=route_id, merges=merges),
+        routing=NodeRouting(route=route_id, merges=merges, control=control),
     )
 
 
@@ -213,13 +213,37 @@ ROUTE_B = (route(None, ("b",), ("a",)),)  # no case matched: default arm `b` run
             ),
             (None, (("use", "blocked", BLOCKED),)),
         ),
-        # A rejected route source blocks its targets before any decision is consulted.
+        # B1-Q1 fallback (PR5): a rejected source still has the record its decision
+        # read, so a control-only target follows the decision instead of blocking.
         (
             (
                 node("src", state="rejected", reason="validation_rejected"),
-                node("a", ("src",), route_id="r"),
+                node("b", ("src",), route_id="r", control="src"),
             ),
-            (None, (("a", "blocked", BLOCKED),)),
+            ("b", ()),
+        ),
+        (
+            (
+                node("src", state="rejected", reason="validation_rejected"),
+                node("a", ("src",), route_id="r", control="src"),
+            ),
+            (None, (("a", "skipped", SKIP),)),
+        ),
+        # A target that also reads the source's data still needs it to succeed.
+        (
+            (
+                node("src", state="rejected", reason="validation_rejected"),
+                node("b", ("src",), route_id="r"),
+            ),
+            (None, (("b", "blocked", BLOCKED),)),
+        ),
+        # A failed control source produced no record: its targets are blocked.
+        (
+            (
+                node("src", state="failed", reason="native_failure"),
+                node("b", ("src",), route_id="r", control="src"),
+            ),
+            (None, (("b", "blocked", BLOCKED),)),
         ),
         # Merge picks the selected arm even though the other candidate was skipped.
         (

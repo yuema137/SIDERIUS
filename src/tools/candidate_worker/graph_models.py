@@ -6,6 +6,8 @@ from pydantic import Field, model_validator
 
 from tools.workflow_preview.models import PreviewModel
 
+from .route_eval import RouteEvaluationOutput
+
 # "adaptor" marks a `GraphTrace.adaptors` entry; it is never a declared node capability.
 GraphCapability = Literal[
     "proposal", "implementation", "validation", "literature", "interpretation", "tuning", "adaptor"
@@ -34,11 +36,34 @@ class GraphNodeEvidence(PreviewModel):
     reason: GraphReason | None = None
 
 
+class GraphRouteEvidence(PreviewModel):
+    """One predicate route decision, bound to the digest of the record it read.
+
+    The verifier re-projects the same record and re-runs the evaluator; a human
+    decision (``decided_by="human"``) is reserved for the gate (B1-PR8).
+    """
+
+    branch_id: str
+    source_node: str
+    source_record_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluator: Literal["siderius.route/v1"] = "siderius.route/v1"
+    decision: RouteEvaluationOutput
+    decided_by: Literal["predicate"] = "predicate"
+
+    @model_validator(mode="after")
+    def _one_branch(self) -> "GraphRouteEvidence":
+        if self.decision.branch_id != self.branch_id:
+            raise ValueError("route evidence decision names another branch")
+        return self
+
+
 class GraphTrace(PreviewModel):
     nodes: tuple[GraphNodeEvidence, ...]
     # Declared adaptors in declaration order; omitted when none, so traces of
     # unadapted runs keep their bytes.
     adaptors: tuple[GraphNodeEvidence, ...] = Field(default=(), exclude_if=lambda value: not value)
+    # Route decisions in branch declaration order; omitted when none (unrouted bytes).
+    routes: tuple[GraphRouteEvidence, ...] = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def _adaptor_entries(self) -> "GraphTrace":

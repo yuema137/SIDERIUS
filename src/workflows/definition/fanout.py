@@ -14,6 +14,7 @@ from .models import (
     ReusableWorkflowDefinition,
     WorkflowDefinition,
 )
+from .routes import branch_arms
 from .validation import predecessor_facts
 
 
@@ -41,6 +42,9 @@ class InterpretationEdge:
 
 # S1 (B6-3): fanout branches -> first passing validator -> one tuner.
 SELECTION_PROFILE = "native-proposal-fanout-selection/v1"
+# B1-PR5: the S1 node set plus declared routes, e.g. a fallback branch that runs
+# only when the first validator rejects (B1-Q1/Q2). The only profile admitting routes.
+ROUTED_PROFILE = "native-routed-candidate/v1"
 
 
 @dataclass(frozen=True)
@@ -85,9 +89,15 @@ def execution_families(
     definition: WorkflowDefinition | ReusableWorkflowDefinition, profile: str | None
 ) -> ProposalFamilies:
     """Select only an explicitly supported native graph profile."""
-    refuse_declaration_only(definition, admits_adaptors=profile == SELECTION_PROFILE)
+    refuse_declaration_only(
+        definition,
+        admits_adaptors=profile in (SELECTION_PROFILE, ROUTED_PROFILE),
+        admits_routes=profile == ROUTED_PROFILE,
+    )
     if profile == SELECTION_PROFILE:
         return selection_candidate(definition)
+    if profile == ROUTED_PROFILE:
+        return routed_candidate(definition)
     if profile == "native-interpretation-candidate/v1":
         return interpretation_candidate(definition)
     if profile == "native-literature-candidate/v1":
@@ -216,6 +226,29 @@ def selection_candidate(
         tuning=tuner.id,
         selection=AdaptorSelection(adaptor.id, validators),
     )
+
+
+def routed_candidate(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> ProposalFamilies:
+    """S1 plus routes over implementation/validation arms only (B1-Q1(a), not Q1(b)).
+
+    An arm containing the tuner or the selection adaptor would gate training on a
+    predicate (Q1(b), not chosen): a body could then complete without training.
+    """
+    if not definition.routes:
+        raise ValueError("the routed profile requires at least one declared route")
+    shape = selection_candidate(definition)
+    allowed = {
+        node.id for node in definition.nodes if node.capability in ("implementation", "validation")
+    }
+    for branch, arms in branch_arms(definition, predecessor_facts(definition)).items():
+        if any(arm - allowed for arm in arms):
+            raise ValueError(
+                f"route {branch}: the routed profile routes only implementation/validation "
+                "arms, never the adaptor or the tuner"
+            )
+    return shape
 
 
 def literature_candidate(
