@@ -133,7 +133,6 @@ def code_equivalent(root: Path) -> None:
     assert len(observations) == 2
     for stage in ("proposal", "tuner"):
         for name in (
-            "sampling_seed",
             "trial_time_budget_minutes",
             "formal_time_budget_minutes",
             "trial_portion",
@@ -141,11 +140,8 @@ def code_equivalent(root: Path) -> None:
             "workflow_parameter_rules",
         ):
             assert observations[0][stage][name] == observations[1][stage][name], (stage, name)
-    assert (
-        observations[0]["tuner"]["train_base_seed"]
-        == observations[1]["tuner"]["train_base_seed"]
-        == 29
-    )
+    # Issue #983: each admitted candidate run resolves its own run seed.
+    assert all(isinstance(obs["tuner"]["run_seed"], int) for obs in observations)
     for name in (
         "trial_max_epochs",
         "formal_max_epochs",

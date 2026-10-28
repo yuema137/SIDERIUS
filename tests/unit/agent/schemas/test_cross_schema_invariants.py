@@ -45,7 +45,7 @@ def _trial_config(**overrides):
         "mode": "trial",
         "train_sampling_seed": 42,
         "eval_sampling_seed": 42,
-        "train_base_seed": 42,
+        "seed_context": {"run_seed": 42},
     }
     return TrialConfig(**{**base, **overrides})
 

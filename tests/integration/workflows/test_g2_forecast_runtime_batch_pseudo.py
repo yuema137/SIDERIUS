@@ -29,6 +29,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTuningOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.tuner_composed_effects import (
     composed_tuner_effects,
     recording_sandbox_for_attempts,
@@ -62,6 +63,7 @@ def test_preflight_batch_reaches_inference_and_record(tmp_path, request, monkeyp
     run_name = "g2_coherence"
 
     agent_input = HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type=_PLUGIN_MODEL_TYPE,
         max_rounds=2,

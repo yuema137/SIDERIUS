@@ -171,7 +171,6 @@ FORMAL_ROUND_STRATEGY="full_clone"  # canonical: full_clone|hybrid_params|indepe
 DEGENERATE_PENALTY_SCORE=""                 # empty → omit flag → schema default None (null score on collapse)
 # §3.2 — Data slicing / reproducibility (13.C-bis; None-default → omit when empty)
 TARGET_FILES=()                     # DEPRECATED no-op (DS7); parsed, not forwarded
-SAMPLING_SEED=""                    # empty == omit == Python None
 RUN_SEED=""                         # issue #983; empty == omit == lock or generate
 # §3.2 — Debugging (action=store_true; 1 emits the flag)
 DEBUG_DUMP_PROMPTS=0
@@ -452,7 +451,7 @@ parse_chain_args() {
             shift
           done
           ;;
-        --sampling_seed)             SAMPLING_SEED="$2"; shift 2 ;;
+        --sampling_seed)             echo "--sampling_seed is retired (issue #983): seeds derive from run_seed; set --run_seed" >&2; exit 1 ;;
         --run_seed)                  RUN_SEED="$2"; shift 2 ;;
         # §3.2 — Debugging
         --debug_dump_prompts)        DEBUG_DUMP_PROMPTS=1; shift ;;
@@ -603,9 +602,6 @@ build_app_args() {
     fi
     # DS7 — --trial_strategy / --target_files are deprecated no-ops: still
     # parsed (so existing invocations don't break) but no longer forwarded.
-    if [ -n "$SAMPLING_SEED" ]; then
-        APP_ARGS+=(--sampling_seed "$SAMPLING_SEED")
-    fi
     if [ -n "$RUN_SEED" ]; then
         APP_ARGS+=(--run_seed "$RUN_SEED")
     fi
@@ -874,9 +870,6 @@ print_chain_header() {
     echo "    Degen reaction : penalty=${DEGENERATE_PENALTY_SCORE:-(null score on collapse)}"
     if [ ${#TARGET_FILES[@]} -gt 0 ]; then
         echo "    Target files   : ${TARGET_FILES[*]}"
-    fi
-    if [ -n "$SAMPLING_SEED" ]; then
-        echo "    Sampling seed  : $SAMPLING_SEED"
     fi
     if [ -n "$RUN_SEED" ]; then
         echo "    Run seed       : $RUN_SEED"

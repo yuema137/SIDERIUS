@@ -979,14 +979,6 @@ class ProposalInput(BaseModel):
         "estimate matches the tuner's. Default 0.1 mirrors "
         "HyperparamTuningInput.train_portion.",
     )
-    sampling_seed: int | None = Field(
-        default=None,
-        description="Seed for build_sample_set(). When None the proposer auto-generates "
-        "one for its estimate; the tuner uses its own auto-generation "
-        "policy from HyperparamTuningInput.sampling_seed. The estimate is "
-        "robust to which exact segments are picked, so identical seeds "
-        "across the two gates are not required.",
-    )
     trial_time_budget_minutes: float | None = Field(
         default=None,
         description="Configured Trial time budget in minutes, shown independently "

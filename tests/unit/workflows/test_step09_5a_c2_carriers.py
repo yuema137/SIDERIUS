@@ -209,7 +209,8 @@ class TestLaunchConfigIsTransitOnly:
                 Path(__file__).parent / "goldens" / "step09_5a_pre_refactor_launch_defaults.json"
             ).read_text()
         )
-        assert len(golden) == 72, "the pre-refactor default record is incomplete"
+        # Issue #983 S3b retired sampling_seed / train_base_seed (72 -> 70).
+        assert len(golden) == 70, "the pre-refactor default record is incomplete"
 
         mismatched = []
         for f in dataclasses.fields(WorkflowLaunchConfig):

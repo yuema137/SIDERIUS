@@ -99,7 +99,11 @@ Owner: `core/run_seed_lock.py` (resolution) over `core/run_invariants.py`
   workspace lock, so a new workspace never inherits a source run's seed.
 - `WorkflowLaunchConfig.run_seed` projects only when set (`omit_if_none`), so a
   seedless reviewed capture keeps its bytes. Candidate settings refuse it
-  (`INACTIVE_LAUNCH_FIELDS`); a candidate graph's tuner lock stays seedless.
+  (`INACTIVE_LAUNCH_FIELDS`). Until S4 admits the seed with the operation,
+  candidate training admission resolves its workspace seed the same way (lock,
+  then generation) and prints the `[seed]` line.
+- The standalone tuner CLI (`ml_hyperparameter_tune_agent.py main`) is an entry
+  boundary too: lock, then `--run_seed`, then generation, before round 1.
 - The tuner receives the locked value as `HyperparamTuningInput.run_seed`, locks
   it in its sub-workspace and writes it to `run_config_{run_name}.json`.
 
@@ -155,7 +159,7 @@ see it.
 | resume with different health-gate enablement | startup failure |
 | resume after editing a health plugin or task health config | startup failure (the digest moved) |
 | resume with a `--run_seed` different from the locked `run_seed` | startup failure naming `run_seed` |
-| continuing a workspace whose lock has no `run_seed` (created before the seed contract) | refused (`pre_seed_lock_violation`); the chain halts. The workspace stays readable and is not modified. A seedless run (candidate graph) still validates against it. |
+| continuing a workspace whose lock has no `run_seed` (created before the seed contract) | refused (`pre_seed_lock_violation`); the chain halts. The workspace stays readable and is not modified. A seedless comparison (old tooling reading the lock) still validates against it. |
 | malformed carried confirmations | raises |
 | inspector cannot compute the next iteration | launcher halts with both signals shown |
 

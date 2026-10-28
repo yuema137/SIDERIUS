@@ -450,9 +450,10 @@ EXAMPLE_IDENTITIES = {
         "f0717cfc5640874bcefa38e8e88e1e490189a5099aebbb79b3a17bec42cde53e",
         "f07f0263ece5eb02fa16da9c368f8845c2cf8ee1d700031f8d86dbd803c4c2e8",
     ),
+    # Re-pinned by #983 S3b: the example drops the retired sampling_seed/train_base_seed.
     "reusable_training.py": (
-        "6cfb35fdc76bb92b67250b084b7e49c751fb219a29f8960a33973694c1d09e93",
-        "2420ac1bf7b4d87be1b2f1112e577e7d3c580e1677fc5325deef4c6e93da7d9d",
+        "f4bc5cc1d0f73048d664b8f8d00fdf74faa3b70e191cf6084e4fcfe0953ff0fc",
+        "401907f9b23dd6722123490b3afaba2f72cda1d6741a3f3bcc1a146ffb40f04d",
     ),
 }
 

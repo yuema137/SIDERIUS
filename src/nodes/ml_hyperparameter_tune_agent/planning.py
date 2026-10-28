@@ -31,6 +31,7 @@ from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
 )
 from execute_tools.sample_set_builder import build_sample_set
+from nodes.ml_hyperparameter_tune_agent.attempt_seeds import derive_attempt_seeds
 from nodes.ml_hyperparameter_tune_agent.contracts import (
     AttemptIdentity,
     AttemptOrdering,
@@ -678,24 +679,15 @@ def prepare_attempt(
         cfg_train_portion = min(cfg_train_portion, _ceiling)
         cfg_eval_portion = min(cfg_eval_portion, _ceiling)
 
-    # Generate deterministic seeds for reproducibility.
-    import hashlib
-
-    seed_input = f"{run_name}_{total_attempts}".encode()
-    seed_hash = int(hashlib.sha256(seed_input).hexdigest(), 16)
-    train_sampling_seed = (
-        agent_input.sampling_seed if agent_input.sampling_seed is not None else seed_hash % (2**31)
+    # Issue #983 — every attempt seed derives from the locked run seed at this
+    # attempt's position; run labels never enter (F-SEED-1).
+    seeds = derive_attempt_seeds(
+        agent_input.run_seed,
+        agent_input.seed_coordinates,
+        round_index=iteration,
+        attempt=total_attempts,
+        align=plan.train_validation_align,
     )
-    train_base_seed = (
-        agent_input.train_base_seed
-        if agent_input.train_base_seed is not None
-        else (seed_hash >> 31) % (2**31)
-    )
-    # Eval seed: same as train when aligned, different otherwise
-    if plan.train_validation_align:
-        eval_sampling_seed = train_sampling_seed
-    else:
-        eval_sampling_seed = (seed_hash >> 62) % (2**31)
 
     # V19 PR 2 — the ONE ordering resolution point. Combines
     # the agent's proposal (or its rejection) with the
@@ -728,9 +720,9 @@ def prepare_attempt(
         # Legacy
         file_index=file_index if mode == "single_file" else None,
         # Seeds
-        train_sampling_seed=train_sampling_seed,
-        eval_sampling_seed=eval_sampling_seed,
-        train_base_seed=train_base_seed,
+        train_sampling_seed=seeds.train_sampling,
+        eval_sampling_seed=seeds.eval_sampling,
+        seed_context=seeds.context,
         # Ordering — RESOLVED values only (V19 PR 2).
         # executed_strategy() narrows to non-null inside
         # ordering.py; doing it here pushed pyright past its
@@ -934,7 +926,7 @@ def prepare_attempt(
         # the child argv is byte-identical.
         "task_scopes": task_scopes,
         "train_portion": trial_config.train_portion,
-        "train_base_seed": trial_config.train_base_seed,
+        "seed_context": trial_config.seed_context,
         "eval_sample_set": eval_sample_set,  # validation data (from validation files)
         # Ordering — resolved values only (V19 PR 2)
         "order_strategy": trial_config.resolved_order_strategy,

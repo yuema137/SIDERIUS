@@ -40,6 +40,7 @@ from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import get_or_create
 from core.layout import checkout_root
 from core.record_role import observed_attempt_role
+from core.retired_seed_pins import refuse_set_pins
 from core.run_invariants import (
     LockLaunchIdentity,
     RunHealthMaterialization,
@@ -80,6 +81,7 @@ from execute_tools.task_data_path import (
     resolve_bound_task_data_path,
 )
 from execute_tools.trial_anchor_map import load_anchor_map
+from nodes.ml_hyperparameter_tune_agent.attempt_seeds import require_run_seed
 from nodes.ml_hyperparameter_tune_agent.checkpoint_retention import (
     CompletedTrainingAttempt,
     finalize_run_checkpoints,
@@ -917,6 +919,9 @@ class HyperparamTuningAgent:
         # workflow) that materializes/hashes the effective config and then
         # constructs the invariants from the result, so the sha in the lock
         # always describes the exact config this run reads.
+        # Issue #983 (M2) — refuse a missing run seed before any LLM call.
+        require_run_seed(agent_input.run_seed)
+        refuse_set_pins(agent_input.retired_seed_pins, "HyperparamTuningInput")
         run_invariants, _effective_config_path = build_run_invariants(
             resolved_data_scope=resolved_data_scope,
             health_gate_enabled=agent_input.health_gate_enabled,
@@ -1265,7 +1270,7 @@ class HyperparamTuningAgent:
             # override is in force, so it lives on each ExperimentRecord.
             "order_strategy_override": agent_input.order_strategy_override,
             "file_order_override": agent_input.file_order_override,
-            # Issue #983 — the locked run seed (null on candidate graphs).
+            # Issue #983 — the run seed its entry boundary resolved and locked.
             "run_seed": agent_input.run_seed,
             "started_at": started_at,
         }
@@ -1913,6 +1918,8 @@ def main() -> int:
     (`workflows/model_exploration.py`'s own CLI entry) — this is the second
     composition edge, not a new authority.
     """
+    from core.run_invariants import RunInvariantsViolation
+    from core.run_seed_lock import resolve_workspace_run_seed
     from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
     parser = build_parser()
@@ -1921,7 +1928,14 @@ def main() -> int:
 
     bind_generated_library_to_workspace(args.workspace)
     run_composition = compose_run_task_bindings(args.task_composition)
-    agent_input = build_agent_input(args, parser, run_composition)
+    # Issue #983 (R2) — the standalone CLI is an entry boundary: lock, then
+    # --run_seed, then generation; run() locks the value before round 1.
+    try:
+        run_seed = resolve_workspace_run_seed(args.workspace, args.run_seed)
+    except RunInvariantsViolation as error:
+        parser.error(str(error))
+    print(run_seed.log_line(), flush=True)
+    agent_input = build_agent_input(args, parser, run_composition, run_seed=run_seed.value)
 
     agent = HyperparamTuningAgent()
     with bind_run_task_composition(run_composition, physical_data_root=args.data_dir):

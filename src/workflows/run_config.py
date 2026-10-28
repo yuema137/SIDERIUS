@@ -121,8 +121,6 @@ class WorkflowLaunchConfig:
     # formal rounds — the F14 mechanism).
     eval_portion: float | None = None
     train_validation_align: bool = True
-    sampling_seed: int | None = None
-    train_base_seed: int | None = None
     # Issue #983 — the operator's explicit run seed (``--run_seed``), or None
     # when the workflow startup resolves it from the lock or generates it.
     # Omitted from launch projections when None so seedless captures keep

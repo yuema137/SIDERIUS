@@ -10,7 +10,9 @@ from agent.schemas.proposal import ProposalInput
 from core.durable_io import publish_bytes_write_once
 from core.hardware_context import get_or_create as get_hardware_context
 from core.hardware_models import HardwareContext
+from core.retired_seed_pins import refuse_set_pins
 from core.run_invariants import RunInvariants, ensure_run_invariants
+from core.run_seed_lock import resolve_workspace_run_seed
 from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import DataScope
@@ -158,15 +160,22 @@ def admit_training(
         composed=True,
         external_evaluation=candidate_evaluation_executor() is not None,
     )
+    # Issue #983 — a settings document that recorded a retired pin is readable
+    # but never executed. Admission is a run-seed entry boundary until S4
+    # admits the seed with the operation: lock, then generation, printed.
+    refuse_set_pins(settings.retired_seed_pins, "candidate training settings")
+    run_seed = resolve_workspace_run_seed(initial.workspace, None)
+    print(run_seed.log_line(), flush=True)
     preparation = prepare_training_run(
         launch=launch,
         workspace=initial.workspace,
         llm_config=config,
         task_composition=composition,
+        run_seed=run_seed,
         **{
             name: getattr(settings, name)
             for name in type(settings).model_fields
-            if name != "launch"
+            if name not in {"launch", "retired_seed_pins"}
         },
     )
     resolve_ordering(
