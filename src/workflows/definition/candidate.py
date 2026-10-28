@@ -9,8 +9,19 @@ from .models import (
     WorkflowDefinition,
 )
 
+ROUTING_NOT_ADMITTED = (
+    "conditional routing is declared but this execution profile does not admit it"
+)
+
+
+def refuse_routes(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> None:
+    """Routes are declaration-only: no execution profile admits them yet."""
+    if definition.routes:
+        raise ValueError(ROUTING_NOT_ADMITTED)
+
 
 def candidate_nodes(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> dict[str, str]:
+    refuse_routes(definition)
     nodes = {node.capability: node for node in definition.nodes}
     expected = {"proposal", "implementation", "validation"}
     if set(nodes) not in (expected, expected | {"tuning"}) or len(nodes) != len(definition.nodes):

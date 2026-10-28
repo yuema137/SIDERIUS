@@ -4,6 +4,8 @@ Each test names the defect it catches. Fixtures use neutral metric specs from
 ``tests.helpers.metric_fixtures``; nothing here trains, scores or calls an LLM.
 """
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -479,3 +481,19 @@ def test_record_maps_every_emitted_output_to_its_inputs_and_digest():
     assert record.parameters_sha256 == (
         "6a21434c04c761108a692d14547ccddd4f22cd9efaa15a71e4da66b8bd240c28"
     )
+
+
+def test_adaptor_input_provenance_refuses_a_route_merge():
+    """A merge is not an origin: recording it would hide which arm contributed the bytes."""
+    from pydantic import ValidationError
+
+    from workflows.definition.models import SelectedSource
+
+    merge = SelectedSource(
+        branch="gate", candidates=(ResultSource(node="a"), ResultSource(node="b"))
+    )
+    with pytest.raises(ValidationError, match="never a route merge"):
+        AdaptorInputRef(port="inputs", position=0, source=merge, record_sha256="0" * 64)
+    payload = ref(0).model_dump(mode="json") | {"source": merge.model_dump(mode="json")}
+    with pytest.raises(ValidationError, match="never a route merge"):
+        AdaptorInputRef.model_validate_json(json.dumps(payload))
