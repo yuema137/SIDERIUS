@@ -33,6 +33,7 @@ from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_preparation_routes import reusable_preparation_router
 from .reusable_routes import reusable_router
 from .service import CandidateConsole
+from .settings_file import protected_paths
 from .settings_models import SettingsContext
 from .settings_routes import settings_router
 from .settings_service import ConsoleSettings
@@ -82,8 +83,10 @@ def refusal(table: dict[str, str], error: OperationFailure) -> JSONResponse:
 
 
 def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -> FastAPI:
-    """``settings`` is the startup snapshot's context; absent, the Settings page is read-only."""
+    """``settings`` is the startup snapshot's context (``load_console(...).settings``);
+    absent, the Settings page is read-only."""
     service = CandidateConsole(config)
+    workspace = None if settings is None else settings.workspace_root
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.console = service
     app.include_router(
@@ -96,7 +99,9 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
     app.include_router(edited_router(service))
     app.include_router(reusable_router(service))
     app.include_router(native_chain_router(service))
-    app.include_router(reusable_preparation_router(service))
+    app.include_router(
+        reusable_preparation_router(service, protected=protected_paths(service.config, workspace))
+    )
     app.include_router(
         settings_router(
             ConsoleSettings(service.config, settings or SettingsContext(None, frozenset()))

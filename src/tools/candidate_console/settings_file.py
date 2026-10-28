@@ -14,6 +14,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from tools.candidate_operations.models import OperationFailure
 
 from .files import canonical, config_bytes, private_bytes
@@ -63,9 +65,17 @@ def read_settings(path: Path) -> tuple[GlobalSettings | None, str | None]:
         ) from error
     try:
         settings = GlobalSettings.model_validate_json(payload)
-    except ValueError:
-        raise SettingsInvalid(f"global settings file is not valid {SETTINGS_SCHEMA} JSON") from None
+    except ValidationError as error:
+        raise SettingsInvalid(
+            f"global settings file is not valid {SETTINGS_SCHEMA} JSON at {invalid_fields(error)}"
+        ) from None
     return settings, hashlib.sha256(payload).hexdigest()
+
+
+def invalid_fields(error: ValidationError) -> str:
+    """Field locations only (Pydantic ``loc``), never the offending values."""
+    locations = sorted({".".join(map(str, item["loc"])) or "(document)" for item in error.errors()})
+    return ", ".join(locations[:5])
 
 
 def allowlists(
@@ -227,6 +237,14 @@ def validate_settings(resolved: ResolvedConsole) -> None:
     settings = context.settings
     if settings is None:
         return
+    # Every folder ref fails closed, including ones console.json overrides (OQ-4).
+    for task_id, folder in settings.data_folders.items():
+        label = f"data folder for task {task_id}"
+        path = resolve_folder(folder, lists, label=label)
+        try:
+            validate_read_only_exclusion((path,), protected)
+        except ValueError:
+            raise SettingsInvalid(f"{label} overlaps a protected console path") from None
     if settings.llm_profile is not None:
         path = llm_profile_path(settings.llm_profile, lists, context.workspace_root)
         payload = _llm_bytes(path, label="global settings llm_profile")

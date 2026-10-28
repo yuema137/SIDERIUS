@@ -1,5 +1,6 @@
 """Saved-source review and recovery-first preparation through native owners."""
 
+from pathlib import Path
 from uuid import UUID
 
 from pydantic import Field, field_validator
@@ -66,8 +67,11 @@ class NewRunReview(NewRunIntent):
 
 
 class ReusablePreparation:
-    def __init__(self, console: CandidateConsole):
+    def __init__(self, console: CandidateConsole, *, protected: tuple[Path, ...] | None = None):
+        """``protected``: paths no read-only input may overlap at admission; by default
+        derived from the config alone (``create_app`` adds the workspace settings/library)."""
         self.console = console
+        self.protected = protected_paths(console.config) if protected is None else protected
 
     def _review(
         self, project_id: str, selection: NewRunSelection
@@ -93,9 +97,7 @@ class ReusablePreparation:
         try:
             inspected = inspect_reusable_source(request)
             check_request_policy(task, inspected.request)
-            plan = preflight_reusable_candidate(
-                request, protected=protected_paths(self.console.config)
-            )
+            plan = preflight_reusable_candidate(request, protected=self.protected)
             check_request_policy(task, plan.binding.request)
         except OperationFailure:
             raise
