@@ -18,7 +18,9 @@
     return 'Save the reviewed workflow first.';
   }
   function render() {
-    const state = window.workflowEditor.state, ready = window.newRunGate.ready;
+    // The gate's own editor snapshot can trail the live state by one event (a run-step-state
+    // render fires inside the editor's own event): a live source with no saved SHA is never ready.
+    const state = window.workflowEditor.state, ready = window.newRunGate.ready && !!state.savedSha256;
     const opened = session.connected && !!state.projectId && state.sourceAvailable;
     // Only bytes a console Save recorded are a "saved version" (red-team A-6/A-7).
     const name = ready ? window.editorVersions?.nameFor(state.savedSha256) : null;
