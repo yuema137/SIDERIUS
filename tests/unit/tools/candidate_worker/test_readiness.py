@@ -391,3 +391,44 @@ def test_unrouted_graph_trace_bytes_are_unchanged(prepared, native_runner, monke
     verify_graph_trace(
         request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        # B6-D8: a rejected or skipped source is merely inadmissible to an adaptor.
+        (("rejected", None), ("pick", ())),
+        (("skipped", SKIP), ("pick", ())),
+        (("succeeded", None), ("pick", ())),
+        # A blocked source has no outcome to weigh: the adaptor is closed, not run.
+        (("blocked", BLOCKED), (None, (("pick", "blocked", BLOCKED),))),
+    ],
+)
+def test_an_adaptor_is_ready_once_every_source_is_terminal(source, expected):
+    """Fails if adaptors reuse the capability rule (rejected would block) or ignore blocked."""
+    state, reason = source
+    nodes = (
+        NodeReadiness(node_id="a", predecessors=(), state="succeeded"),
+        NodeReadiness(node_id="b", predecessors=(), state=state, reason=reason),
+        NodeReadiness(node_id="pick", predecessors=("a", "b"), state="pending", kind="adaptor"),
+        NodeReadiness(node_id="tune", predecessors=("pick",), state="pending"),
+    )
+    output = next_dispatch(ReadinessInput(nodes=nodes, aborted=False))
+    assert (output.next, output.terminal) == expected
+
+
+def test_an_adaptor_waits_for_every_source_and_its_rejection_blocks_consumers():
+    pending = (
+        NodeReadiness(node_id="a", predecessors=(), state="rejected"),
+        NodeReadiness(node_id="b", predecessors=(), state="running"),
+        NodeReadiness(node_id="pick", predecessors=("a", "b"), state="pending", kind="adaptor"),
+    )
+    assert next_dispatch(ReadinessInput(nodes=pending, aborted=False)).next is None
+    closed = (
+        NodeReadiness(
+            node_id="pick", predecessors=(), state="rejected", reason="no_admissible_input"
+        ),
+        NodeReadiness(node_id="tune", predecessors=("pick",), state="pending"),
+    )
+    output = next_dispatch(ReadinessInput(nodes=closed, aborted=False))
+    assert output.terminal == (("tune", "blocked", BLOCKED),)

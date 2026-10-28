@@ -8,7 +8,8 @@ global state, no LLM and no execution wiring. The declaration format and its
 validation table belong to `workflows.definition` (B6-1, see
 [definition contract](../definition/definition-contract.md#adaptor-declarations-inert));
 readiness, record publication, graph trace and verifier recomputation belong to
-B6-3. LLM COMBINE kinds belong to B2
+the candidate worker (B6-3: `readiness.NodeReadiness.kind="adaptor"`,
+`adaptor_phase.py`). LLM COMBINE kinds belong to B2
 (`admit_/run_/replay_llm_strategy`); their rankings re-enter through `select`.
 
 | Owner | Responsibility |
@@ -140,9 +141,12 @@ direction iff metric, rankable-field guard, record literal digest.
 
 ## Limitations
 
-- Declarable since B6-1 but not reachable from any workflow until B6-3 wires
-  execution (execution admission refuses adaptor documents); no paper or
-  existing digest is affected.
+- Reachable since B6-3 only through the v1 selection profile
+  `native-proposal-fanout-selection/v1` with `pass/v1`, `first-admissible/v1`,
+  `single/v1` over `validation.output` (executor, record publication and verifier
+  recomputation: `tools/candidate_worker/adaptor_phase.py`, described in the
+  candidate-worker contract). Every other kind is declarable but not executed; no
+  paper or existing digest is affected.
 - Decided (review of B6-2): shortfall is monotonic; under `on_short="fail"`
   any shortfall fails, otherwise an empty result is `rejected`.
 - Open semantics to confirm: `too_many_items` for split (never truncated);

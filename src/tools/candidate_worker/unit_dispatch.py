@@ -46,12 +46,14 @@ def phase_unit(
     shape: ProposalFamilies,
     results: dict[str, NodeOutput],
     admission: AdmittedTraining | None,
+    tuning_branch: tuple[str, str] | None,
     incumbent: float | None,
 ) -> PhaseUnit:
     if capability == "tuning":
-        assert admission is not None
+        # The adaptor-selected (implementation, validation) pair, chosen in the worker.
+        assert admission is not None and tuning_branch is not None
         proposal = results[shape.families[0].proposal]
-        implementation, validation = (results[key] for key in shape.branches[0])
+        implementation, validation = (results[key] for key in tuning_branch)
         assert isinstance(proposal, ProposalOutput)
         assert isinstance(implementation, ImplementorOutput)
         assert isinstance(validation, ValidatorOutput)
@@ -104,6 +106,7 @@ def node_invocation(
     results: dict[str, NodeOutput],
     iteration: int,
     admitted: TrainingAdmission | None,
+    tuning_branch: tuple[str, str] | None,
     incumbent: float | None,
 ) -> NodeInvocation:
     if capability == "tuning":
@@ -134,5 +137,7 @@ def node_invocation(
         node_id=node_id,
         iteration=iteration,
         storage=storage,
-        unit=phase_unit(node_id, capability, selected, shape, results, admission, incumbent),
+        unit=phase_unit(
+            node_id, capability, selected, shape, results, admission, tuning_branch, incumbent
+        ),
     )

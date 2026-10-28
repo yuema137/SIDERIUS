@@ -173,3 +173,111 @@ def trace_projection(receipt) -> str:
         include={"status", "validation_passed", "graph_trace", "native_output_paths"}
     ).replace(receipt.workspace, "<ws>")
     return re.sub(r'"record_sha256":"[0-9a-f]{64}"', '"record_sha256":"<sha>"', payload)
+
+
+SELECTION_PROFILE = "native-proposal-fanout-selection/v1"
+TRAINING_OWNED_SEED_FIELDS = (
+    "trial_time_budget_minutes",
+    "formal_time_budget_minutes",
+    "workflow_parameter_rules",
+    "sampling_seed",
+    "is_trial",
+    "allowed_output_types",
+    "baseline_isolation",
+    "data_scope",
+    "trial_portion",
+    "train_portion",
+    "enable_structured_health_feedback",
+    "vram_budget_gb",
+    "hardware_context",
+    "constraint_context",
+)
+
+
+def selection_request(request, branches=2, *, bindings=None, node_order=None):
+    """S1: fanout branches -> first-admissible adaptor ``pick`` -> one tuner ``train``.
+
+    ``bindings`` is the adaptor's declared validator order (default ``check0..``);
+    ``node_order`` permutes node declaration (and so execution) order.
+    """
+    request = fanout_request(request, branches)
+    raw = request.preview.model_dump(mode="json")
+    definition = raw["document"]["definition"]
+    project = Path(request.preview.project_root)
+    validators = bindings or [f"check{index}" for index in range(branches)]
+    definition["externals"].append(
+        {"id": "settings", "contract": "native-training.settings", "location": "training.json"}
+    )
+    definition["nodes"].append(
+        {
+            "id": "train",
+            "capability": "tuning",
+            "request": {
+                "kind": "protocol",
+                "protocol": "validated-candidate-to-tuning",
+                "arguments": [
+                    {"name": "proposal", "source": {"kind": "result", "node": "propose"}},
+                    {"name": "validation", "source": {"kind": "adaptor", "adaptor": "pick"}},
+                    {"name": "settings", "source": {"kind": "external", "binding": "settings"}},
+                ],
+            },
+        }
+    )
+    if node_order is not None:
+        nodes = {node["id"]: node for node in definition["nodes"]}
+        definition["nodes"] = [nodes[key] for key in node_order]
+    definition["adaptor_format"] = "siderius.adaptors/v1"
+    definition["adaptors"] = [
+        {
+            "id": "pick",
+            "inputs": [{"name": "checks", "contract": "validation.output", "cardinality": "many"}],
+            "bindings": [
+                {
+                    "port": "checks",
+                    "sources": [{"kind": "result", "node": node} for node in validators],
+                }
+            ],
+            "combine": {"kind": "pass/v1"},
+            "select": {"kind": "first-admissible/v1"},
+            "distribute": {"kind": "single/v1"},
+        }
+    ]
+    raw["execution_profile"] = SELECTION_PROFILE
+    # Training owns these seed facts; the native admission fills them when omitted.
+    seed = json.loads((project / "seed.json").read_bytes())
+    for name in TRAINING_OWNED_SEED_FIELDS:
+        seed.pop(name, None)
+    (project / "seed.json").write_text(json.dumps(seed))
+    config = json.loads((project / "llm.json").read_bytes())
+    config["tune"] = {
+        "provider": "openai",
+        "model_id": "tuner-test",
+        "planner_strategy": "native-timing-v1",
+    }
+    (project / "llm.json").write_text(json.dumps(config))
+    (project / "training.json").write_text(
+        json.dumps(
+            {
+                "launch": {
+                    "healthgate_mode": "observe_only",
+                    "result_authority": "diagnostic",
+                    "allowed_output_types": ["classifier"],
+                    "trial_time_budget_minutes": 7,
+                    "formal_time_budget_minutes": 19,
+                    "max_rounds": 2,
+                    "trial_max_epochs": 3,
+                    "formal_max_epochs": 8,
+                }
+            }
+        )
+    )
+    preview = WorkflowPreviewRequest.model_validate_json(json.dumps(raw))
+    observed = preview_workflow(preview)
+    return request.model_copy(
+        update={
+            "preview": preview,
+            "files": observed.files,
+            "declaration_digest": preview.document.definition.declaration_digest(),
+            "selected_constructor_routes": observed.selected_constructor_routes,
+        }
+    )

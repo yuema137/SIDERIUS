@@ -20,6 +20,9 @@ from .route_eval import RouteEvaluationOutput
 _OPEN: frozenset[GraphState] = frozenset(("pending", "running"))
 # Terminal states that close every consumer as blocked; blocked beats skipped.
 _UNSUCCESSFUL: frozenset[GraphState] = frozenset(("failed", "rejected", "blocked"))
+# Source states that close an adaptor: a failure (which also aborts) or a blocked
+# source, whose absence is not an observed outcome the strategy could weigh.
+_ADAPTOR_CLOSING: frozenset[GraphState] = frozenset(("failed", "blocked"))
 # Reasons a node may be `skipped` with; a consumer of a skipped source inherits it.
 SKIP_REASONS: frozenset[GraphReason] = frozenset(("route_not_selected",))
 
@@ -55,6 +58,8 @@ class NodeReadiness(StopModel):
     state: GraphState
     reason: GraphReason | None = None  # recorded reason; a skip is inherited from it
     routing: NodeRouting = NodeRouting()
+    # A capability waits for successful sources; an adaptor for terminal ones (B6-D8).
+    kind: Literal["capability", "adaptor"] = "capability"
 
     @model_validator(mode="after")
     def _skip_has_reason(self) -> "NodeReadiness":
@@ -62,6 +67,8 @@ class NodeReadiness(StopModel):
             raise ValueError("a skipped node must carry a skip reason")
         if set(self.predecessors) & set(_merged(self.routing)):
             raise ValueError("a merge candidate is not also a required predecessor")
+        if self.kind == "adaptor" and self.routing != NodeRouting():
+            raise ValueError("an adaptor is neither a route target nor a merge consumer")
         return self
 
 
@@ -162,11 +169,14 @@ def _close_reason(
     run. AND over required sources: failure stop, then blocked (a failed, rejected
     or blocked source) beats skipped (a skipped source's reason is inherited, the
     generic propagation for any skip reason), then the node's own route decision.
-    Additional node classes (e.g. adaptors that accept any terminal source) extend
-    this hook.
+    An adaptor accepts any terminal source (B6-D8): only a failed or blocked source
+    closes it; a rejected or skipped one is merely inadmissible to its strategy.
     """
     if aborted:
         return ("blocked", "dependency_not_successful")
+    if node.kind == "adaptor":
+        closing = any(nodes[key].state in _ADAPTOR_CLOSING for key in node.predecessors)
+        return ("blocked", "dependency_not_successful") if closing else None
     sources = [nodes[key] for key in node.predecessors]
     sources += [_merge_input(node.node_id, item, nodes, decisions) for item in node.routing.merges]
     if any(source.state in _UNSUCCESSFUL for source in sources):
@@ -227,6 +237,7 @@ def readiness_input(
             state="pending" if item is None else item.state,
             reason=None if item is None else item.reason,
             routing=routing,
+            kind="adaptor" if slot.capability == "adaptor" else "capability",
         )
 
     return ReadinessInput(

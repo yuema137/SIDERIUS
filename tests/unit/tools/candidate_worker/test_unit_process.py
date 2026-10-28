@@ -21,7 +21,12 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from tests.helpers.candidate_fanout import UNROUTED_TRACE_SHA256, fanout_request, trace_projection
+from tests.helpers.candidate_fanout import (
+    UNROUTED_TRACE_SHA256,
+    fanout_request,
+    selection_request,
+    trace_projection,
+)
 from tools.candidate_worker import launch_candidate
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.candidate_worker.unit_runner import spawn_unit as real_spawn_unit
@@ -29,6 +34,7 @@ from tools.candidate_worker.unit_runner import spawn_unit as real_spawn_unit
 from .conftest import REPO, _prepare_request
 from .test_graph import initial
 from .test_native import Provider, native_runner
+from .test_training import training_runner
 
 PROBE = "b33_registry_probe"
 HARNESS = """import json, os, runpy, subprocess, sys
@@ -80,6 +86,28 @@ def propose(*args, **kwargs):
 phases.run_implementation, phases.run_validation, phases.run_proposal = (
     implement, validate, propose
 )
+if CONFIG["tuner"]:
+    # The offline tuner of test_training.training_runner, and the lineage it got.
+    sys.path.insert(1, {repo!r})
+    from tests.unit.workflows.test_model_exploration import _make_tuning_output
+    from tools.candidate_worker import training
+    class Tuner:
+        def set_run_context(self, **kwargs):
+            pass
+        def run(self, value):
+            output = _make_tuning_output(
+                model_type=value.model_type, run_name=value.storage.local.run_name
+            )
+            return output.model_copy(update=dict(
+                candidate_id=value.candidate_id,
+                task_composition_fingerprint=value.task_composition_ref.semantic_fingerprint,
+            ))
+    training.HyperparamTuningAgent = Tuner
+    real_training = training.run_training
+    def observed_training(context, proposal, implementation, validation, *args, **kwargs):
+        log(kind="trained", model_file_path=implementation.model_file_path)
+        return real_training(context, proposal, implementation, validation, *args, **kwargs)
+    training.run_training = observed_training
 sys.argv = ["tools.candidate_worker.unit_child", sys.argv[1]]
 runpy.run_module("tools.candidate_worker.unit_child", run_name="__main__")
 """
@@ -123,17 +151,18 @@ def stable(value, normalized):
     return normalized(value) if isinstance(value, str) else value
 
 
-def run_real_units(request, monkeypatch, tmp_path, fail):
+def run_real_units(request, monkeypatch, tmp_path, fail, *, tuner=False):
     """Launch through the worker with every graph unit in a real child process."""
     from tools.candidate_worker import unit_runner
 
     log = tmp_path / f"units_{fail}.jsonl"
     config = tmp_path / f"harness_{fail}.json"
-    config.write_text(json.dumps({"fail": fail, "log": str(log)}))
+    config.write_text(json.dumps({"fail": fail, "log": str(log), "tuner": tuner}))
     harness = tmp_path / f"unit_harness_{fail}.py"
     harness.write_text(
         HARNESS.format(
             src=str(REPO / "src"),
+            repo=str(REPO),
             provider=inspect.getsource(Provider),
             config=str(config),
             probe=PROBE,
@@ -312,3 +341,21 @@ def test_unit_child_never_imports_workspace_shadows(tmp_path, monkeypatch, capfd
         real_spawn_unit(str(workspace / "candidate_run/units/node/invocation.json"))
     assert not marker.exists(), marker.read_text()
     assert "FileNotFoundError" in capfd.readouterr().out
+
+
+def test_adaptor_selected_branch_trains_in_a_real_tuning_unit(
+    prepared, training_runner, monkeypatch, tmp_path
+):
+    """Fails if the worker-side adaptor selection does not reach the tuning unit
+    process: with reversed bindings check1 is first admissible, so the real tuning
+    unit must receive build1 (the in-process default would train build0). The
+    verifier also rechecks verdicts and the staged bytes the unit wrote."""
+    request = selection_request(prepared, bindings=["check1", "check0"])
+    receipt, rows, _ = run_real_units(request, monkeypatch, tmp_path, "none", tuner=True)
+    assert receipt.status == "completed", receipt.error
+    (trained,) = [row for row in rows if row["kind"] == "trained"]
+    assert "/build1/" in trained["model_file_path"]
+    assert len([row for row in rows if row["kind"] == "unit"]) == len(receipt.graph_trace.nodes)
+    verify_graph_trace(
+        request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
+    )

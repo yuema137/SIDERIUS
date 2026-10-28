@@ -246,13 +246,18 @@ and v2, because the worker consumes v1). `None` and `()` are omitted from
 serialization and canonical source, so documents without adaptors keep their
 declaration digests and source bytes (pinned: the shipped examples in
 `test_workflow_routes.py`, a loop document with stop conditions in
-`test_adaptor_declarations.py`). Adaptors are **declaration only**:
-`candidate.refuse_declaration_only` refuses any document with `adaptor_format`
-("adaptors are declared but this execution profile does not admit them",
-`ADAPTORS_NOT_ADMITTED`), after the routing refusal, in every shape check that
-preview, preparation, worker and verifier admission use. A v2 document with
-`training_settings` runs those checks during declaration validation and therefore
-cannot declare adaptors until B6-3 admits an adaptor profile. Execution is B6-3.
+`test_adaptor_declarations.py`). Adaptors execute only under the opt-in v1
+execution profile `fanout.SELECTION_PROFILE` (`native-proposal-fanout-selection/v1`,
+B6-3; shape and run-time semantics in the candidate-worker contract, "Opt-in
+first-passing selection"). `candidate.refuse_declaration_only(definition, *,
+admits_adaptors=False)` refuses any document with `adaptor_format` ("adaptors are
+declared but this execution profile does not admit them", `ADAPTORS_NOT_ADMITTED`),
+after the routing refusal, in every shape check that preview, preparation, worker and
+verifier admission use; only `execution_families` for the selection profile passes
+`admits_adaptors=True`. The reusable (v2) document, preparation and console profile
+lists do not include the selection profile yet, so a v2 document cannot declare
+adaptors. `candidate_prepare.resolution` nevertheless carries `routes`,
+`adaptor_format` and `adaptors` verbatim into the effective v1 definition.
 
 ### Models
 
@@ -291,8 +296,10 @@ a concrete origin) names.
   (`predecessor_facts` includes adaptor vertices). Adaptors are checked before node
   requests, so a consumer never reports a symptom of an invalid adaptor.
 - Route checks treat adaptors as vertices: a merge into an adaptor port must cover
-  every arm of a branch with a default, and an adaptor may not depend on two exclusive
-  arms of one branch except through a merge.
+  every arm of a branch with a default. Unlike a node, an adaptor may depend on two
+  exclusive arms of one branch without a merge (B6-3): it is ready once every source
+  is terminal and a skipped source is inadmissible (B6-D8), so it never inherits a
+  skip. It therefore carries no arm label to its consumers.
 
 ### Validation table (`adaptor_validation.py`)
 

@@ -403,7 +403,7 @@ are not supported by this profile.
 #### Per-unit processes (B3-3)
 
 Every graph profile (`execution_profile` set, including loop bodies) runs each
-dispatched node, except adaptors (B6 runs those in the worker), in its
+dispatched node, except adaptors (`adaptor_phase.execute_adaptor` runs those in the worker), in its
 own child process, still one at a time. Readiness,
 input materialization, predecessor-result selection, terminal classification
 and the trace stay in the worker (`graph.execute_fanout`). The fixed
@@ -417,7 +417,8 @@ three/four-stage path is unchanged and runs in the worker.
   `ImplementationUnit`, `ValidationUnit`, `LiteratureUnit`,
   `InterpretationUnit`, `TuningUnit`). A proposal after a literature review
   carries the review evidence already applied. `TuningUnit` carries the
-  predecessor outputs, `chain_formal_incumbent_reference` and
+  predecessor outputs of the branch `adaptor_phase.tuning_branch` selected in
+  the worker (the selection adaptor's contribution, else the only branch), `chain_formal_incumbent_reference` and
   `AdmittedTraining`: the `TrainingAdmission` without its task composition and
   LLM config, which `admission_from` refuses to build if restoring it would not
   equal the admitted value.
@@ -509,7 +510,9 @@ real unit processes with a generated provider harness: it requires the pinned
 accepted and failed trace digests, prompts and normalized records equal to the
 in-process run, a distinct process per unit importing this checkout, no
 registry write visible to a later unit or the worker, a crashed unit treated as
-a native failure, replay of a unit's subprocess lifecycle, -inf values and a
+a native failure, an adaptor-selected branch (reversed bindings) reaching a
+real tuning unit with the verifier's verdict and staged-bytes checks passing,
+replay of a unit's subprocess lifecycle, -inf values and a
 validator-filled nested field crossing the transport, and no import of
 `tools`/`json` shadows planted in the workspace.
 
@@ -531,8 +534,9 @@ inspects the first `pending` node whose sources (predecessors plus every merge
 candidate) are all terminal (neither `pending` nor `running`) and returns one
 action as `ReadinessOutput`: `next=<node_id>` to dispatch it, or
 `terminal=((node_id, state, reason),)` to close it without dispatch;
-`next=None, terminal=()` means no node can act. The per-node rule
-`_close_reason`, in precedence order:
+`next=None, terminal=()` means no node can act. An adaptor slot
+(`kind="adaptor"`) follows its own rule (see "Opt-in first-passing selection").
+For a capability node, the per-node rule `_close_reason`, in precedence order:
 
 1. `aborted` (an earlier native failure) → `blocked/dependency_not_successful`.
 2. Any required source `failed`, `rejected` or `blocked` →
@@ -684,6 +688,117 @@ Reusable version-2 source and managed preparation also support this profile thro
 Code callers may still supply version-1 native inputs directly. Both routes use
 the same existing operation/HTTP observation without loading an editor.
 
+
+### Opt-in first-passing selection (S1, B6-3)
+
+`WorkflowPreviewRequest.execution_profile="native-proposal-fanout-selection/v1"`
+(`workflows.definition.fanout.SELECTION_PROFILE`) admits B6 scenario S1: one
+external proposal, its complete implementation/validation branches (the
+proposal-fanout ownership rules above), exactly one declared adaptor and exactly
+one tuning node. Admission (`fanout.selection_candidate`) requires:
+
+- `adaptor_format="siderius.adaptors/v1"` and one `AdaptorInstance` with one
+  `validation.output` input port, `combine=pass/v1`, `select=first-admissible/v1`,
+  `distribute=single/v1` (no other strategy triple is admitted);
+- the port binding lists every validator `ResultSource` exactly once, in any order;
+  that declared binding order is the selection order;
+- the tuner uses `validated-candidate-to-tuning` with `proposal` = the proposal
+  result, `validation` = `AdaptorSource(adaptor=<id>)` and an external `settings`
+  (`candidate.check_tuning_edge` accepts either a validator id or this adaptor
+  source); no route and no loop.
+
+`ProposalFamilies.selection = AdaptorSelection(adaptor, validators)` records the
+admitted adaptor and its bound validators in declared order; `tuning` names the
+tuner. Every other profile still refuses an adaptor document
+(`ADAPTORS_NOT_ADMITTED`). The proposal seed path and branch storage slots are
+those of `native-proposal-fanout/v1`; training admission and the native tuner path
+are those of the interpretation profile's training ("Native training after
+interpretation"), so the seed must leave training-owned fields unset or equal.
+
+**Readiness.** `NodeReadiness.kind` is `"capability"` (default) or `"adaptor"`
+(B6-D8). An adaptor is ready once every bound source is terminal; `_close_reason`
+closes it `blocked/dependency_not_successful` only after an abort or when a source
+is `failed` or `blocked`. A `rejected` or `skipped` source does not close it; the
+strategy treats it as inadmissible. An adaptor never carries routing.
+Its consumers keep the capability rule, so a `rejected` adaptor blocks the tuner.
+
+**Execution** (`adaptor_phase.execute_adaptor`). Items are built by
+`adaptor_items` in declared port order, then binding position, never completion
+order. Every succeeded or rejected source's native record is read (digest checked
+against the trace) and parsed with the contract's native model
+(`workflows.custom_adaptors.contracts.native_type`). A rejected source must be
+rejected by its record (a `VALIDITY_GATED_CONTRACTS` value with `passed=False`),
+else `ValueError`; it becomes an item with state `rejected` and no value. A
+`skipped` source raises `SkippedAdaptorInputError` (routed execution, B1-PR5, must
+first provide a skip record to cite as provenance), which `execute_adaptor`
+re-raises instead of closing the slot; any other state raises `ValueError`. The pure
+`run_deterministic_adaptor` decides with `metric=None` (no metric-ranking kind is
+admitted), and `build_adaptor_record` builds the `AdaptorRecord`. Each emitted
+output value is published write-once as canonical JSON at
+`candidate_run[/iteration_NNN]/adaptors/<id>.out.result.json` (`<id>.out.result.<i>.json`
+for indexed outputs), then the record at `.../adaptors/<id>.json`; the file digest of
+an output equals its `OutputDigest.sha256`. The trace slot closes with the outcome
+status and reason (`succeeded`; `rejected/no_admissible_input`;
+`rejected|failed/insufficient_items`), the record path and its digest. The closure
+is computed before anything is published. Any other exception
+closes it `failed/native_failure` without a record and stops later effects, as for
+a native node. The tuner trains the branch whose validator the adaptor emitted
+(`adaptor_phase.tuning_branch`, read from the outcome's contribution); all
+validators rejected gives `rejected/no_admissible_input` and a blocked tuner.
+
+**Trace.** `GraphTrace.adaptors` holds one `GraphNodeEvidence` per declared
+adaptor, in declaration order, with `capability="adaptor"`, predecessor ids,
+`storage` = the adaptors control directory, state, reason, record path and digest.
+It is omitted when empty, so unadapted traces keep their bytes (pinned:
+`test_unrouted_graph_trace_bytes_are_unchanged`,
+`test_unadapted_training_trace_bytes_are_unchanged`). `GraphTrace` refuses an
+`"adaptor"` capability in `nodes` and any other capability in `adaptors`.
+`GraphReason` gains `no_admissible_input`, `insufficient_items` and the reserved
+`judge_failure` (B6-8). Adaptor records are not in `native_output_paths`.
+
+**Body outcome** (`adaptor_phase.body_outcome`, shared by worker and verifier).
+A `rejected` node bound to an adaptor that `succeeded` was an inadmissible input
+the adaptor absorbed; it is neutral in `body_status`, like a skip. Adaptor states
+themselves count. Under the selection profile the selected path decides the body:
+selected input and tuner `succeeded` gives `completed`; an adaptor
+`rejected/no_admissible_input` (or `insufficient_items`) gives `rejected` with a
+blocked tuner. `validation_passed` is the selected candidate's validation, i.e.
+`True` iff the selection adaptor `succeeded`. Every branch keeps its own node
+state in the trace (a rejected sibling stays `rejected/validation_rejected`).
+Profiles without adaptors keep the existing rules (pinned trace bytes above).
+
+**Verification.** `verify_graph_trace` checks adaptor membership and bindings
+against `expected_adaptors`, record path/digest of a decided adaptor, that its
+sources were terminal and none failed or blocked, and replays readiness over nodes
+then adaptors. `adaptor_phase.verify_adaptors` then recomputes each recorded
+adaptor from the native records the trace names and requires the record bytes, each
+emitted output's bytes and the trace `(state, reason)` to equal the recomputation;
+an `<id>.out.*` file the recomputation does not emit is refused. Selection inputs
+are trace states, so the native verifier loop also requires every `validation`
+entry's state to be its record's verdict (`succeeded` iff `ValidatorOutput.passed`,
+else `rejected`), read from the digest-checked record. `verify_graph_training`
+reads the trained (implementation, validation) pair from the verified outcome
+(`tuning_branch`), checks the validation record and the tuner identity as before,
+and binds the tuner to that implementation from record facts only, mirroring
+`artifacts.verify_artifacts`. A generated model (its `model_file_path` under the
+attempt's `models` directory) is copied verbatim by `stage_native_plugins`, so the
+staged `get_plugin_dir(<tuner storage>, run_name)/<model>.py` must equal its bytes;
+this applies to every trained profile and changes no record. A reused task-declared
+package model (`test_file_path == ""`, model outside the attempt) is trained from
+its declared source and `stage_model_source` copies nothing, so no bytes are
+compared; under the selection profile a staged copy then contradicts the record and
+is refused. An unreadable staged or model file is a `ValueError` ("tuner staged
+model ..."), never an incidental `OSError`.
+Witness: `tests/unit/tools/candidate_worker/test_adaptor_selection.py` (second
+branch trained when the first is rejected; all rejected; declared and reversed
+binding order over execution order; tampered record/output/closure; extra output
+file; relabelled validator verdict; staged model of a sibling; declared package
+reuse; missing staged model; shape refusals).
+
+Not admitted: v2 reusable source, managed preparation and console for this profile;
+any other strategy triple, metric ranking, per-item/split distribution, routes,
+loops, custom and LLM strategies; a skipped adaptor input (`SkippedAdaptorInputError`
+until B1-PR5 provides skip records).
 
 ### Opt-in native literature candidate
 

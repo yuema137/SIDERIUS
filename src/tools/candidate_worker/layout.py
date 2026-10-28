@@ -86,3 +86,19 @@ def tuning_input_path(workspace: Path, node_id: str, *, iteration: int = 1) -> P
     return (
         candidate_control_dir(workspace, iteration=iteration) / "tuning_inputs" / f"{node_id}.json"
     )
+
+
+def adaptor_dir(workspace: Path, *, iteration: int = 1) -> Path:
+    """The adaptors' own records and published output values (B6-3)."""
+    return candidate_control_dir(workspace, iteration=iteration) / "adaptors"
+
+
+def adaptor_record_path(workspace: Path, adaptor_id: str, *, iteration: int = 1) -> Path:
+    return adaptor_dir(workspace, iteration=iteration) / f"{adaptor_id}.json"
+
+
+def adaptor_output_path(
+    workspace: Path, adaptor_id: str, port: str, index: int | None, *, iteration: int = 1
+) -> Path:
+    suffix = port if index is None else f"{port}.{index}"
+    return adaptor_dir(workspace, iteration=iteration) / f"{adaptor_id}.out.{suffix}.json"

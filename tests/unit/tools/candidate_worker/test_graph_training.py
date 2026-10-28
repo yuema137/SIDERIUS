@@ -517,3 +517,33 @@ def test_nonfinite_tuning_score_crosses_the_tuning_unit(prepared, training_runne
     assert result.outcome == "returned" and result.output is not None
     output = decode_transport(training.HyperparamTuningOutput, result.output.encode())
     assert output.best_denoising_score == float("-inf")
+
+
+# Pinned on base bce9c452 (before adaptor execution): sha256 of the trained graph
+# receipt's trace, status, validation flag and output index, with the workspace and
+# native record digests (which embed tmp paths) masked. Adaptor support must not
+# move these bytes.
+TRAINED_TRACE_SHA256 = {
+    "completed": "18c39b0014c87cf80f936184529bf32133f2735dcb1a36d8de0babfb5878ae9e",
+    "rejected": "5b6c189069ab88d4a67bbf8613661c70d3b27a1a411aa54184976651418c767d",
+}
+
+
+@pytest.mark.parametrize("outcome", sorted(TRAINED_TRACE_SHA256))
+def test_unadapted_training_trace_bytes_are_unchanged(
+    prepared, training_runner, native_runner, outcome
+):
+    """Fails if adaptor execution alters serialization or outcome of a trained graph run."""
+    import re
+
+    native_runner.reject = outcome == "rejected"
+    request = graph_training_request(prepared)
+    receipt = launch_candidate(request)
+    payload = receipt.model_dump_json(
+        include={"status", "validation_passed", "graph_trace", "native_output_paths"}
+    ).replace(receipt.workspace, "<ws>")
+    payload = re.sub(r'"record_sha256":"[0-9a-f]{64}"', '"record_sha256":"<sha>"', payload)
+    assert hashlib.sha256(payload.encode()).hexdigest() == TRAINED_TRACE_SHA256[outcome], payload
+    verify_graph_trace(
+        request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
+    )

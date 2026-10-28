@@ -176,7 +176,13 @@ def _check_arm_dependencies(
     arms: Arms,
     order: tuple[str, ...],
 ) -> None:
-    """Refuse a node depending on two exclusive arms of one branch except through a merge."""
+    """Refuse a node depending on two exclusive arms of one branch except through a merge.
+
+    An adaptor is exempt and carries no arm label: it is ready once every bound
+    source is terminal and treats a skipped source as inadmissible (B6-D8), so it
+    never inherits a skip and runs whichever arm was selected.
+    """
+    adaptors = {adaptor.id for adaptor in definition.adaptors}
     plain: dict[str, set[str]] = {vertex: set() for vertex in order}
     merged: dict[str, list[SelectedSource]] = {vertex: [] for vertex in order}
     for consumer, source in bound_sources(definition):
@@ -205,6 +211,9 @@ def _check_arm_dependencies(
         for merge in merged[node]:
             for item in merge.candidates:
                 current |= {label for label in labels[item.node] if label[0] != merge.branch}
+        if node in adaptors:
+            labels[node] = frozenset()
+            continue
         branches = [branch for branch, _ in current]
         if len(branches) != len(set(branches)):
             raise ValueError(f"{node}: depends on two exclusive arms without a merge")
