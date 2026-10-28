@@ -68,10 +68,12 @@ class TestLockBytes:
 class TestContinuation:
     def test_resume_adopts_the_locked_seed(self, tmp_path):
         """Fails if a continuation without --run_seed generates a new seed
-        instead of reusing the lock's, silently changing the run's numerics."""
+        instead of reusing the lock's, silently changing the run's numerics,
+        or claims a new seed source for an adopted seed."""
         _lock(tmp_path, SEED)
         resolved = resolve_workspace_run_seed(str(tmp_path), None)
         assert resolved == WorkspaceRunSeed(value=SEED, origin="locked")
+        assert resolved.lock_fields()["run_seed_source"] is None
         assert continuation_run_seed(str(tmp_path), None) == SEED
         validate_run_invariants(str(tmp_path), _invariants(resolved.value))
 
@@ -162,7 +164,9 @@ class TestEntryPaths:
                     model_type="synthetic_model", planner_strategy="native-timing-v1", run_seed=SEED
                 )
             ),
-            workflow_lock_identity(WorkflowLaunchConfig(), llm, SEED),
+            workflow_lock_identity(
+                WorkflowLaunchConfig(), llm, WorkspaceRunSeed(value=SEED, origin="operator")
+            ),
         ]
         for index, identity in enumerate(identities):
             expected, _ = build_run_invariants(
@@ -219,6 +223,7 @@ class TestEntryPaths:
         lock = json.loads((workspace / RUN_INVARIANTS_BASENAME).read_text())
         assert isinstance(lock["run_seed"], int)
         assert lock["seed_derivation"] == "siderius-seed/v1"
+        assert lock["run_seed_source"] == "generated"
         assert f"[seed] run_seed={lock['run_seed']} source=generated" in capsys.readouterr().out
         assert captured["tune_input"].run_seed == lock["run_seed"]
 
