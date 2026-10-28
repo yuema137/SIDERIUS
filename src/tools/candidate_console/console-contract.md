@@ -1093,8 +1093,9 @@ Manual UUID entry remains available.
 
 Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
 (M-2; native `failed`, `timed_out` and `interrupted` read "Failed: …" in plain words,
-and a store `unknown` state whose process reason is `missing_identity` reads
-"… is starting."). For a failed operation `#monitor-cause` shows "Cause (from the
+native `cancelled` (Stop run, #1027) reads "Stopped on request before finishing; no
+candidate result was produced.", and a store `unknown` state whose process reason is
+`missing_identity` reads "… is starting."). For a failed operation `#monitor-cause` shows "Cause (from the
 log): <last exception line>" (`operationOutcome.cause`, the last line shaped like
 `Name(Error|Exception|Failure|Refusal): …`) from the log text already displayed; the
 Run page reads the last 64 KiB of the native, then operation, log once and appends the

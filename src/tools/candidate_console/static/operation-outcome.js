@@ -27,6 +27,7 @@
     if (native === 'rejected' || value.validation_passed === false) {
       return 'Finished: validation rejected the candidate.';
     }
+    if (native === 'cancelled') return 'Stopped on request before finishing; no candidate result was produced.';
     if (native === 'stopped') return 'Finished: stopped at a completed body boundary.';
     if (native === 'paused') return 'Paused at a completed body boundary.';
     if (native === 'completed') return 'Finished.';

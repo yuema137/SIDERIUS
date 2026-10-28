@@ -110,13 +110,13 @@ try {
   await page.screenshot({path: resolve(tmpdir(), 'siderius-operation-stopping.png'), fullPage: true});
   runningTerminal = true;
   await said.filter({hasText: 'Run stopped. Files written so far stay in the run folder; no candidate result is produced.'}).waitFor();
-  await page.locator('#monitor-status').filter({hasText: 'Native: cancelled'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Stopped on request before finishing'}).waitFor();
   assert.ok(await stop.isHidden());
   await page.screenshot({path: resolve(tmpdir(), 'siderius-operation-stopped.png'), fullPage: true});
   // A failed poll keeps the last line but marks it as an old observation.
   unreachable = true;
   await said.filter({hasText: 'Last observed: Run stopped.'}).waitFor();
-  await page.locator('#monitor-status').filter({hasText: 'Observation stale or unavailable'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Last displayed facts are retained'}).waitFor();
   unreachable = false;
   await said.filter({hasText: /^Run stopped\./}).waitFor();
 
@@ -124,7 +124,7 @@ try {
   for (const id of [finished, preparing]) {
     await page.evaluate(value => { location.hash = 'slow-control/' + value; }, id);
     await page.locator('#operation-observed').filter({hasText: id}).waitFor();
-    await page.locator('#monitor-status').filter({hasText: 'State:'}).waitFor();
+    await page.locator('#monitor-status').filter({hasText: /in progress\.|^Finished/}).waitFor();
     await page.waitForTimeout(300);
     assert.ok(await stop.isHidden(), `no Stop run for ${id}`);
     assert.equal(await said.textContent(), '');
