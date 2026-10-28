@@ -46,6 +46,7 @@ from core.run_invariants import (
     build_run_invariants,
     effective_watchdog_deadline_policy,
     load_run_invariants,
+    run_seed_lock_fields,
     validate_run_invariants,
 )
 from core.runtime_control.gpu_accounting import device_identity_from_hardware
@@ -620,6 +621,7 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         ),
         runtime_completion_policy=agent_input.runtime_completion_policy,
         runtime_verifier_identity=agent_input.runtime_verifier_identity,
+        **run_seed_lock_fields(agent_input.run_seed),
     )
 
 
@@ -1263,6 +1265,8 @@ class HyperparamTuningAgent:
             # override is in force, so it lives on each ExperimentRecord.
             "order_strategy_override": agent_input.order_strategy_override,
             "file_order_override": agent_input.file_order_override,
+            # Issue #983 — the locked run seed (null on candidate graphs).
+            "run_seed": agent_input.run_seed,
             "started_at": started_at,
         }
         run_config_path = os.path.join(workspace, f"run_config_{run_name}.json")

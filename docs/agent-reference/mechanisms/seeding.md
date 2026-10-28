@@ -15,12 +15,23 @@ stochastic unit, and how the native trainer applies those seeds. It does not
 own where a run seed is admitted, locked or displayed; later PRs of issue
 #983 add those and document them with their owners.
 
-**Landed state.** The trainer is seeded (see [Trainer seeding](#trainer-seeding)).
-The tuner does not yet derive its seeds from a run seed: it still computes
-`train_sampling_seed`, `train_base_seed` and `eval_sampling_seed` from
+**Landed state.** The native workflow resolves, locks and prints one
+`run_seed` per workspace (`--run_seed`, else the lock, else
+`resolve_run_seed`); see
+[persistence-and-resume.md](persistence-and-resume.md#run-seed-in-the-lock-issue-983).
+The trainer is seeded (see [Trainer seeding](#trainer-seeding)) and the
+`hash(exp_id)` fallback is gone. The tuner does not yet derive its seeds from
+the locked run seed: it still computes `train_sampling_seed`,
+`train_base_seed` and `eval_sampling_seed` from
 `sha256(f"{run_name}_{total_attempts}")` and passes only `--train_base_seed`
 to the trainer, so a tuner-driven trainer runs under the
-[interim rule](#interim-tuner-transport). No run seed is locked or shown yet.
+[interim rule](#interim-tuner-transport) with its own generated run seed,
+which differs from the locked one.
+
+Both entry kinds print their seed through one formatter,
+`core.seeding.format_seed_line`: `[seed] run_seed=N source=S`, where `S` is
+`operator`, `generated` or `locked` at the workflow startup and `supplied` or
+`generated` at the trainer CLI.
 
 ## Public interface
 
@@ -35,6 +46,7 @@ to the trainer, so a tuner-driven trainer runs under the
 | `SeedPurpose` | closed `Literal` (below). Extended only by a reviewed PR. |
 | `SeedCoordinates` | frozen, `extra="forbid"`, `strict=True` (below). |
 | `SEED_DERIVATION` | `"siderius-seed/v1"` |
+| `SeedLineSource`, `format_seed_line(run_seed, source) -> str` | the single `[seed] run_seed=N source=S` stdout formatter; `S` ∈ `operator`, `generated`, `locked`, `supplied`. Used by `WorkspaceRunSeed.log_line` and the trainer's `seed_log_line`. |
 | `canonical_json_bytes(atoms) -> bytes` | the canonical tuple encoding (below). Accepts only `str`, `int` (not `bool`) and `None`; anything else raises `TypeError`. |
 | `derive_seed(run_seed, purpose, at) -> int` | the `v1` derivation; result in `[0, 2**63 - 1]`. Raises `ValidationError` for an invalid `run_seed` and `ValueError("unknown seed purpose …")` for a purpose outside `SeedPurpose`. |
 | `MissingRunSeed` | `ValueError` subclass raised by a component that requires a seed and received `None`. Only an entry boundary may generate a run seed. |
@@ -245,5 +257,5 @@ These belong to later #983 PRs:
 
 - Tuner derivation of `SeedContext` and the GPU probe check on derived
   values (S3b); removal of `--train_base_seed`.
-- Admission and lock integration, record fields, display, and the RNG census
+- Candidate admission, record and receipt fields, display, and the RNG census
   guard.

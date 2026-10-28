@@ -121,6 +121,8 @@ INACTIVE_LAUNCH_FIELDS = frozenset(
         "model_types",
         "n_candidates",
         "plan_overrides",
+        # Issue #983 (M3): a candidate graph's seed authority is its run request.
+        "run_seed",
         "scientific_evidence_order",
         "source_paths",
         "source_run_name",

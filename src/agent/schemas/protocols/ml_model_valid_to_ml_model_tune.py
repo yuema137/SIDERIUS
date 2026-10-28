@@ -90,6 +90,8 @@ def local_validated_model(
     train_validation_align: bool = True,
     sampling_seed: int | None = None,
     train_base_seed: int | None = None,
+    # Issue #983 — the run seed the workflow locked; None on candidate graphs.
+    run_seed: int | None = None,
     cleanup_denoised: bool = False,
     retain_model_outputs: bool = False,
     retain_training_checkpoints: bool = False,
@@ -386,6 +388,7 @@ def local_validated_model(
         train_validation_align=train_validation_align,
         sampling_seed=sampling_seed,
         train_base_seed=train_base_seed,
+        run_seed=run_seed,
         cleanup_denoised=cleanup_denoised,
         retain_model_outputs=retain_model_outputs,
         retain_training_checkpoints=retain_training_checkpoints,

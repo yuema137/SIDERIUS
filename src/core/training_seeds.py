@@ -23,6 +23,7 @@ from core.seeding import (
     SeedCoordinates,
     SeedPurpose,
     derive_seed,
+    format_seed_line,
     resolve_run_seed,
 )
 
@@ -146,7 +147,7 @@ def resolve_trainer_seed_plan(
 
 def seed_log_line(plan: TrainingSeedPlan, source: TrainerSeedSource) -> str:
     """The stdout line the trainer prints before any training work starts."""
-    return f"[seed] run_seed={plan.context.run_seed} source={source}"
+    return format_seed_line(plan.context.run_seed, source)
 
 
 def trainer_seed_record(plan: TrainingSeedPlan, source: TrainerSeedSource) -> dict[str, object]:

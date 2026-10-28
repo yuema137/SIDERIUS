@@ -29,6 +29,9 @@ DERIVED_SEED_BITS: Final = 63
 
 RunSeed = Annotated[int, Field(ge=0, le=RUN_SEED_MAX, strict=True)]
 SeedSource = Literal["operator", "generated"]
+#: Where an execution's seed came from, as printed: a run seed bound at an entry
+#: boundary (``SeedSource``), adopted from a workspace lock, or supplied to a trainer.
+SeedLineSource = Literal["operator", "generated", "locked", "supplied"]
 SeedPurpose = Literal[
     "tuner.train_sampling",
     "tuner.eval_sampling",
@@ -98,6 +101,11 @@ def resolve_run_seed(explicit: int | None) -> RunSeedBinding:
     if explicit is None:
         return RunSeedBinding(value=generate_run_seed(), source="generated")
     return RunSeedBinding(value=explicit, source="operator")
+
+
+def format_seed_line(run_seed: int, source: SeedLineSource) -> str:
+    """The one operator-visible ``[seed]`` stdout line, printed before execution."""
+    return f"[seed] run_seed={run_seed} source={source}"
 
 
 def canonical_json_bytes(atoms: tuple[CanonicalAtom, ...]) -> bytes:

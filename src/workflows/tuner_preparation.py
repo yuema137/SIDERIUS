@@ -100,6 +100,7 @@ def prepare_native_tuner_input(
         train_validation_align=launch.train_validation_align,
         sampling_seed=launch.sampling_seed,
         train_base_seed=launch.train_base_seed,
+        run_seed=run_invariants.run_seed,
         cleanup_denoised=launch.cleanup_denoised,
         retain_model_outputs=launch.retain_model_outputs,
         retain_training_checkpoints=launch.retain_training_checkpoints,

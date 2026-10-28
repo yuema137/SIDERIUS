@@ -62,6 +62,7 @@ from core.runtime_control.verifier_provider import (
     resolve_runtime_verifier_identity,
 )
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
+from core.seeding import RunSeed
 from core.target_standardization import TargetStandardizationReceipt
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
@@ -2229,6 +2230,14 @@ class HyperparamTuningInput(BaseModel):
             "Base seed for per-epoch training subsampling. Epoch n uses "
             "train_base_seed + n. When None, auto-generated. "
             "Read from a previous trial_config_{exp_id}.json."
+        ),
+    )
+    run_seed: RunSeed | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Issue #983 — the run seed locked in the workflow workspace. The tuner "
+            "locks and records it; None keeps the seedless candidate-graph state."
         ),
     )
 

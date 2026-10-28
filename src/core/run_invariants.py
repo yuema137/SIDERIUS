@@ -25,7 +25,8 @@ canonical field declared on ``RunInvariants._CANONICAL`` (ordering
 override, health-feedback policy, runtime identities, task composition,
 arXiv U1's workflow topology ``lit_review_enabled`` /
 ``lit_review_config_sha256`` and the opaque ``experiment_arm`` label, and
-the Gold campaign's observed ``advice_sha256`` treatment identity). The
+the Gold campaign's observed ``advice_sha256`` treatment identity, and
+issue #983's ``run_seed`` / ``seed_derivation``). The
 mechanism is deliberately generic: future run-defining settings (dataset
 version, execution policy, ...) join by adding a field to ``RunInvariants``
 — the file format and validation logic need no redesign.
@@ -42,7 +43,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
@@ -59,8 +60,44 @@ from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.scheduling import HostBudget
 from core.runtime_control.verifier_provider import RuntimeVerifierIdentity
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
+from core.seeding import SEED_DERIVATION, RunSeed, SeedSource
 
 RUN_INVARIANTS_BASENAME = "run_invariants_lock.json"
+
+SeedDerivation = Literal["siderius-seed/v1"]
+
+
+class RunSeedLockFields(TypedDict):
+    """The lock fields one run seed contributes."""
+
+    run_seed: int | None
+    seed_derivation: SeedDerivation | None
+    run_seed_source: SeedSource | None
+
+
+def run_seed_lock_fields(
+    run_seed: int | None, source: SeedSource | None = None
+) -> RunSeedLockFields:
+    """Lock fields for ``run_seed``; ``None`` keeps the seedless (pre-seed) shape.
+
+    ``source`` is how the creating execution obtained the seed; a later
+    execution that adopts the lock passes ``None`` (provenance, never compared).
+    """
+    return {
+        "run_seed": run_seed,
+        "seed_derivation": None if run_seed is None else SEED_DERIVATION,
+        "run_seed_source": source,
+    }
+
+
+def _require_seed_pair(run_seed: int | None, derivation: str | None, source: str | None) -> None:
+    """A locked seed is meaningless without the derivation that consumes it."""
+    if (run_seed is None) != (derivation is None) or (run_seed is None and source is not None):
+        raise ValueError(
+            "run_seed and seed_derivation are set together or not at all, and "
+            f"run_seed_source requires run_seed; got run_seed={run_seed!r}, "
+            f"seed_derivation={derivation!r}, run_seed_source={source!r}"
+        )
 
 
 def effective_watchdog_deadline_policy(
@@ -359,6 +396,18 @@ class RunInvariants(BaseModel):
         default=None, exclude_if=lambda value: value is None
     )
     planner_strategy_identity: PlannerStrategyIdentity | None = None
+    # Issue #983 — the run's one seed and its derivation version. CANONICAL:
+    # a continuation reuses the locked seed and a different explicit seed is
+    # drift. ``None`` marks a lock written before the seed contract; a seeded
+    # run refuses to continue it (``_reject_pre_seed_lock``). Omitted when
+    # ``None`` so pre-seed locks keep their bytes.
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
+    seed_derivation: SeedDerivation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    # Issue #983 — how the creating execution obtained the seed. RECORDED,
+    # never compared: a continuation adopts the lock whatever its source.
+    run_seed_source: SeedSource | None = Field(default=None, exclude_if=lambda value: value is None)
     # B3-2 (decision B3-Q7) — serial dispatch, or parallel-v1 under a declared
     # HostBudget. CANONICAL: parallel-v1's drain policy can change a failed
     # body's trace, so a workspace cannot switch mode on resume. "serial" is
@@ -480,6 +529,8 @@ class RunInvariants(BaseModel):
         "runtime_verifier_identity",
         "gpu_execution_policy",
         "planner_strategy_identity",
+        "run_seed",
+        "seed_derivation",
         # B3-Q7 — serial and parallel-v1 traces can differ on failure.
         "scheduling_mode",
     )
@@ -503,6 +554,7 @@ class RunInvariants(BaseModel):
         # and never compared: staging the same advice at a different
         # absolute path is not a different treatment (the Q-P1-2 rule).
         "advice_path",
+        "run_seed_source",
         # B3-2 — host capacity the parallel run was scheduled against.
         "host_budget",
     )
@@ -617,6 +669,11 @@ class RunInvariants(BaseModel):
                 "artifact is unattributable — a resume refusal would name two "
                 "hex strings and no file to compare."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _seed_and_derivation_travel_together(self) -> RunInvariants:
+        _require_seed_pair(self.run_seed, self.seed_derivation, self.run_seed_source)
         return self
 
     @model_validator(mode="after")
@@ -857,6 +914,22 @@ def _reject_legacy_runtime_lock(
     )
 
 
+def pre_seed_lock_violation(workspace: str) -> RunInvariantsViolation:
+    """Issue #983 (D-OP-3.1): a lock without ``run_seed`` predates the seed contract.
+
+    Its iterations ran with unrecorded, entropy-seeded randomness, so a seeded
+    continuation would mix two regimes in one trajectory. The workspace stays
+    readable; only continuation is refused.
+    """
+    return RunInvariantsViolation(
+        f"workspace {workspace!r} was created before the run-seed contract and "
+        "cannot be continued by this build: its lock records no run_seed, so its "
+        "existing iterations used unrecorded randomness.\n"
+        "  Start a FRESH workspace (optionally with --run_seed N); the old one "
+        "remains readable and is not modified."
+    )
+
+
 def validate_run_invariants(workspace: str, expected: RunInvariants) -> None:
     """Compare ``expected`` against the workspace lock; raise on any drift.
 
@@ -883,6 +956,8 @@ def validate_run_invariants(workspace: str, expected: RunInvariants) -> None:
             "original revision, or a new workspace with verified experiment settings."
         )
     _reject_legacy_runtime_lock(workspace, locked, expected)
+    if locked.run_seed is None and expected.run_seed is not None:
+        raise pre_seed_lock_violation(workspace)
     drifted = [
         name
         for name in RunInvariants._CANONICAL
@@ -993,10 +1068,21 @@ class LockLaunchIdentity(BaseModel):
         default=None, exclude_if=lambda value: value is None
     )
     planner_strategy_identity: PlannerStrategyIdentity | None = None
+    #: Issue #983 — the run seed resolved at the entry boundary and its
+    #: derivation; build with :func:`run_seed_lock_fields`. CANONICAL, so it
+    #: is threaded explicitly. ``None`` is the seedless candidate-graph state.
+    run_seed: RunSeed | None = None
+    seed_derivation: SeedDerivation | None = None
+    run_seed_source: SeedSource | None = None
     #: B3-2 — the validated operator budget, or ``None`` for serial dispatch.
     #: The builder derives the canonical scheduling mode and the recorded
     #: budget provenance from it; ``None`` yields a byte-identical lock.
     host_budget: HostBudget | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _seed_and_derivation_travel_together(self) -> LockLaunchIdentity:
+        _require_seed_pair(self.run_seed, self.seed_derivation, self.run_seed_source)
+        return self
 
 
 #: The unlabelled default — module-level so call sites can splat a shared
@@ -1195,6 +1281,9 @@ def build_run_invariants(
             runtime_verifier_identity=_launch_identity.runtime_verifier_identity,
             gpu_execution_policy=_launch_identity.gpu_execution_policy,
             planner_strategy_identity=_launch_identity.planner_strategy_identity,
+            run_seed=_launch_identity.run_seed,
+            seed_derivation=_launch_identity.seed_derivation,
+            run_seed_source=_launch_identity.run_seed_source,
             # B3-2 — one rule derives the canonical mode from the budget; the
             # budget itself is recorded as provenance.
             scheduling_mode=scheduling_mode_for(_launch_identity.host_budget),

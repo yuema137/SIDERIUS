@@ -64,6 +64,7 @@ from core.runtime_control.verifier_provider import (
     resolve_runtime_verifier_identity,
 )
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
+from core.seeding import RunSeed
 from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
 
@@ -122,6 +123,11 @@ class WorkflowLaunchConfig:
     train_validation_align: bool = True
     sampling_seed: int | None = None
     train_base_seed: int | None = None
+    # Issue #983 — the operator's explicit run seed (``--run_seed``), or None
+    # when the workflow startup resolves it from the lock or generates it.
+    # Omitted from launch projections when None so seedless captures keep
+    # their bytes.
+    run_seed: RunSeed | None = field(default=None, metadata={"omit_if_none": True})
     cleanup_denoised: bool = False
     retain_model_outputs: bool = False
     retain_training_checkpoints: bool = False
