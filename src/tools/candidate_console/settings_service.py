@@ -14,16 +14,18 @@ import stat
 import threading
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from tools.candidate_operations.models import OperationFailure
 
-from .files import canonical, config_bytes, open_directory
+from .files import canonical, config_bytes, open_directory, private_bytes
 from .models import ConsoleConfig
 from .settings_file import (
     SettingsInvalid,
     advice_path,
     check_subpath,
+    invalid_fields,
     library_directory,
-    read_settings,
 )
 from .settings_library import (
     LibraryRefused,
@@ -33,6 +35,7 @@ from .settings_library import (
     store,
 )
 from .settings_models import (
+    SETTINGS_SCHEMA,
     AllowlistRef,
     FileRef,
     GlobalSettings,
@@ -87,6 +90,37 @@ def _library_entries(workspace: Path | None, kind: str) -> tuple[tuple[LibraryRe
     return tuple(cards)
 
 
+def _publish_private(path: Path, payload: bytes) -> None:
+    """Atomic 0600 replace inside a parent opened with no-follow descriptors.
+
+    Temp file + fsync + ``os.replace`` relative to that descriptor, so a swapped
+    parent link cannot redirect the write (design §5.1). The temp file is removed
+    only if publishing fails.
+    """
+    import secrets
+
+    directory = open_directory(canonical(str(path.parent)))
+    temporary = f".{path.name}.{secrets.token_hex(8)}.tmp"
+    try:
+        descriptor = os.open(
+            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory
+        )
+        try:
+            os.fchmod(descriptor, 0o600)
+            os.write(descriptor, payload)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        try:
+            os.replace(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
+        except BaseException:
+            os.unlink(temporary, dir_fd=directory)
+            raise
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 class ConsoleSettings:
     def __init__(self, config: ConsoleConfig, context: SettingsContext):
         self.config, self.context = config, context
@@ -97,11 +131,41 @@ class ConsoleSettings:
         policy = self.context.policy
         return policy is not None and policy.browser_writable
 
-    def _pending(self) -> tuple[GlobalSettings | None, str | None]:
+    def _pending(self) -> tuple[GlobalSettings | None, str | None, str | None]:
+        """(settings, sha256 of the bytes on disk, problem sentence) for the file now on disk.
+
+        A readable but invalid file keeps its digest, so an explicit Save can replace
+        it under the same compare-and-swap; an unreadable file has no digest.
+        """
         path = self.context.settings_path
         if path is None:
-            return None, None
-        return read_settings(path)
+            return None, None, None
+        try:
+            payload = private_bytes(str(path))
+        except FileNotFoundError:
+            return None, None, None
+        except (OSError, OperationFailure):
+            return (
+                None,
+                None,
+                (
+                    "settings/global_settings.json cannot be read: it must be a regular file "
+                    "owned by you with mode 600. Run chmod 600 on it (or restore it), then Reload."
+                ),
+            )
+        digest = hashlib.sha256(payload).hexdigest()
+        try:
+            return GlobalSettings.model_validate_json(payload), digest, None
+        except ValidationError as error:
+            return (
+                None,
+                digest,
+                (
+                    f"settings/global_settings.json is not valid {SETTINGS_SCHEMA} JSON at "
+                    f"{invalid_fields(error)}. Fix or "
+                    "restore the file and Reload, or choose values here and Save to replace it."
+                ),
+            )
 
     def _label(self, ref: FileRef | None, kind: str) -> str:
         if ref is None:
@@ -120,14 +184,15 @@ class ConsoleSettings:
             SettingRow(
                 name="advice",
                 task_id=None,
-                origin="global_settings" if advice is not None else "server_config",
+                origin="global_settings" if advice is not None else "not_set",
                 label=self._label(advice, "advice"),
                 effective=None
                 if advice is None
                 else str(advice_path(advice, context.allowlists, context.workspace_root)),
             )
         )
-        roots = {root.path: root.label for root in context.allowlists.data_roots}
+        roots = {root.id: root.label for root in context.allowlists.data_roots}
+        folders = active.data_folders if active is not None else {}
         for task in self.config.tasks:
             origin = context.origin(task.task_id, "llm_config_file")
             profile = active.llm_profile if active is not None else None
@@ -155,15 +220,19 @@ class ConsoleSettings:
             for name in ("data_root", "preparation_root", "candidate_root", "reusable_runs_root"):
                 value = getattr(task, name)
                 folder_origin = context.origin(task.task_id, name)
-                parent = str(Path(value).parent) if value is not None else None
+                folder = folders.get(task.task_id) if name == "data_root" else None
+                label = {
+                    "server_config": "Set in console.json",
+                    "workspace_layout": "Workspace layout",
+                }.get(folder_origin, "")
+                if folder_origin == "global_settings" and folder is not None:
+                    label = f"{roots.get(folder.root_id, folder.root_id)} / {folder.subpath}"
                 rows.append(
                     SettingRow(
                         name=name,
                         task_id=task.task_id,
                         origin=folder_origin,
-                        label=roots.get(parent or "", "Workspace layout")
-                        if folder_origin != "server_config"
-                        else "Set in console.json",
+                        label=label,
                         effective=value,
                     )
                 )
@@ -172,7 +241,7 @@ class ConsoleSettings:
     def view(self) -> SettingsView:
         from .workspace import workspace_readiness
 
-        pending, digest = self._pending()
+        pending, digest, problem = self._pending()
         context = self.context
         lists = context.allowlists
         resolved = ResolvedConsole(self.config, context)
@@ -183,7 +252,8 @@ class ConsoleSettings:
             pending=pending,
             active=context.settings,
             active_sha256=context.settings_sha256,
-            restart_required=digest != context.settings_sha256,
+            restart_required=problem is None and digest != context.settings_sha256,
+            problem=problem,
             rows=self._rows(),
             llm_profiles=(
                 *(
@@ -221,8 +291,6 @@ class ConsoleSettings:
 
     def write(self, request: SettingsWrite) -> SettingsView:
         """CAS on the file's sha256, full validation, then one atomic 0600 publish."""
-        from core.durable_io import publish_bytes_atomically
-
         from .config import validate_resolved
         from .workspace import resolve_console
 
@@ -232,10 +300,9 @@ class ConsoleSettings:
             raise SettingsRefusal(403, "read_only", "global settings are read-only on this console")
         payload = (request.settings.model_dump_json(indent=2) + "\n").encode()
         with self._lock:
-            try:
-                _, current = read_settings(path)
-            except SettingsInvalid:
-                current = "unreadable"
+            _, current, problem = self._pending()
+            if problem is not None and current is None:
+                raise SettingsRefusal(422, "settings_unreadable", problem)
             if current != request.expected_sha256:
                 raise SettingsRefusal(
                     409, "stale", "settings changed since they were loaded; reload"
@@ -249,8 +316,14 @@ class ConsoleSettings:
                 raise SettingsRefusal(
                     422, "settings_invalid", "settings fail console validation; run check"
                 ) from None
-            canonical(str(path.parent))
-            publish_bytes_atomically(str(path), payload)
+            try:
+                _publish_private(path, payload)
+            except (OSError, OperationFailure):
+                raise SettingsRefusal(
+                    422,
+                    "settings_invalid",
+                    "the settings folder is unavailable or contains a link; nothing was saved",
+                ) from None
         return self.view()
 
     def upload(self, upload: LibraryUpload) -> LibraryRef:
@@ -274,9 +347,17 @@ class ConsoleSettings:
             raise SettingsRefusal(404, "not_found", "data root is not configured")
         try:
             parts = check_subpath(subpath) if subpath else ()
-            root = canonical(roots[root_id].path)
-        except (SettingsInvalid, OperationFailure):
+        except SettingsInvalid:
             raise SettingsRefusal(422, "validation", "folder subpath is not allowed") from None
+        try:
+            root = canonical(roots[root_id].path)
+        except OperationFailure:
+            raise SettingsRefusal(
+                409,
+                "root_changed",
+                "this data root now contains a link or moved; point console.json data_roots "
+                "at the real folder and restart",
+            ) from None
         try:
             descriptor = open_directory(root)
         except OSError:

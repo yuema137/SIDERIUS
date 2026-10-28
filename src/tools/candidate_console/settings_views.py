@@ -21,7 +21,7 @@ SettingName = Literal[
 class SettingRow(PreviewModel):
     name: SettingName
     task_id: Id | None
-    origin: Origin
+    origin: Origin | Literal["not_set"]
     label: str  # allowlist label or library name; never file contents
     effective: str | None  # the resolved server path
 
@@ -45,6 +45,7 @@ class SettingsView(PreviewModel):
     active: GlobalSettings | None  # loaded at startup; in effect until restart
     active_sha256: str | None
     restart_required: bool
+    problem: str | None  # the settings file on disk cannot be used, and how to recover
     rows: tuple[SettingRow, ...]
     llm_profiles: tuple[ProfileCard, ...]
     advice_files: tuple[AdviceCard, ...]

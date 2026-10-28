@@ -115,6 +115,12 @@ try {
   await page.locator('#settings-status').filter({hasText: 'Read-only'}).waitFor();
   assert.equal(await page.locator('#settings-save').isDisabled(), true);
   assert.equal(await page.getByLabel('Lab profile').isDisabled(), true);
+  // An unusable settings file is named with its recovery, and Save stays off without a digest.
+  view = {...settingsView(), pending: null, settings_sha256: null, restart_required: false,
+    problem: 'settings/global_settings.json cannot be read: it must be a regular file owned by you with mode 600. Run chmod 600 on it (or restore it), then Reload.'};
+  await page.locator('#settings-reload').click();
+  await page.locator('#settings-status').filter({hasText: 'chmod 600'}).waitFor();
+  assert.equal(await page.locator('#settings-save').isDisabled(), true);
   await page.setViewportSize({width: 390, height: 844});
   if (process.env.CONSOLE_SCREENSHOT_DIR) await page.screenshot({path: join(process.env.CONSOLE_SCREENSHOT_DIR, 'settings-mobile.png'), fullPage: true});
   assert.deepEqual(faults, []);

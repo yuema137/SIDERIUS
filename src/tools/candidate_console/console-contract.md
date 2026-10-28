@@ -160,6 +160,11 @@ derived as `<workspace_root>/data`. Files are referenced in place, never copied.
 **Settings file.** `global_settings: {browser_writable: bool = false}` enables
 reading `<workspace_root>/settings/global_settings.json`; `global_settings` without
 `workspace_root` is refused, and without `global_settings` no settings file is read.
+`init` writes the block (`browser_writable: true`) only into a console.json it
+creates; it never rewrites an existing one, so an earlier workspace opts in by an
+operator edit. Every `data_folders` ref is resolved and exclusion-checked at
+`check`/startup even when console.json sets that task's `data_root`. A schema
+error names Pydantic `loc` paths only, never values.
 Schema `GlobalSettings`: `schema_version: "siderius.console-global-settings/v1"`,
 `llm_profile: FileRef | null`, `advice: FileRef | null`,
 `data_folders: {task_id: FolderRef}`. `FileRef` is
@@ -206,9 +211,10 @@ output and reusable runs root, and, with a workspace, `settings/` and `library/`
 `validate_config(config, workspace=…)` applies it to every task `data_root` and
 `task_read_only` entry; `validate_settings` applies it to every `data_roots` entry.
 `admit(request, *, protected=())` applies it to `(data_root, *task_read_only)`; the
-console passes `protected_paths(config)` through `preflight_reusable_candidate` on
-the in-process reusable path. Limitation: subprocess admission does not receive the
-console set; its `data_root` must equal the startup-validated `TaskChoice.data_root`
+console's `create_app(config, settings)` passes `protected_paths(config,
+settings.workspace_root)` to `ReusablePreparation`, which forwards it through
+`preflight_reusable_candidate` on the in-process reusable path. Limitation:
+subprocess admission does not receive the console set; its `data_root` must equal the startup-validated `TaskChoice.data_root`
 (`check_request_policy`).
 
 `recorded_examples` is an optional allowlist for read-only candidate-validation
@@ -255,7 +261,7 @@ JSON ≤256 KiB). Refusals are `{"error": {code, message}}` and never echo input
 | Route | Effect | Refusals |
 | --- | --- | --- |
 | `GET /api/settings` | `SettingsView`: `enabled`, `writable`, `settings_sha256` (file on disk), `pending`, `active` + `active_sha256` (startup snapshot), `restart_required = settings_sha256 != active_sha256`, `rows`, choice cards (allowlist IDs and library files whose bytes match their name), `data_roots` (ID/label), `tasks` (with the `data_root` origin), `workspace_root`, `WorkspaceReadiness`, `host` | — |
-| `PUT /api/settings` | `SettingsWrite{expected_sha256, settings}`; under one process lock: re-read the file no-follow and compare sha256 (absent matches only `null`), resolve console.json with the candidate settings, run `validate_resolved`, then `publish_bytes_atomically` (0600) after `canonical(parent)`; returns the new view | 403 `read_only` (no policy, `browser_writable=false`, or no context); 409 `stale`; 422 `settings_invalid` with the `SettingsInvalid` predicate, or a generic validation message |
+| `PUT /api/settings` | `SettingsWrite{expected_sha256, settings}`; under one process lock: re-read the file no-follow and compare sha256 (absent matches only `null`), resolve console.json with the candidate settings, run `validate_resolved`, then publishes 0600 through the parent opened with `files.open_directory` (temp file `O_EXCL\|O_NOFOLLOW` + fsync + `os.replace` with `src_dir_fd`/`dst_dir_fd`, design §5.1); returns the new view. A readable but invalid file keeps its digest, so a Save may replace it under the same CAS | 403 `read_only` (no policy, `browser_writable=false`, or no context); 409 `stale`; 422 `settings_unreadable` (not a private 0600 regular file; names the fix); 422 `settings_invalid` with the `SettingsInvalid` predicate, a generic validation message, or an unavailable/linked settings folder |
 | `POST /api/settings/library` | `LibraryUpload{kind: "llm"\|"advice", label (1..63), content}`; content bytes are validated first (`parse_llm_config_bytes` → 422 `invalid_file` "Not an LLM profile: …"; `parse_advice_bytes(label="upload")` → 422 with the owner's message), then published with `publish_bytes_write_once` (0600) to `library/<kind>/<slug>-<sha12>.json` after `canonical(dir)`; `slug` lowercases the label to `[a-z0-9-]`, ≤50; returns `LibraryRef` | 403 `read_only`; 422 `invalid_file` or empty slug; 409 `exists` when that name holds different bytes (identical bytes return the existing ref); 409 `unavailable` without a library directory |
 | `GET /api/settings/folders?root_id=&subpath=&limit=` | `FolderListing{entries, incomplete}`: direct children of an allowlisted root, walked with `files.open_directory` then `O_DIRECTORY\|O_NOFOLLOW` per segment and `os.scandir(fd)`; directories as `directory`, symlinks as `link`, files omitted; sorted; at most `limit` (1..200) of at most 4096 examined; `incomplete` when more exist | 404 unknown root or unavailable/linked folder; 422 subpath syntax (`check_subpath`) or limit |
 
@@ -268,9 +274,19 @@ only); `AdviceCard{label, ref, present_keys, unsupported_keys, problem}` reads w
 to their name; an unreadable allowlisted file shows `problem` instead of failing
 the view.
 
+`SettingsView.problem` names an unusable settings file on disk and its recovery
+(chmod 600, fix/restore, or Save over a readable invalid file); `pending` is then
+`null` and the view still returns 200. CAS limitation: the lock is per process.
+Two console processes serving one workspace can both pass the digest check before
+either replaces the file; the later replace wins. Serve one console per workspace.
+The folder listing reports `409 root_changed` when an allowlisted root is no longer
+canonical (it now contains a link or moved).
+
 `SettingRow{name, task_id, origin, label, effective}` covers `advice` (global) and,
 per task, `llm_profile`, `data_root`, `preparation_root`, `candidate_root`,
-`reusable_runs_root`; `effective` is the resolved server path of the running
+`reusable_runs_root`; `origin` adds `not_set` for an unselected advice file; a
+settings-selected data folder is labelled `<root label> / <subpath>` from the active
+`FolderRef`; `effective` is the resolved server path of the running
 snapshot. Origins are presentation only. A saved file applies after restart
 (OQ-2): routers keep the startup snapshot. Stale safety (P4): after a profile
 change and restart, a configured-task preparation made with the old profile no

@@ -38,7 +38,7 @@ even when using the default models.
    | `settings/` | `console.json`, the access token file `console-token` |
    | `data/` | one folder per task, `data/<task_id>/`, that you fill with task data |
    | `operations/`, `preparations/`, `candidates/`, `runs/` | console state and run outputs |
-   | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile as `library/llm/default-<12 hex digits>.json` |
+   | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile as `library/llm/default-<12 hex characters>.json` |
    | `projects/` | a conventional place for workflow editor projects |
 
    On success it prints two lines, the configuration file and the browser
@@ -81,6 +81,13 @@ even when using the default models.
    `task my-task needs llm_config_file` when neither `console.json` nor the
    global settings select a model profile. Browser users can change
    the native run name and three advice fields.
+
+   `console.json` reads `settings/global_settings.json` only when it contains a
+   `global_settings` block. `init` writes `"global_settings": {"browser_writable":
+   true}` into a new `console.json`, which also lets the browser save settings.
+   `init` never rewrites an existing `console.json`, so a workspace created
+   before this block existed lacks it; add that line yourself (use `false` to
+   read the file but keep the browser from changing it) and run `check`.
 
    To offer other model profiles, advice files or data locations, list them in
    `console.json` under `llm_profiles`, `advice_files` and `data_roots` (see
@@ -206,11 +213,12 @@ workspace library, so the browser never types a server path.
    **Show routes** lists which provider and model each step uses. To add a
    profile, choose **Import from this computer…** and pick a JSON profile; the
    console checks it first and refuses a misspelled key without saving anything.
-3. Under **Advice**, pick a file or **None**. **Import from this computer…**
-   accepts an advice file in the command-line format, including one you
-   exported earlier. Each file lists which steps it advises; keys that workflows
-   cannot use yet (`interpret`, `analysis`, `mindset`) are marked. This choice is recorded for new
-   workflows; it is not applied to runs from this page.
+3. Under **Advice**, pick a file or **None**. The choice is only saved for
+   now: no run uses it, and each workflow keeps the advice written in it.
+   **Import from this computer…** accepts an advice file in the command-line
+   format, including one you exported earlier. Each file lists which steps it
+   advises; keys that workflows cannot use yet (`interpret`, `analysis`,
+   `mindset`) are marked.
 4. Under **Data folder**, choose a data root for a task, open subfolders, and
    select **Use <folder>**. Links are shown but cannot be selected. A task whose
    `console.json` sets `data_root` shows "Set in console.json" instead.
@@ -220,14 +228,18 @@ workspace library, so the browser never types a server path.
    value the running console uses, where it comes from and its server path.
 
 Saving and importing need `"global_settings": {"browser_writable": true}` in
-`console.json` (`init` writes it); otherwise the page is read-only. Imported files
-are copied to `library/llm/` or `library/advice/` on the server under a name that
-ends in the first 12 digits of their SHA-256. Importing the same file again
-reuses that copy; library files are never replaced or deleted. If someone else saved in
-the meantime, the page says so; select **Reload** and choose again. A choice
-that would fail `check`, such as a folder that no longer exists, is refused with
-the reason and nothing is written. **Workspace** lists missing workspace folders
-and, when `init` can create them, the command to run on the server.
+`console.json` (`init` writes it); otherwise the page is read-only. Imported
+files are copied to `library/llm/` or `library/advice/` on the server under a
+name that ends in the first 12 hex characters of their SHA-256. Importing the
+same file again reuses that copy; library files are never replaced or deleted.
+If someone else saved in the meantime, the page says so; select **Reload** and
+choose again. A choice that would fail `check`, such as a folder that no longer
+exists, is refused with the reason and nothing is written. If
+`settings/global_settings.json` itself becomes unusable, the page says why: run
+`chmod 600` on it if its permissions changed, or fix or restore it; when it is
+readable but invalid, you can also choose values and **Save** to replace it.
+**Workspace** lists missing workspace folders and, when `init` can create them,
+the command to run on the server.
 
 ## Edit existing circuit connections
 

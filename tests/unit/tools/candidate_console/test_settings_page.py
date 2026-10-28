@@ -70,12 +70,40 @@ def _put(api: TestClient, expected: str | None, **settings):
     )
 
 
-def test_view_reports_origins_paths_and_restart_state(workspace):
+def test_view_reports_origins_paths_and_restart_state(workspace, tmp_path):
+    """Defect: a row claims the wrong source, or names a nested folder by the layout.
+
+    The advice row must say "not set" rather than console.json, and a data folder
+    chosen two levels under a root is labelled by that root (F2/F3 of #1065 review).
+    """
     view = _client(_load(workspace)).get("/api/settings").json()
     assert view["enabled"] and view["writable"] and not view["restart_required"]
+    assert view["problem"] is None
     rows = {(row["task_id"], row["name"]): row for row in view["rows"]}
     assert rows[("synthetic", "llm_profile")]["origin"] == "global_settings"
     assert rows[("synthetic", "data_root")]["origin"] == "workspace_layout"
+    assert (rows[(None, "advice")]["origin"], rows[(None, "advice")]["label"]) == (
+        "not_set",
+        "None",
+    )
+    (tmp_path / "lab" / "x" / "y").mkdir(parents=True)
+    api = _client(_load(workspace))
+    current = api.get("/api/settings").json()
+    nested = {"synthetic": {"root_id": "lab", "subpath": "x/y"}}
+    assert (
+        _put(
+            api,
+            current["settings_sha256"],
+            llm_profile=current["pending"]["llm_profile"],
+            data_folders=nested,
+        ).status_code
+        == 200
+    )
+    restarted = _client(_load(workspace)).get("/api/settings").json()
+    row = next(
+        r for r in restarted["rows"] if (r["task_id"], r["name"]) == ("synthetic", "data_root")
+    )
+    assert (row["origin"], row["label"]) == ("global_settings", "Lab disk / x/y")
     assert {card["label"] for card in view["llm_profiles"]} == {
         card["ref"]["name"] for card in view["llm_profiles"]
     }
@@ -176,7 +204,63 @@ def test_folder_listing_returns_only_directory_names_and_never_follows_links(wor
     ):
         response = api.get("/api/settings/folders", params=params)
         assert response.status_code == status, params
-    assert "DO-NOT-ECHO" not in listing.__repr__()
+    assert "secret.txt" not in json.dumps(listing)  # files are never listed
+
+
+@pytest.mark.parametrize("damage", ["schema", "mode"])
+def test_an_unusable_settings_file_is_named_with_its_recovery(damage, workspace):
+    """Defect: a file broken after startup makes GET 500 and PUT loop on 409 (#1065 F1)."""
+    path = _settings_file(workspace)
+    api = _client(_load(workspace))
+    if damage == "schema":
+        path.write_text('{"schema_version": "wrong"}')
+    else:
+        path.chmod(0o640)
+    response = api.get("/api/settings")
+    assert response.status_code == 200
+    view = response.json()
+    assert view["pending"] is None and "settings/global_settings.json" in view["problem"]
+    choice = {"llm_profile": view["active"]["llm_profile"]}
+    if damage == "mode":
+        assert "chmod 600" in view["problem"] and view["settings_sha256"] is None
+        refused = _put(api, None, **choice)
+        assert refused.status_code == 422
+        assert refused.json()["error"]["code"] == "settings_unreadable"
+        assert stat.S_IMODE(path.stat().st_mode) == 0o640
+        return
+    assert "Save to replace it" in view["problem"] and "at schema_version" in view["problem"]
+    replaced = _put(api, view["settings_sha256"], **choice)  # recovery: explicit Save under CAS
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["problem"] is None
+    assert json.loads(path.read_text())["llm_profile"] == choice["llm_profile"]
+
+
+def test_save_never_writes_through_a_linked_settings_folder(workspace, tmp_path):
+    """Defect: a settings folder swapped for a link after startup redirects the write."""
+    api = _client(_load(workspace))
+    view = api.get("/api/settings").json()
+    settings = workspace / "settings"
+    aside = tmp_path / "settings-aside"
+    settings.rename(aside)
+    settings.symlink_to(aside)
+    before = (aside / "global_settings.json").read_bytes()
+    response = _put(api, view["settings_sha256"], llm_profile=view["pending"]["llm_profile"])
+    assert response.status_code in (409, 422)
+    assert (aside / "global_settings.json").read_bytes() == before
+    assert sorted(path.name for path in aside.iterdir()) == sorted(
+        ["console.json", "console-token", "global_settings.json"]
+    )
+
+
+def test_listing_names_a_root_that_is_no_longer_canonical(workspace, tmp_path):
+    """Defect: a moved or linked root is reported as a bad subpath (#1065 F7)."""
+    api = _client(_load(workspace))
+    lab = tmp_path / "lab"
+    lab.rename(tmp_path / "lab-real")
+    lab.symlink_to(tmp_path / "lab-real")
+    response = api.get("/api/settings/folders", params={"root_id": "lab"})
+    assert response.status_code == 409 and response.json()["error"]["code"] == "root_changed"
+    assert "data_roots" in response.json()["error"]["message"]
 
 
 # P4: a changed model profile makes an already-prepared run fail closed after restart.
