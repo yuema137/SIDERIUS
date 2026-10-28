@@ -218,8 +218,8 @@ def _rubric_combined(contract, items):
     ranking = Ranking(
         basis="rubric",
         entries=(
-            RankEntry(unit=1, ref=items[1].ref, value=8.0),
-            RankEntry(unit=0, ref=items[0].ref, value=5.0),
+            RankEntry(unit=1, ref=items[1].ref, value=8.0, exact="8"),
+            RankEntry(unit=0, ref=items[0].ref, value=5.0, exact="5"),
         ),
     )
     assert base.units[0].element_contract == contract
@@ -239,6 +239,25 @@ def test_rubric_ranking_filters_but_never_reorders_metric_scored_items():
         select(metric, combined, HIGHER)
     literature_rank = _rubric_combined("literature.output", [literature(0, 0.1), literature(1)])
     assert select(TopKSelect(k=1), literature_rank, None) == (1,)
+
+
+def test_rubric_threshold_compares_the_exact_value_not_its_display_float():
+    # Defect: a rubric mean just below at_least whose float rounds to at_least is kept
+    # (a float comparison), or a rubric ranking without exact values is accepted.
+    items = [literature(0, 0.1), literature(1)]
+    base = combine(PassCombine(), tuple(items), None)
+    below = "399999999999999999999/100000000000000000000"  # 4 - 1e-20; float is 4.0
+    ranking = Ranking(
+        basis="rubric",
+        entries=(
+            RankEntry(unit=0, ref=items[0].ref, value=4.0, exact="4"),
+            RankEntry(unit=1, ref=items[1].ref, value=4.0, exact=below),
+        ),
+    )
+    combined = Combined(combine_kind="rubric-rank/v1", units=base.units, ranking=ranking)
+    assert select(ThresholdSelect(basis="rubric", at_least=4.0), combined, None) == (0,)
+    with pytest.raises(ValidationError, match="exact value"):
+        Ranking(basis="rubric", entries=(RankEntry(unit=0, ref=items[0].ref, value=4.0),))
 
 
 def test_empty_admissible_set_and_empty_selection_are_rejected_without_outputs():

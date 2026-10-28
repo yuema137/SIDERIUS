@@ -231,15 +231,8 @@ def test_weighted_mean_stays_on_the_rubric_scale(tmp_path, bound):
     assert {score.weighted_mean for score in ranking.scores} == {float(bound)}
 
 
-def test_rubric_threshold_reads_the_weighted_mean_on_the_rubric_scale(tmp_path):
-    """Defect: threshold(basis=rubric, at_least=4) keeps items below 4 on the 1..5 scale.
-
-    Means are 13/3, 3 and 3: only reviews:2 clears 4 (a weighted sum, 13/9/9, would
-    keep all three).
-    """
-    value = invocation(tmp_path)
-    ranking = run(value, StubBridge(), tmp_path).outcome.ranking
-    assert ranking is not None
+def _combined(value: StrategyInvocation, ranking) -> Combined:
+    """The B6 ranking B6-8 builds from an ``ItemRanking`` (exact rubric values)."""
     by_id = {item.item_id: (index, item) for index, item in enumerate(value.items)}
     units = tuple(
         Unit(
@@ -251,16 +244,90 @@ def test_rubric_threshold_reads_the_weighted_mean_on_the_rubric_scale(tmp_path):
         for index, item in by_id.values()
     )
     entries = tuple(
-        RankEntry(unit=by_id[s.item_id][0], ref=by_id[s.item_id][1].ref, value=s.weighted_mean)
+        RankEntry(
+            unit=by_id[s.item_id][0],
+            ref=by_id[s.item_id][1].ref,
+            value=s.weighted_mean,
+            exact=s.weighted_mean_exact,
+        )
         for s in ranking.scores
     )
-    combined = Combined(
+    return Combined(
         combine_kind="rubric-rank/v1",
         units=units,
         ranking=Ranking(basis="rubric", entries=entries),
     )
-    kept = select(ThresholdSelect(basis="rubric", at_least=4.0), combined, None)
+
+
+def test_rubric_threshold_reads_the_weighted_mean_on_the_rubric_scale(tmp_path):
+    """Defect: threshold(basis=rubric, at_least=4) keeps items below 4 on the 1..5 scale.
+
+    Means are 13/3, 3 and 3: only reviews:2 clears 4 (a weighted sum, 13/9/9, would
+    keep all three).
+    """
+    value = invocation(tmp_path)
+    ranking = run(value, StubBridge(), tmp_path).outcome.ranking
+    assert ranking is not None
+    kept = select(ThresholdSelect(basis="rubric", at_least=4.0), _combined(value, ranking), None)
     assert [value.items[index].item_id for index in kept] == ["reviews:2"]
+
+
+def decimal_rubric(novelty: float, rigor: float) -> RubricSpec:
+    weights = (novelty, rigor)
+    criteria = tuple(
+        criterion.model_copy(update={"weight": weight})
+        for criterion, weight in zip(RUBRIC.criteria, weights, strict=True)
+    )
+    return RUBRIC.model_copy(update={"criteria": criteria})
+
+
+@pytest.mark.parametrize(
+    ("weights", "true_four"),
+    [
+        pytest.param((0.1, 0.2), (2, 5), id="0.1/0.2-float-gives-3.999999999999999"),
+        pytest.param((0.1, 0.3), (1, 5), id="0.1/0.3-binary-weights-are-not-the-declared-decimals"),
+    ],
+)
+def test_decimal_weights_are_exact_for_ties_thresholds_and_the_scale_bound(
+    tmp_path, weights, true_four
+):
+    """Defect: float arithmetic on weights 0.1/0.2 gives (2,5) -> 3.999999999999999 and
+    (4,4) -> 4.0, reversing the input-order tie, dropping a true 4 at at_least=4, and
+    letting an all-max item drift off scale_max."""
+    table = {
+        "reviews:0": {"novelty": [true_four[0]], "rigor": [true_four[1]]},  # 4 exactly
+        "reviews:1": {"novelty": [4], "rigor": [4]},  # 4 exactly: ties reviews:0
+        "reviews:2": {"novelty": [5], "rigor": [5]},  # all-max: exactly scale_max
+    }
+    rubric = decimal_rubric(*weights)
+    value = invocation(tmp_path, strategy=strategy(rubric=rubric_ref(rubric)), rubric=rubric)
+    ranking = run(value, StubBridge(table), tmp_path).outcome.ranking
+    assert ranking is not None
+    assert ranking.order == ("reviews:2", "reviews:0", "reviews:1")
+    assert [s.weighted_mean_exact for s in ranking.scores] == ["5", "4", "4"]
+    assert ranking.scores[0].weighted_mean == float(rubric.scale_max)
+    kept = select(ThresholdSelect(basis="rubric", at_least=4.0), _combined(value, ranking), None)
+    assert sorted(kept) == [0, 1, 2]
+
+
+def test_order_uses_the_exact_mean_when_display_floats_collide(tmp_path):
+    """Defect: ranking sorts on the display float, so distinct exact means that round to
+    the same float fall back to input order. Weights (1.0, 1e-16): (1,1) is exactly 1,
+    (1,2) is 10000000000000002/10000000000000001; both display as 1.0."""
+    rubric = decimal_rubric(1.0, 1e-16)
+    table = {
+        "reviews:0": {"novelty": [1], "rigor": [1]},
+        "reviews:1": {"novelty": [1], "rigor": [2]},
+    }
+    value = invocation(tmp_path, n=2, strategy=strategy(rubric=rubric_ref(rubric)), rubric=rubric)
+    ranking = run(value, StubBridge(table), tmp_path).outcome.ranking
+    assert ranking is not None
+    assert ranking.order == ("reviews:1", "reviews:0")
+    assert [score.weighted_mean for score in ranking.scores] == [1.0, 1.0]
+    assert [score.weighted_mean_exact for score in ranking.scores] == [
+        "10000000000000002/10000000000000001",
+        "1",
+    ]
 
 
 def test_llm_supplied_total_is_refused_not_used(tmp_path):
@@ -354,6 +421,16 @@ def test_replay_equals_run_and_refuses_tampered_or_unaccounted_evidence(tmp_path
         replay_llm_strategy(value, ROUTES, expected_sha256=canonical_sha256(record))
     record_path.write_bytes(original_record)
 
+    # Re-anchored record with a reversed ranking: the re-derived outcome must refuse it.
+    record = json.loads(original_record)
+    ranking = record["outcome"]["ranking"]
+    ranking["order"] = ranking["order"][::-1]
+    ranking["scores"] = ranking["scores"][::-1]
+    record_path.write_bytes(canonical_json_bytes(record))
+    with pytest.raises(StrategyError, match="outcome differs"):
+        replay_llm_strategy(value, ROUTES, expected_sha256=canonical_sha256(record))
+    record_path.write_bytes(original_record)
+
     (calls_dir / "002_scorer.json").write_bytes(original_call)
     with pytest.raises(StrategyError, match="not accounted for"):
         replay_llm_strategy(value, ROUTES, expected_sha256=result.evidence_sha256)
@@ -410,7 +487,7 @@ TOP1 = TopKSelect(k=1)
 def admit(select=TOP1, inputs=None, output_contract="literature.output", value=None):
     return admit_llm_strategy(
         value or strategy(),
-        inputs=inputs or (PORT,),
+        inputs=(PORT,) if inputs is None else inputs,
         output_contract=output_contract,
         select=select,
         cardinality=CardinalityBound(min=1, max=1),
@@ -436,6 +513,19 @@ def test_admission_accepts_rubric_rank_with_its_static_bound():
         ),
         pytest.param({"value": strategy(max_calls=2)}, "call_bound_exceeds_max_calls", id="cap"),
         pytest.param({"select": FirstAdmissibleSelect()}, "select_incompatible", id="first"),
+        pytest.param({"inputs": ()}, "no_input_ports", id="no-ports"),
+        pytest.param(
+            {
+                "value": strategy(scoring="batch", max_calls=1, repeats=1),
+                "inputs": (
+                    InputPort(
+                        name="r", contract="literature.output", cardinality="many", max_items=17
+                    ),
+                ),
+            },
+            "batch_too_large",
+            id="batch-prompt-bound",
+        ),
         pytest.param(
             {"select": ThresholdSelect(basis="metric", metric_id="m", at_least=0.5)},
             "select_incompatible",
