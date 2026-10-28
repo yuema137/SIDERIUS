@@ -344,6 +344,24 @@ def run_bulk(
     limit = concurrency or len(plan.shards)
     result = BulkResult(sha=sha, started_at=time.time())
 
+    # An EMPTY shard is never launched. ``pytest`` with no path arguments falls
+    # back to the configured ``testpaths`` and would run the whole tree,
+    # integration included — so a narrow selection planned over more shards
+    # than it has files (routine once the bulk lane is split across a CI
+    # matrix) must record an empty shard as trivially passed instead.
+    for shard in plan.shards:
+        if not shard.files:
+            result.shards.append(
+                ShardResult(
+                    index=shard.index,
+                    files=(),
+                    returncode=0,
+                    duration_s=0.0,
+                    tmpdir="",
+                )
+            )
+    runnable = [shard for shard in plan.shards if shard.files]
+
     # A thread pool is safe here: each worker only waits on its own child
     # process, so the GIL is released and nothing is shared but the result list.
     with ThreadPoolExecutor(max_workers=max(1, limit)) as pool:
@@ -357,7 +375,7 @@ def run_bulk(
                 threads=threads,
                 timeout_s=timeout_s,
             )
-            for shard in plan.shards
+            for shard in runnable
         ]
         # No early cancellation: a failing shard must not discard the evidence
         # its siblings are still producing.
