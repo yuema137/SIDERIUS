@@ -34,6 +34,7 @@ from .native_resume_models import NativeResumeAdmission
 from .process import environment, runtime_identity, spawn
 from .read import releasable
 from .reusable import verify_reusable_operation
+from .seed_admission import admission_seed
 from .store import (
     claim,
     digest,
@@ -156,8 +157,10 @@ def _admit_new(
     expected_reusable_inputs: ReusablePreparationExpectation | None,
 ) -> OperationHandle:
     """Native admission of a new ID; the slot already overlays any placed selector."""
+    preparation_run_seed = None
     if submission.kind == "candidate":
-        verify_reusable_operation(config, submission)
+        verified = verify_reusable_operation(config, submission)
+        preparation_run_seed = None if verified is None else verified.receipt.run_seed
         try:
             observed = fresh_preview(submission.request)
         except (OSError, ValueError) as error:
@@ -224,6 +227,7 @@ def _admit_new(
         expected_reusable_inputs,
         chain_admission,
         resume_admission,
+        preparation_run_seed,
     )
 
 
@@ -236,7 +240,16 @@ def _claim_and_spawn(
     expected_reusable_inputs: ReusablePreparationExpectation | None,
     chain_admission: NativeChainAdmission | None,
     resume_admission: NativeResumeAdmission | None,
+    preparation_run_seed: int | None,
 ) -> OperationHandle:
+    loop_root = None
+    if submission.kind == "candidate_loop_resume":
+        from .loop_resume import root_record
+        from .store import load_record
+
+        loop_root = root_record(load_record(config, submission.request.predecessor_operation_id))
+    # Issue #983 — bound under the store lock, before claim(): the record is the
+    # durable seed authority the child executes.
     record = OperationRecord(
         native_id=uuid4(),
         submission=submission,
@@ -247,6 +260,8 @@ def _claim_and_spawn(
         native_chain_admission=chain_admission,
         native_resume_admission=resume_admission,
         admitted_at=now(),
+        run_seed=admission_seed(submission, loop_root),
+        preparation_run_seed=preparation_run_seed,
     )
     compare_reusable_expectation(record, expected_reusable_inputs)
     path = claim(root, record)

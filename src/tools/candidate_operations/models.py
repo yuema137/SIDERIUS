@@ -7,6 +7,7 @@ from pydantic import Field, TypeAdapter, model_validator
 
 from core.runtime_control.pair_admission import PositiveGpuGiB
 from core.runtime_control.scheduling import PositiveCount, PositiveQuantity, ResourceRequest
+from core.seeding import RunSeed, RunSeedBinding, admitted_run_seed
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
 from tools.candidate_prepare.reusable_models import (
     ReusableCandidatePreparationRequest,
@@ -121,6 +122,9 @@ OperationSubmission = Annotated[
     Field(discriminator="kind"),
 ]
 SUBMISSION = TypeAdapter(OperationSubmission)
+#: Submissions whose admission binds a run seed (issue #983). A loop resume
+#: inherits its root's; native chains resolve theirs at chain startup.
+SEEDED_SUBMISSIONS = (PrepareOperation, ReusablePrepareOperation, CandidateOperation)
 NativeReceipt = CandidatePreparationReceipt | ReusablePreparationReceipt | CandidateRunReceipt
 
 
@@ -144,6 +148,31 @@ class OperationRecord(PreviewModel):
     native_resume_admission: NativeResumeAdmission | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    #: Issue #983 — the run seed bound at admission, before claim and spawn; a
+    #: loop resume copies its root's. ``None`` only on records that predate the
+    #: seed contract (and on native chains, whose seed lives in the chain lock).
+    run_seed: RunSeedBinding | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: Provenance: the run seed of the reusable preparation a candidate was built
+    #: from. The candidate never derives from it; it keeps its own ``run_seed``.
+    preparation_run_seed: RunSeed | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def seed_binding(self):
+        submission = self.submission
+        if isinstance(submission, SEEDED_SUBMISSIONS):
+            if self.run_seed is not None:
+                # Raises when the binding is not what admission binds for this request.
+                admitted_run_seed(submission.request.run_seed, self.run_seed)
+        elif self.run_seed is not None and submission.kind != "candidate_loop_resume":
+            raise ValueError(f"{submission.kind} operation records no run seed")
+        if self.preparation_run_seed is not None and (
+            not isinstance(submission, CandidateOperation)
+            or submission.reusable_preparation is None
+        ):
+            raise ValueError("preparation_run_seed requires a reusable-preparation candidate")
+        return self
 
     @model_validator(mode="after")
     def chain_binding(self):
@@ -251,6 +280,8 @@ class OperationSnapshot(PreviewModel):
     native_chain: NativeChainObservation | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    #: The admitted record's run seed (issue #983), readable before any receipt.
+    run_seed: RunSeedBinding | None = Field(default=None, exclude_if=lambda value: value is None)
     reason: str
 
 

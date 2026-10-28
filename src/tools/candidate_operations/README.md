@@ -52,6 +52,11 @@ before candidate execution.
    identical JSON with the same ID returns the same operation without running it
    again. Different content with that ID is refused.
 
+   Every run uses one random seed. Without `--run-seed N`, SIDERIUS picks one
+   and records it; `status` shows it as `run_seed`. Add `--run-seed N` (an
+   integer from 0 to 2^53 - 1) to choose it yourself, and repeat the same value
+   whenever you resubmit that file.
+
 3. Reopen the result and read a bounded log chunk:
 
    ```sh

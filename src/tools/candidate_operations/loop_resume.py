@@ -32,6 +32,7 @@ from .models import (
     OperationStoreConfig,
 )
 from .process import runtime_identity
+from .seed_admission import require_recorded_seed, require_root_seed
 from .store import (
     is_authored_loop,
     load_record,
@@ -94,6 +95,9 @@ def root_inputs(record: OperationRecord):
     )
     if record.runtime != root.runtime or record.inputs != root.inputs:
         raise OperationFailure("integrity", "loop continuation runtime or inputs changed")
+    require_recorded_seed(root, initial.seed_binding())
+    if record.run_seed != root.run_seed:
+        raise OperationFailure("integrity", "loop continuation run seed changed")
     return root, saved, initial
 
 
@@ -226,6 +230,9 @@ def admit(
         load_record(config, submission.request.predecessor_operation_id)
     )
     assert root.submission.kind == "candidate"
+    # Issue #983 — a segment continues the root's seed; an S3b-era root records
+    # none (its lock does), and is refused rather than adopted or re-minted.
+    require_root_seed(root)
     try:
         # The same file-identity check the continuation child repeats; refusing here
         # keeps an edited input from consuming the single successor reservation.

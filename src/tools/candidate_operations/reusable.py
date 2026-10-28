@@ -2,7 +2,11 @@
 
 from uuid import UUID
 
-from tools.candidate_prepare import ReusablePreparedSelection, verify_reusable_preparation
+from tools.candidate_prepare import (
+    ReusablePreparedSelection,
+    VerifiedReusablePreparation,
+    verify_reusable_preparation,
+)
 
 from .files import canonical, overlap
 from .models import CandidateOperation, OperationFailure, OperationStoreConfig
@@ -22,20 +26,27 @@ def validate_selection_root(
         raise OperationFailure("path", "operation state overlaps reusable envelope")
 
 
-def verify_reusable_operation(config: OperationStoreConfig, submission: CandidateOperation) -> None:
-    """Fresh content check for a new admission or dispatch; never for existing-ID recovery."""
+def verify_reusable_operation(
+    config: OperationStoreConfig, submission: CandidateOperation
+) -> VerifiedReusablePreparation | None:
+    """Fresh content check for a new admission or dispatch; never for existing-ID recovery.
+
+    The operator's explicit ``run_seed`` is the one field a candidate may add to
+    the prepared request: the preparation never chooses the candidate's seed.
+    """
     selection = submission.reusable_preparation
     if selection is None:
-        return
+        return None
     validate_selection_root(config, selection)
     try:
         verified = verify_reusable_preparation(selection)
-        if verified.request != submission.request:
+        if verified.request != submission.request.model_copy(update={"run_seed": None}):
             raise ValueError("submitted request differs from selected preparation")
     except (OSError, ValueError) as error:
         raise OperationFailure(
             "reusable_preparation", "reusable preparation no longer matches the selected request"
         ) from error
+    return verified
 
 
 def build_reusable_operation(

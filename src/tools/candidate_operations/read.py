@@ -7,8 +7,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
 
+from core.seeding import RunSeedBinding
 from tools.candidate_prepare.models import CandidatePreparationReceipt, PreparationControl
-from tools.candidate_prepare.reusable_models import ReusablePreparationObservations
+from tools.candidate_prepare.reusable_models import (
+    ReusablePreparationObservations,
+    ReusablePreparationReceipt,
+)
 from tools.candidate_prepare.reusable_terminal import read_reusable_terminal
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.candidate_worker.records import verify_candidate_records
@@ -31,6 +35,7 @@ from .models import (
 from .native_chain_read import read_native_chain_operation
 from .native_resume_read import has_continuation, read_resume_chain
 from .process import observe
+from .seed_admission import require_recorded_seed
 from .store import (
     is_authored_loop,
     load_record,
@@ -65,11 +70,14 @@ def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
 
         return read_segment(record)
     if submission.kind == "prepare_reusable":
-        return read_reusable_terminal(
+        terminal = read_reusable_terminal(
             submission.request,
             ReusablePreparationObservations.from_inputs(record.inputs),
             record.native_id,
         )
+        if terminal is not None:
+            require_recorded_seed(record, _preparation_seed(terminal[0]))
+        return terminal
     control = native_directory(submission)
     try:
         payload = read_bytes(control / "receipt.json")
@@ -89,6 +97,7 @@ def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
             or saved.sources != record.inputs
         ):
             raise OperationFailure("integrity", "native preparation identity mismatch")
+        require_recorded_seed(record, _preparation_seed(receipt))
     else:
         assert submission.kind == "candidate"
         receipt = CandidateRunReceipt.model_validate_json(payload)
@@ -102,12 +111,31 @@ def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
             workspace=control.parent,
             receipt=receipt,
         )
+        require_recorded_seed(record, initial.seed_binding())
     return receipt, hashlib.sha256(payload).hexdigest()
 
 
+def _preparation_seed(
+    receipt: CandidatePreparationReceipt | ReusablePreparationReceipt,
+) -> RunSeedBinding | None:
+    if receipt.run_seed is None or receipt.run_seed_source is None:
+        return None
+    return RunSeedBinding(value=receipt.run_seed, source=receipt.run_seed_source)
+
+
 def read_operation(config: OperationStoreConfig, operation_id: UUID) -> OperationSnapshot:
+    """Project one operation; the admitted run seed is shown from the record (issue #983)."""
     config = validate_config(config)
     record = load_record(config, operation_id)
+    snapshot = _read_record(config, record, operation_id)
+    if record.run_seed is None:
+        return snapshot
+    return snapshot.model_copy(update={"run_seed": record.run_seed})
+
+
+def _read_record(
+    config: OperationStoreConfig, record: OperationRecord, operation_id: UUID
+) -> OperationSnapshot:
     path = operation_path(config, operation_id)
     process = ProcessObservation(status="unknown", reason="missing_identity")
     observed_at = now()

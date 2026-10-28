@@ -404,6 +404,25 @@ def test_paused_continuation_resumes_again_across_two_hops(
         for operation_id in (root_id, first_id, second_id)
     ]
     assert tokens[1] == tokens[0] and tokens[2] == tokens[0]
+    # Issue #983 T7/M8: every segment continues the root's admitted seed, and a
+    # resumed segment's bodies keep the global iteration (3-4, never 1-2 again).
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+    from core.seeding import SeedCoordinates
+
+    seed = read_operation(config, root_id).run_seed
+    assert seed is not None and seed.source == "generated"
+    assert [read_operation(config, item).run_seed for item in (first_id, second_id)] == [seed] * 2
+    assert (initial.run_seed, initial.run_seed_source) == (seed.value, seed.source)
+    tuned = [
+        HyperparamTuningInput.model_validate_json(
+            tuning_input_path(Path(initial.workspace), "train", iteration=iteration).read_bytes()
+        )
+        for iteration in range(1, 5)
+    ]
+    assert [(value.run_seed, value.seed_coordinates) for value in tuned] == [
+        (seed.value, SeedCoordinates(iteration=iteration, node_id="train"))
+        for iteration in range(1, 5)
+    ]
 
 
 @pytest.mark.parametrize("fault", ["native_lease", "supervisor"])

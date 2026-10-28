@@ -221,7 +221,8 @@ class CandidateConsole:
             else None
         )
         return StatusView(
-            **snapshot.model_dump(exclude={"receipt", "receipt_digest"}),
+            # The run seed's console readback is issue #983 S6; the view omits it.
+            **snapshot.model_dump(exclude={"receipt", "receipt_digest", "run_seed"}),
             native_status=receipt.status if receipt else None,
             graph_trace=receipt.graph_trace if isinstance(receipt, CandidateRunReceipt) else None,
             native_id=native_id,

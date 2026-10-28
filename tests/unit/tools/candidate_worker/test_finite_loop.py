@@ -112,6 +112,15 @@ def test_two_native_bodies_preserve_advice_and_verify_feedback(
     assert len(proposals) == 2
     tuned = [value for name, value in loop_tuner if name == "tuner"]
     assert [value.current_run_best_formal_score for value in tuned] == [None, 0.75]
+    # Issue #983 T7 (F-SEED-2): each body's tuner derives under its own global
+    # iteration and the authored node, from the one seed the launch receipt bound.
+    from core.seeding import SeedCoordinates
+
+    assert receipt.run_seed is not None and receipt.run_seed_source == "generated"
+    assert [(value.run_seed, value.seed_coordinates) for value in tuned] == [
+        (receipt.run_seed, SeedCoordinates(iteration=1, node_id="train")),
+        (receipt.run_seed, SeedCoordinates(iteration=2, node_id="train")),
+    ]
     assert all(
         any(
             item.kind == "human" and "both output logits" in item.content
@@ -225,7 +234,8 @@ def test_operation_stop_finishes_active_body_without_next_dispatch(
         return output
 
     monkeypatch.setattr(training.HyperparamTuningAgent, "run", stop_at_tuning)
-    receipt = launch_candidate(request, invocation_id=record.native_id)
+    # As the operation child does: the admitted record's nonce and run seed.
+    receipt = launch_candidate(request, invocation_id=record.native_id, run_seed=record.run_seed)
     assert receipt.status == "stopped", receipt.error
     assert receipt.loop_trace.attempted_iterations == 1
     assert len([item for item in loop_tuner if item[0] == "tuner"]) == 1
@@ -604,3 +614,55 @@ def test_loop_on_unsupported_profile_is_refused_before_record_and_dispatch(
     )
     assert handle.observation == "starting"
     spawn.assert_called_once()
+
+
+SEEDS = (4503599627370497, 9007199254740991)
+
+
+def test_candidate_llm_requests_are_seed_invariant(
+    prepared, loop_tuner, native_runner, interpretation_provider, monkeypatch
+):
+    """T15 (candidate): fails if any run seed or derived seed reaches an LLM-visible request.
+
+    Two runs of the same two-body loop differ only in the explicit run seed and
+    in minted identities (run/candidate UUIDs), which are masked. Every recorded
+    proposer, implementor, validator and interpreter request is byte-identical.
+    """
+    import re
+
+    recorded: list[str] = []
+    # The interpreter double overrides only `generate`; it inherits `generate_text`.
+    for owner, name in (
+        (native_runner, "generate"),
+        (native_runner, "generate_text"),
+        (interpretation_provider, "generate"),
+    ):
+        real = owner.__dict__[name]
+
+        def capture(self, system, user, *args, _real=real, **kwargs):
+            recorded.append(f"{kwargs.get('label')}\n{system}\n{user}")
+            return _real(self, system, user, *args, **kwargs)
+
+        monkeypatch.setattr(owner, name, capture)
+    workspace = Path(prepared.preview.document.definition.task.workspace)
+    runs = {}
+    for seed in SEEDS:
+        recorded.clear()
+        request = loop_request(prepared).model_copy(update={"run_seed": seed})
+        receipt = launch_candidate(request)
+        assert receipt.status == "completed", receipt.error
+        assert (receipt.run_seed, receipt.run_seed_source) == (seed, "operator")
+        masked = [
+            re.sub(r"[0-9a-f]{32}|[0-9a-f-]{36}", "<id>", item).replace(str(workspace), "<ws>")
+            for item in recorded
+        ]
+        labels = {item.split("\n", 1)[0] for item in recorded}
+        assert "interpretation.per_model" in labels and len(labels) > 2, labels
+        runs[seed] = masked
+        # Move the run aside (never delete) so the second run claims a fresh workspace.
+        workspace.rename(workspace.with_name(f"workspace-seed-{seed}"))
+    first, second = runs.values()
+    assert first == second
+    # Distinctive 53-bit values: neither seed's digits appear in any request.
+    assert not any(str(seed) in item for item in first for seed in SEEDS)
+    assert not any("run_seed" in item for item in first)
