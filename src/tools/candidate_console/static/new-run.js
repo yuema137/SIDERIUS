@@ -52,7 +52,11 @@
     const id = intent.payload.selection.preparation_operation_id;
     $('operation-id').textContent = id;
     $('monitor').href = '#slow-control/' + id;
-    const version = intent.source_version;
+    // Display-only: a malformed stored version (hand-edited storage) is ignored.
+    const stored = intent.source_version;
+    const version = stored && typeof stored === 'object' && typeof stored.sha256 === 'string' &&
+      /^[0-9a-f]{64}$/.test(stored.sha256) && (stored.name === null || stored.name === undefined || typeof stored.name === 'string')
+      ? stored : null;
     const named = version ? ` for source version ${version.name ? `"${version.name}"` : 'unnamed'} (${version.sha256.slice(0, 12)})` : '';
     $('operation-status').textContent = `Retained preparation intent${named}. Check or retry this exact operation; current editor changes are separate.`;
   }

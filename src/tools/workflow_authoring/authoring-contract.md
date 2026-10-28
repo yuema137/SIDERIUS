@@ -80,14 +80,17 @@ SHA-256 remains the version identity, and A → B → A records a third row with
 absent means the next unused `vN`, where N starts at one more than the number of
 named Saves. Under the existing source lock and before any recovery copy or source
 write, Save reads and validates the record (regular owned single-link file, no
-symlink, at most 256 KiB, matching `source_name`, at most 1000 rows), refuses a used
+symlink, at most 512 KiB, matching `source_name`, at most 1000 rows), refuses a used
 name and prepares the appended record; any such refusal is `version_record` and
-writes nothing. If the last recorded SHA differs from the base, an `observed` row
-precedes the `saved` row. After the source is atomically replaced, the record is
-published by temp file + fsync + rename, keeping its permission bits (a new record
-takes the source's bits). If that write fails, Save returns `version_record` with
-the saved `current` view: the source is saved, the old record is intact, and the
-next Save records these bytes as an `observed` row. Identical bytes record nothing.
+writes nothing. The byte cap is sized so 1000 worst-case rows (64 four-byte UTF-8
+name characters) always fit, so the row cap is the operative Save limit; either
+refusal message names both limits. If the last recorded SHA differs from the base,
+an `observed` row precedes the `saved` row. After the source is atomically replaced,
+the record is published by temp file + fsync + rename, keeping its permission bits
+(a new record takes the source's bits). If that write fails, Save returns the
+distinct code `version_record_not_updated` with the saved `current` view: the source
+is saved, the old record is intact, and the next Save records these bytes as an
+`observed` row. Identical bytes record nothing.
 `SaveView.version_name` reports the recorded name.
 
 Without a record, workflows keep working: `GET /versions` lists the current bytes

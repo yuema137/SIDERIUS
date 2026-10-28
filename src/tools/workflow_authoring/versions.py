@@ -21,8 +21,12 @@ from core.durable_io import publish_bytes_atomically
 from .models import MAX_SOURCE_BYTES, Digest, Model, VersionName
 
 VERSION_RECORD_SCHEMA = "siderius.workflow-versions/v1"
-MAX_VERSION_RECORD_BYTES = 256 * 1024
 MAX_VERSIONS = 1000
+# Sized so MAX_VERSIONS rows always fit: the worst case (64 four-byte-UTF-8 name
+# characters per row, 255-byte source name, offset timestamps) encodes to ~434 KiB.
+# The row cap is therefore the operative Save limit; the byte cap only bounds reads.
+MAX_VERSION_RECORD_BYTES = 512 * 1024
+_RECORD_LIMITS = f"at most {MAX_VERSIONS} versions and {MAX_VERSION_RECORD_BYTES // 1024} KiB"
 
 
 def version_record_path(source_file: Path) -> Path:
@@ -108,7 +112,7 @@ def read_record(source_file: Path) -> tuple[VersionRecord | None, int | None]:
             raise VersionRecordError("version record must be an owned single-link regular file")
         payload = handle.read(MAX_VERSION_RECORD_BYTES + 1)
     if len(payload) > MAX_VERSION_RECORD_BYTES:
-        raise VersionRecordError("version record exceeds 256 KiB")
+        raise VersionRecordError(f"version record exceeds {_RECORD_LIMITS}")
     try:
         record = VersionRecord.model_validate_json(payload)
     except ValidationError as error:
@@ -151,7 +155,7 @@ def appended_record(
     added.append(RecordedVersion(sha256=saved_sha256, name=name, recorded_at=now, origin="saved"))
     if len(record.versions) + len(added) > MAX_VERSIONS:
         raise VersionRecordError(
-            f"version record holds {MAX_VERSIONS} versions; archive it externally to continue"
+            f"version record is full ({_RECORD_LIMITS}); archive it externally to continue"
         )
     return VersionRecord(source_name=record.source_name, versions=(*record.versions, *added)), name
 
@@ -159,7 +163,9 @@ def appended_record(
 def encode_record(record: VersionRecord) -> bytes:
     payload = (record.model_dump_json(indent=2) + "\n").encode("utf-8")
     if len(payload) > MAX_VERSION_RECORD_BYTES:
-        raise VersionRecordError("version record would exceed 256 KiB")
+        raise VersionRecordError(
+            f"version record would exceed {_RECORD_LIMITS}; archive it externally to continue"
+        )
     return payload
 
 

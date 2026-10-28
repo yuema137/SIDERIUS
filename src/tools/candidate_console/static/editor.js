@@ -511,7 +511,7 @@
       if (error.stale) return;
       if (!current(id, version)) return;
       // Source bytes were published; only the version record write failed.
-      if (error.code === 'version_record' && error.value?.current) { adopt(error.value.current); status(error.message); return; }
+      if (error.code === 'version_record_not_updated' && error.value?.current) { adopt(error.value.current); status(error.message); return; }
       if (error.code === 'version_record') { status(error.message + ' Save refused before writing; reviewed proposal retained.'); return; }
       if (hasSourceConflict(error) && error.value?.current) { showConflict(error.value.current); reviewed = null; }
       else if (error.value?.proposal?.task_reference_update) {

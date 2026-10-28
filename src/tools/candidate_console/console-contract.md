@@ -441,7 +441,10 @@ returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
 `/api/editor/{project_id}/versions` returns `VersionList` and GET
 `/versions/{index}?sha256=` returns read-only `VersionDetail` (see named versions
 in the authoring contract); `editor-versions.js` renders the Save name field and
-Version history panel and owns no record policy. The existing console
+Version history panel and owns no record policy. Save error `version_record`
+means nothing was written (the reviewed proposal is retained); the distinct
+`version_record_not_updated` means the source was saved but its record was not, so
+`editor.js` adopts the returned saved `current` view. The existing console
 Bearer token, origin, host and 256 KiB wire-body admission apply to every API
 route. Browser requests select project IDs and never filesystem destinations.
 The [authoring contract](../workflow_authoring/authoring-contract.md) owns source
