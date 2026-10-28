@@ -46,9 +46,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from functools import cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 
 from agent.schemas.hyperparam_tuning import (
     HealthGateMode,
@@ -58,7 +58,7 @@ from agent.schemas.hyperparam_tuning import (
     validate_trial_override_schedule,
 )
 from agent.schemas.parameter_rules import ParameterRules
-from agent.schemas.proposal import OutputTypeName
+from agent.schemas.proposal import OutputTypeName, ResearchPolicy
 from core.runtime_control.admission import AdmissionEnforcement
 from core.runtime_control.completion import RuntimeCompletionPolicy
 from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
@@ -71,6 +71,11 @@ from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from core.seeding import RunSeed
 from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
+
+#: The early-stop threshold, in the golden metric's units. Its only consumer is
+#: the workflow loop, so this declaration owns its rule: NaN would make every
+#: comparison False and silently disable early stopping (issue #1045).
+FiniteTargetScore = Annotated[float, Field(allow_inf_nan=False)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +95,7 @@ class WorkflowLaunchConfig:
     start_iteration: int = 1
     max_rounds: int = 10
     max_proposal_attempts: int = 3
-    target_score: float | None = None
+    target_score: FiniteTargetScore | None = None
     file_index: int = 6
     healthgate_mode: HealthGateMode | None = None
     result_authority: ResultAuthority | None = None
@@ -338,35 +343,69 @@ def validate_launch_trial_overrides(launch: WorkflowLaunchConfig) -> None:
     )
 
 
+@dataclass(frozen=True)
+class _LaunchOwner:
+    """The schema field that owns one launch value's rule."""
+
+    label: str
+    adapter: TypeAdapter
+    accepts_none: bool
+
+
+def _owner(label: str, annotation: object) -> _LaunchOwner:
+    adapter = TypeAdapter(annotation)
+    try:
+        adapter.validate_python(None)
+    except ValidationError:
+        return _LaunchOwner(label, adapter, accepts_none=False)
+    return _LaunchOwner(label, adapter, accepts_none=True)
+
+
 @cache
-def _tuner_owned_launch_fields() -> dict[str, TypeAdapter]:
-    """Launch fields forwarded to a ``HyperparamTuningInput`` field of the same name."""
-    owned = sorted(launch_config_field_names() & HyperparamTuningInput.model_fields.keys())
-    return {
-        name: TypeAdapter(HyperparamTuningInput.model_fields[name].rebuild_annotation())
-        for name in owned
+def _launch_owners() -> dict[str, _LaunchOwner]:
+    """Each launch field's owning schema field.
+
+    Most launch values are forwarded to a same-named ``HyperparamTuningInput``
+    field. Two floats have no tuner owner (issue #1045 sweep):
+    ``minimum_boldness`` is owned by ``ResearchPolicy``, and ``target_score``,
+    consumed only by the workflow's early stop, is owned by its declaration
+    here (``FiniteTargetScore``).
+    """
+    owners = {
+        name: _owner(
+            f"HyperparamTuningInput.{name}",
+            HyperparamTuningInput.model_fields[name].rebuild_annotation(),
+        )
+        for name in sorted(launch_config_field_names() & HyperparamTuningInput.model_fields.keys())
     }
+    owners["minimum_boldness"] = _owner(
+        "ResearchPolicy.minimum_boldness",
+        ResearchPolicy.model_fields["minimum_boldness"].rebuild_annotation(),
+    )
+    owners["target_score"] = _owner("WorkflowLaunchConfig.target_score", FiniteTargetScore | None)
+    return owners
 
 
 def validate_launch_owner_values(launch: WorkflowLaunchConfig) -> None:
-    """Check every tuner-owned launch value against its owner before any work.
+    """Check every owned launch value against its owner before any work.
 
-    Issues #828 and #1045: the tuner schema owns these rules (finite positive
-    budgets, finite timeouts and safety factors, ...), but on the standard path
-    it only ran when the tuner input was built, after paid proposal and
-    implementation calls. Every entry path now applies the same annotations at
-    launch. ``None`` stays "omitted"; transit fields resolved later keep it.
+    Issues #828 and #1045: the owners declare these rules (finite positive
+    budgets, finite timeouts, factors and thresholds, ...), but on the standard
+    path they only ran when the consuming input was built, after paid proposal
+    and implementation calls. Every entry path now applies the same annotations
+    at launch. ``None`` stays "omitted"; transit fields resolved later keep it.
     """
-    for name, owner in _tuner_owned_launch_fields().items():
+    for name, owner in _launch_owners().items():
         value = getattr(launch, name)
         if value is None:
             continue
         try:
-            owner.validate_python(value)
+            owner.adapter.validate_python(value)
         except ValidationError as exc:
             reason = "; ".join(error["msg"] for error in exc.errors())
+            omit = " Omit it (None) to leave it unset or disabled." if owner.accepts_none else ""
             raise ValueError(
-                f"{name}={value!r} is refused by HyperparamTuningInput.{name}: {reason}"
+                f"{name}={value!r} is refused by {owner.label}: {reason}.{omit}"
             ) from exc
 
 
