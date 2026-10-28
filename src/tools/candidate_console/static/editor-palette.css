@@ -6,19 +6,21 @@
 .editor-palette h3 { margin: 0 0 .4rem; font-size: .9rem; }
 .editor-palette .palette-toggle { display: none; width: 100%; text-align: left; }
 .editor-palette .palette-search { width: 100%; margin-bottom: .4rem; box-sizing: border-box; }
-.editor-palette .palette-list { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--control-border); border-radius: .45rem; overflow: hidden; }
+.editor-palette .palette-list { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--control-border); border-top: 0; border-radius: .45rem; overflow: hidden; }
 /* Compact stack: one aligned row per capability (icon, name, step, badge); rows share
  * dividers, not margins (margin 0 overrides the global details margin in styles.css),
  * so the collapsed rail has no gaps. Expanding a row shows its details. */
 .editor-palette .palette-category { --capability-accent: var(--capability-generic); --capability-tint: var(--control); margin: 0; border-left: 4px solid var(--capability-accent); background: var(--panel); }
-.editor-palette .palette-category + .palette-category { border-top: 1px solid var(--control-border); }
+/* Every row carries the same top divider (the list has no top border), so all rows
+ * have the same block size. */
+.editor-palette .palette-category { border-top: 1px solid var(--control-border); }
 .editor-palette .palette-category[data-capability="interpretation"] { --capability-accent: var(--capability-interpretation); --capability-tint: var(--capability-interpretation-tint); }
 .editor-palette .palette-category[data-capability="literature"] { --capability-accent: var(--capability-literature); --capability-tint: var(--capability-literature-tint); }
 .editor-palette .palette-category[data-capability="proposal"] { --capability-accent: var(--capability-proposal); --capability-tint: var(--capability-proposal-tint); }
 .editor-palette .palette-category[data-capability="implementation"] { --capability-accent: var(--capability-implementation); --capability-tint: var(--capability-implementation-tint); }
 .editor-palette .palette-category[data-capability="validation"] { --capability-accent: var(--capability-validation); --capability-tint: var(--capability-validation-tint); }
 .editor-palette .palette-category[data-capability="tuning"] { --capability-accent: var(--capability-tuning); --capability-tint: var(--capability-tuning-tint); }
-.editor-palette .palette-row { display: flex; align-items: center; gap: .4rem; box-sizing: border-box; height: 2.25rem; padding: 0 .5rem; cursor: pointer; list-style: none; color: var(--text); overflow: hidden; }
+.editor-palette .palette-row { display: flex; align-items: center; gap: .4rem; box-sizing: border-box; height: 2.25rem; line-height: 1; padding: 0 .5rem; cursor: pointer; list-style: none; color: var(--text); overflow: hidden; }
 .editor-palette .palette-row::-webkit-details-marker { display: none; }
 .editor-palette .palette-row::after { flex: none; content: "▸"; color: var(--text); font-size: .7rem; }
 .editor-palette .palette-category[open] > .palette-row { background: var(--capability-tint); }

@@ -10,8 +10,8 @@
  * shape tokens come from editor-contract-presentation.js keyed on the id. */
 (() => {
   'use strict';
-  // Sentence-case display titles from editor-capability-presentation.js (their owner).
-  const capabilityLabel = name => window.editorCapabilityPresentation.title(name);
+  // Display names from editor-capability-presentation.js (their single owner).
+  const capabilityLabel = name => window.editorCapabilityPresentation.label(name);
   const contracts = () => window.editorContractPresentation;
   const element = (tag, text, parent, className) => {
     const value = document.createElement(tag); value.textContent = text;
@@ -57,8 +57,7 @@
   function titled(parent, capability, className) {
     window.editorCapabilityPresentation.append(parent, capability, '', className);
     parent.querySelector('.capability-instance')?.remove();
-    const name = parent.querySelector('.capability-name');
-    name.textContent = capabilityLabel(capability); name.title = capabilityLabel(capability);
+    parent.querySelector('.capability-name').title = capabilityLabel(capability);
   }
   // Collapsed row (summary): icon | title | marker | step | chevron, one uniform line.
   // The Start here / Optional context badge is a small marker (accessible text and

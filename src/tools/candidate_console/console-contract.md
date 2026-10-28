@@ -308,7 +308,7 @@ selected operation inside the existing poll, only for `kind == "candidate"` and
 clears the section. 404/409 are final for that selection; other failures retry on
 the next existing poll. Each body is its own section (`Iteration N` for several
 bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
-(`TRAIN & TUNE`). No cross-body score or ordering is computed or displayed.
+(`Train & tune`). No cross-body score or ordering is computed or displayed.
 Non-integer numbers are display-rounded by `number-format.js` (up to four
 decimals; four significant digits for magnitudes below 1e-3 or from 1e9); the
 exact reported value stays in the cell's tooltip. Stop-condition values in the
@@ -516,7 +516,7 @@ drag payload. It lists
 `GET /api/editor/node-catalog` entries (fetched once per connection, only while the
 Workflow view is shown; other pages never request it) as a compact, aligned stack
 of one uniform-height collapsed `details.palette-category` row per capability (icon,
-sentence-case title from `editorCapabilityPresentation.title` on one line with
+display name from `editorCapabilityPresentation.label` on one line with
 ellipsis and a full-title tooltip, a dot marker with accessible text and tooltip for
 "Start here" on `guide.chain[0]` / "Optional context" on `guide.context`, step
 number) in `guide` stage order, with a text search (matching rows open). Above the
@@ -688,8 +688,10 @@ partial code-authored set never overlaps. A pointer drag and Alt + arrows call t
 same move: it records every displayed position, the moved one updated, so the next
 open shows the same layout; a save without a move keeps positions unchanged.
 Keyboard buttons share pointer actions; Escape/right-click cancels a pending wire.
-Card headings use the paper capability names (`INTERPRET`, `LITERATURE`, `PROPOSE`,
-`IMPLEMENT`, `VALIDATE`, `TRAIN & TUNE`) from `editor-capability-presentation.js`;
+Card headings, palette, loop, run and result views use one sentence-case display
+name per capability (`Interpret results`, `Literature review`, `Propose model`,
+`Implement`, `Validate`, `Train & tune`; the paper figure's stages in plain words)
+from `editor-capability-presentation.js`, their single owner;
 a unit census binds that table to the catalog. Shared semantic theme tokens own colors.
 
 Source/form/base changes invalidate Review. Unreviewed inspector edits disable

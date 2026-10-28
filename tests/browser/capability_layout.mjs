@@ -81,9 +81,9 @@ try {
   for (const mode of ['light', 'dark']) {
     await theme.selectOption(mode);
     assert.equal(await page.locator('html').getAttribute('data-theme'), mode);
-    assert.equal(await page.locator('#circuit-node-interpret .capability-name').textContent(), 'INTERPRET');
+    assert.equal(await page.locator('#circuit-node-interpret .capability-name').textContent(), 'Interpret results');
     assert.deepEqual(await page.locator('.circuit-card .capability-name').allTextContents(),
-      ['INTERPRET', 'PROPOSE', 'IMPLEMENT', 'VALIDATE', 'TRAIN & TUNE']);
+      ['Interpret results', 'Propose model', 'Implement', 'Validate', 'Train & tune']);
     assert.equal(await page.locator('.capability-generic').count(), 0, `${mode}: generic CAPABILITY card rendered`);
     const accent = await page.locator('.circuit-card[data-node="interpret"]').evaluate(card => {
       const style = getComputedStyle(card);
