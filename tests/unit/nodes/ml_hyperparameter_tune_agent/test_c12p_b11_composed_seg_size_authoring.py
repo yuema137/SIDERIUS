@@ -62,6 +62,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, TaskCompositionRef
+from core.training_seeds import SeedContext
 from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.task_data_path import bind_task_data_path
 from nodes.ml_hyperparameter_tune_agent.contracts import (
@@ -70,6 +71,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     RunBindings,
 )
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
+from tests.helpers.run_seed import TEST_RUN_SEED
 
 #: What ``WaveNetConfig`` DECLARES (`ml_models/models_format_sandbox.py:25`).
 #: Hardcoded on purpose: read back from the config class it would compare the
@@ -252,6 +254,7 @@ def _bindings(agent_input, configs_dir, data_path=None) -> RunBindings:
 
 def _composed_input() -> HyperparamTuningInput:
     return HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="wavenet",
         task_composition_ref=TaskCompositionRef(
@@ -661,5 +664,5 @@ def _trial_config_for(topology):
         target_files=list(range(topology.num_files)),
         train_sampling_seed=0,
         eval_sampling_seed=0,
-        train_base_seed=0,
+        seed_context=SeedContext(run_seed=0),
     )

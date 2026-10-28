@@ -65,8 +65,8 @@ if TYPE_CHECKING:
     from workflows.native_chain_binding import NativeChainLaunchContext
     from workflows.reviewed_launch import ReviewedLaunchContext
 
-from dotenv import load_dotenv
 
+from agent.credential_environment import load_compatibility_dotenv
 from agent.data_analysis.source_scope import source_prompt_identity
 from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.telemetry import LLMBridgeContextError
@@ -89,7 +89,9 @@ from core.run_invariants import (
     RunInvariantsViolation,
     build_run_invariants,
     effective_watchdog_deadline_policy,
+    run_seed_lock_fields,
 )
+from core.run_seed_lock import continuation_run_seed
 from execute_tools.data_paths import DatasetDirectoryUnavailable, resolve_dataset_dir
 from execute_tools.dataset_config import DataScope, resolve_dataset_profile
 from execute_tools.health_checks._composition import HealthBindingState
@@ -176,7 +178,7 @@ SIDERIUS_ROOT = (
     str(_CHECKOUT_ROOT) if _CHECKOUT_ROOT is not None else str(Path(__file__).resolve().parents[2])
 )
 if _CHECKOUT_ROOT is not None:
-    load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
+    load_compatibility_dotenv(Path(SIDERIUS_ROOT) / ".env")
 
 
 def load_validation_fixed_candidate_plan(path: str | None) -> dict | None:
@@ -1076,6 +1078,10 @@ def compute_expected_invariants(
             ),
             runtime_completion_policy=args.runtime_completion_policy,
             runtime_verifier_identity=identity.runtime_verifier_identity,
+            # Issue #983 — the locked seed (refusing a pre-seed lock or a
+            # conflicting --run_seed), else the flag; generation stays with
+            # the workflow startup, which locks the same value.
+            **run_seed_lock_fields(continuation_run_seed(args.workspace, args.run_seed)),
         ),
     )
     return invariants
@@ -1653,6 +1659,10 @@ def _run_bound_iteration(
             launch_identity=launch_identity,
             replacement=manifest_replacement,
         )
+        if isinstance(e, RunInvariantsViolation):
+            # Issue #983 — a pre-seed lock or a conflicting --run_seed is a
+            # workspace contract failure; no later iteration can repair it.
+            _halt_contract_failure(args.workspace, args.start_iteration, e)
         sys.exit(1)
 
     if expectations is not None:

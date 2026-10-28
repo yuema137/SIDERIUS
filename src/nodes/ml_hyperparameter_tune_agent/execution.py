@@ -42,6 +42,7 @@ from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
+from core.training_seeds import TrainingSeedPlan
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
@@ -430,7 +431,7 @@ def run_admission_preflight(
         task_composition_ref=agent_input.task_composition_ref,
         task_scopes=prepared.task_scopes,
         data_dir=time_data_dir,
-        epoch_seed=trial_config.train_base_seed,
+        epoch_seed=TrainingSeedPlan(trial_config.seed_context).epoch(0).subsample,
         train_portion=trial_config.train_portion,
         max_samples=agent_input.validation_max_train_samples,
     )

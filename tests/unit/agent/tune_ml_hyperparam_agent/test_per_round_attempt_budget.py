@@ -36,6 +36,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
+from tests.helpers.run_seed import TEST_RUN_SEED
 
 
 @pytest.fixture(autouse=True)
@@ -149,6 +150,7 @@ def _make_input(
     the entire point of the exercise.
     """
     return HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,

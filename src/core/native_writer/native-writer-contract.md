@@ -54,7 +54,11 @@ observer inside native iteration scope sees the lifecycle after finalization and
 before return/raise. It marks uncertainty for an unreaped child, cleanup errors,
 an owned group not proven absent, or an abnormal plain child without group cleanup
 proof. The synchronous native skill/sandbox/phase path carries this context.
-No context transfer to arbitrary future threads or processes is promised.
+No context transfer to arbitrary future threads or processes is promised. The
+one delegated process path is a candidate-worker graph unit: the unit child
+collects the lifecycles it observed and the worker replays them in order with
+`observed_subprocess.replay_process_lifecycle` after the unit ends, and the
+unit child's own plain supervised lifecycle is observed directly.
 
 Sticky in-memory uncertainty is set before persisting `unresolved`. Callback errors
 cannot replace the original supervision exception. If persistence fails, active

@@ -134,11 +134,12 @@ def build_training_parser() -> argparse.ArgumentParser:
         help="Use the same subsample every epoch instead of resampling.",
     )
     parser.add_argument(
-        "--train_base_seed",
-        type=int,
+        "--seed_context_json",
+        type=str,
         default=None,
-        help="Base seed for per-epoch subsampling. Epoch n uses seed = base + n. "
-        "When None, derived from exp_id hash.",
+        help="Path to a SeedContext JSON (run_seed + coordinates) from which every "
+        "trainer seed derives. When absent, the trainer generates a run seed and "
+        "records seed_source='generated' in its results JSON.",
     )
     parser.add_argument(
         "--order_strategy",

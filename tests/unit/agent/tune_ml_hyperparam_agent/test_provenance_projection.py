@@ -9,7 +9,9 @@ def _config(plan, **overrides):
     fields = {
         name: value for name, value in plan.model_dump().items() if name in TrialConfig.model_fields
     }
-    fields.update(mode="formal", train_sampling_seed=1, eval_sampling_seed=1, train_base_seed=1)
+    fields.update(
+        mode="formal", train_sampling_seed=1, eval_sampling_seed=1, seed_context={"run_seed": 1}
+    )
     return TrialConfig(**(fields | overrides))
 
 

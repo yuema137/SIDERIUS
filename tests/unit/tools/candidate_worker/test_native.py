@@ -88,6 +88,18 @@ def native_runner(monkeypatch):
     monkeypatch.setattr(
         importlib.import_module("tools.candidate_worker.launch"), "run_observed", observed
     )
+
+    def unit_in_process(invocation_path):
+        """Graph units execute their file-transported invocation in this process."""
+        from tools.candidate_worker.unit_child import run_invocation_file
+
+        run_invocation_file(Path(invocation_path))
+
+    monkeypatch.setattr(
+        importlib.import_module("tools.candidate_worker.unit_runner"),
+        "spawn_unit",
+        unit_in_process,
+    )
     return Provider
 
 
@@ -475,3 +487,34 @@ def test_join_protocol_optional_arguments_preserve_existing_defaults(prepared, n
         proposed_implementation_to_validation(
             proposal, implemented.model_copy(update={"candidate_id": None}), storage
         )
+
+
+@pytest.mark.parametrize("graph", [False, True])
+def test_validator_pytest_is_bounded_by_the_remaining_worker_budget(
+    prepared, native_runner, monkeypatch, graph
+):
+    """Fails if a worker path drops the declared budget before validation (issue #984).
+
+    Loop and loop-continuation entries: test_loop_resume.py
+    ``test_resumed_segment_bounds_validator_pytest_by_its_own_worker_budget``.
+    """
+    from tests.helpers.candidate_fanout import fanout_request
+
+    validator = importlib.import_module("nodes.ml_code_validator_agent.ml_code_validator_agent")
+    limits = []
+
+    def launched(test_file_path, env, *, limit=None):
+        limits.append(limit)
+        return True, "1 passed"
+
+    monkeypatch.setattr(validator, "run_generated_pytest", launched)
+    request = fanout_request(prepared) if graph else refresh(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.status in ("accepted", "completed"), receipt.error
+    assert len(limits) >= 1
+    assert all(
+        limit is not None
+        and limit.source == "worker_budget"
+        and 0 < limit.seconds <= request.timeout_seconds
+        for limit in limits
+    )

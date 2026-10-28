@@ -163,6 +163,8 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "retain_training_checkpoints": False,
     # PR-C — workflow-owned ordering of two independent evidence capabilities.
     "scientific_evidence_order": "analysis_then_literature",
+    # Issue #983 — explicit operator run seed; None = resolved at startup.
+    "run_seed": None,
 }
 
 
@@ -207,7 +209,8 @@ class TestLaunchConfigIsTransitOnly:
                 Path(__file__).parent / "goldens" / "step09_5a_pre_refactor_launch_defaults.json"
             ).read_text()
         )
-        assert len(golden) == 72, "the pre-refactor default record is incomplete"
+        # Issue #983 S3b retired sampling_seed / train_base_seed (72 -> 70).
+        assert len(golden) == 70, "the pre-refactor default record is incomplete"
 
         mismatched = []
         for f in dataclasses.fields(WorkflowLaunchConfig):

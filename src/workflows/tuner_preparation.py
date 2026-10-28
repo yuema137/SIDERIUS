@@ -12,6 +12,7 @@ from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_valida
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.run_invariants import RunInvariants
+from core.seeding import SeedCoordinates
 from workflows.llm_config import resolve_standard_tuner_llm_options
 from workflows.run_bindings import WorkflowRunBindings
 from workflows.run_config import WorkflowLaunchConfig, frozen_portion_overrides
@@ -40,6 +41,7 @@ def prepare_native_tuner_input(
     run_invariants: RunInvariants,
     constraint_context: ConstraintContext | None,
     chain_formal_incumbent_reference: float | None,
+    seed_coordinates: SeedCoordinates,
 ) -> HyperparamTuningInput:
     """Build the native tuner request from already admitted workflow context.
 
@@ -98,8 +100,8 @@ def prepare_native_tuner_input(
             launch.eval_portion, _TUNER_INPUT_PORTION_DEFAULTS["eval_portion"]
         ),
         train_validation_align=launch.train_validation_align,
-        sampling_seed=launch.sampling_seed,
-        train_base_seed=launch.train_base_seed,
+        run_seed=run_invariants.run_seed,
+        seed_coordinates=seed_coordinates,
         cleanup_denoised=launch.cleanup_denoised,
         retain_model_outputs=launch.retain_model_outputs,
         retain_training_checkpoints=launch.retain_training_checkpoints,

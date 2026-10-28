@@ -1,0 +1,20 @@
+[
+  [
+    {
+      "source": "",
+      "kind": "literature",
+      "content": "Skip connections stabilise depth.",
+      "source_ref": "sd0",
+      "confidence": 0.9,
+      "produced_at": null
+    },
+    {
+      "source": "",
+      "kind": "literature",
+      "content": "Dilated convolutions widen the receptive field.",
+      "source_ref": "sd1",
+      "confidence": 0.6,
+      "produced_at": null
+    }
+  ]
+]

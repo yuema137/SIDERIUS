@@ -24,6 +24,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.hardware_context import HardwareContext, load_manifest
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
+from tests.helpers.run_seed import TEST_RUN_SEED
 
 # ── Canned responses (mirror test_tuning_agent.py so this file stays
 #    hermetic — no import coupling across test modules) ─────────────────────
@@ -90,6 +91,7 @@ def _mock_run_skill(skill_folder, sandbox, **params):
 
 def _make_input(tmp_path) -> HyperparamTuningInput:
     return HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
