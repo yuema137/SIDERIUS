@@ -70,7 +70,7 @@ even when using the default models.
    **Help** in the header reopens the tour at any time.
    Tools a first-time user does not need stay hidden until you turn them on in
    **Settings** (header): **Show advanced tools** adds the source editor,
-   references, version history, Refresh from disk, protocol mapping details and
+   references, Reload from disk, protocol mapping details and
    raw contract ids on the canvas and in Selection, the model-hyperparameter
    owner, native chains, configured-task
    preparation, the operation-UUID form and recorded examples; **Show developer
@@ -113,11 +113,22 @@ even when using the default models.
    exact diff; Save writes those reviewed bytes. Connections, card moves and
    inspector edits collect in one set of pending edits that you review and save
    together. **Undo**/**Redo** (Ctrl+Z / Ctrl+Shift+Z) step through them;
-   **Discard changes** returns to the workflow as it was loaded, while **Refresh
-   from disk** re-reads the file and asks first if edits are pending. A `*` in
-   the tab title and an *Unsaved changes* badge mark pending edits. Switching views retains pending
+   **Revert to saved** returns to the workflow as it was last saved (Undo brings your
+   edits back), while **Reload from disk** (advanced tools) re-reads the file and asks
+   first if edits are pending. A `*` in the tab title, an *Unsaved changes* badge and a
+   dot beside the version name in the page bar mark pending edits. Switching views retains pending
    edits and review state. A real page exit with pending edits uses the browser's
    unsaved-change guard. Saving does not run the declaration.
+   Moving a card or editing a setting rewrites the whole Python file. If that would
+   remove comments you wrote by hand, the Save step says how many and which ones
+   before you confirm. Saving into a read-only file is refused ("This file is
+   read-only on disk"); make the file writable, then select **Save version** again.
+   If the file changed on disk while you edited (for example, you saved it from
+   another tab), the page shows **This workflow changed on disk** with what changed.
+   Choose **Reapply my changes onto latest** to keep your edits, or **Reload from
+   disk** to drop them. **Version history** (`⋯` menu) lists each saved version;
+   **View** shows what changed, and **Restore this version as a draft** loads an older
+   version as unsaved changes that you save like any other edit.
    The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
    Until the canvas has a module, it says what to do next and offers **Start from a
@@ -178,7 +189,7 @@ input…**, keep or change the suggested id, and type the project-relative path 
 the JSON file that will hold the value, for example `inputs/build_store.json`.
 In a reusable workflow there is no path to type: the run supplies the input when it
 is prepared (reusable preparation accepts only such managed inputs). Then click
-**Create and connect**. Undo, Redo and Discard cover all of these edits.
+**Create and connect**. Undo, Redo and Revert to saved cover all of these edits.
 
 ## Bind a task version
 

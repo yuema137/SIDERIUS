@@ -48,10 +48,10 @@ try {
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   const status = () => page.locator('#editor-status').textContent();
-  await waitUntil(async () => (await status()).includes('Opened supported'));
+  await waitUntil(async () => (await status()).includes('Opened '));
   const open = async project => {
     await page.locator('#editor-project').selectOption(project);
-    await waitUntil(async () => (await page.locator('.circuit-card').count()) === 5 && (await status()).includes('Opened supported'));
+    await waitUntil(async () => (await page.locator('.circuit-card').count()) === 5 && (await status()).includes('Opened '));
   };
   const boxes = () => page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => {
     const box = card.getBoundingClientRect();
@@ -72,7 +72,7 @@ try {
     await page.locator('#editor-review').click();
     await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
     await page.locator('#editor-save').click();
-    await waitUntil(async () => (await status()).includes('Saved reviewed'));
+    await waitUntil(async () => (await status()).includes('Saved as "'));
     assert.deepEqual(posts.map(item => item.path.split('/').at(-1)), ['review', 'save']);
     return posts[0].body.proposal.document;
   };
@@ -135,7 +135,7 @@ try {
     assert.deepEqual(byNode(reviewed.positions), moved, `${gesture}: every displayed position is persisted`);
     assert.deepEqual(byNode(parsed(metadata.five_node_partial_source).positions), moved);
     await page.locator('#editor-refresh').click();
-    await waitUntil(async () => (await status()).includes('Opened supported'));
+    await waitUntil(async () => (await status()).includes('Opened '));
     assert.deepEqual(await displayed(), moved, `${gesture}: reopened layout is the saved layout`);
     await assertDisjoint(`${gesture}: reopened layout`);
     await page.screenshot({path: join(evidence, `partial-${gesture}.png`), fullPage: true});

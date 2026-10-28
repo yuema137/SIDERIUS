@@ -34,7 +34,7 @@ try {
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   const status = () => page.locator('#editor-status').textContent();
-  await waitUntil(async () => (await status()).includes('Opened supported'), 'open');
+  await waitUntil(async () => (await status()).includes('Opened '), 'open');
   const open = async id => {
     await page.locator('#editor-project').selectOption(id);
     await waitUntil(async () => (await page.locator('#editor-path').textContent()).endsWith(id === 'reusable' ? 'reusable.py' : 'reusable_interpretation.py'), `${id} opened`);

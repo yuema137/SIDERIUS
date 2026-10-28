@@ -33,7 +33,7 @@ try {
   await page.goto(metadata.origin + '/#workflow');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   await page.locator('#editor-project').selectOption('interpretation');
   await waitUntil(async () => (await page.locator('#editor-source').inputValue()).includes('native-interpretation-candidate/v1'));
   const pending = () => page.locator('#editor-pending').textContent();
@@ -146,7 +146,7 @@ try {
   const diff = await page.locator('#editor-diff').textContent();
   assert.match(diff, /trial_max_epochs/); assert.match(diff, /-.*sampling_seed/);
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   const saved = await readFile(metadata.interpretation_source, 'utf8');
   assert.match(saved, /'trial_max_epochs': 4/); assert.doesNotMatch(saved, /sampling_seed/);
   await page.locator('#circuit-node-fit').click();
