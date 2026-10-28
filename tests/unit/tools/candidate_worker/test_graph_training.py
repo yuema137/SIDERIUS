@@ -445,11 +445,11 @@ def test_native_tuning_transports_explicit_iteration_and_incumbent(
     from dataclasses import replace
 
     from agent.schemas.storage import LocalStorageConfig, StorageConfig
-    from tools.candidate_worker import graph, training
+    from tools.candidate_worker import training
 
     request = graph_training_request(prepared)
     captured = []
-    real = graph.run_training
+    real = training.run_training
     contexts = []
     monkeypatch.setattr(
         training.HyperparamTuningAgent, "set_run_context", lambda self, **kw: contexts.append(kw)
@@ -459,7 +459,8 @@ def test_native_tuning_transports_explicit_iteration_and_incumbent(
         captured.append((args, kwargs))
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(graph, "run_training", observe)
+    # The tuning unit resolves the native call at dispatch (B3-3 unit_child).
+    monkeypatch.setattr(training, "run_training", observe)
     receipt = launch_candidate(request)
     assert receipt.status == "completed", receipt.error
     args, _ = captured[0]

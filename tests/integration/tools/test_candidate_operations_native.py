@@ -189,10 +189,14 @@ def test_native_timeout_is_preserved_by_detached_reader(admitted, tmp_path):
 def native_submitter(tmp_path, bundle, reject=False, *, distinct_branches=False):
     # Test-only provider substitution inside the actual native sandbox. No production switch.
     provider = bundle / "offline_provider.py"
+    # Graph units run in their own processes (B3-3): the same file is the unit
+    # harness, and each implementation unit tags its source with its node ID.
     provider.write_text(f"""import builtins, os, runpy, sys
+from pathlib import Path
 from typing import ClassVar
 {inspect.getsource(Provider)}
 Provider.reject = {reject!r}
+UNIT = sys.argv[1] == '--unit'
 branch_count = 0
 original_generate = Provider.generate
 def generate(self, system, user, **kwargs):
@@ -200,7 +204,8 @@ def generate(self, system, user, **kwargs):
     result = original_generate(self, system, user, **kwargs)
     if {distinct_branches!r} and kwargs.get('label') == 'implementor.code':
         branch_count += 1
-        result['forward_body'] += '  # branch ' + str(branch_count)
+        tag = Path(sys.argv[-1]).parent.name if UNIT else str(branch_count)
+        result['forward_body'] += '  # branch ' + tag
     return result
 Provider.generate = generate
 assert os.environ['EXPLICIT_TEST_KEY'] == 'bound-value'
@@ -210,10 +215,15 @@ def offline(name, globals=None, locals=None, fromlist=(), level=0):
     result = original(name, globals, locals, fromlist, level)
     if name == 'agent.llm_bridge':
         sys.modules[name].LLMBridge = Provider
+    units = sys.modules.get('tools.candidate_worker.unit_runner')
+    if units is not None and not getattr(units, 'offline_harness', False):
+        units.unit_command = lambda path: [sys.executable, __file__, '--unit', path]
+        units.offline_harness = True
     return result
 builtins.__import__ = offline
-sys.argv = ['tools.candidate_worker.child', sys.argv[1]]
-runpy.run_module('tools.candidate_worker.child', run_name='__main__')
+module = 'tools.candidate_worker.unit_child' if UNIT else 'tools.candidate_worker.child'
+sys.argv = [module, sys.argv[-1]]
+runpy.run_module(module, run_name='__main__')
 """)
     operation = tmp_path / "native_operation.py"
     operation.write_text(f"""import importlib, os, sys

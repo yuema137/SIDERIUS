@@ -380,6 +380,15 @@ UNROUTED_TRACE_SHA256 = {
 }
 
 
+def trace_sha256(receipt) -> str:
+    """Digest of the pinned projection, with tmp workspace and record digests masked."""
+    payload = receipt.model_dump_json(
+        include={"status", "validation_passed", "graph_trace", "native_output_paths"}
+    ).replace(receipt.workspace, "<ws>")
+    payload = re.sub(r'"record_sha256":"[0-9a-f]{64}"', '"record_sha256":"<sha>"', payload)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 @pytest.mark.parametrize("outcome", sorted(UNROUTED_TRACE_SHA256))
 def test_unrouted_graph_trace_bytes_are_unchanged(prepared, native_runner, monkeypatch, outcome):
     """Fails if skip semantics alter serialization or outcome of an existing graph run."""
@@ -396,11 +405,7 @@ def test_unrouted_graph_trace_bytes_are_unchanged(prepared, native_runner, monke
         monkeypatch.setattr(phases, "run_implementation", failed)
     request = fanout_request(prepared)
     receipt = launch_candidate(request)
-    payload = receipt.model_dump_json(
-        include={"status", "validation_passed", "graph_trace", "native_output_paths"}
-    ).replace(receipt.workspace, "<ws>")
-    payload = re.sub(r'"record_sha256":"[0-9a-f]{64}"', '"record_sha256":"<sha>"', payload)
-    assert hashlib.sha256(payload.encode()).hexdigest() == UNROUTED_TRACE_SHA256[outcome], payload
+    assert trace_sha256(receipt) == UNROUTED_TRACE_SHA256[outcome]
     verify_graph_trace(
         request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
     )

@@ -88,6 +88,18 @@ def native_runner(monkeypatch):
     monkeypatch.setattr(
         importlib.import_module("tools.candidate_worker.launch"), "run_observed", observed
     )
+
+    def unit_in_process(invocation_path):
+        """Graph units execute their file-transported invocation in this process."""
+        from tools.candidate_worker.unit_child import run_invocation_file
+
+        run_invocation_file(Path(invocation_path))
+
+    monkeypatch.setattr(
+        importlib.import_module("tools.candidate_worker.unit_runner"),
+        "spawn_unit",
+        unit_in_process,
+    )
     return Provider
 
 
