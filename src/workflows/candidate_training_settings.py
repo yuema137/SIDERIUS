@@ -184,12 +184,6 @@ class CandidateTrainingSettings(BaseModel):
         )
         if unsupported:
             raise ValueError(f"unsupported fresh training controls: {unsupported}")
-        for name in SUPPORTED_LAUNCH_FIELDS:
-            value = getattr(self.launch, name)
-            # Native transit portions resolve None later; optionality is retained.
-            if value is not None and name in HyperparamTuningInput.model_fields:
-                annotation = HyperparamTuningInput.model_fields[name].rebuild_annotation()
-                TypeAdapter(annotation).validate_python(value)
         for name in type(self).model_fields.keys() & HyperparamTuningInput.model_fields.keys():
             value = getattr(self, name)
             if value is not None:

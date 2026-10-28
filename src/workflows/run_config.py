@@ -45,6 +45,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
+from functools import cache
 from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
@@ -337,35 +338,42 @@ def validate_launch_trial_overrides(launch: WorkflowLaunchConfig) -> None:
     )
 
 
-#: Operator wall-time budgets whose rule the tuner schema owns
-#: (``OperatorTimeBudgetMinutes``). Issue #828: every launch entry path
-#: checks them here, before model execution, so forecast and measured
-#: admission never receive a malformed budget to reinterpret.
-OPERATOR_TIME_BUDGET_FIELDS: tuple[str, ...] = (
-    "trial_time_budget_minutes",
-    "formal_time_budget_minutes",
-    "bypass_formal_time_budget_minutes",
-)
+@cache
+def _tuner_owned_launch_fields() -> dict[str, TypeAdapter]:
+    """Launch fields forwarded to a ``HyperparamTuningInput`` field of the same name."""
+    owned = sorted(launch_config_field_names() & HyperparamTuningInput.model_fields.keys())
+    return {
+        name: TypeAdapter(HyperparamTuningInput.model_fields[name].rebuild_annotation())
+        for name in owned
+    }
 
 
-def validate_launch_time_budgets(launch: WorkflowLaunchConfig) -> None:
-    """Apply the tuner-owned budget annotation to each configured budget."""
-    for name in OPERATOR_TIME_BUDGET_FIELDS:
-        annotation = HyperparamTuningInput.model_fields[name].rebuild_annotation()
+def validate_launch_owner_values(launch: WorkflowLaunchConfig) -> None:
+    """Check every tuner-owned launch value against its owner before any work.
+
+    Issues #828 and #1045: the tuner schema owns these rules (finite positive
+    budgets, finite timeouts and safety factors, ...), but on the standard path
+    it only ran when the tuner input was built, after paid proposal and
+    implementation calls. Every entry path now applies the same annotations at
+    launch. ``None`` stays "omitted"; transit fields resolved later keep it.
+    """
+    for name, owner in _tuner_owned_launch_fields().items():
         value = getattr(launch, name)
+        if value is None:
+            continue
         try:
-            TypeAdapter(annotation).validate_python(value)
+            owner.validate_python(value)
         except ValidationError as exc:
+            reason = "; ".join(error["msg"] for error in exc.errors())
             raise ValueError(
-                f"{name} must be a finite positive number of minutes, or omitted "
-                f"(None) to disable that budget; got {value!r}"
+                f"{name}={value!r} is refused by HyperparamTuningInput.{name}: {reason}"
             ) from exc
 
 
 def validate_launch_admission(launch: WorkflowLaunchConfig) -> None:
     """The launch-value checks every entry path runs before workflow effects."""
     validate_launch_trial_overrides(launch)
-    validate_launch_time_budgets(launch)
+    validate_launch_owner_values(launch)
 
 
 def bind_runtime_verifier_launch(launch: WorkflowLaunchConfig) -> WorkflowLaunchConfig:
