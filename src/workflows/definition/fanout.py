@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from .candidate import check_tuning_edge
+from .candidate import check_tuning_edge, refuse_routes
 from .models import (
     ExternalRequest,
     ExternalSource,
@@ -69,6 +69,7 @@ def execution_families(
     definition: WorkflowDefinition | ReusableWorkflowDefinition, profile: str | None
 ) -> ProposalFamilies:
     """Select only an explicitly supported native graph profile."""
+    refuse_routes(definition)
     if profile == "native-interpretation-candidate/v1":
         return interpretation_candidate(definition)
     if profile == "native-literature-candidate/v1":

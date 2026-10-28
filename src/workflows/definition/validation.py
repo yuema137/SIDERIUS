@@ -1,8 +1,10 @@
 """Check declarations without loading referenced objects or executing protocols."""
 
+from collections.abc import Mapping, Set
 from typing import TYPE_CHECKING
 
 from .catalog import CAPABILITIES, CONTRACTS, PROTOCOLS
+from .routes import route_entries, validate_routes
 
 if TYPE_CHECKING:
     from .models import (
@@ -15,7 +17,8 @@ if TYPE_CHECKING:
 
 
 def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefinition") -> None:
-    predecessor_facts(definition)
+    facts = predecessor_facts(definition)
+    validate_routes(definition, facts, topological_order(dict(facts)))
     if definition.loop is not None:
         nodes = {node.id: node for node in definition.nodes}
         feedback = definition.loop.feedback
@@ -49,7 +52,7 @@ def predecessor_facts(
     definition: "WorkflowDefinition | ReusableWorkflowDefinition",
 ) -> tuple[tuple[str, frozenset[str]], ...]:
     """Validate every argument and return immutable scheduling dependencies."""
-    from .models import ExternalRequest, ExternalSource
+    from .models import ExternalRequest, ExternalSource, SelectedSource
 
     externals = {item.id: item for item in definition.externals}
     nodes = {node.id: node for node in definition.nodes}
@@ -97,6 +100,18 @@ def predecessor_facts(
             source = argument.source
             if isinstance(source, ExternalSource):
                 actual = external_contract(source.binding, f"{node.id}.{name}")
+            elif isinstance(source, SelectedSource):
+                if unknown := {item.node for item in source.candidates} - nodes.keys():
+                    raise ValueError(
+                        f"{node.id}.{name}: Unknown merge candidates: {sorted(unknown)}"
+                    )
+                outputs = {
+                    CAPABILITIES[nodes[item.node].capability].output for item in source.candidates
+                }
+                if len(outputs) != 1:
+                    raise ValueError(f"{node.id}.{name}: merge candidates differ in contract")
+                actual = outputs.pop()
+                dependencies[node.id].update(item.node for item in source.candidates)
             else:
                 if source.node not in nodes:
                     raise ValueError(f"{node.id}.{name}: Unknown source node: {source.node}")
@@ -107,15 +122,30 @@ def predecessor_facts(
                     f"{node.id}.{name}: requires {declared[name].contract}, got {actual}"
                 )
 
-    # Kahn's algorithm avoids recursion depth dependence on declaration size.
+    # A route target waits for its branch source's decision: a control edge, so a
+    # route can never create a cycle or target an ancestor of its own source.
+    for branch in definition.routes:
+        for target in (item for entry in route_entries(branch) for item in entry):
+            if branch.source.node not in nodes or target not in nodes:
+                raise ValueError(f"route {branch.id}: Unknown route node")
+            dependencies[target].add(branch.source.node)
+
+    topological_order(dependencies)
+    return tuple((node, frozenset(sources)) for node, sources in dependencies.items())
+
+
+def topological_order(dependencies: Mapping[str, Set[str]]) -> tuple[str, ...]:
+    """Kahn's algorithm avoids recursion depth dependence on declaration size."""
+    order: list[str] = []
     pending = dict(dependencies)
     while pending:
-        ready = {node for node, sources in pending.items() if not sources}
+        ready = [node for node, sources in pending.items() if not sources]
         if not ready:
             raise ValueError("Cycles and feedback are unsupported in this declaration version")
-        pending = {node: sources - ready for node, sources in pending.items() if node not in ready}
-
-    return tuple((node, frozenset(sources)) for node, sources in dependencies.items())
+        order.extend(ready)
+        done = frozenset(ready)
+        pending = {node: sources - done for node, sources in pending.items() if node not in done}
+    return tuple(order)
 
 
 def validate_positions(

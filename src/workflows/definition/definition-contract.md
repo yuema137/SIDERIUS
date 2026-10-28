@@ -79,7 +79,8 @@ multiple candidates or schedule parallel execution. Disconnected nodes with
 complete external request declarations are allowed.
 
 Apart from the optional authored `loop` described under
-[Authored loop](#authored-loop), there are no custom/generation/aggregation
+[Authored loop](#authored-loop) and the inert `routes` described under
+[Route declarations](#route-declarations-inert), there are no custom/generation/aggregation
 adapter, feedback, arbitrary-code, constructor configuration or
 execution-control fields. Supplying such fields fails validation. Future support
 requires an audited native owner and an explicit format extension. No generic
@@ -143,6 +144,84 @@ and canonical source, so the declaration digest and source bytes of a loop witho
 conditions are unchanged. Execution semantics, precedence and readback belong to
 the candidate-worker contract ("Deterministic stop conditions").
 
+## Route declarations (inert)
+
+`WorkflowDefinition.routes` and `ReusableWorkflowDefinition.routes` optionally carry
+up to 32 `Branch` declarations. An empty tuple is omitted from serialization and
+canonical source, so existing declaration digests, source bytes and receipts are
+unchanged. Routing is **declaration only**: `candidate.refuse_routes`, called first by
+the shared shape checks `candidate.candidate_nodes` and `fanout.execution_families`,
+refuses any document with routes ("conditional routing is declared but this execution
+profile does not admit it"). Preview, preparation, worker and verifier admission all
+pass through those checks, so no current profile executes a routed document. A v2
+document with `training_settings` runs those checks during declaration validation and
+is therefore refused at declaration until a routed profile exists.
+
+### Readable fields
+
+A predicate reads only a field listed in `catalog.ROUTE_OBSERVABLES` for the branch
+source's capability output contract; free field names and JSON paths do not exist.
+
+| Observable | Contract | Native field | Kind |
+| --- | --- | --- | --- |
+| `validation.passed` | `validation.output` | `ValidatorOutput.passed` | bool |
+| `tuning.status` | `tuning.output` | `HyperparamTuningOutput.status` | enum `completed`, `partial`, `failed` |
+| `tuning.valid_formal` | `tuning.output` | `HyperparamTuningOutput.best_valid_formal_denoising_score` | metric (`float | None`) |
+
+`tests/unit/workflows/test_workflow_routes.py` checks each row against the native schema.
+Adding an observable is a catalog row plus that check.
+
+### Predicates
+
+`RoutePredicate` is a `kind`-discriminated union of leaves and one combinator level:
+
+| Constructor | Fields | Reads | Meaning |
+| --- | --- | --- | --- |
+| `BoolIs` | `kind="bool_is"`, `observable`, `value: bool` | bool | field equals `value` |
+| `EnumIn` | `kind="enum_in"`, `observable`, `values: tuple[str, ...]` (nonempty, unique, catalogued) | enum | field is one of `values` |
+| `MetricAtLeast` | `kind="metric_at_least"`, `observable`, `metric_id: str` (nonempty), `threshold: float` (finite) | metric | a present value is at least `threshold` under the run metric's direction |
+| `IsMissing` | `kind="is_missing"`, `observable` | metric | the value is absent |
+| `AllOf` / `AnyOf` | `terms`: 2 to 8 leaves | — | conjunction / disjunction |
+| `Not` | `term`: one leaf | — | negation |
+
+Combinators contain leaves only (no nesting), so a predicate has at most 8 leaves.
+Every leaf reads the branch's single source result; cross-node predicates need a typed
+aggregation owner and are not expressible. Direction is never declared: `metric_id` must
+equal the run `MetricSpec` id, checked by execution admission before dispatch (not by
+this package). An absent metric makes `MetricAtLeast` false, never an error; `IsMissing`
+makes that case explicit. Evaluation belongs to the future route evaluator.
+
+### Branches, arms and merges
+
+`Branch(id, source=ResultSource(...), cases=(RouteCase(when, targets), ...), default=None)`
+declares 1 to 8 ordered cases; the first matching case wins. `default` is `None`
+(omitted from serialization) or a nonempty tuple of entry nodes. With no default and no
+matching case, no arm runs; a single-case branch without a default is a guard.
+Branch ids are their own namespace and must be unique.
+
+Each target receives a control edge from the branch source, which joins the topological
+check: a target that is the source or one of its ancestors fails as a cycle. The **arm**
+of a case (or the default) is every node reachable from the source whose every path from
+the source passes through one of that entry's targets. Validation refuses:
+
+- unknown route nodes, uncatalogued observables, a leaf whose kind does not fit the
+  observable, and enum values that repeat or are not catalogued;
+- a node that is a target twice, in two cases, or of two branches (nested branching uses
+  a branch whose source lies inside an arm);
+- a node that depends on two arms of one branch except through a merge;
+- a `SelectedSource(branch, candidates=(ResultSource, ...))` merge argument whose branch
+  is unknown, whose candidates (at least 2) do not share the argument's output contract,
+  do not lie one in each arm that can run (every case plus the default when present), or
+  whose consumer lies inside one of that branch's arms;
+- with a `loop`, any arm containing the loop feedback source or any of its predecessors,
+  including merge candidates (decision Q5(a); conservative in v1).
+
+Arms of different cases are disjoint by construction: distinct targets each have a
+direct control edge from the source. A merge is a deterministic select keyed by the
+recorded decision, not an OR/race join; its consumer depends on every candidate for
+scheduling. Execution semantics (`skipped`/`route_not_selected`, decision evidence,
+verification) belong to later candidate-worker work.
+
 ## Static Python source bridge
 
 `parse_workflow_source(source: str) -> AuthoredWorkflowDocument` and
@@ -161,7 +240,10 @@ from this explicit allowlist: `TaskReferences`, `ExternalBinding`,
 `CandidatePreparationOptions`, `ReusableWorkflowDefinition`,
 `ReusableWorkflowDocument`, plus the loop constructors `AuthoredLoop`, `LoopFeedback`,
 `MetricThresholdStop`, `NoImprovementStop` and the reserved, always-refused
-`JudgeStop`. Imported unused constructors are allowed; referenced
+`JudgeStop`, plus the route constructors `Branch`, `RouteCase`, `BoolIs`, `EnumIn`,
+`MetricAtLeast`, `IsMissing`, `AllOf`, `AnyOf`, `Not` and `SelectedSource`. The
+renderer imports loop and route constructors only when the document uses them, so
+existing canonical source bytes are unchanged. Imported unused constructors are allowed; referenced
 constructors must be imported. Aliases, wildcard and relative imports fail.
 
 Only imported bare constructors with unique known keyword arguments, literal

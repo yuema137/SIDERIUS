@@ -5,6 +5,7 @@ Strings identify owners; they are never dynamically imported or executed.
 
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,39 @@ PROTOCOLS = MappingProxyType(
                 ArgumentContract("llm_model_id", "optional.model-id", False),
                 ArgumentContract("constraint_context", "optional.constraint-context", False),
             ),
+        ),
+    }
+)
+
+
+@dataclass(frozen=True)
+class RouteObservable:
+    """One readable native output field; ``field`` is documentation, never a lookup path."""
+
+    contract: str
+    field: str
+    kind: Literal["bool", "enum", "metric"]
+    values: tuple[str, ...] = ()
+
+
+# Closed list of fields a route predicate may read. Adding one requires the
+# native-schema drift test; predicates never name free fields or JSON paths.
+ROUTE_OBSERVABLES = MappingProxyType(
+    {
+        "validation.passed": RouteObservable(
+            "validation.output", "agent.schemas.validator.ValidatorOutput.passed", "bool"
+        ),
+        "tuning.status": RouteObservable(
+            "tuning.output",
+            "agent.schemas.hyperparam_tuning.HyperparamTuningOutput.status",
+            "enum",
+            ("completed", "partial", "failed"),
+        ),
+        "tuning.valid_formal": RouteObservable(
+            "tuning.output",
+            "agent.schemas.hyperparam_tuning.HyperparamTuningOutput"
+            ".best_valid_formal_denoising_score",
+            "metric",
         ),
     }
 )
