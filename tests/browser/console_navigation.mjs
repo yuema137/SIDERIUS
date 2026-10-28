@@ -104,6 +104,12 @@ try {
   await page.locator('#view-home').waitFor();
   await page.locator('nav a[href="#workflow"]').click();
   await page.locator('#editor-status').filter({hasText: 'Fixture project unavailable'}).waitFor();
+  // Run preparation has its own route; an unavailable project keeps its handoff closed.
+  await page.locator('nav a[href="#run"]').click();
+  assert.equal(await page.title(), 'SIDERIUS · Run');
+  assert.equal(await page.locator('#view-workflow').isHidden(), true);
+  assert.equal(await page.locator('#view-run').isVisible(), true);
+  assert.equal(await page.locator('#workflow-next-run').isDisabled(), true);
   await page.locator('nav a[href="#slow-control"]').click();
   await waitUntil(() => offsets.length > routeOffset);
   assert.ok(offsets.slice(routeOffset).every(value => value === 73), 'Same UUID/back-forward must retain log cursor');

@@ -151,9 +151,6 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
   overflow: auto;
   padding: 16px;
 }
-.workflow-run-details { margin-top: 16px; }
-.workflow-run-details[open] { display: grid; gap: 14px; }
-.workflow-run-details > section { min-width: 0; padding-top: 8px; border-top: 1px solid var(--border); }
 .connection-list { margin: 8px 0 0; font-size: .82rem; }
 .connection-list ul { margin: 8px 0 0; padding-left: 1.25rem; }
 .connection-list li { overflow-wrap: anywhere; margin: 4px 0; }

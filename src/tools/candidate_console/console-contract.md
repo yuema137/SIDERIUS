@@ -619,7 +619,7 @@ gets `.has-required-unbound` (red outline/glow) and a `.circuit-problem-badge`.
 server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
 (`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
 focuses the inspector select for `field` (and marks the canvas input
-`.problem-focus`); an unlocated item opens Advanced → Source at its line. The
+`.problem-focus`); an unlocated item opens Advanced source at its line. The
 list never enables Review: Review remains disabled for an incomplete draft.
 Witness: `tests/browser/required_defaults.mjs`.
 
@@ -740,9 +740,10 @@ operation for live status). Manual UUID entry remains available.
 
 ## Persistent views, routing and session
 
-`index.html` owns a single document with persistent Home, Workflow and Slow control
-sections. `navigation.js` owns `/#home`, `/#workflow`, `/#slow-control` and
-`/#slow-control/<UUID>`. Empty fragments use Home. Complete UUID validation
+`index.html` owns a single document with persistent Home, Workflow, Run and Slow
+control sections. `navigation.js` owns `/#home`, `/#workflow`, `/#run`,
+`/#slow-control` and `/#slow-control/<UUID>`; `document.title` names Workflow and
+Run. Empty fragments use Home. Complete UUID validation
 precedes operation selection; invalid routes show a local error and suspend
 operation polling without mutating a native request. Bare Slow control retains
 selection; repeated identical UUIDs do not reset the monitor epoch/log cursor.
@@ -779,12 +780,12 @@ handlers also refuse disconnected actions. Explicit conflict Discard/Rebase rema
 local and usable, but do not restore network actions until authenticated reconnect. Reconnect only refreshes
 reads; POSTs never retry automatically. Initial editor/project reads that span a
 reconnect restart for the new revision without replacing a loaded pending draft.
-Editor projects load only on Workflow entry. Choices/project failures remain local;
+Editor projects load only on Workflow or Run entry (Run reads the open project's saved version). Choices/project failures remain local;
 known-operation reads need neither task choices nor editor configuration. The one
 existing visible-document two-second polling loop retains its cursor/epoch owners.
 
 Home leads with the workflow journey (open the workflow, edit and review, prepare
-a new run, launch and monitor) and its **Open workflow** action. The native chain
+a new run on the Run page, launch and monitor) and its **Open workflow** action. The native chain
 and configured-task flows follow under **Advanced**. All views share one shell:
 a compact header (title, about, theme), navigation and content aligned on one
 left edge, up to 1920px wide.
@@ -792,13 +793,43 @@ left edge, up to 1920px wide.
 Home's configured-task flow is a secondary disclosure independent of the editor
 selection. Prepared workspace, identity, routes, limits, devices/network and
 credential blockers remain visible before explicit Launch within that flow.
-Workflow references and Advanced → Source start collapsed; successful Review
-opens the exact diff. Disclosure toggles do not change edit mode or reviewed bytes.
+Workflow references, **Advanced source** and **Details** (save behavior and
+concurrent-writer notes) start collapsed; successful Review opens the exact diff. Disclosure toggles do not change edit mode or reviewed bytes.
 Unsupported-source status and Inspect source remain visible; conflicts retain
 visible summary/actions. A `beforeunload` guard applies only to a real document
 exit with pending editor changes. Slow control shows operation identity, native
 state, observed time and token quality; facts, token rows and logs are disclosures.
 It infers neither scientific success nor complete billing.
+
+### Page inventory and guidance
+
+| Route | Primary content and action | Secondary content |
+| --- | --- | --- |
+| `#home` | Workflow journey; **Open workflow** | **Advanced**: native chain card; collapsed **Prepare configured task** |
+| `#workflow` | Project, task package/version, canvas + Selection; **Save reviewed source** (Refresh and Review are secondary buttons); **Next: prepare a run** | Research loop panel; collapsed References, Advanced source, Review exact Python changes, Details |
+| `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; collapsed captured resources |
+| `#slow-control` | Recent operations; Status and logs | Loop controls, observations, token table, logs, Recorded example |
+
+`page-guidance.js` is presentation only and owns no request or draft state. It reads
+`window.workflowEditor.state` and `window.newRunGate.ready`. `new-run.js` remains the
+single Run gate: it exports `newRunGate.ready` (its existing `ready()` predicate) and
+dispatches `new-run-gate` from its `controls()`. **Next: prepare a run** is enabled
+exactly when that gate is open and only sets `location.hash = 'run'`; its text and
+the Run page's `#run-source-state` show `Saved version <sha256[:12]> of <project> is
+ready to run.` or the first closing reason (not connected, no project, source not
+open, project not runnable, not a reusable declaration, conflict, saving, unsaved
+edits). Those reasons explain a closed gate and never open it. The New run and
+Prepared run controllers keep their element IDs and behavior; their task loaders run
+on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
+opening a disclosure, and scrolls to the capture heading only after the
+`console-view` event shows the Run panel (next animation frame).
+
+When the connection is absent or no workflow source is open, Workflow shows
+**Start from a task example** (select a task, edit, save, run) with a one-line state.
+A step line (`#step-indicator`, `role="navigation"`, not a `<nav>` element) shows
+Task › Workflow › Run › Results on Workflow (Task until a source is open), Run and
+Slow control, with `aria-current="step"` and a done mark for completed steps; it is
+hidden on Home. Witness: `tests/browser/page_guidance.mjs`.
 
 Navigation qualification: `tests/browser/console_navigation.mjs` uses the same
 explicit environment as the editor gate. Its temporary synthetic observations
@@ -1054,7 +1085,7 @@ use the same token table; selecting another UUID clears prior rows/times/provena
 and epoch checks fence late responses. Native cumulative scope appears in the
 status line; identity provenance and scientific/billing limitations are in the
 expandable detail. Direct UUID navigation/reconnect needs no choice
-or editor fetch; the existing New run task loader is deferred to Workflow entry. Empty candidate choices disable Prepare with explanatory copy.
+or editor fetch; the existing New run task loader is deferred to Workflow or Run entry. Empty candidate choices disable Prepare with explanatory copy.
 
 `tests/browser/native_chain.mjs` uses the explicit Python/Playwright/Chromium and
 CONSOLE_EVIDENCE_DIR variables. From a clean committed checkout it creates an
