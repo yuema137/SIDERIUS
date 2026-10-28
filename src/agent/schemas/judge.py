@@ -125,6 +125,12 @@ MAX_SCORED_ITEMS_PER_CALL = 16
 #: With ``DebateTurn.argument`` ≤ 3000 characters and ``cites`` ≤ the item cap,
 #: a transcript is bounded at 68 turns × ~3.3k characters.
 MAX_DEBATE_TURNS = MAX_DEBATE_ROUNDS * (MAX_SCORED_ITEMS_PER_CALL + 1)
+#: Rendered characters (system + user) one judge call may send. No context-size owner
+#: exists in the LLM bridge or ``WorkflowLLMConfig``, so this is declared here: about
+#: 100k tokens at ~4 characters per token, which leaves output room in the 128k-token
+#: windows of the routed judge models. It counts everything rendered, including the
+#: task's ``JudgeTaskBlocks`` guidance; a call over it is never sent.
+MAX_JUDGE_PROMPT_CHARS = 400_000
 
 
 class ProjectedField(JudgeModel):

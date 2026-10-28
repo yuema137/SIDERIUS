@@ -12,12 +12,14 @@ import pytest
 from pydantic import ValidationError
 
 from agent.judge.call import JudgeRunContext
+from agent.judge.evidence import JudgeEvidenceError, verify_call_chain
 from agent.schemas.data_analysis.common import canonical_json_bytes, canonical_sha256
 from agent.schemas.judge import (
     AdviceRequest,
     AdvisoryNote,
     CallRequest,
     ItemProjection,
+    JudgeCallEvidence,
     JudgedItem,
     ProjectedField,
     RevisionRequest,
@@ -180,8 +182,10 @@ def test_primary_advisors_over_more_items_than_one_call_may_hold_is_refused(tmp_
         name="reviews", contract="literature.output", cardinality="many", max_items=200
     )
     assert "batch_too_large" in {r.code for r in admit(inputs=(wide,)).refusals}
-    with pytest.raises(ValidationError, match="at most 16 items per call"):
-        invocation(tmp_path, positions=tuple(range(17)))
+    bridge = AdvisorsBridge()
+    with pytest.raises(StrategyError, match="17 items exceed 16 items per call"):
+        run(invocation(tmp_path, positions=tuple(range(17))), bridge, tmp_path)
+    assert bridge.calls == []
 
 
 def test_per_advisor_consults_each_advisor_then_revises_with_every_note(tmp_path):
@@ -356,3 +360,18 @@ PINS = [
         "3d0a15fdfbe6bab17b8f8e89293af17dfeae9790708a74d62784c87b8d8f72bb",
     ),
 ]
+
+
+def test_an_advice_then_revision_chain_verifies_against_its_declared_kinds(tmp_path):
+    """Defect: chain verification requires one content kind, refusing every valid
+    per_advisor chain (advice, advice, revision), or accepts a revision recorded where
+    the planner declared advice."""
+    value = invocation(tmp_path, strategy=primary_advisors(advice="per_advisor"))
+    run(value, AdvisorsBridge(), tmp_path)
+    calls = [
+        JudgeCallEvidence.model_validate_json(path.read_bytes())
+        for path in sorted((value.evidence_dir / "calls").iterdir())
+    ]
+    verify_call_chain(calls, content_kinds=("advice", "advice", "revision"))
+    with pytest.raises(JudgeEvidenceError, match="not the declared 'advice'"):
+        verify_call_chain(calls, content_kinds=("advice", "advice", "advice"))

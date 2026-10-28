@@ -101,10 +101,8 @@ with the omitted count recorded as a field. `proposal.output` projects
 `confidence` are not projected.
 
 `StrategyInvocation(adaptor_id, iteration, strategy, items, output_contract,
-expected_count, rubric, task_guidance, evidence_dir)` refuses: duplicate items;
-more than `MAX_SCORED_ITEMS_PER_CALL` items for a kind that lists every item in
-one call (the same cap is the request schemas' `max_length`, e.g. `MergeRequest.items`);
-items of more than one contract; a `rubric` that is absent for `rubric-rank/v1`,
+expected_count, rubric, task_guidance, evidence_dir)` refuses (pydantic
+`ValidationError`): duplicate items; items of more than one contract; a `rubric` that is absent for `rubric-rank/v1`,
 present for another kind, or whose `rubric_ref(rubric)` differs from
 `strategy.rubric` (content digest); `task_guidance` present iff
 `strategy.guidance == "task_blocks"` (B6 supplies the task's composed
@@ -258,7 +256,17 @@ value (`cardinality_mismatch` otherwise) and stamps
 1. Refuse with `StrategyError`, before any provider contact: unimplemented kind;
    no route for `route_slot` in `routes`; `context.iteration !=
    invocation.iteration`; `strategy_call_bound(strategy, len(items)) >
-   max_calls`; a non-empty `evidence_dir` (evidence is never reused). A
+   max_calls`; more than `MAX_SCORED_ITEMS_PER_CALL` items for a kind that lists
+   every item in one call (`require_call_capacity`; replay refuses the same way; the
+   same cap is the request schemas' `max_length`, e.g. `MergeRequest.items`); a
+   non-empty `evidence_dir` (evidence is never reused); and the subclass
+   `PromptBudgetExceeded` when the first call's rendered prompt (system + user
+   characters, including task `JudgeTaskBlocks` guidance) exceeds
+   `MAX_JUDGE_PROMPT_CHARS` (400 000, `agent/schemas/judge.py`: about 100k tokens,
+   leaving output room in a 128k-token window; no context-size owner exists in the
+   bridge or `WorkflowLLMConfig`). The message names the budget, the measured size
+   and the remedy (fewer items, shorter guidance, `per_item` scoring); nothing is
+   written. A
    `JudgeCallRefused` or `ExecutionDeadlineExceeded` from the call core
    propagates; any published call files then stay without a `strategy.json`, and
    a rerun of that invocation refuses.
@@ -266,13 +274,16 @@ value (`cardinality_mismatch` otherwise) and stamps
    context, evidence_path=<evidence_dir>/calls/<NNN>_<role>.json,
    max_calls=bound)`. Each request names `invocation_sha256` and lists the
    `evidence_sha256` of every earlier call (`prior_turns`). The chain stops at the
-   first call whose status is not `decided`.
+   first call whose status is not `decided`, or before a later call whose rendered
+   prompt exceeds `MAX_JUDGE_PROMPT_CHARS` (that call is never sent).
 3. `decide`: fewer items than `min_items` → no call, `insufficient_items`; a
    kind `precheck` failure (`primary_unavailable`) → no call, that code; all
    decided → `StrategyOutcome(status="decided", ranking=...)` for a ranking kind or
    `combined=...` for a combining kind (`combined` is omitted from the JSON when
    absent); a kind's `trivial` ranking (one item, `debate-judge` rank) → `skipped`
    with no call, unless the fold raises `StrategyFoldFailure` (`cardinality_mismatch`);
+   a decided chain that stopped before an over-budget call → `prompt_too_large`
+   (re-derived on replay by re-rendering that call; any other early end refuses);
    otherwise `failed` with the call's `failure_code`, or `fallback` with
    `fallback_combine = on_failure.combine.kind` when a `Fallback` is declared
    (B6 then runs that deterministic combine on the same items; partial LLM output

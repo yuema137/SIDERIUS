@@ -313,8 +313,10 @@ def test_a_debate_over_more_items_than_one_call_may_hold_is_refused(tmp_path):
         cardinality=CardinalityBound(min=1, max=1),
     ).refusals
     assert "batch_too_large" in {r.code for r in refusals}
-    with pytest.raises(ValidationError, match="at most 16 items per call"):
-        invocation(tmp_path, n=17)
+    bridge = DebateBridge()
+    with pytest.raises(StrategyError, match="17 items exceed 16 items per call"):
+        run(invocation(tmp_path, n=17, strategy=debate(max_calls=403)), bridge, tmp_path)
+    assert bridge.calls == []
 
 
 PORT = InputPort(name="reviews", contract="literature.output", cardinality="many", max_items=3)
@@ -448,3 +450,28 @@ PINS = [
         "3d0a15fdfbe6bab17b8f8e89293af17dfeae9790708a74d62784c87b8d8f72bb",
     ),
 ]
+
+
+def test_a_growing_transcript_that_would_exceed_the_prompt_budget_ends_the_debate(
+    tmp_path, monkeypatch
+):
+    """Defect: a later debate call whose transcript pushes its prompt past the budget is
+    sent anyway; it must end the chain as recorded prompt_too_large and replay equal."""
+    sizes: list[int] = []
+
+    class Measuring(DebateBridge):
+        def generate(self, system_prompt, user_prompt, *, label):
+            sizes.append(len(system_prompt) + len(user_prompt))
+            return super().generate(system_prompt, user_prompt, label=label)
+
+    strategy = debate(rounds=1, critic=False)
+    run(invocation(tmp_path / "probe", strategy=strategy), Measuring(), tmp_path)
+    assert sizes[0] < sizes[1]  # the transcript grows the prompt
+    for module in ("run", "plan"):
+        monkeypatch.setattr(f"workflows.judge_strategies.{module}.MAX_JUDGE_PROMPT_CHARS", sizes[0])
+    value = invocation(tmp_path, strategy=strategy)
+    bridge = DebateBridge()
+    result = run(value, bridge, tmp_path)
+    assert len(bridge.calls) == 1
+    assert (result.outcome.status, result.outcome.failure_code) == ("failed", "prompt_too_large")
+    assert replay_llm_strategy(value, ROUTES, expected_sha256=result.evidence_sha256) == result

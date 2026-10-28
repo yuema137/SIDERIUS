@@ -10,6 +10,7 @@ from .admission import admit_llm_strategy
 from .kinds import IMPLEMENTED_KINDS, strategy_call_bound
 from .models import (
     ItemRanking,
+    PromptBudgetExceeded,
     RubricScore,
     StrategyAdmission,
     StrategyError,
@@ -29,6 +30,7 @@ __all__ = [
     "IMPLEMENTED_KINDS",
     "ITEM_PROJECTORS",
     "ItemRanking",
+    "PromptBudgetExceeded",
     "RubricScore",
     "StrategyAdmission",
     "StrategyError",

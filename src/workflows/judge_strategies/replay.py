@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from agent.judge.evidence import JudgeEvidenceError, verify_call_evidence
+from agent.judge.evidence import JudgeEvidenceError, verify_call_chain, verify_call_evidence
 from agent.schemas.data_analysis.common import canonical_json_bytes
 from agent.schemas.judge import JudgeCallEvidence, JudgeRoutes
 
@@ -25,7 +25,14 @@ from .models import (
     StrategyResult,
     invocation_sha256,
 )
-from .plan import call_path, call_request, decide, next_call, strategy_route
+from .plan import (
+    call_path,
+    call_request,
+    decide,
+    next_call,
+    require_call_capacity,
+    strategy_route,
+)
 
 
 def _read_anchored(path: Path, expected_sha256: str) -> StrategyEvidence:
@@ -63,6 +70,7 @@ def replay_llm_strategy(
     kind = implemented_kind(strategy)
     route = strategy_route(strategy, routes)
     evidence_dir = invocation.evidence_dir
+    require_call_capacity(invocation)
     strategy_path = evidence_dir / STRATEGY_EVIDENCE_FILE
     record = _read_anchored(strategy_path, expected_sha256)
     digest = invocation_sha256(invocation)
@@ -72,6 +80,7 @@ def replay_llm_strategy(
     if (record.strategy_kind, record.static_call_bound) != (strategy.kind, bound):
         raise StrategyError("strategy evidence kind or call bound differs from the invocation")
     calls: tuple[JudgeCallEvidence, ...] = ()
+    kinds: tuple[str, ...] = ()  # the planner's declared content-kind sequence
     accounted = {strategy_path}
     for anchor in record.calls:
         if calls and calls[-1].status != "decided":
@@ -91,11 +100,12 @@ def replay_llm_strategy(
         except (JudgeEvidenceError, FileNotFoundError) as error:
             raise StrategyError(f"strategy call {len(calls)} is refused: {error}") from error
         calls += (evidence,)
+        kinds += (planned.content.kind,)
         accounted.add(path)
-    if (not calls or calls[-1].status == "decided") and next_call(
-        kind, invocation, calls
-    ) is not None:
-        raise StrategyError("strategy evidence ends before the planned call chain is complete")
+    try:
+        verify_call_chain(calls, content_kinds=kinds)
+    except JudgeEvidenceError as error:
+        raise StrategyError(f"strategy call chain is refused: {error}") from error
     if decide(kind, invocation, calls) != record.outcome:
         raise StrategyError("re-derived strategy outcome differs from the recorded outcome")
     _require_accounted(evidence_dir, accounted)
