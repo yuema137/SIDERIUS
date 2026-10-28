@@ -144,6 +144,11 @@ def resolve_trainer_seed_plan(
     return TrainingSeedPlan(generated, pinned_subsample_base=train_base_seed), "generated"
 
 
+def seed_log_line(plan: TrainingSeedPlan, source: TrainerSeedSource) -> str:
+    """The stdout line the trainer prints before any training work starts."""
+    return f"[seed] run_seed={plan.context.run_seed} source={source}"
+
+
 def trainer_seed_record(plan: TrainingSeedPlan, source: TrainerSeedSource) -> dict[str, object]:
     """The seed fields a trainer adds to its results JSON (never LLM-visible)."""
     record: dict[str, object] = {

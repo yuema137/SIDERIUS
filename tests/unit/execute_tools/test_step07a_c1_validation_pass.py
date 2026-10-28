@@ -406,8 +406,9 @@ class TestComparabilityUnequalLastBatch:
         reference = sum(per_sample) / len(per_sample)
         mutation = float(np.mean(batch_means))  # unweighted mean of batch means (2, 2, 1)
         # R3 sums float32 batch means; the reference sums float32 per-sample
-        # losses. They agree to float32 rounding, which depends on the weights.
-        assert r3 == pytest.approx(reference, abs=1e-6)
+        # losses. They agree to float32 rounding, which depends on the weights
+        # and on BLAS/thread count; the wrong estimator differs by ~1e-4.
+        assert r3 == pytest.approx(reference, rel=1e-6)
         assert abs(r3 - mutation) > 1e-5, "the fixture must separate the two estimators"
 
 

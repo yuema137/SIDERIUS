@@ -36,6 +36,7 @@ from core.training_seeds import (
     TrainingSeedPlan,
     require_seed_plan,
     resolve_trainer_seed_plan,
+    seed_log_line,
     trainer_seed_record,
 )
 from execute_tools.checkpoint_selection import CheckpointSelector
@@ -2315,6 +2316,8 @@ def main():
     seed_plan, seed_source = resolve_trainer_seed_plan(
         _load_seed_context_arg(args.seed_context_json), args.train_base_seed
     )
+    # Pre-execution record: a crash, OOM or timeout never loses the seed.
+    print(seed_log_line(seed_plan, seed_source), flush=True)
 
     # RT2-B: create the verification session FIRST so the measured setup
     # window covers config load and everything after — main() entry is the

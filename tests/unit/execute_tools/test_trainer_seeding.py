@@ -136,7 +136,9 @@ class TestEngineSeeding:
 class TestTrainerEntryBoundary:
     """T4: ``main()`` is the trainer CLI entry boundary for a run seed."""
 
-    def _main(self, tmp_path, monkeypatch, fx, *extra: str) -> tuple[TrainingSeedPlan, dict]:
+    def _main(
+        self, tmp_path, monkeypatch, fx, *extra: str, capsys=None
+    ) -> tuple[TrainingSeedPlan, dict]:
         import workflows.task_composition as composition
 
         data_path = TwoFamilyDataPath(fx)
@@ -145,6 +147,8 @@ class TestTrainerEntryBoundary:
 
         def fake_stream(*args, **kwargs):
             seen.update(kwargs)
+            if capsys is not None:
+                seen["stdout_before_training"] = capsys.readouterr().out
             return {"final_loss": 1.0, "loss_history": [1.0], "model_params": 1}
 
         monkeypatch.setattr(tes, "run_experiment_streaming", fake_stream)
@@ -171,7 +175,17 @@ class TestTrainerEntryBoundary:
         with bind_dataset_profile(fx.profile):
             tes.main()
         (result_path,) = (tmp_path / "sb").rglob("experiment_results_*.json")
+        self.seen = seen
         return seen["seed_plan"], json.loads(result_path.read_text())
+
+    def test_generated_seed_is_printed_before_training_starts(
+        self, two_family, tmp_path, monkeypatch, capsys
+    ):
+        """Defect: a generated seed is recorded only in the results JSON written
+        after training, so a crash, OOM or timeout loses it."""
+        plan, _ = self._main(tmp_path, monkeypatch, two_family, capsys=capsys)
+        stdout = self.seen["stdout_before_training"]
+        assert f"[seed] run_seed={plan.context.run_seed} source=generated" in stdout
 
     def test_absent_context_generates_and_records_the_run_seed(
         self, two_family, tmp_path, monkeypatch
@@ -257,8 +271,11 @@ class TestSeedPlan:
             SeedContext(run_seed=3, at=SeedCoordinates(epoch=0))
 
 
-def test_child_environment_pins_the_hash_seed(monkeypatch):
-    """Defect: trainer and probe children inherit a randomized or divergent
-    ``PYTHONHASHSEED``, so set iteration in task code differs between them."""
-    monkeypatch.setenv("PYTHONHASHSEED", "random")
+def test_child_environment_pins_the_hash_seed_unless_the_operator_set_one(monkeypatch):
+    """Defect: children inherit a randomized ``PYTHONHASHSEED``, so set
+    iteration in task code differs between trainer and probe; or the builder
+    silently overrides a value the operator set deliberately."""
+    monkeypatch.delenv("PYTHONHASHSEED", raising=False)
     assert subprocess_env()["PYTHONHASHSEED"] == "0"
+    monkeypatch.setenv("PYTHONHASHSEED", "123")
+    assert subprocess_env()["PYTHONHASHSEED"] == "123"
