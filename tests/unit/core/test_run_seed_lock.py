@@ -111,11 +111,29 @@ class TestContinuation:
 
 class TestFreshWorkspace:
     def test_history_import_never_inherits_the_source_seed(self, tmp_path, monkeypatch):
-        """Fails if resolution reads any lock but the target's, so a
-        ``--seed_paths`` import would continue the source run's seed."""
-        _lock(tmp_path / "source", SEED)
+        """Fails if the ``--seed_paths`` import path (``restore_prior_state``)
+        or the resolver after it reads the source run's lock, so the new
+        workspace would continue the source run's seed."""
+        from core.resume import restore_prior_state
+
+        source = tmp_path / "source"
+        _lock(source, SEED)
+        source_output = source / "run_output_v1_agent.json"
+        source_output.write_text("{}")
+        new = tmp_path / "new"
+        new.mkdir()
+        expected = continuation_run_seed(str(new), None)
+        state = restore_prior_state(
+            workspace=str(new),
+            current_iter=1,
+            seed_paths=[str(source_output)],
+            expected_invariants=_invariants(expected),
+        )
+        assert list(state.resolved_source_paths) == [str(source_output)]
+        assert expected is None
+        assert load_run_invariants(str(new)) is None
         monkeypatch.setattr("core.seeding.generate_run_seed", lambda: 7)
-        resolved = resolve_workspace_run_seed(str(tmp_path / "new"), None)
+        resolved = resolve_workspace_run_seed(str(new), None)
         assert resolved == WorkspaceRunSeed(value=7, origin="generated")
         assert resolved.log_line() == "[seed] run_seed=7 source=generated"
 
