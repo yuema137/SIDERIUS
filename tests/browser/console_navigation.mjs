@@ -140,7 +140,7 @@ try {
   assert.equal(await page.locator('#monitor-button').isDisabled(), true);
   await page.goto(metadata.origin + '/#monitor/not-a-uuid');
   const beforeInvalid = requests.length;
-  await page.locator('#route-status').filter({hasText: 'Invalid console route'}).waitFor();
+  await page.locator('#route-status').filter({hasText: 'Invalid operation UUID'}).waitFor();
   await connect();
   assert.ok(requests.slice(beforeInvalid).every(item => !item.path.startsWith('/api/operations/')), 'Invalid UUID never reaches operation API');
   console.log('PASS: direct monitor, history, isolation, invalid route and reconnect witnesses');

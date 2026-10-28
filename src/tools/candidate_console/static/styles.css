@@ -431,3 +431,7 @@ header.console-header { position: relative; min-height: var(--bar-height); }
 .entry-card > .button-link { justify-self: start; }
 .home-advanced { display: grid; gap: var(--space-4); }
 @media (max-width: 800px) { .entry-cards { grid-template-columns: minmax(0, 1fr); } }
+
+/* "Skip to canvas" (Workflow view): off screen until it has keyboard focus (red-team E-7). */
+.skip-link { position: absolute; left: var(--space-2); top: -48px; z-index: 50; padding: var(--space-2) var(--space-3); border-radius: var(--radius-1); background: var(--panel); color: var(--text); box-shadow: var(--elev-2); }
+.skip-link:focus { top: var(--space-2); }

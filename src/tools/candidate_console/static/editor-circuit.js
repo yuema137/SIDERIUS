@@ -64,12 +64,16 @@
       [...host.querySelectorAll('.circuit-wire')].find(path => same(wireKey(path), wireKey(target)))?.classList.toggle('selected', selected);
     }
   }
+  // Wires are read aloud in plain words ("Propose model sends Model plan to Implement") and
+  // join the Tab order only with advanced tools on (E-7); beginners select one with the mouse.
+  const wireLabel = (from, to, contract) => `${capabilityOf(from)} sends ${contract ? contracts.describe(contract).name : 'its result'} to ${capabilityOf(to)}`;
+  const wireTabIndex = enabled => enabled && window.uiSettings?.isEnabled('advanced') ? '0' : '-1';
   const wireKey = target => ({from: target.dataset.from, to: target.dataset.to, argument: target.dataset.argument || null});
   function selectWire(target) {
     if (!projection?.enabled) return;
     selectedWire = wireKey(target);
     target.focus({preventScroll: true}); highlight();
-    say(`Selected connection ${selectedWire.from}.result to ${selectedWire.to}.${selectedWire.argument}. Disconnect it with the button or Delete.`);
+    say(`Selected: ${target.getAttribute('aria-label')}. Disconnect it with the button or Delete.`);
   }
   function disconnectSelectedWire() {
     if (!projection?.enabled || projection.allowBindingChange === false || !selectedWire) return;
@@ -164,8 +168,8 @@
       const target = document.createElementNS(svg.namespaceURI, 'path');
       target.setAttribute('d', geometry.path(route)); target.classList.add('circuit-wire-target');
       target.dataset.from = source.node; target.dataset.to = input.dataset.node; target.dataset.argument = option.argument;
-      target.setAttribute('tabindex', '0'); target.setAttribute('role', 'button'); target.setAttribute('aria-pressed', 'false');
-      target.setAttribute('aria-label', `Connection ${source.node}.result to ${input.dataset.node}.${option.argument}`);
+      target.setAttribute('tabindex', wireTabIndex(projection.enabled)); target.setAttribute('role', 'button'); target.setAttribute('aria-pressed', 'false');
+      target.setAttribute('aria-label', wireLabel(source.node, input.dataset.node, option.socket_contract));
       target.addEventListener('focus', () => path.classList.add('focused'));
       target.addEventListener('blur', () => path.classList.remove('focused'));
       target.addEventListener('click', event => { event.stopPropagation(); selectWire(target); });
@@ -283,6 +287,7 @@
     const disconnect = element('button', 'Disconnect selected connection', host, 'circuit-disconnect');
     disconnect.type = 'button'; disconnect.hidden = true; disconnect.addEventListener('click', disconnectSelectedWire);
     const viewport = element('div', '', host, 'circuit-viewport'), sizer = element('div', '', viewport, 'circuit-sizer');
+    viewport.id = 'circuit-viewport'; viewport.tabIndex = -1; viewport.setAttribute('aria-label', 'Workflow canvas');
     const world = element('div', '', sizer, 'circuit-world');
     viewport.addEventListener('scroll', updateVisibility, {passive: true});
     viewObserver.disconnect(); viewObserver.observe(viewport);
@@ -413,7 +418,7 @@
     for (const port of host.querySelectorAll('.circuit-port')) port.disabled = !enabled;
     const disconnect = host.querySelector('.circuit-disconnect'); if (disconnect) disconnect.disabled = !enabled || projection.allowBindingChange === false;
     for (const target of host.querySelectorAll('.circuit-wire-target')) {
-      target.setAttribute('aria-disabled', String(!enabled)); target.setAttribute('tabindex', enabled ? '0' : '-1');
+      target.setAttribute('aria-disabled', String(!enabled)); target.setAttribute('tabindex', wireTabIndex(enabled));
     }
     for (const heading of host.querySelectorAll('.editor-node')) heading.setAttribute('aria-disabled', String(!selectable));
     const tidy = host.querySelector('#circuit-tidy'); if (tidy) tidy.disabled = !enabled || !projection.document || projection.allowMove === false;
@@ -464,5 +469,10 @@
     if (!projection?.document) return;
     if (view.fitPending) fit(); else updateVisibility();
   });
-  window.editorCircuit = Object.freeze({render, setEnabled});
+  // "Skip to canvas" (index.html): the selected module, else the first, else the canvas itself.
+  function focusCanvas() {
+    const target = host?.querySelector('.editor-node[aria-pressed="true"]') || host?.querySelector('.editor-node') || host?.querySelector('.circuit-viewport');
+    target?.focus(); return !!target;
+  }
+  window.editorCircuit = Object.freeze({render, setEnabled, focusCanvas});
 })();

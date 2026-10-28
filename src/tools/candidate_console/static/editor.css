@@ -31,7 +31,9 @@
 .circuit-wire { fill: none; stroke: var(--edge); stroke-width: 2; pointer-events: none; }
 .circuit-wire.selected, .circuit-wire.focused { stroke: var(--focus); stroke-width: 4; }
 .circuit-wire-target { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
-.circuit-wire-target:focus-visible { outline: none; }
+/* Keyboard focus on a wire: a soft halo along the stroke (selection only recolours it). */
+.circuit-wire-target:focus-visible { outline: none; stroke: color-mix(in srgb, var(--focus) 40%, transparent); }
+.circuit-viewport:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .circuit-disconnect { margin: .35rem 0; }
 .circuit-port-unbound-label { font-weight: 700; }
 .circuit-port.is-unbound[data-required="true"] { border-color: var(--warning); }
