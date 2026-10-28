@@ -13,6 +13,7 @@
 #editor-inspector label.field-problem { padding: .3rem .4rem; border-left: 4px solid var(--error); }
 #editor-inspector label.field-problem select { border-color: var(--error); }
 #editor-inspector h3 { margin: 1rem 0 .3rem; font-size: .95rem; }
+.field-problem-text { color: var(--error); }
 
 .training-settings { margin: 1rem 0; }
 .training-settings > summary { font-weight: bold; }

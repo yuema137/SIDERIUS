@@ -146,9 +146,16 @@
   function changed(label = 'Edit', coalesce = null) {
     if (draft && !sourceDirty) draft.record(draftState(), label, coalesce);
     invalidate(); inspectIfNeeded();
+    // A draft state inspected before (e.g. delete, then add back) has no new reply coming:
+    // its cached problems replace the previous state's now.
+    if (hasNodeDraft() && !sourceDirty && nodeView()) rediagnose();
   }
   const api = (path, body) => window.consoleSession.request('editor/' + path, body);
   function diagnostic(items = []) {
+    // Located problems name only modules still on the canvas (a reply for an older draft may
+    // name a deleted one); an empty canvas has exactly one problem to fix.
+    const present = new Set((display?.definition.nodes || []).map(n => n.id));
+    if (display) items = present.size ? items.filter(item => !item.node || present.has(item.node)) : items.filter(item => item.code === 'workflow_empty');
     $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}${item.field_path ? ` at ${item.field_path.join('.')}` : ''}`).join('\n');
     // Server diagnostics only; draft problems carry node/field, source ones a line.
     window.editorProblems.render($('problems'), items, {source: window.editorProblems.focusSource, describe: problemLabels,
@@ -417,7 +424,7 @@
         const select = document.createElement('select'); label.append(select);
         label.classList.toggle('field-problem', option.required && !option.bound);
         if (!option.bound) {
-          const empty = node('option', option.required ? 'Required input is unbound' : 'Unbound (optional)', select);
+          const empty = node('option', 'Not connected', select);
           empty.value = ''; empty.disabled = true; empty.selected = true;
         }
         option.choices.forEach((choice, index) => {
@@ -478,7 +485,7 @@
     // editorDraft.proposal reviews loop-only edits as a typed loop patch on the anchor source.
     const edit = message => { changed('Edit research loop'); render(); status(message); };
     window.editorLoopControls.render($('loop'), {loop: graph.definition.loop || null, template: loopTemplate,
-      drafts: loopDrafts, nodes: graph.definition.nodes, profile: graph.execution_profile || null, enabled: canEditLoop()}, {
+      drafts: loopDrafts, nodes: display.definition.nodes, profile: graph.execution_profile || null, enabled: canEditLoop()}, {
       add: () => {
         if (!live() || graph.definition.loop || !loopTemplate) return;
         graph.definition.loop = clone(loopTemplate);

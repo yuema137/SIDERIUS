@@ -1,7 +1,10 @@
 /* Presentation and ephemeral gestures only; editor.js owns every document mutation. */
 (() => {
   'use strict';
-  let projection = null, actions = null, host = null, pending = null, drag = null, selectedWire = null, connecting = false;
+  let projection = null, actions = null, host = null, pending = null, drag = null, selectedWire = null, connecting = false
+  // A mouse press never focuses a card (pointerdown preventDefault), and selecting re-renders:
+  // the clicked heading is focused after that render so Delete and Alt+arrows act on it.
+  let refocus = null;
   // View-only state (zoom, scroll, arranged view, expanded optional inputs). It is
   // kept per opened graph and never reaches a document, so viewing never changes source.
   let view = {key: null, scale: 1, fitPending: false, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
@@ -267,7 +270,7 @@
     const note = element('p', '', parent, 'circuit-view-note'); note.setAttribute('aria-live', 'polite');
   }
   function render(container, value, callbacks) {
-    const focus = container.contains(document.activeElement) ? document.activeElement.id : null;
+    const focus = refocus || (container.contains(document.activeElement) ? document.activeElement.id : null); refocus = null;
     const key = `${value.viewKey ?? ''}|${(value.document?.definition.nodes || []).map(node => node.id).join(',')}`;
     const previous = container.querySelector('.circuit-viewport');
     if (view.key !== key) view = {key, scale: 1, fitPending: true, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
@@ -300,7 +303,11 @@
       const role = [...heading.querySelector('.capability-heading').classList].find(name => name.startsWith('capability-') && name !== 'capability-heading');
       if (role) card.classList.add(role);
       heading.setAttribute('aria-pressed', String(node.id === value.selected));
-      heading.addEventListener('click', () => { if (projection === value && projection.selectable) actions.select(node.id); });
+      heading.addEventListener('click', () => {
+        if (projection !== value || !projection.selectable) return;
+        refocus = heading.id; actions.select(node.id);
+        if (refocus) { refocus = null; heading.focus({preventScroll: true}); }
+      });
       heading.addEventListener('contextmenu', event => { if (projection === value && projection.enabled && !pending && actions.menu) { actions.select(node.id); actions.menu(node.id, event); } });
       heading.addEventListener('keydown', event => {
         // Node removal is proposed by editor.js (Review shows the exact change before Save).

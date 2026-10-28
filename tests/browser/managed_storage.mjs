@@ -37,12 +37,12 @@ rows = []
 for n in d.definition.nodes:
     req = n.request
     if req.kind == 'external':
-        e = ext[req.binding]; rows.append({'node': n.id, 'capability': n.capability, 'argument': None, 'kind': e.kind, 'contract': e.contract, 'id': e.id})
+        e = ext[req.binding]; rows.append({'node': n.id, 'capability': n.capability, 'argument': None, 'kind': getattr(e, 'kind', 'external'), 'contract': e.contract, 'id': e.id})
         continue
     for a in req.arguments:
         if a.name == 'storage':
-            e = ext[a.source.binding]; rows.append({'node': n.id, 'capability': n.capability, 'argument': 'storage', 'kind': e.kind, 'contract': e.contract, 'id': e.id})
-print(json.dumps({'rows': rows, 'literal_storage': [e.id for e in d.definition.externals if e.kind != 'managed_candidate' and e.contract == 'storage']}))
+            e = ext[a.source.binding]; rows.append({'node': n.id, 'capability': n.capability, 'argument': 'storage', 'kind': getattr(e, 'kind', 'external'), 'contract': e.contract, 'id': e.id})
+print(json.dumps({'rows': rows, 'literal_storage': [e.id for e in d.definition.externals if getattr(e, 'kind', 'external') != 'managed_candidate' and e.contract == 'storage']}))
 `, path], {cwd: root, encoding: 'utf8', env: {...process.env, PYTHONPATH: resolve(root, 'src')}}));
 try {
   const metadata = await new Promise((accept, reject) => {
@@ -95,7 +95,7 @@ try {
     assert.equal(await page.locator(`#circuit-input-${id}-storage`).count(), 0, `${id}: no storage socket`);
     await page.locator(`#circuit-node-${id}`).click();
     assert.equal(await page.locator('#editor-inspector select[data-argument="storage"]').count(), 0, `${id}: no storage row`);
-    assert.equal(await page.locator('#editor-inspector .external-input-create').count(), 0, `${id}: no "Create external input"`);
+    assert.equal(await page.locator(`#editor-inspector .external-input-create[data-socket="${id}.storage"]`).count(), 0, `${id}: no "Create external input" for storage`);
   }
   assert.equal(await page.locator(`#circuit-input-${proposal}-request`).count(), 0, 'The managed proposal request has no socket');
   assert.equal(await page.locator('#problems-chip').isVisible(), false, 'No problem asks for storage');

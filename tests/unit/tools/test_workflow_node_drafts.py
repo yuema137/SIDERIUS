@@ -242,6 +242,36 @@ def test_deleting_every_module_is_a_problem_not_a_refusal(tmp_path):
     assert refused.value.code == "draft_incomplete"
 
 
+def test_problems_after_emptying_a_loop_workflow_name_only_what_remains(tmp_path):
+    """Fails if an emptied canvas lists more than "add at least one module", or if adding
+    one incomplete module hides the loop problem while its feedback endpoints are still
+    deleted (red-team E-1: the pending node's missing input used to short-circuit)."""
+    from tests.browser.workflow_editor_server import interpretation_profile_source
+
+    source = interpretation_profile_source()
+    editor = editor_for(tmp_path, source)
+    sha = editor.read().sha256
+    every = tuple(node.id for node in parse_workflow_source(source).definition.nodes)
+    emptied = editor.inspect_node_drafts(
+        NodeDraftsRequest(expected_sha256=sha, proposal=drafts(source, removed=every))
+    )
+    assert [(item.code, item.message) for item in emptied.problems] == [
+        ("workflow_empty", "add at least one module")
+    ]
+    one = drafts(
+        source,
+        pending("build2", "proposal-to-implementation", 0.0, storage="@proposal_store"),
+        removed=every,
+    )
+    view = editor.inspect_node_drafts(NodeDraftsRequest(expected_sha256=sha, proposal=one))
+    assert {(item.code, item.node) for item in view.problems} == {
+        ("loop_feedback_missing", None),
+        ("required_unbound", "build2"),
+    }
+    unbound = next(item for item in view.problems if item.node == "build2")
+    assert unbound.message == "build2.output: required input is not connected"
+
+
 def test_deleting_an_unread_node_keeps_every_other_byte(tmp_path):
     """Fails if a draft deletion nobody reads re-renders the file (comments lost) instead
     of the targeted removal, so add-then-delete would no longer be byte-identical."""

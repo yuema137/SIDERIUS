@@ -66,7 +66,7 @@ try {
   assert.equal(await item.getAttribute('data-field'), 'output');
   assert.equal(await item.getAttribute('data-code'), 'required_unbound');
   assert.match(await item.locator('.editor-problem-text').textContent(), /^Implement: .+ is not connected$/, 'One plain sentence: module and connector name');
-  assert.match(await item.locator('.editor-problem-raw').textContent(), /build\.output · required input is unbound/, 'Raw location is advanced detail');
+  assert.match(await item.locator('.editor-problem-raw').textContent(), /build\.output · required input is not connected/, 'Raw location is advanced detail');
   assert.match(await page.locator('#editor-save-reason').textContent(), /^Fix 1 problem to save$/, 'Disabled Save says why');
   assert.equal(await page.locator('#editor-review').isDisabled(), true, 'An incomplete draft blocks Review');
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
