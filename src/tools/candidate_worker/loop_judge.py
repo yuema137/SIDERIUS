@@ -107,7 +107,10 @@ def _context(initial: "CandidateRunReceipt", iteration: int) -> JudgeRunContext:
 
 
 def mark_skipped_stop_judge(initial: "CandidateRunReceipt", value: StopEvaluationInput) -> None:
-    """Record a deterministic-first skip as a ``judge.stop.skipped`` usage marker (no call)."""
+    """Record a deterministic-first skip as a ``judge.stop.skipped`` usage marker (no call).
+
+    Best-effort telemetry (``emit_judge_marker``): it never fails the run.
+    """
     skipped = skipped_stop_judge(value)
     if skipped is None:
         return

@@ -503,3 +503,34 @@ def test_body_health_is_invalid_only_when_every_formal_record_is_invalid(
     score = BodyScore(iteration=1, valid_formal=None, metric_spec=None)
     path = tmp_path / "run_output.json"
     assert _body_health(str(tmp_path), score, tuning, path) == expected
+
+
+def test_a_skip_marker_that_cannot_reach_a_provider_bridge_never_fails_the_run(
+    prepared, loop_tuner, monkeypatch, capsys
+):
+    """Fails if the best-effort skip marker can change the outcome of a loop a metric
+    condition stopped correctly: without a judge credential the real bridge cannot be
+    built, yet the run must still complete with its deterministic reason."""
+    from tools.candidate_worker import loop_judge
+    from workflows.definition import JudgeStop, MetricThresholdStop
+
+    def unavailable(route):
+        raise RuntimeError("OPENAI_API_KEY is not set")
+
+    # The real factory's failure mode without a credential, without touching the host env.
+    monkeypatch.setattr(loop_judge, "bridge_for_route", unavailable)
+    metric, threshold, (low, high) = threshold_for(prepared)
+    request = judged_request(
+        prepared,
+        (
+            JudgeStop(criterion="plateau"),
+            MetricThresholdStop(metric_id=metric.id, threshold=threshold),
+        ),
+        final_iteration=3,
+    )
+    scored_bodies(monkeypatch, (high, low, low))
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    assert receipt.loop_trace.stop_reason.kind == "metric_threshold"
+    assert "marker 'judge.stop.skipped' not recorded" in capsys.readouterr().err
+    verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)

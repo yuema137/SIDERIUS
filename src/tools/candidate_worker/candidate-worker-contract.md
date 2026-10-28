@@ -1414,7 +1414,10 @@ predicate; the worker calls iff it is true, readback requires evidence iff it is
    `skipped_stop_judge`), `mark_skipped_stop_judge` records a usage marker row
    through the bridge's `emit_marker` (label `judge.stop.skipped`, extra `reason=
    "deterministic_stop"`, `judge_condition_index`, `deciding_condition_index`); no
-   call and no evidence;
+   call and no evidence. The marker is best-effort telemetry: `emit_judge_marker`
+   checks no execution deadline, and a failure to build or bind the bridge (for
+   example a missing credential) or to write the row is reported on stderr and
+   never changes the loop's outcome;
 4. otherwise, when `N >= min_completed_bodies`, `call_stop_judge` makes exactly one
    call (`run_judge_call`, template `judge.stop/v1`, usage label `judge.stop`,
    `max_calls=1`, run context `(workspace, N, run_name, run_id)`) and publishes

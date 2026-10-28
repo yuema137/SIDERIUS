@@ -13,7 +13,7 @@ changes.
 | [`agent/schemas/judge.py`](../schemas/judge.py) | Typed records: `StopJudgeRequest` (`CallContent` kind `stop`), `JudgeBodyFacts`, `DirectionWords`, `CallRequest`, `StopVerdict` (`CallPayload`), `PromptIdentity`, `JudgeRoute`, `JudgeCallEvidence` |
 | [`template.py`](template.py) | `JudgeTemplate`: one versioned, framework-owned template per call role; pure rendering and `PromptIdentity` |
 | [`stop_template.py`](stop_template.py) | `STOP_TEMPLATE` (`judge.stop/v1`, usage label `judge.stop`, response model `StopVerdict`) |
-| [`call.py`](call.py) | `run_judge_call` — the only function in the package that contacts a provider; `emit_judge_marker` (a skipped call's usage marker row through the bound bridge's `emit_marker`; no provider call, no evidence); `JudgeRunContext`, `JudgeCallRefused`, `JudgeEvidenceConflict` |
+| [`call.py`](call.py) | `run_judge_call` — the only function in the package that contacts a provider; `emit_judge_marker` (best-effort usage marker row for a skipped call through the bound bridge's `emit_marker`; no provider call, no evidence, no deadline check, never raises an `Exception`); `JudgeRunContext`, `JudgeCallRefused`, `JudgeEvidenceConflict` |
 | [`evidence.py`](evidence.py) | Readback: `read_call_evidence`, `verify_call_evidence`, `verify_call_chain`, `chain_prior_turns`, `evidence_sha256`; imports no bridge |
 
 Not owned here: provider routing and usage rows (`LLMBridge`,
