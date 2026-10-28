@@ -117,11 +117,11 @@ even when using the default models.
    unsaved-change guard. Saving does not run the declaration.
    The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
-   Until the canvas has a module, it says what to do next and offers the 4-step
-   tour (choose a task, pick a module, match connector names, save a version).
+   Until the canvas has a module, it says what to do next and offers **Start from a
+   template**; the 4-step tour is a link below it and under **Help**.
    Save behavior and concurrent-writer notes are under **Details** (Settings ›
-   Show developer details). After a successful save, **Next: prepare a run** opens the **Run**
-   page; it stays disabled, with the reason beside it, while edits are unsaved or
+   Show developer details). After a successful save, **Next: Run** opens the **Run**
+   page; it stays disabled, with the reason in its tooltip, while edits are unsaved or
    the project is not enabled for runs.
    A step line (Task › Workflow › Run › Results) shows where you are.
 
@@ -145,14 +145,17 @@ to connect one. If saved cards overlap, **Arrange view** shows a non-overlapping
 layout without changing the file.
 
 Drag a node heading to move it, or focus the heading and use Alt + arrow keys.
-These edits stay local until **Review changes** and **Save reviewed source**.
+These edits stay local until you press **Save** (it checks the workflow) and then
+**Save version** in the row that opens. **Tidy up** (bottom-right of the canvas) lines
+the cards up left to right; it is one edit you can undo.
 For a bound workflow, choose its matching configured task version and acknowledge
 the findings. Prepare a new run on the Run page to check its supported execution profile.
 
-To add nodes, click or drag entries from **Add capability**. You can add several
-nodes, move any card and wire them in any order. A node with a missing required
-input shows it in red, and **Review changes** stays disabled until every
-required input is connected.
+To add nodes, click or drag entries from **Add capability**, or hover a card and
+press the **+** beside an output that is not connected yet: pick a module and it is
+added to the right, already connected. You can add several nodes, move any card and
+wire them in any order. A node with a missing required input shows it in red, and
+**Save** stays disabled until every required input is connected.
 
 When a required input such as `storage` has nothing to connect, select the node.
 Under that input, Selection explains what the input is. Open **Create external
@@ -163,13 +166,14 @@ Reusable workflows can choose **Managed by the run** instead. Then click
 
 ## Bind a task version
 
-The **Task package and version** panel always states which task package and
+The task chip in the Workflow page bar shows the task package and version; click it
+to open the **Task package and version** card below the canvas. That card always states which task package and
 version the open workflow uses. Versions are offered only for configured tasks
 that declare `task_revision`; otherwise the panel says that none are configured.
 
 In Workflow builder, explicitly choose a configured task package/version and
 **Update workflow references**. Inspect the Python diff and task findings, confirm
-them and **Save reviewed source**. An unbound reusable workflow requires a separate
+them and **Save version**. An unbound reusable workflow requires a separate
 confirmation to adopt its currently observed snapshot; save that binding before
 editing its scientific settings.
 
@@ -184,7 +188,7 @@ unsupported forms explain why the switch is blocked. Existing runs stay unchange
 See the [exact support boundary](../workflow_authoring/authoring-contract.md#changed-task-versions-for-fresh-candidates).
 
 Save pending source or inspector edits before Update. For bound edits, select the
-matching configured choice and use ordinary **Review changes** and Save first.
+matching configured choice and use the ordinary **Save** first.
 Choosing a version alone never changes source. Both Professional and Assistant
 collaboration use this flow. Saving affects future captures; preparation and launch
 remain separate, and existing runs keep their captured binding.
@@ -201,7 +205,7 @@ See the [reusable configuration contract](console-contract.md#reusable-capture-c
 
 1. Connect and open **Workflow Editor**. Review and **Save** your source edits.
    An already saved supported reusable declaration needs no extra Save. Resolve
-   any source conflict before continuing. Select **Next: prepare a run**; the
+   any source conflict before continuing. Select **Next: Run**; the
    **Run** page states which saved version it will use.
 2. On the Run page, in **New run**, explicitly choose the configured task and resources, enter a
    run name, and select **Review preparation**. Check the source, dataset, model

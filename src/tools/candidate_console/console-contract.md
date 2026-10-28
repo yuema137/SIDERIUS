@@ -790,13 +790,18 @@ contrast >= 4.5:1, the narrow drawer, and that nothing is posted or written.
 
 Templates and advice (`editor-templates.js`, `editor-advice.js`,
 `editor-templates.css`; server contract in
-`tools/workflow_authoring/authoring-contract.md`): the Workflow page shows a compact
-"Start from a template" card; its dialog lists compact cards (icon, title, one
-sentence) and shows the graph preview of the chosen template, with loop details
-collapsed, before "Import as draft". Import calls
-`window.workflowEditor.importSource(source, label)`, which runs the ordinary
-source Review; the result folds into the draft as one undoable step and Save is
-still required. The node inspector calls `window.editorAdvice.render` directly
+`tools/workflow_authoring/authoring-contract.md`): the gallery opens from the canvas
+header **Templates** button (`#editor-template-open`), the empty-canvas primary action
+(`#workflow-start-template`), Home **Start from a template** and the page-bar `⋯` menu
+(`window.editorTemplates.open()`). Its dialog lists compact cards (icon, title, one
+sentence), first **Blank workflow** (`data-template="blank"`: changes nothing, closes
+the dialog and focuses the module search), then the server templates with the graph
+preview of the chosen one and loop details collapsed, before **Use template**
+(`#editor-template-import`). Use calls `window.workflowEditor.importSource(source,
+label)` inside `editorPageBar.quietly(...)`, which runs the ordinary source check
+without opening the save step; the result folds into the draft as one undoable step
+and Save is still required. Afterwards `editorAdvice.focusFirst()` selects the first
+canvas module whose capability has an advice target and focuses its advice field. The node inspector calls `window.editorAdvice.render` directly
 after the node heading, so "Your advice to the agents" (multi-line, help,
 example placeholder) is its first input; edits are draft document edits with one
 coalesced undo step per node, disabled while a palette node is pending.
@@ -930,16 +935,17 @@ It infers neither scientific success nor complete billing.
 
 | Route | Primary content and action | Secondary content (Settings-gated unless noted) |
 | --- | --- | --- |
-| `#home` | Hero (theme-matched logo + one sentence); entry cards **Start from a template** (opens the tour on Workflow), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** |
-| `#workflow` | Page bar (title, problems chip, **Review changes**, version name, **Save reviewed source**, Undo/Redo/Discard, **Next: prepare a run**); status line; project and task package/version; docked rail, canvas and Selection | Research loop panel and Review exact Python changes (shown); References, Advanced source, Version history, Refresh, canvas help, connection mappings (advanced); Details (developer) |
+| `#home` | Hero (theme-matched logo + one sentence); entry cards **Start from a template** (opens the template gallery on Workflow), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** |
+| `#workflow` | Page bar (title + dirty badge, project select, task chip, problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Task package and version (collapsed card below the frame); Exact Python changes, References, Advanced source, Version history, Refresh, canvas help, connection mappings (advanced); Details (developer) |
 | `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; captured resources (developer) |
 | `#monitor` | Recent operations; Status and logs; loop controls; results; token summary | Operation UUID form, Recorded example (advanced); operation facts, token table (developer) |
 
 `page-guidance.js` is presentation only and owns no request or draft state. It reads
 `window.workflowEditor.state` and `window.newRunGate.ready`. `new-run.js` remains the
 single Run gate: it exports `newRunGate.ready` (its existing `ready()` predicate) and
-dispatches `new-run-gate` from its `controls()`. **Next: prepare a run** is enabled
-exactly when that gate is open and only sets `location.hash = 'run'`; its text and
+dispatches `new-run-gate` from its `controls()`. **Next: Run** is enabled
+exactly when that gate is open and only sets `location.hash = 'run'`; its tooltip, the
+visually hidden `#workflow-next-state` (its `aria-describedby`) and
 the Run page's `#run-source-state` show `Saved version <sha256[:12]> of <project> is
 ready to run.` or the first closing reason (not connected, no project, source not
 open, project not runnable, not a reusable declaration, conflict, saving, unsaved
@@ -952,7 +958,9 @@ opening a disclosure, and scrolls to the capture heading only after the
 Until the canvas draws a capability card, the canvas panel shows the empty start state
 `#workflow-start-guide` (spec §7.2): title **Build your research loop**, one sentence from
 `page-guidance.js` (`#workflow-start-state`: connect, choose a project, source not open, or
-add a module) and one action, **Take the 4-step tour**. CSS hides it with
+add a module), one primary action **Start from a template** (`#workflow-start-template`,
+opens the gallery; disabled until connected) and the tour as a secondary link
+(`#onboarding-start.link-button`). CSS hides it with
 `.workflow-canvas-panel:has(.circuit-card)`. The Selection panel shows `.inspector-empty`
 until `.inspector-capability-heading` exists. The page-bar `#problems-chip` mirrors the
 `.editor-problem` count that `editor-problems.js` renders (MutationObserver; hidden at 0)
@@ -976,8 +984,11 @@ bordered (`--radius-2`, no shadow) and a direct `h2` is its header above a divid
 `details.card` summaries are equal-height header bars whose divider appears only when
 open. `editor.css` owns the Workflow frame: page bar, then the docked
 `.editor-workspace` grid `var(--rail-width) 272px | canvas | var(--inspector-width) 352px`
-(320 px below 1280 px), height `calc(100vh - 96px)`, 1 px dividers and no gutters; each
-`.dock-panel` scrolls independently under a sticky 48 px header. Below 900 px the panels
+(320 px below 1280 px), height `--workspace-height` (set by `editor-page-bar.js`: window
+height minus the frame's top when scrolled to the top, minus 16 px, at least 480 px; the
+open save step is not subtracted), 1 px dividers and no gutters; rail and Selection
+scroll independently under a sticky 48 px header; the canvas panel does not scroll, its
+`.circuit-viewport` fills the remaining height and scrolls (`editor-page-bar.css`). Below 900 px the panels
 stack at natural height and the rail is `editor-palette.js`'s drawer. The rail column is
 `--rail-width`; s9's collapsed icon rail may set it to 48 px.
 
@@ -1000,17 +1011,82 @@ gated sections call `showAllConsoleSections(browser)` from
 `tests/browser/console_view_flags.mjs`.
 
 Tour (`onboarding.js`, spec §7.3 within its 3–4 step limit): opt-in only, from the empty
-canvas, the header **Help** button or Home **Start from a template**; from another page it
+canvas link, the header **Help** button or the page-bar `⋯` menu; from another page it
 switches to `#workflow` first. Four steps, each highlighting a visible element with an
 outline ring and a non-modal card placed beside it (right, below, left, above, clamped;
 no backdrop, the page stays usable): **Choose a task** (`#editor-project`), **Pick a
 module** (`#editor-palette`), **Match connector names** (`.circuit-viewport`), **Save a
-version** (`#editor-save`). Buttons Skip · Back · Next / OK; Esc = Skip; focus returns
+version** (`#editor-review`, the page-bar Save). Buttons Skip · Back · Next / OK; Esc = Skip; focus returns
 to the opener. Outcome `done`/`dismissed` is stored as `siderius.console.tour.v1`; it
 never reopens itself. Witness: `tests/browser/layout_onboarding.mjs` (defaults, Settings
 toggles and persistence, tour anchoring/non-blocking/reopen, logo per theme, docked frame
 geometry at 1440×1100 and 1024×768 in both themes, card disjointness, page-grid edges,
 text ≥ 4.5:1 and ≥ 12 px outside the canvas, rail and inspector internals).
+
+#### Workflow page bar, save step and canvas controls
+
+Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
+`window.workflowEditor.state`, never mutates a draft or sends a request).
+
+- Connection (spec L6): `#access-section` lives in the header. Disconnected it is a
+  full-width banner (heading, token form, status); connected (`session.js`
+  `.access-collapsed`) it is one chip: `#access-status` **Connected.** (tooltip: the
+  2 s observation refresh), **Change token**, **Disconnect console**.
+- Page bar, left to right: `h1` + `#editor-dirty`; `#editor-project` (label visually
+  hidden); `#editor-task-chip` (`Task: <package_id> · <revision>`, `Task: not bound` or
+  `Task: not open`; `needs-attention` while a bound workflow has no selected configured
+  version or task findings are pending; click opens `#editor-task-panel`, a collapsed
+  `details.card` below the frame holding the unchanged `editor-task-controls.js` panel,
+  open by default when advanced tools are on); `#problems-chip`; `#editor-edit-actions`
+  (Undo `undo-2`, Redo `redo-2`, Revert `rotate-ccw` icon buttons created by
+  `editor-draft.js`; names via `aria-label`, labels in tooltips); Refresh (advanced);
+  primary **Save** (`#editor-review`); **Next: Run** (`#workflow-next-run`); `⋯`
+  (`details.overflow-menu`: New from template…, Take the tour, Task package and version,
+  Version history and Advanced source (advanced only), Settings…).
+- Save step: **Save** is the ordinary editor Review (unchanged request and gating).
+  When a check succeeds (`state.reviewed` turns true) the in-flow
+  `#editor-save-confirm` row opens under the page bar with `#editor-version-name`,
+  **Cancel** and **Save version** (`#editor-save`, unchanged: it posts exactly the
+  checked `reviewed.source` bytes with their sha256). It closes on Cancel/Esc, on any
+  edit (the check is invalidated) and after Save. A pending task review adds
+  **Show task findings** (opens the task card for the acknowledgement). The diff
+  (`#editor-review-disclosure` › `#editor-diff`) is an Advanced disclosure in the row.
+  Template imports run inside `editorPageBar.quietly()` and do not open it.
+  `workflowEditor.state` gained presentation fields `reviewed`, `taskReview`,
+  `taskSelected` and `taskBinding` (`{package_id, revision}` or null).
+- Canvas: header **Templates**; the circuit toolbar sits bottom-right of the canvas and
+  the connector legend bottom-left (`#editor-graph` grid). **Tidy up** (`#circuit-tidy`,
+  `layout-grid`) places every module with `editorCircuitGeometry.tidy`: columns by
+  longest result-input path from a source, rows by the mean row of the sources (ties
+  by id), steps = largest card + 80/32 px rounded up to 16 px, all on the 16 px grid.
+  It is one draft edit through the ordinary `move` callback (label `Tidy up layout`,
+  undoable, saved only with Save); Arrange view stays display-only.
+- `+` add-handle (`editor-canvas-add.js`, canvas-study V5): an output whose card feeds
+  no wire shows a 20 px `+` 8 px outside the card while the card is hovered, focused or
+  selected. It opens a search popover of catalog routes that have an argument with the
+  output's contract id (`editorNodePalette.connectable`, presentation filter only).
+  Choosing one calls `editorNodePalette.addConnected`, which adds a pending node 80 px
+  right of the source with that argument (required first) bound to
+  `{kind: 'result', node, port: 'result'}` as ONE draft edit (`Add capability <id>`);
+  the server node inspection decides completeness as for palette adds. Esc closes.
+- Research loop is a section of the Selection panel (`#editor-loop.inspector-section`).
+- Icons (spec §3): vendored Lucide sprite `static/icons.svg` (47 `<symbol id="i-NAME">`,
+  shapes only, licence `static/icons-LICENSE.txt`, ISC + MIT for Feather-derived
+  icons), exact-allowlisted as `image/svg+xml`. `icons.js` fetches it once, adopts only
+  its `<symbol>` elements into a hidden in-document `<svg>` and exposes
+  `consoleIcons.make(name, size)` / `.decorate(root)` (`data-icon="NAME"`); icons are
+  `aria-hidden`; if the sprite cannot load, controls keep their text. Capability icons
+  (`editor-capability-presentation.js`) use §3.3: literature `book-open-text`, proposal
+  `lightbulb`, implementation `code-xml`, validation `shield-check`, tuning
+  `sliders-horizontal`, interpretation `chart-spline`, fallback `shapes`.
+- The page footer line was removed.
+
+Witnesses: `tests/browser/first_use_journey.mjs` (beginner first use at 1440×1100:
+Home → connect → project → Home template → Blank first → Use template → advice
+focused → `+` add wired → Tidy up and drag without overlap → Create external input →
+Save step → Save version → Next: Run; canvas visible without page scroll),
+`page_guidance.mjs`, `layout_onboarding.mjs`; `circuit_geometry.mjs` covers `tidy`
+in Node.
 
 #### Feature inventory (Beginner / Advanced / Developer)
 
@@ -1028,17 +1104,19 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Home | Entry cards: Start from a template, Open a workflow, Monitor runs | Beginner | shown | The three first actions |
 | Home | Run a configured native chain | Advanced | gated | Externally reviewed captures; not a first-use path |
 | Home | Prepare configured task (native Prepare / Launch candidate) | Advanced | gated | Server-configured route independent of the editor |
-| Workflow | Page bar: title, problems chip, Review changes, Version name, Save reviewed source, Undo/Redo/Discard, Next: prepare a run | Beginner | shown | Edit → review → save → run loop |
+| Workflow | Page bar: title, project select, task chip, problems chip, Undo/Redo/Revert icons, Save, Next: Run, `⋯` | Beginner | shown | Edit → save → run loop |
+| Workflow | Save step: version name, Save version | Beginner | shown after Save | Confirms a named version of the checked bytes |
 | Workflow | Refresh from disk | Advanced | gated | Only for external edits to the source file |
-| Workflow | Status line (Run gate reason, pending edits, version help) | Beginner | shown | Explains why Run is closed |
+| Workflow | Status line (editor status, pending edits); Run gate reason as the Next: Run tooltip | Beginner | shown | Explains what happened and why Run is closed |
 | Workflow | Problems list (`#editor-problems`) | Beginner | shown | Required inputs to fix before saving |
 | Workflow | Source conflict tools (discard / rebase) | Advanced | shown when a conflict exists | Must stay reachable to resolve a conflict safely |
-| Workflow | Workflow project select; task package and version | Beginner | shown | Choose a task |
+| Workflow | Workflow project select and task chip (page bar) | Beginner | shown | Choose a task |
+| Workflow | Task package and version details (choose version, update references, findings) | Beginner | collapsed card below the frame; open by default with advanced tools | Opened from the task chip when a version must be chosen |
 | Workflow | Module rail (palette) | Beginner | shown | Add modules |
-| Workflow | Canvas, toolbar, empty-canvas start state | Beginner | shown | Build and connect |
+| Workflow | Canvas, bottom-right controls (Fit, zoom, Arrange view, Tidy up), `+` add-handles, empty-canvas start state | Beginner | shown | Build and connect |
 | Workflow | Canvas controls help (keyboard-move hints) | Advanced | gated | Long control reference; the tour covers first use |
 | Workflow | Connection mappings list | Advanced | gated | Protocol detail per binding |
-| Workflow | Template strip (Start from a template) and gallery | Beginner | shown | One-click start from a simple closed loop |
+| Workflow | Templates button and gallery (Blank workflow first, Use template) | Beginner | shown | One-click start from a simple closed loop |
 | Workflow | Module rail start guide, stage stack, row details, hover/focus popover | Beginner | shown | Where to start and what connects to what |
 | Workflow | Contract legend (swatch + name, arrow key) | Beginner | shown | Same name = connectable |
 | Workflow | Raw contract ids in the legend | Advanced | gated (`editor-contract-presentation.js`) | Catalog identity, not needed to connect |
@@ -1046,10 +1124,10 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Workflow | Selection inspector, in order: advice (`editor-advice.js`), inputs with contract names, "Create external input" (`editor-external-inputs.js`), training and loop settings | Beginner | shown | Configure the selected module |
 | Workflow | Inspector Mapping details, model-hyperparameter owner (`editor-node-parameters.js`) | Advanced | gated (`editor.js`, `editor-node-parameters.js`) | Protocol / task-manifest detail |
 | Workflow | Remove capability (Selection, after the sections above) | Beginner | shown | Undo a placement |
-| Workflow | Research loop panel | Beginner | shown | Iteration limit and stop conditions |
+| Workflow | Research loop (Selection section) | Beginner | shown | Iteration limit and stop conditions |
 | Workflow | References (task / external locations) | Advanced | gated | Paths owned by the task configuration |
 | Workflow | Advanced source (Python editor) | Advanced | gated | Direct source editing |
-| Workflow | Review exact Python changes | Beginner | shown | Review opens it before Save |
+| Workflow | Exact Python changes (in the save step) | Advanced | gated | Byte-level review of what Save writes |
 | Workflow | Version history | Advanced | gated | Restore / inspect earlier versions |
 | Workflow | Details (save behavior, concurrent writers) | Developer | gated | Implementation notes |
 | Run | Saved-version state, New run (task, name, Review preparation, Prepare saved source) | Beginner | shown | Prepare the run |
@@ -1065,13 +1143,11 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Monitor | Native chain observation details | Advanced | hook (native-chain-monitor.js) | Native recipe internals |
 | Monitor | Recorded example | Advanced | gated | Read-only validation evidence |
 
-Not yet adopted from the spec (follow-up, not in this change): Lucide icon sprite
-(gear/help/step/empty-state icons use text), Help menu (§7.4 shows only the tour),
-connection chip in the header (L6), moving project/task into an inspector Workflow tab
-(L5), review dialog (§9), tour backdrop (omitted so the page never blocks), canvas
-internals below 12 px, and the screenshot-review items for the Workflow page bar
-(header connection chip, compact project/task selector, icon undo/redo, Review folded
-into Save, loop panel in the inspector, Python diff as Advanced).
+Not yet adopted from the spec (follow-up, not in this change): Help menu (§7.4 shows
+only the tour), Lucide icons for the header gear/help and the step line, project/task in
+an inspector Workflow tab (L5; the task details are a card below the frame), tour
+backdrop (omitted so the page never blocks), canvas internals below 12 px, minimap,
+connection snap radius, palette click-to-add auto-wiring (P6) and Connection view (R3).
 
 Navigation qualification: `tests/browser/console_navigation.mjs` uses the same
 explicit environment as the editor gate. Its temporary synthetic observations

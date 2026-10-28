@@ -36,15 +36,16 @@ whether referenced manifests, data or plugins exist.
 4. Follow **Workflow Editor** from the console, enter its access token and choose
    a project. Select a node to edit a supported binding, or edit task/external
    locations. The Python panel also accepts supported source changes, including
-   adding nodes. Click **Review changes** to validate the graph and inspect the
-   exact generated Python diff. After inspector edits, review first to update
+   adding nodes. Click **Save** to validate the graph; a save row opens (with
+   Settings › Show advanced tools it also shows the exact generated Python diff).
+   After inspector edits, press **Save** (then **Cancel**) first to update
    the Python panel before typing source changes. Inspector changes can rewrite formatting and
-   comments; review shows that rewrite. The **Research loop** panel adds or
+   comments; the diff shows that rewrite. The **Research loop** section of Selection adds or
    removes the research loop, its iteration limit and stop conditions; a loop your
-   coding agent wrote in `workflow.py` appears there, and Review shows the
+   coding agent wrote in `workflow.py` appears there, and the diff shows the
    resulting Python.
-5. Keep the suggested **Version name** (`v1`, `v2`, ...) or type your own, then
-   click **Save reviewed source**. Success means the reviewed bytes were saved
+5. In the save row, keep the suggested **Version name** (`v1`, `v2`, ...) or type your own, then
+   click **Save version**. Success means the reviewed bytes were saved
    and read back, and `workflow.py.versions.json` beside the source records the
    name, time and SHA-256. **Version history** lists saved versions, marks the
    current one and opens each read-only with its diff from the previous one. Exact previous/proposed bytes are kept as separate
