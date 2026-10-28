@@ -516,8 +516,8 @@ enabled only when the server returned `loop_template`, or the declared loop as o
 fieldset per facet: Iteration limit (`final_iteration`, whole number ≥ 1; invalid
 or empty values stay local and block Review) and Feedback (paper capability labels
 from `editorCapabilityPresentation.label`, read-only endpoints). Remove deletes the
-loop. Loop-only edits review as `LoopProposal` on the current exact source; with
-other inspector edits pending, the whole document proposal carries them. A third
+loop. Loop-only edits review as `LoopProposal` on the draft's anchor source; with
+other draft edits pending, the document or draft proposal carries them. A third
 fieldset, Stop conditions, adds/removes at most one `metric_threshold` (metric id
 text plus threshold; the editor does not know the task metric) and one
 `no_improvement` (completed bodies); `judge` is never offered. All stop-condition
@@ -531,7 +531,7 @@ diagnostic `field_path`. Loop edits preserve bytes only for an already-canonical
 source; Review re-renders the whole declaration, so hand-formatted or commented
 sources are rewritten (visible in the diff). The panel
 does not draw a back-edge or annotate cards, and it shares the source-dirty,
-binding-draft, conflict and saving fences. Capture review (`ReusableCaptureReview.loop`)
+conflict and saving fences of the unified draft. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
 from the captured declaration, and the launch summary states "up to N iterations"
 or "none (one workflow body)", followed by "stops early when …" for each declared
@@ -559,7 +559,43 @@ focuses the inspector select for `field` (and marks the canvas input
 list never enables Review: Review remains disabled for an incomplete draft.
 Witness: `tests/browser/required_defaults.mjs`.
 
-Socket/drag gestures send no requests. Source editing, disconnection, conflict,
+Unified draft (`editor-draft.js`, `window.editorDraft`; `editor.js` delegates).
+Wiring, disconnection, layout moves, inspector, training and research-loop edits
+are operations on one draft state `{document, bindings, anchor, training,
+loopTemplate}`: `document` is the edited authored document, `bindings` are
+`BindingPatch` values relative to `anchor.inventory`, and `anchor` is the last
+server projection the draft starts from (`{source, document, inventory}` of the
+loaded source, or of a reviewed Source/task-reference update). There is no edit
+mode: any mix accumulates, with one dirty flag (`workflowEditor.state.dirty`,
+true while the draft identity `{document, bindings, anchor.source}` differs from
+the loaded state, or while Source text is dirty). Review selects the existing
+typed proposal from the draft: patches present → `DraftProposal` whose
+`base_document` is the edited document (layout and inspector edits travel with
+the patches); otherwise document changes outside the loop → `DocumentProposal`;
+loop-only changes → `LoopProposal` on `anchor.source`; no change →
+`SourceProposal(anchor.source)`. Dirty Source text reviews as `SourceProposal`;
+its reviewed projection becomes the new anchor as one history step. Binding
+inspection (`POST …/draft`, read-only) belongs to the current patch set: layout
+or inspector edits keep it, any patch change (including undo/redo) re-inspects,
+and Review stays disabled until the current patch set inspects `complete`. A
+no-op input event is not an edit. The server API is unchanged.
+Training-settings actions from `editor-node-parameters.js` (value, mode, per-field
+Reset) are draft operations too: typing in one field coalesces, each Reset is its
+own undo step, and undo/redo re-render the badges from the restored document.
+History: every operation records one undo step (consecutive typing in one field
+coalesces, limit 200). **Undo**/**Redo** buttons and Ctrl/Cmd+Z,
+Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only) restore
+earlier states and invalidate any review. **Discard changes** restores the loaded
+state without reading disk and is itself undoable; **Refresh from disk** re-reads
+and asks first when dirty. Undo/Redo/Discard are disabled while Source text is
+dirty, during Save and while a conflict is shown (the conflict panel's own
+Discard/Rebase apply; Rebase makes the current disk version Discard's target and
+stays disabled while binding patches are pending). A dirty draft prefixes the
+page title with `* `, shows an "Unsaved changes" badge in the Workflow heading and
+arms the `beforeunload` guard. Save still writes exactly the reviewed bytes and
+resets history to the saved state.
+
+Socket/drag gestures send no review or save requests. Source editing, disconnection, conflict,
 saving and invalid training drafts gate mutations; stale rendered projections
 cannot mutate a replacement document. Required whole-declaration checks remain
 Review/Save, with execution-profile/alias admission owned by separate native

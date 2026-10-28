@@ -254,6 +254,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "editor-problems.js": "text/javascript",
             "editor-node-parameters.js": "text/javascript",
             "editor-versions.js": "text/javascript",
+            "editor-draft.js": "text/javascript",
+            "editor-draft.css": "text/css",
             "reusable-run.js": "text/javascript",
             "reusable-intents.js": "text/javascript",
             "new-run.js": "text/javascript",

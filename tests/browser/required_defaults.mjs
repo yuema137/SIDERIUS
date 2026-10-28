@@ -100,6 +100,13 @@ try {
   assert.equal(await settings.locator('[data-training="sampling_seed"]').isDisabled(), true);
   assert.equal(await row('sampling_seed').getAttribute('data-modified'), 'false');
   assert.equal(await badge('sampling_seed').textContent(), 'Changed, not saved', 'Reset differs from the saved value until saved');
+  // Parameter edits are unified-draft operations: one Reset is one undo step, redo reapplies it.
+  assert.match(await page.locator('#editor-undo').getAttribute('title'), /^Undo: Reset /);
+  await page.locator('#editor-undo').click();
+  assert.equal(await settings.locator('[data-training-mode="sampling_seed"]').inputValue(), 'supplied', 'Undo restores the reset value');
+  assert.equal(await badge('trial_max_epochs').textContent(), 'Changed, not saved', 'Undo reverts only the last operation');
+  await page.locator('#editor-redo').click();
+  assert.equal(await settings.locator('[data-training-mode="sampling_seed"]').inputValue(), 'unset');
 
   // Read-only model hyperparameters name their task-manifest owner; the loop endpoint points to loop settings.
   const owner = page.locator('#editor-model-hyperparameters');

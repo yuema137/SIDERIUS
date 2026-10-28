@@ -41,7 +41,6 @@
 .circuit-disconnect { margin: .35rem 0; }
 .circuit-port-unbound-label { font-weight: 700; }
 .circuit-port.is-unbound[data-required="true"] { border-color: var(--warning); }
-#editor-cancel-binding-draft { margin-left: .5rem; }
 .circuit-pending { fill: none; stroke: var(--focus); stroke-width: 2; stroke-dasharray: 6 4; opacity: .6; }
 .circuit-port.compatible { outline: 2px solid var(--focus); outline-offset: -3px; }
 .circuit-port.incompatible { opacity: .6; }

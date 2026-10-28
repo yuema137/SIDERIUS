@@ -154,6 +154,57 @@ def test_binding_draft_disconnect_promote_and_conflict(editor_config):
         assert path.read_text().startswith("# external edit")
 
 
+def test_unified_draft_review_carries_layout_and_binding_edits_together(editor_config):
+    """Fails if a draft review drops edits carried by its base document (the browser's
+    unified draft sends layout/inspector edits there) or starts requiring the saved one."""
+    from tests.unit.workflows.test_workflow_definition import definition
+    from workflows.definition import WorkflowDocument, parse_workflow_source
+    from workflows.definition.source import render_workflow_source
+
+    path = editor_config.editor_projects[0].source_file
+    path.write_text(render_workflow_source(WorkflowDocument(definition=definition())))
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        base = client.get("/api/editor/example", headers=headers).json()
+        edited = json.loads(json.dumps(base["document"]))
+        edited["positions"] = [{"node": "implement", "x": 321, "y": 654}]
+        edited["definition"]["task"]["workspace"] = "runs/edited"
+        storage = dict(edited["definition"]["externals"][1], id="other_storage")
+        edited["definition"]["externals"].append(storage)
+        draft = {
+            "base_document": edited,
+            "bindings": [
+                {
+                    "node": "validate",
+                    "argument": "storage",
+                    "source": {"kind": "external", "binding": "other_storage"},
+                }
+            ],
+        }
+        body = {"expected_sha256": base["sha256"], "proposal": {"kind": "draft", "draft": draft}}
+        review = client.post("/api/editor/example/review", headers=headers, json=body)
+        assert review.status_code == 200, review.text
+        reviewed = parse_workflow_source(review.json()["source"])
+        assert [(item.node, item.x, item.y) for item in reviewed.positions] == [
+            ("implement", 321, 654)
+        ]
+        assert reviewed.definition.task.workspace == "runs/edited"
+        validate = next(node for node in reviewed.definition.nodes if node.id == "validate")
+        bound = next(item for item in validate.request.arguments if item.name == "storage")
+        assert bound.source.binding == "other_storage"
+        save = {
+            "source": review.json()["source"],
+            "proposal_sha256": review.json()["sha256"],
+            "expected_sha256": base["sha256"],
+        }
+        saved = client.post("/api/editor/example/save", headers=headers, json=save)
+        assert saved.status_code == 200, saved.text
+        assert path.read_text() == review.json()["source"]
+
+
 def test_task_choice_metadata_is_safe_and_inert(editor_config, monkeypatch):
     """Fails if GET leaks target paths, inspects task content, or starts native observation."""
     pin = TaskBinding(
