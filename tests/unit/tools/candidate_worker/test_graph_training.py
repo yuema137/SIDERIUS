@@ -445,11 +445,11 @@ def test_native_tuning_transports_explicit_iteration_and_incumbent(
     from dataclasses import replace
 
     from agent.schemas.storage import LocalStorageConfig, StorageConfig
-    from tools.candidate_worker import graph, training
+    from tools.candidate_worker import training
 
     request = graph_training_request(prepared)
     captured = []
-    real = graph.run_training
+    real = training.run_training
     contexts = []
     monkeypatch.setattr(
         training.HyperparamTuningAgent, "set_run_context", lambda self, **kw: contexts.append(kw)
@@ -459,7 +459,8 @@ def test_native_tuning_transports_explicit_iteration_and_incumbent(
         captured.append((args, kwargs))
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(graph, "run_training", observe)
+    # The tuning unit resolves the native call at dispatch (B3-3 unit_child).
+    monkeypatch.setattr(training, "run_training", observe)
     receipt = launch_candidate(request)
     assert receipt.status == "completed", receipt.error
     args, _ = captured[0]
@@ -487,3 +488,62 @@ def test_native_tuning_transports_explicit_iteration_and_incumbent(
     assert tuned[-1].current_run_best_formal_score == 0.75
     assert [item["iter"] for item in contexts] == [1, 2]
     assert path.is_file() and output.model_type == tuned[-1].model_type
+
+
+def test_nonfinite_tuning_score_crosses_the_tuning_unit(prepared, training_runner, monkeypatch):
+    """Fails if the unit boundary refuses a -inf tuning score sentinel, which would
+    fail a tuning node whose in-process output was valid. (A -inf
+    `skip_formal_min_delta` is refused earlier, by training admission's own JSON
+    round trip, independently of units; its transport is covered directly in
+    test_unit_process.)"""
+    from tools.candidate_worker import training
+    from tools.candidate_worker.graph_evidence import read_graph_control
+    from tools.candidate_worker.unit_models import NodeUnitResult
+    from tools.candidate_worker.unit_transport import decode_transport
+
+    tuner = training.HyperparamTuningAgent
+    real = tuner.run
+    monkeypatch.setattr(
+        tuner,
+        "run",
+        lambda self, value: real(self, value).model_copy(
+            update={"best_denoising_score": float("-inf")}
+        ),
+    )
+    receipt = launch_candidate(graph_training_request(prepared))
+    assert receipt.status == "completed", receipt.error
+    path = Path(receipt.workspace) / "candidate_run/units/train/result.json"
+    result = decode_transport(NodeUnitResult, read_graph_control(path))
+    assert result.outcome == "returned" and result.output is not None
+    output = decode_transport(training.HyperparamTuningOutput, result.output.encode())
+    assert output.best_denoising_score == float("-inf")
+
+
+# Pinned on base bce9c452 (before adaptor execution): sha256 of the trained graph
+# receipt's trace, status, validation flag and output index, with the workspace and
+# native record digests (which embed tmp paths) masked. Adaptor support must not
+# move these bytes.
+TRAINED_TRACE_SHA256 = {
+    "completed": "18c39b0014c87cf80f936184529bf32133f2735dcb1a36d8de0babfb5878ae9e",
+    "rejected": "5b6c189069ab88d4a67bbf8613661c70d3b27a1a411aa54184976651418c767d",
+}
+
+
+@pytest.mark.parametrize("outcome", sorted(TRAINED_TRACE_SHA256))
+def test_unadapted_training_trace_bytes_are_unchanged(
+    prepared, training_runner, native_runner, outcome
+):
+    """Fails if adaptor execution alters serialization or outcome of a trained graph run."""
+    import re
+
+    native_runner.reject = outcome == "rejected"
+    request = graph_training_request(prepared)
+    receipt = launch_candidate(request)
+    payload = receipt.model_dump_json(
+        include={"status", "validation_passed", "graph_trace", "native_output_paths"}
+    ).replace(receipt.workspace, "<ws>")
+    payload = re.sub(r'"record_sha256":"[0-9a-f]{64}"', '"record_sha256":"<sha>"', payload)
+    assert hashlib.sha256(payload.encode()).hexdigest() == TRAINED_TRACE_SHA256[outcome], payload
+    verify_graph_trace(
+        request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
+    )

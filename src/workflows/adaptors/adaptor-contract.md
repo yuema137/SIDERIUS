@@ -8,7 +8,8 @@ global state, no LLM and no execution wiring. The declaration format and its
 validation table belong to `workflows.definition` (B6-1, see
 [definition contract](../definition/definition-contract.md#adaptor-declarations-inert));
 readiness, record publication, graph trace and verifier recomputation belong to
-B6-3. LLM COMBINE kinds belong to B2
+the candidate worker (B6-3: `readiness.NodeReadiness.kind="adaptor"`,
+`adaptor_phase.py`). LLM COMBINE kinds belong to B2
 (`admit_/run_/replay_llm_strategy`); their rankings re-enter through `select`.
 
 | Owner | Responsibility |
@@ -34,6 +35,16 @@ build_adaptor_record(*, adaptor_id, iteration, combine, select, distribute,
 `items` must be in declared order (port order, then binding position). The
 caller supplies each succeeded value already validated against its catalogue
 contract; `AdaptorItem.value` is present iff `state == "succeeded"`.
+`AdaptorInputRef.record_sha256` is the native record digest of a succeeded or
+rejected input; for a route-skipped input it is the skip record digest the
+candidate worker cites (`route_phase.skip_citations`: the SHA-256 of the canonical
+`GraphRouteEvidence` that skipped it, B1-PR5). A skip citation resolves only
+through the run's receipt: the cited evidence is an entry of that body's
+`graph_trace.routes`, not a separate file, so the adaptor record alone cannot
+dereference it. For a skip inherited by propagation the walk follows the first
+route-skipped predecessor in the trace entry's sorted `predecessors` until the
+deciding branch; it is deterministic and the worker and verifier run the same
+function (`route_phase.skip_citations`) over the same entries.
 `admit_items` refuses (`AdaptorStrategyError`) any tuple not in declared order:
 each port's items must be contiguous and their positions strictly increasing.
 
@@ -140,9 +151,12 @@ direction iff metric, rankable-field guard, record literal digest.
 
 ## Limitations
 
-- Declarable since B6-1 but not reachable from any workflow until B6-3 wires
-  execution (execution admission refuses adaptor documents); no paper or
-  existing digest is affected.
+- Reachable since B6-3 only through the v1 selection profile
+  `native-proposal-fanout-selection/v1` with `pass/v1`, `first-admissible/v1`,
+  `single/v1` over `validation.output` (executor, record publication and verifier
+  recomputation: `tools/candidate_worker/adaptor_phase.py`, described in the
+  candidate-worker contract). Every other kind is declarable but not executed; no
+  paper or existing digest is affected.
 - Decided (review of B6-2): shortfall is monotonic; under `on_short="fail"`
   any shortfall fails, otherwise an empty result is `rejected`.
 - Open semantics to confirm: `too_many_items` for split (never truncated);

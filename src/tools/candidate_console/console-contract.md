@@ -290,6 +290,12 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
   its `record_sha256` is re-checked with `record_digest`, then the file is validated
   as JSON and against the `HyperparamTuningOutput` schema. Any other state returns
   `result=null` (no score, even if a record file exists).
+- `skipped`: every node of that body's verified `graph_trace.nodes` in state
+  `skipped`, in declaration order, as `GraphSkippedNode(node_id, reason)` (for a
+  `native-routed-candidate/v1` run: the arm a route decision did not select,
+  `route_not_selected`). A skipped node is not run and is never shown as a failure;
+  a skipped tuner has `tuning_state="skipped"` and `result=null`. The field is
+  omitted when empty, so unrouted projections keep their bytes.
 - `GraphRunSummary` is the path-free subset of `RunView`: run name, model type,
   status, termination reason, times, completed rounds, total attempts, `metric`,
   `metric_source`, `ranking_refusal`, declared secondary metric identities, the
@@ -307,11 +313,16 @@ selected operation inside the existing poll, only for `kind == "candidate"` and
 clears the section. 404/409 are final for that selection; other failures retry on
 the next existing poll. Each body is its own section (`Iteration N` for several
 bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
-(`TRAIN & TUNE`). No cross-body score or ordering is computed or displayed.
+(`TRAIN & TUNE`). A body with `skipped` nodes adds one muted line
+"Skipped, not run: <node> (<reason>), ...". No cross-body score or ordering is
+computed or displayed; route decision details (observable values, case) are
+B1-PR6 monitor work.
 
 Witnesses: `test_console_graph_results_reuse_native_run_report_without_paths`
 (native graph record vs `project_run`, no path, failed stage has no score, changed
-record refused), `test_two_native_bodies_preserve_advice_and_verify_feedback`
+record refused), `test_console_graph_results_list_the_skipped_arm` (routed body:
+skipped fallback arm listed, tuning result still projected),
+`test_two_native_bodies_preserve_advice_and_verify_feedback`
 (two loop bodies in verified order, refused body → integrity) and
 `tests/browser/graph_results_monitor.mjs` (synthetic GET-only two-body render).
 Provider and tuner effects are offline doubles; these establish projection, not
