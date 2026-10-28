@@ -661,8 +661,8 @@ def test_candidate_llm_requests_are_seed_invariant(
         runs[seed] = masked
         # Move the run aside (never delete) so the second run claims a fresh workspace.
         workspace.rename(workspace.with_name(f"workspace-seed-{seed}"))
+        # Raw, unmasked request text: no seed's digits and no seed field name.
+        assert not any(str(value) in item for item in recorded for value in SEEDS)
+        assert not any("run_seed" in item for item in recorded)
     first, second = runs.values()
     assert first == second
-    # Distinctive 53-bit values: neither seed's digits appear in any request.
-    assert not any(str(seed) in item for item in first for seed in SEEDS)
-    assert not any("run_seed" in item for item in first)

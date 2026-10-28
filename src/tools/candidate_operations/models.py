@@ -159,7 +159,7 @@ class OperationRecord(PreviewModel):
     )
 
     @model_validator(mode="after")
-    def seed_binding(self):
+    def admitted_seed_matches_request(self):
         submission = self.submission
         if isinstance(submission, SEEDED_SUBMISSIONS):
             if self.run_seed is not None:

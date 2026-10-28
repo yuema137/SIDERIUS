@@ -1,6 +1,5 @@
 """Issue #983 S4: operation admission binds, hands off and reads back one run seed."""
 
-import argparse
 import importlib
 import json
 from pathlib import Path
@@ -23,7 +22,6 @@ from tools.candidate_operations import (
     submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure, OperationRecord
-from tools.candidate_operations.seed_admission import require_root_seed
 from tools.candidate_operations.store import claim, digest, load_record, locked_store
 from tools.candidate_prepare.reusable_models import ReusableCandidatePreparationRequest
 
@@ -115,16 +113,64 @@ def test_child_without_an_admitted_seed_never_dispatches(admitted, monkeypatch):
     dispatched.assert_not_called()
 
 
-def test_s3b_era_loop_root_is_refused_not_adopted(admitted):
-    """S4 obligation: a root record without a seed cannot be continued (no second seed)."""
-    _, _, record = admitted
-    with pytest.raises(OperationFailure, match="predates recorded run seeds") as refused:
-        require_root_seed(record.model_copy(update={"run_seed": None}))
-    # The operator learns why and what to do.
-    assert refused.value.detail.code == "loop_resume"
-    assert "no run_seed" in str(refused.value) and "Start a fresh candidate run" in str(
-        refused.value
+def claim_record(config, submission, **fields):
+    """Claim a hand-built record, as an earlier build would have admitted it."""
+    from tools.candidate_operations.process import runtime_identity
+    from tools.candidate_operations.store import now
+
+    record = OperationRecord(
+        native_id=uuid4(),
+        submission=submission,
+        request_digest=digest(submission),
+        config=config,
+        runtime=runtime_identity(),
+        inputs=submission.request.files,
+        admitted_at=now(),
+        **fields,
     )
+    with locked_store(config) as root:
+        claim(root, record)
+    return record
+
+
+def test_s3b_era_loop_root_is_refused_at_review_and_resume(prepared, tmp_path, monkeypatch):
+    """S4 obligation: a loop root admitted without a seed is never offered or admitted a Resume.
+
+    Fails if Review (or Resume admission) proceeds to native reads, so a Resume
+    could adopt the lock's seed or mint a second one.
+    """
+    from tests.unit.tools.candidate_worker.test_finite_loop import loop_request
+    from tools.candidate_operations import review_loop_resume
+
+    config = store(tmp_path)
+    root = CandidateOperation(request_id=uuid4(), request=loop_request(prepared))
+    record = claim_record(config, root)  # S3b-era shape: no run_seed on the record
+    # Release the store's single active slot so Resume admission reaches its review.
+    from tools.candidate_operations.files import publish
+    from tools.candidate_operations.models import SpawnFailure
+
+    publish(
+        Path(config.state_root) / "operations" / str(root.request_id) / "spawn_failure.json",
+        SpawnFailure(operation_id=root.request_id, request_digest=record.request_digest),
+    )
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", Mock())
+    resume = CandidateLoopResumeOperation(
+        request_id=uuid4(),
+        request=CandidateLoopResumeRequest(
+            predecessor_operation_id=root.request_id, expected_receipt_digest="0" * 64
+        ),
+    )
+    for attempt in (
+        lambda: review_loop_resume(config, root.request_id),
+        lambda: submit_operation(config, resume, launch_environment=ENV),
+    ):
+        with pytest.raises(OperationFailure, match="predates recorded run seeds") as refused:
+            attempt()
+        # The operator learns why and what to do.
+        assert refused.value.detail.code == "loop_resume"
+        message = str(refused.value)
+        assert "no run_seed" in message and "Start a fresh candidate run" in message
+    assert not (Path(config.state_root) / "operations" / str(resume.request_id)).exists()
 
 
 def test_seedless_reusable_prepare_digest_is_unchanged():
@@ -202,7 +248,112 @@ def test_cli_run_seed_sets_the_request_and_refuses_conflicts(prepared):
     )
     with pytest.raises(OperationFailure, match="does not apply"):
         with_run_seed(resume, 7)
-    from core.run_seed_lock import run_seed_argument
 
-    with pytest.raises(argparse.ArgumentTypeError):
-        run_seed_argument(str(2**53))
+
+def test_forged_preparation_receipt_seed_is_an_integrity_failure(admitted):
+    """(a) Fails if a preparation receipt may claim a seed its operation never admitted."""
+    from tests.unit.tools.candidate_operations.test_reader import native_fixture
+    from tools.candidate_operations.read import native_receipt
+
+    config, submission, _, _, control, receipt = native_fixture(admitted)
+    assert native_receipt(load_record(config, submission.request_id)) is not None
+    assert receipt.run_seed is not None
+    (control / "receipt.json").write_text(
+        receipt.model_copy(update={"run_seed": receipt.run_seed + 1}).model_dump_json()
+    )
+    with pytest.raises(OperationFailure, match="run seed disagrees") as refused:
+        native_receipt(load_record(config, submission.request_id))
+    assert refused.value.detail.code == "integrity"
+    snapshot = read_operation(config, submission.request_id)
+    assert (snapshot.state, snapshot.reason) == ("unknown", "integrity_failure")
+
+
+def launched_candidate(prepared, config, *, launch_seed: int):
+    """An admitted candidate (generated seed) and its hand-published launch receipt."""
+    from tools.candidate_worker.launch import publish as native_publish
+    from tools.candidate_worker.models import CandidateRunReceipt
+
+    submission = CandidateOperation(request_id=uuid4(), request=prepared)
+    record = claim_record(config, submission, run_seed=RunSeedBinding(value=5, source="generated"))
+    workspace = Path(prepared.preview.document.definition.task.workspace)
+    control = workspace / "candidate_run"
+    control.mkdir(parents=True)
+    initial = CandidateRunReceipt(
+        run_id=record.native_id.hex,
+        run_name=prepared.run_name,
+        workspace=str(workspace),
+        declaration_digest=prepared.declaration_digest,
+        status="launched",
+        node_ids=tuple(node.id for node in prepared.preview.document.definition.nodes),
+        selected_constructor_routes=prepared.selected_constructor_routes,
+        ledger_path=str(workspace / "token_usage.jsonl"),
+        log_path=str(control / "worker.log"),
+        run_seed=launch_seed,
+        run_seed_source="generated",
+    )
+    native_publish(control / "request.json", prepared)
+    native_publish(control / "launch.json", initial)
+    return submission, control, initial
+
+
+@pytest.mark.parametrize("forged", ["launch", "terminal"])
+def test_forged_candidate_receipt_seed_is_an_integrity_failure(prepared, tmp_path, forged):
+    """(a)/(c) Fails if a launch receipt may disagree with the record, or a terminal receipt
+    with its launch receipt (`RECEIPT_IDENTITY_FIELDS` in `verify_candidate_records`)."""
+    from tools.candidate_worker.launch import publish as native_publish
+
+    config = store(tmp_path)
+    submission, control, initial = launched_candidate(
+        prepared, config, launch_seed=6 if forged == "launch" else 5
+    )
+    terminal = initial.model_copy(update={"status": "rejected", "validation_passed": False})
+    if forged == "terminal":
+        terminal = terminal.model_copy(update={"run_seed": 6})
+    native_publish(control / "receipt.json", terminal)
+    snapshot = read_operation(config, submission.request_id)
+    assert (snapshot.state, snapshot.reason) == ("unknown", "integrity_failure")
+    if forged == "terminal":
+        honest = terminal.model_copy(update={"run_seed": 5})
+        (control / "receipt.json").write_text(honest.model_dump_json(indent=2) + "\n")
+        assert read_operation(config, submission.request_id).state == "completed"
+
+
+def test_worker_reconcile_refuses_a_child_receipt_that_changes_the_seed(prepared, tmp_path):
+    """(c) Fails if the sandboxed child may report a seed other than the launch receipt's."""
+    from tools.candidate_worker.launch import reconcile
+    from tools.candidate_worker.models import CandidateRunReceipt
+    from tools.workspace_sandbox.runner import ExecutionResult
+
+    initial = CandidateRunReceipt(
+        run_id="a" * 32,
+        run_name=prepared.run_name,
+        workspace=str(tmp_path / "workspace"),
+        declaration_digest=prepared.declaration_digest,
+        status="launched",
+        node_ids=(),
+        selected_constructor_routes=(),
+        ledger_path=str(tmp_path / "workspace/token_usage.jsonl"),
+        log_path=str(tmp_path / "workspace/candidate_run/worker.log"),
+        run_seed=5,
+        run_seed_source="generated",
+    )
+    child = tmp_path / "child.json"
+    child.write_text(
+        initial.model_copy(update={"status": "accepted", "run_seed": 6}).model_dump_json()
+    )
+    result = ExecutionResult(status="completed", returncode=0, elapsed_seconds=0.0)
+    terminal = reconcile(initial, result, child)
+    assert (terminal.status, terminal.error) == ("failed", "child receipt changed run_seed")
+
+
+def test_operation_listing_carries_the_admitted_seed(prepared, tmp_path, monkeypatch):
+    """Fails if the operations listing (`OperationListEntry.snapshot`) drops the record's seed."""
+    from tools.candidate_operations import list_operations
+
+    config = store(tmp_path)
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", Mock(side_effect=OSError))
+    submission = CandidateOperation(request_id=uuid4(), request=prepared)
+    submit_operation(config, submission, launch_environment=ENV)
+    record = load_record(config, submission.request_id)
+    (entry,) = list_operations(config, 10).entries
+    assert record.run_seed is not None and entry.snapshot.run_seed == record.run_seed

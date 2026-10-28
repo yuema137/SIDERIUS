@@ -25,7 +25,8 @@ def admission_seed(
     if isinstance(submission, SEEDED_SUBMISSIONS):
         return resolve_run_seed(submission.request.run_seed)
     if submission.kind == "candidate_loop_resume":
-        assert loop_root is not None
+        if loop_root is None:
+            raise OperationFailure("integrity", "loop resume admission lacks its root record")
         return require_root_seed(loop_root)
     return None
 

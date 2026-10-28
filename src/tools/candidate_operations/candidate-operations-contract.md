@@ -131,16 +131,23 @@ Owners: `seed_admission.py` (`admission_seed`, `require_root_seed`,
   never generates one.
 - **Loop resume** copies its root record's binding into its own record and never
   generates. A root admitted before this contract (an S3b-era record without a
-  seed; its workspace lock does record one) is refused at Resume admission with
-  `loop_resume`. The message states the cause (the record has no `run_seed`, so
-  a segment could not prove it continues the same seed) and the remedy (start
-  a fresh candidate run, optionally with `--run-seed N`). The seed is neither
-  adopted from the lock nor re-minted; the old records stay readable.
+  seed; its workspace lock does record one) is refused with `loop_resume` by
+  Review (`review_loop_resume`, `write-loop-resume`) before any native read, and
+  therefore also by Resume admission, which repeats the review. The message
+  states the cause (the record has no `run_seed`, so a segment could not prove
+  it continues the same seed) and the remedy (start a fresh candidate run,
+  optionally with `--run-seed N`). The seed is neither adopted from the lock nor
+  re-minted; the old records stay readable.
 - **Reusable preparation provenance.** A candidate submitted with a
   `reusable_preparation` records the verified preparation receipt's seed as
   `OperationRecord.preparation_run_seed`. It is provenance only: the candidate
   keeps its own `run_seed`, and an explicit candidate `run_seed` is the one field
-  its request may add to the prepared request. A candidate built from a plain
+  its request may add to the prepared request. The value is bound to the
+  selection's pinned receipt bytes (`expected_receipt_sha256`, which include the
+  receipt's `run_seed`), and the child's dispatch-time re-verification refuses
+  any other receipt. Readback does not re-verify it, because status and recovery
+  must not require surviving prepared files; after dispatch it is admitted
+  provenance only. A candidate built from a plain
   `prepare` operation (console prepared or edited flow) records no
   `preparation_run_seed`: operations hold no verified link from such a
   candidate to its preparation (`ReviewedContext` is console metadata, not an

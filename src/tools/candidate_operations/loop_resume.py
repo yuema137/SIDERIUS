@@ -175,6 +175,10 @@ def review_locked(config: OperationStoreConfig, operation_id: UUID) -> Operation
     from .read import bound, optional, read_operation
 
     record = load_record(config, operation_id)
+    # Issue #983 — before any native read: a segment continues the root's seed,
+    # and an S3b-era root records none (its lock does), so Review refuses it
+    # rather than offering a Resume that could adopt or re-mint a seed.
+    require_root_seed(root_record(record))
     _, request, initial = claimed_inputs(record)
     snapshot = read_operation(config, operation_id)
     receipt = snapshot.receipt
@@ -231,9 +235,6 @@ def admit(
         load_record(config, submission.request.predecessor_operation_id)
     )
     assert root.submission.kind == "candidate"
-    # Issue #983 — a segment continues the root's seed; an S3b-era root records
-    # none (its lock does), and is refused rather than adopted or re-minted.
-    require_root_seed(root)
     try:
         # The same file-identity check the continuation child repeats; refusing here
         # keeps an edited input from consuming the single successor reservation.
