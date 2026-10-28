@@ -97,7 +97,13 @@ try {
   assert.ok(await input('check_left', 'proposal').evaluate(element => element.classList.contains('compatible')));
   const dimmed = input('check_left', 'implementation');
   assert.ok(await dimmed.evaluate(element => element.classList.contains('incompatible')));
-  assert.ok(Number(await dimmed.evaluate(element => getComputedStyle(element).opacity)) < 0.5, 'incompatible input is dimmed');
+  const dim = await dimmed.evaluate(element => ({
+    port: getComputedStyle(element).opacity,
+    socket: getComputedStyle(element.querySelector('.circuit-socket')).opacity,
+    pill: getComputedStyle(element.querySelector('.circuit-port-contract')).borderTopStyle}));
+  assert.ok(Number(dim.socket) < 0.5, 'incompatible input dims its socket');
+  assert.equal(dim.pill, 'dashed', 'incompatible input dashes its contract pill');
+  assert.equal(dim.port, '1', 'incompatible label text is not faded below 4.5:1 (port stays clickable)');
   assert.match(await dimmed.getAttribute('title'), /expects implementation\.output .*provides proposal\.output/);
   assert.equal(await output('alternate').getAttribute('aria-pressed'), 'false', 'hover does not select');
   await page.mouse.move(2, 2);

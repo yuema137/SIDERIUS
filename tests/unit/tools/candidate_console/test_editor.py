@@ -325,10 +325,57 @@ def test_every_catalog_contract_has_a_distinct_port_token_in_both_themes():
         assert f"--contract-{colour}:" in css, colour
     for shape in {shape for _, shape in tokens}:
         assert f'.circuit-port[data-contract-shape="{shape}"] .circuit-socket' in css, shape
-    # Literal colours (not theme aliases) need a dark-theme value too.
+    # Literal colours (not theme aliases) need a dark-theme declaration too.
     light, dark = css.split(':root[data-theme="dark"]', 1)
     for literal in re.findall(r"(--contract-[\w-]+): #", light):
-        assert f"{literal}: #" in dark, literal
+        assert f"{literal}:" in dark, literal
+
+
+def _relative_luminance(hex_colour: str) -> float:
+    channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _theme_values(css: str) -> tuple[dict[str, str], dict[str, str]]:
+    light, dark = css.split(':root[data-theme="dark"]', 1)
+    declaration = r"(--[\w-]+):\s*([^;]+);"
+    return dict(re.findall(declaration, light)), dict(
+        re.findall(declaration, dark.split("}", 1)[0])
+    )
+
+
+def test_every_contract_token_meets_non_text_contrast_on_every_port_background():
+    """Fails if a contract socket/wire colour drops below WCAG 1.4.11's 3:1 against a
+    background ports render on (any capability card tint, --panel, --bg, --control) in
+    either theme; the light proposal amber and implementation teal once did (2.67:1)."""
+    theme_light, theme_dark = _theme_values((STATIC / "theme.css").read_text())
+    own_light, own_dark = _theme_values((STATIC / "editor-contract-presentation.css").read_text())
+    for theme, env in (
+        ("light", {**theme_light, **own_light}),
+        ("dark", {**theme_light, **theme_dark, **own_light, **own_dark}),
+    ):
+
+        def resolve(value: str, env: dict[str, str] = env) -> str:
+            alias = re.fullmatch(r"var\((--[\w-]+)\)", value.strip())
+            return resolve(env[alias[1]]) if alias else value.strip()
+
+        backgrounds = {
+            name: resolve(value)
+            for name, value in env.items()
+            if name.endswith("-tint") or name in ("--panel", "--bg", "--control")
+        }
+        assert len(backgrounds) >= 10, backgrounds
+        tokens = {
+            name: resolve(value) for name, value in env.items() if name.startswith("--contract-")
+        }
+        for token, colour in tokens.items():
+            for background, fill in backgrounds.items():
+                lighter, darker = sorted(
+                    (_relative_luminance(colour), _relative_luminance(fill)), reverse=True
+                )
+                ratio = (lighter + 0.05) / (darker + 0.05)
+                assert ratio >= 3, f"{theme} {token} {colour} on {background} {fill}: {ratio:.2f}"
 
 
 def test_every_index_asset_is_served(console_config):
