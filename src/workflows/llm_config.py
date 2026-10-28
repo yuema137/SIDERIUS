@@ -270,24 +270,23 @@ class LitReviewLLMConfig(BaseModel):
 
 class JudgeRouteConfig(BaseModel):
     """
-    One LLM-judge route: provider, model and a bounded call budget.
+    One LLM-judge route: an explicit provider and model, plus a bounded call budget.
 
-    Unlike ``NodeLLMConfig``, a judge route has no unbounded form. The output
-    ceiling is required and ``max_retries`` must be a finite count of total
-    transport attempts (``LLMBridge`` semantics: 0 and 1 both allow only the
-    initial call). ``None`` and absent values are refused, so an unbounded retry
-    budget cannot reach a judge call. Other nodes are unaffected.
+    Unlike ``NodeLLMConfig``, a judge route has no defaults and no unbounded form.
+    ``provider`` and ``model_id`` are required because the judge's model is part of
+    the audited evidence; no central default is substituted. ``max_output_tokens``
+    is required and ``max_retries`` must be a finite count of total transport
+    attempts (``LLMBridge`` semantics: 0 and 1 both allow only the initial call).
+    Both integers are strict, so booleans are refused. ``None`` and absent values
+    are refused, so an unbounded retry budget cannot reach a judge call.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: ProviderName = Field(
-        default=DEFAULT_LLM_PROVIDER,
-        description="LLM provider.",
-    )
+    provider: ProviderName = Field(description="LLM provider. Required; no default.")
     model_id: str = Field(
-        default_factory=lambda data: default_model_for_provider(data["provider"]),
-        description="Specific model ID passed to the provider.",
+        min_length=1,
+        description="Specific model ID passed to the provider. Required; no default.",
     )
     reasoning_effort: ReasoningEffort | None = Field(
         default=None,
@@ -295,10 +294,12 @@ class JudgeRouteConfig(BaseModel):
     )
     max_output_tokens: int = Field(
         gt=0,
+        strict=True,
         description="Required output ceiling for every judge call on this route.",
     )
     max_retries: int = Field(
         ge=0,
+        strict=True,
         description=(
             "Required finite limit on total transport attempts, including the "
             "initial request. 0 and 1 both allow only the initial call; "
@@ -321,6 +322,7 @@ class JudgeLLMConfig(BaseModel):
     - ``aggregate``: LLM combine/select strategies inside adaptors (B2-6 onward).
     - ``debate``: debate-judge strategy calls (B2-7 onward).
 
+    An empty block is refused: declaring ``judge`` means declaring at least one route.
     This model only declares and validates routes. No judge call is made from
     it, and the workspace run lock does not yet record it.
     """
@@ -331,10 +333,20 @@ class JudgeLLMConfig(BaseModel):
     aggregate: JudgeRouteConfig | None = None
     debate: JudgeRouteConfig | None = None
 
+    @model_validator(mode="after")
+    def require_a_declared_route(self) -> JudgeLLMConfig:
+        if self.stop is None and self.aggregate is None and self.debate is None:
+            raise ValueError("judge must declare at least one of stop, aggregate, debate")
+        return self
+
 
 class WorkflowLLMConfig(BaseModel):
     """
     Per-node LLM configuration for a workflow.
+
+    ``judge`` is the one non-node block: LLM-judge routes (``JudgeLLMConfig``).
+    It is read as ``.judge``, never through ``get()``, and is omitted from the
+    serialized config when unset.
 
     Each field is optional. When None, the corresponding node uses its own
     built-in central model default.
@@ -443,6 +455,7 @@ class WorkflowLLMConfig(BaseModel):
         Args:
             node_name: One of "interpret", "data_analysis", "propose",
                        "implement", "validate", "tune", "lit_review".
+                       "judge" is refused: it is not a node slot; read ``.judge``.
 
         Returns:
             Flat dict of LLM kwargs, or `{}` if the node is not configured.

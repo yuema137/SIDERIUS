@@ -386,7 +386,7 @@ class TestWorkflowLLMConfigJudge:
         assert dumped == UNIFORM_WITHOUT_JUDGE_JSON
         assert "judge" not in json.loads(dumped)
 
-    def test_declared_judge_routes_round_trip_and_stay_out_of_node_slots(self):
+    def test_judge_routes_round_trip_and_are_refused_through_get(self):
         config = WorkflowLLMConfig.model_validate(
             {
                 "judge": {
@@ -399,40 +399,26 @@ class TestWorkflowLLMConfigJudge:
                 }
             }
         )
-        assert config.judge is not None and config.judge.aggregate is None
         dumped = json.loads(config.model_dump_json())
         assert dumped["judge"]["stop"]["max_retries"] == 3
         assert WorkflowLLMConfig.model_validate(dumped) == config
         with pytest.raises(ValueError, match="not a node slot"):
             config.get("judge")
 
-    @pytest.mark.parametrize(
-        "route",
-        [
-            {"max_output_tokens": 800},  # max_retries absent
-            {"max_output_tokens": 800, "max_retries": None},  # explicit unbounded
-            {"max_output_tokens": 800, "max_retries": -1},  # negative attempt count
-            {"max_retries": 2},  # max_output_tokens absent
-            {"max_output_tokens": 0, "max_retries": 2},  # non-positive ceiling
-            {"max_output_tokens": 800, "max_retries": 2, "max_retry": 9},  # typo
-        ],
-    )
-    def test_judge_route_refuses_missing_or_unbounded_limits(self, route):
+    def test_judge_route_requires_explicit_provider_and_model(self):
+        """The judge's model is audited evidence: no central default may fill it in."""
+        route = {"max_output_tokens": 800, "max_retries": 2}
+        for explicit in ({"provider": "openai"}, {"model_id": "gpt-4o-mini"}):
+            with pytest.raises(ValidationError):
+                WorkflowLLMConfig.model_validate({"judge": {"stop": {**route, **explicit}}})
         with pytest.raises(ValidationError):
-            WorkflowLLMConfig.model_validate({"judge": {"debate": route}})
+            WorkflowLLMConfig.model_validate(
+                {"judge": {"stop": {**route, "provider": "openai", "model_id": ""}}}
+            )
 
-    @pytest.mark.parametrize("attempts", [0, 1])
-    def test_zero_or_one_retry_is_a_finite_single_attempt_route(self, attempts):
-        """0 and 1 both mean one transport attempt; finiteness, not a minimum, is the rule."""
-        config = WorkflowLLMConfig.model_validate(
-            {
-                "judge": {
-                    "stop": {"max_output_tokens": 800, "max_retries": attempts},
-                }
-            }
-        )
-        assert config.judge is not None and config.judge.stop is not None
-        assert config.judge.stop.max_retries == attempts
+    def test_empty_judge_block_is_refused(self):
+        with pytest.raises(ValidationError, match="at least one"):
+            WorkflowLLMConfig.model_validate({"judge": {}})
 
     def test_unbounded_retries_remain_valid_for_other_slots_beside_judge(self):
         config = WorkflowLLMConfig.model_validate(
@@ -450,19 +436,3 @@ class TestWorkflowLLMConfigJudge:
         )
         assert config.interpret is not None and config.interpret.max_retries is None
         assert config.get("interpret") == {"provider": "openai", "model_id": "gpt-4o-mini"}
-
-    def test_judge_reasoning_effort_requires_openai(self):
-        with pytest.raises(ValidationError, match="requires provider='openai'"):
-            WorkflowLLMConfig.model_validate(
-                {
-                    "judge": {
-                        "stop": {
-                            "provider": "gemini",
-                            "model_id": "gemini-2.5-flash",
-                            "reasoning_effort": "low",
-                            "max_output_tokens": 800,
-                            "max_retries": 2,
-                        }
-                    }
-                }
-            )
