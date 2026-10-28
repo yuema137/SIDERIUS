@@ -898,7 +898,7 @@ def _resolve_time_check_probe_request(
     resolution = resolve_request_probe(
         request=request,
         budget=RuntimeBudget(
-            time_seconds=max(time_budget_minutes, 1e-9) * 60.0,
+            time_seconds=time_budget_minutes * 60.0,
             # V21 PR B3 Stage B. The policy already grades this correctly
             # (decision_policy:285): a MEASURED peak above the threshold
             # REJECTs, a projected one is ADVISORY. It was inert only

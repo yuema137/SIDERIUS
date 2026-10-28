@@ -77,6 +77,13 @@ from ml_models.models_format_sandbox import LossConfig
 
 TrainingValidationPortion = Annotated[float, Field(gt=0, le=1)]
 
+#: An operator-configured wall-time budget in minutes: finite and positive.
+#: ``None`` (on the fields that use it) is the only way to disable a budget;
+#: zero and non-finite values are malformed configuration, refused by every
+#: launch entry path before model execution (``validate_launch_admission``)
+#: rather than reinterpreted by forecast or measured admission.
+OperatorTimeBudgetMinutes = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+
 
 #: What a HealthGate verdict DOES in this run: enforce, or only record.
 #:
@@ -2075,9 +2082,8 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
-    bypass_formal_time_budget_minutes: float | None = Field(
+    bypass_formal_time_budget_minutes: OperatorTimeBudgetMinutes | None = Field(
         default=None,
-        gt=0.0,
         description=(
             "Lane F3 / F-BYPASS-WD-1: the ELEVATED wall-time ceiling (minutes) "
             "a score-QUALIFIED bypass formal attempt may use — ONE resolved "
@@ -2267,7 +2273,7 @@ class HyperparamTuningInput(BaseModel):
     # the validator→tuner protocol. Each is independently optional: setting
     # only the trial budget gates trial rounds and skips formal rounds, and
     # vice versa. The tuner picks the right one each round via plan.is_trial.
-    trial_time_budget_minutes: float | None = Field(
+    trial_time_budget_minutes: OperatorTimeBudgetMinutes | None = Field(
         default=None,
         description=(
             "Wall-time budget in minutes against which evaluate_time_skill "
@@ -2288,7 +2294,7 @@ class HyperparamTuningInput(BaseModel):
             "may record observations but cannot reject the attempt."
         ),
     )
-    formal_time_budget_minutes: float | None = Field(
+    formal_time_budget_minutes: OperatorTimeBudgetMinutes | None = Field(
         default=None,
         description=(
             "Wall-time budget in minutes against which evaluate_time_skill "

@@ -308,8 +308,8 @@ expression — and failing before any GPU work is the fail-closed direction.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `trial_time_budget_minutes` | `float \| None` | No | `None` | Trial wall-time ceiling. `None` disables Trial time admission regardless of source. |
-| `formal_time_budget_minutes` | `float \| None` | No | `None` | Formal wall-time ceiling. `None` disables Formal time admission regardless of source. |
+| `trial_time_budget_minutes` | `float \| None` | No | `None` | Trial wall-time ceiling in minutes; finite and positive (`OperatorTimeBudgetMinutes`, issue #828: zero, negative and non-finite values are refused at launch, never clamped). `None` disables Trial time admission regardless of source. |
+| `formal_time_budget_minutes` | `float \| None` | No | `None` | Formal wall-time ceiling in minutes; finite and positive (`OperatorTimeBudgetMinutes`, issue #828: zero, negative and non-finite values are refused at launch, never clamped). `None` disables Formal time admission regardless of source. |
 | `trial_time_admission_source` | `forecast \| measured` | No | `measured` | Trial's sole time-admission authority. `measured` enforces executing-device evidence and skips advance forecast admission; `forecast` does the reverse. |
 | `formal_time_admission_source` | `forecast \| measured` | No | `measured` | Formal's independent sole time-admission authority, with the same mutually exclusive semantics. |
 | `runtime_completion_policy` | `completed-workload-v1 \| verified-prediction-v1` | No | `completed-workload-v1` | Completed phase actual costs govern the current attempt; incomplete phases still require conservative verification. Explicit strict mode retains the pre-completion admission rule. Compared in run identity and forwarded unchanged to training and inference. Historical experiment selection belongs to the consumer repository. |
