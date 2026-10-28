@@ -90,15 +90,44 @@ def _run_fixture(manifest: Path, control: Path, **parameters: object):
     )
 
 
-def test_author_timeout_starts_after_child_startup(tmp_path: Path) -> None:
-    # Defect: counting the ~2 s framework import against the author's timeout
-    # made every fast adaptor with a sub-startup timeout fail.
-    _, manifest = _project(tmp_path)
-    _set_timeout(manifest, 0.5)
-    output, _ = _run_fixture(manifest, tmp_path / "fast")
-    assert output.author[0][0]["source_ref"] == "sd0"
+_STARTUP_DELAY_SECONDS = 6.0
+_AUTHOR_TIMEOUT_SECONDS = 4.0
 
-    _set_timeout(manifest, 5)
+
+def _delay_child_startup(monkeypatch, seconds: float) -> None:
+    """Test-only hook: the child sleeps before running its module, i.e. before `entered`."""
+    from workflows.custom_adaptors import process
+
+    real = process.supervise_subprocess
+
+    def delayed(cmd, **kwargs):
+        executable, *flags, module_flag, module, request = cmd
+        assert (module_flag, module) == ("-m", "workflows.custom_adaptors.child")
+        code = (
+            f"import runpy, sys, time; time.sleep({seconds}); "
+            f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)"
+        )
+        return real([executable, *flags, "-c", code, request], **kwargs)
+
+    monkeypatch.setattr(process, "supervise_subprocess", delayed)
+
+
+def test_author_timeout_starts_at_entered_not_at_launch(tmp_path: Path, monkeypatch) -> None:
+    # Defect: counting startup against the author's timeout made fast adaptors
+    # fail whenever startup was slower than their timeout. Startup is forced to
+    # 6 s (> the 4 s author timeout), so only a deadline that starts at `entered`
+    # lets this run finish; the fast adaptor then has 4 s for its post-entry work.
+    _, manifest = _project(tmp_path)
+    _set_timeout(manifest, _AUTHOR_TIMEOUT_SECONDS)
+    _delay_child_startup(monkeypatch, _STARTUP_DELAY_SECONDS)
+    output, elapsed = _run_fixture(manifest, tmp_path / "fast")
+    assert output.author[0][0]["source_ref"] == "sd0"
+    assert elapsed > _STARTUP_DELAY_SECONDS  # The hook really delayed startup.
+
+
+def test_author_timeout_stops_a_running_adaptor(tmp_path: Path) -> None:
+    _, manifest = _project(tmp_path)
+    _set_timeout(manifest, 3)
     _replace_entry(
         manifest,
         "import time\n"
