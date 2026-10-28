@@ -303,12 +303,25 @@ def test_unsupported_valid_graph_and_unchecked_copies_are_distinct(request_at):
         ({"propose": {"reasonng": {}}}, "llm_config.propose.*reasonng"),
         ({"propose": {"comparison": {"max_retry": 2}}}, "llm_config.propose.comparison.*max_retry"),
         ({"validate": {}, "validate_model": {}}, "duplicate name/alias"),
+        ({"interpret": {"provder": "openai"}}, "llm_config.interpret.*provder"),
+        ({"tune": {"reflecter": {}}}, "llm_config.tune.*reflecter"),
+        ({"tune": {"planner": {"modl_id": "x"}}}, "llm_config.tune.planner.*modl_id"),
     ],
 )
 def test_active_typos_and_duplicate_alias_refused(request_at, payload, match):
-    """The native models ignore extras; only the preview's bounded key check catches these."""
+    """The native models ignore extras; only the shared strict loader catches these."""
     with pytest.raises(ValueError, match=match):
         preview_workflow(configured(request_at, payload))
+
+
+def test_inert_underscore_keys_are_accepted_at_every_level(request_at):
+    """A ``_``-prefixed key is an inert annotation at the console boundary too."""
+    payload = {
+        "_comment": "annotation",
+        "interpret": {"_note": "leaf", "provider": "openai", "model_id": "gpt-4o-mini"},
+        "tune": {"planner": {"_note": "planner", "provider": "openai", "model_id": "gpt-4o-mini"}},
+    }
+    assert preview_workflow(configured(request_at, payload)) is not None
 
 
 def test_selected_roles_only_preserve_partial_and_stage_retry_semantics(request_at, monkeypatch):
@@ -426,3 +439,26 @@ def test_uri_is_not_accidentally_resolved_as_local_filename(request_at):
     fake.write_text("opaque")
     with pytest.raises(ValueError, match=r"task.manifest.*local path, not a URI"):
         preview_workflow(with_task(request_at, manifest="https://example.test/task.yaml"))
+
+
+def test_judge_is_reported_inactive_only_when_declared(request_at):
+    """`judge` is not a node slot: undeclared configs keep their inactive-role tuple."""
+    undeclared = preview_workflow(request_at)
+    declared = preview_workflow(
+        configured(
+            request_at,
+            {
+                "judge": {
+                    "stop": {
+                        "provider": "openai",
+                        "model_id": "gpt-4o-mini",
+                        "max_output_tokens": 800,
+                        "max_retries": 2,
+                    }
+                }
+            },
+        )
+    )
+    assert "judge" not in undeclared.inactive_roles
+    assert declared.inactive_roles[-1] == "judge"
+    assert declared.inactive_roles[:-1] == undeclared.inactive_roles

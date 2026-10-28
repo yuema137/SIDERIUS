@@ -47,8 +47,11 @@ from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Literal
 
+from pydantic import TypeAdapter, ValidationError
+
 from agent.schemas.hyperparam_tuning import (
     HealthGateMode,
+    HyperparamTuningInput,
     ResultAuthority,
     TimeAdmissionSource,
     validate_trial_override_schedule,
@@ -64,6 +67,7 @@ from core.runtime_control.verifier_provider import (
     resolve_runtime_verifier_identity,
 )
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
+from core.seeding import RunSeed
 from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
 
@@ -120,8 +124,11 @@ class WorkflowLaunchConfig:
     # formal rounds — the F14 mechanism).
     eval_portion: float | None = None
     train_validation_align: bool = True
-    sampling_seed: int | None = None
-    train_base_seed: int | None = None
+    # Issue #983 — the operator's explicit run seed (``--run_seed``), or None
+    # when the workflow startup resolves it from the lock or generates it.
+    # Omitted from launch projections when None so seedless captures keep
+    # their bytes.
+    run_seed: RunSeed | None = field(default=None, metadata={"omit_if_none": True})
     cleanup_denoised: bool = False
     retain_model_outputs: bool = False
     retain_training_checkpoints: bool = False
@@ -328,6 +335,37 @@ def validate_launch_trial_overrides(launch: WorkflowLaunchConfig) -> None:
         force_formal_round=launch.force_formal_round,
         formal_training_scope_source=launch.formal_training_scope_source,
     )
+
+
+#: Operator wall-time budgets whose rule the tuner schema owns
+#: (``OperatorTimeBudgetMinutes``). Issue #828: every launch entry path
+#: checks them here, before model execution, so forecast and measured
+#: admission never receive a malformed budget to reinterpret.
+OPERATOR_TIME_BUDGET_FIELDS: tuple[str, ...] = (
+    "trial_time_budget_minutes",
+    "formal_time_budget_minutes",
+    "bypass_formal_time_budget_minutes",
+)
+
+
+def validate_launch_time_budgets(launch: WorkflowLaunchConfig) -> None:
+    """Apply the tuner-owned budget annotation to each configured budget."""
+    for name in OPERATOR_TIME_BUDGET_FIELDS:
+        annotation = HyperparamTuningInput.model_fields[name].rebuild_annotation()
+        value = getattr(launch, name)
+        try:
+            TypeAdapter(annotation).validate_python(value)
+        except ValidationError as exc:
+            raise ValueError(
+                f"{name} must be a finite positive number of minutes, or omitted "
+                f"(None) to disable that budget; got {value!r}"
+            ) from exc
+
+
+def validate_launch_admission(launch: WorkflowLaunchConfig) -> None:
+    """The launch-value checks every entry path runs before workflow effects."""
+    validate_launch_trial_overrides(launch)
+    validate_launch_time_budgets(launch)
 
 
 def bind_runtime_verifier_launch(launch: WorkflowLaunchConfig) -> WorkflowLaunchConfig:

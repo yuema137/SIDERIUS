@@ -10,7 +10,7 @@ inputs, so the author always types the project-relative path.
 from typing import get_args
 
 from workflows.definition import ManagedCandidateBinding
-from workflows.definition.catalog import CAPABILITIES, CONTRACTS
+from workflows.definition.catalog import CAPABILITIES, COLLECTION_CONTRACTS, CONTRACTS
 
 from .models import ExternalInputCatalog, ExternalInputKind
 from .options import contract_info
@@ -40,8 +40,9 @@ _MANAGED = frozenset(get_args(ManagedCandidateBinding.model_fields["contract"].a
 
 
 def external_input_catalog() -> ExternalInputCatalog:
-    """Every catalog contract except capability results, which a node connection supplies."""
-    results = {item.output for item in CAPABILITIES.values()}
+    """Every catalog contract except those a connection supplies: capability results and
+    collections a ``collect/v1`` adaptor assembles (no profile admits them as externals)."""
+    results = {item.output for item in CAPABILITIES.values()} | set(COLLECTION_CONTRACTS.values())
     return ExternalInputCatalog(
         entries=tuple(
             ExternalInputKind(

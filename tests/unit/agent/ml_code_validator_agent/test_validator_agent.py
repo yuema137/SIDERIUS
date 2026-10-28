@@ -8,9 +8,8 @@ Tests cover:
     - Missing attribute returns (False, message naming the attribute)
 
   _run_tests
-    - subprocess returncode 0 → (True, output)
-    - subprocess returncode 1 → (False, output)
-    - stdout and stderr are concatenated into test_output
+    - the caller's declared pytest limit reaches the supervised launcher
+      (exit mapping and supervision: tests/unit/agent/skills/test_generated_pytest.py)
 
   _check_description
     - Existing file with >50 chars returns (True, None)
@@ -204,59 +203,20 @@ class TestCheckPlugin:
 
 
 class TestRunTests:
-    @staticmethod
-    def _touch_test_file(tmp_path):
-        """Materialize a real file so the empty-path guard doesn't
-        short-circuit — these tests exercise the pytest-subprocess path."""
-        p = tmp_path / "test_dummy.py"
-        p.write_text("def test_dummy(): assert True\n")
-        return str(p)
+    # Exit-code mapping, output concatenation and process supervision are
+    # owned by tests/unit/agent/skills/test_generated_pytest.py (real
+    # children). Here: the node forwards the caller's declared limit.
 
-    def test_passing_tests_return_true(self, tmp_path):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "3 passed in 0.5s"
-        mock_result.stderr = ""
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, _output = _run_tests(self._touch_test_file(tmp_path))
-        assert ok is True
+    def test_declared_limit_reaches_the_supervised_pytest_child(self, tmp_path, mock_llm_bridge):
+        """Fails if the agent drops the caller's pytest limit (issue #984)."""
+        from agent.skills.generated_pytest import PytestLimit
 
-    def test_failing_tests_return_false(self, tmp_path):
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = "FAILED test_forward - AssertionError"
-        mock_result.stderr = ""
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, _output = _run_tests(self._touch_test_file(tmp_path))
-        assert ok is False
-
-    def test_stdout_and_stderr_concatenated(self, tmp_path):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "stdout content"
-        mock_result.stderr = "stderr content"
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            _ok, output = _run_tests(self._touch_test_file(tmp_path))
-        assert "stdout content" in output
-        assert "stderr content" in output
-
-    def test_output_returned_on_pass(self, tmp_path):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "3 passed"
-        mock_result.stderr = ""
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            _ok, output = _run_tests(self._touch_test_file(tmp_path))
-        assert "3 passed" in output
-
-    def test_output_returned_on_fail(self, tmp_path):
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = "FAILED"
-        mock_result.stderr = "error detail"
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            _ok, output = _run_tests(self._touch_test_file(tmp_path))
-        assert "FAILED" in output
+        declared = PytestLimit(seconds=7.5)
+        with patch(
+            "nodes.ml_code_validator_agent.run_generated_pytest", return_value=(True, "ok")
+        ) as launched:
+            MLCodeValidatorAgent(**_AGENT_KWARGS).run(make_input(tmp_path), test_limit=declared)
+        assert launched.call_args.kwargs["limit"] is declared
 
     # --- Branch B empty/nonexistent-path guard (v16 fix) ---
 
@@ -265,7 +225,7 @@ class TestRunTests:
         emitted by the implementor's short-circuit. Pytest must NOT be
         invoked — an empty positional arg triggers full-project discovery
         (the v16 loss-chain false-negative bug)."""
-        with patch("nodes.ml_code_validator_agent.subprocess.run") as mocked:
+        with patch("nodes.ml_code_validator_agent.run_generated_pytest") as mocked:
             ok, output = _run_tests("")
         assert ok is True
         assert "Skipped" in output
@@ -275,7 +235,7 @@ class TestRunTests:
     def test_run_tests_skips_when_path_not_a_file(self):
         """Nonexistent path also skips — same guard, defensive against a
         stale/cleaned path (v16 iter_015 pytest-tmp-dir race)."""
-        with patch("nodes.ml_code_validator_agent.subprocess.run") as mocked:
+        with patch("nodes.ml_code_validator_agent.run_generated_pytest") as mocked:
             ok, output = _run_tests("/nonexistent/path/that/does/not/exist.py")
         assert ok is True
         assert "Skipped" in output
@@ -639,6 +599,14 @@ class TestDeclaredOutputContract:
 # ---------------------------------------------------------------------------
 
 
+def _pytest_returns(mock_result):
+    """Stub the supervised pytest launcher with a recorded child outcome."""
+    return patch(
+        "nodes.ml_code_validator_agent.run_generated_pytest",
+        return_value=(mock_result.returncode == 0, mock_result.stdout + mock_result.stderr),
+    )
+
+
 @pytest.fixture
 def mock_llm_bridge():
     """Mock LLMBridge.generate to return a passing review."""
@@ -650,18 +618,18 @@ def mock_llm_bridge():
 
 @pytest.fixture
 def passing_subprocess():
-    """Patch subprocess.run to simulate all pytest tests passing."""
+    """Stub the supervised pytest launcher to report all tests passing."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = "1 passed in 0.1s"
     mock_result.stderr = ""
-    with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
+    with _pytest_returns(mock_result):
         yield
 
 
 @pytest.fixture
 def passing_mocks(mock_llm_bridge, passing_subprocess):
-    """Combined fixture: mocked LLM + mocked subprocess."""
+    """Combined fixture: mocked LLM + stubbed pytest launcher."""
     yield
 
 
@@ -730,7 +698,7 @@ class TestMLCodeValidatorAgentRun:
         mock_result.returncode = 1
         mock_result.stdout = "FAILED test_forward - AssertionError"
         mock_result.stderr = ""
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
+        with _pytest_returns(mock_result):
             out = MLCodeValidatorAgent(
                 provider="gemini", model_id="gemini-3.1-flash-lite-preview"
             ).run(make_input(tmp_path))
@@ -742,7 +710,7 @@ class TestMLCodeValidatorAgentRun:
         mock_result.returncode = 1
         mock_result.stdout = "FAILED test_forward"
         mock_result.stderr = ""
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
+        with _pytest_returns(mock_result):
             out = MLCodeValidatorAgent(
                 provider="gemini", model_id="gemini-3.1-flash-lite-preview"
             ).run(make_input(tmp_path))
@@ -776,7 +744,7 @@ class TestMLCodeValidatorAgentRun:
         mock_result.stderr = ""
         bad_plugin = tmp_path / "bad.py"
         bad_plugin.write_text("import broken_xyz\n")
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
+        with _pytest_returns(mock_result):
             inp = make_input(
                 tmp_path,
                 model_file_path=str(bad_plugin),
@@ -912,7 +880,7 @@ class TestLLMReview:
         mock_result.returncode = 1
         mock_result.stdout = "FAILED test_forward - RuntimeError: size mismatch"
         mock_result.stderr = ""
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
+        with _pytest_returns(mock_result):
             with patch("nodes.ml_code_validator_agent.LLMBridge") as MockBridge:
                 instance = MockBridge.return_value
                 instance.generate.return_value = FAKE_LLM_REVIEW
@@ -1121,7 +1089,7 @@ class TestInheritanceDecoupledFromPassed:
         mock_result.returncode = 1
         mock_result.stdout = "FAILED test_forward"
         mock_result.stderr = ""
-        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
+        with _pytest_returns(mock_result):
             inp = make_input(
                 tmp_path,
                 inherited_components=[

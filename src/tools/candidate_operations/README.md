@@ -52,6 +52,11 @@ before candidate execution.
    identical JSON with the same ID returns the same operation without running it
    again. Different content with that ID is refused.
 
+   Every run uses one random seed. Without `--run-seed N`, SIDERIUS picks one
+   and records it; `status` shows it as `run_seed`. Add `--run-seed N` (an
+   integer from 0 to 2^53 - 1) to choose it yourself, and repeat the same value
+   whenever you resubmit that file.
+
 3. Reopen the result and read a bounded log chunk:
 
    ```sh
@@ -161,8 +166,9 @@ observed alive. `unknown` means evidence is insufficient; it blocks new admissio
 and is never automatically retried. A new operation cannot reuse an older
 operation's receipt at the same output path. Preserve the records for investigation.
 A completed operation also keeps its slot until its process is observed exited.
-There is no cancellation or queue. Captured native continuation is limited to the
-explicit route below.
+There is no queue. To stop a running candidate, see
+[Stop a running candidate now](#stop-a-running-candidate-now). Captured native
+continuation is limited to the explicit route below.
 
 Use `--kind operation` for wrapper output. Logs and full native receipts are
 trusted local data and may contain sensitive task or plugin output. Byte cursors
@@ -171,6 +177,67 @@ the current file size reports truncation and restarts at zero. Same-size log
 replacement cannot be detected by this cursor. The
 [technical contract](candidate-operations-contract.md) defines integrity checks,
 credential limits and deployment boundaries.
+
+## Share one GPU budget across operations
+
+Each store runs one operation at a time, so running several candidates at once
+means using several stores. On their own, separate stores do not know about each
+other: two of them could start training on the same GPU and exceed its memory. A
+shared host ledger fixes that. You declare the host budget once. Every candidate
+submitted with that ledger reserves part of the budget before it starts, and gives
+the reservation back when its processes, including training, have ended.
+
+1. Create the ledger directory once, private to you, outside every store,
+   workspace and input: `mkdir -m 700 /path/to/host-ledger`. Submissions never
+   create it.
+2. Write a budget file for this host: each GPU's UUID, hardware and memory
+   ceiling, plus host memory, CPU slots and the maximum number of concurrent
+   operations. The [budget format](../../core/runtime_control/scheduling.md#budget-intake-run-invariants-and-child-environment)
+   lists every field. Nothing in it is guessed for you.
+3. Add a `resources` object to each candidate submission saying what that run
+   needs, for example
+   `{"gpu_count": 1, "vram_gib": 3.0, "vram_source": "configured_cap", "host_memory_gib": 8.0, "cpu_slots": 2, "time_budgeted": false}`.
+   Set `time_budgeted` to `true` when the run uses a training time budget. A GPU
+   run must also list `CUDA_VISIBLE_DEVICES` in `request.environment_names`;
+   that is how the run receives the GPU it was given. The `vram_gib` you declare
+   is what the ledger reserves. The run itself does not yet check that it stays
+   within it, so declare at least the run's own VRAM budget. Only `candidate`
+   submissions are accepted with a budget; other kinds are refused with
+   `resources_required`.
+4. Submit every candidate with the same ledger directory and budget file. The
+   two flags always go together:
+
+   ```sh
+   .venv/bin/python -m tools.candidate_operations submit \
+     --store-config store-a.json --request submission-a.json \
+     --host-ledger /path/to/host-ledger --host-budget host-budget.json
+   ```
+
+A placed submission returns `starting`, the same as before, and its operation
+directory gains `placement.json`, which names the GPU it was given. If the budget
+is currently full, the submission is refused with `host_capacity` and nothing
+starts. Submit it again after a running operation ends. A run that could never
+fit is refused with `resource_refused`. Two runs sharing one GPU slow each other
+down, which can change what a time budget admits. So a `time_budgeted` run is not
+placed on a GPU another run is using; it is refused with
+`shared_gpu_time_budget`. If you accept that contention, set
+`"acknowledge_shared_gpu_time_budget": true` in the budget file before the first
+submission. Changing the budget file while runs hold reservations is refused with
+`budget_mismatch`.
+
+Nothing polls in the background. A finished run's reservation is returned the
+next time any submission uses the ledger. If a crash leaves a reservation behind,
+release it explicitly:
+
+```sh
+.venv/bin/python -m tools.candidate_operations release-reservation \
+  --host-ledger /path/to/host-ledger --operation-id OPERATION_UUID
+```
+
+If the operation's processes or its sandbox still appear to be running, the
+release is refused with `session_live`. The ledger only protects launches that
+name it. The [ledger contract](candidate-operations-contract.md#host-reservation-ledger)
+lists every refusal and its limits.
 
 ## Run a captured native chain
 
@@ -232,6 +299,32 @@ Missing counts stay unavailable. Token monitoring does not reread scientific
 result files or establish complete billing. The response identifies whether the
 run identity matches retained records or comes from the current run identity file.
 Professional, Assistant and GUI use this same reader.
+
+## Stop a running candidate now
+
+Use this when a candidate run is still `active` and you want it to stop at once,
+for example because it is spending paid API calls. It works for `candidate`
+operations and resumed loop segments.
+
+```sh
+.venv/bin/python -m tools.candidate_operations cancel \
+  --store-config store.json --operation-id RUNNING_OPERATION_UUID
+```
+
+The answer means the request was recorded; it is safe to run the command again.
+The run is asked to stop within half a second and is force-killed one second
+later if it has not exited, including a model call in progress. Check `status`
+until `receipt.status` is `cancelled`. Files written so far stay in the run
+workspace, and the log and reported tokens stay readable; no candidate result is
+produced. A
+call that was in flight may still be billed by the provider without appearing in
+the token report. A cancelled loop cannot be resumed; use `pause-loop` instead if
+you want to continue later.
+
+If the run already finished, the command refuses with `terminal` and changes
+nothing. `starting` means the run has not started yet; try again in a moment.
+`not_running` means its process is gone, so there is nothing to stop. The [operations contract](candidate-operations-contract.md#cancel-an-active-candidate-operation)
+defines the full rules.
 
 ## Stop, pause or resume a research loop
 

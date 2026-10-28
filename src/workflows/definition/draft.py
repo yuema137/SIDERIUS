@@ -15,6 +15,7 @@ from .models import (
     DeclarationModel,
     ExternalRequest,
     Identifier,
+    ProtocolRequest,
     Source,
 )
 
@@ -43,11 +44,12 @@ class WorkflowDraft(DeclarationModel):
             node = nodes.get(patch.node)
             if node is None:
                 raise ValueError(f"Unknown draft node: {patch.node}")
-            arguments = (
-                {None}
-                if isinstance(node.request, ExternalRequest)
-                else {item.name for item in PROTOCOLS[node.request.protocol].arguments}
-            )
+            if isinstance(node.request, ExternalRequest):
+                arguments: set[str | None] = {None}
+            elif isinstance(node.request, ProtocolRequest):
+                arguments = {item.name for item in PROTOCOLS[node.request.protocol].arguments}
+            else:
+                arguments = set()  # an adaptor request has no editable binding socket
             if patch.argument not in arguments:
                 raise ValueError(f"Unknown draft socket: {patch.node}.{patch.argument}")
         return self

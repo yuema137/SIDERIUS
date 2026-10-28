@@ -66,6 +66,15 @@ SCHEMA_NAMES = MappingProxyType(
             "Findings from published papers, with the retrieved papers behind them.",
             "produced",
         ),
+        (
+            "list[agent.schemas.protocols.ml_literature_review_to_ml_model_propose"
+            ".NamedLiteratureReviewOutput]"
+        ): SchemaName(
+            "Collected paper findings",
+            "Paper findings from several literature searches, each labelled with the search "
+            "that produced it.",
+            "produced",
+        ),
         "agent.schemas.proposal.ProposalInput": SchemaName(
             "Design brief",
             "Everything needed to design the next model.",

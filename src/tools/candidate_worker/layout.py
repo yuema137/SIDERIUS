@@ -25,16 +25,23 @@ def candidate_control_dir(workspace: Path, *, iteration: int = 1) -> Path:
     return control if iteration == 1 else control / f"iteration_{iteration:03d}"
 
 
+# Profiles whose proposal diagnostics are per node; every other profile keeps the
+# fixed and G1 singular paths.
+_PER_NODE_PROPOSAL_PROFILES = (
+    "native-proposal-families/v1",
+    "native-literature-candidate/v1",
+    "native-interpretation-candidate/v1",
+    "native-literature-collection/v1",
+    "native-literature-split/v1",
+)
+
+
 def proposal_input_path(
     workspace: Path, profile: str | None, node_id: str, *, iteration: int = 1
 ) -> Path:
     """Isolate family diagnostics while retaining fixed and G1 bytes/paths."""
     control = candidate_control_dir(workspace, iteration=iteration)
-    if profile in (
-        "native-proposal-families/v1",
-        "native-literature-candidate/v1",
-        "native-interpretation-candidate/v1",
-    ):
+    if profile in _PER_NODE_PROPOSAL_PROFILES:
         return control / "proposal_inputs" / f"{node_id}.json"
     return control / "proposal_input.json"
 
@@ -43,16 +50,7 @@ def proposal_debug_dir(
     workspace: Path, profile: str | None, node_id: str, *, iteration: int = 1
 ) -> Path:
     directory = candidate_control_dir(workspace, iteration=iteration) / "debug"
-    return (
-        directory / node_id
-        if profile
-        in (
-            "native-proposal-families/v1",
-            "native-literature-candidate/v1",
-            "native-interpretation-candidate/v1",
-        )
-        else directory
-    )
+    return directory / node_id if profile in _PER_NODE_PROPOSAL_PROFILES else directory
 
 
 def literature_input_path(workspace: Path, node_id: str, *, iteration: int = 1) -> Path:
@@ -86,3 +84,19 @@ def tuning_input_path(workspace: Path, node_id: str, *, iteration: int = 1) -> P
     return (
         candidate_control_dir(workspace, iteration=iteration) / "tuning_inputs" / f"{node_id}.json"
     )
+
+
+def adaptor_dir(workspace: Path, *, iteration: int = 1) -> Path:
+    """The adaptors' own records and published output values (B6-3)."""
+    return candidate_control_dir(workspace, iteration=iteration) / "adaptors"
+
+
+def adaptor_record_path(workspace: Path, adaptor_id: str, *, iteration: int = 1) -> Path:
+    return adaptor_dir(workspace, iteration=iteration) / f"{adaptor_id}.json"
+
+
+def adaptor_output_path(
+    workspace: Path, adaptor_id: str, port: str, index: int | None, *, iteration: int = 1
+) -> Path:
+    suffix = port if index is None else f"{port}.{index}"
+    return adaptor_dir(workspace, iteration=iteration) / f"{adaptor_id}.out.{suffix}.json"

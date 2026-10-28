@@ -21,6 +21,7 @@ from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
     ExpertAdviceInput,
     GateExhaustionInfo,
+    OperatorTimeBudgetMinutes,
     TaskCompositionRef,
 )
 from agent.schemas.output_types import OutputTypeName as OutputTypeName
@@ -979,22 +980,14 @@ class ProposalInput(BaseModel):
         "estimate matches the tuner's. Default 0.1 mirrors "
         "HyperparamTuningInput.train_portion.",
     )
-    sampling_seed: int | None = Field(
-        default=None,
-        description="Seed for build_sample_set(). When None the proposer auto-generates "
-        "one for its estimate; the tuner uses its own auto-generation "
-        "policy from HyperparamTuningInput.sampling_seed. The estimate is "
-        "robust to which exact segments are picked, so identical seeds "
-        "across the two gates are not required.",
-    )
-    trial_time_budget_minutes: float | None = Field(
+    trial_time_budget_minutes: OperatorTimeBudgetMinutes | None = Field(
         default=None,
         description="Configured Trial time budget in minutes, shown independently "
         "in every proposer request. Used by the static preflight advisory when "
         "is_trial=True; it never rejects or revises proposals. None means no "
         "Trial budget was supplied to this input, so its advisory is skipped.",
     )
-    formal_time_budget_minutes: float | None = Field(
+    formal_time_budget_minutes: OperatorTimeBudgetMinutes | None = Field(
         default=None,
         description="Configured Formal time budget in minutes, shown independently "
         "in every proposer request. Used by the static preflight advisory when "

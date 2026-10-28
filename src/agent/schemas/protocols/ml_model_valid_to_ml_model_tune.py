@@ -31,6 +31,7 @@ from agent.schemas.hyperparam_tuning import (
     TimeAdmissionSource,
     serialize_expert_advice,
 )
+from agent.schemas.judge import JudgeRoutes
 from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.parameter_rules import ParameterRules
@@ -44,6 +45,7 @@ from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.verifier_provider import RuntimeVerifierIdentity
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
+from core.seeding import SeedCoordinates
 from execute_tools.dataset_config import DataScope
 
 
@@ -88,8 +90,11 @@ def local_validated_model(
     train_portion: float = 0.1,
     eval_portion: float = 0.1,
     train_validation_align: bool = True,
-    sampling_seed: int | None = None,
-    train_base_seed: int | None = None,
+    # Issue #983 — the locked run seed and the caller-owned seed coordinates.
+    run_seed: int | None = None,
+    seed_coordinates: SeedCoordinates | None = None,
+    # B2-4 — the locked judge routes, echoed for the tuner's lock validation.
+    judge_routes: JudgeRoutes | None = None,
     cleanup_denoised: bool = False,
     retain_model_outputs: bool = False,
     retain_training_checkpoints: bool = False,
@@ -384,8 +389,9 @@ def local_validated_model(
         train_portion=train_portion,
         eval_portion=eval_portion,
         train_validation_align=train_validation_align,
-        sampling_seed=sampling_seed,
-        train_base_seed=train_base_seed,
+        run_seed=run_seed,
+        seed_coordinates=seed_coordinates or SeedCoordinates(),
+        judge_routes=judge_routes,
         cleanup_denoised=cleanup_denoised,
         retain_model_outputs=retain_model_outputs,
         retain_training_checkpoints=retain_training_checkpoints,

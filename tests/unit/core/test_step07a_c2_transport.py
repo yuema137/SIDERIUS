@@ -51,6 +51,7 @@ from agent.schemas.model_io_contract import (
 )
 from core.sandbox_executor import StubSandbox, TidmadSandbox
 from core.training_execution_bindings import TrainingExecutionBindings
+from core.training_seeds import SeedContext
 from execute_tools.dataset_config import DataScope, bind_dataset_profile
 from execute_tools.scoring_utils import validate_sample_set
 from execute_tools.task_data_path import EvalMaterializationParams
@@ -196,7 +197,7 @@ class TestArgvDelta:
             sample_set=TRAIN_SS,
             eval_sample_set=EVAL_SS,
             train_portion=0.5,
-            train_base_seed=11,
+            seed_context=SeedContext(run_seed=11),
         )
         (cmd,), _ = mock_run.call_args
         assert _normalize(cmd, str(tmp_path)) == [
@@ -226,8 +227,8 @@ class TestArgvDelta:
             "<WS>/configs/c2run/eval_sample_set_c2exp.json",  # THE delta
             "--train_portion",
             "0.5",
-            "--train_base_seed",
-            "11",
+            "--seed_context_json",
+            "<WS>/configs/c2run/seed_context_c2exp.json",
             "--runtime_observation_out",
             "<WS>/configs/c2run/runtime_verification_c2exp.json",
         ]
@@ -269,7 +270,7 @@ class TestArgvDelta:
                 TRAIN_CFG,
                 LOSS_CFG,
                 train_portion=0.1,
-                train_base_seed=73,
+                seed_context=SeedContext(run_seed=73),
                 order_strategy="sequential",
                 file_order=[2, 0, 1],
                 execution_bindings=TrainingExecutionBindings(
@@ -280,7 +281,8 @@ class TestArgvDelta:
         (cmd,), _ = mock_run.call_args
         assert "--sample_set_json" not in cmd
         assert cmd[cmd.index("--train_portion") + 1] == "0.1"
-        assert cmd[cmd.index("--train_base_seed") + 1] == "73"
+        context_path = Path(cmd[cmd.index("--seed_context_json") + 1])
+        assert SeedContext.model_validate_json(context_path.read_text()) == SeedContext(run_seed=73)
         assert cmd[cmd.index("--order_strategy") + 1] == "sequential"
         order_path = Path(cmd[cmd.index("--file_order_json") + 1])
         assert json.loads(order_path.read_text(encoding="utf-8")) == [2, 0, 1]
@@ -505,7 +507,7 @@ class TestRungB07a2ValidationScopeAxis:
                 },
                 {"loss_type": "focal"},
                 train_portion=0.5,
-                train_base_seed=19,
+                seed_context=SeedContext(run_seed=19),
                 runtime_policy={},
                 execution_bindings=TrainingExecutionBindings(
                     task_scopes=attempt_scopes(adapter, training_scope)
@@ -578,7 +580,7 @@ class TestRungB07a2ValidationScopeAxis:
                 execution_bindings=TrainingExecutionBindings(
                     task_scopes=attempt_scopes(adapter, train_ss, eval_ss)
                 ),
-                train_base_seed=5,
+                seed_context=SeedContext(run_seed=5),
             )
             monkeypatch.setattr(adapter, "validation_dataset", original_materialize)
         assert out["status"] == "success", out.get("message")

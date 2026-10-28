@@ -10,6 +10,7 @@
   try { $('operation-id').value = localStorage.getItem('siderius.operation_id') || ''; if ($('operation-id').value) say('remembered-operation', 'Last opened on this browser.'); } catch { /* Optional convenience. */ }
 
   const api = (path, body) => window.consoleSession.request(path, body);
+  const monitorStop = window.operationStop.mount('operation-stop');
   function facts(element, rows) {
     element.replaceChildren();
     for (const [label, value] of rows) {
@@ -167,7 +168,7 @@
   });
   function setMonitor(id) {
     if (monitorId.toLowerCase() === id.toLowerCase()) return;
-    monitorEpoch++; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
+    monitorEpoch++; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorStop.render(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
     $('token-rows').replaceChildren(); $('tokens-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
     say('remembered-operation', '');
     say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: Unavailable');
@@ -186,7 +187,7 @@
     try {
       const status = await api('operations/' + id);
       if (epoch !== monitorEpoch) return;
-      window.renderNativeChain(status); window.renderLoopControl(status);
+      window.renderNativeChain(status); window.renderLoopControl(status); monitorStop.render(status);
       say('monitor-status', describe(status));
       say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: ' + (status.observed_at || 'Unavailable'));
       facts($('operation-facts'), [['Operation UUID', status.operation_id], ['Kind', status.kind], ['Observed at', status.observed_at],
@@ -214,6 +215,7 @@
       say('log-status', chunk.missing ? 'Log not available yet.' : `Log observed: ${chunk.observed_size} source bytes · Next byte offset: ${cursor}`);
     } catch (error) {
       if (error.stale) return;
+      if (epoch === monitorEpoch) monitorStop.observation(true);
       if (epoch === monitorEpoch) say('monitor-status', 'Observation stale or unavailable: ' + error.message + '. Last displayed facts are retained; disconnection does not mean stopped.');
     }
   }

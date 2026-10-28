@@ -3,6 +3,7 @@
   'use strict';
   const $ = id => document.getElementById('capture-' + id);
   const session = window.consoleSession, coordinator = window.reusableIntents;
+  const stopControl = window.operationStop.mount('capture-stop');
   const profileDescriptions = {
     'native-proposal-families/v1': ' Independent proposal instances executed serially.',
     'native-literature-candidate/v1': ' Native literature review feeds one proposal, implementation and validation.',
@@ -25,6 +26,9 @@
   let handoffGeneration = -1;
   let tasksRevision = null, cursor = null, busy = false, intent = null, terminal = false, refusedInitial = false, storageProblem = false;
   const status = message => { $('status').textContent = message; };
+  // The reason a project cannot run outlives later task/list refreshes, which never apply to it.
+  const notEnabled = () => !!editor.projectId && !editor.candidateEnabled;
+  const NOT_ENABLED = 'This project is editable but not enabled for candidate runs.';
   const api = (suffix, body, project = editor.projectId) => session.request(`editor/${encodeURIComponent(project)}/reusable-captures${suffix}`, body);
   const current = (version, revision) => generation === version && session.revision === revision;
   const option = (value, text) => { const el = document.createElement('option'); el.value = value; el.textContent = text; return el; };
@@ -53,6 +57,7 @@
   function invalidate() { generation++; selected = null; review = null; $('summary').replaceChildren(); $('details').textContent = ''; controls(); }
   function showIntent() {
     $('intent').hidden = !intent;
+    stopControl.render(null);
     if (!intent) return;
     $('operation-id').textContent = intent.payload.candidate_operation_id;
     $('operation-status').textContent = 'Retained launch intent. Check status or explicitly retry this same operation.';
@@ -67,6 +72,7 @@
     if (!coordinator.observe('candidate', intent, value)) return;
     terminal = coordinator.dismissible('candidate', intent);
     $('operation-status').textContent = `Operation ${state}${value.native_status ? ' · Native ' + value.native_status : ''}.`;
+    stopControl.render(value.state ? value : null);
     $('monitor').hidden = false; $('finish').hidden = !terminal; $('finish').textContent = 'Dismiss completed operation'; controls();
   }
   async function launchRetained(initial = false) {
@@ -118,7 +124,8 @@
       $('task').replaceChildren(option('', 'Choose task and resources'), ...tasks.filter(task => task.reusable_runs_root).map(task => option(task.task_id, task.label)));
       if ([...$('task').options].some(item => item.value === previous)) $('task').value = previous;
       if ($('task').value !== previous) invalidate();
-      if (!$('task').value) status(tasks.some(task => task.reusable_runs_root)
+      if (notEnabled()) status(NOT_ENABLED);
+      else if (!$('task').value) status(tasks.some(task => task.reusable_runs_root)
         ? 'Choose a task to list prepared runs.' : 'Reusable captures are not configured for any task.');
       else if (editor.candidateEnabled && !selected) await list();
     } catch (error) { if (!error.stale) { tasksRevision = null; status(error.message); } }
@@ -131,7 +138,7 @@
       if (session.connected && editor.sourceAvailable && !editor.saving && !selected) void list();
     }
     if (previous.projectId !== editor.projectId) { invalidate(); $('run').replaceChildren(option('', 'Choose a prepared run')); if (session.connected) void list(); }
-    if (!editor.candidateEnabled && editor.projectId) status('This project is editable but not enabled for candidate runs.');
+    if (notEnabled()) status(NOT_ENABLED);
     controls();
   });
   session.subscribe(() => { if (!session.connected) { generation++; review = null; $('summary').replaceChildren(); $('details').textContent = ''; } controls(); if (session.connected && ['workflow', 'run'].includes(window.consoleNavigation?.view)) void loadTasks(); });

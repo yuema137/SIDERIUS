@@ -48,6 +48,7 @@ from nodes.ml_hyperparameter_tune_agent.health_coverage import validate_attempt_
 from tests.fixtures.tuner_composed_task import TunerComposedTask
 from tests.helpers.recording_llm_bridge import RecordingLLMBridge
 from tests.helpers.recording_sandbox import RecordingSandbox
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.tuner_composed_effects import composed_tuner_effects
 from tests.helpers.tuner_composed_fixture import composed_run
 
@@ -192,6 +193,7 @@ def _agent(bridge, sandbox) -> HyperparamTuningAgent:
 
 def _input(tmp_path, run_name: str, rounds: int, **overrides) -> HyperparamTuningInput:
     base = dict(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="quickstart_reference_mlp",
         max_rounds=rounds,

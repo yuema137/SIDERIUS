@@ -61,6 +61,87 @@ Undeclared entries are ignored and never logged. Parse refusals are raised
 outside the parser's exception handler, so neither message nor chained cause
 quotes bytes or values; missing declared names are reported by name only.
 
+### Workspace layout and `init`
+
+Owners: `settings_models.py` (file schema), `workspace.py` (derivation,
+readiness, `init`), `config.load_console`, `__main__` (`check`, `serve`, `init`).
+
+**File schema.** `ConsoleFile`/`TaskEntry` are generated from `ConsoleConfig`/`TaskChoice`
+with `pydantic.create_model`; every field keeps its owner's annotation and
+constraints. Differences: `ConsoleFile` adds `workspace_root: str | None` and makes
+`operation_store`/`auth_token_file` optional; `TaskEntry` makes `data_root`,
+`preparation_root`, `candidate_root`, `reusable_runs_root` and `llm_config_file`
+optional. `ConsoleConfig` and `TaskChoice` gain no field, so native requests built
+from `TaskChoice` (`service.preparation_request`) are unchanged.
+
+**Resolution.** `resolve_console(bytes)` validates `ConsoleFile`, dumps it with
+`exclude_unset=True`, fills only keys the file omits, then validates the result as
+`ConsoleConfig`. `load_console(path) -> ResolvedConsole(config, settings)` applies
+the unchanged `validate_config`; `load_config(path)` keeps its signature and result.
+`SettingsContext` carries `workspace_root` and the `(task_id | None, field)` pairs the
+layout filled; it is presentation/readiness input only, never native input.
+When `workspace_root` (canonical, no symlinks) is set and a field is omitted:
+
+| Field | Derived value under `<workspace_root>` |
+| --- | --- |
+| `operation_store` | `state_root=operations`, `preparation_roots=[preparations, runs]`, `candidate_roots=[candidates, runs]` |
+| `auth_token_file` | `settings/console-token` |
+| `TaskChoice.data_root` | `data/<task_id>` |
+| `TaskChoice.preparation_root` | `preparations/<task_id>` |
+| `TaskChoice.candidate_root` | `candidates/<task_id>` |
+| `TaskChoice.reusable_runs_root` | `runs/<task_id>` (an explicit `null` keeps reusable runs disabled) |
+
+`runs` is in both root lists so the derived reusable runs root satisfies the
+`validate_config` scope rule. `llm_config_file`, `task_manifest`, resources and
+credential names are content choices and are never derived. An explicit value
+always wins (parity: an explicit file resolves to exactly
+`ConsoleConfig.model_validate_json(bytes)`). A field with no source raises
+`workspace.MissingSetting`; `check`/`serve` exit 2 and print only the task ID and
+field name, for example `task my-task needs llm_config_file (set it in console.json)`.
+
+**`init --workspace <parent>`.** `<parent>` is explicit (no default) and must be
+an existing canonical directory. The command walks from `/` with
+`O_DIRECTORY|O_NOFOLLOW` descriptors and requires `<parent>` and every existing or
+created workspace directory to satisfy the ownership predicate: a directory,
+`st_uid == os.getuid()`, no group/other write bit. It creates only missing
+children with `mkdir(name, 0o700, dir_fd=…)` and `fchmod 0700`:
+`operations`, `preparations`, `candidates`, `runs`, `projects`, `library`,
+`library/llm`, `library/advice`, `settings`, `data` (`exported_configs` is created
+lazily by its writer). It creates `settings/console-token` with
+`O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0600, 32 random bytes URL-safe encoded;
+an existing token is left untouched and validated by `files.token`. It publishes
+`library/llm/default-<sha12>.json` write-once with the `WorkflowLLMConfig.default()`
+export expression of [LLM defaults](../../../docs/reference/llm-defaults.md)
+(bytes equal `configs/llm/default.json`; no checkout read); existing different
+bytes are refused. It writes `settings/console.json` write-once only when absent:
+`workspace_root`, `port` (default 8740, `--port`), `browser_origin`, `tasks: []`.
+When `console.json` exists and names this workspace, `init` also creates the missing
+derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
+them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
+Under any umask it creates folders as 0700 and the token as 0600 (it sets umask
+077 for its own duration and `fchmod`s created folders). It never deletes, overwrites
+or follows a symlink. Refusals exit 2 and say which item failed:
+`WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
+or the library default profile, when it is a symlink, unreadable or has different
+bytes); `MissingSetting` from an existing console.json names the task field; an
+unusable `--workspace` gets its own message. Residual race: `core.durable_io` publishes by path, so after the no-follow
+parent check only a same-user process, which already owns the workspace, can swap
+a parent.
+
+**`WorkspaceReadiness`** (`readiness_models.py`, beside `CredentialReadiness`) is an
+ephemeral, name-only projection: `workspace_status` and one `WorkspaceEntry(name,
+status, created_by)` per fixed child, per derived task output root and per derived
+`data/<task_id>`. `status` is `present|missing|not_directory|symlink|not_owner|unreadable`
+(`missing` only for not-found; other open/stat refusals map to `symlink`,
+`not_directory` or `unreadable`),
+computed with no-follow `stat` relative to a root descriptor opened by
+`files.open_directory` (the same no-follow walk as private reads); task data
+(`created_by="operator"`) reports presence only. `created_by="writer"` entries do
+not affect `ready`. `init_command` is set when `init` could fix a missing item. No
+`os.access` probe and no creation. `check`/`serve` print non-present entries and
+the command to stderr when a workspace is not ready, including when
+`validate_config` refuses.
+
 `recorded_examples` is an optional allowlist for read-only candidate-validation
 records. Each entry has a unique `example_id`, readable `label`, canonical
 `workspace` strictly below an existing `candidate_roots` directory, and the
@@ -291,6 +372,12 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
   its `record_sha256` is re-checked with `record_digest`, then the file is validated
   as JSON and against the `HyperparamTuningOutput` schema. Any other state returns
   `result=null` (no score, even if a record file exists).
+- `skipped`: every node of that body's verified `graph_trace.nodes` in state
+  `skipped`, in declaration order, as `GraphSkippedNode(node_id, reason)` (for a
+  `native-routed-candidate/v1` run: the arm a route decision did not select,
+  `route_not_selected`). A skipped node is not run and is never shown as a failure;
+  a skipped tuner has `tuning_state="skipped"` and `result=null`. The field is
+  omitted when empty, so unrouted projections keep their bytes.
 - `GraphRunSummary` is the path-free subset of `RunView`: run name, model type,
   status, termination reason, times, completed rounds, total attempts, `metric`,
   `metric_source`, `ranking_refusal`, declared secondary metric identities, the
@@ -308,7 +395,10 @@ selected operation inside the existing poll, only for `kind == "candidate"` and
 clears the section. 404/409 are final for that selection; other failures retry on
 the next existing poll. Each body is its own section (`Iteration N` for several
 bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
-(`Train & tune`). No cross-body score or ordering is computed or displayed.
+(`Train & tune`). A body with `skipped` nodes adds one muted line
+"Skipped, not run: <node> (<reason>), ...". No cross-body score or ordering is
+computed or displayed; route decision details (observable values, case) are
+B1-PR6 monitor work.
 Non-integer numbers are display-rounded by `number-format.js` (up to four
 decimals; four significant digits for magnitudes below 1e-3 or from 1e9); the
 exact reported value stays in the cell's tooltip. Stop-condition values in the
@@ -317,7 +407,9 @@ transported values are unchanged.
 
 Witnesses: `test_console_graph_results_reuse_native_run_report_without_paths`
 (native graph record vs `project_run`, no path, failed stage has no score, changed
-record refused), `test_two_native_bodies_preserve_advice_and_verify_feedback`
+record refused), `test_console_graph_results_list_the_skipped_arm` (routed body:
+skipped fallback arm listed, tuning result still projected),
+`test_two_native_bodies_preserve_advice_and_verify_feedback`
 (two loop bodies in verified order, refused body → integrity) and
 `tests/browser/graph_results_monitor.mjs` (synthetic GET-only two-body render).
 Provider and tuner effects are offline doubles; these establish projection, not
@@ -415,6 +507,53 @@ its per-body results once completed. A continued predecessor shows "Continued by
 `tests/unit/tools/candidate_console/test_loop_pause_resume.py`, the console
 projections in `candidate_worker/test_loop_resume.py` (real two-segment store), and
 `tests/browser/loop_controls.mjs` (stubbed API).
+
+## Stop run (operator cancel)
+
+`CandidateConsole.cancel_operation(UUID)` delegates once to
+`candidate_operations.request_cancel`, which owns kind/terminal/liveness admission,
+idempotency, the write-once `cancel.json` intent and the child-enforced group
+termination ([operations contract](../candidate_operations/candidate-operations-contract.md#cancel-an-active-candidate-operation)).
+HTTP POST `/api/operations/{UUID}/cancel` passes the ordinary mutation boundary
+and accepts only the empty JSON object (`OperationCancelSelection`). Success returns
+`OperationCancelAcknowledgement` `{"operation_id": UUID, "outcome": "requested"}`:
+recorded, never stopped. A repeated POST replays the first request and returns 200
+even after the run became terminal. Refusals: unknown operation 404; `kind`
+(not a candidate operation), `terminal` (already finished; nothing stopped),
+`starting` (no process identity yet; retry shortly) and `not_running` (process
+gone; nothing to stop) 409 with route-local fixed messages in
+`OPERATION_CANCEL_REFUSALS`; `integrity` and others 409 with the generic message.
+Native detail and paths are never echoed.
+
+`StatusView.cancel_requested` and `StatusView.cancellable` mirror the snapshot
+fields and are omitted when false, so existing status bytes are unchanged unless a
+new cancel is possible (then `cancellable: true` is added).
+`cancellable` is the single authority for offering Stop run; the page keeps no
+kind or state list of its own.
+
+Browser: `operation-stop.js` owns `window.operationStop.mount(prefix)`, which
+binds `#<prefix>-group`, `#<prefix>-button` and `#<prefix>-status` and returns
+`render(status | null)`. It is mounted twice and draws only from statuses the page
+already reads (no extra polling): Slow control (`operation-stop`, every monitor
+poll) and the Run page retained candidate intent (`capture-stop`, on Check status
+or launch). **Stop run** is shown only while the latest status has `cancellable`
+true and no acknowledgement is held. A click opens `window.confirm` stating that the
+run ends immediately, cannot be undone or resumed, produces no candidate result,
+keeps files written so far in the run folder, and that a model call in progress
+may still be billed without appearing in the token report; declining sends nothing. Accepting disables the button for the pending request, so
+one click sequence issues one POST. Status text: "Sending Stop…", then "Stopping
+the run…" until a receipt; native `cancelled` reads "Run stopped. Files written so
+far stay in the run folder; no candidate result is produced."; a receipt with another status after a request reads "Stop was
+requested, but the run finished first."; a refusal reads "Stop was not recorded:
+<message>" (a network failure adds that retrying is safe). While the session is
+disconnected or the page's latest poll failed (`observation(true)` from `app.js`),
+the line is prefixed "Last observed:"; the next successful render clears it. State
+resets when another operation is selected. While `cancel_requested` is true the loop **Stop at next
+boundary** and **Pause at next boundary** controls are hidden, and a `cancelled`
+loop receipt reads "Research loop stopped by you before it finished. Files written
+so far stay in the run folder; this run cannot be resumed." Witnesses:
+`tests/unit/tools/candidate_console/test_operation_cancel.py` and
+`tests/browser/operation_stop.mjs` (stubbed API).
 
 ## Recorded candidate examples
 
@@ -679,14 +818,16 @@ loop-only changes → `LoopProposal` on `anchor.source`; no change →
 `SourceProposal(anchor.source)`. Dirty Source text reviews as `SourceProposal`;
 its reviewed projection becomes the new anchor as one history step. Binding
 inspection (`POST …/draft`, read-only) belongs to the current patch set: layout
-or inspector edits keep it, any patch change (including undo/redo) re-inspects,
+or inspector edits keep it, any patch change (including undo/redo) re-inspects (a binding edit that returns
+to the loaded bindings inspects nothing and clears the previous problems list),
 and Review stays disabled until the current patch set inspects `complete`. A
 no-op input event is not an edit. The server API is unchanged.
 Training-settings actions from `editor-node-parameters.js` (value, mode, per-field
 Reset) are draft operations too: typing in one field coalesces, each Reset is its
 own undo step, and undo/redo re-render the badges from the restored document.
 History: every operation records one undo step (consecutive typing in one field
-coalesces, limit 200). **Undo**/**Redo** buttons and Ctrl/Cmd+Z,
+coalesces, limit 200). Secondary **Undo**/**Redo** buttons (Save stays the one
+primary editor action) and Ctrl/Cmd+Z,
 Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only) restore
 earlier states and invalidate any review. **Discard changes** restores the loaded
 state without reading disk and is itself undoable, including dirty Source text:
@@ -951,7 +1092,8 @@ ready to run.` or the first closing reason (not connected, no project, source no
 open, project not runnable, not a reusable declaration, conflict, saving, unsaved
 edits). Those reasons explain a closed gate and never open it. The New run and
 Prepared run controllers keep their element IDs and behavior; their task loaders run
-on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
+on Workflow or Run entry. For a project that is not enabled for candidate runs,
+`#capture-status` keeps that reason; a task load finishing later does not replace it. `reusableCandidate.openPrepared` routes to `#run` instead of
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
 

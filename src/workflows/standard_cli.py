@@ -18,6 +18,8 @@ from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.hyperparam_tuning import TrainingValidationPortion
 from agent.schemas.ordering import parse_file_order_cli
 from agent.schemas.parameter_rules import ParameterRules
+from core.retired_seed_pins import retired_pin_message
+from core.run_seed_lock import run_seed_argument
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from core.runtime_control.watchdog_profile import ExecutionRegime
 from execute_tools.dataset_config import DataScope
@@ -37,6 +39,11 @@ def _positive_int(s: str) -> int:
     if v < 1:
         raise argparse.ArgumentTypeError(f"expected a positive integer (>= 1), got {v}")
     return v
+
+
+def _retired_seed_pin(s: str) -> None:
+    """argparse type: a retired per-purpose seed pin is refused, never ignored."""
+    raise argparse.ArgumentTypeError(retired_pin_message("the launch", ["sampling_seed"]))
 
 
 def _portion_floor(s: str) -> float:
@@ -240,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lane F3: ELEVATED wall-time ceiling (minutes) for a score-qualified "
         "bypass formal attempt — one value drives BOTH re-evaluated admission and "
         "the watchdog ceiling. Omitted (None) = a qualified bypass grants NO "
-        "extension. Campaign frozen value: 200.",
+        "extension. Must be finite and positive. Campaign frozen value: 200.",
     )
     parser.add_argument(
         "--order_strategy_override",
@@ -742,21 +749,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--sampling_seed",
-        type=int,
+        type=_retired_seed_pin,
         default=None,
-        help="Seed for build_sample_set(). None auto-generates per gate.",
+        help="RETIRED (issue #983): refused; every seed derives from --run_seed.",
+    )
+    parser.add_argument(
+        "--run_seed",
+        type=run_seed_argument,
+        default=None,
+        help=(
+            "The run's one seed (issue #983), an integer in [0, 2**53 - 1]. Omit it "
+            "to generate one at startup. A workspace keeps its locked seed: a later "
+            "iteration adopts it, and a different value is refused."
+        ),
     )
     parser.add_argument(
         "--trial_time_budget_minutes",
         type=float,
         default=None,
-        help="Trial wall-time budget in minutes. None disables Trial time admission.",
+        help=(
+            "Trial wall-time budget in minutes; must be finite and positive. "
+            "Omit (None) to disable Trial time admission."
+        ),
     )
     parser.add_argument(
         "--formal_time_budget_minutes",
         type=float,
         default=None,
-        help="Formal wall-time budget in minutes. None disables Formal time admission.",
+        help=(
+            "Formal wall-time budget in minutes; must be finite and positive. "
+            "Omit (None) to disable Formal time admission."
+        ),
     )
     parser.add_argument(
         "--trial_time_admission_source",

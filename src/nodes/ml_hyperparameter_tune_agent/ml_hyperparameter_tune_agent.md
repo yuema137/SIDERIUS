@@ -139,12 +139,20 @@ Strategies:
   `drop_last`, so batches may span a file boundary and the optimizer-step
   count is identical to `shuffle` for the same selection.
 
-### Sampling seeds
+### Run seed (issue #983)
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `sampling_seed` | `int \| None` | No | `None` | Seed for `build_sample_set()` — determines which PSD segments form the data scope. When `None`, auto-generated from `SHA-256(run_name + model_type)`. |
-| `train_base_seed` | `int \| None` | No | `None` | Base seed for per-epoch training subsampling. Epoch `n` uses `train_base_seed + n`. When `None`, auto-generated. |
+| `run_seed` | `RunSeed \| None` | Yes in practice | `None` | The run seed the entry boundary resolved and locked. `None` raises `MissingRunSeed` at startup, before any LLM call; the tuner never generates one. Locked in the tuner workspace lock and written to `run_config_{run_name}.json`. |
+| `seed_coordinates` | `SeedCoordinates` | No | empty | Caller-owned seed position (`iteration`, `node_id`, `branch`). The native workflow passes the global chain iteration. `round`, `attempt` and `epoch` are refused. |
+
+Each attempt's `train_sampling_seed`, `eval_sampling_seed` and the trainer's
+`seed_context` derive from `run_seed` at
+`seed_coordinates + (round, attempt=total_attempts)`; see
+[seeding](../../../docs/agent-reference/mechanisms/seeding.md#tuner-attempt-seeds).
+The retired `sampling_seed` / `train_base_seed` fields: a `null` value on
+readback is dropped; a set value is kept in `retired_seed_pins` (provenance)
+and `run()` refuses to execute it (`RetiredSeedPin`).
 
 ### Selection topology (Step-02b)
 
@@ -300,8 +308,8 @@ expression — and failing before any GPU work is the fail-closed direction.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `trial_time_budget_minutes` | `float \| None` | No | `None` | Trial wall-time ceiling. `None` disables Trial time admission regardless of source. |
-| `formal_time_budget_minutes` | `float \| None` | No | `None` | Formal wall-time ceiling. `None` disables Formal time admission regardless of source. |
+| `trial_time_budget_minutes` | `float \| None` | No | `None` | Trial wall-time ceiling in minutes; finite and positive (`OperatorTimeBudgetMinutes`, issue #828: zero, negative and non-finite values are refused at launch, never clamped). `None` disables Trial time admission regardless of source. |
+| `formal_time_budget_minutes` | `float \| None` | No | `None` | Formal wall-time ceiling in minutes; finite and positive (`OperatorTimeBudgetMinutes`, issue #828: zero, negative and non-finite values are refused at launch, never clamped). `None` disables Formal time admission regardless of source. |
 | `trial_time_admission_source` | `forecast \| measured` | No | `measured` | Trial's sole time-admission authority. `measured` enforces executing-device evidence and skips advance forecast admission; `forecast` does the reverse. |
 | `formal_time_admission_source` | `forecast \| measured` | No | `measured` | Formal's independent sole time-admission authority, with the same mutually exclusive semantics. |
 | `runtime_completion_policy` | `completed-workload-v1 \| verified-prediction-v1` | No | `completed-workload-v1` | Completed phase actual costs govern the current attempt; incomplete phases still require conservative verification. Explicit strict mode retains the pre-completion admission rule. Compared in run identity and forwarded unchanged to training and inference. Historical experiment selection belongs to the consumer repository. |
@@ -449,6 +457,7 @@ repository. Result lands at `{workspace}/run_output_{run_name}.json`.
 | `--seed_plugin_path` | `str` (optional) | `None` | Path to a plugin `.py` for plugin model_types. |
 | `--run_name` | `str` | `"test_run"` | Run name. |
 | `--workspace` | `str` | `./siderius_workspace` | Workspace root. |
+| `--run_seed` | `int` (`[0, 2**53 - 1]`) | `None` | Entry boundary (R2): the workspace lock's seed wins, then this flag, then generation; printed as `[seed] run_seed=N source=…` and locked before round 1. A different value than the locked seed is refused. |
 | `--is_trial` | flag | `False` | Enable trial-explore mode. |
 | `--trial_strategy` / `--trial_portion` / `--train_portion` / `--target_files` / ... | various | various | Mirror the schema fields above. |
 | `--file_index` | `int` | `6` | Validation file index (formal mode). Ignored under `--is_trial` per `feedback_no_file_index_in_trial`. |
@@ -1326,7 +1335,7 @@ direction and asserts these two do not move.
 | Rule | Classification | Behaviour |
 |---|---|---|
 | `skip_formal_min_delta`, `bypass_formal_time_budget_min_delta` | DECLARED by the operator, in the golden metric's units | a COORDINATE on the better-direction axis: negative loosens, positive tightens, under both directions. The documented disable values (`-inf` skip, `+inf` bypass) still resolve to that metric's worst / best sentinel, so there is no second convention to learn |
-| `bypass_formal_time_budget_minutes` | `float \| None`, default `None` | **Lane F3 / F-BYPASS-WD-1**: the ELEVATED wall-time ceiling (minutes) a score-QUALIFIED bypass formal attempt may use. ONE resolved value feeds BOTH consumers — admission RE-EVALUATES the forecast against it (a forecast past even this ceiling is REFUSED under bypass; the flag is never forced), and the same value becomes the attempt's `chosen_time_budget`, so the runtime watchdog's `operator_budget_seconds` moves WITH the admission verdict. `None` (default) = a qualified bypass grants NO extension — the elevated ceiling must be explicitly typed at launch (campaign: 200; normal formal: `formal_time_budget_minutes` 120), so it can never become a global raise through a schema default. The watchdog is never disabled by this value. Fresh-chain note: with `enable_chain_incumbent_formal_gates` ON and no incumbent, the −inf bootstrap makes the SCORE side unconditional (V20 §16.C) — the reachable unqualified state is the absence of a HealthGate-valid trial winner. |
+| `bypass_formal_time_budget_minutes` | `float \| None`, default `None`; finite and positive (`OperatorTimeBudgetMinutes`, issue #828) | **Lane F3 / F-BYPASS-WD-1**: the ELEVATED wall-time ceiling (minutes) a score-QUALIFIED bypass formal attempt may use. ONE resolved value feeds BOTH consumers — admission RE-EVALUATES the forecast against it (a forecast past even this ceiling is REFUSED under bypass; the flag is never forced), and the same value becomes the attempt's `chosen_time_budget`, so the runtime watchdog's `operator_budget_seconds` moves WITH the admission verdict. `None` (default) = a qualified bypass grants NO extension — the elevated ceiling must be explicitly typed at launch (campaign: 200; normal formal: `formal_time_budget_minutes` 120), so it can never become a global raise through a schema default. The watchdog is never disabled by this value. Fresh-chain note: with `enable_chain_incumbent_formal_gates` ON and no incumbent, the −inf bootstrap makes the SCORE side unconditional (V20 §16.C) — the reachable unqualified state is the absence of a HealthGate-valid trial winner. |
 | bootstrap and disabled sentinels | generic ORDER facts | `worst_sentinel` / `best_sentinel` |
 | the efficiency band | generic, metric-independent by definition | ONE named `EFFICIENCY_BAND_FRACTION` (0.05), applied to the run's OBSERVED score range and moved toward worse — never a raw `best − 0.05` |
 | `degenerate_penalty_score` | DECLARED, and INAPPLICABLE under a minimised metric | a finite float is **REFUSED at startup** with a recorded reason. It is not negated and not reinterpreted: the "large negative, strictly below any healthy success" convention describes a maximised metric, and under a minimised one the same number is the run's best score. `None` (the default) is direction-free and always accepted |

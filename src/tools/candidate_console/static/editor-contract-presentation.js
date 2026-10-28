@@ -15,6 +15,7 @@
     'interpretation.output': {colour: 'interpretation', shape: 'square'},
     'literature.input': {colour: 'literature', shape: 'circle'},
     'literature.output': {colour: 'literature', shape: 'square'},
+    'literature.collection': {colour: 'literature', shape: 'capsule'},
     'proposal.input': {colour: 'proposal', shape: 'circle'},
     'proposal.output': {colour: 'proposal', shape: 'square'},
     'implementation.input': {colour: 'implementation', shape: 'circle'},

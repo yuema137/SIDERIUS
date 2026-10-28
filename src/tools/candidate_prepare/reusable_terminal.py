@@ -86,6 +86,7 @@ def _native(
         or native.source_observations != binding.sources
         or native.status != receipt.status
         or native.error != receipt.error
+        or (native.run_seed, native.run_seed_source) != (receipt.run_seed, receipt.run_seed_source)
     ):
         raise ValueError("terminal native receipt identity or outcome mismatch")
     if receipt.status == "prepared" and (

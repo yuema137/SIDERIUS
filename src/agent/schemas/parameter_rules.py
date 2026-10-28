@@ -51,17 +51,29 @@ def _model_path_exists(annotation: Any, parts: list[str]) -> bool:
     return len(parts) == 1 or _model_path_exists(field.annotation, parts[1:])
 
 
-def _validate_training_rule_path(path: str, parts: list[str]) -> None:
-    """Keep fixed training targets aligned with the actual execution schema."""
-    if parts[0] != "train_config":
-        return
-    from ml_models.models_format_sandbox import TrainConfig
+def _fixed_rule_schemas() -> dict[str, type[BaseModel]]:
+    """Consuming execution schema for each closed rule root.
 
-    if not _model_path_exists(TrainConfig, parts[1:]):
+    ``model_config`` is absent on purpose: model plugins own an extensible
+    configuration, so its leaves cannot be checked against a fixed schema.
+    Custom-loss plugin hyperparameters are not transported through
+    ``loss_config``; ``LossConfig`` is the complete loss-routing surface.
+    """
+    from ml_models.models_format_sandbox import LossConfig, TrainConfig
+
+    return {"train_config": TrainConfig, "loss_config": LossConfig}
+
+
+def _validate_fixed_rule_path(path: str, parts: list[str]) -> None:
+    """Keep fixed training and loss targets aligned with their execution schema."""
+    schema = _fixed_rule_schemas().get(parts[0])
+    if schema is None:
+        return
+    if not _model_path_exists(schema, parts[1:]):
         raise ParameterRuleError(
-            f"unsupported training parameter path {path!r}: target must exist in "
-            "TrainConfig or one of its nested configuration models; check the "
-            "training fields in the task-composition parameter-rule contract"
+            f"unsupported {parts[0]} parameter path {path!r}: target must exist in "
+            f"{schema.__name__} or one of its nested configuration models; check the "
+            f"{parts[0]} fields in the task-composition parameter-rule contract"
         )
 
 
@@ -75,7 +87,7 @@ def _validate_parameter_path(path: str) -> None:
             f"parameter path {path!r} must target a leaf under "
             "model_config, train_config, or loss_config"
         )
-    _validate_training_rule_path(path, parts)
+    _validate_fixed_rule_path(path, parts)
 
 
 def register_parameter_predicate(name: str, predicate: ParameterPredicate) -> None:
@@ -105,8 +117,10 @@ class NumericRange(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    min: float | None = None
-    max: float | None = None
+    # Strict bounds: lax coercion would silently read ``true`` as 1.0 or "3" as
+    # 3.0, while the enforced parameter value itself must be a non-bool number.
+    min: float | None = Field(default=None, strict=True)
+    max: float | None = Field(default=None, strict=True)
 
     @model_validator(mode="after")
     def validate_interval(self) -> NumericRange:
@@ -145,6 +159,13 @@ class ParameterRule(BaseModel):
 
     @model_validator(mode="after")
     def validate_rule(self) -> ParameterRule:
+        # Only ``exact`` may carry null. A null range/allowed/predicate would
+        # otherwise fall through ``kind`` and silently become an exact-null lock.
+        for kind in ("range", "allowed", "predicate"):
+            if kind in self.model_fields_set and getattr(self, kind) is None:
+                raise ValueError(
+                    f"{kind} rule must not be null; declare {{'exact': null}} to lock a null value"
+                )
         if self.allowed is not None and not self.allowed:
             raise ValueError("allowed must contain at least one value")
         if self.predicate is not None and not self.predicate.strip():

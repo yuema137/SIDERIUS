@@ -156,6 +156,7 @@ def test_owner_projection_defaults_and_saved_task_current_environment_are_separa
     del expected_values["gpu_execution_policy"]
     del expected_values["runtime_verifier"]
     del expected_values["runtime_verifier_identity"]
+    del expected_values["run_seed"]  # Issue #983: omitted when unset.
     assert report.launch_settings == json.loads(json.dumps(expected_values))
     assert calls == ["discover"]
     assert report.dataset_directory == str(tmp_path / "data")
@@ -409,6 +410,18 @@ def test_real_trial_schedule_validator_refuses_discarded_overrides(setup):
         "--is_trial", "--max_rounds", "1", "--plan_overrides", '{"trial_portion": 0.2}'
     )
     with pytest.raises(ValueError, match="apply to zero"):
+        inspect_environment(operation)
+    assert not operation.output.exists()
+
+
+@pytest.mark.parametrize("value", ["0", "-5"])
+def test_console_preview_refuses_malformed_time_budget(setup, value):
+    """#828: the preview reported a nonpositive budget as a valid launch setting.
+
+    Non-finite values are already refused earlier by the inspection JSON owner.
+    """
+    operation, _ = setup[0](f"--formal_time_budget_minutes={value}")
+    with pytest.raises(ValueError, match="formal_time_budget_minutes must be a finite positive"):
         inspect_environment(operation)
     assert not operation.output.exists()
 

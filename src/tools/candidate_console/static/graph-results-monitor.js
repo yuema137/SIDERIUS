@@ -70,6 +70,11 @@
       title.textContent = projection.bodies.length > 1 ? `Iteration ${body.iteration}` : 'Workflow body';
       const stage = window.editorCapabilityPresentation?.label('tuning') || 'tuning';
       group.append(title, facts([[`${stage} state`, body.tuning_state]]));
+      if (body.skipped?.length) {
+        const skipped = document.createElement('p'); skipped.className = 'muted graph-result-skipped';
+        skipped.textContent = 'Skipped, not run: ' + body.skipped.map(item => `${item.node_id} (${item.reason.replaceAll('_', ' ')})`).join(', ');
+        group.append(skipped);
+      }
       if (body.result) group.append(renderRun(body.result));
       else {
         const unavailable = document.createElement('p'); unavailable.className = 'muted';

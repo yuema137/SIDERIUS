@@ -1,7 +1,9 @@
 # Aggregate GPU ceiling contract
 
 Owner: `pair_admission.py`. Ordinary `admission.py` and
-`isolated_admission.py` consume the same resolution. This is an aggregate
+`isolated_admission.py` consume the same resolution. The pure scheduler
+(`scheduling.py`, [contract](scheduling.md)) consumes one resolution per GPU
+slot and delegates its VRAM arithmetic to `evaluate_resolved_pair_admission`. This is an aggregate
 admission limit, separate from per-candidate trial/formal VRAM budgets.
 
 ## Inputs and precedence

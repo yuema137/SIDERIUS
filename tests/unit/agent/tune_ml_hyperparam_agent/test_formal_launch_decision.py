@@ -55,6 +55,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _should_skip_formal,
 )
 from tests.helpers.metric_fixtures import direction_only_spec, shipped_spec
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.scoring_stubs import stub_scoring
 from tests.helpers.tuner_source import tuner_node_source
 
@@ -768,6 +769,7 @@ def _run_one_formal_round(tmp_path, *, seeded_trial: dict, gates_enabled: bool) 
 
         HyperparamTuningAgent().run(
             HyperparamTuningInput(
+                run_seed=TEST_RUN_SEED,
                 planner_strategy="native-timing-v1",
                 model_type="punet",
                 run_name="dc3_launch",

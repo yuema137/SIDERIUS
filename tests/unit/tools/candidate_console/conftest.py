@@ -74,6 +74,9 @@ def prepared(console_config, monkeypatch):
         return ExecutionResult(status="completed", returncode=0, elapsed_seconds=0.0)
 
     monkeypatch.setattr(importlib.import_module("tools.candidate_prepare.launch"), "run", offline)
-    receipt = prepare_candidate(record.submission.request, invocation_id=record.native_id)
+    # As the operation child does: the admitted nonce and run seed.
+    receipt = prepare_candidate(
+        record.submission.request, invocation_id=record.native_id, run_seed=record.run_seed
+    )
     assert receipt.status == "prepared", receipt.error
     return service, selection, receipt

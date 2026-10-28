@@ -692,7 +692,22 @@ class TestCensusDLegacyLockKeySet:
         declaration in the ``advice_sha256`` mould would refuse EVERY
         pre-existing workspace's resume. Omitted-at-1.0 in the serialized
         lock, so legacy and full-eval lock bytes are unchanged, and the new
-        refusal is confined to workspaces declaring a NON-DEFAULT portion."""
+        refusal is confined to workspaces declaring a NON-DEFAULT portion.
+
+        DECLARED DELTA (B3-2, decision B3-Q7): ``scheduling_mode`` joined —
+        ``serial`` or ``parallel-v1`` under a declared HostBudget. Parallel
+        drain semantics can change a failed body's trace, so a workspace
+        cannot switch mode on resume. Omitted at ``serial``, so every legacy
+        and every budget-less lock stays byte-identical and resumable; the
+        budget itself (``host_budget``) is ``_PROVENANCE``.
+
+        DECLARED DELTA (B2-4, operator decision B deferred from B2-2):
+        ``judge_routes`` joined — the resolved LLM-judge routes (provider,
+        model, effort, output and retry bounds per family). A recorded judge
+        verdict replays only against the route that produced it, so a
+        continuation cannot switch judge model or bounds. Omitted at ``None``
+        (no ``judge`` block), so every judge-free lock stays byte-identical
+        and resumable."""
         from core.run_invariants import RunInvariants
 
         assert RunInvariants._CANONICAL == (
@@ -749,4 +764,12 @@ class TestCensusDLegacyLockKeySet:
             "gpu_execution_policy",
             # Explicit planner policy must remain identical across resume (#372).
             "planner_strategy_identity",
+            # Issue #983 — one run seed per workspace; omitted when None so
+            # pre-seed locks keep their bytes, and refused for continuation.
+            "run_seed",
+            "seed_derivation",
+            # B3-2 — the declared delta documented above.
+            "scheduling_mode",
+            # B2-4 — the declared delta documented above.
+            "judge_routes",
         )

@@ -68,11 +68,7 @@ def training_request(prepared):
     )
     (root / "seed.json").write_text(json.dumps(seed))
     config = json.loads((root / "llm.json").read_text())
-    config["tune"] = {
-        "provider": "openai",
-        "model_id": "tuner-test",
-        "planner_strategy": "native-timing-v1",
-    }
+    config["tune"] = {"planner_strategy": "native-timing-v1"}
     (root / "llm.json").write_text(json.dumps(config))
     return refresh(
         prepared.model_copy(
@@ -223,6 +219,37 @@ def test_bad_launch_refuses_before_provider(training_request, native_runner, fie
     path.write_text(json.dumps(settings))
     receipt = launch_candidate(refresh(training_request))
     assert receipt.status == "failed"
+    assert not Provider.calls
+
+
+def test_candidate_submission_refuses_a_set_seed_pin(training_request):
+    """Issue #983 T13. Fails if a new candidate whose settings set a retired
+    pin is admitted, spending proposal calls on a bundle that can never train."""
+    from core.retired_seed_pins import RetiredSeedPin
+
+    path = Path(training_request.preview.project_root) / "training.json"
+    settings = json.loads(path.read_text())
+    settings["launch"]["sampling_seed"] = 17
+    path.write_text(json.dumps(settings))
+    with pytest.raises(RetiredSeedPin, match="seeds derive from run_seed; set --run_seed"):
+        refresh(training_request)
+
+
+def test_training_admission_refuses_a_pin_admitted_by_an_older_build(
+    training_request, native_runner, monkeypatch
+):
+    """Issue #983 T13. Fails if a request admitted before the submission check
+    existed (its settings set a pin) reaches the proposer: training admission
+    is the execution boundary that refuses it."""
+    preview = importlib.import_module("tools.workflow_preview.preview")
+    monkeypatch.setattr(preview, "refuse_pinned_settings", lambda *a, **k: None)
+    path = Path(training_request.preview.project_root) / "training.json"
+    settings = json.loads(path.read_text())
+    settings["launch"]["train_base_seed"] = 23
+    path.write_text(json.dumps(settings))
+    receipt = launch_candidate(refresh(training_request))
+    assert receipt.status == "failed"
+    assert "seeds derive from run_seed; set --run_seed" in receipt.error
     assert not Provider.calls
 
 
@@ -379,6 +406,7 @@ def test_after_process_operation_read_reaches_terminal_verifier(
         runtime=runtime_identity(),
         inputs=training_request.files,
         admitted_at=now(),
+        run_seed=receipt.seed_binding(),
     )
     with locked_store(config) as root:
         claim(root, record)
