@@ -10,7 +10,8 @@ from pydantic import Field
 from tools.workflow_preview.models import PreviewModel
 
 from .readiness_models import WorkspaceReadiness
-from .settings_models import FileRef, GlobalSettings, Id, Origin
+from .settings_library import AdviceCard, ProfileCard
+from .settings_models import GlobalSettings, Id, Origin
 
 SettingName = Literal[
     "llm_profile", "advice", "data_root", "preparation_root", "candidate_root", "reusable_runs_root"
@@ -23,11 +24,6 @@ class SettingRow(PreviewModel):
     origin: Origin | Literal["not_set"]
     label: str  # allowlist label or library name; never file contents
     effective: str | None  # the resolved server path
-
-
-class ChoiceCard(PreviewModel):
-    label: str
-    ref: FileRef
 
 
 class DataRootCard(PreviewModel):
@@ -51,8 +47,8 @@ class SettingsView(PreviewModel):
     restart_required: bool
     problem: str | None  # the settings file on disk cannot be used, and how to recover
     rows: tuple[SettingRow, ...]
-    llm_profiles: tuple[ChoiceCard, ...]
-    advice_files: tuple[ChoiceCard, ...]
+    llm_profiles: tuple[ProfileCard, ...]
+    advice_files: tuple[AdviceCard, ...]
     data_roots: tuple[DataRootCard, ...]
     tasks: tuple[TaskCard, ...]
     workspace_root: str | None

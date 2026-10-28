@@ -27,8 +27,45 @@
       input.addEventListener('change', () => { draft[name] = card.ref; renderPending(); });
       const label = element('label', card.label, {for: id});
       if (card.ref) label.append(element('span', card.ref.source === 'library' ? ' (library)' : ' (console.json allowlist)', {class: 'muted'}));
-      row.append(input, label); container.append(row);
+      row.append(input, label);
+      if (card.ref) row.append(...details(card));
+      container.append(row);
     });
+  }
+
+  // Facts from the server's owners: key names and routes only, never file contents or values.
+  function details(card) {
+    if (card.problem) return [element('p', 'Unavailable: ' + card.problem, {class: 'muted'})];
+    const out = [];
+    if (card.required_names) {
+      out.push(element('p', card.required_names.length ? 'Needs keys: ' + card.required_names.join(', ') : 'Needs no provider keys.', {class: 'muted'}));
+      if (card.routes?.length) {
+        const more = element('details'), list = element('ul');
+        more.append(element('summary', 'Show routes'));
+        for (const route of card.routes) list.append(element('li', `${route.name}: ${route.transport ? `${route.transport.provider} ${route.transport.model_id || ''}`.trim() : route.applicability}`));
+        more.append(list); out.push(more);
+      }
+    }
+    if (card.present_keys) {
+      out.push(element('p', 'Advice for: ' + (card.present_keys.join(', ') || 'nothing'), {class: 'muted'}));
+      if (card.unsupported_keys.length) out.push(element('p', `Workflows cannot use ${card.unsupported_keys.join(', ')} yet; a workflow that references this file will be refused until they can.`));
+    }
+    return out;
+  }
+
+  // Upload moves the file's text from this computer to the server's write-once library.
+  async function importFile(kind, input) {
+    const file = input.files[0]; input.value = '';
+    if (!file || !view?.writable) return;
+    // The server refuses request bodies over 256 KiB; measure the JSON body it will receive.
+    const body = {kind, label: file.name.replace(/\.json$/i, '').slice(0, 63) || kind, content: await file.text()};
+    if (new TextEncoder().encode(JSON.stringify(body)).length > 256 * 1024) { say('Not imported: the file is too large; the console accepts uploads up to about 256 KiB.'); return; }
+    say('Importing…');
+    try {
+      const ref = await session().request('settings/library', body);
+      say(`Imported as ${ref.name} in the server library. Select it, then Save.`);
+      await load(true);
+    } catch (error) { if (!error.stale) say('Not imported: ' + error.message); }
   }
 
   async function listFolders(rootId, subpath) {
@@ -157,6 +194,7 @@
     const data = $('settings-data'); data.replaceChildren();
     if (!view.tasks.length) data.append(element('p', 'No tasks are configured.', {class: 'muted'}));
     for (const task of view.tasks) data.append(folderPicker(task));
+    for (const kind of ['llm', 'advice']) $('settings-import-' + kind).disabled = !view.writable;
     renderRows(); renderWorkspace(); renderPending();
     if (view.problem) { say(view.problem); return; }
     say(!view.enabled ? 'Global settings are not enabled in console.json; values below are fixed by the server.'
@@ -164,10 +202,11 @@
         : 'Read-only: console.json does not allow browser changes to global settings.');
   }
 
-  async function load() {
+  async function load(keepStatus = false) {
     if (!session().connected || busy) return;
+    const status = $('settings-status').textContent;
     busy = true; say('Reading settings…');
-    try { view = await session().request('settings'); loadedRevision = session().revision; render(); }
+    try { view = await session().request('settings'); loadedRevision = session().revision; render(); if (keepStatus) say(status); }
     catch (error) { if (!error.stale) say('Settings unavailable: ' + error.message); }
     finally { busy = false; if (view) renderPending(); }
   }
@@ -185,6 +224,7 @@
     } finally { busy = false; if (view) renderPending(); }
   });
   $('settings-reload').addEventListener('click', () => { void load(); });
+  for (const kind of ['llm', 'advice']) $('settings-import-' + kind).addEventListener('change', event => { void importFile(kind, event.target); });
   const wanted = () => window.consoleNavigation.view === 'settings' && loadedRevision !== session().revision;
   session().subscribe(state => {
     if (!state.connected) { say(view ? 'Not connected. Reconnect to reload settings.' : 'Connect to load settings.'); return; }

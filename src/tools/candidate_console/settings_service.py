@@ -27,6 +27,13 @@ from .settings_file import (
     invalid_fields,
     library_directory,
 )
+from .settings_library import (
+    LibraryRefused,
+    LibraryUpload,
+    advice_card,
+    profile_card,
+    store,
+)
 from .settings_models import (
     SETTINGS_SCHEMA,
     AllowlistRef,
@@ -37,7 +44,6 @@ from .settings_models import (
     SettingsContext,
 )
 from .settings_views import (
-    ChoiceCard,
     DataRootCard,
     FolderEntry,
     FolderListing,
@@ -57,12 +63,12 @@ class SettingsRefusal(Exception):
         self.status, self.code, self.message = status, code, message
 
 
-def _library_cards(workspace: Path | None, kind: str) -> tuple[ChoiceCard, ...]:
+def _library_entries(workspace: Path | None, kind: str) -> tuple[tuple[LibraryRef, Path], ...]:
     """Regular files named ``<slug>-<sha12>.json`` whose bytes match their name."""
     if workspace is None:
         return ()
     directory = library_directory(workspace, kind)
-    cards: list[ChoiceCard] = []
+    cards: list[tuple[LibraryRef, Path]] = []
     try:
         descriptor = open_directory(directory)
     except OSError:
@@ -80,7 +86,7 @@ def _library_cards(workspace: Path | None, kind: str) -> tuple[ChoiceCard, ...]:
             ref = LibraryRef(name=name, sha256=digest)
         except (OSError, ValueError):
             continue  # not a library entry (wrong name, symlink swap or changed bytes)
-        cards.append(ChoiceCard(label=name, ref=ref))
+        cards.append((ref, directory / name))
     return tuple(cards)
 
 
@@ -250,12 +256,24 @@ class ConsoleSettings:
             problem=problem,
             rows=self._rows(),
             llm_profiles=(
-                *(ChoiceCard(label=p.label, ref=AllowlistRef(id=p.id)) for p in lists.llm_profiles),
-                *_library_cards(context.workspace_root, "llm"),
+                *(
+                    profile_card(p.label, AllowlistRef(id=p.id), Path(p.file))
+                    for p in lists.llm_profiles
+                ),
+                *(
+                    profile_card(ref.name, ref, path)
+                    for ref, path in _library_entries(context.workspace_root, "llm")
+                ),
             ),
             advice_files=(
-                *(ChoiceCard(label=a.label, ref=AllowlistRef(id=a.id)) for a in lists.advice_files),
-                *_library_cards(context.workspace_root, "advice"),
+                *(
+                    advice_card(a.label, AllowlistRef(id=a.id), Path(a.file))
+                    for a in lists.advice_files
+                ),
+                *(
+                    advice_card(ref.name, ref, path)
+                    for ref, path in _library_entries(context.workspace_root, "advice")
+                ),
             ),
             data_roots=tuple(DataRootCard(id=r.id, label=r.label) for r in lists.data_roots),
             tasks=tuple(
@@ -307,6 +325,17 @@ class ConsoleSettings:
                     "the settings folder is unavailable or contains a link; nothing was saved",
                 ) from None
         return self.view()
+
+    def upload(self, upload: LibraryUpload) -> LibraryRef:
+        """Validate, then publish once into the workspace library; never replaces a file."""
+        workspace = self.context.workspace_root
+        if not self.writable or workspace is None:
+            raise SettingsRefusal(403, "read_only", "global settings are read-only on this console")
+        with self._lock:
+            try:
+                return store(workspace, upload)
+            except LibraryRefused as error:
+                raise SettingsRefusal(error.status, error.code, error.message) from None
 
     def folders(self, root_id: str, subpath: str, limit: int) -> FolderListing:
         """Direct child directory names under an allowlisted root; links shown, never followed."""

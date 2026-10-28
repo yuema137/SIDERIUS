@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from .settings_library import LibraryUpload
 from .settings_service import ConsoleSettings, SettingsRefusal
 from .settings_views import SettingsWrite
 
@@ -26,6 +27,14 @@ def settings_router(settings: ConsoleSettings) -> APIRouter:
         selection = SettingsWrite.model_validate_json(await request.body())
         try:
             return await run_in_threadpool(settings.write, selection)
+        except SettingsRefusal as error:
+            return _refused(error)
+
+    @router.post("/api/settings/library")
+    async def upload(request: Request):
+        selection = LibraryUpload.model_validate_json(await request.body())
+        try:
+            return await run_in_threadpool(settings.upload, selection)
         except SettingsRefusal as error:
             return _refused(error)
 
