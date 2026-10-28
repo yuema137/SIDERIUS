@@ -49,8 +49,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from core.execution_calibration import calibration_provenance
 from core.generated_library import generated_library_provenance
 from core.planner_strategy_identity import PlannerStrategyIdentity
+from core.runtime_control.budget_intake import (
+    HostBudgetProvenance,
+    SchedulingMode,
+    scheduling_mode_for,
+)
 from core.runtime_control.completion import RuntimeCompletionPolicy
 from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
+from core.runtime_control.scheduling import HostBudget
 from core.runtime_control.verifier_provider import RuntimeVerifierIdentity
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 
@@ -125,6 +131,11 @@ class RunInvariants(BaseModel):
         advice_path: Resolved ABSOLUTE path the advice bytes were read from,
             or ``None``. RECORDED, never compared: path proves authority and
             reachability, the observed digest proves treatment identity.
+        scheduling_mode: ``serial`` (no budget; every legacy lock) or
+            ``parallel-v1`` (dispatch under a declared ``HostBudget``).
+            CANONICAL (decision B3-Q7); omitted from the lock when serial.
+        host_budget: The parallel-v1 budget's digest, concurrency limit and
+            source. RECORDED, never compared; ``None`` exactly when serial.
         created_at: ISO-8601 creation timestamp. Provenance only — never
             part of equality.
 
@@ -348,6 +359,20 @@ class RunInvariants(BaseModel):
         default=None, exclude_if=lambda value: value is None
     )
     planner_strategy_identity: PlannerStrategyIdentity | None = None
+    # B3-2 (decision B3-Q7) — serial dispatch, or parallel-v1 under a declared
+    # HostBudget. CANONICAL: parallel-v1's drain policy can change a failed
+    # body's trace, so a workspace cannot switch mode on resume. "serial" is
+    # every legacy lock's regime and is omitted from the serialized lock, so
+    # a legacy lock parses to it and every serial lock keeps its bytes.
+    scheduling_mode: SchedulingMode = Field(
+        default="serial", exclude_if=lambda value: value == "serial"
+    )
+    # B3-2 — the budget a parallel-v1 run declared (digest, concurrency limit,
+    # source). RECORDED, never compared: a budget describes host capacity,
+    # the `execution_calibration` precedent (R-11-6). Omitted when serial.
+    host_budget: HostBudgetProvenance | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     created_at: str | None = None
     # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
     # run executed under, plus their provenance. RECORDED, never compared.
@@ -455,6 +480,8 @@ class RunInvariants(BaseModel):
         "runtime_verifier_identity",
         "gpu_execution_policy",
         "planner_strategy_identity",
+        # B3-Q7 — serial and parallel-v1 traces can differ on failure.
+        "scheduling_mode",
     )
 
     #: Fields RECORDED for audit and never compared (Step 11 C3, R-11-6).
@@ -476,6 +503,8 @@ class RunInvariants(BaseModel):
         # and never compared: staging the same advice at a different
         # absolute path is not a different treatment (the Q-P1-2 rule).
         "advice_path",
+        # B3-2 — host capacity the parallel run was scheduled against.
+        "host_budget",
     )
 
     #: C9d fields that a legacy lock cannot supply. Their absence is a
@@ -587,6 +616,17 @@ class RunInvariants(BaseModel):
                 "advice_sha256 is set but advice_path is None: a digest with no "
                 "artifact is unattributable — a resume refusal would name two "
                 "hex strings and no file to compare."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _scheduling_mode_matches_budget(self) -> RunInvariants:
+        """parallel-v1 exists only under a declared budget, and only it has one."""
+        if (self.scheduling_mode == "parallel-v1") != (self.host_budget is not None):
+            raise ValueError(
+                f"scheduling_mode={self.scheduling_mode!r} requires host_budget exactly "
+                "when parallel-v1: a parallel lock without its budget is unattributable, "
+                "and a serial lock with one claims a budget it was not scheduled against."
             )
         return self
 
@@ -953,6 +993,10 @@ class LockLaunchIdentity(BaseModel):
         default=None, exclude_if=lambda value: value is None
     )
     planner_strategy_identity: PlannerStrategyIdentity | None = None
+    #: B3-2 — the validated operator budget, or ``None`` for serial dispatch.
+    #: The builder derives the canonical scheduling mode and the recorded
+    #: budget provenance from it; ``None`` yields a byte-identical lock.
+    host_budget: HostBudget | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 #: The unlabelled default — module-level so call sites can splat a shared
@@ -1151,6 +1195,14 @@ def build_run_invariants(
             runtime_verifier_identity=_launch_identity.runtime_verifier_identity,
             gpu_execution_policy=_launch_identity.gpu_execution_policy,
             planner_strategy_identity=_launch_identity.planner_strategy_identity,
+            # B3-2 — one rule derives the canonical mode from the budget; the
+            # budget itself is recorded as provenance.
+            scheduling_mode=scheduling_mode_for(_launch_identity.host_budget),
+            host_budget=(
+                None
+                if _launch_identity.host_budget is None
+                else HostBudgetProvenance.of(_launch_identity.host_budget)
+            ),
             # Step 11 C3 (R-11-6) — stamped at the SAME shared builder, for
             # the same reason C9d is: every entry point then records the
             # ceilings its children actually ran under. Provenance, never
