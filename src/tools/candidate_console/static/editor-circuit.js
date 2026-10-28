@@ -280,7 +280,10 @@
       if (role) card.classList.add(role);
       heading.setAttribute('aria-pressed', String(node.id === value.selected));
       heading.addEventListener('click', () => { if (projection === value && projection.enabled) actions.select(node.id); });
+      heading.addEventListener('contextmenu', event => { if (projection === value && projection.enabled && !pending && actions.menu) { actions.select(node.id); actions.menu(node.id, event); } });
       heading.addEventListener('keydown', event => {
+        // Node removal is proposed by editor.js (Review shows the exact change before Save).
+        if (projection === value && projection.enabled && ['Delete', 'Backspace'].includes(event.key) && actions.remove) { event.preventDefault(); actions.remove([node.id]); return; }
         if (projection !== value || !projection.enabled || projection.allowMove === false || !event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
         event.preventDefault(); const position = card._position;
         move(layout(node.id, position.x + (event.key === 'ArrowLeft' ? -20 : event.key === 'ArrowRight' ? 20 : 0), position.y + (event.key === 'ArrowUp' ? -20 : event.key === 'ArrowDown' ? 20 : 0)));

@@ -11,7 +11,11 @@
  *                loop); binding changes are NOT applied here
  *   bindings     [{node, argument, source|null}] patches relative to anchor.inventory
  *   anchor       {source, document, inventory}: the last server projection the
- *                draft starts from (loaded source, or a reviewed source/task update)
+ *                draft starts from (loaded source, or a reviewed source/task/node edit)
+ *   node         null, or one pending palette node: AddNodeProposal fields without
+ *                `source` ({node, capability, protocol, binding, arguments, x, y});
+ *                it is added on top of an unedited anchor (document equals
+ *                anchor.document, no binding patches), so it is reviewed alone
  *   training, loopTemplate   server presentation values for the anchor (not compared)
  */
 (() => {
@@ -28,7 +32,7 @@
     return JSON.stringify(value ?? null);
   }
   // Identity of the authored proposal; presentation values never make a draft dirty.
-  const identity = state => canonical({document: state.document, bindings: state.bindings, source: state.anchor.source});
+  const identity = state => canonical({document: state.document, bindings: state.bindings, source: state.anchor.source, node: state.node ?? null});
   const sameTarget = (patch, node, argument) => patch.node === node && patch.argument === argument;
 
   /** History over DraftState values. `loaded` is the state Discard restores. */
@@ -98,6 +102,8 @@
   const withoutLoop = document => { const copy = clone(document); delete copy.definition.loop; return canonical(copy); };
   /** The existing typed review proposal for this draft (server models in workflow_authoring.models). */
   function proposal(state) {
+    // A pending node is a byte-preserving source insertion on the anchor (AddNodeProposal).
+    if (state.node) return {kind: 'add_node', source: state.anchor.source, ...clone(state.node)};
     if (state.bindings.length) {
       // The server inspects patches over this edited document, so layout and inspector edits travel with them.
       return {kind: 'draft', draft: {base_document: clone(state.document), bindings: clone(state.bindings)}};
