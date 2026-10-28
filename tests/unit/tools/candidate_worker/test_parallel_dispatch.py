@@ -108,9 +108,12 @@ class _FakeUnit:
 class _Starter:
     """Runs the real unit child entry in-process; records env and concurrency."""
 
-    def __init__(self, seed: int, failing: frozenset[str] = frozenset()):
+    def __init__(
+        self, seed: int, failing: frozenset[str] = frozenset(), hold: dict[str, int] | None = None
+    ):
         self.rng = random.Random(seed)
         self.failing = failing
+        self.hold = hold or {}
         self.envs: dict[str, dict[str, str]] = {}
         self.active: list[str] = []
         self.overlaps: list[tuple[str, ...]] = []
@@ -125,7 +128,8 @@ class _Starter:
         if node in self.failing:
             return _FakeUnit(path, 0, 1, self.active)
         run_invocation_file(path)
-        return _FakeUnit(path, self.rng.randint(0, 4), 0, self.active)
+        polls = self.hold.get(node, self.rng.randint(0, 4))
+        return _FakeUnit(path, polls, 0, self.active)
 
 
 def _without_scheduling(receipt) -> str:
@@ -157,8 +161,12 @@ def test_parallel_body_reproduces_the_serial_trace_in_any_completion_order(
 
 
 def test_gpu_units_never_exceed_the_reserved_slot(prepared, native_runner, monkeypatch):
-    """Two 3 GiB checks may not share a 4 GiB slot: the second waits for the first."""
-    starter = _Starter(7)
+    """Two 3 GiB checks may not share a 4 GiB slot: the second waits for the first.
+
+    Each check runs long enough that both would overlap if the second were
+    started instead of queued.
+    """
+    starter = _Starter(7, hold={"check0": 40, "check1": 40})
     monkeypatch.setattr(parallel_dispatch, "start_unit", starter)
     request = _parallel(prepared, _budget(units=4, vram_ceiling=4.0), validation_vram=3.0)
     receipt = launch_candidate(request)
