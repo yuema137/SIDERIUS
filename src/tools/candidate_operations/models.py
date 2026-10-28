@@ -88,6 +88,7 @@ class OperationResources(PreviewModel):
             host_memory_gib=self.host_memory_gib,
             cpu_slots=self.cpu_slots,
             wall_seconds=wall_seconds,
+            time_budgeted=self.time_budgeted,
         )
 
 

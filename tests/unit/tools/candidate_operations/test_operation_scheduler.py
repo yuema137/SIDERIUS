@@ -381,7 +381,12 @@ def test_a_held_ledger_refuses_after_a_bounded_wait(prepared, tmp_path, children
 
 
 def test_time_budgeted_run_shares_a_gpu_only_when_acknowledged(prepared, tmp_path, children):
-    """Decision B3-Q6: contention changes measured-time admission of both runs."""
+    """Decision B3-Q6: contention changes measured-time admission of both runs.
+
+    The rule is a ``plan_dispatch`` placement constraint (#1019): with the only
+    slot shared, the run cannot be placed now (``host_capacity``) and the reason
+    names the time-budget contention; the reservation records the flag.
+    """
     for acknowledge, ledger in ((False, "plain"), (True, "acknowledged")):
         host = _ledger(tmp_path, ledger, acknowledge=acknowledge)
         submit_operation(
@@ -396,8 +401,14 @@ def test_time_budgeted_run_shares_a_gpu_only_when_acknowledged(prepared, tmp_pat
         )
         if acknowledge:
             assert launch().observation == "starting"
+            with locked_ledger(host.ledger_root) as root:
+                flags = [r.placement.reserved.time_budgeted for r in read_state(root).reservations]
+            assert flags == [False, True]
         else:
-            assert _code(launch) == "shared_gpu_time_budget"
+            with pytest.raises(OperationFailure) as refused:
+                launch()
+            assert refused.value.detail.code == "host_capacity"
+            assert "time-budgeted unit would share it" in str(refused.value)
 
 
 def test_spawn_failure_returns_the_reservation(prepared, tmp_path, monkeypatch):

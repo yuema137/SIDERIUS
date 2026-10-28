@@ -48,7 +48,6 @@ class HostReservation(PreviewModel):
     request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     state_root: str
     placement: Placement
-    time_budgeted: bool
     process: ProcessIdentity | None = None
 
     @model_validator(mode="after")

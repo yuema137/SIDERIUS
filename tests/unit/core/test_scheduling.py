@@ -266,6 +266,47 @@ def test_shared_gpu_acknowledgment_leaves_existing_budget_digests_unchanged():
     assert acknowledged.digest != budget.digest
 
 
+def test_time_budgeted_unit_takes_an_unshared_slot_and_queues_only_when_none_is_free():
+    """Decision B3-Q6 is a placement constraint (#1019), not a post-placement veto.
+
+    Contention on a shared GPU changes measured-time admission, so a time-budgeted
+    unit (or a unit joining one) must not share a slot unless acknowledged. A rule
+    applied after first-fit would refuse ``timed`` although ``GPU-b`` is idle.
+    """
+    budget = _budget(_slot("GPU-a", 16.0), _slot("GPU-b", 16.0))
+    timed = _gpu("timed", 1, 2.0).model_copy(update={"time_budgeted": True})
+    held = _running(budget, _gpu("held", 0, 2.0))
+
+    decision = plan_dispatch((timed,), held, budget, on_refusal="continue")
+    assert _shape(decision) == [("timed", "placed", "GPU-b")]
+
+    # `other` does not fit beside `held` on GPU-a, so first-fit puts it on GPU-b.
+    both_held = _running(budget, _gpu("held", 0, 2.0), _gpu("other", 2, 15.0))
+    assert {p.gpu_uuid for p in both_held} == {"GPU-a", "GPU-b"}
+    queued = plan_dispatch((timed,), both_held, budget, on_refusal="continue").placements[0]
+    assert queued.decision == "queued"
+    assert "time-budgeted unit would share it" in queued.reasons[0]
+
+    # Either side counts: a plain unit may not join a time-budgeted one.
+    timed_held = plan_dispatch((timed,), (), budget, on_refusal="continue").placed
+    joining = plan_dispatch((_gpu("plain", 3, 2.0),), timed_held, budget, on_refusal="continue")
+    assert _shape(joining) == [("plain", "placed", "GPU-b")]
+
+    acknowledged = budget.model_copy(update={"acknowledge_shared_gpu_time_budget": True})
+    shared = plan_dispatch(
+        (timed,),
+        _running(acknowledged, _gpu("held", 0, 2.0)),
+        acknowledged,
+        on_refusal="continue",
+    )
+    assert _shape(shared) == [("timed", "placed", "GPU-a")]
+
+
+def test_unset_time_budget_flag_keeps_request_serialization():
+    """Recorded placements (placement.json, ledger) predate the field; false is omitted."""
+    assert "time_budgeted" not in _gpu("plain", 0, 1.0).model_dump(mode="json")
+
+
 def test_host_memory_derives_only_from_a_declared_positive_role_cap():
     """Inherited or uncapped roles have no bound; guessing one would invent a host cap."""
     declared = RoleCeiling(role="training", gib=24, source="environment")

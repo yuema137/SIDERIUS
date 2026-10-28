@@ -234,7 +234,8 @@ credentials), which may take seconds. Lock order is store lock, then ledger
 lock; the ledger never takes a store lock.
 
 `HostReservation`: `operation_id`, `request_digest`, `state_root`, `placement`
-(the placed `Placement`; `unit_id` = operation UUID), `time_budgeted`, and
+(the placed `Placement`; `unit_id` = operation UUID; its
+`reserved.time_budgeted` carries the declaration), and
 `process` (`ProcessIdentity`, bound after spawn). All live reservations share
 one budget digest; `dispatch_ordinal` is the host-level submission order
 (`next_ordinal`, incremented per reservation).
@@ -243,7 +244,8 @@ Resource declaration. `CandidateOperation.resources: OperationResources | None`
 (omitted when absent, so existing request bytes and digests are unchanged;
 included in the request digest when present): `gpu_count` (0/1), `vram_gib`
 and `vram_source` (exactly for a GPU unit), `host_memory_gib`, `cpu_slots`,
-`time_budgeted`. `ResourceRequest` owns the field rules; `wall_seconds` is the
+`time_budgeted`. `OperationResources.request` projects all of them into the
+`ResourceRequest`, which owns the field rules; `wall_seconds` is the
 request's `timeout_seconds`. The declared `vram_gib` is the ledger's
 accounting; the run's own admission does not yet enforce it (see #1018).
 `time_budgeted` is likewise the operator's statement, not yet cross-checked
@@ -268,12 +270,13 @@ code and leaves no claim, reservation or child):
 6. `plan_dispatch` refusal (cannot fit even an idle budget):
    `resource_refused` with its `escalated to operator` reasons; queued (fits
    the budget, not the current ledger): `host_capacity` with the ledger
-   shortfall. B3-5a has no `queued` operation state; queued dispatch is B3-5b;
-7. decision B3-Q6: a placed GPU unit whose slot already holds a reservation,
-   where either side is `time_budgeted`, refuses `shared_gpu_time_budget`
-   unless the budget sets `acknowledge_shared_gpu_time_budget`. The check uses
-   the `plan_dispatch` slot and does not search another slot (moving it into
-   `plan_dispatch` is #1019, before B3-4).
+   shortfall. B3-5a has no `queued` operation state; queued dispatch is B3-5b.
+   Decision B3-Q6 is one of these placement rules (`plan_dispatch`, see the
+   [scheduling contract](../../core/runtime_control/scheduling.md#decision)):
+   without `acknowledge_shared_gpu_time_budget`, a time-budgeted run is placed
+   only on a slot no other reservation holds, and no run joins a slot holding a
+   time-budgeted one. When no such slot is free the result is `host_capacity`
+   whose reason names the contention.
 
 Placement and spawn. After the claim the reservation is written (process
 unbound, so a crash fails closed) and the `Placement` is published write-once

@@ -218,9 +218,10 @@ directory gains `placement.json`, which names the GPU it was given. If the budge
 is currently full, the submission is refused with `host_capacity` and nothing
 starts. Submit it again after a running operation ends. A run that could never
 fit is refused with `resource_refused`. Two runs sharing one GPU slow each other
-down, which can change what a time budget admits. So a `time_budgeted` run is not
-placed on a GPU another run is using; it is refused with
-`shared_gpu_time_budget`. If you accept that contention, set
+down, which can change what a time budget admits. So a `time_budgeted` run is only
+placed on a GPU no other run is using, and no run is placed beside it. If every
+GPU is in use, it is refused with `host_capacity`, and the message says a
+time-budgeted run would share the GPU. If you accept that contention, set
 `"acknowledge_shared_gpu_time_budget": true` in the budget file before the first
 submission. Changing the budget file while runs hold reservations is refused with
 `budget_mismatch`.

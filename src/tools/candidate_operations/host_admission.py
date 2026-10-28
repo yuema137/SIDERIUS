@@ -94,7 +94,6 @@ class LedgerSlot(HostSlot):
             request_digest=record.request_digest,
             state_root=record.config.state_root,
             placement=self.admitted.placement,
-            time_budgeted=self.admitted.resources.time_budgeted,
         )
         state = HostLedgerState(
             next_ordinal=self.state.next_ordinal + 1,
@@ -181,7 +180,6 @@ def admit(
         raise OperationFailure(
             "host_capacity", "cannot be placed now: " + "; ".join(placement.reasons)
         )
-    _require_time_budget_acknowledged(state, placement, resources, budget)
     return Admitted(placement=placement, operation=operation, resources=resources)
 
 
@@ -199,22 +197,4 @@ def _require_reachable(operation: CandidateOperation, resources: OperationResour
     elif request.devices:
         raise OperationFailure(
             "placement_unreachable", "a CPU-only reservation must not bind device nodes"
-        )
-
-
-def _require_time_budget_acknowledged(
-    state: HostLedgerState,
-    placement: Placement,
-    resources: OperationResources,
-    budget: HostBudget,
-) -> None:
-    """Decision B3-Q6: contention on a shared GPU changes measured-time admission."""
-    if placement.gpu_uuid is None or budget.acknowledge_shared_gpu_time_budget:
-        return
-    sharing = [r for r in state.reservations if r.placement.gpu_uuid == placement.gpu_uuid]
-    if sharing and (resources.time_budgeted or any(r.time_budgeted for r in sharing)):
-        raise OperationFailure(
-            "shared_gpu_time_budget",
-            f"a time-budgeted run would share {placement.gpu_uuid}; set "
-            "acknowledge_shared_gpu_time_budget in the budget file to accept contention",
         )
