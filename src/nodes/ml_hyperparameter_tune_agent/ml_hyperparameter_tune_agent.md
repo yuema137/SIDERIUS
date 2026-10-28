@@ -453,7 +453,7 @@ repository. Result lands at `{workspace}/run_output_{run_name}.json`.
 | `--reflect_model_id` | `str` (optional) | `None` | Optional separate model for the reflector. |
 | `--expert_advice` | `str` | `"None"` | Initial human-expert advice as a string (legacy CLI shape). |
 | `--max_rounds` | `int` | `10` | Maximum rounds. |
-| `--force_model` | `str` (registry key \| plugin type \| `"auto"`) | `"auto"` | Force a specific architecture. |
+| `--force_model` | `str` (registry key \| plugin type \| `"auto"`) | `"auto"` | Force a specific architecture. The run refuses at launch, before any LLM call, a `model_config` parameter rule that the forced model's config class would drop (see the parameter-rule contract in `docs/reference/task-composition.md`). |
 | `--seed_plugin_path` | `str` (optional) | `None` | Path to a plugin `.py` for plugin model_types. |
 | `--run_name` | `str` | `"test_run"` | Run name. |
 | `--workspace` | `str` | `./siderius_workspace` | Workspace root. |
