@@ -283,8 +283,9 @@ def selection_request(request, branches=2, *, bindings=None, node_order=None):
     )
 
 
-# Pinned on base 405d7aaf (before routed execution), same projection as above, for
-# the S1 selection profile keyed by the rejected review ordinals.
+# Captured on base 405d7aaf (before routed execution, B1-PR5) with the same
+# projection as above, for the S1 selection profile keyed by the rejected review
+# ordinals; routed execution must not move these bytes.
 SELECTION_TRACE_SHA256 = {
     (): "73305fcceb04633985819dab674bba8c69cde2599b770f43048fae6b39a8070c",
     (0,): "8c16e12033ae0096cf656e88ce5569fe3af848e4f86fdc95a53fb5193baf619d",

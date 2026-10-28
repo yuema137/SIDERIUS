@@ -38,7 +38,13 @@ contract; `AdaptorItem.value` is present iff `state == "succeeded"`.
 `AdaptorInputRef.record_sha256` is the native record digest of a succeeded or
 rejected input; for a route-skipped input it is the skip record digest the
 candidate worker cites (`route_phase.skip_citations`: the SHA-256 of the canonical
-`GraphRouteEvidence` that skipped it, B1-PR5).
+`GraphRouteEvidence` that skipped it, B1-PR5). A skip citation resolves only
+through the run's receipt: the cited evidence is an entry of that body's
+`graph_trace.routes`, not a separate file, so the adaptor record alone cannot
+dereference it. For a skip inherited by propagation the walk follows the first
+route-skipped predecessor in the trace entry's sorted `predecessors` until the
+deciding branch; it is deterministic and the worker and verifier run the same
+function (`route_phase.skip_citations`) over the same entries.
 `admit_items` refuses (`AdaptorStrategyError`) any tuple not in declared order:
 each port's items must be contiguous and their positions strictly increasing.
 

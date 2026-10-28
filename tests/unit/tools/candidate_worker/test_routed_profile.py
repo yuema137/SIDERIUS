@@ -137,18 +137,27 @@ def test_verifier_re_derives_route_decisions(prepared, training_runner, rejectin
 def test_route_metric_mismatch_is_refused_before_any_dispatch(
     prepared, training_runner, monkeypatch, native_runner
 ):
-    """Fails if route metric admission ran after a node: a record would be orphaned."""
-    calls = []
+    """Fails if route metric admission ran after a node (a record would be orphaned),
+    more than once, or with anything but the composed run metric.
+    """
+    composed, calls = [], []
+    derive = route_phase.admit_route_metric
+
+    def observe(definition, spec):
+        composed.append(spec)
+        return derive(definition, spec)
 
     def refuse(branches, metric):
         calls.append(metric)
         raise RouteConditionError("route fallback names metric 'other'")
 
+    monkeypatch.setattr(route_phase, "admit_route_metric", observe)
     monkeypatch.setattr(route_phase, "admit_route_metrics", refuse)
     request = routed_request(prepared)
     receipt, _ = run(request)
     assert receipt.status == "failed" and receipt.graph_trace is None
-    assert calls and calls[0] is not None  # the composed run metric, derived once
+    (spec,) = composed
+    assert spec is not None and len(calls) == 1 and calls[0] is spec
     assert not (Path(receipt.workspace) / request.run_name / "graph_instances").exists()
 
 
@@ -214,3 +223,23 @@ def test_fallback_route_declares_a_control_only_target(prepared):
     assert routing["build1"].route == FALLBACK_ROUTE["id"]
     assert routing["build1"].control == "check0"
     assert set(routing) == {"build1"}
+
+
+def test_routed_profile_refuses_a_route_that_gates_the_tuner(prepared):
+    """Review F1: `check0.passed -> [train]` would let a rejecting body complete untrained.
+
+    Fails if routed admission accepted an arm containing the tuner (gated tuning,
+    B1-Q1(b), not chosen); the declaration itself stays valid for the selection shape.
+    """
+    gated = {
+        "id": "gate",
+        "source": {"kind": "result", "node": "check0"},
+        "cases": [
+            {
+                "when": {"kind": "bool_is", "observable": "validation.passed", "value": True},
+                "targets": ["train"],
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="only implementation/validation arms"):
+        routed_request(prepared, routes=(gated,))

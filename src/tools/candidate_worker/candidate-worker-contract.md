@@ -822,8 +822,13 @@ loops, custom and LLM strategies. Routes run only under
 
 `WorkflowPreviewRequest.execution_profile="native-routed-candidate/v1"`
 (`workflows.definition.fanout.ROUTED_PROFILE`) admits the S1 selection node set
-(same admission, `fanout.selection_candidate`) plus at least one declared route;
-it is the only profile whose `refuse_declaration_only` call passes
+(same admission, `fanout.selection_candidate`, via `fanout.routed_candidate`) plus
+at least one declared route whose arms (targets and every node they dominate,
+`routes.branch_arms`) contain only implementation/validation nodes: an arm holding
+the selection adaptor or the tuner is refused ("the routed profile routes only
+implementation/validation arms, never the adaptor or the tuner"), because gating
+training on a predicate (B1-Q1(b), not chosen) would let a body complete untrained.
+It is the only profile whose `refuse_declaration_only` call passes
 `admits_routes=True`. Every other profile, the fixed candidate, v2 reusable
 sources, managed preparation and the console profile lists still refuse a routed
 document (`ROUTING_NOT_ADMITTED`). No loop is admitted (`admit_loop` admits only
@@ -851,7 +856,11 @@ trace's `record_sha256`, then `evaluate_route`. A `failed` source decides nothin
 and its targets are blocked. Any exception during projection or evaluation is a
 `RouteConditionError` raised out of `execute_fanout` (outside the node's own
 failure handling): the body fails as an uncertain child failure, never reading the
-route as false. Each decision is recorded as
+route as false. This is deliberately fail-closed for B1-PR5: the child exits
+nonzero, the receipt is `failed` with no `graph_trace`, and native records already
+written for nodes that ran in that body stay on disk unindexed by any receipt (they
+are never read as evidence). A per-body failure that keeps its trace, as adaptor
+exceptions do (`failed/native_failure`), is tracked in issue #1016. Each decision is recorded as
 `GraphRouteEvidence(branch_id, source_node, source_record_sha256,
 evaluator="siderius.route/v1", decision, decided_by="predicate")` and fed to
 readiness. `GraphTrace.routes` lists them in branch declaration order and is
@@ -884,7 +893,7 @@ run metric (a tuning record without a stamp would make a metric route
 unverifiable; not declarable today). Readiness replay then uses the recorded
 decisions, refusing a node dispatched in a non-selected arm and any terminal
 `(state, reason)` readiness would not produce.
-Witness: `tests/unit/tools/candidate_worker/test_routed_profile.py` (passing
+Witness: `tests/unit/tools/candidate_worker/test_routed_profile.py` (tuner- or adaptor-gating route refused; passing
 `check0` skips the fallback and the adaptor cites the skip record; rejected
 `check0` runs the fallback, trains `build1` and completes; both rejected; forged
 decision, source digest and dropped decision refused; metric admission before any
