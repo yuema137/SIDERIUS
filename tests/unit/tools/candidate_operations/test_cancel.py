@@ -28,6 +28,7 @@ from tools.candidate_operations.child import execute
 from tools.candidate_operations.files import publish
 from tools.candidate_operations.models import CancelRequest, OperationFailure, OperationRecord
 from tools.candidate_operations.process import current_identity, identity_of, runtime_identity
+from tools.candidate_operations.seed_admission import admission_seed
 from tools.candidate_operations.store import claim, digest, locked_store, now
 from tools.candidate_worker.launch import publish as native_publish
 from tools.candidate_worker.models import CandidateRunReceipt
@@ -50,6 +51,8 @@ def claimed(prepared, tmp_path):
         runtime=runtime_identity(),
         inputs=prepared.files,
         admitted_at=now(),
+        # Issue #983: bound as admission binds it; the child never generates one.
+        run_seed=admission_seed(submission),
     )
     with locked_store(config) as root:
         path = claim(root, record)
@@ -76,6 +79,8 @@ def native_records(record: OperationRecord, status: str | None) -> Path:
         selected_constructor_routes=request.selected_constructor_routes,
         ledger_path=str(workspace / "token_usage.jsonl"),
         log_path=str(control / "worker.log"),
+        run_seed=None if record.run_seed is None else record.run_seed.value,
+        run_seed_source=None if record.run_seed is None else record.run_seed.source,
     )
     native_publish(control / "request.json", request)
     native_publish(control / "launch.json", initial)

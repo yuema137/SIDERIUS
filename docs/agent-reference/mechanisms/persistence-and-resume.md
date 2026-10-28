@@ -99,9 +99,12 @@ Owner: `core/run_seed_lock.py` (resolution) over `core/run_invariants.py`
   workspace lock, so a new workspace never inherits a source run's seed.
 - `WorkflowLaunchConfig.run_seed` projects only when set (`omit_if_none`), so a
   seedless reviewed capture keeps its bytes. Candidate settings refuse it
-  (`INACTIVE_LAUNCH_FIELDS`). Until S4 admits the seed with the operation,
-  candidate training admission resolves its workspace seed the same way (lock,
-  then generation) and prints the `[seed]` line.
+  (`INACTIVE_LAUNCH_FIELDS`). A candidate's seed is bound at operation
+  admission or by direct `launch_candidate` and recorded in `launch.json`;
+  candidate training admission never generates. `adopt_bound_run_seed(workspace,
+  binding)` locks that binding (with its source) on the first body and requires
+  later bodies and resumed segments to find the same value locked; a pre-seed
+  launch receipt raises `MissingRunSeed`.
 - The standalone tuner CLI (`ml_hyperparameter_tune_agent.py main`) is an entry
   boundary too: lock, then `--run_seed`, then generation, before round 1.
 - The tuner receives the locked value as `HyperparamTuningInput.run_seed`, locks

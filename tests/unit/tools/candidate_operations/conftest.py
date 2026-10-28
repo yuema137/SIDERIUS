@@ -7,6 +7,7 @@ import pytest
 from tests.unit.tools.candidate_prepare.conftest import selection
 from tools.candidate_operations import OperationStoreConfig, PrepareOperation
 from tools.candidate_operations.models import OperationRecord, RuntimeIdentity
+from tools.candidate_operations.seed_admission import admission_seed
 from tools.candidate_operations.store import digest, now
 
 
@@ -32,5 +33,6 @@ def admitted(selection, tmp_path):
         ),
         inputs=(),
         admitted_at=now(),
+        run_seed=admission_seed(submission),
     )
     return config, submission, record

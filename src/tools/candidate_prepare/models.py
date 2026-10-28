@@ -3,10 +3,11 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.schemas.output_types import OutputTypeName
 from core.generated_artifact_name import validate_generated_artifact_name
+from core.seeding import RunSeed, SeedSource
 from tools.workflow_preview.models import FileObservation, PreviewModel
 
 
@@ -27,12 +28,21 @@ class CandidatePreparationRequest(PreviewModel):
     implementation_advice: str | None = None
     validation_advice: str | None = None
     allowed_output_types: tuple[OutputTypeName, ...] | None = Field(default=None, min_length=1)
+    #: Issue #983 — the operator's explicit seed for this preparation run; omitted
+    #: when ``None`` so seedless request digests are unchanged.
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("run_name")
     @classmethod
     def safe_name(cls, value: str) -> str:
         validate_generated_artifact_name(value, field="run_name")
         return value
+
+
+def require_seed_pair(run_seed: int | None, source: str | None) -> None:
+    """A preparation receipt records its run seed and source together, or neither (pre-seed)."""
+    if (run_seed is None) != (source is None):
+        raise ValueError("run_seed and run_seed_source are recorded together")
 
 
 class CandidatePreparationReceipt(PreviewModel):
@@ -48,6 +58,13 @@ class CandidatePreparationReceipt(PreviewModel):
     proposal_path: str | None = None
     composition_fingerprint: str | None = None
     source_observations: tuple[FileObservation, ...] = ()
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
+    run_seed_source: SeedSource | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def seed_pair(self):
+        require_seed_pair(self.run_seed, self.run_seed_source)
+        return self
 
 
 class PreparationControl(PreviewModel):

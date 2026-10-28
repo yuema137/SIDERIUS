@@ -95,6 +95,15 @@ each output's inputs are `(owner of the non-list fields, owner of entry i with
 item_path="<field>[i]")`, so a concat → split names the right source review); `replicate/v1(count)` (same value,
 role `replicated`).
 
+Every DISTRIBUTE `count` is bounded to `1..MAX_ADAPTOR_OUTPUTS` (64, the
+`workflows/definition/adaptor_strategies.py` constant; `per-item/v1` and
+`split-items/v1` take `count >= 1`, `replicate/v1` takes `count >= 2`). The
+bound is enforced at declaration (a `ValidationError`, so an unbounded count
+never reaches static topology or B3 admission) and is the same ceiling
+`OutputSpec.count` applies to B6-5 custom manifests. The value 64 is the
+existing custom-adaptor output cap; `MAX_ROUTE_BRANCHES` (32) is a separate
+route-branch bound and is not reused here.
+
 Ties always resolve to declared order (stable sort); completion order is never
 an input.
 

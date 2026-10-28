@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 
 from core.generated_artifact_name import validate_generated_artifact_name
+from core.seeding import RunSeed, RunSeedBinding, SeedCoordinates, SeedSource
 from tools.setup_review.route_models import LLMRoute
 from tools.workflow_preview.models import FileObservation, PreviewModel, WorkflowPreviewRequest
 
@@ -49,6 +50,10 @@ class CandidateRunRequest(PreviewModel):
     implementation_advice: str | None = None
     validation_advice: str | None = None
     workflow_source: WorkflowSourceSnapshot | None = None
+    #: Issue #983 — the operator's explicit run seed; ``None`` lets the entry
+    #: boundary generate one. Omitted when ``None``, so seedless request bytes
+    #: and digests are unchanged.
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def source_binding(self):
@@ -106,3 +111,43 @@ class CandidateRunReceipt(PreviewModel):
     training_output: TrainingOutputEvidence | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    #: Issue #983 — the run seed bound before launch and where it came from.
+    #: ``None`` only on receipts written before the seed contract.
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
+    run_seed_source: SeedSource | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def seed_pair(self):
+        if (self.run_seed is None) != (self.run_seed_source is None):
+            raise ValueError("run_seed and run_seed_source are recorded together")
+        return self
+
+    def seed_binding(self) -> RunSeedBinding | None:
+        """The recorded binding; ``None`` for a receipt that predates the seed contract."""
+        if self.run_seed is None or self.run_seed_source is None:
+            return None
+        return RunSeedBinding(value=self.run_seed, source=self.run_seed_source)
+
+
+#: Receipt fields fixed at launch: a child or terminal receipt never changes them.
+RECEIPT_IDENTITY_FIELDS = (
+    "run_id",
+    "run_name",
+    "workspace",
+    "declaration_digest",
+    "node_ids",
+    "selected_constructor_routes",
+    "ledger_path",
+    "log_path",
+    "run_seed",
+    "run_seed_source",
+)
+
+
+def tuning_seed_scope(iteration: int, node_id: str) -> SeedCoordinates:
+    """The coordinates a candidate tuner derives its attempt seeds under (issue #983).
+
+    ``iteration`` is the global loop index, which a resumed segment continues;
+    ``node_id`` is the authored tuning node. Run labels never enter.
+    """
+    return SeedCoordinates(iteration=iteration, node_id=node_id)
