@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import builtins
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -31,9 +32,6 @@ C = SeedCoordinates
 # (run_seed, purpose, coordinates, literal expected seed). The literals were
 # computed once and are pinned: any change to the tuple order, the JSON
 # encoding, the digest slice or the mask changes at least one of them.
-# Design revision 3 removed the ``trainer.unit`` purpose, so its vector
-# (0, "trainer.unit", C()) was replaced by the two purposes it added; the
-# remaining v1 vectors are unchanged because the encoding is unchanged.
 KNOWN_ANSWERS = [
     (0, "trainer.init_python", C(), 162581914680118109),
     (
@@ -62,11 +60,11 @@ KNOWN_ANSWERS = [
 def _independent_v1(run_seed: int, purpose: str, at: SeedCoordinates) -> int:
     """The documented formula, written out without the module's encoder."""
     parts = [
-        '"siderius-seed/v1"',
+        json.dumps("siderius-seed/v1"),
         str(run_seed),
-        f'"{purpose}"',
+        json.dumps(purpose),
         *(
-            "null" if v is None else (f'"{v}"' if isinstance(v, str) else str(v))
+            "null" if v is None else (json.dumps(v) if isinstance(v, str) else str(v))
             for v in (at.iteration, at.node_id, at.branch, at.round, at.attempt, at.epoch)
         ),
     ]
