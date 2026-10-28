@@ -5,13 +5,20 @@ hashed identity excludes its host-specific ``evidence_dir``.
 Contract: ``judge-strategies-contract.md`` beside this file.
 """
 
+from fractions import Fraction
 from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
-from agent.schemas.judge import Digest, FailureCode, ItemProjection, JudgeModel
+from agent.schemas.judge import (
+    MAX_SCORED_ITEMS_PER_CALL,
+    Digest,
+    FailureCode,
+    ItemProjection,
+    JudgeModel,
+)
 from agent.schemas.judge_task import (
     JudgeTaskBlocks,
     RubricRef,
@@ -19,6 +26,7 @@ from agent.schemas.judge_task import (
     judge_guidance_sha256,
     rubric_ref,
 )
+from workflows.adaptors.exact import ExactRational
 from workflows.adaptors.items import AdaptorInputRef
 from workflows.definition.adaptor_strategies import CardinalityBound
 from workflows.definition.base import Identifier
@@ -78,6 +86,10 @@ class StrategyInvocation(JudgeModel):
             assert self.rubric is not None
             if rubric_ref(self.rubric) != self.strategy.rubric:
                 raise ValueError("the supplied rubric is not the one the strategy references")
+            if self.strategy.scoring == "batch" and len(self.items) > MAX_SCORED_ITEMS_PER_CALL:
+                raise ValueError(
+                    f"batch scoring lists at most {MAX_SCORED_ITEMS_PER_CALL} items per call"
+                )
         if (self.strategy.guidance == "task_blocks") != (self.task_guidance is not None):
             raise ValueError("task guidance is supplied iff the strategy declares task_blocks")
         return self
@@ -103,9 +115,18 @@ class RubricScore(JudgeModel):
     rubric: RubricRef
     item_id: str = Field(min_length=1)
     per_criterion: tuple[CriterionValue, ...] = Field(min_length=1)
-    # Σ(weight × median) / Σ weight, computed by framework code; lies on the rubric
-    # scale [scale_min, scale_max], which threshold/v1 (basis rubric) reads.
+    # Σ(weight × median) / Σ weight, computed exactly by framework code (weights as
+    # their declared decimals); lies on the rubric scale [scale_min, scale_max].
+    # ``weighted_mean_exact`` is the authority for ordering, ties and thresholds;
+    # ``weighted_mean`` is its float, for display only.
+    weighted_mean_exact: ExactRational
     weighted_mean: float = Field(allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def display_matches_exact(self) -> Self:
+        if self.weighted_mean != float(Fraction(self.weighted_mean_exact)):
+            raise ValueError("weighted_mean must be the float of weighted_mean_exact")
+        return self
 
 
 class ItemRanking(JudgeModel):
@@ -167,6 +188,8 @@ class StrategyResult(JudgeModel):
 
 StrategyRefusalCode = Literal[
     "kind_not_implemented",
+    "no_input_ports",
+    "batch_too_large",
     "unbounded_port",
     "mixed_contracts",
     "unprojectable_contract",

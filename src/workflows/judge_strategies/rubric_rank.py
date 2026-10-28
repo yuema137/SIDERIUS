@@ -2,15 +2,17 @@
 
 Pure. The LLM supplies per-criterion integers only; this module takes the median
 of the declared repeats per criterion, computes the weighted mean
-(``sum(weight * median) / sum(weight)`` in rubric criterion order, so it lies on
-the rubric scale) and orders items by it, higher first, ties in input order. A rubric
+(``sum(weight * median) / sum(weight)`` in rubric criterion order, computed exactly
+with ``Fraction`` so it lies on the rubric scale) and orders items by it, higher first, ties in input order. A rubric
 score is not a task metric: this module deliberately imports no metric owner (an AST guard enforces it).
 """
 
+from fractions import Fraction
 from statistics import median
 
 from agent.judge.rubric_template import RUBRIC_TEMPLATE
 from agent.schemas.judge import JudgedItem, RubricScoringRequest, RubricVerdict
+from workflows.adaptors.exact import decimal_fraction
 from workflows.definition.llm_strategies import RubricRankStrategy
 
 from .models import (
@@ -67,33 +69,36 @@ def fold(invocation: StrategyInvocation, verdicts: tuple[RubricVerdict, ...]) ->
         raise StrategyError("rubric-rank/v1 folds only a complete set of scorer verdicts")
     rubric = invocation.rubric
     assert rubric is not None
+    weights = [decimal_fraction(criterion.weight) for criterion in rubric.criteria]
     samples: dict[tuple[str, str], list[int]] = {}
     for verdict in verdicts:
         for entry in verdict.item_scores:
             for score in entry.scores:
                 samples.setdefault((entry.item_id, score.criterion), []).append(score.score)
-    scores = []
+    scores: list[RubricScore] = []
+    exact: list[Fraction] = []
     for item in judged:
-        per_criterion = tuple(
-            CriterionValue(
-                criterion=criterion.name,
-                value=float(median(samples[(item.item_id, criterion.name)])),
-            )
+        medians = [
+            median(Fraction(value) for value in samples[(item.item_id, criterion.name)])
             for criterion in rubric.criteria
-        )
-        weighted = sum(
-            criterion.weight * value.value
-            for criterion, value in zip(rubric.criteria, per_criterion, strict=True)
-        )
-        mean = weighted / sum(criterion.weight for criterion in rubric.criteria)
+        ]
+        weighted = sum((w * m for w, m in zip(weights, medians, strict=True)), Fraction(0))
+        mean = weighted / sum(weights, Fraction(0))
+        exact.append(mean)
         scores.append(
             RubricScore(
                 rubric=strategy.rubric,
                 item_id=item.item_id,
-                per_criterion=per_criterion,
-                weighted_mean=mean,
+                per_criterion=tuple(
+                    # A median of integers is a half-integer: its float is exact.
+                    CriterionValue(criterion=criterion.name, value=float(value))
+                    for criterion, value in zip(rubric.criteria, medians, strict=True)
+                ),
+                weighted_mean_exact=str(mean),
+                weighted_mean=float(mean),
             )
         )
-    # Stable sort: equal means keep input order (tie_break="input_order").
-    ranked = tuple(sorted(scores, key=lambda score: -score.weighted_mean))
+    # Exact values; stable sort keeps input order for equal means (tie_break="input_order").
+    order = sorted(range(len(scores)), key=lambda index: -exact[index])
+    ranked = tuple(scores[index] for index in order)
     return ItemRanking(order=tuple(score.item_id for score in ranked), scores=ranked)

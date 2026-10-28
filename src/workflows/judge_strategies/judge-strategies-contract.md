@@ -18,7 +18,7 @@ union declarable in `AdaptorInstance.combine` and calls this package.
 | `plan.py` | `PlannedCall`, `StrategyKind`, `strategy_route`, `call_request`, `call_path`, `decide` (shared by run and replay) |
 | `rubric_rank.py` | `rubric-rank/v1`: `call_bound`, `plan_call`, `fold` (pure) |
 | `run.py` | `run_llm_strategy`: the only provider effect in the package |
-| `replay.py` | `replay_llm_strategy`: readback, imports no provider path |
+| `replay.py` | `replay_llm_strategy`: readback; its direct imports include no provider module (`agent.llm_bridge`, `agent.judge.call`) |
 | `models.py` | `StrategyItem`, `StrategyInvocation`, `invocation_sha256`, `RubricScore`, `CriterionValue`, `ItemRanking`, `StrategyOutcome`, `StrategyEvidence`, `StrategyResult`, `StrategyAdmission`, `StrategyRefusal`, `StrategyError` |
 | `agent/judge/rubric_template.py` | `RUBRIC_TEMPLATE` (`judge.rubric/v1`, role `scorer`, usage label `judge.rubric-rank`, response `RubricVerdict`) |
 | `agent/schemas/judge.py` | Call-level types: `RubricScoringRequest` (`CallContent` kind `rubric_scoring`), `JudgedItem`, `ItemProjection`, `ProjectedField`, `RubricVerdict` (`CallPayload` kind `rubric`) |
@@ -55,6 +55,8 @@ admitted iff `refusals` is empty. Refusal codes:
 | Code | Rule |
 | --- | --- |
 | `kind_not_implemented` | the kind is not in `IMPLEMENTED_KINDS` (only refusal reported; `static_call_bound=None`) |
+| `no_input_ports` | `inputs` is empty (only refusal reported; `static_call_bound=None`) |
+| `batch_too_large` | `scoring="batch"` with an item capacity above `MAX_SCORED_ITEMS_PER_CALL` (16; `agent/schemas/judge.py`), so one batch prompt has a fixed size bound; use `per_item` |
 | `unbounded_port` | a `many` port without `max_items`: the static call bound needs the item capacity (`one` port = 1, `many` port = `max_items`) |
 | `mixed_contracts` | ports of more than one contract |
 | `unprojectable_contract` | no projector in `ITEM_PROJECTORS` (v1: `proposal.output`, `literature.output`) |
@@ -87,6 +89,7 @@ with the omitted count recorded as a field. `proposal.output` projects
 
 `StrategyInvocation(adaptor_id, iteration, strategy, items, output_contract,
 expected_count, rubric, task_guidance, evidence_dir)` refuses: duplicate items;
+batch scoring of more than `MAX_SCORED_ITEMS_PER_CALL` items;
 items of more than one contract; a `rubric` that is absent for `rubric-rank/v1`,
 present for another kind, or whose `rubric_ref(rubric)` differs from
 `strategy.rubric` (content digest); `task_guidance` present iff
@@ -119,11 +122,16 @@ rubric's criteria with integers in `[scale_min, scale_max]`; otherwise
 
 The fold (pure, imports no metric owner): per item and criterion, the median of
 the repeats' integers (`statistics.median`; with 2 repeats the mean of the two);
-`weighted_mean = Σ(weight × median) / Σ weight` in rubric criterion order, so it
-always lies on the rubric scale `[scale_min, scale_max]` and a
-`threshold(basis="rubric", at_least)` reads on that scale independently of how the
-weights are normalized; ranking by `weighted_mean` descending, equal means in
-input order. `RubricScore` is not a
+`weighted_mean = Σ(weight × median) / Σ weight` in rubric criterion order, computed
+exactly with `fractions.Fraction` (each weight enters as the decimal it was declared
+as, `Fraction(repr(weight))`; medians are exact), so it always lies on the rubric
+scale `[scale_min, scale_max]` and a `threshold(basis="rubric", at_least)` reads on
+that scale independently of how the weights are normalized. `RubricScore` carries
+`weighted_mean_exact` (canonical `str(Fraction)`, e.g. `"4"`, `"13/3"`), the
+authority for ordering, ties and thresholds and the value replay compares, plus
+`weighted_mean = float(exact)` for display only. Ranking is by the exact value
+descending, equal values in input order. B6 `select` compares a rubric threshold
+exactly: `Fraction(RankEntry.exact) >= Fraction(repr(at_least))`. `RubricScore` is not a
 metric: it never enters `MetricOrder`, tuning records, the incumbent, Health or
 stop conditions.
 
@@ -189,7 +197,8 @@ The adaptor wiring (B6-8) is the only intended caller. It must:
    iteration=N)/adaptors/<id>.judge/`, unique per invocation and write-once. Pass the
    run lock's `JudgeRoutes` and a `JudgeRunContext` of the same iteration.
 4. **Consume.** `decided` → map `ItemRanking` to a B6 `Ranking(basis="rubric")`
-   with `RankEntry.value = RubricScore.weighted_mean`, then SELECT/DISTRIBUTE;
+   with `RankEntry.value = weighted_mean` and `RankEntry.exact = weighted_mean_exact`
+   (a rubric ranking without `exact` is refused), then SELECT/DISTRIBUTE;
    `fallback` → run `fallback_combine` deterministically on the same items;
    `failed` → adaptor `failed`, reason `judge_failure`. Record
    `(<evidence_dir>/strategy.json, evidence_sha256)` in
@@ -203,15 +212,19 @@ The adaptor wiring (B6-8) is the only intended caller. It must:
 `tests/unit/workflows/test_judge_strategies.py`: hand-computed weighted means
 and input-order ties; per-criterion median of repeats; LLM-supplied total
 refused; weighted mean pinned to the rubric scale and a rubric threshold
-read on that scale through B6 `select`; incomplete, foreign or out-of-scale verdicts end the chain and report
+read on that scale through B6 `select`; decimal weights 0.1/0.2 keep exact ties,
+thresholds and the scale maximum; a re-anchored reversed ranking is refused; incomplete, foreign or out-of-scale verdicts end the chain and report
 the declared fallback (and replay); inadmissible or reordered inputs refused;
 replay equality and refusal of an edited call, a re-anchored truncation, stray
 files, a reordered invocation and another route; run refusals before any call;
 invocation rubric/guidance coherence; one row per admission refusal; unimplemented
 kinds refused at admission and run; pinned `judge.rubric/v1` request, template,
 prompt and response-schema digests; weights absent from the prompt; projection
-bounds; AST guards (rubric fold imports no metric owner; replay, plan, kinds and
-the fold import no provider path).
+bounds; AST guards on direct imports only (`rubric_rank.py` imports no
+`metric_order`/`evaluation_metric` module; `replay.py`, `plan.py`, `kinds.py` and
+`rubric_rank.py` import neither `agent.llm_bridge` nor `agent.judge.call`).
+Transitive imports are not checked by the guard; replay makes no provider call
+because it never invokes `run_judge_call`.
 
 ## Limitations
 
