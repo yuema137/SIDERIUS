@@ -36,6 +36,7 @@ def _resolve(
     )
     return resolve_proposal_baseline_config(
         baseline,
+        proposed_model_type="proposed_candidate",
         composition_ref=composition,
         workflow_rules=workflow,
     )
@@ -86,3 +87,14 @@ def test_unconstrained_baseline_is_unchanged_and_generation_contract_is_visible(
     assert "model_config.segmentation_size: exact 40000" in render_proposal_parameter_rules(
         None, _rules("model_config.segmentation_size", {"exact": 40_000})
     )
+
+
+def test_template_base_model_type_does_not_judge_the_proposed_model_locks() -> None:
+    """Fails if a template base's config class refuses a lock meant for the new model."""
+    # ``hidden_width`` is not a PUNetConfig field; the proposed model may declare it.
+    baseline = {"model_type": "punet", "model_config": {"hidden_width": 8}}
+    rules = _rules("model_config.hidden_width", {"exact": 16})
+
+    effective = _resolve(baseline, workflow=rules)
+
+    assert effective["model_config"]["hidden_width"] == 16

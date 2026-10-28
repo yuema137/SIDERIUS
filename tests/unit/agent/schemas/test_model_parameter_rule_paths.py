@@ -107,7 +107,10 @@ def test_tuner_fails_closed_without_a_config_class_but_proposals_defer(plugin: s
         apply_parameter_rules(_plan("not_implemented_yet"), workflow_rules=rules)
     # A generated model is proposed before its config class exists.
     pending = resolve_parameter_rule_document(
-        {"model_config": {}}, task_rules=rules, defer_missing_non_exact=True
+        {"model_config": {}},
+        task_rules=rules,
+        defer_missing_non_exact=True,
+        defer_unknown_model=True,
     )
     assert pending["model_config"]["hidden"] == 16
 

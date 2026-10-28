@@ -547,11 +547,17 @@ Notes:
   does not declare refuses that plan. A `model_config.model_type` rule is
   judged against the executed model: an exact lock that names another model,
   or an `allowed` list without it, is refused; it never selects the model.
-  With a fixed `--force_model`, the tuner checks these rules once at launch,
-  before any LLM call or attempt. Without one, the tuner checks each plan and
-  refuses a `model_config` rule when the executed model has no registered
-  config class. Only a proposal baseline, whose generated model may not be
-  implemented yet, defers that check to the tuner.
+  With a fixed `--force_model`, the tuner resolves the `model_config` rules
+  once at launch against the forced model, before any LLM call or attempt:
+  an unknown target, a `model_config.model_type` rule of any kind that the
+  forced model cannot satisfy, or an invalid exact value is refused there.
+  Rules on values the planner chooses later are still checked per plan.
+  Without a fixed model, the tuner checks each plan and refuses a
+  `model_config` rule when the executed model has no registered config class.
+  A proposal baseline judges `model_config` rules against the proposed model
+  (`model_name`), not a template base the baseline names; that model has no
+  config class before implementation, so its target check is left to the
+  tuner.
 - A workflow may add a second rule set through
   `--workflow_parameter_rules '<json>'`, using the same shape. Task and
   workflow rules are enforced together: the workflow may narrow a task rule

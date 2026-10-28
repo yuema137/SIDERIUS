@@ -83,10 +83,11 @@ no hidden contracts, no silent defaults.
   `force_model` or the plan's top-level `model_type`, which is the default).
   A `model_config.model_type` rule is validated against the executed type and
   never selects it. The tuner fails closed when the class is unregistered;
-  only proposal-baseline resolution (`defer_missing_non_exact`) defers.
-  `extra="allow"` configs accept unknown keys.
-  `validate_model_parameter_rules` repeats the check once at tuner launch for
-  a fixed `force_model`.
+  only proposal-baseline resolution (`defer_unknown_model`, with the proposed
+  model name as `executed_model_type`) defers. `extra="allow"` configs accept
+  unknown keys. `validate_model_parameter_rules` runs the full resolver once at
+  tuner launch for a fixed `force_model`, on an empty model configuration with
+  only planner-chosen values deferred.
   See the [parameter-rule contract](../../../docs/reference/task-composition.md)
   for sampling ownership, composition conflicts and value-validation boundaries.
 

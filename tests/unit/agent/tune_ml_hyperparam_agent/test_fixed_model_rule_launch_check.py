@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -36,7 +37,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 from core.generated_library import bind_generated_library_to_workspace
-workspace, checkout, field = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+import json
+workspace, checkout, rules = Path(sys.argv[1]), Path(sys.argv[2]), json.loads(sys.argv[3])
 bind_generated_library_to_workspace(str(workspace))
 from workflows.task_composition import compose_run_task_bindings, bind_run_task_composition, build_task_composition_ref
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
@@ -55,7 +57,7 @@ with bind_run_task_composition(composition, physical_data_root=str(workspace / "
         storage={"backend": "local", "local": {"workspace": str(workspace / "records"), "run_name": "probe"}},
         data_dir=str(workspace / "data"), health_gate_enabled=False,
         task_composition_ref=build_task_composition_ref(composition),
-        workflow_parameter_rules={f"model_config.{field}": {"exact": 4}},
+        workflow_parameter_rules=rules,
         max_rounds=1, attempts_per_round=1,
     )
     node = HyperparamTuningAgent(bridge_factory=bridge, sandbox_factory=lambda **kwargs: SimpleNamespace(plugin_dir=str(workspace / "plugins")))
@@ -69,16 +71,25 @@ with bind_run_task_composition(composition, physical_data_root=str(workspace / "
 
 
 @pytest.mark.parametrize(
-    ("field", "expected"),
+    ("rules", "expected"),
     [
-        ("segmentaton_size", "OUTCOME refused unsupported model_config parameter path"),
-        ("segmentation_size", "OUTCOME reached-bridge"),
+        (
+            {"model_config.segmentaton_size": {"exact": 4}},
+            "OUTCOME refused unsupported model_config parameter path",
+        ),
+        # Can never pass for the forced model: refused once, not per attempt.
+        (
+            {"model_config.model_type": {"allowed": ["wavenet"]}},
+            "OUTCOME refused workflow parameter rule for 'model_config.model_type'",
+        ),
+        ({"model_config.segmentation_size": {"exact": 4}}, "OUTCOME reached-bridge"),
     ],
+    ids=["typo-target", "model-type-allowed-list", "valid-lock"],
 )
-def test_fixed_model_refuses_dropped_model_lock_before_any_attempt(
-    tmp_path: Path, field: str, expected: str
+def test_fixed_model_refuses_impossible_model_rule_before_any_attempt(
+    tmp_path: Path, rules: dict, expected: str
 ) -> None:
-    """Without the launch check, a typo lock fails every attempt or is silently dropped."""
+    """Without the launch check, each attempt spends an LLM call before refusing the rule."""
     (tmp_path / "data").mkdir()
     (tmp_path / "plugins").mkdir()
     (tmp_path / "seed.py").write_text(textwrap.dedent(PLUGIN))
@@ -88,7 +99,7 @@ def test_fixed_model_refuses_dropped_model_lock_before_any_attempt(
     env.pop("PYTHONPATH", None)
     env.update(PYTHONDONTWRITEBYTECODE="1", OMP_NUM_THREADS="1")
     result = subprocess.run(
-        [sys.executable, str(script), str(tmp_path), str(ROOT), field],
+        [sys.executable, str(script), str(tmp_path), str(ROOT), json.dumps(rules)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
