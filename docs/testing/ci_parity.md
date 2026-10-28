@@ -310,8 +310,9 @@ skips is worse than no harness (§28).
 > fully green): bulk 524.3 s + sensitive 57.3 s = **581.6 s against a banked
 > historical pytest step of 628 s — a ratio of 1.08×.**
 >
-> A runner has 4 vCPUs, so four shards saturate it and scheduling cannot beat
-> the CPU budget; and the weight table is calibrated to this host, so shard 0
+> At the time this row was written a runner was assumed to have 4 vCPUs; the
+> manifest of run `40616894222` later measured `cpu_count` 2 (§9). Within one
+> runner scheduling cannot beat the CPU budget; and the weight table is calibrated to this host, so shard 0
 > carried the locally-dominant file and finished in **31.3 s** while its
 > siblings ran 450–524 s. Correctly weighted for CI it would reach ≈ 1.69×.
 >
@@ -435,31 +436,105 @@ cannot produce.
 
 ---
 
-## 9. The initial declared CI profile — 4 × 1
+## 9. The declared CI profile — 8 shards over a 4-job matrix, 1 thread each
 
-The workflow declares **4 bulk shards × 1 thread per shard**, capped at 4.
+The bulk lane plans **8 shards × 1 thread** and executes them across **4
+parallel matrix jobs**, each running **2 shards** — one per runner CPU. The
+sensitive lane runs alone in its own job.
 
-**This is a declaration, not a remote measurement.** Nothing has yet been timed
-on a GitHub runner, and the number must not be quoted as the remote optimum
-until a run measures it.
+**Why the split (issue #990).** The runner manifest of full-suite run
+`40616894222` records `cpu_count` 2, `affinity_count` 2. The previous profile
+ran 4 shards × 1 thread on that one runner — 2× oversubscription. Its bulk step
+took 18 m 38 s (shards 1073 / 1116 / 867 / 1071 s) inside a ~22 min job, and
+three later full-suite runs (`40619940595`, `40620503887`, `40621567296`) were
+cancelled at the 25-minute ceiling with no verdict. Adding shards to one 2-CPU
+runner cannot shorten it, so the work moves to more runners instead; the
+timeout stays a resource ceiling.
 
-**Why declared rather than detected.** A source audit found no trustworthy way
-to read the effective CPU budget: Python 3.12 has no `os.process_cpu_count()`,
-`os.sched_getaffinity` does not observe cgroup quotas, `/sys/fs/cgroup/cpu.max`
-is not readable here, and no repository helper exists. A detector would carry
-false precision, so the profile is explicit.
+### Job graph and status
 
-**Why 4 and why capped at 4.** `ubuntu-latest` is documented as 4 vCPU, so
-4 × 1 fills it without oversubscription. The cap is 4 because the measured floor
-is a single 460.3 s file: no file-level shard can finish before its heaviest
-file, so a fifth shard cannot make the run shorter.
+| job | status name | runs | needs |
+|---|---|---|---|
+| `prepare` | `Lint + Type + Select` | docs classification, docs fast path, install, ruff, pyright, selector; uploads the ONE changed-file list as artifact `ci-changed-files` when the selection is narrowed | — |
+| `unit` (matrix `job: [0, 1, 2, 3]`) | `Unit tests (bulk <i>)` | `python -m tools.ci bulk --shards 8 --job-index <i> --job-count 4 --threads 1` | `prepare` |
+| `sensitive` | `Unit tests (sensitive lane)` | `python -m tools.ci sensitive` on a quiesced runner | `prepare` only — a RED bulk lane never skips it |
+| `quality` | **`Lint + Type + Unit Tests`** | aggregate verdict (below) | all three, `if: always()` |
 
-**How it gets corrected.** Every run emits `run_manifest.json` recording the
-declared profile *and* the observed facts — `cpu_count`, `affinity_count`,
-`cgroup_cpu_max`, `runner_name`, `runner_os` — side by side. A mismatch is
-therefore visible in the first remote artifact, and any adjustment afterwards is
-made from fact rather than assumption. One adjustment, not a sweep: the remote
-budget is for correctness, not benchmarking.
+`quality` keeps the historical status name. It is GREEN only when `prepare`
+succeeded and either the run took the documentation fast path (unit lanes
+skipped by design) or `unit` and `sensitive` both succeeded **and**
+`src/tools/ci/matrix.py verify` accepts the matrix reports. Because it runs on
+`always()`, a failed or cancelled upstream job makes it RED rather than
+skipped. `unit` uses `fail-fast: false` so one RED job never cancels the
+evidence of its siblings.
+
+Branch protection: as of this change `master` has no classic protection and
+its only ruleset (`Master-Protection`) has no required status checks, so no
+required-check name is affected. If a required check is added, require
+`Lint + Type + Unit Tests` only; the matrix job names carry the index and are
+not stable gate names.
+
+### Assignment and the whole-run proof — `tools/ci/matrix.py`
+
+* Every matrix job computes the **same** full plan:
+  `plan_shards(selection, count=8, …)` is deterministic (§ `shards.py`) and every
+  job consumes the same commit and the same `ci-changed-files` list. A narrowed
+  verdict whose list is missing makes the job fail rather than plan the full
+  suite alone.
+* Job `i` executes the strided subset `job_shard_indices(8, 4, i)` =
+  `{i, i + 4}`. LPT packing already balances the shards, so a job's wall time
+  is its slower shard. `job_count > shard_count` is refused: a job with no shard
+  would report green having executed nothing.
+* Each job writes `matrix_report.json` (schema version 1: `job_index`,
+  `job_count`, `shard_count`, `plan_digest`, `shards_run`, `ok`, `full_suite`,
+  `files`) beside `bulk_result.json` and `run_manifest.json`, inside its
+  `ci-parity-evidence-bulk-<i>` artifact. `plan_digest` is the SHA-256 of the
+  WHOLE plan (every shard's index and files plus the sensitive set).
+* `quality` downloads those artifacts and runs `verify`, which fails unless
+  one report exists per job `0..job_count-1`, all agree on `job_count`,
+  `shard_count` and `plan_digest`, each job ran exactly its assigned indices,
+  the union is every shard index exactly once, and every job reported `ok`.
+  The verifier is standard-library only, so the aggregate job runs it with
+  `uv run --no-project python -I` and does not install the project.
+* An empty shard (a narrowed selection with fewer files than 8) is recorded as
+  trivially passed and **never launched**: `pytest` with no path arguments
+  would fall back to `testpaths` and run the whole tree.
+
+`matrix.job` in the workflow must list exactly `0..CI_BULK_JOBS-1`, and
+`CI_BULK_SHARDS / CI_BULK_JOBS` must equal the runner CPU count. Drift in the
+first is caught by `verify`; the second is a declaration (see below).
+
+Local reproduction: `python -m tools.ci plan --shards 8 --job-index <i>
+--job-count 4` prints the plan plus the job's `shards`; the defaults
+(`--job-index 0 --job-count 1`) reproduce the single-process harness exactly.
+
+### Expected duration
+
+Estimated from the per-test JUnit times of run `40616894222` (3,964 test-seconds
+measured under 2× contention) applied to the 8-shard plan at `fc7e3cf8`: the
+heaviest shard holds ~765 contended test-seconds and the median ~450. With one
+shard per CPU the heaviest shard should take roughly 400–770 s (the bound is
+the contention factor of the measured times), plus ~1.5 min install and ~40 s
+collection per job, after `prepare` (~3 min). Expected critical path is about
+10–17 min against per-job ceilings of 25 min (`unit`) and 15 min (`prepare`,
+`sensitive`). The first matrix run's manifests replace this estimate.
+
+The residual imbalance comes from `weights.json`, which is calibrated to the
+24-core lab host (§7) and still names a split file that no longer exists (the
+harness drops that split and says so). CI-calibrated weights would bring the
+heaviest of 8 shards to ~495 contended test-seconds; regenerating them is a
+separate change.
+
+### Why declared rather than detected
+
+A source audit found no trustworthy way to read the effective CPU budget:
+Python 3.12 has no `os.process_cpu_count()`, `os.sched_getaffinity` does not
+observe cgroup quotas, `/sys/fs/cgroup/cpu.max` is not readable here, and no
+repository helper exists. A detector would carry false precision, so the
+profile is explicit. Every run emits `run_manifest.json` recording the declared
+profile *and* the observed facts — `cpu_count`, `affinity_count`,
+`cgroup_cpu_max`, `runner_name`, `runner_os` — side by side, so a mismatch is
+visible in the first remote artifact and any adjustment is made from fact.
 
 ### What the manifest carries
 

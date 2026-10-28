@@ -19,24 +19,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Lint + Type + Unit Tests
+  # The pipeline is four jobs (issue #990). One 2-CPU runner executing the
+  # whole bulk lane took ~22 min on a full-suite selection and later runs were
+  # cancelled at the 25-minute ceiling. The bulk lane is therefore split across
+  # a matrix of runners, each executing one shard per CPU:
+  #
+  #   prepare ──┬── unit (matrix, CI_BULK_JOBS runners) ──┐
+  #             └── sensitive (own runner, quiesced) ─────┴── quality (aggregate)
+  #
+  # `quality` keeps the historical status name "Lint + Type + Unit Tests" and is
+  # green only when every upstream job succeeded (or the run legitimately took
+  # the documentation fast path) AND the matrix reports prove that every shard
+  # of one identical plan ran exactly once. See docs/testing/ci_parity.md §9.
+  prepare:
+    name: Lint + Type + Select
     runs-on: ubuntu-latest
-    # Raised 15 -> 25 during Step 05c (2026-08-15). NOT a 05c-specific need:
-    # master's own runs were already at the ceiling, and two master PUSH runs
-    # (31855504278, 31855238181) were cancelled at it before this branch
-    # existed. The last SUCCESSFUL master run (31857482569) measured:
-    #
-    #     install 47s · ruff 1s · pyright 2m17s · pytest 10m28s
-    #     ---------------------------------------------------------------
-    #     total 13m38s  ->  1m22s of headroom against a 15-minute cap
-    #
-    # A ~9,300-test suite that grows by a few dozen cases per PR then flips
-    # the job from green to `cancelled` — a result that looks like a failure,
-    # carries no failing test, and tells a reviewer nothing. This is a
-    # resource ceiling, not a correctness guard; raising it changes what CI
-    # tolerates in wall-clock, never what it accepts as passing.
-    timeout-minutes: 25
+    # Resource ceiling, not a correctness guard: classification, install, ruff,
+    # pyright and selection measured ~3 min together (run 40616894222).
+    timeout-minutes: 15
+    outputs:
+      docs_only: ${{ steps.documentation.outputs.docs_only }}
+      full_suite: ${{ steps.selection.outputs.full_suite }}
 
     steps:
       - name: Checkout
@@ -152,78 +155,114 @@ jobs:
           grep -q '^pytest_args=' "$GITHUB_OUTPUT" \
             || full "the selector produced no pytest_args"
 
-      # ---- unit tests via the repository-owned harness ---------------------
-      # The harness (`tools/ci/`) owns HOW tests execute: preflight, weighted
-      # file-level shards, per-shard TMPDIR and thread pinning, the sensitive
-      # lane, and result aggregation. It COMPOSES `tools.ci_selection` for WHAT
-      # runs — the selector remains the single authority and is not duplicated
-      # here. See docs/testing/ci_parity.md.
-      #
-      # CI RESOURCE PROFILE — explicit, not auto-detected. Python 3.12 has no
-      # os.process_cpu_count(), sched_getaffinity does not see cgroup quotas,
-      # and no repository helper reports an effective CPU budget, so an
-      # auto-detector would be guessing. ubuntu-latest is documented as 4 vCPU;
-      # 4 shards x 1 thread matches that without oversubscription. The shard cap
-      # is 4 because the measured floor is a single 460 s file — more shards
-      # cannot go faster. `cpu_count` is recorded in the manifest so the FIRST
-      # remote run corrects this profile with fact rather than assumption.
+      # The ONE changed-file list travels to every matrix job as an artifact, so
+      # no job derives its own diff. A full-suite verdict writes no list and
+      # uploads nothing; the unit jobs then run the full suite by construction.
+      - name: Hand the changed-file list to the unit jobs
+        if: >-
+          steps.documentation.outputs.docs_only != 'true'
+          && steps.selection.outputs.full_suite != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-changed-files
+          path: ${{ runner.temp }}/ci_changed_files.json
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---- unit tests via the repository-owned harness -------------------------
+  # The harness (`tools/ci/`) owns HOW tests execute: preflight, weighted
+  # file-level shards, per-shard TMPDIR and thread pinning, the sensitive lane,
+  # and result aggregation. It COMPOSES `tools.ci_selection` for WHAT runs — the
+  # selector remains the single authority and is not duplicated here. See
+  # docs/testing/ci_parity.md.
+  #
+  # CI RESOURCE PROFILE — explicit, not auto-detected (§9 of the contract).
+  # The runner's measured `cpu_count` is 2 (run 40616894222 manifest). Every
+  # job plans the SAME CI_BULK_SHARDS shards and executes the strided subset
+  # `tools.ci.matrix` assigns it, so each runner executes
+  # CI_BULK_SHARDS / CI_BULK_JOBS = 2 shards x 1 thread: one shard per CPU, no
+  # oversubscription. `matrix.job` MUST list exactly 0..CI_BULK_JOBS-1; the
+  # aggregate job fails if any index is missing or duplicated.
+  unit:
+    name: Unit tests (bulk ${{ matrix.job }})
+    needs: prepare
+    if: needs.prepare.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    # Resource ceiling, not a correctness guard. Expected ~9-15 min per job
+    # from the issue #990 measurements; see docs/testing/ci_parity.md §9.
+    timeout-minutes: 25
+    strategy:
+      # A failing job must not cancel its siblings: their evidence completes
+      # the failure batch, exactly as a failing shard never aborts siblings.
+      fail-fast: false
+      matrix:
+        job: [0, 1, 2, 3]
+    env:
+      CI_BULK_SHARDS: "8"
+      CI_BULK_JOBS: "4"
+      CI_SHARD_THREADS: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies (incl. dev group)
+        run: uv sync --group dev --frozen
+
+      - name: Receive the changed-file list
+        if: needs.prepare.outputs.full_suite != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-changed-files
+          path: ${{ runner.temp }}
+
       - name: Unit tests — repository CI harness (no real_run, no integration)
-        if: steps.documentation.outputs.docs_only != 'true'
-        env:
-          CI_BULK_SHARDS: "4"
-          CI_SHARD_THREADS: "1"
         run: |
           set -euo pipefail
-          echo "full_suite=${{ steps.selection.outputs.full_suite }}"
+          echo "full_suite=${{ needs.prepare.outputs.full_suite }}"
           # Consume the ONE changed-file list the selector step produced. The
           # harness then asks tools.ci_selection itself, so the selector remains
           # the single authority for WHAT runs and nothing is re-derived here.
-          # A full-suite verdict leaves that file unwritten, and the harness
-          # fail-closes to the full suite on a missing file.
+          # A full-suite verdict leaves no list and the harness runs the full
+          # suite. A narrowed verdict WITHOUT its list is a transport failure:
+          # refuse rather than let this one job plan a different file set.
           CHANGED_ARG=""
-          if [ "${{ steps.selection.outputs.full_suite }}" != "true" ] \
-             && [ -s "$RUNNER_TEMP/ci_changed_files.json" ]; then
+          if [ "${{ needs.prepare.outputs.full_suite }}" != "true" ]; then
+            if [ ! -s "$RUNNER_TEMP/ci_changed_files.json" ]; then
+              echo "selector narrowed the run but its changed-file list is missing" >&2
+              exit 1
+            fi
             CHANGED_ARG="--changed-from $RUNNER_TEMP/ci_changed_files.json"
           fi
           uv run python -m tools.ci bulk \
             --root . \
             --shards "$CI_BULK_SHARDS" \
+            --job-index "${{ matrix.job }}" \
+            --job-count "$CI_BULK_JOBS" \
             --threads "$CI_SHARD_THREADS" \
             --workdir "$RUNNER_TEMP/ci_parity" \
             $CHANGED_ARG
 
-      # The sensitive lane runs AFTER the bulk lane and alone. Its reviewed
-      # files are declared in tools.ci.sensitive: deadline and scheduler-ordering
-      # witnesses must not compete with the bulk shards.
-      # `if: always()` because a RED bulk lane must not HIDE the sensitive
-      # lane's result. Run 32834492183 failed in bulk and skipped this step
-      # entirely, so a whole class of evidence was silently absent from a run
-      # that was supposed to produce the complete failure batch. Collecting
-      # everything in ONE run is the rule this lane exists to enforce; a
-      # workflow that stops at the first red step is the fix-one/rerun loop
-      # wearing different clothes.
-      - name: Unit tests — sensitive lane (serial, quiesced)
-        if: always() && steps.documentation.outputs.docs_only != 'true'
-        env:
-          CI_SHARD_THREADS: "1"
-        run: |
-          set -euo pipefail
-          uv run python -m tools.ci sensitive \
-            --root . \
-            --threads "$CI_SHARD_THREADS" \
-            --workdir "$RUNNER_TEMP/ci_parity"
-
-      # Per-node JUnit is the structured evidence whole-run attribution needs,
-      # and the current workflow emits none: `-q` prints counts, so skipped and
-      # collected node identities never leave the runner. This is also what
-      # answers CP-10 (12,992 collected locally vs 12,989 outcomes remotely) at
-      # zero extra cost. `if: always()` because a RED run is exactly when the
-      # per-node detail matters most.
-      - name: Upload structured test evidence
-        if: always() && steps.documentation.outputs.docs_only != 'true'
+      # Per-node JUnit is the structured evidence whole-run attribution needs.
+      # `if: always()` because a RED run is exactly when the per-node detail
+      # matters most. The aggregate job also reads this artifact's
+      # matrix_report.json to prove the shard union.
+      - name: Upload structured test evidence (bulk)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-parity-evidence
+          name: ci-parity-evidence-bulk-${{ matrix.job }}
+          # A re-run of a failed job replaces its own earlier evidence, so the
+          # aggregate never reads two reports for one job index.
+          overwrite: true
           # $RUNNER_TEMP, NOT the workspace: a workdir inside the checkout puts
           # every shard's TMPDIR in the repository, where one shard's fixture
           # becomes another shard's "repository content". Two failures in run
@@ -232,22 +271,126 @@ jobs:
           # EXACT paths, no `**`. Run 32834492183 uploaded 18,674 files of which
           # SIX were evidence: `**` descends into every shard's TMPDIR and
           # collected every JSON and XML any test happened to write in a
-          # fixture. Worse, it matched no `shard*.log` at all — the tracebacks,
-          # the single most useful artefact in a RED run, were the one thing
-          # missing. These patterns name only what the harness itself writes.
+          # fixture. These patterns name only what the harness itself writes,
+          # including the shard*.log tracebacks.
           path: |
             ${{ runner.temp }}/ci_parity/*.json
             ${{ runner.temp }}/ci_parity/bulk/shard*.xml
             ${{ runner.temp }}/ci_parity/bulk/shard*.log
-            ${{ runner.temp }}/ci_parity/sensitive/shard*.xml
-            ${{ runner.temp }}/ci_parity/sensitive/shard*.log
           retention-days: 14
-          # `.ci_parity` is dot-prefixed, and upload-artifact@v4 EXCLUDES hidden
-          # paths by default — the first remote run uploaded nothing and logged
-          # "No files were found", leaving a RED run with no per-node evidence
-          # at all. The patterns above are scoped to *.xml / *.json under that
-          # one directory, so this does not widen what is collected.
+          # upload-artifact@v4 EXCLUDES hidden paths by default — an early
+          # remote run uploaded nothing and logged "No files were found". The
+          # patterns above are scoped to harness outputs, so this does not
+          # widen what is collected.
           include-hidden-files: true
           # An empty evidence artifact is a harness failure, not a warning: the
           # whole point of the upload is that a RED run stays attributable.
           if-no-files-found: error
+
+  # The sensitive lane runs ALONE on its own runner. Its reviewed files are
+  # declared in tools.ci.sensitive: deadline and scheduler-ordering witnesses
+  # must not compete with the bulk shards, and a separate runner quiesces them
+  # by construction. It `needs` only `prepare`, never `unit`: run 32834492183
+  # failed in bulk and skipped the sensitive lane entirely, so a whole class of
+  # evidence was silently absent from a run meant to produce the complete
+  # failure batch. A RED bulk lane must never HIDE this lane's result.
+  sensitive:
+    name: Unit tests (sensitive lane)
+    needs: prepare
+    if: needs.prepare.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI_SHARD_THREADS: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies (incl. dev group)
+        run: uv sync --group dev --frozen
+
+      - name: Unit tests — sensitive lane (serial, quiesced)
+        run: |
+          set -euo pipefail
+          uv run python -m tools.ci sensitive \
+            --root . \
+            --threads "$CI_SHARD_THREADS" \
+            --workdir "$RUNNER_TEMP/ci_parity"
+
+      - name: Upload structured test evidence (sensitive)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-parity-evidence-sensitive
+          overwrite: true
+          path: |
+            ${{ runner.temp }}/ci_parity/sensitive/shard*.xml
+            ${{ runner.temp }}/ci_parity/sensitive/shard*.log
+          retention-days: 14
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # ---- aggregate status --------------------------------------------------
+  # The one status a reviewer (and any future required-check rule) reads. It
+  # runs on `always()` so a failed or cancelled upstream job turns it RED
+  # rather than leaving it "skipped", which GitHub treats as passing.
+  quality:
+    name: Lint + Type + Unit Tests
+    needs: [prepare, unit, sensitive]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        if: needs.prepare.result == 'success' && needs.prepare.outputs.docs_only != 'true'
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        if: needs.prepare.result == 'success' && needs.prepare.outputs.docs_only != 'true'
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        if: needs.prepare.result == 'success' && needs.prepare.outputs.docs_only != 'true'
+        run: uv python install 3.12
+
+      - name: Collect bulk matrix reports
+        if: needs.prepare.result == 'success' && needs.prepare.outputs.docs_only != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ci-parity-evidence-bulk-*
+          path: ${{ runner.temp }}/matrix
+
+      # Standard library only, so no project install is needed here.
+      - name: Verify every shard of one plan ran exactly once
+        if: needs.prepare.result == 'success' && needs.prepare.outputs.docs_only != 'true'
+        run: |
+          uv run --no-project python -I src/tools/ci/matrix.py verify \
+            --reports-dir "$RUNNER_TEMP/matrix"
+
+      - name: Require every upstream job
+        if: always()
+        run: |
+          echo "prepare=${{ needs.prepare.result }} unit=${{ needs.unit.result }} sensitive=${{ needs.sensitive.result }}"
+          echo "docs_only=${{ needs.prepare.outputs.docs_only }}"
+          if [ "${{ needs.prepare.result }}" != "success" ]; then
+            echo "prepare (lint, type check or selection) did not succeed" >&2
+            exit 1
+          fi
+          if [ "${{ needs.prepare.outputs.docs_only }}" = "true" ]; then
+            echo "documentation fast path: unit lanes legitimately skipped"
+            exit 0
+          fi
+          if [ "${{ needs.unit.result }}" != "success" ] \
+             || [ "${{ needs.sensitive.result }}" != "success" ]; then
+            echo "a unit-test lane did not succeed" >&2
+            exit 1
+          fi

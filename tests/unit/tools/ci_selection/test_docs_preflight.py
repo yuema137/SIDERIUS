@@ -53,13 +53,23 @@ def test_missing_files_and_symlinks_cannot_claim_documentation_only(docs_root):
 
 
 def test_runtime_steps_require_non_documentation_and_status_name_is_preserved():
+    """The documentation fast path skips runtime work and keeps the status name.
+
+    Fails as: a runtime step or unit-test job loses its docs-only gate (a docs PR
+    pays for the full pipeline, or worse, a non-docs PR skips it), or the
+    aggregate status reviewers read stops being "Lint + Type + Unit Tests" or
+    stops depending on every lane.
+    """
     import yaml
 
     root = Path(__file__).resolve().parents[4]
-    workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())
-    quality = workflow["jobs"]["quality"]
+    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]
+    quality = jobs["quality"]
     assert quality["name"] == "Lint + Type + Unit Tests"
-    steps = quality["steps"]
+    assert set(quality["needs"]) == {"prepare", "unit", "sensitive"}
+    assert quality["if"] == "always()"
+
+    steps = jobs["prepare"]["steps"]
     names = [step["name"] for step in steps]
     assert names.index("Classify ordinary documentation changes") < names.index(
         "Install dependencies (incl. dev group)"
@@ -71,6 +81,8 @@ def test_runtime_steps_require_non_documentation_and_status_name_is_preserved():
             for token in ("--group dev", "uv run ruff", "uv run pyright", "python -m tools.ci")
         ) or ("uses" in step and "upload-artifact" in step["uses"]):
             assert "steps.documentation.outputs.docs_only != 'true'" in step["if"]
+    for lane in ("unit", "sensitive"):
+        assert jobs[lane]["if"] == "needs.prepare.outputs.docs_only != 'true'"
     docs = next(step for step in steps if step["name"] == "Check ordinary documentation")
     assert "--only-group dev --frozen" in docs["run"]
     assert "--noconftest" in docs["run"]
