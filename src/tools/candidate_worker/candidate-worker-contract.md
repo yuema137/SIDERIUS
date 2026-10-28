@@ -1006,7 +1006,13 @@ adaptor's `CollectedItems` into the catalogued `literature.collection`
 review node id>, output=<review>)` per collected entry, in collected order) and
 applies `local_typed_evidence_many`; the proposer prompt therefore renders the
 existing collection section, one `### Review: <review node id>` heading per review in
-declared binding order, never completion order. S3 applies `local_typed_evidence` to
+declared binding order, never completion order. Renaming a review node therefore
+changes the proposer prompt (operator-accepted, 2026-10-28). This profile is the first
+framework producer of a collection: before B6-4 only hand-written
+`ProposalInput.literature_review_evidence` seeds reached the collection renderer.
+Every proposal seed under either adaptor profile must leave
+`literature_review_evidence` unset; `materialize_fanout` refuses one that carries it
+before any review or proposer call (the reusable-preparation rule). S3 applies `local_typed_evidence` to
 output `i`, a `LiteratureReviewOutput` whose `findings` hold exactly the one entry
 `split-items/v1` placed there (all other fields of the review unchanged), so family
 `i` sees the singular literature section with that one claim. With `field-rank/v1`
@@ -1016,7 +1022,9 @@ rendered in the prompt). No prompt template, agent schema or rendering owner cha
 (`rendering_assembly_digest` unchanged).
 
 **Shortfall and per-index skip.** Under `on_short="skip"`, fewer than M split entries
-leave indices `n..M-1` `skipped` in the outcome and record. `adaptor_phase.skipped_inputs`
+leave indices `n..M-1` `skipped` in the outcome and record. Under `field-rank/v1`
+a finding whose `confidence` is `None` is unranked and never kept by `top-k/v1`, so
+unscored findings alone can cause a shortfall (and a skip or failure per `on_short`). `adaptor_phase.skipped_inputs`
 maps every node whose request reads a skipped index to `insufficient_items`;
 `readiness_input(..., skipped_inputs=...)` sets `NodeReadiness.skipped_input`, and
 `_close_reason` closes that node `skipped/insufficient_items` after the blocked rule
@@ -1043,7 +1051,9 @@ equal `proposal_input` over the verified review records and adaptor outcomes (a
 reordered collection or a sibling's finding is refused: "proposal input does not match
 the declared literature edge").
 Witness: `tests/unit/tools/candidate_worker/test_literature_adaptors.py` (binding
-order over execution order with per-review attribution in the proposer prompt;
+order over execution order with per-review attribution in the proposer prompt; a seed
+already carrying literature evidence refused before any call; self-reported ranking
+provenance in the S3 record;
 skip of the short index with ranked findings per family; relabelled skip and swapped
 finding refused; `on_short="fail"` and `too_many_items` failures recorded and blocking;
 admission refusals).

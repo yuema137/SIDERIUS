@@ -22,6 +22,7 @@ from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.workflow_preview import WorkflowPreviewRequest, preview_workflow
 from workflows.definition.candidate import ADAPTORS_NOT_ADMITTED
 
+from .conftest import refresh
 from .test_graph import initial
 from .test_literature import literature_sdk as literature_sdk
 from .test_native import native_runner as native_runner
@@ -146,6 +147,10 @@ def test_split_skip_feeds_ranked_findings_and_skips_short_indices(
         assert observed[f"check{index}"] == ("succeeded", None)
     record = json.loads(Path(receipt.graph_trace.adaptors[0].record_path).read_bytes())
     assert [item["status"] for item in record["outputs"]] == ["emitted", "emitted", "skipped"]
+    assert (record["ranking"]["basis"], record["ranking"]["provenance"]) == (
+        "field",
+        "self-reported",
+    )
     verify_graph_trace(request, parent, receipt)
     # A skip relabelled as a route skip contradicts the recomputed adaptor outcome.
     nodes = tuple(
@@ -239,3 +244,42 @@ def test_split_profile_requires_one_proposal_per_index(prepared, findings):
         proposal["request"]["arguments"][0]["source"]["index"] = 1
 
     _refused(request, rebind, "one proposal per adaptor output index")
+
+
+@pytest.mark.parametrize("build", [literature_collection_request, literature_split_request])
+def test_seed_with_literature_evidence_is_refused_before_any_call(
+    prepared, native_runner, literature_sdk, build
+):
+    """Fails if a hand-written seed's evidence is silently merged or replaced by the edge."""
+    from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import _project
+
+    request = build(prepared)
+    project = Path(request.preview.project_root)
+    evidence = _project(
+        LiteratureReviewOutput.model_validate(
+            {
+                "agent_card": {
+                    "agent_name": "hand",
+                    "role": "r",
+                    "expertise_domain": "d",
+                    "coverage": "c",
+                    "limitations": "l",
+                    "trust_level": "soft_prior",
+                    "trust_guidance": "g",
+                },
+                "run_name": request.run_name,
+                "started_at": "2026-10-28T00:00:00Z",
+                "finished_at": "2026-10-28T00:00:00Z",
+            }
+        )
+    ).model_dump(mode="json")
+    for external in _definition(request.preview.model_dump(mode="json"))["externals"]:
+        if external["contract"] == "proposal.input":
+            path = project / external["location"]
+            seed = json.loads(path.read_bytes())
+            seed["literature_review_evidence"] = evidence
+            path.write_text(json.dumps(seed))
+    receipt = launch_candidate(refresh(request))
+    assert receipt.status == "failed"
+    assert receipt.graph_trace is None
+    assert not literature_sdk[0] and not native_runner.calls

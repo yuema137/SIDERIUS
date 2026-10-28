@@ -204,6 +204,8 @@ def _graph_reason(reason: AdaptorReason | None) -> GraphReason | None:
     match reason:
         case None | "no_admissible_input" | "insufficient_items" | "too_many_items":
             return reason
+        case _:  # a new AdaptorReason must be mapped to a graph reason explicitly
+            raise ValueError(f"adaptor reason {reason!r} has no graph reason")
 
 
 def _adaptor_sources(definition: AdaptorDefinition) -> tuple[tuple[str, AdaptorSource], ...]:
@@ -241,8 +243,8 @@ def skipped_inputs(
     skipped: dict[str, GraphReason] = {}
     for node_id, source in _adaptor_sources(definition):
         outcome = outcomes.get(source.adaptor)
-        if outcome is None:
-            continue
+        if outcome is None or outcome.status != "succeeded":
+            continue  # a non-succeeded adaptor blocks its consumers instead
         if any(item.index == source.index and item.status == "skipped" for item in outcome.outputs):
             skipped[node_id] = "insufficient_items"
     return skipped
