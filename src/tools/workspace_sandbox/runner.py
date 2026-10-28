@@ -127,7 +127,9 @@ def _await(
 
     Without a probe this is the single historical ``wait(timeout)``. A probe is
     polled first (an intent recorded before spawn takes effect at once) and then
-    every ``CANCEL_POLL_SECONDS``. The caller's ``finally`` owns termination.
+    every ``CANCEL_POLL_SECONDS``. A fired probe yields ``cancelled`` only while the
+    child is still running; a child that already exited reports its own outcome.
+    The caller's ``finally`` owns termination.
     """
     if cancel_requested is None:
         try:
@@ -138,7 +140,8 @@ def _await(
     deadline = time.monotonic() + timeout
     while True:
         if cancel_requested():
-            return "cancelled"
+            # A child that already exited on its own keeps its natural outcome.
+            return "exited" if process.poll() is not None else "cancelled"
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return "timed_out"

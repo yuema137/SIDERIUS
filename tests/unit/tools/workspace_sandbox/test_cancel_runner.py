@@ -66,3 +66,16 @@ def test_unfired_probe_keeps_exit_and_timeout_semantics(shell_group, argv, timeo
     execution, pgid, _ = _execute("run_observed", argv, timeout, lambda: False)
     assert (execution.status, execution.returncode) == expected
     assert observe_group(pgid).status == "absent"
+
+
+@pytest.mark.parametrize(("code", "expected"), [(0, "completed"), (3, "failed")])
+def test_probe_firing_after_natural_exit_keeps_the_natural_outcome(shell_group, code, expected):
+    """Fails if a cancel that lands after the child already exited relabels a finished run
+    as ``cancelled`` (with its own return code), hiding its real result."""
+
+    def late_probe():
+        time.sleep(0.5)  # the child exits during this first poll
+        return True
+
+    execution, _, _ = _execute("run_observed", ["/bin/sh", "-c", f"exit {code}"], 120, late_probe)
+    assert (execution.status, execution.returncode) == (expected, code)

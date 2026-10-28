@@ -24,8 +24,9 @@ is called exactly as before.
 
 `cancel_requested()` (also accepted by `launch_continuation`) is forwarded to the
 runner, which polls it right after spawn and every `CANCEL_POLL_SECONDS` while it
-waits. When it returns true the runner's existing group cleanup terminates the
-sandbox and reports `ExecutionResult.status == "cancelled"`; the receipt is the
+waits. When it returns true while the sandbox still runs, the runner's existing
+group cleanup terminates it and reports `ExecutionResult.status == "cancelled"`
+(a sandbox that already exited keeps its natural outcome); the receipt is the
 launch receipt with status `cancelled` and no loop/graph trace. A child receipt
 claiming `cancelled` after a normal exit reconciles to `failed`: only supervision
 records cancellation. A cancelled loop's `supervision.json` fails `require_clean`,
