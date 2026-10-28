@@ -194,7 +194,7 @@ def verify_graph_trace(
     trace = receipt.graph_trace
     if trace is None:
         if (
-            receipt.status not in ("failed", "interrupted", "timed_out")
+            receipt.status not in ("failed", "interrupted", "timed_out", "cancelled")
             or receipt.native_output_paths
             or receipt.validation_passed is not None
         ):

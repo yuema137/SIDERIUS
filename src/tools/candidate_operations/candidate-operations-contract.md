@@ -5,7 +5,8 @@
 `tools.candidate_operations` exports `OperationStoreConfig`, `PrepareOperation`,
 `ReusablePrepareOperation`, `CandidateOperation`, discriminated `OperationSubmission`, `OperationHandle`,
 `OperationSnapshot`, `LogReadRequest`, `LogChunk`, `submit_operation`,
-`read_operation`, and `read_operation_log`. All models inherit strict frozen
+`read_operation`, `read_operation_log`, and operator cancel `request_cancel` /
+`CancelRequest` ([cancel](#cancel-an-active-candidate-operation)). All models inherit strict frozen
 extra-forbid `PreviewModel`; requests are revalidated from JSON at use. Native
 `CandidatePreparationRequest`/`CandidateRunRequest` and receipt schemas retain
 their existing owners. Submit/read imports do not compose tasks, load generated
@@ -25,7 +26,8 @@ credential values and never dispatch again.
 The CLI has `submit --store-config FILE --request FILE`, `status --store-config
 FILE --operation-id UUID`, and `log --store-config FILE --operation-id UUID
 --kind native|operation --offset N --limit N`, plus `review`, `review-resume` and
-`tokens` (native chains, below) and the authored-loop controls `stop-loop`,
+`tokens` (native chains, below), `cancel --store-config FILE --operation-id UUID`
+([cancel](#cancel-an-active-candidate-operation)), the authored-loop controls `stop-loop`,
 `pause-loop`, `review-loop-resume` and `write-loop-resume`
 ([authored-loop CLI](#control-an-authored-loop-from-code-or-the-cli)), and the
 host-ledger options `submit --host-ledger DIR --host-budget FILE` and
@@ -327,8 +329,94 @@ An identical old native request/receipt cannot satisfy a new admission: its
 native nonce differs. Under cross-store races the native exclusive directory
 claim still selects the winner; a loser cannot inherit the winner's receipt and
 remains unknown/nonreleasable. This is ownership binding, not global admission.
-No automatic retry, resume, cancellation, force-clear, attachment, queue, HTTP or
-cross-store resource/spend admission is supplied.
+No automatic retry, resume, force-clear, attachment, queue, HTTP or cross-store
+spend admission is supplied; cancellation is an explicit operator request
+([below](#cancel-an-active-candidate-operation)).
+
+## Cancel an active candidate operation
+
+`request_cancel(config, operation_id) -> CancelRequest` (CLI `cancel
+--store-config FILE --operation-id UUID`) stops one live `candidate` or
+`candidate_loop_resume` operation now, including a model call in progress. Other
+kinds refuse with `kind`: their children have no cancel probe. Owners:
+`cancel.py` (intent, probe, evidence rule), `workspace_sandbox.runner`
+(`cancel_requested` probe in the wait loop) and the existing
+`core.runtime_control.process_group` cleanup the runner already uses
+(`terminate_observed_group` in `run_observed`, which authored loops use;
+`terminate_remaining_group` in `run`, which other runs use). There is no second kill path.
+
+Sequence:
+
+1. Under the store lock the owner loads and revalidates the record, then returns an
+   existing `cancel.json` unchanged (idempotent; the first `requested_at` wins).
+2. Otherwise it reads `read_operation` and records only for a verified
+   `state == "active"` snapshot (live wrapper, no completion, records verified).
+   Refusals, none of which records anything: a native receipt or `operation_failed`
+   is `terminal`; `reason == "integrity_failure"` is `integrity` (a later intent
+   must never turn an unverified receipt, such as a forged `cancelled` one, into a
+   verified terminal); no `process.json` yet and no outcome is `starting` (the
+   launch window; retry shortly); any other wrapper that is not alive is
+   `not_running` (the child is gone; nothing to stop).
+3. It publishes write-once private `operations/<id>/cancel.json`
+   (`CancelRequest`: `operation_id`, `request_digest`, `requested_at`). The
+   acknowledgement is a request, not termination; no signal is sent by the caller.
+4. The operation child passes `cancel_probe(path, record)` to `launch_candidate` or
+   `launch_continuation`, which pass it to `run` / `run_observed`. The runner polls
+   it right after spawn and then every `CANCEL_POLL_SECONDS` (0.5 s). When it
+   fires while the sandbox is still running, the runner leaves its wait and its
+   existing `finally` terminates the sandbox session group (TERM, 1 s grace, KILL)
+   that this child created. Worst case from intent to KILL is about 0.5 s of
+   polling plus the 1 s grace. If the sandbox already exited on its own when the
+   probe fires (`process.poll()` is set), the run keeps its natural outcome. An
+   unreadable or mismatched marker raises inside the wait; the group is still
+   cleaned up and the receipt is `failed`.
+5. A cancelled wait reports `ExecutionResult.status == "cancelled"` (the actual
+   signal return code, not 124). `reconcile` copies the launch receipt with status
+   `cancelled`; it never reads `child.json`. For loops, `supervision.json` records
+   the cancelled execution, so `require_clean` refuses and the segment cannot be
+   resumed. The child publishes the ordinary `native` Completion with that receipt
+   digest.
+
+If the operation child is gone, nothing remains to terminate: the sandbox runs
+with `--die-with-parent`, so the submitter never signals a process it did not
+start. An intent recorded after the sandbox exited has no effect; the receipt keeps
+its natural status and the snapshot still reports `cancel_requested`.
+
+Readback and verification. `OperationSnapshot.cancel_requested` is `true` when a
+bound `cancel.json` exists. `OperationSnapshot.cancellable` (`cancel.cancellable`)
+is `true` exactly when a new request would be recorded: a cancellable kind, state
+`active` and no intent yet; the console offers Stop run only from it. Both are
+omitted when false, so existing snapshot bytes are unchanged unless a new cancel is
+possible (then `cancellable: true` is added). A cancelled run reads `state="completed"` with native receipt status
+`cancelled` (distinct from `failed`, `timed_out` and `interrupted`). A `cancelled`
+receipt without a recorded `CancelRequest` is an integrity failure (`unknown`), and
+`reconcile` turns a sandbox child that claims `cancelled` after a normal exit into
+`failed`: only supervision records cancellation. `verify_candidate_records`, the
+graph and the loop verifiers accept a trace-less `cancelled` terminal like
+`failed`/`timed_out`. Launch records, written native node records and the token
+ledger stay on disk and readable.
+
+Interactions. Host-ledger reservations are released only by the existing evidence
+rules: the sweep releases once the child and sandbox sessions have ended, which a
+completed cancellation produces; cancel itself never edits the ledger. Cancel is
+not a loop body outcome: the whole sandbox, including the loop runner, ends, so no
+declared stop condition evaluates a cancelled body. Cancel overrides a pending
+Pause or Stop; a later Pause or Stop marker cannot make a cancelled segment
+resumable. A paused segment refuses with `terminal`; cancel the live successor by its own
+UUID.
+
+Token accounting. Reported tokens include only usage recorded before termination.
+A provider call in flight when the group is killed may be billed by the provider
+yet never appear in `token_usage.jsonl`; cancellation does not estimate it.
+
+Witnesses: `tests/unit/tools/candidate_operations/test_cancel.py` (store, refusals,
+evidence rule, and an in-process child that terminates a real long-running group),
+`tests/unit/tools/workspace_sandbox/test_cancel_runner.py` (runner group
+termination, unchanged exit/timeout semantics, a late probe after a natural exit),
+`tests/unit/tools/candidate_worker/test_cancel.py` (verifiable, unresumable loop
+receipt; a child cannot claim cancellation) and
+`tests/unit/tools/candidate_worker/test_loop_resume.py::test_cancel_reaches_resumed_segment_and_reads_back_trace_less`
+(the probe reaches a resumed segment; its trace-less receipt reads back).
 
 ## Operation list
 

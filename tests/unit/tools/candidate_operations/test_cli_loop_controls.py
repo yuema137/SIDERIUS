@@ -57,14 +57,16 @@ def recorder(calls, name, result):
         ("stop-loop", "request_loop_stop"),
         ("pause-loop", "request_loop_pause"),
         ("review-loop-resume", "review_loop_resume"),
+        ("cancel", "request_cancel"),
     ],
 )
 def test_loop_command_reaches_its_own_owner(store, monkeypatch, capsys, command, owner):
     """Fails if a subcommand is routed to another control (e.g. pause-loop writes Stop,
-    which is run-wide and terminal) or to the native-chain review."""
+    which is run-wide and terminal; cancel reaching a boundary control would let a paid run
+    continue) or to the native-chain review."""
     config, path = store
     calls = []
-    for name in ("request_loop_stop", "request_loop_pause", "review_loop_resume"):
+    for name in ("request_loop_stop", "request_loop_pause", "review_loop_resume", "request_cancel"):
         result = SimpleNamespace(model_dump_json=lambda name=name: json.dumps({"owner": name}))
         monkeypatch.setattr(cli, name, recorder(calls, name, result))
     monkeypatch.setattr(cli, "review_native_chain_resume", recorder(calls, "native", None))

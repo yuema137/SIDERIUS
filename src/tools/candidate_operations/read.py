@@ -13,6 +13,7 @@ from tools.candidate_prepare.reusable_terminal import read_reusable_terminal
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.candidate_worker.records import verify_candidate_records
 
+from .cancel import CANCELLABLE_KINDS, cancellable, read_cancel, require_cancel_evidence
 from .expectation import compare_reusable_expectation
 from .files import read_bytes, read_model
 from .models import (
@@ -140,7 +141,10 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
             )
         if record.submission.kind in {"native_chain", "native_chain_resume"}:
             return read_native_chain_operation(record, process, completion)
+        cancel = read_cancel(path, record) if record.submission.kind in CANCELLABLE_KINDS else None
         native = native_receipt(record)
+        if native is not None and isinstance(native[0], CandidateRunReceipt):
+            require_cancel_evidence(native[0], cancel)
         if (
             completion is not None
             and completion.outcome == "native"
@@ -165,6 +169,7 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
                 state="completed",
                 process=process,
                 finishing=process.status == "alive",
+                cancel_requested=cancel is not None,
                 receipt_available=True,
                 successor_operation_id=successor,
                 receipt=native[0],
@@ -182,6 +187,7 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
                 else "unknown",
                 process=process,
                 reason=completion.reason,
+                cancel_requested=cancel is not None,
             )
         return OperationSnapshot(
             operation_id=operation_id,
@@ -190,6 +196,12 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
             observed_at=observed_at,
             state="active" if process.status == "alive" else "unknown",
             process=process,
+            cancel_requested=cancel is not None,
+            cancellable=cancellable(
+                record.submission.kind,
+                "active" if process.status == "alive" else "unknown",
+                cancel is not None,
+            ),
             reason="observed_wrapper" if process.status == "alive" else "outcome_unresolved",
         )
     except (OSError, ValueError, ValidationError):
