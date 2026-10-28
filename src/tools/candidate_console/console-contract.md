@@ -919,7 +919,8 @@ ready to run.` or the first closing reason (not connected, no project, source no
 open, project not runnable, not a reusable declaration, conflict, saving, unsaved
 edits). Those reasons explain a closed gate and never open it. The New run and
 Prepared run controllers keep their element IDs and behavior; their task loaders run
-on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
+on Workflow or Run entry. For a project that is not enabled for candidate runs,
+`#capture-status` keeps that reason; a task load finishing later does not replace it. `reusableCandidate.openPrepared` routes to `#run` instead of
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
 
