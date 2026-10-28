@@ -228,7 +228,7 @@ def test_an_unusable_settings_file_is_named_with_its_recovery(damage, workspace)
         assert refused.json()["error"]["code"] == "settings_unreadable"
         assert stat.S_IMODE(path.stat().st_mode) == 0o640
         return
-    assert "Save to replace it" in view["problem"]
+    assert "Save to replace it" in view["problem"] and "at schema_version" in view["problem"]
     replaced = _put(api, view["settings_sha256"], **choice)  # recovery: explicit Save under CAS
     assert replaced.status_code == 200, replaced.text
     assert replaced.json()["problem"] is None
