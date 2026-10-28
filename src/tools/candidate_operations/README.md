@@ -161,8 +161,9 @@ observed alive. `unknown` means evidence is insufficient; it blocks new admissio
 and is never automatically retried. A new operation cannot reuse an older
 operation's receipt at the same output path. Preserve the records for investigation.
 A completed operation also keeps its slot until its process is observed exited.
-There is no cancellation or queue. Captured native continuation is limited to the
-explicit route below.
+There is no queue. To stop a running candidate, see
+[Stop a running candidate now](#stop-a-running-candidate-now). Captured native
+continuation is limited to the explicit route below.
 
 Use `--kind operation` for wrapper output. Logs and full native receipts are
 trusted local data and may contain sensitive task or plugin output. Byte cursors
@@ -293,6 +294,29 @@ Missing counts stay unavailable. Token monitoring does not reread scientific
 result files or establish complete billing. The response identifies whether the
 run identity matches retained records or comes from the current run identity file.
 Professional, Assistant and GUI use this same reader.
+
+## Stop a running candidate now
+
+Use this when a candidate run is still `active` and you want it to stop at once,
+for example because it is spending paid API calls. It works for `candidate`
+operations and resumed loop segments.
+
+```sh
+.venv/bin/python -m tools.candidate_operations cancel \
+  --store-config store.json --operation-id RUNNING_OPERATION_UUID
+```
+
+The answer means the request was recorded; it is safe to run the command again.
+Within about a second the run's sandbox is shut down, including a model call in
+progress. Check `status` until `receipt.status` is `cancelled`. Work done so far
+stays in the run workspace, and the log and reported tokens stay readable. A
+call that was in flight may still be billed by the provider without appearing in
+the token report. A cancelled loop cannot be resumed; use `pause-loop` instead if
+you want to continue later.
+
+If the run already finished, the command refuses with `terminal` and changes
+nothing. The [operations contract](candidate-operations-contract.md#cancel-an-active-candidate-operation)
+defines the full rules.
 
 ## Stop, pause or resume a research loop
 

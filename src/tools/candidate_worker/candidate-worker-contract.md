@@ -1,7 +1,7 @@
 # Native candidate execution contract
 
 `CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None,
-on_sandbox_spawn=None)` are the common JSON/Python boundary.
+on_sandbox_spawn=None, cancel_requested=None)` are the common JSON/Python boundary.
 The CLI decodes the same request and calls that function. The parent imports
 inert declaration/preview/routing schemas and public pure evidence projections;
 it never composes tasks, executes task/generated plugins or constructs agents/providers. `child` verifies captured inputs, binds generated
@@ -21,6 +21,17 @@ runner's cleanup `try` (an observer exception still terminates and reaps the
 sandbox). The host reservation ledger uses it to publish the sandbox identity
 (candidate operations contract, "Host reservation ledger"). Omitted, the runner
 is called exactly as before.
+
+`cancel_requested()` (also accepted by `launch_continuation`) is forwarded to the
+runner, which polls it right after spawn and every `CANCEL_POLL_SECONDS` while it
+waits. When it returns true the runner's existing group cleanup terminates the
+sandbox and reports `ExecutionResult.status == "cancelled"`; the receipt is the
+launch receipt with status `cancelled` and no loop/graph trace. A child receipt
+claiming `cancelled` after a normal exit reconciles to `failed`: only supervision
+records cancellation. A cancelled loop's `supervision.json` fails `require_clean`,
+so it is never resumable. Omitted, the runner is called exactly as before. The
+operator route is the candidate operations contract, "Cancel an active candidate
+operation".
 
 ## Selected inputs and task authority
 
@@ -159,8 +170,8 @@ they do not qualify fresh end-to-end reuse. There is no library promotion.
 The child writes `child.json` only after native validation completes. The parent
 reconciles the sandbox return code/status, immutable launch identity, validation
 status and managed native record paths before writing `receipt.json`. Timeout,
-process failure, interruption and absent/malformed/inconsistent child results
-cannot become validation success. Partial records remain inspectable.
+process failure, interruption, operator cancellation and absent/malformed/inconsistent
+child results cannot become validation success. Partial records remain inspectable.
 
 The receipt is an execution index with task fingerprint, candidate/node IDs,
 storage/output paths, selected constructor routes, log and usage-ledger paths.

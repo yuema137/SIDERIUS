@@ -19,6 +19,7 @@ from tools.candidate_operations import (
     read_operation_log,
     read_operation_tokens,
     read_prepared_candidate,
+    request_cancel,
     request_loop_pause,
     request_loop_stop,
     review_loop_resume,
@@ -44,6 +45,7 @@ from .models import (
     LoopResumeSelection,
     LoopStatusView,
     LoopStopAcknowledgement,
+    OperationCancelAcknowledgement,
     PreparedReview,
     PreparedSelection,
     PrepareSelection,
@@ -230,6 +232,11 @@ class CandidateConsole:
             else None,
             loop=loop_status(self.config.operation_store, snapshot),
         )
+
+    def cancel_operation(self, operation_id: UUID) -> OperationCancelAcknowledgement:
+        """Record cancel for a live candidate; acknowledgement is not termination."""
+        request_cancel(self.config.operation_store, operation_id)
+        return OperationCancelAcknowledgement(operation_id=operation_id)
 
     def request_loop_stop(self, operation_id: UUID) -> LoopStopAcknowledgement:
         """Record graceful Stop; acknowledgement is not termination (read status for that)."""

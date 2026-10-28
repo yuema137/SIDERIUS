@@ -421,6 +421,46 @@ its per-body results once completed. A continued predecessor shows "Continued by
 projections in `candidate_worker/test_loop_resume.py` (real two-segment store), and
 `tests/browser/loop_controls.mjs` (stubbed API).
 
+## Stop run (operator cancel)
+
+`CandidateConsole.cancel_operation(UUID)` delegates once to
+`candidate_operations.request_cancel`, which owns kind/terminal/liveness admission,
+idempotency, the write-once `cancel.json` intent and the child-enforced group
+termination ([operations contract](../candidate_operations/candidate-operations-contract.md#cancel-an-active-candidate-operation)).
+HTTP POST `/api/operations/{UUID}/cancel` passes the ordinary mutation boundary
+and accepts only the empty JSON object (`OperationCancelSelection`). Success returns
+`OperationCancelAcknowledgement` `{"operation_id": UUID, "outcome": "requested"}`:
+recorded, never stopped. A repeated POST replays the first request and returns 200
+even after the run became terminal. Refusals: unknown operation 404; `kind`
+(not a candidate operation), `terminal` (already finished; nothing stopped) and
+`not_running` (not confirmed running) 409 with route-local fixed messages in
+`OPERATION_CANCEL_REFUSALS`; `integrity` and others 409 with the generic message.
+Native detail and paths are never echoed.
+
+`StatusView.cancel_requested` mirrors `OperationSnapshot.cancel_requested` and is
+omitted when false, so existing status bytes are unchanged.
+
+Browser: `operation-stop.js` owns `window.operationStop.mount(prefix)`, which
+binds `#<prefix>-group`, `#<prefix>-button` and `#<prefix>-status` and returns
+`render(status | null)`. It is mounted twice and draws only from statuses the page
+already reads (no extra polling): Slow control (`operation-stop`, every monitor
+poll) and the Run page retained candidate intent (`capture-stop`, on Check status
+or launch). **Stop run** is shown only for kind `candidate` or
+`candidate_loop_resume`, state `active`, no receipt and no recorded or acknowledged
+cancel. A click opens `window.confirm("Stop this run? Work done so far is kept.")`;
+declining sends nothing. Accepting disables the button for the pending request, so
+one click sequence issues one POST. Status text: "Sending Stop…", then "Stopping
+the run…" until a receipt; native `cancelled` reads "Run stopped. Work done so far
+is kept."; a receipt with another status after a request reads "Stop was
+requested, but the run finished first."; a refusal reads "Stop was not recorded:
+<message>" (a network failure adds that retrying is safe). State resets when another
+operation is selected. While `cancel_requested` is true the loop **Stop at next
+boundary** and **Pause at next boundary** controls are hidden, and a `cancelled`
+loop receipt reads "Research loop stopped by you before it finished. Work done so
+far is kept; this run cannot be resumed." Witnesses:
+`tests/unit/tools/candidate_console/test_operation_cancel.py` and
+`tests/browser/operation_stop.mjs` (stubbed API).
+
 ## Recorded candidate examples
 
 `ConsoleConfig.recorded_examples` defaults to empty. The authenticated

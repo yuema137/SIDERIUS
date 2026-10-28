@@ -83,6 +83,13 @@ even when using the default models.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
    resumed as a new segment of the same run, which shows its own results.
    A loop ended early by a declared stop condition says why, in plain words.
+   To stop a running candidate now, press **Stop run** and confirm "Stop this
+   run? Work done so far is kept." The run's sandbox is shut down within about a
+   second, including a model call in progress. The page says "Stopping the run…"
+   until the native receipt reads `cancelled`, then "Run stopped. Work done so far
+   is kept." A call that was in flight may still be billed without appearing in
+   the token report, and a stopped loop cannot be resumed. The Run page shows the
+   same button for a retained candidate whose last checked status is active.
    Configured **Recorded examples** appear in Slow control. They show verified
    proposal, implementation, validation and reported-token evidence only; they
    are not live operations, training results, scientific scores or billing

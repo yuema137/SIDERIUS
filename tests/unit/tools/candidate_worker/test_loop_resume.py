@@ -41,7 +41,8 @@ def process_segments(monkeypatch):
 
     operations = []
 
-    def observed(profile, argv):
+    def observed(profile, argv, **_supervision):
+        # The operation child now always passes a cancel probe; no cancel is requested here.
         pid = os.fork()
         if pid == 0:
             try:
