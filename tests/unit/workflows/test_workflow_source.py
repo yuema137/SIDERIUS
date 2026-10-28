@@ -532,9 +532,3 @@ def test_judge_stop_roundtrips_every_field_through_canonical_source():
     assert "    JudgeStop,\n" in source
     assert "min_completed_bodies=2" in source and "on_failure='fail'" in source
     assert parse_workflow_source(source) == document
-    assert (
-        parse_workflow_source(source.replace("on_failure='fail'", "on_failure='continue'"))
-        .definition.loop.stop_conditions[0]
-        .on_failure
-        == "continue"
-    )

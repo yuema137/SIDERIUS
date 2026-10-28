@@ -239,6 +239,8 @@ def test_recorded_verdict_decides_and_an_unrecorded_one_fails_closed():
 
 
 def test_evaluator_module_never_imports_a_provider_or_the_judge_effect():
+    """Fails if the pure evaluator gains a provider or judge-call import: readback runs it
+    at every boundary, and an effect there could re-call the LLM on verification."""
     import tools.candidate_worker.loop_stop as module
 
     tree = ast.parse(Path(module.__file__).read_text())
