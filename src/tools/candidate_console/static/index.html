@@ -288,8 +288,8 @@
     <p id="settings-host" class="muted"></p>
     <p id="settings-status" role="status">Connect to load settings.</p>
     <form id="settings-form" hidden>
-      <fieldset><legend>Models</legend><p class="muted">Used by tasks whose console.json entry leaves out <code>llm_config_file</code>.</p><div id="settings-models"></div></fieldset>
-      <fieldset><legend>Advice</legend><p class="muted">Not applied to runs from here; workflows record their own advice.</p><div id="settings-advice"></div></fieldset>
+      <fieldset><legend>Models</legend><p class="muted">Used by tasks whose console.json entry leaves out <code>llm_config_file</code>.</p><div id="settings-models"></div><label for="settings-import-llm">Import from this computer…</label><input id="settings-import-llm" type="file" accept=".json,application/json"></fieldset>
+      <fieldset><legend>Advice</legend><p class="muted">Not applied to runs from here; workflows record their own advice.</p><div id="settings-advice"></div><label for="settings-import-advice">Import from this computer…</label><input id="settings-import-advice" type="file" accept=".json,application/json"></fieldset>
       <fieldset><legend>Data folder</legend><div id="settings-data"></div></fieldset>
       <div class="actions"><button type="submit" id="settings-save">Save settings</button><button type="button" id="settings-reload" class="secondary">Reload</button></div>
     </form>

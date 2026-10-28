@@ -27,8 +27,8 @@ function settingsView({writable = true, settings = pending, sha = 'a'.repeat(64)
       {name: 'llm_profile', task_id: 'synthetic', origin: 'global_settings', label: DEFAULT.name, effective: '/srv/ws/library/llm/' + DEFAULT.name},
       {name: 'data_root', task_id: 'synthetic', origin: 'workspace_layout', label: 'Workspace layout', effective: '/srv/ws/data/synthetic'},
     ],
-    llm_profiles: [{label: DEFAULT.name, ref: DEFAULT}, {label: 'Lab profile', ref: {source: 'allowlist', id: 'lab'}}],
-    advice_files: [{label: 'Shared advice', ref: {source: 'allowlist', id: 'notes'}}],
+    llm_profiles: [{label: DEFAULT.name, ref: DEFAULT, required_names: ['OPENAI_API_KEY'], routes: [{name: 'propose', applicability: 'conditional', transport: {provider: 'openai', model_id: 'gpt-x'}}]}, {label: 'Lab profile', ref: {source: 'allowlist', id: 'lab'}, required_names: [], routes: []}],
+    advice_files: [{label: 'Shared advice', ref: {source: 'allowlist', id: 'notes'}, present_keys: ['propose', 'mindset'], unsupported_keys: ['mindset']}],
     data_roots: [{id: 'lab', label: 'Lab disk'}, {id: 'workspace', label: 'Workspace data'}],
     tasks: [{task_id: 'synthetic', label: 'Synthetic task', data_root_origin: 'workspace_layout'}],
     workspace_root: '/srv/ws',
@@ -46,7 +46,7 @@ try {
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   const page = await browser.newPage({viewport: {width: 1280, height: 900}}), faults = [], puts = [];
   page.on('pageerror', error => faults.push(error.message));
-  let view = settingsView(), putReply = null;
+  let view = settingsView(), putReply = null; const uploads = [];
   await page.route('**/api/settings**', async route => {
     const request = route.request(), url = new URL(request.url());
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
@@ -56,6 +56,11 @@ try {
       const subpath = url.searchParams.get('subpath');
       const entries = subpath === '' ? [{name: 'runs', kind: 'directory'}, {name: 'elsewhere', kind: 'link'}] : [{name: 'a', kind: 'directory'}];
       return route.fulfill({json: {entries, incomplete: false}});
+    }
+    if (url.pathname === '/api/settings/library') {
+      assert.equal(request.method(), 'POST');
+      uploads.push(JSON.parse(request.postData()));
+      return route.fulfill({json: {source: 'library', name: 'notes-0123456789ab.json', sha256: '0123456789ab' + '0'.repeat(52)}});
     }
     if (request.method() === 'PUT') {
       assert.equal(request.headers()['content-type'], 'application/json');
@@ -71,6 +76,14 @@ try {
   assert.equal(await page.locator('#settings-save').isDisabled(), true, 'Nothing to save before a change');
   assert.match(await page.locator('#settings-workspace-problems').textContent(), /data\/synthetic: missing \(put the task data here\)/);
   assert.match(await page.locator('#settings-rows').textContent(), /Workspace folder/);
+
+  // Cards show owner-derived key names and routes; unusable advice keys are marked.
+  assert.match(await page.locator('#settings-models').textContent(), /Needs keys: OPENAI_API_KEY/);
+  assert.match(await page.locator('#settings-advice').textContent(), /Workflows cannot use mindset yet/);
+  // Import sends the file's text to the server library; no path leaves the browser.
+  await page.locator('#settings-import-advice').setInputFiles({name: 'notes.json', mimeType: 'application/json', buffer: Buffer.from('{"propose": "x"}')});
+  await page.locator('#settings-status').filter({hasText: 'Imported as notes-0123456789ab.json'}).waitFor();
+  assert.deepEqual(uploads, [{kind: 'advice', label: 'notes', content: '{"propose": "x"}'}]);
 
   // Choose an allowlisted model and a folder under an allowlisted root; links are not selectable.
   await page.getByLabel('Lab profile').check();
@@ -105,5 +118,5 @@ try {
   await page.setViewportSize({width: 390, height: 844});
   if (process.env.CONSOLE_SCREENSHOT_DIR) await page.screenshot({path: join(process.env.CONSOLE_SCREENSHOT_DIR, 'settings-mobile.png'), fullPage: true});
   assert.deepEqual(faults, []);
-  console.log('PASS: settings view, allowlist choice, no-follow folder picking, CAS PUT with refs only, restart notice, stale refusal and read-only mode.');
+  console.log('PASS: settings view, profile/advice cards, advice import, allowlist choice, no-follow folder picking, CAS PUT with refs only, restart notice, stale refusal and read-only mode.');
 } finally { if (browser) await browser.close(); server.kill('SIGTERM'); lines.close(); }
