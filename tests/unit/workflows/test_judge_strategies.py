@@ -313,6 +313,26 @@ def test_decimal_weights_are_exact_for_ties_thresholds_and_the_scale_bound(
     assert sorted(kept) == [0, 1, 2]
 
 
+def test_order_uses_the_exact_mean_when_display_floats_collide(tmp_path):
+    """Defect: ranking sorts on the display float, so distinct exact means that round to
+    the same float fall back to input order. Weights (1.0, 1e-16): (1,1) is exactly 1,
+    (1,2) is 10000000000000002/10000000000000001; both display as 1.0."""
+    rubric = decimal_rubric(1.0, 1e-16)
+    table = {
+        "reviews:0": {"novelty": [1], "rigor": [1]},
+        "reviews:1": {"novelty": [1], "rigor": [2]},
+    }
+    value = invocation(tmp_path, n=2, strategy=strategy(rubric=rubric_ref(rubric)), rubric=rubric)
+    ranking = run(value, StubBridge(table), tmp_path).outcome.ranking
+    assert ranking is not None
+    assert ranking.order == ("reviews:1", "reviews:0")
+    assert [score.weighted_mean for score in ranking.scores] == [1.0, 1.0]
+    assert [score.weighted_mean_exact for score in ranking.scores] == [
+        "10000000000000002/10000000000000001",
+        "1",
+    ]
+
+
 def test_llm_supplied_total_is_refused_not_used(tmp_path):
     """Defect: a verdict carrying its own total is accepted and could replace code arithmetic."""
 
