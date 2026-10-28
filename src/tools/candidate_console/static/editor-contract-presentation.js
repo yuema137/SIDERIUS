@@ -113,7 +113,8 @@
       const row = text('li', '', list); row.dataset.contract = id;
       // The description is the row tooltip: rows stay one compact line each.
       const token = describe(id); row.title = token.description;
-      swatch(row, id); text('span', token.name, row, 'circuit-contract-legend-name'); text('code', id, row);
+      swatch(row, id); text('span', token.name, row, 'circuit-contract-legend-name');
+      text('code', id, row).dataset.uiFlag = 'advanced'; // raw id: Settings › Show advanced tools
     }
     parent.append(box); return box;
   }
@@ -131,7 +132,7 @@
     const mapping = rows.find(item => item.protocol_mapping)?.protocol_mapping;
     if (!mapping) return null;
     learn(mapping.output_contract);
-    const box = document.createElement('div'); box.className = 'circuit-adapter';
+    const box = document.createElement('div'); box.className = 'circuit-adapter'; box.dataset.uiFlag = 'advanced';
     const chip = text('button', '', box, 'circuit-adapter-chip'); chip.type = 'button';
     chip.id = `circuit-adapter-${nodeId}`; chip.style.setProperty('--contract-colour', colourVar(mapping.output_contract.id));
     swatch(chip, mapping.output_contract.id);

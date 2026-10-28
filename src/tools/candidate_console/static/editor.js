@@ -366,29 +366,13 @@
       const heading = node('div', '', $('inspector'));
       const capabilityLabel = window.editorCapabilityPresentation.append(heading, item.capability, item.id, 'inspector-capability-heading');
       heading.setAttribute('aria-label', `${capabilityLabel}, instance ${item.id}`);
-      // Human advice is the first input of the inspector (editor-advice.js renders it).
+      // Order: advice first (editor-advice.js), then inputs, then advanced detail and actions.
       window.editorAdvice?.render($('inspector'), {document: graph, item, inventory, enabled: canEditCircuit()},
         (mutate, label) => { if (graph === capturedGraph) { mutate(graph); changed(label, `advice:${item.id}`); } });
-      window.editorNodePalette?.inspectorActions($('inspector'), item.id, {remove: removeNodes, enabled: canEditCircuit()});
-      const mapping = node('details', '', $('inspector')); mapping.className = 'inspector-mapping';
-      node('summary', 'Mapping details', mapping);
-      const mappingList = node('dl', '', mapping); mappingList.className = 'inspector-mapping-list';
-      node('dt', 'Capability ID', mappingList); node('dd', item.capability, mappingList);
-      node('dt', 'Instance ID', mappingList); node('dd', item.id, mappingList);
-      if (item.request.kind === 'protocol') { node('dt', 'Protocol', mappingList); node('dd', item.request.protocol, mappingList); }
-      const protocolMapping = inventory.find(entry => entry.node === item.id)?.protocol_mapping;
-      if (protocolMapping) {
-        node('dt', 'Protocol owner', mappingList); node('dd', protocolMapping.owner, mappingList);
-        node('dt', 'Mapped input contract', mappingList); node('dd', protocolMapping.output_contract.id, mappingList);
-      }
-      for (const option of inventory.filter(entry => entry.node === item.id)) {
-        node('dt', option.argument || 'Request', mappingList);
-        node('dd', option.source ? (option.source.kind === 'external' ? `external:${option.source.binding}` : `${option.source.node}.${option.source.port}`) : 'unbound', mappingList);
-      }
       node('h3', 'Inputs', $('inspector'));
       for (const option of inventory.filter(entry => entry.node === item.id)) {
         const state = option.bound ? 'bound' : option.required ? 'Required · unbound' : 'Optional · unbound';
-        const label = node('label', `${option.argument || 'Request'} · ${option.socket_contract.id} · ${state}`, $('inspector'));
+        const label = node('label', `${option.argument || 'Request'} · ${window.editorContractPresentation.describe(option.socket_contract).name} · ${state}`, $('inspector'));
         const select = document.createElement('select'); label.append(select);
         label.classList.toggle('field-problem', option.required && !option.bound);
         if (!option.bound) {
@@ -419,6 +403,23 @@
       const loop = graph.definition.loop;
       if (loop && [loop.feedback.source.node, loop.feedback.target].includes(item.id)) window.editorNodeParameters.loopPointer($('inspector'), loop, item.id, () => { $('loop').scrollIntoView({block: 'start'}); $('loop').querySelector('input, button')?.focus(); });
       if (item.capability === 'tuning') window.editorNodeParameters.modelOwner($('inspector'), graph.definition.task, graph.task_binding);
+      // Advanced (Settings) protocol detail, then node actions, after advice and inputs.
+      const mapping = node('details', '', $('inspector')); mapping.className = 'inspector-mapping'; mapping.dataset.uiFlag = 'advanced';
+      node('summary', 'Mapping details', mapping);
+      const mappingList = node('dl', '', mapping); mappingList.className = 'inspector-mapping-list';
+      node('dt', 'Capability ID', mappingList); node('dd', item.capability, mappingList);
+      node('dt', 'Instance ID', mappingList); node('dd', item.id, mappingList);
+      if (item.request.kind === 'protocol') { node('dt', 'Protocol', mappingList); node('dd', item.request.protocol, mappingList); }
+      const protocolMapping = inventory.find(entry => entry.node === item.id)?.protocol_mapping;
+      if (protocolMapping) {
+        node('dt', 'Protocol owner', mappingList); node('dd', protocolMapping.owner, mappingList);
+        node('dt', 'Mapped input contract', mappingList); node('dd', protocolMapping.output_contract.id, mappingList);
+      }
+      for (const option of inventory.filter(entry => entry.node === item.id)) {
+        node('dt', option.argument || 'Request', mappingList);
+        node('dd', option.source ? (option.source.kind === 'external' ? `external:${option.source.binding}` : `${option.source.node}.${option.source.port}`) : 'unbound', mappingList);
+      }
+      window.editorNodePalette?.inspectorActions($('inspector'), item.id, {remove: removeNodes, enabled: canEditCircuit()});
     }
     for (const key of Object.keys(graph.definition.task)) field($('references'), `task.${key}`, graph.definition.task[key], value => { graph.definition.task[key] = value; });
     for (const external of [...graph.definition.externals, ...newExternals]) {

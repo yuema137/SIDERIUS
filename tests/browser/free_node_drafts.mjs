@@ -74,7 +74,7 @@ try {
   await page.locator('#circuit-node-implementation').click();
   const help = page.locator('.external-input-help[data-socket="implementation.storage"]');
   await help.waitFor();
-  assert.match(await help.textContent(), /^storage: .+/);
+  assert.match(await help.textContent(), /^Storage folder: .+/, 'the contract_names name, not the id');
   const form = page.locator('.external-input-create[data-socket="implementation.storage"]');
   await form.locator('summary').click();
   assert.equal(await form.locator('input[name="external-id"]').inputValue(), 'implementation_storage');

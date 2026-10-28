@@ -103,6 +103,7 @@
   // Model hyperparameters belong to the task manifest; the editor names the owner only.
   function renderModelOwner(parent, task, binding) {
     const group = node('fieldset', '', parent, 'model-hyperparameters'); group.id = 'editor-model-hyperparameters';
+    group.dataset.uiFlag = 'advanced'; // task-manifest detail: Settings › Show advanced tools
     node('legend', 'Model hyperparameters (read-only)', group);
     node('p', 'Model hyperparameters are owned by the task manifest, not by this workflow. Edit them in the task package.', group);
     const list = node('dl', '', group);

@@ -150,7 +150,7 @@
     const dialog = element('dialog', '', document.body, 'template-gallery'); dialog.id = 'editor-template-gallery';
     dialog.setAttribute('aria-labelledby', 'editor-template-title');
     const title = element('h2', 'Start from a template', dialog); title.id = 'editor-template-title';
-    element('p', 'Templates are workflow shapes, not tasks: they never choose a task, data or model. Start from Proposal; Interpretation adds the research loop.', dialog, 'muted');
+    element('p', `Templates are workflow shapes, not tasks: they never choose a task, data or model. Start from ${label('proposal')}; ${label('interpretation')} adds the research loop.`, dialog, 'muted');
     const body = element('div', '', dialog, 'template-body');
     const list = element('div', '', body, 'template-list'); list.id = 'editor-template-list';
     const detail = element('div', '', body, 'template-detail'); detail.id = 'editor-template-detail';

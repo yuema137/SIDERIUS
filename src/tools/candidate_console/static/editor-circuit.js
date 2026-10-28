@@ -312,7 +312,8 @@
       const missing = value.inventory.filter(item => item.node === node.id && item.required && !item.bound).length;
       card.classList.toggle('has-required-unbound', missing > 0);
       if (missing) element('span', `${missing} required input${missing === 1 ? '' : 's'} missing`, card, 'circuit-problem-badge').dataset.node = node.id;
-      const mapping = element('details', '', card, 'circuit-mapping');
+      // Advanced detail (ui-settings.js): hidden for beginners, so a flag change re-renders.
+      const mapping = element('details', '', card, 'circuit-mapping'); mapping.dataset.uiFlag = 'advanced';
       mapping.addEventListener('toggle', draw);
       element('summary', 'Mapping details', mapping);
       const mappingList = element('dl', '', mapping, 'circuit-mapping-list');
@@ -404,6 +405,8 @@
     path.setAttribute('d', geometry.path([start, {x: (start.x + end.x) / 2, y: start.y}, {x: (start.x + end.x) / 2, y: end.y}, end])); svg.append(path);
   });
   new ResizeObserver(() => { if (projection?.document) draw(); }).observe(document.body);
+  // Settings flags change card content (mapping details, chips): re-place the cards.
+  window.addEventListener('ui-settings-change', () => { if (host && projection) render(host, projection, actions); });
   // A canvas rendered while hidden (zero width) fits once it is first laid out.
   const viewObserver = new ResizeObserver(() => {
     if (!projection?.document) return;

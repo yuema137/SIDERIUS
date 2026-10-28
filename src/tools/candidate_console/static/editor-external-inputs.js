@@ -41,7 +41,7 @@
     const socket = `${nodeId}.${option.argument || 'request'}`;
     const id = suggestion(`${nodeId}_${option.argument || 'input'}`, context.taken);
     const choose = option.choices.some(choice => choice.source.kind === 'external') ? 'Choose an existing input above, or create one.' : 'No input of this kind exists yet: create one.';
-    const help = element('p', `${option.socket_contract.id}: ${entry.summary} ${choose}`, parent, 'external-input-help');
+    const help = element('p', `${window.editorContractPresentation.describe(option.socket_contract).name}: ${entry.summary} ${choose}`, parent, 'external-input-help');
     help.dataset.socket = socket;
     const form = element('details', '', parent, 'external-input-create'); form.dataset.socket = socket;
     element('summary', 'Create external input…', form);

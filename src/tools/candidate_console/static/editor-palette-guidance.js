@@ -5,9 +5,9 @@
  * argument's `produced_by`). Nothing here decides whether a connection is allowed:
  * the canvas highlight marks ports whose server contract id equals one the entry
  * declares, and binding still goes through the server's port_inventory choices.
- * Contract type names are the server's (`contract.name`, `contract.kind` when the
- * catalog projection carries them); otherwise the contract id is shown. Colour and
- * shape tokens come from editor-contract-presentation.js keyed on the id. */
+ * Contract type names, colour and shape come from editor-contract-presentation.js
+ * (the browser side of the server name owner, workflows/definition/contract_names.py);
+ * `contract.kind`, when present, names an input's origin. */
 (() => {
   'use strict';
   // Display names from editor-capability-presentation.js (their single owner).
@@ -21,7 +21,8 @@
   const list = names => names.map(capabilityLabel).join(', ');
   const routeText = entry => entry.protocol ? `Fed by ${list(sources(entry)) || entry.protocol}` : 'Starts from an external input';
   const sources = entry => [...new Set(entry.arguments.flatMap(item => item.produced_by))];
-  const typeName = contract => contract.name || contract.id;
+  // One name owner: editor-contract-presentation.js learns the server name from the object.
+  const typeName = contract => contracts().describe(contract).name;
   // Origin of an input: the server's contract kind when present, else produced_by.
   const origin = (contract, producedBy) => producedBy.length ? `from ${list(producedBy)}`
     : contract.kind === 'setting' ? 'setting' : 'external input';

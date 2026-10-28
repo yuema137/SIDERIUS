@@ -518,9 +518,10 @@ External source chips remain inspector bindings. Omitted optional ports and argu
 creation/deletion are not graphical controls in this slice.
 
 The node palette (`editor-palette.js`, `editor-palette.css`; presentation only,
-`editor.js` owns the draft) is a sticky side rail left of the canvas
-(`.editor-canvas-layout`; own scroll, at most the viewport height) so a drag
-source and the canvas share the screen; under 900px it collapses to a drawer opened
+`editor.js` owns the draft) is the docked rail of the editor workspace
+(`.editor-workspace` in `editor.css`: `--rail-width`, own scroll, sized with the
+`theme.css` layout tokens) so a drag source and the canvas share the screen; under
+900px it collapses to a drawer opened
 by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
 Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
 drag payload. It lists
@@ -536,9 +537,9 @@ has no card) with a "How it works" disclosure naming `guide.context`. Expanding 
 server description, the sent type, connects-from/to and one addable `.palette-entry`
 per route with contract chips: "→ <name>" for each received (required) type and
 "<name> →" for the sent type (`data-direction` receives/sends, accessible text
-"receives"/"sends"; optional ones counted). Type names are the server contract
-`name` when the catalog projection carries it, else the contract id; colour/shape
-come from `editor-contract-presentation.js`. Hover or keyboard focus on a route shows
+"receives"/"sends"; optional ones counted). Type names, colour and shape come from
+`editor-contract-presentation.js` `describe()`, which learns the server contract `name`
+(owner `workflows/definition/contract_names.py`) from the catalog contract objects. Hover or keyboard focus on a route shows
 one shared `#palette-popover` (`role=tooltip`, `aria-describedby`; Escape, blur or
 leaving dismisses it): description, request route, every received argument with
 type, required/optional and origin (`produced_by` capabilities or external input),
@@ -574,7 +575,8 @@ Source edit).
 
 Inspector input creation (`editor-external-inputs.js`, `editor-external-inputs.css`).
 Under each unbound socket whose contract `GET /api/editor/external-inputs` lists,
-Selection shows one line: the contract id, the server `summary`, and whether
+Selection shows one line: the contract name (`editorContractPresentation.describe`,
+the `contract_names.py` owner), the server `summary`, and whether
 existing inputs of that contract are offered in the select above. A collapsed
 "Create external input…" form asks for an input id (suggested `<node>_<argument>`,
 de-duplicated), and for a reusable (schema 2) document with a `managed` contract,
@@ -1036,9 +1038,14 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Workflow | Canvas, toolbar, empty-canvas start state | Beginner | shown | Build and connect |
 | Workflow | Canvas controls help (keyboard-move hints) | Advanced | gated | Long control reference; the tour covers first use |
 | Workflow | Connection mappings list | Advanced | gated | Protocol detail per binding |
-| Workflow | Contract legend details, Mapping chips on cards | Advanced | hook (s1/s10 canvas) | Raw contract ids and field mapping |
-| Workflow | Selection inspector (inputs, defaults, advice) | Beginner | shown | Configure the selected module |
-| Workflow | Inspector mapping details, model-hyperparameter owner link | Advanced | hook (s8 inspector) | Protocol / task-manifest detail |
+| Workflow | Template strip (Start from a template) and gallery | Beginner | shown | One-click start from a simple closed loop |
+| Workflow | Module rail start guide, stage stack, row details, hover/focus popover | Beginner | shown | Where to start and what connects to what |
+| Workflow | Contract legend (swatch + name, arrow key) | Beginner | shown | Same name = connectable |
+| Workflow | Raw contract ids in the legend | Advanced | gated (`editor-contract-presentation.js`) | Catalog identity, not needed to connect |
+| Workflow | Mapping chips ("adapter") on cards, card Mapping details | Advanced | gated (`editor-contract-presentation.js`, `editor-circuit.js`; flag change re-renders the canvas) | Protocol field mapping |
+| Workflow | Selection inspector, in order: advice (`editor-advice.js`), inputs with contract names, "Create external input" (`editor-external-inputs.js`), training and loop settings | Beginner | shown | Configure the selected module |
+| Workflow | Inspector Mapping details, model-hyperparameter owner (`editor-node-parameters.js`) | Advanced | gated (`editor.js`, `editor-node-parameters.js`) | Protocol / task-manifest detail |
+| Workflow | Remove capability (Selection, after the sections above) | Beginner | shown | Undo a placement |
 | Workflow | Research loop panel | Beginner | shown | Iteration limit and stop conditions |
 | Workflow | References (task / external locations) | Advanced | gated | Paths owned by the task configuration |
 | Workflow | Advanced source (Python editor) | Advanced | gated | Direct source editing |
@@ -1062,7 +1069,9 @@ Not yet adopted from the spec (follow-up, not in this change): Lucide icon sprit
 (gear/help/step/empty-state icons use text), Help menu (§7.4 shows only the tour),
 connection chip in the header (L6), moving project/task into an inspector Workflow tab
 (L5), review dialog (§9), tour backdrop (omitted so the page never blocks), canvas
-internals below 12 px and inspector internals (s1/s8/s9/s10 conformance pass).
+internals below 12 px, and the screenshot-review items for the Workflow page bar
+(header connection chip, compact project/task selector, icon undo/redo, Review folded
+into Save, loop panel in the inspector, Python diff as Advanced).
 
 Navigation qualification: `tests/browser/console_navigation.mjs` uses the same
 explicit environment as the editor gate. Its temporary synthetic observations

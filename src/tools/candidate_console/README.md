@@ -67,7 +67,9 @@ even when using the default models.
    **Help** in the header reopens the tour at any time.
    Tools a first-time user does not need stay hidden until you turn them on in
    **Settings** (header): **Show advanced tools** adds the source editor,
-   references, version history, Refresh from disk, native chains, configured-task
+   references, version history, Refresh from disk, protocol mapping details and
+   raw contract ids on the canvas and in Selection, the model-hyperparameter
+   owner, native chains, configured-task
    preparation, the operation-UUID form and recorded examples; **Show developer
    details** adds operation facts, raw token tables, captured resources and save
    internals. The browser remembers both choices.
