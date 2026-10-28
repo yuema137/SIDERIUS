@@ -505,7 +505,14 @@ the persistent shell and memory-only session with the operation monitor; its
 source/review policy remains owned by `editor.js`. `GET /api/editor/projects`
 returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
 `POST /api/editor/{project_id}/review` validates `ReviewRequest`; `POST
-/api/editor/{project_id}/save` validates `SaveRequest`. The existing console
+/api/editor/{project_id}/save` validates `SaveRequest`. GET
+`/api/editor/{project_id}/versions` returns `VersionList` and GET
+`/versions/{index}?sha256=` returns read-only `VersionDetail` (see named versions
+in the authoring contract); `editor-versions.js` renders the Save name field and
+Version history panel and owns no record policy. Save error `version_record`
+means nothing was written (the reviewed proposal is retained); the distinct
+`version_record_not_updated` means the source was saved but its record was not, so
+`editor.js` adopts the returned saved `current` view. The existing console
 Bearer token, origin, host and 256 KiB wire-body admission apply to every API
 route. Browser requests select project IDs and never filesystem destinations.
 The [authoring contract](../workflow_authoring/authoring-contract.md) owns source
@@ -932,7 +939,10 @@ flow. The New run adapter below consumes this monitor without adding job persist
 `ReusablePreparation(console)` in `reusable_preparation.py` exposes
 `review(project_id, NewRunSelection)` and `prepare(project_id, NewRunIntent)`.
 POST `/api/editor/{project_id}/reusable-preparations/review` returns `NewRunReview`;
-POST `/prepare` returns existing `OperationHandle` with HTTP 202. Both use the
+POST `/prepare` returns existing `OperationHandle` with HTTP 202. `NewRunReview.source_version_name`
+(omitted when absent) is the recorded Save name of `expected_source_sha256`,
+display-only and outside the expectation and native request; the browser keeps it
+as `source_version` beside, not inside, the retained intent payload. Both use the
 same authentication/origin/body boundary and threadpool transport as capture APIs.
 Selection accepts only task_id, run_name, run_id, preparation_operation_id and
 expected_source_sha256. Intent adds native `ReusablePreparationExpectation`;
@@ -1048,7 +1058,8 @@ identical typed request. Operation admission owns concurrent claims and rechecks
 No console runtime, claim, request registry or automatic retry is introduced.
 
 Fresh review/launch refuses pinned input or capture paths writable by configured
-authoring projects: source_file, sibling .<source-name>.authoring.lock and recovery
+authoring projects: source_file, sibling .<source-name>.authoring.lock,
+<source-name>.versions.json and recovery
 descendants. Writable destination/recovery overlap also refuses. Unrelated sources
 in the same project remain editable. Existing-record recovery bypasses this fresh
 policy. External edits remain subject to native capture rechecks before dispatch.

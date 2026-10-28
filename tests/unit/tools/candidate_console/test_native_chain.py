@@ -164,7 +164,9 @@ def test_corrupt_existing_record_never_becomes_fresh(chain, console_config, monk
         )
 
 
-@pytest.mark.parametrize("target", ["source", "lock", "recovery", "output", "unrelated"])
+@pytest.mark.parametrize(
+    "target", ["source", "lock", "versions", "recovery", "output", "unrelated"]
+)
 def test_editor_separation_matches_actual_write_authority(chain, console_config, target):
     """Blanket project-root blocking rejects unrelated; missing lock/recovery checks admit collisions."""
     record, _ = chain
@@ -180,6 +182,7 @@ def test_editor_separation_matches_actual_write_authority(chain, console_config,
     paths = {
         "source": source,
         "lock": root / ".editable.json.authoring.lock",
+        "versions": root / "editable.json.versions.json",
         "recovery": recovery / "saved.json",
         "unrelated": root / "other.json",
         "output": root / "other.json",

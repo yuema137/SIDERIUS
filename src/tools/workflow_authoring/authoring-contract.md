@@ -4,7 +4,8 @@
 `AuthoredWorkflowDocument` (v1 or reusable v2), its native catalog and the source bridge own declaration
 semantics. Unbound source/document operations never resolve or import referenced files.
 Explicit task-reference selection enables the separate bounded inspection below. Recovery copies do
-not authorize execution and are never a source revision/publication system.
+not authorize execution and are never a source revision/publication system;
+named-version history only reads them.
 
 `Project` selects an explicit normalized absolute project root, source file and
 existing 0700 recovery directory. Source/recovery are strict descendants of the
@@ -60,6 +61,50 @@ Unsupported preparation options have no structured editor and remain intact
 through other edits. Unbound review/save remain inert declaration operations
 without explicit task-reference selection;
 reusable preparation/launch retain their candidate preparation/operation owners.
+
+## Named versions
+
+`versions.py` owns the version record, a sibling of the source named
+`<source name>.versions.json` (for `workflow.py`: `workflow.py.versions.json`),
+validated by `VersionRecord` (`schema_id="siderius.workflow-versions/v1"`,
+`source_name`, ordered `versions`). Each `RecordedVersion` holds `sha256` of the
+exact source bytes, `name`, timezone-aware `recorded_at` and `origin`: `saved` (a
+named Save) or `observed` (unnamed base bytes first seen at a later Save: a
+pre-record workflow or an external edit). Names are 1-64 characters without
+control characters or surrounding whitespace and unique within the record. No Git
+dependency exists. Names are presentation metadata only: they never enter source
+bytes, declaration digests, preparation requests or run identity; the source
+SHA-256 remains the version identity, and A → B → A records a third row with A's SHA.
+
+`SaveRequest.version_name` is optional and omitted from serialization when absent;
+absent means the next unused `vN`, where N starts at one more than the number of
+named Saves. Under the existing source lock and before any recovery copy or source
+write, Save reads and validates the record (regular owned single-link file, no
+symlink, at most 512 KiB, matching `source_name`, at most 1000 rows), refuses a used
+name and prepares the appended record; any such refusal is `version_record` and
+writes nothing. The byte cap is sized so 1000 worst-case rows (64 four-byte UTF-8
+name characters) always fit, so the row cap is the operative Save limit; either
+refusal message names both limits. If the last recorded SHA differs from the base,
+an `observed` row precedes the `saved` row. After the source is atomically replaced,
+the record is published by temp file + fsync + rename, keeping its permission bits
+(a new record takes the source's bits). If that write fails, Save returns the
+distinct code `version_record_not_updated` with the saved `current` view: the source
+is saved, the old record is intact, and the next Save records these bytes as an
+`observed` row. Identical bytes record nothing.
+`SaveView.version_name` reports the recorded name.
+
+Without a record, workflows keep working: `GET /versions` lists the current bytes
+as one `unrecorded` current row and the first Save creates the record. `versions()`
+returns `VersionList` (record path/presence, current SHA, suggested `next_name`,
+chronological `VersionEntry` rows with list `index`, `current` and
+`bytes_available`). Current bytes that are not the last recorded SHA appear as a
+final `unrecorded` row. Version bytes are the existing write-once `SHA256.py`
+recovery copies, read only when owned, regular, single-link and hash-equal; no
+second byte store exists. `version(index, sha256)` returns `VersionDetail` with
+read-only source and a unified diff against the preceding row when both byte sets
+are available, otherwise source/diff are null (SHA only). A stale index/SHA pair
+is `conflict`. An invalid record blocks history and Save until it is repaired or
+moved aside; `recorded_name` (run-preparation display) treats it as unnamed.
 
 ## Non-executable binding drafts
 

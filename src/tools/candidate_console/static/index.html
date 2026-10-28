@@ -28,6 +28,7 @@
   <script src="/editor-circuit.js" defer></script>
   <script src="/editor-problems.js" defer></script>
   <script src="/editor-node-parameters.js" defer></script>
+  <script src="/editor-versions.js" defer></script>
   <script src="/editor.js" defer></script>
   <script src="/navigation.js" defer></script>
   <script src="/recorded-example.js" defer></script>
@@ -132,8 +133,10 @@
     <div class="actions">
       <button id="editor-refresh" class="secondary" disabled>Refresh from disk</button>
       <button id="editor-review" class="secondary" disabled>Review changes</button>
+      <label for="editor-version-name">Version name</label><input id="editor-version-name" type="text" maxlength="64" spellcheck="false" aria-describedby="editor-version-help">
       <button id="editor-save" disabled>Save reviewed source</button>
     </div>
+    <p id="editor-version-help" class="muted">Each Save records this name, the time and the file's SHA-256 beside the source. Leave the suggested name or type your own.</p>
     <p id="editor-pending">No pending edits.</p>
     <section id="editor-problems" aria-label="Problems" aria-live="polite" hidden></section>
     <div id="editor-conflict" hidden>
@@ -172,6 +175,7 @@
     <pre id="editor-diff"></pre>
     <p>Every edit invalidates review. Save writes exactly the reviewed bytes.</p>
   </details>
+  <details class="card" id="editor-history"><summary>Version history</summary></details>
   <details class="card" id="workflow-details"><summary>Details</summary>
     <h2>Save behavior</h2><p class="muted">Saving updates source for future New run captures. It does not launch a run or change existing captures. Task-bound publication checks the explicitly selected native task identity.</p>
     <h2>Concurrent writers</h2><p class="muted">Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</p>

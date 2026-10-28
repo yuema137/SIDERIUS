@@ -120,6 +120,16 @@ def editor_router(
         service = selected(project_id)
         return perform(service.read)
 
+    @router.get("/{project_id}/versions")
+    def versions(project_id: str):
+        service = selected(project_id)
+        return perform(service.versions)
+
+    @router.get("/{project_id}/versions/{index}")
+    def version(project_id: str, index: int, sha256: str):
+        service = selected(project_id)
+        return perform(lambda: service.version(index, sha256))
+
     @router.post("/{project_id}/review")
     async def review(project_id: str, request: Request):
         service = selected(project_id)
