@@ -1531,9 +1531,11 @@ release; finishing/unknown/alive does not. Only initial live pre-submit refusal
 permits refused-intent dismissal. Restored/retried/404 `not_found`/transport
 outcomes retain identity. **Forget** (R-3): `dispatching(kind, record)` is recorded
 before every POST of the record in this page; a later status read answering typed
-`unknown_operation` (`observeUnknown`) makes the record forgettable, so Forget is
-offered only after this page's own Retry (or first dispatch) was followed by an
-unknown read. Forget asks for confirmation, is never offered while the operation is
+`unknown_operation` (`observeUnknown`) starts a confirmation: the page keeps polling,
+and the record becomes forgettable only when a second typed-unknown read arrives at
+least 5 s after the first (L-5: a single read can precede an admission whose response
+the network lost). Forget is therefore offered only after this page's own Retry (or
+first dispatch) was followed by two such reads. Forget asks for confirmation, is never offered while the operation is
 known and unreleased, and only removes the browser record. Explicit removal rereads identity and confirms absence. This is advisory
 coordination, not atomic localStorage locking; the native store serializes effects.
 

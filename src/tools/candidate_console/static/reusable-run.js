@@ -135,6 +135,7 @@
   }
   function unresolvedMessage(error) {
     if (error.code === 'unknown_operation') {
+      if (evidence()?.confirming) return 'This console has no record of this run yet. Checking once more before offering Forget…';
       return evidence()?.forgettable
         ? 'This console still has no record of this run after Retry. Nothing is running for it here: forget it to start another run.'
         : 'This console has no record of this run. Retry sends the same launch again; it never starts a second run.';
@@ -294,7 +295,7 @@
   setInterval(() => {
     if (!session.connected || document.hidden || window.consoleNavigation?.view !== 'run') return;
     const state = evidence();
-    if (intent && !state?.released && problem !== 'unknown' && problem !== 'refused') void check();
+    if (intent && !state?.released && problem !== 'refused' && (problem !== 'unknown' || state?.confirming)) void check();
   }, POLL_MS);
   $('finish').addEventListener('click', () => {
     if (busy || !session.connected || !intent || !coordinator.dismissible('candidate', intent)) return;

@@ -92,7 +92,10 @@
     }
   }
 
-  const entry = bytes => evidence.get(bytes) || {released: false, refused: false, dispatched: false, unknown: false};
+  // Forget needs two typed-unknown reads at least this far apart after the last dispatch
+  // (L-5): one read can precede an admission the network lost but the server completes.
+  const UNKNOWN_GAP_MS = 5000;
+  const entry = bytes => evidence.get(bytes) || {released: false, refused: false, dispatched: false, unknown: false, unknownSince: null};
   function update(value, change) {
     const bytes = JSON.stringify(value);
     evidence.set(bytes, {...entry(bytes), ...change});
@@ -124,7 +127,7 @@
   // Called immediately before every POST of this exact record; any earlier "unknown"
   // observation no longer proves absence once a new dispatch may be in flight.
   function dispatching(kind, value) {
-    if (same(kind, value)) update(value, {dispatched: true, unknown: false});
+    if (same(kind, value)) update(value, {dispatched: true, unknown: false, unknownSince: null});
   }
 
   function observe(kind, value, status, initialRefusal = false) {
@@ -143,22 +146,25 @@
     const terminalExited = ['completed', 'operation_failed'].includes(status?.state) &&
       status.process?.status === 'exited';
     const released = !status?.finishing && (spawnFailed || terminalExited);
-    update(value, {released, refused: initialRefusal, unknown: false});
+    update(value, {released, refused: initialRefusal, unknown: false, unknownSince: null});
     return true;
   }
 
   // The server read this store and holds no such operation. Forgetting is allowed only
-  // when this page dispatched the record before that read (Retry before Forget).
-  function observeUnknown(kind, value) {
+  // when this page dispatched the record before these reads (Retry before Forget) and two
+  // such reads are at least UNKNOWN_GAP_MS apart (L-5).
+  function observeUnknown(kind, value, now = Date.now()) {
     if (!same(kind, value)) return false;
     const current = entry(JSON.stringify(value));
-    update(value, {released: false, unknown: current.dispatched});
+    if (!current.dispatched) { update(value, {released: false, unknown: false, unknownSince: null}); return true; }
+    const since = current.unknownSince ?? now;
+    update(value, {released: false, unknownSince: since, unknown: now - since >= UNKNOWN_GAP_MS});
     return true;
   }
 
   function state(kind, value) {
     const current = same(kind, value) ? entry(JSON.stringify(value)) : null;
-    return current ? {...current, forgettable: current.unknown === true} : null;
+    return current ? {...current, forgettable: current.unknown === true, confirming: current.unknownSince !== null && !current.unknown} : null;
   }
 
   function dismissible(kind, value) {

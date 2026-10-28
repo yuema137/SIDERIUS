@@ -222,6 +222,9 @@ try {
   assert.equal(await page.locator('#forget-browser-data').isDisabled(), true);
   // A typed unknown_operation after this page's Retry offers Forget (R-3), and stops polling.
   statusFixture = {status: 404, json: {error: {code: 'unknown_operation', message: 'fixture unknown'}}};
+  // L-5: one unknown read is not enough; a second read at least 5 s later is required.
+  await page.locator('#new-run-operation-status').filter({hasText: 'Checking once more'}).waitFor();
+  assert.equal(await page.locator('#new-run-dismiss').isHidden(), true, 'No Forget after a single unknown read');
   await page.locator('#new-run-operation-status').filter({hasText: 'still has no record'}).waitFor();
   assert.equal(await page.locator('#new-run-dismiss').textContent(), 'Forget this operation');
   assert.equal(await page.locator('#new-run-dismiss').isEnabled(), true);

@@ -32,10 +32,11 @@
     operation?.state === 'completed' && operation?.receipt_available &&
     operation?.native_status === 'prepared';
   const evidence = () => intent ? coordinator.state('preparation', intent) : null;
-  // Distinct, readable default: <project>-<yyyymmdd-hhmm> (local time).
+  // Distinct, readable default: <project>-<yyyymmdd-hhmmss> (local time; seconds keep two
+  // runs prepared within the same minute apart, L-6).
   function defaultName() {
     const now = new Date(), two = value => String(value).padStart(2, '0');
-    const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}`;
+    const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}${two(now.getSeconds())}`;
     return `${editor.projectId || 'run'}-${stamp}`;
   }
   function suggestName() {
@@ -72,6 +73,7 @@
     $('open').disabled = !session.connected || !intent || busy ||
       !coordinator.same('preparation', intent) || !prepared();
     $('prerequisites').textContent = !session.connected ? 'Connect to prepare a run.'
+      : intent ? 'This run uses the task and name below; start over to change them.'
       : ready() ? 'Choose the task and resources, then check the inputs.'
         : 'Open a runnable project and save your edits first.';
     window.dispatchEvent(new CustomEvent('new-run-gate', {detail: {ready: !!ready()}}));
@@ -135,6 +137,7 @@
   }
   function unresolvedMessage(error) {
     if (error.code === 'unknown_operation') {
+      if (evidence()?.confirming) return 'This console has no record of this preparation yet. Checking once more before offering Forget…';
       return evidence()?.forgettable
         ? 'This console still has no record of this preparation after Retry. Nothing is running for it here: forget it to start over.'
         : 'This console has no record of this preparation. Retry sends the same request again; it never creates a second one.';
@@ -186,12 +189,13 @@
       controls();
     }
   }
-  // Poll while the Run view shows an unreleased preparation; stop on release or a typed
-  // unknown (Retry restarts it), and pause while the tab is hidden.
+  // Poll while the Run view shows an unreleased preparation; stop on release or a settled
+  // typed unknown (Retry restarts it), and pause while the tab is hidden.
   setInterval(() => {
     const state = evidence();
     if (!intent || !session.connected || document.hidden || window.consoleNavigation?.view !== 'run') return;
-    if (state?.released || problem === 'unknown' || problem === 'refused') return;
+    // An unknown read keeps polling only while a second read is still needed (L-5).
+    if (state?.released || problem === 'refused' || (problem === 'unknown' && !state?.confirming)) return;
     void check();
   }, POLL_MS);
   async function tasks() {
