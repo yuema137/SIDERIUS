@@ -393,3 +393,87 @@ def test_a_skipped_adaptor_input_is_refused_with_a_typed_error(prepared):
     }
     with pytest.raises(SkippedAdaptorInputError, match="B1-PR5"):
         adaptor_items(definition.adaptors[0], entries)
+
+
+@pytest.fixture
+def declared_reuse(native_runner, monkeypatch):
+    """Every branch reuses a task-declared package model (review R1).
+
+    The native implementation record takes the reuse form ``verify_artifacts``
+    accepts (model outside the attempt, empty test sentinel), and staging takes
+    the declared branch, so nothing is copied under the tuner's plugin dir.
+    """
+    from types import SimpleNamespace
+
+    from tools.candidate_worker import artifacts, phases
+    from workflows import plugin_staging
+
+    real = phases.run_implementation
+    declared = {}
+
+    def reuse(context, request, *args, **kwargs):
+        output, path = real(context, request, *args, **kwargs)
+        package = Path(request.preview.project_root) / "package"
+        source = package / f"{output.model_type}.py"
+        description = package / output.model_type / "description.md"
+        if not source.exists():
+            description.parent.mkdir(parents=True)
+            source.write_bytes(Path(output.model_file_path).read_bytes())
+            description.write_bytes(Path(output.description_file_path).read_bytes())
+        declared[output.model_type] = SimpleNamespace(absolute_path=str(source))
+        output = output.model_copy(
+            update={
+                "model_file_path": str(source),
+                "description_file_path": str(description),
+                "test_file_path": "",
+            }
+        )
+        path.unlink()
+        path.write_text(output.model_dump_json())
+        return output, path
+
+    def lookup(model_type, binding):
+        return declared.get(model_type)
+
+    monkeypatch.setattr(phases, "run_implementation", reuse)
+    for module in (artifacts, plugin_staging):
+        monkeypatch.setattr(module, "declared_package_model", lookup)
+        monkeypatch.setattr(module, "require_declared_model_source", lambda *_: None)
+    return declared
+
+
+def test_declared_package_reuse_still_verifies_and_completes(
+    prepared, training_runner, declared_reuse, trained
+):
+    """Review R1: nothing is staged for a declared model; the verifier must not read it.
+
+    Fails if the staged-bytes check ignores the reuse record (missing file -> failed run).
+    """
+    from core.sandbox_executor import get_plugin_dir
+
+    request = selection_request(prepared)
+    receipt, parent = run(request)
+    assert receipt.status == "completed", receipt.error
+    tuner = next(item for item in receipt.graph_trace.nodes if item.node_id == "train")
+    staged = Path(get_plugin_dir(tuner.storage, receipt.run_name)) / "worker_linear.py"
+    assert not staged.exists()
+    verify_graph_trace(request, parent, receipt)
+    # Under selection, a staged copy contradicts the trained branch's declared reuse.
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.write_bytes(b"# not the declared source\n")
+    with pytest.raises(ValueError, match="contradicts the trained branch's declared reuse"):
+        verify_graph_trace(request, parent, receipt)
+
+
+def test_a_missing_staged_model_is_a_typed_refusal(
+    prepared, training_runner, native_runner, trained
+):
+    from core.sandbox_executor import get_plugin_dir
+
+    request = selection_request(prepared)
+    receipt, parent = run(request)
+    tuner = next(item for item in receipt.graph_trace.nodes if item.node_id == "train")
+    staged = Path(get_plugin_dir(tuner.storage, receipt.run_name)) / "worker_linear.py"
+    staged.rename(staged.with_suffix(".moved"))
+    with pytest.raises(ValueError, match="tuner staged model is unreadable"):
+        verify_graph_trace(request, parent, receipt)

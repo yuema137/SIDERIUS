@@ -662,14 +662,21 @@ entry's state to be its record's verdict (`succeeded` iff `ValidatorOutput.passe
 else `rejected`), read from the digest-checked record. `verify_graph_training`
 reads the trained (implementation, validation) pair from the verified outcome
 (`tuning_branch`), checks the validation record and the tuner identity as before,
-and binds the tuner to that implementation: the staged
-`get_plugin_dir(<tuner storage>, run_name)/<model>.py` must equal the bytes of the
-pair's `ImplementorOutput.model_file_path` (`stage_native_plugins` copies it
-verbatim; this applies to every trained profile and changes no record).
+and binds the tuner to that implementation from record facts only, mirroring
+`artifacts.verify_artifacts`. A generated model (its `model_file_path` under the
+attempt's `models` directory) is copied verbatim by `stage_native_plugins`, so the
+staged `get_plugin_dir(<tuner storage>, run_name)/<model>.py` must equal its bytes;
+this applies to every trained profile and changes no record. A reused task-declared
+package model (`test_file_path == ""`, model outside the attempt) is trained from
+its declared source and `stage_model_source` copies nothing, so no bytes are
+compared; under the selection profile a staged copy then contradicts the record and
+is refused. An unreadable staged or model file is a `ValueError` ("tuner staged
+model ..."), never an incidental `OSError`.
 Witness: `tests/unit/tools/candidate_worker/test_adaptor_selection.py` (second
 branch trained when the first is rejected; all rejected; declared and reversed
 binding order over execution order; tampered record/output/closure; extra output
-file; relabelled validator verdict; staged model of a sibling; shape refusals).
+file; relabelled validator verdict; staged model of a sibling; declared package
+reuse; missing staged model; shape refusals).
 
 Not admitted: v2 reusable source, managed preparation and console for this profile;
 any other strategy triple, metric ranking, per-item/split distribution, routes,

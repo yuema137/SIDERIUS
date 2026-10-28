@@ -634,9 +634,7 @@ def verify_graph_training(
     implementation_node, validation_node = tuning_branch(shape, outcomes or {})
     proposal_path = nodes[shape.families[0].proposal].record_path
     validation_path = nodes[validation_node].record_path
-    implementation_path = nodes[implementation_node].record_path
     assert proposal_path is not None and validation_path is not None
-    assert implementation_path is not None
     proposal = ProposalOutput.model_validate_json(Path(proposal_path).read_bytes())
     validation = ValidatorOutput.model_validate_json(Path(validation_path).read_bytes())
     value = HyperparamTuningInput.model_validate_json(
@@ -656,11 +654,11 @@ def verify_graph_training(
     )
     output = NativeOutputIdentity.model_validate_json(Path(tuner.record_path).read_bytes())
     _check_staged_implementation(
-        implementation_path,
-        nodes[implementation_node].record_sha256,
+        nodes[implementation_node],
         tuner.storage,
         initial.run_name,
         proposal,
+        selected=shape.selection is not None,
     )
     if (
         not validation.passed
@@ -685,24 +683,42 @@ def verify_graph_training(
 
 
 def _check_staged_implementation(
-    record_path: str,
-    record_sha256: str | None,
+    implementation_node: GraphNodeEvidence,
     tuner_storage: str,
     run_name: str,
     proposal: "ProposalOutput",
+    *,
+    selected: bool,
 ) -> None:
     """The tuner trained the trained branch's model bytes, not a sibling's.
 
-    ``stage_native_plugins`` copies the implementation's model file verbatim to
-    ``get_plugin_dir(<tuner storage>, run_name)/<model>.py``; compare those bytes.
+    Mirrors ``artifacts.verify_artifacts`` from record facts only. A generated
+    model lives under the attempt's ``models`` directory and
+    ``stage_native_plugins`` copies it verbatim to
+    ``get_plugin_dir(<tuner storage>, run_name)/<model>.py``: the bytes must match.
+    A reused task-declared package model (empty ``test_file_path``, model outside
+    the attempt) is trained from its declared source and nothing is staged; under
+    a selection adaptor (``selected``) a staged copy then contradicts the record.
     """
     from agent.schemas.implementor import ImplementorOutput
     from core.sandbox_executor import get_plugin_dir
 
-    payload = read_graph_control(Path(record_path))
-    if hashlib.sha256(payload).hexdigest() != record_sha256:
+    assert implementation_node.record_path is not None
+    payload = read_graph_control(Path(implementation_node.record_path))
+    if hashlib.sha256(payload).hexdigest() != implementation_node.record_sha256:
         raise ValueError("graph native record mismatch")
     implementation = ImplementorOutput.model_validate_json(payload)
     staged = Path(get_plugin_dir(tuner_storage, run_name)) / f"{proposal.model_name}.py"
-    if staged.read_bytes() != Path(implementation.model_file_path).read_bytes():
+    plugins = Path(implementation_node.storage) / "models"
+    if not Path(implementation.model_file_path).resolve().is_relative_to(plugins.resolve()):
+        if implementation.test_file_path != "":
+            raise ValueError("tuner staged model: reused model lacks the empty test sentinel")
+        if selected and staged.exists():
+            raise ValueError("tuner staged model contradicts the trained branch's declared reuse")
+        return
+    try:
+        same = staged.read_bytes() == Path(implementation.model_file_path).read_bytes()
+    except OSError as error:
+        raise ValueError(f"tuner staged model is unreadable: {error}") from error
+    if not same:
         raise ValueError("tuner staged model differs from the trained branch implementation")
