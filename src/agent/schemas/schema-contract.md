@@ -73,11 +73,12 @@ no hidden contracts, no silent defaults.
   accepts null; a null `range` / `allowed` / `predicate` is refused instead
   of falling back to an exact-null kind, and `NumericRange` bounds are strict
   numbers (no bool or string coercion).
-- `ParameterRules` checks fixed `train_config` paths against the consuming
-  `TrainConfig.model_fields` and nested model annotations, including optional
-  unions. The shared document resolver repeats this check so a mutated rule
-  dictionary cannot introduce a silently ignored execution lock. Exact rules
-  may insert omitted valid leaves; model plugin paths remain extensible.
+- `ParameterRules` checks fixed `train_config` and `loss_config` paths against
+  the consuming `TrainConfig` / `LossConfig` `model_fields` and nested model
+  annotations, including optional unions. The shared document resolver
+  repeats this check so a mutated rule dictionary cannot introduce a silently
+  ignored execution lock. Exact rules may insert omitted valid leaves; model
+  plugin paths remain extensible.
   See the [parameter-rule contract](../../../docs/reference/task-composition.md)
   for sampling ownership, composition conflicts and value-validation boundaries.
 

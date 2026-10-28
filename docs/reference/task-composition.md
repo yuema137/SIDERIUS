@@ -529,7 +529,13 @@ Notes:
   existing typed schema still owns selected-variant and value validation.
   An exact lock may supply an omitted valid leaf; optional parent mappings must
   already exist for nested writes. `train_config.lr_schedule: {exact: null}`
-  remains supported. Model-specific `model_config` paths remain extensible;
+  remains supported. Loss rule targets are checked the same way against the
+  fields of the execution `LossConfig`; a misspelled field such as
+  `loss_config.gammmma` is refused instead of being dropped when the loss is
+  built. Custom-loss plugin hyperparameters are not transported through
+  `loss_config` (the plugin executes its `PLUGIN_LOSS_CONFIG_CLASS`
+  defaults), so a rule naming one, such as `loss_config.snr_threshold`, is
+  refused. Model-specific `model_config` paths remain extensible;
   this fixed-field validation does not close the model plugin's configuration.
 - A workflow may add a second rule set through
   `--workflow_parameter_rules '<json>'`, using the same shape. Task and
