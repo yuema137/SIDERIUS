@@ -82,8 +82,11 @@ def parse_llm_config_bytes(content: bytes) -> WorkflowLLMConfig:
     try:
         return WorkflowLLMConfig.model_validate(value)
     except ValidationError as error:
+        # value_error messages are this module's fixed validator reasons, which never
+        # carry input; every other type is reported by name only.
         problems = "; ".join(
-            f"{'.'.join(str(part) for part in item['loc']) or 'llm_config'}: {item['type']}"
+            f"{'.'.join(str(part) for part in item['loc']) or 'llm_config'}: "
+            + (item["msg"] if item["type"] == "value_error" else item["type"])
             for item in error.errors()
         )
         raise ValueError(f"llm_config failed validation: {problems}") from None

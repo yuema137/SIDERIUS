@@ -569,3 +569,26 @@ def test_wrong_typed_secret_value_error_never_echoes_the_value(payload, location
     with pytest.raises(ValueError, match=rf"{location}: ") as info:
         parse_llm_config_bytes(json.dumps(payload).encode())
     assert "SECRET123" not in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "payload,reason",
+    [
+        (
+            {
+                "interpret": {
+                    "provider": "anthropic",
+                    "model_id": "sk-test-SECRET123",
+                    "reasoning_effort": "low",
+                }
+            },
+            "reasoning_effort requires provider='openai'",
+        ),
+        ({"judge": {}}, "judge must declare at least one of stop, aggregate, debate"),
+    ],
+)
+def test_validator_reason_is_reported_without_input_values(payload, reason):
+    with pytest.raises(ValueError) as info:
+        parse_llm_config_bytes(json.dumps(payload).encode())
+    assert reason in str(info.value)
+    assert "SECRET123" not in str(info.value)
