@@ -1614,8 +1614,9 @@ serial run has no budget and refuses a grant. A parallel run takes exactly one
 of its host-ledger `HostGrant` or `parallel.budget`; both or neither raise
 `ValueError` at the launch boundary (`launch_candidate`, `launch_continuation`).
 
-Envelope (`envelope_request(request, serial)`). Under the host ledger a parallel
-run reserves one entry, its envelope, computed from the graph:
+Envelope (`envelope_request(request, serial, budget)`). Under the host ledger a
+parallel run reserves one entry, its envelope, computed from the graph and
+clamped to the budget:
 - two declared units may overlap only when no dependency path joins them
   (paths through adaptors and undeclared nodes count; dependencies are the
   profile's `execution_families(...).predecessors`);
@@ -1626,12 +1627,25 @@ run reserves one entry, its envelope, computed from the graph:
 - `serial` (the operation's own `resources` declaration) joins the peak only
   when some node is undeclared, since such a unit runs alone under it. Unit id,
   ordinal, wall time and `time_budgeted` always come from it;
-- the GPU part is one slot holding the peak VRAM sum (`gpu_count=1`,
-  `vram_source="configured_cap"`), so every unit always fits its own envelope.
-  Multi-GPU envelopes are not supported; a peak above every slot's ceiling is
-  refused `resource_refused` like any request;
-- `unit_slots` is the peak unit count, counted against the host's
+- the GPU part is one slot (`gpu_count=1`, `vram_source="configured_cap"`);
+- clamp (B3-4d): each quantity is `max(min(peak, capacity), largest single
+  unit)`, where capacity is the largest slot's `effective_gib` for VRAM and the
+  budget totals for host memory, CPU slots and `max_concurrent_units` (for
+  `unit_slots`, whose least value is 1). A peak the host cannot hold is
+  therefore admitted with less concurrency: units that do not fit together wait
+  in FIFO order inside the grant. Every unit always fits its own envelope;
+- `require_units_fit` is the only parallel-specific refusal: a declared unit
+  whose own VRAM exceeds the largest slot (or that needs a GPU when the budget
+  has none), or whose host memory or CPU slots exceed the budget totals, raises
+  `ParallelUnitTooLarge`, naming the unit, its capability, the largest slot (or
+  budget total) and the remedy. Host admission refuses it
+  `parallel_unit_exceeds_capacity` before any claim. The operation's own
+  `resources` (the floor for undeclared units) are admitted like any serial run;
+- `unit_slots` is the clamped peak unit count, counted against the host's
   `max_concurrent_units`.
+Multi-GPU envelopes (one run's units spread over several slots under the ledger)
+are a 1.2 roadmap item; without a ledger, a run's own `parallel.budget` already
+places units on any of its slots.
 Route exclusivity is not used: the peak is conservative only where two arms of
 one route can never both run.
 

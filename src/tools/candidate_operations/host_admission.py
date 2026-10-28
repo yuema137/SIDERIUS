@@ -18,7 +18,7 @@ from uuid import UUID
 from core.runtime_control.scheduling import HostBudget, Placement, ResourceRequest, plan_dispatch
 from core.subprocess_env import CUDA_VISIBLE_DEVICES_ENV_VAR
 from tools.candidate_worker.models import CandidateRunRequest
-from tools.candidate_worker.parallel_envelope import envelope_request
+from tools.candidate_worker.parallel_envelope import ParallelUnitTooLarge, envelope_request
 from tools.candidate_worker.parallel_models import HostGrant
 
 from .files import canonical, overlap, publish
@@ -269,8 +269,12 @@ def admit(
         wall_seconds=request.timeout_seconds,
     )
     if request.parallel is not None:
-        # One reservation holds the run's whole envelope (its peak concurrent demand).
-        unit = envelope_request(request, unit)
+        # One reservation holds the run's whole envelope: its peak concurrent
+        # demand, clamped to what this budget can hold.
+        try:
+            unit = envelope_request(request, unit, budget)
+        except ParallelUnitTooLarge as error:
+            raise OperationFailure("parallel_unit_exceeds_capacity", str(error)) from error
     _require_reachable(request, unit)
     state = promote(state, budget)
     waiting = tuple(entry.placement.reserved for entry in state.queued)

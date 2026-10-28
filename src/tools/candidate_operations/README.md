@@ -238,7 +238,10 @@ needs (`gpu`, `vram_gib`, `host_memory_gib`, `cpu_slots`), for example
 Kinds you leave out run one at a time, as today. With a ledger, the run reserves
 only what its nodes can use at the same moment (for example, two checks that can
 run together, not every node in the graph), and it waits in the queue like any
-other run until that fits. Without a ledger, the block must also carry its own
+other run until that fits. If its nodes together need more than the host has,
+the run still starts and simply runs fewer of them at once. Only a single node
+that needs more than the largest GPU (or more memory or CPU than the budget) is
+refused, with `parallel_unit_exceeds_capacity` and a message naming that node. Without a ledger, the block must also carry its own
 `budget`. The exact rules are in the
 [worker contract](../candidate_worker/candidate-worker-contract.md#parallel-dispatch).
 

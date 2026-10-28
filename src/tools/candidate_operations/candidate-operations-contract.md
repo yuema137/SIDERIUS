@@ -428,9 +428,13 @@ not recorded in the operation directory.
 
 Parallel runs (B3-4a). A candidate whose request carries `parallel`
 ([worker contract](../candidate_worker/candidate-worker-contract.md#parallel-dispatch))
-reserves one entry: its envelope, `envelope_request(request, resources.request(...))`,
+reserves one entry: its envelope, `envelope_request(request, resources.request(...), budget)`,
 the peak concurrent demand of its declared units (never the sum of all of them),
-with `unit_slots` counted against `max_concurrent_units`. It is placed or queued
+clamped to what the budget can hold but never below the largest single unit, with
+`unit_slots` counted against `max_concurrent_units`. A declared unit that fits
+no slot (or the budget's memory or CPU slots) even alone refuses
+`parallel_unit_exceeds_capacity`, with a message naming the unit and the largest
+slot. It is placed or queued
 like any submission, and the reachability check (`placement_unreachable`) uses
 the envelope's `gpu_count`. A placed parallel run's operation directory also
 holds write-once `host_grant.json` (`HostGrant`: the ledger budget and the
