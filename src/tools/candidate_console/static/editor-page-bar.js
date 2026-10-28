@@ -31,7 +31,9 @@
       text.append('This save also updates task references. Confirm the findings under Task package and version, then save. ');
       const show = element('button', 'Show task findings', text, 'link-button'); show.type = 'button';
       show.addEventListener('click', () => openTaskPanel(true));
-    } else text.textContent = 'The workflow is checked. Save writes exactly the checked file as a new version.';
+    } else text.textContent = current.reviewedTypedSource
+      ? 'The workflow is checked. Save writes the Python text you typed in Advanced source as a new version.'
+      : 'The workflow is checked. Save writes exactly the checked file as a new version.';
   }
   function syncStrip() {
     const current = state();

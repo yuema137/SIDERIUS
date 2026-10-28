@@ -96,13 +96,13 @@ try {
 
   // Context menu offers removal and closes on Escape.
   await page.locator('#circuit-node-validate').click({button: 'right'});
-  assert.equal(await page.locator('.node-context-menu [role="menuitem"]').textContent(), 'Remove validate');
+  assert.equal(await page.locator('.node-context-menu [role="menuitem"]').textContent(), 'Delete module');
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.node-context-menu').count(), 0);
 
   // Inspector removal of the added node restores the original bytes exactly.
   await page.locator('#circuit-node-validation').click();
-  await page.locator('button[aria-label="Remove validation"]').click();
+  await page.locator('button[aria-label="Delete validation"]').click();
   await waitUntil(async () => (await pendingText()).includes('deletion of validation · complete'), 'deletion checked');
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()), 'review removal');

@@ -109,7 +109,7 @@ try {
 
   // Legend lists every contract present in the graph with its swatch and readable name.
   const legend = page.locator('.circuit-contract-legend');
-  assert.match(await legend.locator('summary').textContent(), /^Port types \(\d+\)$/);
+  assert.match(await legend.locator('summary').textContent(), /^Connector types \(\d+\)$/);
   await legend.locator('summary').click();
   const legendIds = await legend.locator('li').evaluateAll(items => items.map(item => item.dataset.contract));
   for (const contract of byContract.keys()) assert.ok(legendIds.includes(contract), `legend lists ${contract}`);
@@ -133,7 +133,7 @@ try {
   assert.ok(Number(dim.socket) < 0.5, 'incompatible input dims its socket');
   assert.equal(dim.pill, 'dashed', 'incompatible input dashes its contract pill');
   assert.equal(dim.port, '1', 'incompatible label text is not faded below 4.5:1 (port stays clickable)');
-  assert.match(await dimmed.getAttribute('data-refusal'), /expects implementation\.output .*provides proposal\.output/);
+  assert.equal(await dimmed.getAttribute('data-refusal'), "Can't connect: Propose model sends Model plan; this input receives Model code.", 'K10 sentence names both connector types');
   assert.equal(await dimmed.getAttribute('title'), null, 'No native title tooltip on sockets (spec §6.2)');
   assert.equal(await output('alternate').getAttribute('aria-pressed'), 'false', 'hover does not select');
   await page.mouse.move(2, 2);
@@ -142,7 +142,7 @@ try {
 
   // Refused connection names both contracts.
   await output('check_left').click(); await input('build_left', 'output').click();
-  assert.match(await message(), /refused: build_left\.output expects proposal\.output \(Model plan\), but check_left\.result provides validation\.output \(Code verdict\)/);
+  assert.equal(await message(), "Can't connect: Validate sends Code verdict; this input receives Model plan.", 'refusal names both connector types');
   assert.equal(await dirty(), false); await page.keyboard.press('Escape');
 
   // U5: the protocol mapping chip expands to source -> argument field mappings.

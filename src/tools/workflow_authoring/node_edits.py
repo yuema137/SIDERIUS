@@ -252,21 +252,22 @@ def _removal(
                 and (node.id, argument.name) not in patched
             ):
                 patches.append(BindingPatch(node=node.id, argument=argument.name, source=None))
-    problems: list[DraftProblem] = []
+    if len(removed) == len(definition.nodes) and not proposal.nodes:
+        # An empty canvas has one thing to fix; the loop problem returns with the first module.
+        return tuple(patches), (
+            DraftProblem(code="workflow_empty", message="add at least one module"),
+        )
     loop = definition.loop
     if loop is not None and {loop.feedback.source.node, loop.feedback.target} & removed:
-        problems.append(
+        # Stays while either endpoint is deleted, whatever else the draft adds.
+        return tuple(patches), (
             DraftProblem(
                 code="loop_feedback_missing",
                 message="the research loop feeds back between deleted modules; "
                 "add them back or remove the research loop",
-            )
+            ),
         )
-    if len(removed) == len(definition.nodes) and not proposal.nodes:
-        problems.append(
-            DraftProblem(code="workflow_empty", message="a workflow needs at least one module")
-        )
-    return tuple(patches), tuple(problems)
+    return tuple(patches), ()
 
 
 def _used_bindings(nodes) -> set[str]:
@@ -295,19 +296,17 @@ def _orphaned_managed(document: AuthoredWorkflowDocument, removed: set[str]) -> 
     }
 
 
-def _deleted(
+def _remaining(
     base: AuthoredWorkflowDocument,
     proposal: NodeDraftsProposal,
     patches: tuple[BindingPatch, ...],
     orphans: set[str],
-    removal_problems: tuple[DraftProblem, ...],
-) -> AuthoredWorkflowDocument:
-    """The document without the deleted nodes, their positions and orphaned managed bindings,
-    with every binding patch applied and the pending additions appended.
+) -> tuple[dict, list[DraftProblem]]:
+    """The document payload without the deleted nodes, their positions and orphaned managed
+    bindings, with every binding patch applied, plus the remaining nodes' missing inputs.
 
     Built before validation: a document holding both a deleted node and its replacement
-    (e.g. two proposals) need not be valid. Missing required inputs are located problems;
-    only a complete result is validated by the native document model.
+    (e.g. two proposals) need not be valid. Problems name only nodes that remain.
     """
     removed = set(proposal.removed)
     payload = base.model_dump(mode="json")
@@ -317,7 +316,7 @@ def _deleted(
     ] + [item.model_dump(mode="json") for item in proposal.externals]
     definition["nodes"] = [node for node in definition["nodes"] if node["id"] not in removed]
     payload["positions"] = [item for item in payload["positions"] if item["node"] not in removed]
-    problems = list(removal_problems)
+    problems: list[DraftProblem] = []
     for node in definition["nodes"]:
         request = node["request"]
         mine = [patch for patch in patches if patch.node == node["id"]]
@@ -345,10 +344,15 @@ def _deleted(
             for item in PROTOCOLS[request["protocol"]].arguments
             if item.required and item.name not in arguments
         )
-    if problems:
-        raise NodeEditRefusal(
-            "draft_incomplete", "\n".join(item.message for item in problems), tuple(problems)
-        )
+    return payload, problems
+
+
+def _deleted(
+    base: AuthoredWorkflowDocument, proposal: NodeDraftsProposal, payload: dict
+) -> AuthoredWorkflowDocument:
+    """The complete remaining ``payload`` (see ``_remaining``) with the pending additions,
+    validated by the native document model."""
+    definition = payload["definition"]
     definition["nodes"].extend(_node(item).model_dump(mode="json") for item in proposal.nodes)
     payload["positions"].extend(
         NodePosition(node=item.node, x=item.x, y=item.y).model_dump(mode="json")
@@ -367,7 +371,7 @@ def _required(node: str, field: str) -> DraftProblem:
         code="required_unbound",
         node=node,
         field=field,
-        message=f"{node}.{field}: required input is unbound",
+        message=f"{node}.{field}: required input is not connected",
     )
 
 
@@ -393,7 +397,19 @@ def apply_node_drafts(proposal: NodeDraftsProposal) -> tuple[str, NodeEditSummar
     base, projected = _projection(proposal)
     if collisions := _collisions(base, proposal):
         raise NodeEditRefusal("node_edit", "\n".join(collisions))
-    problems = tuple(problem for item in proposal.nodes for problem in item.missing_problems())
+    removed = set(proposal.removed)
+    patches, removal_problems = _removal(base, proposal) if removed else (proposal.bindings, ())
+    orphans = _orphaned_managed(base, removed) if removed else set()
+    remaining, reader_problems = (
+        _remaining(base, proposal, patches, orphans) if removed else (None, [])
+    )
+    # Every problem of the draft at once: a pending node's missing input must not hide
+    # the loop or a remaining reader (they are all fixed before saving).
+    problems = (
+        *removal_problems,
+        *reader_problems,
+        *(problem for item in proposal.nodes for problem in item.missing_problems()),
+    )
     if problems:
         raise NodeEditRefusal(
             "draft_incomplete", "\n".join(item.message for item in problems), problems
@@ -401,9 +417,6 @@ def apply_node_drafts(proposal: NodeDraftsProposal) -> tuple[str, NodeEditSummar
     refused = [message for item in proposal.nodes for message in _offered(projected, item)]
     if refused:
         raise NodeEditRefusal("draft_invalid", "\n".join(refused))
-    removed = set(proposal.removed)
-    patches, removal_problems = _removal(base, proposal) if removed else (proposal.bindings, ())
-    orphans = _orphaned_managed(base, removed) if removed else set()
     if proposal.document is None and not patches and not removal_problems and not orphans:
         # Targeted edits: deletions without readers and insertions keep every other byte.
         source = proposal.source
@@ -419,10 +432,8 @@ def apply_node_drafts(proposal: NodeDraftsProposal) -> tuple[str, NodeEditSummar
         except SourceEditError as error:
             raise NodeEditRefusal("node_edit", str(error)) from error
         kept = "all other source bytes are unchanged."
-    elif removed:
-        source = render_workflow_source(
-            _deleted(base, proposal, patches, orphans, removal_problems)
-        )
+    elif remaining is not None:
+        source = render_workflow_source(_deleted(base, proposal, remaining))
         kept = "the other edits of this draft are rendered as canonical source."
     else:
         payload = base.model_dump(mode="json")

@@ -132,7 +132,7 @@ def test_binding_draft_disconnect_promote_and_conflict(editor_config):
         body = {"expected_sha256": base["sha256"], "proposal": {"kind": "draft", "draft": draft}}
         refused = client.post("/api/editor/example/review", headers=headers, json=body)
         assert refused.status_code == 409, refused.text
-        assert "required input is unbound" in refused.text
+        assert "required input is not connected" in refused.text
         assert path.read_text() == original
         assert not tuple(editor_config.editor_projects[0].recovery_directory.iterdir())
         # A typed but incompatible source must still reach the native validator.

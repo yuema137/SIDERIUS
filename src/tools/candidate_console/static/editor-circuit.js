@@ -1,10 +1,13 @@
 /* Presentation and ephemeral gestures only; editor.js owns every document mutation. */
 (() => {
   'use strict';
-  let projection = null, actions = null, host = null, pending = null, drag = null, selectedWire = null, connecting = false;
-  // View-only state (zoom, scroll, arranged view, expanded optional inputs). It is
+  let projection = null, actions = null, host = null, pending = null, drag = null, selectedWire = null, connecting = false
+  // A mouse press never focuses a card (pointerdown preventDefault), and selecting re-renders:
+  // the clicked heading is focused after that render so Delete and Alt+arrows act on it.
+  let refocus = null;
+  // View-only state (zoom, scroll, expanded optional inputs). It is
   // kept per opened graph and never reaches a document, so viewing never changes source.
-  let view = {key: null, scale: 1, fitPending: false, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
+  let view = {key: null, scale: 1, fitPending: false, scroll: null, expanded: new Set(), adapters: new Set()};
   const CARD_GAP = {x: 135, y: 90};
   // Fit to view never goes below this zoom (text stays >= ~9px at the 12px label size); larger
   // graphs scroll inside the viewport. Manual zoom out still reaches 40%.
@@ -33,9 +36,18 @@
     return projection.inventory.find(value => value.node === node && value.argument === argument);
   }
   // Refusal reason naming both server-sent contracts (presentation only).
-  const refusal = (source, node, argument) => contracts.refusal(`${source.node}.result`,
+  const refusal = (source, node, argument) => contracts.refusal(capabilityOf(source.node),
     projection.inventory.find(value => value.node === source.node)?.node_output_contract.id,
-    `${node}.${argument || 'request'}`, choice(node, argument)?.socket_contract.id);
+    'this input', choice(node, argument)?.socket_contract.id);
+  // A refused drop is explained where it happened (tour #7, spec K10): one sentence under the
+  // input; it goes away with the next gesture or render.
+  function anchorNote(port, text) {
+    host.querySelector('.circuit-anchor-note')?.remove();
+    const card = port.closest('.circuit-card'), note = element('p', text, host.querySelector('.circuit-world'), 'circuit-walk-note circuit-anchor-note');
+    note.setAttribute('role', 'status');
+    note.style.left = card.offsetLeft + 'px'; note.style.width = card.offsetWidth + 'px';
+    note.style.top = card.offsetTop + port.offsetTop + port.offsetHeight + 4 + 'px';
+  }
   // `source` is the pending output, or a hovered output for a preview without selecting it.
   function highlight(source = pending) {
     if (!host) return;
@@ -61,12 +73,16 @@
       [...host.querySelectorAll('.circuit-wire')].find(path => same(wireKey(path), wireKey(target)))?.classList.toggle('selected', selected);
     }
   }
+  // Wires are read aloud in plain words ("Propose model sends Model plan to Implement") and
+  // join the Tab order only with advanced tools on (E-7); beginners select one with the mouse.
+  const wireLabel = (from, to, contract) => `${capabilityOf(from)} sends ${contract ? contracts.describe(contract).name : 'its result'} to ${capabilityOf(to)}`;
+  const wireTabIndex = enabled => enabled && window.uiSettings?.isEnabled('advanced') ? '0' : '-1';
   const wireKey = target => ({from: target.dataset.from, to: target.dataset.to, argument: target.dataset.argument || null});
   function selectWire(target) {
     if (!projection?.enabled) return;
     selectedWire = wireKey(target);
     target.focus({preventScroll: true}); highlight();
-    say(`Selected connection ${selectedWire.from}.result to ${selectedWire.to}.${selectedWire.argument}. Disconnect it with the button or Delete.`);
+    say(`Selected: ${target.getAttribute('aria-label')}. Disconnect it with the button or Delete.`);
   }
   function disconnectSelectedWire() {
     if (!projection?.enabled || projection.allowBindingChange === false || !selectedWire) return;
@@ -108,10 +124,9 @@
     });
     viewport.dataset.outsideCards = String(outside.length);
     const zoom = host.querySelector('.circuit-zoom'); if (zoom) zoom.textContent = `${Math.round(view.scale * 100)} %`;
-    note.textContent = (outside.length
-      ? `${outside.length} of ${cards.length} capabilities are partly outside the view. Scroll the canvas or use Fit to view.`
-      : `All ${cards.length} capabilities are in view.`) +
-      (view.arranged ? ' Arranged view: display only; the saved positions are unchanged.' : '');
+    note.textContent = outside.length
+      ? `${outside.length} of ${cards.length} modules are partly outside the view. Scroll the canvas or use Fit to view.`
+      : `All ${cards.length} modules are in view.`;
     // Edge shadows mark each side that still has content to scroll to.
     const shadows = [];
     if (viewport.scrollLeft > 1) shadows.push('inset 14px 0 12px -12px var(--edge)');
@@ -152,7 +167,7 @@
       const output = [...world.querySelectorAll('[data-output]')].find(value => value.dataset.node === source.node);
       if (!output) continue;
       const route = geometry.route(point(output), point(input), boxes, cards.indexOf(output.closest('.circuit-card')), cards.indexOf(input.closest('.circuit-card')), occupied);
-      if (!route) { say('Some wires could not be routed around overlapping or crowded cards. Use Arrange view (display only) or Fit to view, or move cards; the connection list retains every binding.'); continue; }
+      if (!route) { say('Some wires could not be drawn around overlapping cards. Tidy up, or move the cards apart.'); continue; }
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', geometry.path(route)); path.classList.add('circuit-wire');
       if (output.dataset.contract) contracts.decorate(path, output.dataset.contract);
@@ -161,8 +176,8 @@
       const target = document.createElementNS(svg.namespaceURI, 'path');
       target.setAttribute('d', geometry.path(route)); target.classList.add('circuit-wire-target');
       target.dataset.from = source.node; target.dataset.to = input.dataset.node; target.dataset.argument = option.argument;
-      target.setAttribute('tabindex', '0'); target.setAttribute('role', 'button'); target.setAttribute('aria-pressed', 'false');
-      target.setAttribute('aria-label', `Connection ${source.node}.result to ${input.dataset.node}.${option.argument}`);
+      target.setAttribute('tabindex', wireTabIndex(projection.enabled)); target.setAttribute('role', 'button'); target.setAttribute('aria-pressed', 'false');
+      target.setAttribute('aria-label', wireLabel(source.node, input.dataset.node, option.socket_contract));
       target.addEventListener('focus', () => path.classList.add('focused'));
       target.addEventListener('blur', () => path.classList.remove('focused'));
       target.addEventListener('click', event => { event.stopPropagation(); selectWire(target); });
@@ -172,7 +187,30 @@
       });
       svg.append(target);
     }
+    drawFeedback(svg, world);
     highlight(); updateVisibility();
+  }
+  // The research loop's feedback wire (tour #18): dashed, from the feedback module's output
+  // over the top of the cards back to the target module. Display only; the loop panel edits it.
+  function drawFeedback(svg, world) {
+    const loop = projection?.document?.definition.loop;
+    const output = loop && world.querySelector(`#circuit-output-${CSS.escape(loop.feedback.source.node)}`);
+    const target = loop && world.querySelector(`.circuit-card[data-node="${CSS.escape(loop.feedback.target)}"] > .editor-node`);
+    if (!output || !target) return;
+    const start = point(output), box = target.getBoundingClientRect(), end = toWorld(box.left, box.top + box.height / 2);
+    const top = Math.max(8, Math.min(...[...world.querySelectorAll('.circuit-card')].map(card => card.offsetTop)) - 28);
+    const path = document.createElementNS(svg.namespaceURI, 'path');
+    path.setAttribute('d', geometry.path([start, {x: start.x + 20, y: start.y}, {x: start.x + 20, y: top}, {x: end.x - 20, y: top}, {x: end.x - 20, y: end.y}, end]));
+    path.classList.add('circuit-feedback'); path.dataset.from = loop.feedback.source.node; path.dataset.to = loop.feedback.target;
+    path.setAttribute('aria-label', `Research loop: ${capabilityOf(loop.feedback.source.node)} feeds back to ${capabilityOf(loop.feedback.target)}`);
+    svg.prepend(path);
+  }
+  // "Check the workflow": the token walk (editor-circuit-walk.js) over what this canvas shows.
+  function checkLoop() {
+    if (!projection?.document || !host) return;
+    const walk = window.editorCircuitWalk, value = walk.plan(projection.document, projection.inventory);
+    void walk.run(host, value, {say, module: capabilityOf,
+      connector: option => contracts.describe(option.socket_contract).name});
   }
   // "Connects with" for the socket tooltip: capability names of the server-offered sources
   // (an input) or of the inputs that offer this result (an output). Server data only.
@@ -209,10 +247,10 @@
     button.addEventListener('click', () => {
       if (projection !== snapshot || !projection.enabled) return;
       if (!projection.allowBindingChange) { say('Review/save or discard the current edits before changing a connection.'); return; }
-      if (output) { pending = {kind: 'result', node: node.id, port: 'result'}; highlight(); say(`Selected ${node.id}.result. Choose a highlighted input, or press Escape to cancel.`); return; }
-      if (!pending) { say('Select a result output socket first. External bindings remain available in the inspector.'); return; }
+      if (output) { host.querySelector('.circuit-anchor-note')?.remove(); pending = {kind: 'result', node: node.id, port: 'result'}; highlight(); say(`Selected the output of ${capabilityOf(node.id)}. Choose a highlighted input, or press Escape to cancel.`); return; }
+      if (!pending) { say('Choose an output first (the socket on the right side of a module).'); return; }
       const selected = choice(node.id, argument)?.choices.find(value => same(value.source, pending));
-      if (!selected) { say(refusal(pending, node.id, argument)); return; }
+      if (!selected) { const reason = refusal(pending, node.id, argument); say(reason); anchorNote(button, reason); return; }
       cancel(); actions.bind(node.id, argument, selected.source);
     });
     if (output) {
@@ -227,7 +265,8 @@
     return button;
   }
   const button = (parent, text, id, onClick, icon = null) => {
-    const value = element('button', text, parent, 'circuit-view-button'); value.type = 'button'; value.id = id;
+    // Canvas controls are secondary (tour #15): Save stays the page's one primary action.
+    const value = element('button', text, parent, 'circuit-view-button secondary'); value.type = 'button'; value.id = id;
     if (icon && window.consoleIcons) value.prepend(window.consoleIcons.make(icon));
     value.addEventListener('click', onClick); return value;
   };
@@ -238,17 +277,19 @@
     value.classList.add('icon-button'); value.setAttribute('aria-label', label); value.dataset.tipLabel = label;
     element('span', label, value, 'sr-only'); return value;
   };
-  // Tidy up: one undoable layout edit (editor.js move) on the 16px grid; the view refits.
+  // Pipeline position of a module (Literature/Interpret -> Propose -> Implement -> Validate -> Train & tune).
+  const STAGES = ['literature', 'interpretation', 'proposal', 'implementation', 'validation', 'tuning'];
+  const stageOf = id => { const index = STAGES.indexOf(projection.document.definition.nodes.find(node => node.id === id)?.capability); return index < 0 ? STAGES.length : index; };
+  // Tidy up (the one layout tool, red-team A-1): one undoable layout edit (editor.js move) on
+  // the 16px grid; the view refits.
   function tidyUp() {
     if (!projection?.document || !projection.enabled || projection.allowMove === false) return;
     const cards = [...host.querySelectorAll('.circuit-card')];
     const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
-    const placed = geometry.tidy(projection.document.definition.nodes, size);
-    view.arranged = false; view.fitPending = true; view.scroll = null;
+    const placed = geometry.tidy(projection.document.definition.nodes, size, undefined, undefined, stageOf);
+    view.fitPending = true; view.scroll = null;
     actions.move([...placed].map(([node, position]) => ({node, ...position})), 'Tidy up layout');
   }
-  // Re-render the current projection after a view-only change (arranged view).
-  const rerender = () => { if (host && projection) render(host, projection, actions); };
   function toolbar(parent, value) {
     const bar = element('div', '', parent, 'circuit-toolbar');
     bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Canvas view');
@@ -257,29 +298,28 @@
     iconButton(bar, 'Zoom in', 'circuit-zoom-in', () => applyScale(Math.min(1, Math.round((view.scale + 0.1) * 10) / 10)), 'zoom-in');
     iconButton(bar, 'Actual size', 'circuit-zoom-reset', () => applyScale(1), 'maximize');
     iconButton(bar, 'Fit to view', 'circuit-fit', fit, 'scan');
-    const arrange = iconButton(bar, view.arranged ? 'Show saved layout' : 'Arrange view (display only)', 'circuit-arrange', () => {
-      view.arranged = !view.arranged; view.fitPending = true; view.scroll = null; rerender();
-    }, 'workflow');
-    arrange.setAttribute('aria-pressed', String(view.arranged));
-    arrange.disabled = !value.document;
+    const check = iconButton(bar, 'Check the workflow', 'circuit-check', checkLoop, 'repeat-2');
+    check.disabled = !value.document;
     const tidy = iconButton(bar, 'Tidy up', 'circuit-tidy', tidyUp, 'layout-grid');
     tidy.disabled = !value.document || !value.enabled || value.allowMove === false;
     const note = element('p', '', parent, 'circuit-view-note'); note.setAttribute('aria-live', 'polite');
   }
   function render(container, value, callbacks) {
-    const focus = container.contains(document.activeElement) ? document.activeElement.id : null;
+    const focus = refocus || (container.contains(document.activeElement) ? document.activeElement.id : null); refocus = null;
     const key = `${value.viewKey ?? ''}|${(value.document?.definition.nodes || []).map(node => node.id).join(',')}`;
     const previous = container.querySelector('.circuit-viewport');
-    if (view.key !== key) view = {key, scale: 1, fitPending: true, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
+    if (view.key !== key) view = {key, scale: 1, fitPending: true, scroll: null, expanded: new Set(), adapters: new Set()};
     else if (previous && !view.fitPending) view.scroll = {left: previous.scrollLeft, top: previous.scrollTop};
+    window.editorCircuitWalk?.stop();
     host = container; projection = value; actions = callbacks; cancel(false); selectedWire = null; host.replaceChildren();
-    const message = element('p', 'Select a capability to inspect it. Choose an output, then a highlighted input to rebind.', host, 'circuit-message');
+    const message = element('p', 'Select a module to see its inputs. Drag from an output to a highlighted input to connect them.', host, 'circuit-message');
     message.setAttribute('role', 'status');
     toolbar(host, value);
     if (value.document) contracts.legend(host, value.inventory);
     const disconnect = element('button', 'Disconnect selected connection', host, 'circuit-disconnect');
     disconnect.type = 'button'; disconnect.hidden = true; disconnect.addEventListener('click', disconnectSelectedWire);
     const viewport = element('div', '', host, 'circuit-viewport'), sizer = element('div', '', viewport, 'circuit-sizer');
+    viewport.id = 'circuit-viewport'; viewport.tabIndex = -1; viewport.setAttribute('aria-label', 'Workflow canvas');
     const world = element('div', '', sizer, 'circuit-world');
     viewport.addEventListener('scroll', updateVisibility, {passive: true});
     viewObserver.disconnect(); viewObserver.observe(viewport);
@@ -288,9 +328,8 @@
     const saved = new Map(value.document.positions.map(p => [p.node, p]));
     const cards = [];
     // A move persists every displayed position, so later sources never mix stored and fallback layouts.
-    // Moving a card in the arranged view adopts the displayed layout as an ordinary local edit.
     const layout = (moved, x, y) => cards.map(card => card.dataset.node === moved ? {node: moved, x, y} : {node: card.dataset.node, ...card._position});
-    const move = positions => { view.arranged = false; actions.move(positions); };
+    const move = positions => actions.move(positions);
     for (const node of value.document.definition.nodes) {
       const card = element('article', '', world, 'circuit-card'); card.dataset.node = node.id; card.dataset.capability = node.capability;
       const heading = element('button', '', card, 'editor-node');
@@ -300,7 +339,11 @@
       const role = [...heading.querySelector('.capability-heading').classList].find(name => name.startsWith('capability-') && name !== 'capability-heading');
       if (role) card.classList.add(role);
       heading.setAttribute('aria-pressed', String(node.id === value.selected));
-      heading.addEventListener('click', () => { if (projection === value && projection.selectable) actions.select(node.id); });
+      heading.addEventListener('click', () => {
+        if (projection !== value || !projection.selectable) return;
+        refocus = heading.id; actions.select(node.id);
+        if (refocus) { refocus = null; heading.focus({preventScroll: true}); }
+      });
       heading.addEventListener('contextmenu', event => { if (projection === value && projection.enabled && !pending && actions.menu) { actions.select(node.id); actions.menu(node.id, event); } });
       heading.addEventListener('keydown', event => {
         // Node removal is proposed by editor.js (Review shows the exact change before Save).
@@ -326,7 +369,7 @@
         else { gesture.card.style.left = gesture.left + 'px'; gesture.card.style.top = gesture.top + 'px'; draw(); }
       });
       heading.addEventListener('pointercancel', event => {
-        if (projection === value && drag?.node === node.id && drag.pointerId === event.pointerId) { cancel(); say('Node move cancelled.'); }
+        if (projection === value && drag?.node === node.id && drag.pointerId === event.pointerId) { cancel(); say('Move cancelled.'); }
       });
       // Server inventory marks required sockets; an unbound one flags the whole card.
       const missing = value.inventory.filter(item => item.node === node.id && item.required && !item.bound).length;
@@ -380,8 +423,7 @@
     }
     // Card size comes from the rendered cards (editor.css owns it), never a copied constant.
     const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
-    // The arranged view uses the same placement with no stored positions: display only.
-    const placed = geometry.place(value.document.definition.nodes, view.arranged ? new Map() : saved, size, CARD_GAP);
+    const placed = geometry.place(value.document.definition.nodes, saved, size, CARD_GAP);
     for (const card of cards) card._position = placed.get(card.dataset.node);
     const ox = 60 - Math.min(0, ...cards.map(card => card._position.x)), oy = 60 - Math.min(0, ...cards.map(card => card._position.y));
     for (const card of cards) { card.style.left = card._position.x + ox + 'px'; card.style.top = card._position.y + oy + 'px'; }
@@ -392,9 +434,9 @@
     else if (view.scroll) { viewport.scrollLeft = view.scroll.left; viewport.scrollTop = view.scroll.top; }
     updateVisibility();
     const overlapping = geometry.overlaps(cards.map(card => cardBox(card)));
-    if (!view.arranged && overlapping.length) {
-      const names = overlapping.map(([a, b]) => `${cards[a].dataset.node} and ${cards[b].dataset.node}`).join('; ');
-      say(`Saved card positions overlap (${names}). Arrange view shows a non-overlapping layout without changing the saved source; moving a card there adopts that layout as a reviewable edit.`);
+    if (overlapping.length) {
+      const names = overlapping.map(([a, b]) => `${capabilityOf(cards[a].dataset.node)} and ${capabilityOf(cards[b].dataset.node)}`).join('; ');
+      say(`Some cards overlap (${names}). Tidy up arranges them in columns; Undo puts them back.`);
     }
     if (focus) document.getElementById(focus)?.focus({preventScroll: true});
   }
@@ -406,7 +448,7 @@
     for (const port of host.querySelectorAll('.circuit-port')) port.disabled = !enabled;
     const disconnect = host.querySelector('.circuit-disconnect'); if (disconnect) disconnect.disabled = !enabled || projection.allowBindingChange === false;
     for (const target of host.querySelectorAll('.circuit-wire-target')) {
-      target.setAttribute('aria-disabled', String(!enabled)); target.setAttribute('tabindex', enabled ? '0' : '-1');
+      target.setAttribute('aria-disabled', String(!enabled)); target.setAttribute('tabindex', wireTabIndex(enabled));
     }
     for (const heading of host.querySelectorAll('.editor-node')) heading.setAttribute('aria-disabled', String(!selectable));
     const tidy = host.querySelector('#circuit-tidy'); if (tidy) tidy.disabled = !enabled || !projection.document || projection.allowMove === false;
@@ -414,8 +456,9 @@
   }
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
-    if (pending || drag) { cancel(); say('Circuit gesture cancelled.'); }
-    if (selectedWire) { selectedWire = null; highlight(); say('Wire selection cancelled.'); }
+    if (pending || drag) { cancel(); say('Cancelled.'); }
+    if (selectedWire) { selectedWire = null; highlight(); say('Connection deselected.'); }
+    host?.querySelector('.circuit-anchor-note')?.remove();
   });
   // Drag-to-connect: a press on an output released over an input clicks that input.
   document.addEventListener('pointerup', event => {
@@ -440,7 +483,7 @@
     setTimeout(() => document.removeEventListener('click', swallow, {capture: true}), 0);
   });
   document.addEventListener('pointercancel', () => { if (document.body.classList.contains('circuit-gesture')) gesture(false); });
-  document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Connection selection cancelled.'); } });
+  document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Cancelled.'); } });
   document.addEventListener('pointermove', event => {
     if (!pending || !host?.contains(event.target)) return;
     const output = host.querySelector(`#circuit-output-${CSS.escape(pending.node)}`), svg = wireLayer();
@@ -457,5 +500,10 @@
     if (!projection?.document) return;
     if (view.fitPending) fit(); else updateVisibility();
   });
-  window.editorCircuit = Object.freeze({render, setEnabled});
+  // "Skip to canvas" (index.html): the selected module, else the first, else the canvas itself.
+  function focusCanvas() {
+    const target = host?.querySelector('.editor-node[aria-pressed="true"]') || host?.querySelector('.editor-node') || host?.querySelector('.circuit-viewport');
+    target?.focus(); return !!target;
+  }
+  window.editorCircuit = Object.freeze({render, setEnabled, focusCanvas});
 })();

@@ -128,7 +128,7 @@ def test_inline_source_gains_imports_and_positions_and_keeps_comments(tmp_path):
     with pytest.raises(AuthoringError) as incomplete:
         review(editor, proposal)
     assert incomplete.value.code == "draft_incomplete"
-    assert "implement.storage: required input is unbound" in str(incomplete.value)
+    assert "implement.storage: required input is not connected" in str(incomplete.value)
     widened = source.replace(
         'location="old.json"),)',
         'location="old.json"), ExternalBinding(id="store", contract="storage", location="s.json"))',

@@ -156,21 +156,33 @@ function arrange(nodes, spacing, column) {
   for (const [id, rank] of ranks) { const index = rows.get(rank) || 0; positions.set(id, {x: index * column, y: rank * spacing}); rows.set(rank, index + 1); }
   return positions;
 }
-// "Tidy up" (canvas-study V1): left-to-right columns by longest path from a source, rows
-// ordered by the mean row of each node's sources (fewer crossings), all on the `grid`.
-// Column/row steps are the card size plus `gap`, rounded up to the grid.
-function tidy(nodes, size, gap = {x: 80, y: 32}, grid = 16) {
+// "Tidy up" (canvas-study V1, tour #12): connected modules in left-to-right columns by
+// longest path from a source; rows follow the mean row of each node's sources (fewer
+// crossings), then pipeline `stage` order. Modules with no wire at all (new drafts) take the
+// next column, in pipeline order; with no wire anywhere they form one row in pipeline order.
+// Column/row steps are the card size plus `gap`, rounded up to the `grid`.
+function tidy(nodes, size, gap = {x: 80, y: 32}, grid = 16, stage = () => 0) {
   const {ranks, parents} = rankNodes(nodes);
   const up = value => Math.ceil(value / grid) * grid;
   const column = up(size.width + gap.x), spacing = up(size.height + gap.y);
+  const wired = new Set(nodes.flatMap(node => parents(node.id).length ? [node.id, ...parents(node.id)] : []));
+  const byStage = (a, b) => stage(a) - stage(b) || (a < b ? -1 : a > b ? 1 : 0);
+  const loose = nodes.map(node => node.id).filter(id => !wired.has(id)).sort(byStage);
+  if (!wired.size) return new Map(loose.map((id, index) => [id, {x: index * column, y: 0}]));
   const columns = new Map(), row = new Map();
-  for (const node of nodes) { const rank = ranks.get(node.id); if (!columns.has(rank)) columns.set(rank, []); columns.get(rank).push(node.id); }
+  for (const node of nodes) {
+    if (!wired.has(node.id)) continue;
+    const rank = ranks.get(node.id); if (!columns.has(rank)) columns.set(rank, []); columns.get(rank).push(node.id);
+  }
+  const last = Math.max(...columns.keys());
   for (const rank of [...columns.keys()].sort((a, b) => a - b)) {
     const mean = id => { const rows = parents(id).filter(parent => row.has(parent)).map(parent => row.get(parent)); return rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0; };
-    const ids = columns.get(rank).sort((a, b) => mean(a) - mean(b) || (a < b ? -1 : a > b ? 1 : 0));
+    const ids = columns.get(rank).sort((a, b) => mean(a) - mean(b) || byStage(a, b));
     ids.forEach((id, index) => row.set(id, index));
   }
-  return new Map(nodes.map(node => [node.id, {x: ranks.get(node.id) * column, y: row.get(node.id) * spacing}]));
+  const placed = new Map([...row].map(([id, index]) => [id, {x: ranks.get(id) * column, y: index * spacing}]));
+  loose.forEach((id, index) => placed.set(id, {x: (last + 1) * column, y: index * spacing}));
+  return new Map(nodes.map(node => [node.id, placed.get(node.id)]));
 }
 // Saved positions stay exact. Unsaved nodes keep their ranked layout, shifted
 // right of every saved card, so a fallback card never covers a stored one.

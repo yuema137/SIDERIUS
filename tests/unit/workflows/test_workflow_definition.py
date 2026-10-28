@@ -109,7 +109,7 @@ def test_draft_optional_removal_and_external_disconnect_preserve_base():
         )
     )
     assert required.status == "incomplete" and required.document is None
-    assert required.diagnostics == ("propose.request: required input is unbound",)
+    assert required.diagnostics == ("propose.request: required input is not connected",)
     assert base.model_dump_json() == before
 
 

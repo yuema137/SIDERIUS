@@ -62,7 +62,7 @@ try {
   assert.ok(wirePoint);
   assert.equal(await page.evaluate(({x, y}) => document.elementFromPoint(x, y)?.classList.contains('circuit-wire-target'), wirePoint), true, 'A visible wire stroke receives pointer hits');
   await page.mouse.click(wirePoint.x, wirePoint.y);
-  assert.equal(await wire.getAttribute('aria-label'), 'Connection propose.result to implement.output');
+  assert.equal(await wire.getAttribute('aria-label'), 'Propose model sends Model plan to Implement');
   assert.equal(await wire.getAttribute('aria-pressed'), 'true');
   assert.ok(await page.locator('.circuit-wire.selected').count());
   await page.locator('.circuit-disconnect').click();
