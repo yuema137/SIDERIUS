@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from core.chain_state import ChainState
 from core.control_json import JSON_LIMIT, encode_control
@@ -17,6 +17,9 @@ from .graph_models import GraphCapability, GraphNodeEvidence, GraphReason, Graph
 from .layout import candidate_control_dir, graph_instance_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .route_eval import RouteEvaluationOutput
+
+if TYPE_CHECKING:
+    from workflows.adaptors import AdaptorOutcome
 
 
 def expected_nodes(
@@ -61,24 +64,32 @@ def admit_graph_control(
     request: CandidateRunRequest, initial: CandidateRunReceipt, *, iteration: int = 1
 ) -> None:
     """Reserve actual encoded space for every node's largest terminal representation."""
+    from .adaptor_phase import expected_adaptors
+
     encode_control(request)
     encode_control(initial)
-    nodes = tuple(
-        item.model_copy(
-            update={
-                "state": "succeeded",
-                "record_sha256": "f" * 64,
-                "reason": "dependency_not_successful",
-            }
+    nodes, adaptors = (
+        tuple(
+            item.model_copy(
+                update={
+                    "state": "succeeded",
+                    "record_sha256": "f" * 64,
+                    "reason": "dependency_not_successful",
+                }
+            )
+            for item in slots
         )
-        for item in expected_nodes(request, initial, iteration=iteration)
+        for slots in (
+            expected_nodes(request, initial, iteration=iteration),
+            expected_adaptors(request, initial, iteration=iteration),
+        )
     )
     encode_control(
         initial.model_copy(
             update={
                 "status": "rejected",
                 "validation_passed": False,
-                "graph_trace": GraphTrace(nodes=nodes),
+                "graph_trace": GraphTrace(nodes=nodes, adaptors=adaptors),
                 "native_output_paths": tuple(item.record_path for item in nodes),
                 "error": "graph_control_overflow",
             }
@@ -183,13 +194,18 @@ def verify_graph_trace(
         ):
             raise ValueError("graph receipt lacks terminal trace")
         return
+    from .adaptor_phase import expected_adaptors, verify_adaptors
+
     expected = expected_nodes(request, initial, iteration=iteration)
-    if len(trace.nodes) != len(expected):
+    expected_adaptor = expected_adaptors(request, initial, iteration=iteration)
+    if len(trace.nodes) != len(expected) or len(trace.adaptors) != len(expected_adaptor):
         raise ValueError("graph trace membership mismatch")
     shape = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     )
-    states: dict[str, GraphState] = {item.node_id: item.state for item in trace.nodes}
+    states: dict[str, GraphState] = {
+        item.node_id: item.state for item in (*trace.nodes, *trace.adaptors)
+    }
     for item, slot in zip(trace.nodes, expected, strict=True):
         if (item.node_id, item.capability, item.predecessors, item.storage) != (
             slot.node_id,
@@ -226,7 +242,9 @@ def verify_graph_trace(
             or item.reason not in _UNDISPATCHED_REASONS[item.state]
         ):
             raise ValueError("graph incomplete invocation claims output")
-    replay_readiness(trace.nodes)
+    for item, slot in zip(trace.adaptors, expected_adaptor, strict=True):
+        _check_adaptor_entry(item, slot, states)
+    replay_readiness((*trace.nodes, *trace.adaptors))
     status = readiness.body_status(states.values(), tuning=shape.tuning is not None)
     if (
         ("blocked" in states.values() and status in ("accepted", "completed"))
@@ -247,6 +265,9 @@ def verify_graph_trace(
         or receipt.training_output is not None
     ):
         raise ValueError("graph output index mismatch")
+    outcomes = verify_adaptors(
+        request, trace.nodes, trace.adaptors, workspace=Path(initial.workspace), iteration=iteration
+    )
     if shape.tuning is not None:
         verify_graph_training(
             request,
@@ -254,6 +275,7 @@ def verify_graph_trace(
             trace,
             iteration=iteration,
             incumbent=None if history is None else history.chain_formal_incumbent_reference,
+            outcomes=outcomes,
         )
     if (
         execution_families(
@@ -271,6 +293,35 @@ def verify_graph_trace(
         verify_interpretation_evidence(
             request, initial, trace, iteration=iteration, history=history
         )
+
+
+def _check_adaptor_entry(
+    item: GraphNodeEvidence, slot: GraphNodeEvidence, states: Mapping[str, GraphState]
+) -> None:
+    """Binding, record and readiness facts of one adaptor entry; its content is recomputed."""
+    if (item.node_id, item.capability, item.predecessors, item.storage) != (
+        slot.node_id,
+        slot.capability,
+        slot.predecessors,
+        slot.storage,
+    ):
+        raise ValueError("graph trace binding mismatch")
+    if item.state in ("pending", "running"):
+        raise ValueError("graph terminal contains unfinished invocation")
+    if item.record_path is None:
+        if item.record_sha256 is not None or item.reason not in _UNDISPATCHED_REASONS.get(
+            item.state, frozenset()
+        ):
+            raise ValueError("graph incomplete invocation claims output")
+        return
+    if item.state not in ("succeeded", "rejected", "failed") or any(
+        states[key] in ("pending", "running", "failed", "blocked") for key in item.predecessors
+    ):
+        raise ValueError("graph adaptor ran before its inputs were terminal")
+    if item.record_path != slot.record_path or item.record_sha256 != record_digest(
+        item.record_path
+    ):
+        raise ValueError("graph adaptor record mismatch")
 
 
 def verify_literature_evidence(
@@ -542,8 +593,13 @@ def verify_graph_training(
     *,
     iteration: int,
     incumbent: float | None = None,
+    outcomes: "Mapping[str, AdaptorOutcome] | None" = None,
 ) -> None:
-    """Verify native identity/transport without running task plugins or training admission."""
+    """Verify native identity/transport without running task plugins or training admission.
+
+    ``outcomes`` are the verified adaptor outcomes; under a selection adaptor the
+    trained validation is the one it emitted, otherwise the profile's only branch.
+    """
     from agent.schemas.hyperparam_tuning import HyperparamTuningInput
     from agent.schemas.proposal import ProposalInput, ProposalOutput
     from agent.schemas.validator import ValidatorOutput
@@ -561,8 +617,10 @@ def verify_graph_training(
         if tuner.state == "succeeded":
             raise ValueError("successful tuning lacks native output")
         return
+    from .adaptor_phase import tuning_branch
+
     proposal_path = nodes[shape.families[0].proposal].record_path
-    validation_path = nodes[shape.branches[0][1]].record_path
+    validation_path = nodes[tuning_branch(shape, outcomes or {})[1]].record_path
     assert proposal_path is not None and validation_path is not None
     proposal = ProposalOutput.model_validate_json(Path(proposal_path).read_bytes())
     validation = ValidatorOutput.model_validate_json(Path(validation_path).read_bytes())

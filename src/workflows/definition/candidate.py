@@ -1,6 +1,7 @@
 """Pure supported-candidate shape check shared by preview and resolution."""
 
 from .models import (
+    AdaptorSource,
     ExternalRequest,
     ExternalSource,
     ProtocolRequest,
@@ -18,14 +19,18 @@ ROUTING_NOT_ADMITTED = (
 ADAPTORS_NOT_ADMITTED = "adaptors are declared but this execution profile does not admit them"
 
 
-def refuse_declaration_only(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> None:
-    """Routes and adaptors are declaration-only: no execution profile admits them yet.
+def refuse_declaration_only(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition, *, admits_adaptors: bool = False
+) -> None:
+    """Routes are declaration-only; adaptors only where a profile admits them.
 
-    The adaptor format gate guarantees ``adaptor_format`` is set iff an adaptor is used.
+    Only the selection profile (``fanout.SELECTION_PROFILE``) passes
+    ``admits_adaptors=True``. The adaptor format gate guarantees
+    ``adaptor_format`` is set iff an adaptor is used.
     """
     if definition.routes:
         raise ValueError(ROUTING_NOT_ADMITTED)
-    if definition.adaptor_format is not None:
+    if definition.adaptor_format is not None and not admits_adaptors:
         raise ValueError(ADAPTORS_NOT_ADMITTED)
 
 
@@ -55,20 +60,23 @@ def candidate_nodes(definition: WorkflowDefinition | ReusableWorkflowDefinition)
     return {role: node.id for role, node in nodes.items()}
 
 
-def check_tuning_edge(request: Request, proposal: str, validation: str) -> None:
-    """One tuner consumes the selected candidate lineage and explicit native settings."""
+def check_tuning_edge(request: Request, proposal: str, validation: str | AdaptorSource) -> None:
+    """One tuner consumes the selected candidate lineage and explicit native settings.
+
+    ``validation`` names the validator node, or the adaptor output that selects one.
+    """
     if (
         not isinstance(request, ProtocolRequest)
         or request.protocol != "validated-candidate-to-tuning"
     ):
         raise ValueError("tuning requires validated-candidate-to-tuning")
     arguments = {arg.name: arg.source for arg in request.arguments}
-    for role in ("proposal", "validation"):
-        source = arguments[role]
-        if (
-            not isinstance(source, ResultSource)
-            or source.node != {"proposal": proposal, "validation": validation}[role]
-        ):
+    expected = {
+        "proposal": ResultSource(node=proposal),
+        "validation": ResultSource(node=validation) if isinstance(validation, str) else validation,
+    }
+    for role, source in expected.items():
+        if arguments[role] != source:
             raise ValueError(f"tuning.{role} must use this candidate's {role}")
     if not isinstance(arguments["settings"], ExternalSource):
         raise ValueError("tuning.settings requires an external settings file")

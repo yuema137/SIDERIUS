@@ -14,12 +14,14 @@ from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import loc
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.chain_state import ChainState
+from workflows.adaptors import AdaptorOutcome
 from workflows.definition.fanout import execution_families
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 from workflows.termination import infrastructure_abort_reason
 
 from . import phases, readiness
+from .adaptor_phase import execute_adaptor, expected_adaptors, tuning_branch
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
 from .graph_models import GraphNodeEvidence, GraphTrace
@@ -67,11 +69,19 @@ def execute_fanout(
         | InterpretationOutput
         | HyperparamTuningOutput,
     ] = {}
-    slots = {item.node_id: item for item in expected_nodes(request, initial, iteration=iteration)}
+    slots = {
+        item.node_id: item
+        for item in (
+            *expected_nodes(request, initial, iteration=iteration),
+            *expected_adaptors(request, initial, iteration=iteration),
+        )
+    }
     evidence: dict[str, GraphNodeEvidence] = {}
+    outcomes: dict[str, AdaptorOutcome] = {}
     aborted = False
     nodes = {node.id: node for node in definition.nodes}
-    while len(evidence) < len(definition.nodes):
+    adaptors = {adaptor.id: adaptor for adaptor in definition.adaptors}
+    while len(evidence) < len(slots):
         decision = readiness.next_dispatch(
             readiness.readiness_input(slots.values(), evidence, aborted=aborted)
         )
@@ -82,6 +92,18 @@ def execute_fanout(
         if decision.next is None:
             if not decision.terminal:
                 raise RuntimeError("graph readiness found no dispatchable node")
+            continue
+        if decision.next in adaptors:
+            evidence[decision.next], outcome = execute_adaptor(
+                adaptors[decision.next],
+                slots[decision.next],
+                evidence,
+                workspace=Path(initial.workspace),
+                iteration=iteration,
+            )
+            if outcome is not None:
+                outcomes[decision.next] = outcome
+            aborted = aborted or evidence[decision.next].state == "failed"
             continue
         node = nodes[decision.next]
         item = slots[node.id].model_copy(update={"state": "running", "record_path": None})
@@ -128,7 +150,9 @@ def execute_fanout(
                     implementation_directory="",
                 )
                 proposal = results[shape.families[0].proposal]
-                implementation, validation = (results[key] for key in shape.branches[0])
+                implementation, validation = (
+                    results[key] for key in tuning_branch(shape, outcomes)
+                )
                 assert isinstance(proposal, ProposalOutput)
                 assert isinstance(implementation, ImplementorOutput)
                 assert isinstance(validation, ValidatorOutput)
@@ -214,9 +238,12 @@ def execute_fanout(
             evidence[node.id] = item.model_copy(
                 update={"state": "failed", "reason": "native_failure"}
             )
-    trace = GraphTrace(nodes=tuple(evidence[node.id] for node in definition.nodes))
+    trace = GraphTrace(
+        nodes=tuple(evidence[node.id] for node in definition.nodes),
+        adaptors=tuple(evidence[adaptor.id] for adaptor in definition.adaptors),
+    )
     status = readiness.body_status(
-        (item.state for item in trace.nodes), tuning=shape.tuning is not None
+        (item.state for item in (*trace.nodes, *trace.adaptors)), tuning=shape.tuning is not None
     )
     return initial.model_copy(
         update={

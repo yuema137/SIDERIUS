@@ -500,18 +500,23 @@ def routed_pick() -> dict:
     return payload
 
 
-def test_route_merge_into_an_adaptor_port_resolves_and_keeps_arm_rules():
-    """Lead decision 2026-10-28: a port may bind a SelectedSource (one validation.output).
+def test_route_merge_into_an_adaptor_port_resolves():
+    """Lead decision 2026-10-28: a port may bind a SelectedSource (one validation.output)."""
+    WorkflowDefinition.model_validate_json(json.dumps(routed_pick()))
 
-    Reading both exclusive arms without the merge is refused for an adaptor as for a node.
+
+def test_an_adaptor_may_read_both_exclusive_arms_without_a_merge():
+    """B6-3 (B6-D8): a skipped adaptor input is inadmissible, never inherited.
+
+    Fails if the adaptor is refused like a node (nodes keep the rule:
+    ``test_workflow_routes``). The tuner downstream of the adaptor carries no arm
+    label, so it is not refused either.
     """
     payload = routed_pick()
-    WorkflowDefinition.model_validate_json(json.dumps(payload))
     _sources(payload)[0] = {"kind": "result", "node": "vx", "port": "result"}
     _sources(payload).append({"kind": "result", "node": "vy", "port": "result"})
     _pick(payload)["select"] = {"kind": "first-admissible/v1"}
-    with pytest.raises(ValidationError, match="two exclusive arms without a merge"):
-        WorkflowDefinition.model_validate_json(json.dumps(payload))
+    WorkflowDefinition.model_validate_json(json.dumps(payload))
 
 
 def test_a_merge_into_an_adaptor_needs_a_candidate_in_every_arm():
