@@ -69,6 +69,10 @@ no hidden contracts, no silent defaults.
 - Record vocabularies (statuses, verdicts as persisted strings) are declared
   here and are load-bearing for persisted history — additive evolution only.
 - `extra="forbid"` on record-facing types where a misspelled key must refuse.
+- `ParameterRule` declares exactly one kind by key presence. Only `exact`
+  accepts null; a null `range` / `allowed` / `predicate` is refused instead
+  of falling back to an exact-null kind, and `NumericRange` bounds are strict
+  numbers (no bool or string coercion).
 - `ParameterRules` checks fixed `train_config` paths against the consuming
   `TrainConfig.model_fields` and nested model annotations, including optional
   unions. The shared document resolver repeats this check so a mutated rule
