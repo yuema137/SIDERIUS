@@ -73,11 +73,7 @@ def execute_fanout(
     nodes = {node.id: node for node in definition.nodes}
     while len(evidence) < len(definition.nodes):
         decision = readiness.next_dispatch(
-            readiness.readiness_input(
-                slots.values(),
-                {key: value.state for key, value in evidence.items()},
-                aborted=aborted,
-            )
+            readiness.readiness_input(slots.values(), evidence, aborted=aborted)
         )
         for node_id, state, reason in decision.terminal:
             evidence[node_id] = slots[node_id].model_copy(
@@ -219,16 +215,8 @@ def execute_fanout(
                 update={"state": "failed", "reason": "native_failure"}
             )
     trace = GraphTrace(nodes=tuple(evidence[node.id] for node in definition.nodes))
-    status = (
-        "failed"
-        if aborted
-        else (
-            "rejected"
-            if any(item.state == "rejected" for item in trace.nodes)
-            else "completed"
-            if shape.tuning
-            else "accepted"
-        )
+    status = readiness.body_status(
+        (item.state for item in trace.nodes), tuning=shape.tuning is not None
     )
     return initial.model_copy(
         update={

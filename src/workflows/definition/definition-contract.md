@@ -232,8 +232,10 @@ the source passes through one of that entry's targets. Validation refuses:
 Arms of different cases are disjoint by construction: distinct targets each have a
 direct control edge from the source. A merge is a deterministic select keyed by the
 recorded decision, not an OR/race join; its consumer depends on every candidate for
-scheduling. Execution semantics (`skipped`/`route_not_selected`, decision evidence,
-verification) belong to later candidate-worker work.
+scheduling. Readiness skip semantics (`skipped`/`route_not_selected`, merge resolution,
+skip propagation) are owned by `tools.candidate_worker.readiness` (candidate-worker
+contract, readiness authority); decision evidence and routed execution admission belong
+to later candidate-worker work.
 
 ## Adaptor declarations (inert)
 
