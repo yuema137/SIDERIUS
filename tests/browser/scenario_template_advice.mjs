@@ -24,7 +24,7 @@
  */
 import assert from 'node:assert/strict';
 import {spawn, execFileSync} from 'node:child_process';
-import {mkdir} from 'node:fs/promises';
+import {mkdir, readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join, resolve, dirname} from 'node:path';
@@ -75,6 +75,8 @@ try {
 
   // Beginner entry: compact cards (icon, title, one sentence); the graph preview opens on demand.
   const importTemplate = async (id, title) => {
+    // Compare exact bytes on disk before/after import (a prior Save may have changed them).
+    const before = await readFile(metadata.reusable_source);
     await page.locator('#editor-template-open').click();
     const gallery = page.locator('#editor-template-gallery');
     await gallery.locator(`.template-card[data-template="${id}"]`).click();
@@ -85,7 +87,7 @@ try {
     await gallery.locator('#editor-template-import').click();
     await waitUntil(async () => !(await gallery.evaluate(dialog => dialog.open)));
     await waitUntil(async () => (await status.textContent()).includes('Declaration validated'));
-    assert.equal((await parsed()).definition.nodes.length, original.definition.nodes.length, 'Import never writes before Save');
+    assert.ok((await readFile(metadata.reusable_source)).equals(before), 'Import never writes before Save');
   };
   // Human advice is the first input of the inspector, labelled and multi-line.
   const adviceFirst = async () => {

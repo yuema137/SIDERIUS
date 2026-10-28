@@ -291,7 +291,7 @@ _SHAPES: tuple[tuple[TemplateId, str, str, ReusableWorkflowDocument], ...] = (
     (
         "single-loop-with-advice",
         "Single loop with your own advice",
-        "The same loop; the proposal agent also reads your advice and findings.",
+        "The same loop; the proposal agent also reads your advice.",
         _research_loop(with_advice=True),
     ),
     (
