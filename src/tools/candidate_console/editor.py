@@ -9,7 +9,15 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from tools.setup_review.composition_models import TaskCheckSettings
-from tools.workflow_authoring.models import DraftRequest, Project, ReviewRequest, SaveRequest
+from tools.workflow_authoring.models import (
+    DraftRequest,
+    NodeCatalog,
+    NodeDraftRequest,
+    Project,
+    ReviewRequest,
+    SaveRequest,
+)
+from tools.workflow_authoring.options import node_catalog
 from tools.workflow_authoring.service import AuthoringError, WorkflowAuthoring
 from tools.workflow_authoring.task_models import TaskReferenceTarget
 from workflows.definition import TaskBinding
@@ -115,6 +123,11 @@ def editor_router(
             )
         )
 
+    @router.get("/node-catalog", response_model=NodeCatalog)
+    def catalog() -> NodeCatalog:
+        """Read-only projection of the native catalog for the node palette."""
+        return node_catalog()
+
     @router.get("/{project_id}")
     def read(project_id: str):
         service = selected(project_id)
@@ -141,6 +154,12 @@ def editor_router(
         service = selected(project_id)
         proposal = DraftRequest.model_validate_json(await request.body())
         return await run_in_threadpool(perform, lambda: service.inspect_draft(proposal))
+
+    @router.post("/{project_id}/node-draft")
+    async def node_draft(project_id: str, request: Request):
+        service = selected(project_id)
+        proposal = NodeDraftRequest.model_validate_json(await request.body())
+        return await run_in_threadpool(perform, lambda: service.inspect_node_draft(proposal))
 
     @router.post("/{project_id}/save")
     async def save(project_id: str, request: Request):

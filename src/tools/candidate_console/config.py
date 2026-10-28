@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .files import canonical, config_bytes, credential_values, token
 from .models import ConsoleConfig
+from .settings_models import ResolvedConsole
 
 
 def validate_config(config: ConsoleConfig) -> ConsoleConfig:
@@ -76,3 +77,11 @@ def validate_config(config: ConsoleConfig) -> ConsoleConfig:
 
 def load_config(path: str) -> ConsoleConfig:
     return validate_config(ConsoleConfig.model_validate_json(config_bytes(path)))
+
+
+def load_console(path: str) -> ResolvedConsole:
+    """Resolve omitted layout locations, then apply the unchanged ``validate_config``."""
+    from .workspace import resolve_console
+
+    resolved = resolve_console(config_bytes(path))
+    return ResolvedConsole(validate_config(resolved.config), resolved.settings)

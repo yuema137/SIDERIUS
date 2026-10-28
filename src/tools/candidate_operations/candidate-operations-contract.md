@@ -157,7 +157,17 @@ Owners: `seed_admission.py` (`admission_seed`, `require_root_seed`,
   (preparation, reusable top receipt, candidate `launch.json`, loop root) whose
   `run_seed`/`run_seed_source` differ from the record's. A pre-seed record with
   a pre-seed receipt reads back unchanged. Native-chain operations record no
-  seed here; their seed lives in the chain's run-invariants lock.
+  seed here; their seed lives in the chain's run-invariants lock. An explicit
+  seed is the capture declaration's `run.run_seed`
+  ([native chain contract](../native_chain/native-chain-contract.md#run-seed-issue-983)).
+  `NativeChainAdmission.run_seed` records that declared seed (omitted when
+  seedless). Every native-chain snapshot reads the lock back into
+  `NativeChainObservation.run_seed` / `run_seed_source` (omitted when the lock
+  is absent, pre-seed or unreadable) and shows it only if the admission's
+  declared seed explains it; otherwise it reports `run_seed_anomaly`
+  ([native chain contract](../native_chain/native-chain-contract.md#run-seed-issue-983)). The readback sits outside
+  `NativeChainEvidence`, so terminal and resume-prefix comparisons, including
+  terminals recorded before the readback existed, are unchanged.
 
 ## Detached process and environment
 
@@ -263,7 +273,12 @@ code and leaves no claim, reservation or child):
 
 1. not a `candidate` submission with `resources` (every other kind, including
    `candidate_loop_resume` and native chains): `resources_required`;
-2. ledger location (above): `path`; then the lock (`ledger_busy`);
+2. ledger location (above): `path`; then the lock (`ledger_busy`); then
+   `ledger.json` must parse as this revision's `HostLedgerState`, else
+   `ledger_format` (for example a ledger written by B3-5a, whose reservations
+   carried `time_budgeted`). `read_state` owns this refusal, so the sweep and
+   `release_reservation` report it identically, and the file is never
+   rewritten: once its runs have ended, the operator moves it aside;
 3. sweep (see Release);
 4. live reservations under another budget digest: `budget_mismatch`;
 5. the child could not receive the placement: a GPU declaration without
