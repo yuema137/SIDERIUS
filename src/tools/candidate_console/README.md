@@ -106,7 +106,12 @@ even when using the default models.
 8. To author a configured declaration, choose **Workflow Editor**. Select a node
    to inspect its supported bindings; expand **References** for task and external
    locations, or **Advanced source** for exact Python bytes. Review opens the
-   exact diff; Save writes those reviewed bytes. Switching views retains pending
+   exact diff; Save writes those reviewed bytes. Connections, card moves and
+   inspector edits collect in one set of pending edits that you review and save
+   together. **Undo**/**Redo** (Ctrl+Z / Ctrl+Shift+Z) step through them;
+   **Discard changes** returns to the workflow as it was loaded, while **Refresh
+   from disk** re-reads the file and asks first if edits are pending. A `*` in
+   the tab title and an *Unsaved changes* badge mark pending edits. Switching views retains pending
    edits and review state. A real page exit with pending edits uses the browser's
    unsaved-change guard. Saving does not run the declaration.
    The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
