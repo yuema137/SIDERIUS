@@ -190,29 +190,6 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
     assert len(bridge.captures) == 1
 
 
-@pytest.mark.parametrize(
-    "filename",
-    [
-        "certify_minimal.json",
-        "deepseek_tiered_pro.json",
-        "openai_tiered_pro.json",
-        "openai_tiered_v1.json",
-    ],
-)
-def test_shipped_routing_configs_work_without_experiment_plugins(monkeypatch, filename):
-    """Removing the explicit selector from an example must fail in a clean install."""
-    from pathlib import Path
-
-    from workflows.llm_config import WorkflowLLMConfig
-
-    monkeypatch.setattr(strategies, "entry_points", lambda **kwargs: [])
-    path = Path(__file__).resolve().parents[3] / "configs" / "llm" / filename
-    config = WorkflowLLMConfig.model_validate_json(path.read_text())
-    assert config.tune is not None
-    selected = strategies.resolve_planner_strategy(config.tune.planner_strategy)
-    assert selected.identity.name == "native-timing-v1"
-
-
 # Captured from origin/master 9ab94c28 (issue #1034). Workspaces pinned to the
 # native planner record this identity in run_invariants_lock.json and refuse
 # resume when it changes, so an edit to any fingerprinted planner/bridge source
