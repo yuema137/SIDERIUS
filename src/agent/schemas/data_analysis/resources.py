@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, field_serializer, model_validator
+
+from core.seeding import RunSeed
 
 from .common import CertifiedArtifactRef, FrozenModel, NonEmptyStr, Sha256
 
@@ -70,6 +72,26 @@ class AnalysisResourceEnvelope(FrozenModel):
             raise ValueError("per_skill_timeout_s cannot exceed wall_time_budget_s")
         return self
 
+    @field_serializer("sampling_policy", mode="wrap")
+    def _omit_undeclared_seed(
+        self, value: SamplingPolicy, handler: SerializerFunctionWrapHandler
+    ) -> Any:
+        """Serialize ``seed`` only when the operator declared it (issue #983).
+
+        An undeclared seed is derived from the run seed at execution, so the
+        schema default ``0`` never ran and is not written; omitting it also
+        keeps the declaration explicit across dump/validate round trips.
+        """
+        dumped = handler(value)
+        if "seed" not in value.model_fields_set:
+            dumped.pop("seed", None)
+        return dumped
+
+    def declared_sampling_seed(self) -> int | None:
+        """The operator-declared sampling seed, or ``None`` when it is derived."""
+        policy = self.sampling_policy
+        return policy.seed if "seed" in policy.model_fields_set else None
+
 
 class ResourceUsage(FrozenModel):
     wall_time_s: float = Field(ge=0.0)
@@ -78,3 +100,31 @@ class ResourceUsage(FrozenModel):
     peak_vram_bytes: int | None = Field(default=None, ge=0)
     device: NonEmptyStr
     measurement_limitations: tuple[str, ...] = ()
+
+
+class InvocationSamplingSeed(FrozenModel):
+    """The sampling seed one analysis invocation executed (issue #983).
+
+    Framework-owned provenance written by the analysis run store; never
+    rendered into a prompt or passed to a skill or generated program.
+    """
+
+    invocation_id: NonEmptyStr
+    sampling_seed: int = Field(ge=0)
+    sampling_seed_source: Literal["declared", "derived"]
+    #: The plan's own seed, replaced by the derived one; absent when declared.
+    llm_plan_seed_ignored: int | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> InvocationSamplingSeed:
+        if (self.sampling_seed_source == "declared") != (self.llm_plan_seed_ignored is None):
+            raise ValueError("only a derived sampling seed replaces a plan seed")
+        return self
+
+
+class AnalysisSamplingSeeds(FrozenModel):
+    """Every invocation's executed sampling seed and the run seed it derives from."""
+
+    run_seed: RunSeed
+    derivation: Literal["siderius-seed/v1"] = "siderius-seed/v1"
+    invocations: tuple[InvocationSamplingSeed, ...]

@@ -522,6 +522,7 @@ def run_behavioral_case(case: BehavioralCase, workspace: Path) -> dict[str, Any]
         return bridge
 
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=capability,
         bridge_factory=factory,
         provider="behavioral-validation",

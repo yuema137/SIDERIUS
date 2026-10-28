@@ -28,6 +28,7 @@ from agent.data_analysis.non_execution import build_non_execution_report
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.data_analysis.plan_generation import generate_resolved_analysis_plan
 from agent.data_analysis.rendering import render_report_markdown
+from agent.data_analysis.sampling_seed import apply_sampling_seed
 from agent.data_analysis.structured_output import (
     DataAnalysisStructuredOutputError,
     generate_validated,
@@ -62,6 +63,7 @@ from core.execution_deadline import (
     ExecutionDeadlineExceeded,
     execution_deadline,
 )
+from core.seeding import MissingRunSeed
 from execute_tools.analysis_materialization import TaskAnalysisCapability
 from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
 from nodes.llm_settings import ANALYZE, node_bridge_kwargs
@@ -125,7 +127,12 @@ class DataAnalysisAgent:
         bridge_factory: Callable[..., object] | None = None,
         max_output_tokens: int | None = None,
         historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
+        run_seed: int | None = None,
     ) -> None:
+        # Issue #983: the run's seed, run-scoped context like the capabilities.
+        # It is deliberately not a DataAnalysisInput field: the input's canonical
+        # digest is rendered into the plan prompt, which must stay seed-free.
+        self._run_seed = run_seed
         self._capability = task_analysis_capability
         self._provider = provider
         self._model_id = model_id
@@ -250,6 +257,11 @@ class DataAnalysisAgent:
         return tuple(by_identity[key] for key in sorted(by_identity))
 
     def run(self, inp: DataAnalysisInput) -> DataAnalysisReport:
+        if self._run_seed is None:
+            raise MissingRunSeed(
+                "DataAnalysisAgent requires the run seed (issue #983); only an entry "
+                "boundary may generate one"
+            )
         inp = DataAnalysisInput.model_validate(inp)
         store = AnalysisRunStore(inp.storage, request_id=inp.request_id)
         resumed = store.resume_completed_report(inp)
@@ -368,6 +380,10 @@ class DataAnalysisAgent:
                 user=plan_user,
                 semantic_projection=self._plan_semantics,
             )
+            assert self._run_seed is not None
+            resolved, sampling_seeds = apply_sampling_seed(
+                resolved, envelope=inp.resource_envelope, run_seed=self._run_seed
+            )
         except DataAnalysisStructuredOutputError as exc:
             # Only LLM representation failures before plan publication are local.
             # Access/resolution, provider, deadline, persistence and post-execution
@@ -380,6 +396,7 @@ class DataAnalysisAgent:
                 disposition="preparation_failed",
             )
         plan_ref = store.write_plan(plan)
+        store.write_sampling_seeds(sampling_seeds)
         deadline = budget.expires_at
         results: list[SkillResult] = []
         result_refs: list[CertifiedResultRef] = []
