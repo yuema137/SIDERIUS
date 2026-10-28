@@ -10,11 +10,11 @@
     }
     const fragment = location.hash.slice(1) || 'home';
     const parts = fragment.split('/');
-    const valid = ['home', 'workflow', 'run', 'monitor'].includes(parts[0]) &&
+    const valid = ['home', 'workflow', 'run', 'monitor', 'settings'].includes(parts[0]) &&
       (parts.length === 1 || (parts.length === 2 && parts[0] === 'monitor' && uuid.test(parts[1])));
     document.getElementById('route-status').textContent = valid ? '' : 'Invalid console route or operation UUID. Enter a complete operation UUID in Monitor.';
     view = valid ? parts[0] : 'monitor'; operation = valid && parts.length === 2 ? parts[1] : null;
-    document.title = {workflow: 'SIDERIUS · Workflow', run: 'SIDERIUS · Run'}[view] || 'SIDERIUS · Candidate console';
+    document.title = {workflow: 'SIDERIUS · Workflow', run: 'SIDERIUS · Run', settings: 'SIDERIUS · Settings'}[view] || 'SIDERIUS · Candidate console';
     for (const panel of document.querySelectorAll('[data-view]')) panel.hidden = panel.dataset.view !== view;
     for (const link of document.querySelectorAll('nav a')) {
       if (link.hash === '#' + view) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
