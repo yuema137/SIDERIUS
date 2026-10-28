@@ -241,3 +241,39 @@ def test_review_shows_recorded_version_name_without_changing_identity(fresh):
     assert named.source_version_name == "baseline"
     assert named.expectation == unnamed.expectation
     assert "source_version_name" not in intent(named).model_dump()
+
+
+@pytest.mark.parametrize("with_workspace", [False, True])
+def test_console_app_protects_workspace_settings_at_admission(fresh, with_workspace):
+    """Defect: the served app admits a read-only input over the workspace settings/library.
+
+    ``create_app`` must pass the startup workspace into the reusable preparation
+    route's protected set; without a workspace the same review is admitted.
+    """
+    from fastapi.testclient import TestClient
+
+    from tools.candidate_console.app import create_app
+    from tools.candidate_console.settings_models import SettingsContext
+
+    adapter, selection, _ = fresh
+    config = adapter.console.config
+    # A workspace whose settings/ and library/ lie inside the task's data folder.
+    context = SettingsContext(Path(config.tasks[0].data_root) / "ws", frozenset())
+    api = TestClient(
+        create_app(config, context if with_workspace else None),
+        base_url=config.browser_origin,
+        raise_server_exceptions=False,
+    )
+    api.headers.update(
+        {
+            "Authorization": "Bearer " + Path(config.auth_token_file).read_text(),
+            "Origin": config.browser_origin,
+        }
+    )
+    response = api.post(
+        "/api/editor/fresh/reusable-preparations/review", json=selection.model_dump(mode="json")
+    )
+    if with_workspace:
+        assert response.status_code == 409 and response.json()["error"]["code"] == "stale_review"
+    else:
+        assert response.status_code == 200, response.text

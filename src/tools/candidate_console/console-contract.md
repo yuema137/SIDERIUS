@@ -97,7 +97,8 @@ credential names are content choices and are never derived. An explicit value
 always wins (parity: an explicit file resolves to exactly
 `ConsoleConfig.model_validate_json(bytes)`). A field with no source raises
 `workspace.MissingSetting`; `check`/`serve` exit 2 and print only the task ID and
-field name, for example `task my-task needs llm_config_file (set it in console.json)`.
+field name, for example
+`task my-task needs llm_config_file (set it in console.json or global settings)`.
 
 **`init --workspace <parent>`.** `<parent>` is explicit (no default) and must be
 an existing canonical directory. The command walks from `/` with
@@ -113,8 +114,10 @@ an existing token is left untouched and validated by `files.token`. It publishes
 `library/llm/default-<sha12>.json` write-once with the `WorkflowLLMConfig.default()`
 export expression of [LLM defaults](../../../docs/reference/llm-defaults.md)
 (bytes equal `configs/llm/default.json`; no checkout read); existing different
-bytes are refused. It writes `settings/console.json` write-once only when absent:
-`workspace_root`, `port` (default 8740, `--port`), `browser_origin`, `tasks: []`.
+bytes are refused. It writes `settings/global_settings.json` write-once only when
+absent, selecting that library profile as `llm_profile`, and `settings/console.json`
+write-once only when absent: `workspace_root`, `port` (default 8740, `--port`),
+`browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`.
 When `console.json` exists and names this workspace, `init` also creates the missing
 derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
 them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
@@ -141,6 +144,78 @@ not affect `ready`. `init_command` is set when `init` could fix a missing item. 
 `os.access` probe and no creation. `check`/`serve` print non-present entries and
 the command to stderr when a workspace is not ready, including when
 `validate_config` refuses.
+
+### Global settings
+
+Owners: `settings_models.py` (schemas), `settings_file.py` (refs, folder resolution,
+certification, protected paths), `workspace.resolve_console` (precedence),
+`config.validate_resolved` (`validate_config` + `validate_settings`).
+
+**Allowlists in console.json** (allowed with or without `workspace_root`):
+`llm_profiles: [{id, label, file}]`, `advice_files: [{id, label, file}]`,
+`data_roots: [{id, label, path}]`. IDs match `^[a-zA-Z0-9_-]{1,80}$` and are unique
+per list. The `data_roots` ID `workspace` is reserved; with `workspace_root` it is
+derived as `<workspace_root>/data`. Files are referenced in place, never copied.
+
+**Settings file.** `global_settings: {browser_writable: bool = false}` enables
+reading `<workspace_root>/settings/global_settings.json`; `global_settings` without
+`workspace_root` is refused, and without `global_settings` no settings file is read.
+`init` writes the block (`browser_writable: true`) only into a console.json it
+creates; it never rewrites an existing one, so an earlier workspace opts in by an
+operator edit. Every `data_folders` ref is resolved and exclusion-checked at
+`check`/startup even when console.json sets that task's `data_root`. A schema
+error names Pydantic `loc` paths only, never values.
+Schema `GlobalSettings`: `schema_version: "siderius.console-global-settings/v1"`,
+`llm_profile: FileRef | null`, `advice: FileRef | null`,
+`data_folders: {task_id: FolderRef}`. `FileRef` is
+`{"source": "allowlist", "id"}` or `{"source": "library", "name", "sha256"}`;
+`name` matches `<slug>-<sha12>.json`, the 12 hex digits equal the start of
+`sha256`, and it resolves to `<workspace_root>/library/{llm|advice}/<name>`.
+`FolderRef` is `{root_id, subpath}`. The file holds no path; its sha256 is its
+revision. It is read with `files.private_bytes` (owner-only 0600, no-follow,
+256 KiB); an absent file means no values.
+
+**Precedence (OQ-1).** console.json > global settings > workspace layout, per
+field: the settings fill `TaskChoice.llm_config_file` (from `llm_profile`) and
+`TaskChoice.data_root` (from `data_folders[task_id]`) only when console.json omits
+them; the layout then fills remaining locations. `llm_config_file` has no layout
+value. `SettingsContext.origin(task_id, field)` reports `server_config`,
+`global_settings` or `workspace_layout` for presentation only; origins never enter
+native requests, records or digests. A task resolved through settings produces the
+same `TaskChoice`, hence the same `preparation_request`, as the equivalent explicit
+console.json (P2).
+
+**Folder resolution.** `subpath` is refused when it starts with `/`, contains NUL,
+an empty, `.` or `..` segment, or exceeds 512 bytes. The joined path must pass
+`files.canonical` (no symlink in any component, `resolve()` identity), be a
+directory and lie under the root.
+
+**Certification at `check`/`serve` (OQ-4: fail closed).** Every `llm_profiles`
+file is read with `files.config_bytes` and parsed with
+`workflows.llm_config.parse_llm_config_bytes`; every `advice_files` file is read
+with `candidate_prepare.reusable_admission.safe_bytes` and parsed with
+`workflows.advice.parse_advice_bytes` (one reader and one parser owner); every
+`data_roots` path must be a canonical directory. The settings refs must name a
+known allowlist ID, a configured task and an existing root; a library ref's bytes
+must hash to its `sha256`. Refusals raise `settings_file.SettingsInvalid`;
+`check`/`serve` exit 2 with `Console settings are invalid: <predicate>`, naming
+fields, IDs or task IDs only. The global `advice` is validated but never applied
+to a run.
+
+**Read-only exclusion.** `candidate_prepare.admission.validate_read_only_exclusion(
+inputs, protected)` refuses an input that contains or lies inside a protected
+path (`overlap`, beside `validate_destination_overlap`). `settings_file.
+protected_paths(config, workspace)` is `auth_token_file`, `credential_file`,
+`operation_store.state_root`, every preparation and candidate root, every task
+output and reusable runs root, and, with a workspace, `settings/` and `library/`.
+`validate_config(config, workspace=…)` applies it to every task `data_root` and
+`task_read_only` entry; `validate_settings` applies it to every `data_roots` entry.
+`admit(request, *, protected=())` applies it to `(data_root, *task_read_only)`; the
+console's `create_app(config, settings)` passes `protected_paths(config,
+settings.workspace_root)` to `ReusablePreparation`, which forwards it through
+`preflight_reusable_candidate` on the in-process reusable path. Limitation:
+subprocess admission does not receive the console set; its `data_root` must equal the startup-validated `TaskChoice.data_root`
+(`check_request_policy`).
 
 `recorded_examples` is an optional allowlist for read-only candidate-validation
 records. Each entry has a unique `example_id`, readable `label`, canonical
@@ -172,6 +247,52 @@ selection, Update, findings acknowledgement and current-snapshot adoption throug
 the [task-version controls](#workflow-builder-task-versions). Python and HTTP use the same
 [authoring contract](../workflow_authoring/authoring-contract.md#explicit-task-reference-inspectionreview).
 Reusable preparation independently enforces captured native pins.
+
+### Settings page and routes
+
+Owners: `settings_service.ConsoleSettings` (view, CAS write, folder listing),
+`settings_routes.settings_router`, `settings_views` (payloads), `static/settings.js`
+(`#settings` route). `create_app(config, settings=None)` takes the startup
+`SettingsContext` (`__main__` passes `load_console(...).settings`, which records
+`console_path`); without it the page reports `enabled=false` and refuses writes.
+All routes sit behind `RequestBoundary` (bearer token, exact Origin on mutation,
+JSON ≤256 KiB). Refusals are `{"error": {code, message}}` and never echo input.
+
+| Route | Effect | Refusals |
+| --- | --- | --- |
+| `GET /api/settings` | `SettingsView`: `enabled`, `writable`, `settings_sha256` (file on disk), `pending`, `active` + `active_sha256` (startup snapshot), `restart_required = settings_sha256 != active_sha256`, `rows`, choice cards (allowlist IDs and library files whose bytes match their name), `data_roots` (ID/label), `tasks` (with the `data_root` origin), `workspace_root`, `WorkspaceReadiness`, `host` | — |
+| `PUT /api/settings` | `SettingsWrite{expected_sha256, settings}`; under one process lock: re-read the file no-follow and compare sha256 (absent matches only `null`), resolve console.json with the candidate settings, run `validate_resolved`, then publishes 0600 through the parent opened with `files.open_directory` (temp file `O_EXCL\|O_NOFOLLOW` + fsync + `os.replace` with `src_dir_fd`/`dst_dir_fd`, design §5.1); returns the new view. A readable but invalid file keeps its digest, so a Save may replace it under the same CAS | 403 `read_only` (no policy, `browser_writable=false`, or no context); 409 `stale`; 422 `settings_unreadable` (not a private 0600 regular file; names the fix); 422 `settings_invalid` with the `SettingsInvalid` predicate, a generic validation message, or an unavailable/linked settings folder |
+| `POST /api/settings/library` | `LibraryUpload{kind: "llm"\|"advice", label (1..63), content}`; content bytes are validated first (`parse_llm_config_bytes` → 422 `invalid_file` "Not an LLM profile: …"; `parse_advice_bytes(label="upload")` → 422 with the owner's message), then published with `publish_bytes_write_once` (0600) to `library/<kind>/<slug>-<sha12>.json` after `canonical(dir)`; `slug` lowercases the label to `[a-z0-9-]`, ≤50; returns `LibraryRef` | 403 `read_only`; 422 `invalid_file` or empty slug; 409 `exists` when that name holds different bytes (identical bytes return the existing ref); 409 `unavailable` without a library directory |
+| `GET /api/settings/folders?root_id=&subpath=&limit=` | `FolderListing{entries, incomplete}`: direct children of an allowlisted root, walked with `files.open_directory` then `O_DIRECTORY\|O_NOFOLLOW` per segment and `os.scandir(fd)`; directories as `directory`, symlinks as `link`, files omitted; sorted; at most `limit` (1..200) of at most 4096 examined; `incomplete` when more exist | 404 unknown root or unavailable/linked folder; 422 subpath syntax (`check_subpath`) or limit |
+
+Cards (`settings_library.py`): `ProfileCard{label, ref, routes, required_names,
+problem}` projects routes with `setup_review.routes.node_llm_routes` over every
+role and names with `candidate_worker.preflight.credential_requirements` (names
+only); `AdviceCard{label, ref, present_keys, unsupported_keys, problem}` reads with
+`safe_bytes` + `parse_advice_bytes` and marks `interpret`/`analysis`/`mindset`
+(no reusable carrier yet). Library cards list only regular files whose bytes hash
+to their name; an unreadable allowlisted file shows `problem` instead of failing
+the view.
+
+`SettingsView.problem` names an unusable settings file on disk and its recovery
+(chmod 600, fix/restore, or Save over a readable invalid file); `pending` is then
+`null` and the view still returns 200. CAS limitation: the lock is per process.
+Two console processes serving one workspace can both pass the digest check before
+either replaces the file; the later replace wins. Serve one console per workspace.
+The folder listing reports `409 root_changed` when an allowlisted root is no longer
+canonical (it now contains a link or moved).
+
+`SettingRow{name, task_id, origin, label, effective}` covers `advice` (global) and,
+per task, `llm_profile`, `data_root`, `preparation_root`, `candidate_root`,
+`reusable_runs_root`; `origin` adds `not_set` for an unselected advice file; a
+settings-selected data folder is labelled `<root label> / <subpath>` from the active
+`FolderRef`; `effective` is the resolved server path of the running
+snapshot. Origins are presentation only. A saved file applies after restart
+(OQ-2): routers keep the startup snapshot. Stale safety (P4): after a profile
+change and restart, a configured-task preparation made with the old profile no
+longer matches exactly one task (`resolve_prepared_context` → `task_policy`), and
+a reusable capture fails `check_request_policy`. `session.request(path, body,
+method)` is the single bearer owner for `PUT`.
 
 ## Python policy and request binding
 
@@ -310,7 +431,7 @@ HTTP server exit and fresh known-ID reads.
 Browser gate: supply `CONSOLE_PLAYWRIGHT_MODULE` (an installed Playwright module),
 `CONSOLE_BROWSER_EXECUTABLE` (matching Chromium), `CONSOLE_TEST_ORIGIN` (free
 loopback origin) and optional `CONSOLE_SCREENSHOT_DIR`, then run
-`node tests/browser/candidate_console.mjs`. No production browser dependency or
+`node tests/browser/candidate_console.mjs`. The Settings page gate is `node tests/browser/settings_page.mjs` (also needs `EDITOR_PYTHON`). No production browser dependency or
 Node build is required. The test serves fixed assets and mocks API responses;
 it proves browser interaction, not native execution/security. Browser/process
 socket support may require a host execution context. Missing tooling is a missing
@@ -534,7 +655,7 @@ kind or state list of its own.
 Browser: `operation-stop.js` owns `window.operationStop.mount(prefix)`, which
 binds `#<prefix>-group`, `#<prefix>-button` and `#<prefix>-status` and returns
 `render(status | null)`. It is mounted twice and draws only from statuses the page
-already reads (no extra polling): Slow control (`operation-stop`, every monitor
+already reads (no extra polling): Monitor (`operation-stop`, every monitor
 poll) and the Run page retained candidate intent (`capture-stop`, on Check status
 or launch). **Stop run** is shown only while the latest status has `cancellable`
 true and no acknowledgement is held. A click opens `window.confirm` stating that the
@@ -1428,6 +1549,9 @@ in Node.
 
 Default view = Beginner. `data-ui-flag="advanced"` sections appear with Settings ›
 **Show advanced tools**; `data-ui-flag="developer"` with **Show developer details**.
+These view flags live in the header Settings panel (`#settings-toggle`, browser-local);
+the Settings page (`#settings` in the navigation, `settings.js`) is the separate
+server-side global settings view described above.
 "Gated" = gated in this change (s11-owned markup); "Hook" = sibling-owned content for
 the spec conformance pass to gate with the same attribute or `uiSettings.isEnabled()`.
 
