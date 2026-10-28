@@ -258,6 +258,17 @@ declares a `default` key, so a declared `null` default (shown as "Schema default
 null") is distinct from an absent default (no default line). Other keys the schema
 does not declare stay `null` and are not shown.
 `effective` remains the resolved native value for the document.
+`TrainingInspector.policy` (`TrainingChoiceControl`, `policy_controls`) projects the two
+required launch choices training admission has no default for: **Health checks**
+(`healthgate_mode`: Record only = `observe_only`, Block on failure = `blocking`) and
+**Result standing** (`result_authority`: Diagnostic = `diagnostic`, Scientific =
+`scientific`), each with a one-line plain explanation. Option values come from the
+native `HealthGateMode`/`ResultAuthority` Literals; `value` is the authored key or
+`null` when unset or not a native value. The browser renders them as
+`#editor-training-policy` above the training settings: choosing writes the authored
+key, "Choose…" removes it, and an unset choice is marked on the field ("Required:
+choose one. A run cannot start without it."). Save stays allowed; the console's
+preparation review refuses the run with the launch-policy owner's message.
 Nested workflow parameter rules are read-only in the inspector and editable in
 Source; untouched rules and advanced fields survive edits. Task rules are resolved
 later by native owners. All controls participate in the existing source-dirty,

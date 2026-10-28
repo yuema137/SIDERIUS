@@ -221,3 +221,21 @@ def test_unparsed_project_source_refuses_import(template_config):
         )
         assert refused.status_code == 409
         assert refused.json()["error"]["code"] == "unsupported"
+
+
+def test_training_inspector_projects_required_policy_choices():
+    """L-1b: the Train & tune inspector shows both launch-policy choices with their
+    authored value, and an undeclared one as unset (the author's problem to resolve);
+    fails if a choice disappears or an option drifts from the native Literal values."""
+    from tools.workflow_authoring.training import training_inspector
+
+    shape = template_document("single-research-loop")
+    policy = {item.name: item for item in training_inspector(shape).policy}
+    assert {name: item.value for name, item in policy.items()} == {
+        "healthgate_mode": "observe_only",
+        "result_authority": "diagnostic",
+    }
+    assert [o.value for o in policy["healthgate_mode"].options] == ["observe_only", "blocking"]
+    assert all(item.required for item in policy.values())
+    unset = shape.model_copy(update={"training_settings": {}})
+    assert [item.value for item in training_inspector(unset).policy] == [None, None]

@@ -23,6 +23,46 @@ CONTROLS = (
 )
 
 
+# Required run-policy choices (L-1b). Training admission has no default for either
+# (execute_tools.health_checks.launch_policy); labels and one-line explanations are
+# presentation only, the allowed values come from the native Literal types.
+POLICY_CHOICES: tuple[tuple[str, str, str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "healthgate_mode",
+        "Health checks",
+        "What a failed health check does during training. Record only notes it and "
+        "keeps going; Block on failure invalidates that round (the task's health "
+        "checks must be configured to block).",
+        (("observe_only", "Record only"), ("blocking", "Block on failure")),
+    ),
+    (
+        "result_authority",
+        "Result standing",
+        "Whether this run's results may be cited as scientific evidence. Diagnostic is "
+        "for exploring; Scientific requires Block on failure.",
+        (("diagnostic", "Diagnostic"), ("scientific", "Scientific")),
+    ),
+)
+
+
+class TrainingChoiceOption(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    value: str
+    label: str
+
+
+class TrainingChoiceControl(BaseModel):
+    """A required launch choice: unset is a problem the author must resolve."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: str
+    label: str
+    explanation: str
+    options: tuple[TrainingChoiceOption, ...]
+    value: str | None
+    required: bool = True
+
+
 class TrainingControlHelp(BaseModel):
     """Inline help copied from the native settings JSON schema, never authored here.
 
@@ -58,6 +98,7 @@ class TrainingControl(BaseModel):
 class TrainingInspector(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     controls: tuple[TrainingControl, ...]
+    policy: tuple[TrainingChoiceControl, ...] = ()
     allowed_output_types: tuple[str, ...] | None
     workflow_parameter_rules: JsonValue = None
 
@@ -68,6 +109,28 @@ def _launch_schema() -> dict[str, dict]:
 
     schema = CandidateTrainingSettings.model_json_schema()
     return schema["$defs"]["WorkflowLaunchConfig"]["properties"]
+
+
+def policy_controls(authored: dict) -> tuple[TrainingChoiceControl, ...]:
+    """Project the required policy choices; values outside the native Literal stay unset."""
+    from agent.schemas.hyperparam_tuning import HealthGateMode, ResultAuthority
+
+    native = {"healthgate_mode": HealthGateMode, "result_authority": ResultAuthority}
+    controls = []
+    for name, label, explanation, options in POLICY_CHOICES:
+        allowed = get_args(native[name])
+        assert {value for value, _ in options} == set(allowed), name
+        value = authored.get(name)
+        controls.append(
+            TrainingChoiceControl(
+                name=name,
+                label=label,
+                explanation=explanation,
+                options=tuple(TrainingChoiceOption(value=v, label=t) for v, t in options),
+                value=value if value in allowed else None,
+            )
+        )
+    return tuple(controls)
 
 
 def control_help(name: str) -> TrainingControlHelp:
@@ -127,5 +190,6 @@ def training_inspector(document: AuthoredWorkflowDocument) -> TrainingInspector 
             )
             for name, label, kind in CONTROLS
         ),
+        policy=policy_controls(authored),
         workflow_parameter_rules=authored.get("workflow_parameter_rules"),
     )
