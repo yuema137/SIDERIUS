@@ -97,10 +97,11 @@ def create_app(config: ConsoleConfig) -> FastAPI:
 
     @app.exception_handler(OperationFailure)
     async def operation_error(request: Request, error: OperationFailure):
-        # Only credential name diagnostics are safe to forward; native errors may carry paths.
+        # Only credential names and the launch-policy owner's fixed refusal text are
+        # forwarded; other native errors may carry paths.
         message = (
             error.detail.message
-            if error.detail.code == "credentials"
+            if error.detail.code in ("credentials", "launch_policy")
             else {
                 "native_chain_policy": "native chain choice is unavailable or overlaps editor writes",
                 "not_supported": "native-chain token aggregation is not supported",

@@ -1467,7 +1467,14 @@ is a name-only precheck read in the server process before Prepare: it checks onl
 task's configured `candidate_environment_names` against `credential_file`
 (`named_credential_readiness((), names, path)`); provider-derived requirements exist
 only after preparation, so capture review and launch recheck them. It is outside the
-expectation and never blocks Prepare. The browser keeps the version name
+expectation and never blocks Prepare. Review also refuses (409 `launch_policy`, the owner's message
+forwarded verbatim) a workflow whose authored training settings omit
+`healthgate_mode` or `result_authority` or declare `observe_only` + `scientific`: it
+calls `execute_tools.health_checks.launch_policy.validate_declared_policy` (refusals
+1-3 of `validate_formal_launch`) on the same sparse payload preparation captures
+(`settings_payload`). Config-dependent refusals 4-6 still run at training admission.
+Prepare reuses the same review, so the refusal there carries
+`admission_not_attempted`. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the
 same authentication/origin/body boundary and threadpool transport as capture APIs.
 Selection accepts only task_id, run_name, run_id, preparation_operation_id and

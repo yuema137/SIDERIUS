@@ -264,3 +264,38 @@ def test_preparation_review_prechecks_configured_credential_names(fresh, tmp_pat
     ready = adapter.review("fresh", selection)
     assert ready.credential_readiness.ready
     assert "SECRET-MARKER" not in ready.model_dump_json()
+
+
+def _training_document(**launch):
+    from workflows.definition import parse_workflow_source
+
+    root = Path(__file__).resolve().parents[4]
+    source = (root / "examples/workflow_declarations/reusable_training.py").read_text()
+    document = parse_workflow_source(source)
+    settings = dict(document.training_settings)
+    settings["launch"] = {
+        key: value
+        for key, value in {**settings["launch"], **launch}.items()
+        if value is not None
+    }
+    return document.model_copy(update={"training_settings": settings})
+
+
+@pytest.mark.parametrize(
+    ("launch", "fragment"),
+    [
+        ({"healthgate_mode": None, "result_authority": None}, "must declare"),
+        ({"result_authority": None}, "--result_authority"),
+        ({"result_authority": "scientific"}, "contradiction"),
+    ],
+    ids=["both-missing", "authority-missing", "observe-only-scientific"],
+)
+def test_preparation_review_refuses_undeclared_launch_policy(launch, fragment):
+    """L-1: Review refuses what training admission would refuse after launch, with the
+    launch-policy owner's own message; a declared legal pair passes."""
+    from tools.candidate_console.reusable_preparation import check_declared_launch_policy
+
+    check_declared_launch_policy(_training_document())
+    with pytest.raises(OperationFailure, match=fragment) as raised:
+        check_declared_launch_policy(_training_document(**launch))
+    assert raised.value.detail.code == "launch_policy"
