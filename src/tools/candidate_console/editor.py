@@ -9,10 +9,13 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from tools.setup_review.composition_models import TaskCheckSettings
+from tools.workflow_authoring.external_inputs import external_input_catalog
 from tools.workflow_authoring.models import (
     DraftRequest,
+    ExternalInputCatalog,
     NodeCatalog,
     NodeDraftRequest,
+    NodeDraftsRequest,
     Project,
     ReviewRequest,
     SaveRequest,
@@ -128,6 +131,11 @@ def editor_router(
         """Read-only projection of the native catalog for the node palette."""
         return node_catalog()
 
+    @router.get("/external-inputs", response_model=ExternalInputCatalog)
+    def external_inputs() -> ExternalInputCatalog:
+        """Read-only explanation of how each catalog contract becomes an external input."""
+        return external_input_catalog()
+
     @router.get("/{project_id}")
     def read(project_id: str):
         service = selected(project_id)
@@ -160,6 +168,12 @@ def editor_router(
         service = selected(project_id)
         proposal = NodeDraftRequest.model_validate_json(await request.body())
         return await run_in_threadpool(perform, lambda: service.inspect_node_draft(proposal))
+
+    @router.post("/{project_id}/nodes-draft")
+    async def nodes_draft(project_id: str, request: Request):
+        service = selected(project_id)
+        proposal = NodeDraftsRequest.model_validate_json(await request.body())
+        return await run_in_threadpool(perform, lambda: service.inspect_node_drafts(proposal))
 
     @router.post("/{project_id}/save")
     async def save(project_id: str, request: Request):

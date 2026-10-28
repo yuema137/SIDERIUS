@@ -5,6 +5,10 @@ validator decide whether the result is a document. These helpers only locate
 bytes, explain consequences and refuse edits that would need implicit rewiring.
 """
 
+import json
+
+from pydantic import ValidationError
+
 from workflows.definition import (
     AuthoredWorkflowDocument,
     ExternalRequest,
@@ -14,22 +18,37 @@ from workflows.definition import (
     ResultSource,
     parse_workflow_source,
 )
-from workflows.definition.source import WorkflowSourceError
-from workflows.definition.source_edits import SourceEditError, insert_node, remove_nodes
+from workflows.definition.draft import DraftProblem, WorkflowDraft, inspect_draft
+from workflows.definition.source import WorkflowSourceError, render_workflow_source
+from workflows.definition.source_edits import (
+    SourceEditError,
+    insert_external,
+    insert_node,
+    remove_nodes,
+)
 
-from .models import AddNodeProposal, NodeDraftView, NodeEditSummary, RemoveNodeProposal
-from .options import pending_node_ports
+from .models import (
+    AddNodeProposal,
+    NodeDraftsProposal,
+    NodeDraftsView,
+    NodeDraftView,
+    NodeEditSummary,
+    PendingNode,
+    PortInventoryEntry,
+    RemoveNodeProposal,
+)
+from .options import binding_projection, pending_node_ports
 
 
 class NodeEditRefusal(ValueError):
     """A node edit the author must resolve first; ``code`` names the reason."""
 
-    def __init__(self, code: str, message: str) -> None:
-        self.code = code
+    def __init__(self, code: str, message: str, problems: tuple[DraftProblem, ...] = ()) -> None:
+        self.code, self.problems = code, problems
         super().__init__(message)
 
 
-def _node(proposal: AddNodeProposal) -> NodeInstance:
+def _node(proposal: PendingNode) -> NodeInstance:
     request = (
         ExternalRequest(binding=proposal.binding or "")
         if proposal.protocol is None
@@ -38,7 +57,7 @@ def _node(proposal: AddNodeProposal) -> NodeInstance:
     return NodeInstance(id=proposal.node, capability=proposal.capability, request=request)
 
 
-def _offered(document: AuthoredWorkflowDocument, proposal: AddNodeProposal) -> list[str]:
+def _offered(document: AuthoredWorkflowDocument, proposal: PendingNode) -> list[str]:
     """Bindings the catalog projection does not offer for their socket."""
     refused = []
     for port in pending_node_ports(document, proposal):
@@ -134,3 +153,146 @@ def remove_node(proposal: RemoveNodeProposal) -> tuple[str, NodeEditSummary]:
     return source, NodeEditSummary(
         removed=proposal.nodes, disconnected=tuple(incoming), message=message
     )
+
+
+def _projection(
+    proposal: NodeDraftsProposal,
+) -> tuple[AuthoredWorkflowDocument, AuthoredWorkflowDocument]:
+    """The edited base document and an unvalidated choice projection that adds the draft.
+
+    The projection only feeds ``port_choices`` (ids, capabilities, contracts); it is
+    never validated, rendered or returned, because pending nodes may be incomplete.
+    """
+    base = proposal.document or parse_workflow_source(proposal.source)
+    definition = base.definition
+    pending = tuple(
+        NodeInstance.model_construct(id=item.node, capability=item.capability)
+        for item in proposal.nodes
+    )
+    projected = type(definition).model_construct(
+        **{
+            **{name: getattr(definition, name) for name in type(definition).model_fields},
+            "externals": (*definition.externals, *proposal.externals),
+            "nodes": (*definition.nodes, *pending),
+        }
+    )
+    return base, type(base).model_construct(
+        **{
+            **{name: getattr(base, name) for name in type(base).model_fields},
+            "definition": projected,
+        }
+    )
+
+
+def node_drafts_ports(proposal: NodeDraftsProposal) -> tuple[PortInventoryEntry, ...]:
+    """Ports of every projected node; choices include pending results and new externals."""
+    base, projected = _projection(proposal)
+    existing = binding_projection(base, choices_from=projected)[1]
+    return existing + tuple(
+        port for item in proposal.nodes for port in pending_node_ports(projected, item)
+    )
+
+
+def _collisions(base: AuthoredWorkflowDocument, proposal: NodeDraftsProposal) -> list[str]:
+    nodes = {node.id for node in base.definition.nodes}
+    externals = {item.id for item in base.definition.externals}
+    return [
+        f"node id {item.node!r} already exists" for item in proposal.nodes if item.node in nodes
+    ] + [
+        f"external input id {item.id!r} already exists"
+        for item in proposal.externals
+        if item.id in externals
+    ]
+
+
+def apply_node_drafts(proposal: NodeDraftsProposal) -> tuple[str, NodeEditSummary]:
+    """Return proposed source for every pending addition, or refuse before rendering.
+
+    Without existing-content edits the anchor bytes stay and each addition is a
+    targeted insertion; otherwise the combined document is rendered canonically.
+    The caller re-parses the result with the declaration validator.
+    """
+    base, projected = _projection(proposal)
+    if collisions := _collisions(base, proposal):
+        raise NodeEditRefusal("node_edit", "\n".join(collisions))
+    problems = tuple(problem for item in proposal.nodes for problem in item.missing_problems())
+    if problems:
+        raise NodeEditRefusal(
+            "draft_incomplete", "\n".join(item.message for item in problems), problems
+        )
+    refused = [message for item in proposal.nodes for message in _offered(projected, item)]
+    if refused:
+        raise NodeEditRefusal("draft_invalid", "\n".join(refused))
+    if proposal.document is None and not proposal.bindings:
+        source = proposal.source
+        try:
+            for external in proposal.externals:
+                source = insert_external(source, external)
+            for item in proposal.nodes:
+                source = insert_node(
+                    source, _node(item), NodePosition(node=item.node, x=item.x, y=item.y)
+                )
+        except SourceEditError as error:
+            raise NodeEditRefusal("node_edit", str(error)) from error
+        kept = "all other source bytes are unchanged."
+    else:
+        payload = base.model_dump(mode="json")
+        payload["definition"]["externals"].extend(
+            item.model_dump(mode="json") for item in proposal.externals
+        )
+        payload["definition"]["nodes"].extend(
+            _node(item).model_dump(mode="json") for item in proposal.nodes
+        )
+        payload["positions"].extend(
+            NodePosition(node=item.node, x=item.x, y=item.y).model_dump(mode="json")
+            for item in proposal.nodes
+        )
+        try:
+            combined = type(base).model_validate_json(json.dumps(payload))
+        except ValidationError as error:
+            raise NodeEditRefusal(
+                "draft_invalid",
+                "\n".join(item["msg"] for item in error.errors(include_url=False)),
+            ) from error
+        inspection = inspect_draft(
+            WorkflowDraft(base_document=combined, bindings=proposal.bindings)
+        )
+        if inspection.document is None:
+            raise NodeEditRefusal(
+                "draft_" + inspection.status,
+                "\n".join(inspection.diagnostics),
+                inspection.problems,
+            )
+        source = render_workflow_source(inspection.document)
+        kept = "the other edits of this draft are rendered as canonical source."
+    added = tuple(item.node for item in proposal.nodes)
+    parts = [f"{len(added)} node(s) ({', '.join(added)}) with layout positions"] if added else []
+    if proposal.externals:
+        parts.append(
+            f"{len(proposal.externals)} external input(s) "
+            f"({', '.join(item.id for item in proposal.externals)})"
+        )
+    return source, NodeEditSummary(added=added, message=f"Adds {' and '.join(parts)}; {kept}")
+
+
+def inspect_node_drafts(proposal: NodeDraftsProposal) -> NodeDraftsView:
+    """Inert inspection of a multi-node draft that may be incomplete; nothing is saved."""
+    ports = node_drafts_ports(proposal)
+    try:
+        source, _ = apply_node_drafts(proposal)
+        parse_workflow_source(source)
+    except NodeEditRefusal as error:
+        status = "incomplete" if error.code == "draft_incomplete" else "invalid"
+        return NodeDraftsView(
+            status=status,
+            diagnostics=tuple(str(error).split("\n")),
+            problems=error.problems,
+            ports=ports,
+        )
+    except WorkflowSourceError as error:
+        return NodeDraftsView(
+            status="invalid",
+            diagnostics=tuple(item.message for item in error.diagnostics),
+            ports=ports,
+        )
+    return NodeDraftsView(status="complete", ports=ports)

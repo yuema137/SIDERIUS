@@ -33,6 +33,9 @@ from .models import (
     DraftView,
     LoopProposal,
     NodeDraftRequest,
+    NodeDraftsProposal,
+    NodeDraftsRequest,
+    NodeDraftsView,
     NodeDraftView,
     Project,
     RemoveNodeProposal,
@@ -42,7 +45,14 @@ from .models import (
     SaveView,
     SourceView,
 )
-from .node_edits import NodeEditRefusal, add_node, inspect_node, remove_node
+from .node_edits import (
+    NodeEditRefusal,
+    add_node,
+    apply_node_drafts,
+    inspect_node,
+    inspect_node_drafts,
+    remove_node,
+)
 from .options import binding_projection
 from .task_models import TaskReferenceReview, TaskReferenceTarget, TaskReferenceUpdateProposal
 from .training import training_inspector
@@ -223,6 +233,12 @@ class WorkflowAuthoring:
         self._base(self._read_bytes()[0], request.expected_sha256)
         return inspect_node(request.proposal)
 
+    def inspect_node_drafts(self, request: NodeDraftsRequest) -> NodeDraftsView:
+        """Inspect pending nodes/external inputs (possibly incomplete) without rendering a save."""
+        request = NodeDraftsRequest.model_validate_json(request.model_dump_json())
+        self._base(self._read_bytes()[0], request.expected_sha256)
+        return inspect_node_drafts(request.proposal)
+
     def _base(self, payload: bytes, expected: str) -> SourceView:
         current = self._view(payload)
         if current.sha256 != expected:
@@ -275,12 +291,14 @@ class WorkflowAuthoring:
             source = render_workflow_source(updated)
         elif isinstance(proposal, LoopProposal):
             source = render_workflow_source(with_loop(proposal.source, proposal.loop))
-        elif isinstance(proposal, (AddNodeProposal, RemoveNodeProposal)):
+        elif isinstance(proposal, (AddNodeProposal, NodeDraftsProposal, RemoveNodeProposal)):
             self._base(current_payload, request.expected_sha256)
             try:
                 source, node_edit = (
                     add_node(proposal)
                     if isinstance(proposal, AddNodeProposal)
+                    else apply_node_drafts(proposal)
+                    if isinstance(proposal, NodeDraftsProposal)
                     else remove_node(proposal)
                 )
             except NodeEditRefusal as error:

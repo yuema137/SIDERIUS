@@ -12,10 +12,10 @@
  *   bindings     [{node, argument, source|null}] patches relative to anchor.inventory
  *   anchor       {source, document, inventory}: the last server projection the
  *                draft starts from (loaded source, or a reviewed source/task/node edit)
- *   node         null, or one pending palette node: AddNodeProposal fields without
- *                `source` ({node, capability, protocol, binding, arguments, x, y});
- *                it is added on top of an unedited anchor (document equals
- *                anchor.document, no binding patches), so it is reviewed alone
+ *   nodes        pending palette nodes: PendingNode fields ({node, capability, protocol,
+ *                binding, arguments, x, y}); any number, beside every other edit
+ *   externals    new external inputs (ExternalBinding / ManagedCandidateBinding JSON)
+ *                that pending or saved sockets may read (editor-node-drafts.js)
  *   training, loopTemplate   server presentation values for the anchor (not compared)
  */
 (() => {
@@ -32,7 +32,8 @@
     return JSON.stringify(value ?? null);
   }
   // Identity of the authored proposal; presentation values never make a draft dirty.
-  const identity = state => canonical({document: state.document, bindings: state.bindings, source: state.anchor.source, node: state.node ?? null});
+  const identity = state => canonical({document: state.document, bindings: state.bindings, source: state.anchor.source,
+    nodes: state.nodes || [], externals: state.externals || []});
   const sameTarget = (patch, node, argument) => patch.node === node && patch.argument === argument;
 
   const withoutText = state => { const {sourceText, ...rest} = state; return rest; };
@@ -117,8 +118,13 @@
   const withoutLoop = document => { const copy = clone(document); delete copy.definition.loop; return canonical(copy); };
   /** The existing typed review proposal for this draft (server models in workflow_authoring.models). */
   function proposal(state) {
-    // A pending node is a byte-preserving source insertion on the anchor (AddNodeProposal).
-    if (state.node) return {kind: 'add_node', source: state.anchor.source, ...clone(state.node)};
+    // Pending nodes/inputs (NodeDraftsProposal): targeted insertions on the anchor, unless
+    // other edits travel with them (`document` when edited, binding patches).
+    if (state.nodes?.length || state.externals?.length) {
+      const edited = canonical(state.document) !== canonical(state.anchor.document);
+      return {kind: 'node_drafts', source: state.anchor.source, nodes: clone(state.nodes || []), externals: clone(state.externals || []),
+        document: edited ? clone(state.document) : null, bindings: clone(state.bindings)};
+    }
     if (state.bindings.length) {
       // The server inspects patches over this edited document, so layout and inspector edits travel with them.
       return {kind: 'draft', draft: {base_document: clone(state.document), bindings: clone(state.bindings)}};

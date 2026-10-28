@@ -178,6 +178,54 @@ digest, renders nothing for publication and writes no recovery copy; a stale bas
 is a conflict. Only a complete add can be reviewed, so a saved document is always
 valid. Constructor imports added by an insertion are kept by a later removal.
 
+### Multi-node drafts and new external inputs
+
+The browser editor uses `NodeDraftsProposal(kind="node_drafts", source, nodes,
+externals, document=None, bindings=())` (`models.py`, applied by
+`node_edits.apply_node_drafts`) for any number of pending additions in one review.
+`nodes` are `PendingNode` values (the `AddNodeProposal` fields without `kind` and
+`source`; `AddNodeProposal` subclasses it). `externals` are new
+`ExternalBinding(id, contract, location)` or `ManagedCandidateBinding(id, contract)`
+values that pending nodes and saved sockets may read. Pending nodes may read each
+other's results, new externals and saved results. The schema requires at least one
+node or external and unique new ids. Review refuses with 409 `node_edit` (an id
+already in the base document, or a source shape `insert_external`/`insert_node`
+cannot edit), `draft_incomplete` (every unbound required input of every pending
+node), or `draft_invalid` (a pending binding the projected choices do not offer, or
+a combined document the validator refuses).
+
+When `document` is null and `bindings` is empty, the result is a set of targeted
+insertions: `source_edits.insert_external` appends each new external to the literal
+`externals` tuple, then `insert_node` appends each node and its position. Every
+anchor byte, including comments, is kept and the result is re-parsed. A `document`
+(edits of saved content: moves, inspector, loop) or `bindings` (`BindingPatch` on
+saved sockets, which may read pending results) renders the combined document
+canonically through `inspect_draft` and `render_workflow_source`, exactly like a
+`DocumentProposal`/`DraftProposal`. So only a draft whose saved content is unedited
+keeps author comments. The browser omits `document` when it equals the anchor, and
+moving only pending cards does not edit saved positions.
+
+`POST /api/editor/{project_id}/nodes-draft` accepts `NodeDraftsRequest(expected_sha256,
+proposal)` and returns `NodeDraftsView(status, diagnostics, problems, ports)`. It
+checks the saved digest and writes nothing. `ports` cover every projected node:
+saved sockets show the `document` (or anchor) source *without* `bindings`, which the
+browser projects. Their choices, and those of pending sockets, include pending
+results and new externals of the matching contract (`binding_projection(...,
+choices_from=)` over an unvalidated `model_construct` projection used only for
+choices). `problems` locate each unbound input (`DraftProblem` node and field).
+Saved documents stay valid because only a `complete` draft can be reviewed.
+
+`GET /api/editor/external-inputs` returns `ExternalInputCatalog`
+(`external_inputs.external_input_catalog`): one `ExternalInputKind(contract,
+managed, summary, example)` per catalog contract that no capability produces as
+a result. `managed` derives from `ManagedCandidateBinding.contract`, minus
+`literature.input` (which also needs `literature_settings`). It applies only to
+reusable (schema 2) documents; a managed binding in a schema 1 document is
+`invalid`. `summary` is one plain sentence and `example` is a placeholder file name.
+No location is ever proposed. Task packages declare none of these inputs, so the
+author types a project-relative path to a JSON file holding the contract's
+`native_type` value. The path is read only when a run is prepared.
+
 ## Native training inspector
 
 Source/read and review projections include optional typed `training` presentation
