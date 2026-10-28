@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic_core import to_json
+
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTuningOutput
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.proposal import ProposalOutput
@@ -152,7 +154,10 @@ def run_training(
     )
     if input_path is not None:
         input_path.parent.mkdir(parents=True, exist_ok=True)
-        publish_bytes_write_once(str(input_path), tune_input.model_dump_json(indent=2).encode())
+        # Evidence rereads this file: keep accepted nonfinite values (#1012)
+        # instead of the default inf->null; finite documents are unchanged.
+        payload = to_json(tune_input.model_dump(mode="json"), indent=2, inf_nan_mode="strings")
+        publish_bytes_write_once(str(input_path), payload)
     agent = HyperparamTuningAgent()
     context.bind(agent)
     output = HyperparamTuningOutput.model_validate(agent.run(tune_input))

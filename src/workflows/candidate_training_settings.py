@@ -155,7 +155,12 @@ def validate_fresh_time_budget(minutes: float | None) -> None:
 class CandidateTrainingSettings(BaseModel):
     """Child-validated native launch and the seven run-level startup controls."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, revalidate_instances="always")
+    # Accepted nonfinite values (an unused formal delta, an infinite penalty)
+    # must survive this document's own JSON round trip: the default "null"
+    # turned them into a refusal or a silent None at admission (#1012).
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, revalidate_instances="always", ser_json_inf_nan="strings"
+    )
     launch: WorkflowLaunchConfig = Field(default_factory=WorkflowLaunchConfig)
     # These seven defaults follow run_workflow's public startup signature.
     data_scope: DataScope | None = None

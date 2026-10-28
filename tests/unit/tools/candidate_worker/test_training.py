@@ -713,3 +713,29 @@ def test_four_stage_reusable_requires_source_owned_settings(training_request):
     reusable = ReusableWorkflowDefinition.model_validate_json(json.dumps(payload))
     with pytest.raises(ValueError, match="source-owned training_settings"):
         ReusableWorkflowDocument(definition=reusable)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("skip_formal_min_delta", float("-inf")),
+        ("bypass_formal_time_budget_min_delta", float("inf")),
+        ("degenerate_penalty_score", float("-inf")),
+    ],
+)
+def test_admitted_nonfinite_launch_value_reaches_tuner_unchanged(
+    training_request, training_runner, field, value
+):
+    """#1012: admission's settings JSON round trip wrote inf as null.
+
+    A formal delta then failed admission even though the formal policy owner
+    accepts unused nonfinite deltas; an optional field silently became None.
+    """
+    path = Path(training_request.preview.project_root) / "training.json"
+    settings = json.loads(path.read_text())
+    settings["launch"][field] = "-inf" if value < 0 else "+inf"
+    path.write_text(json.dumps(settings))
+    receipt = launch_candidate(refresh(training_request))
+    assert receipt.status == "completed", receipt.error
+    tuned = next(item for name, item in training_runner if name == "tuner")
+    assert getattr(tuned, field) == value

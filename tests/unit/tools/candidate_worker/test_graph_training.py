@@ -543,3 +543,28 @@ def test_unadapted_training_trace_bytes_are_unchanged(
     verify_graph_trace(
         request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
     )
+
+
+def test_nonfinite_launch_values_survive_the_graph_tuning_input(prepared, training_runner):
+    """#1012: the graph writes the tuner input as JSON and evidence rereads it.
+
+    The default inf->null encoding made an unused -inf formal delta fail trace
+    verification after training, and turned an infinite penalty into None.
+    """
+    request = graph_training_request(prepared)
+    path = Path(request.preview.project_root) / "training.json"
+    settings = json.loads(path.read_text())
+    settings["launch"] |= {"skip_formal_min_delta": "-inf", "degenerate_penalty_score": "-inf"}
+    path.write_text(json.dumps(settings))
+    request = refresh(request)
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+
+    saved = HyperparamTuningInput.model_validate_json(
+        tuning_input_path(Path(receipt.workspace), "train").read_bytes()
+    )
+    assert saved.skip_formal_min_delta == saved.degenerate_penalty_score == float("-inf")
+    verify_graph_trace(
+        request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
+    )

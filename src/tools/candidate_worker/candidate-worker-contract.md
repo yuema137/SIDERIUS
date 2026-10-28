@@ -300,7 +300,15 @@ constraint sections refuse; incomplete context is completed from
 `workflow_constraint_context`. Implementation and validation external context
 bindings are checked against that same result. The admitted proposal is saved
 before its first call; resolved settings are saved to
-`candidate_run/training_settings.json`.
+`candidate_run/training_settings.json`. `CandidateTrainingSettings` serializes
+an accepted nonfinite float as the JSON string `"Infinity"`, `"-Infinity"` or
+`"NaN"` (`ser_json_inf_nan="strings"`), so admission's own JSON round trip and
+the saved document preserve it exactly; finite values are byte-identical. The graph tuning input that
+`graph_evidence` rereads is written with the same string encoding. Ingress
+may write such a value as a string (for example `"-inf"`). Whether a value may be
+nonfinite stays with its owner: formal deltas are unconsumed while the
+chain-incumbent gates are disabled (`validate_formal_launch`), as they always are
+on this ingress (issue #1012).
 
 Passed validation returns typed in-memory outputs to training. Missing model
 or loss sources refuse before construction/staging. The shared construction
