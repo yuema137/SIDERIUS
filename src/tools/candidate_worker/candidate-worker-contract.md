@@ -1,7 +1,7 @@
 # Native candidate execution contract
 
-`CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None)`
-are the common JSON/Python boundary.
+`CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None,
+on_sandbox_spawn=None)` are the common JSON/Python boundary.
 The CLI decodes the same request and calls that function. The parent imports
 inert declaration/preview/routing schemas and public pure evidence projections;
 it never composes tasks, executes task/generated plugins or constructs agents/providers. `child` verifies captured inputs, binds generated
@@ -13,6 +13,14 @@ filesystem effects. The native launch uses its hex form as the existing `run_id`
 for artifacts and accounting. Omission preserves native `uuid4().hex` generation.
 Request/receipt schemas, CLI behavior and exclusive claim ownership are unchanged;
 only the claim winner can publish records with that invocation identity.
+
+`on_sandbox_spawn(pid)` is forwarded to `workspace_sandbox.runner.run` /
+`run_observed` as `on_spawn`. It is called once with the bwrap PID right after
+`Popen`, before the chain is awaited and while the PID is unreaped, inside the
+runner's cleanup `try` (an observer exception still terminates and reaps the
+sandbox). The host reservation ledger uses it to publish the sandbox identity
+(candidate operations contract, "Host reservation ledger"). Omitted, the runner
+is called exactly as before.
 
 ## Selected inputs and task authority
 
@@ -545,7 +553,9 @@ routing)` (`pending` for undecided nodes), `aborted`, and `decisions` (the
 recorded `RouteEvaluationOutput` values, at most one per branch; empty for
 every profile except `native-routed-candidate/v1`). It refuses duplicate ids, undeclared
 predecessors or merge candidates, two decisions for one branch, a `skipped`
-node without a reason in `SKIP_REASONS` (B1: `route_not_selected`), and a node
+node without a reason in `SKIP_REASONS` (B1: `route_not_selected`; B6-4:
+`insufficient_items`, set through `skipped_input`, see "Literature adaptor
+profiles"), and a node
 whose merge candidate is also one of its `predecessors`, or whose
 `NodeRouting.control` is set without `route` or is not one of its `predecessors`.
 `predecessors` are the
@@ -833,7 +843,8 @@ reuse; missing staged model; shape refusals).
 
 Not admitted: v2 reusable source, managed preparation and console for this profile;
 any other strategy triple, metric ranking, per-item/split distribution, routes,
-loops, custom and LLM strategies. Routes run only under
+loops, custom and LLM strategies (split distribution runs only under the literature
+split profile, "Literature adaptor profiles" below). Routes run only under
 `native-routed-candidate/v1` (next section).
 
 ### Routed execution profile (B1-PR5)
@@ -989,6 +1000,94 @@ advice field, N-way aggregation, parallelism, training, conditional routing, buf
 human pause or resume. Shared proposal advice is not literature advice. Historical
 scientific settings remain experiment-owned. Omitted/default fixed, fanout and
 family profiles retain their serialization and native scientific payloads.
+
+### Literature adaptor profiles (S2 collection, S3 split; B6-4)
+
+Two opt-in v1 profiles (`fanout.LITERATURE_COLLECTION_PROFILE`,
+`fanout.LITERATURE_SPLIT_PROFILE`) connect reviews to proposals through one declared
+deterministic adaptor. Both reuse the single-review profile above for every review
+(external `literature.input`, managed storage/cache/diagnostic paths, route,
+network and task/constraint admission against **every** proposal seed the review
+feeds, `capture_record`) and the family branch ownership rules
+(`_proposal_branches`) for proposals, implementations and validators. No tuner, loop
+or route is admitted. `ProposalFamilies.literature_adaptor =
+LiteratureAdaptorEdges(adaptor, reviews, protocol, proposals)` records the reviews in
+the adaptor's declared binding order (`LiteratureReview(node, binding)`) and each
+proposal's seed binding and adaptor output index (`LiteratureProposal(node,
+seed_binding, index)`); `ProposalFamilies.literature_reviews` lists the review ids of
+either literature shape. Proposal diagnostics are per node
+(`candidate_run/proposal_inputs/<proposal-id>.json`, debug under
+`candidate_run/debug/<proposal-id>/`).
+
+| Profile | Admission (`fanout.literature_collection_candidate` / `literature_split_candidate`) |
+| --- | --- |
+| `native-literature-collection/v1` (S2) | ≥ 1 external reviews; one adaptor with one `literature.output` port binding every review result exactly once, `collect/v1` + `all/v1` + `single/v1`; exactly one proposal using `literature-collection-to-proposal(reviews=AdaptorSource(<adaptor>), proposal_input=<external seed>)`; its complete branches |
+| `native-literature-split/v1` (S3) | exactly one external review; one adaptor with one `literature.output` port bound to it and `split-items/v1(field="findings", count=M, on_short)` after any COMBINE/SELECT pair the declaration validation table admits (S3 is `field-rank/v1(confidence, descending)` + `top-k/v1(k)`); exactly M proposals, each `literature-to-proposal(output=AdaptorSource(<adaptor>, index=i), proposal_input=<external seed>)`, indices `0..M-1` each bound once; one complete family per proposal |
+
+**Protocol application** (`literature_edges.proposal_input`, the one owner unit
+dispatch and the verifier call). The single-review profile keeps
+`local_typed_evidence(review, proposal_input=seed)` unchanged. S2 converts the
+adaptor's `CollectedItems` into the catalogued `literature.collection`
+(`literature_collection`: one `NamedLiteratureReviewOutput(contribution_id=<source
+review node id>, output=<review>)` per collected entry, in collected order) and
+applies `local_typed_evidence_many`; the proposer prompt therefore renders the
+existing collection section, one `### Review: <review node id>` heading per review in
+declared binding order, never completion order. Renaming a review node therefore
+changes the proposer prompt (operator-accepted, 2026-10-28). This profile is the first
+framework producer of a collection: before B6-4 only hand-written
+`ProposalInput.literature_review_evidence` seeds reached the collection renderer.
+Every proposal seed under either adaptor profile must leave
+`literature_review_evidence` unset; `materialize_fanout` refuses one that carries it
+before any review or proposer call (the reusable-preparation rule). S3 applies `local_typed_evidence` to
+output `i`, a `LiteratureReviewOutput` whose `findings` hold exactly the one entry
+`split-items/v1` placed there (all other fields of the review unchanged), so family
+`i` sees the singular literature section with that one claim. With `field-rank/v1`
++ `top-k/v1`, index `i` is the `i`-th ranked finding by self-reported `confidence`
+(the ranking's `provenance="self-reported"` is recorded in the adaptor record, not
+rendered in the prompt). No prompt template, agent schema or rendering owner changes
+(`rendering_assembly_digest` unchanged).
+
+**Shortfall and per-index skip.** Under `on_short="skip"`, fewer than M split entries
+leave indices `n..M-1` `skipped` in the outcome and record. Under `field-rank/v1`
+a finding whose `confidence` is `None` is unranked and never kept by `top-k/v1`, so
+unscored findings alone can cause a shortfall (and a skip or failure per `on_short`). `adaptor_phase.skipped_inputs`
+maps every node whose request reads a skipped index to `insufficient_items`;
+`readiness_input(..., skipped_inputs=...)` sets `NodeReadiness.skipped_input`, and
+`_close_reason` closes that node `skipped/insufficient_items` after the blocked rule
+(a failed/rejected/blocked source still blocks) and before its own route decision.
+`readiness.SKIP_REASONS` now holds `route_not_selected` and `insufficient_items`, so
+generic skip propagation carries the reason to the family's implementation and
+validator. A skipped node is neutral in `body_status`; a node skipped this way cannot
+feed an adaptor (`SkippedAdaptorInputError`, no profile binds one). Under
+`on_short="fail"` any shortfall closes the adaptor `failed/insufficient_items` with its
+record; more split entries than M closes it `failed/too_many_items` (never truncated;
+`GraphReason` gains `too_many_items`). A failed adaptor stops later effects, so every
+proposal is `blocked` and the body is `failed`. Zero admissible inputs or zero entries
+without a fail policy is `rejected` (no outputs), which blocks every proposal.
+
+**Verification.** `verify_graph_trace` recomputes the adaptors
+(`verify_adaptors`) before readiness replay and replays with the recomputed
+`skipped_inputs`, so a proposal that ran on a non-emitted index, or a family skipped
+despite an emitted one or with another reason, is refused ("graph trace violates
+serial readiness"). `literature_edges.verify_literature_evidence` (moved from
+`graph_evidence`, extended to many reviews and proposals) checks every succeeded
+review's diagnostic input against its capture and every fed seed, the review record's
+digest and run binding, and requires each succeeded proposal's diagnostic input to
+equal `proposal_input` over the verified review records and adaptor outcomes (a
+reordered collection or a sibling's finding is refused: "proposal input does not match
+the declared literature edge").
+Witness: `tests/unit/tools/candidate_worker/test_literature_adaptors.py` (binding
+order over execution order with per-review attribution in the proposer prompt; a seed
+already carrying literature evidence refused before any call; self-reported ranking
+provenance in the S3 record;
+skip of the short index with ranked findings per family; relabelled skip and swapped
+finding refused; `on_short="fail"` and `too_many_items` failures recorded and blocking;
+admission refusals).
+
+Not admitted: v2 reusable source, managed preparation and console for these profiles
+(B6-7); tuning after either profile; collection over other contracts
+(`tuning.collection`, B6-9); `per-item/v1` and `replicate/v1` distribution; custom and
+LLM strategies.
 
 ## Opt-in native interpretation candidate
 

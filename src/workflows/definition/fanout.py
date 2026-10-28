@@ -2,9 +2,17 @@
 
 from dataclasses import dataclass
 
-from .adaptor_strategies import FirstAdmissibleSelect, PassCombine, SingleDistribute
+from .adaptor_strategies import (
+    AllSelect,
+    CollectCombine,
+    FirstAdmissibleSelect,
+    PassCombine,
+    SingleDistribute,
+    SplitItemsDistribute,
+)
 from .candidate import check_tuning_edge, refuse_declaration_only
 from .models import (
+    AdaptorInstance,
     AdaptorSource,
     ExternalRequest,
     ExternalSource,
@@ -40,11 +48,57 @@ class InterpretationEdge:
     input_binding: str
 
 
+@dataclass(frozen=True)
+class LiteratureReview:
+    """One admitted review node and its external ``literature.input`` binding."""
+
+    node: str
+    binding: str
+
+
+@dataclass(frozen=True)
+class LiteratureProposal:
+    """One proposal fed by the literature adaptor: its seed and the output it reads."""
+
+    node: str
+    seed_binding: str
+    index: int | None  # the adaptor output index; None for the unindexed single/v1 output
+
+
+@dataclass(frozen=True)
+class LiteratureAdaptorEdges:
+    """Reviews -> one declared adaptor -> proposals (B6 S2 collection, S3 split).
+
+    ``reviews`` follow the adaptor's declared binding order; ``protocol`` is the
+    one catalogued proposal protocol every proposal applies to its adaptor output.
+    """
+
+    adaptor: str
+    reviews: tuple[LiteratureReview, ...]
+    protocol: str
+    proposals: tuple[LiteratureProposal, ...]
+
+    def proposal(self, node_id: str) -> LiteratureProposal:
+        return next(item for item in self.proposals if item.node == node_id)
+
+
 # S1 (B6-3): fanout branches -> first passing validator -> one tuner.
 SELECTION_PROFILE = "native-proposal-fanout-selection/v1"
 # B1-PR5: the S1 node set plus declared routes, e.g. a fallback branch that runs
 # only when the first validator rejects (B1-Q1/Q2). The only profile admitting routes.
 ROUTED_PROFILE = "native-routed-candidate/v1"
+# S2 (B6-4): N reviews -> collect/v1 -> one proposal through
+# literature-collection-to-proposal -> its complete branches.
+LITERATURE_COLLECTION_PROFILE = "native-literature-collection/v1"
+# S3 (B6-4): one review -> split-items/v1 into M outputs -> M proposals through
+# literature-to-proposal -> one complete family each.
+LITERATURE_SPLIT_PROFILE = "native-literature-split/v1"
+ADAPTOR_PROFILES = (
+    SELECTION_PROFILE,
+    ROUTED_PROFILE,
+    LITERATURE_COLLECTION_PROFILE,
+    LITERATURE_SPLIT_PROFILE,
+)
 
 
 @dataclass(frozen=True)
@@ -63,10 +117,20 @@ class ProposalFamilies:
     interpretation: InterpretationEdge | None = None
     tuning: str | None = None
     selection: AdaptorSelection | None = None
+    literature_adaptor: LiteratureAdaptorEdges | None = None
 
     @property
     def branches(self) -> tuple[tuple[str, str], ...]:
         return tuple(branch for family in self.families for branch in family.branches)
+
+    @property
+    def literature_reviews(self) -> tuple[str, ...]:
+        """Every admitted review node, from either literature shape."""
+        if self.literature is not None:
+            return (self.literature.review,)
+        if self.literature_adaptor is not None:
+            return tuple(item.node for item in self.literature_adaptor.reviews)
+        return ()
 
     def proposal_for(self, node_id: str) -> str:
         """Select lineage from admitted edges, never scientific candidate identity."""
@@ -91,11 +155,15 @@ def execution_families(
     """Select only an explicitly supported native graph profile."""
     refuse_declaration_only(
         definition,
-        admits_adaptors=profile in (SELECTION_PROFILE, ROUTED_PROFILE),
+        admits_adaptors=profile in ADAPTOR_PROFILES,
         admits_routes=profile == ROUTED_PROFILE,
     )
     if profile == SELECTION_PROFILE:
         return selection_candidate(definition)
+    if profile == LITERATURE_COLLECTION_PROFILE:
+        return literature_collection_candidate(definition)
+    if profile == LITERATURE_SPLIT_PROFILE:
+        return literature_split_candidate(definition)
     if profile == ROUTED_PROFILE:
         return routed_candidate(definition)
     if profile == "native-interpretation-candidate/v1":
@@ -349,3 +417,111 @@ def interpretation_candidate(
         interpretation=InterpretationEdge(interpreter.id, proposal.id, interpreter.request.binding),
         tuning=tuners[0].id if tuners else None,
     )
+
+
+def literature_collection_candidate(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> ProposalFamilies:
+    """S2: every review collected (declared binding order) into one proposal's evidence."""
+    adaptor, reviews = _literature_adaptor(definition)
+    if not (
+        isinstance(adaptor.combine, CollectCombine)
+        and isinstance(adaptor.select, AllSelect)
+        and isinstance(adaptor.distribute, SingleDistribute)
+    ):
+        raise ValueError("literature collection requires collect/v1, all/v1 and single/v1")
+    edges, shape = _literature_proposals(
+        definition, adaptor, reviews, "literature-collection-to-proposal", "reviews"
+    )
+    if len(edges.proposals) != 1:
+        raise ValueError("literature collection requires exactly one proposal")
+    return shape
+
+
+def literature_split_candidate(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> ProposalFamilies:
+    """S3: one review's findings split into M outputs; output ``i`` feeds family ``i``.
+
+    COMBINE/SELECT are any deterministic pair the declaration validation table
+    admits before ``split-items/v1`` (e.g. ``field-rank/v1`` + ``top-k/v1``).
+    """
+    adaptor, reviews = _literature_adaptor(definition)
+    distribute = adaptor.distribute
+    if not isinstance(distribute, SplitItemsDistribute) or len(reviews) != 1:
+        raise ValueError("literature split requires split-items/v1 over exactly one review")
+    edges, shape = _literature_proposals(
+        definition, adaptor, reviews, "literature-to-proposal", "output"
+    )
+    indices = sorted(item.index for item in edges.proposals if item.index is not None)
+    if len(indices) != len(edges.proposals) or indices != list(range(distribute.count)):
+        raise ValueError("literature split requires one proposal per adaptor output index")
+    return shape
+
+
+def _literature_adaptor(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> tuple[AdaptorInstance, tuple[LiteratureReview, ...]]:
+    """The one adaptor over every external review, each bound exactly once."""
+    if len(definition.adaptors) != 1:
+        raise ValueError("literature adaptor profiles require exactly one adaptor")
+    adaptor = definition.adaptors[0]
+    if len(adaptor.inputs) != 1 or adaptor.inputs[0].contract != "literature.output":
+        raise ValueError("the literature adaptor requires one literature.output input port")
+    nodes = {node.id: node for node in definition.nodes}
+    declared = [node.id for node in definition.nodes if node.capability == "literature"]
+    sources = adaptor.bindings[0].sources
+    bound = [source.node for source in sources if isinstance(source, ResultSource)]
+    if len(bound) != len(sources) or sorted(bound) != sorted(declared) or not declared:
+        raise ValueError("the literature adaptor must bind every review result exactly once")
+    reviews = []
+    for node_id in bound:
+        request = nodes[node_id].request
+        if not isinstance(request, ExternalRequest):
+            raise ValueError("literature adaptor profiles require external review requests")
+        reviews.append(LiteratureReview(node_id, request.binding))
+    return adaptor, tuple(reviews)
+
+
+def _literature_proposals(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+    adaptor: AdaptorInstance,
+    reviews: tuple[LiteratureReview, ...],
+    protocol: str,
+    argument: str,
+) -> tuple[LiteratureAdaptorEdges, ProposalFamilies]:
+    """Proposals reading the adaptor through ``protocol``; then exact branch ownership."""
+    facts = predecessor_facts(definition)
+    proposals = []
+    for node in definition.nodes:
+        if node.capability != "proposal":
+            continue
+        request = node.request
+        if not isinstance(request, ProtocolRequest) or request.protocol != protocol:
+            raise ValueError(f"each literature-fed proposal requires {protocol}")
+        sources = {arg.name: arg.source for arg in request.arguments}
+        output, seed = sources.get(argument), sources.get("proposal_input")
+        if (
+            not isinstance(output, AdaptorSource)
+            or output.adaptor != adaptor.id
+            or not isinstance(seed, ExternalSource)
+        ):
+            raise ValueError("proposal must consume the literature adaptor and an external seed")
+        proposals.append(LiteratureProposal(node.id, seed.binding, output.index))
+    seeds = {item.node: item.seed_binding for item in proposals}
+    review_ids = {item.node for item in reviews}
+    # Existing branch ownership remains the authority for implementation/validation.
+    candidate = definition.model_copy(
+        update={
+            "nodes": tuple(
+                node.model_copy(update={"request": ExternalRequest(binding=seeds[node.id])})
+                if node.id in seeds
+                else node
+                for node in definition.nodes
+                if node.id not in review_ids
+            )
+        }
+    )
+    shape = _proposal_branches(candidate, facts, external_proposals=True)
+    edges = LiteratureAdaptorEdges(adaptor.id, reviews, protocol, tuple(proposals))
+    return edges, ProposalFamilies(shape.families, facts, literature_adaptor=edges)

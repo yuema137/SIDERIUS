@@ -5,22 +5,24 @@ in-process before B3-3: input selection, storage selection and predecessor
 results. The phase call itself runs in `unit_child`.
 """
 
+from collections.abc import Mapping
 from dataclasses import replace
 
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.interpretation import InterpretationInput
-from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
+from agent.schemas.literature_review import LiteratureReviewInput
 from agent.schemas.proposal import ProposalOutput
-from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import local_typed_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from execute_tools.data_paths import active_physical_data_root
+from workflows.adaptors import AdaptorOutcome
 from workflows.definition.fanout import ProposalFamilies
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 
 from .budget import WorkerBudget
 from .inputs import NativeInputs
+from .literature_edges import proposal_input
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .training_admission import TrainingAdmission
 from .unit_models import (
@@ -46,6 +48,7 @@ def phase_unit(
     selected: SelectedInput,
     shape: ProposalFamilies,
     results: dict[str, NodeOutput],
+    outcomes: Mapping[str, AdaptorOutcome],
     admission: AdmittedTraining | None,
     tuning_branch: tuple[str, str] | None,
     incumbent: float | None,
@@ -75,12 +78,10 @@ def phase_unit(
         return LiteratureUnit(phase="literature", inputs=selected)
     assert isinstance(selected, NativeInputs)
     if capability == "proposal":
-        if shape.literature is not None:
-            review = results[shape.literature.review]
-            assert isinstance(review, LiteratureReviewOutput)
-            selected = replace(
-                selected, proposal=local_typed_evidence(review, proposal_input=selected.proposal)
-            )
+        if shape.literature_reviews:
+            # The declared literature edge, applied by its one owner (also the verifier's).
+            evidence = proposal_input(shape, node_id, selected.proposal, results, outcomes)
+            selected = replace(selected, proposal=evidence)
         return ProposalUnit(phase="proposal", inputs=selected)
     proposal = results[shape.proposal_for(node_id)]
     assert isinstance(proposal, ProposalOutput)
@@ -111,6 +112,7 @@ def node_invocation(
     selected: SelectedInput,
     shape: ProposalFamilies,
     results: dict[str, NodeOutput],
+    outcomes: Mapping[str, AdaptorOutcome],
     iteration: int,
     admitted: TrainingAdmission | None,
     tuning_branch: tuple[str, str] | None,
@@ -151,6 +153,7 @@ def node_invocation(
             selected,
             shape,
             results,
+            outcomes,
             admission,
             tuning_branch,
             incumbent,

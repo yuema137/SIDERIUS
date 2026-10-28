@@ -156,7 +156,9 @@ def test_saved_resume_is_written_once_and_submitted_unchanged(store, tmp_path, m
 
     submitted = []
 
-    def submit(config_arg, submission, *, launch_environment):
+    def submit(config_arg, submission, *, launch_environment, host):
+        # No --host-ledger: the CLI selects the serial default (no host ledger).
+        assert host is None
         submitted.append((config_arg, submission, launch_environment.get("OPENAI_API_KEY")))
         return SimpleNamespace(model_dump_json=lambda: json.dumps({"submitted": True}))
 
