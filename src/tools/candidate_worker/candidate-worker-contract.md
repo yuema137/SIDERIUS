@@ -296,6 +296,38 @@ owner admits the model; `stage_native_plugins` stages only the native tuner
 destination. No global capability publication or model/loss promotion occurs.
 The public tuner owns its entire training/scoring/Health lifecycle.
 
+### Run seed and tuner coordinates (issue #983)
+
+`CandidateRunRequest.run_seed: RunSeed | None` is the operator's explicit seed
+(omitted when `None`, so seedless request bytes and digests are unchanged).
+`launch_candidate(request, *, invocation_id=None, run_seed=None, ...)` is an
+entry boundary: it executes the `RunSeedBinding` an operation admission bound
+(`run_seed=`), or, called directly, binds `request.run_seed` or generates one
+(`core.seeding.admitted_run_seed`, which refuses a binding that contradicts the
+request). The initial receipt `launch.json` records `run_seed` and
+`run_seed_source` before the workspace claim is used by any node; every child,
+body and terminal receipt must keep them (`RECEIPT_IDENTITY_FIELDS`), and
+`verify_candidate_records` refuses a launch seed that contradicts the request.
+A receipt without a seed predates the contract and stays readable.
+
+`admit_training` never generates a seed. `admitted_workspace_seed(initial)` reads
+the launch receipt's binding; a pre-seed receipt raises `MissingRunSeed`. The first
+admission locks the binding (with its source) through `prepare_training_run`;
+later bodies and resumed segments find it locked (`adopt_bound_run_seed`), and a
+different locked seed raises `RunInvariantsViolation`. Admission prints
+`[seed] run_seed=N source=operator|generated|locked`.
+
+`TrainingAdmission.iteration` (transported by `AdmittedTraining.iteration`) is the
+body's global loop iteration, continued from `LoopContinuation.completed_iterations`
+by a resumed segment, and `1` outside a loop. The tuner receives
+`HyperparamTuningInput.seed_coordinates = tuning_seed_scope(iteration, node_id)`
+= `SeedCoordinates(iteration=…, node_id=<authored tuning node>)`, so loop bodies
+and segments derive distinct attempt seeds from the one run seed (fixes F-SEED-2:
+before, every body used empty coordinates). `run_name` never enters. Graph readback
+(`verify_graph_training`) refuses a persisted tuning input whose `run_seed` or
+`seed_coordinates` differ from the launch receipt's seed at that body's
+coordinates; a pre-seed receipt skips the check.
+
 The first three `native_output_paths` retain their legacy ordering. The fourth
 is `<workspace>/<run_name>/iteration_001/<model_name>/run_output_<run_name>.json`.
 That native model directory also owns run configuration, records and retained

@@ -22,6 +22,25 @@ The request is strict, frozen and rejects extra fields. Required selections:
 Optional `allowed_output_types` is the native nonempty classifier/regressor tuple;
 None leaves output policy unconstrained. Timeouts are finite positive seconds.
 
+Optional `run_seed` (`RunSeed`, issue #983) is the operator's explicit seed for
+this preparation run; `None` is omitted from serialization, so seedless request
+bytes are unchanged. `prepare_candidate(request, *, invocation_id=None,
+run_seed=None)` and `prepare_reusable_candidate(..., run_seed=None)` take the
+`RunSeedBinding` an operation admission bound; a direct call omits it and the
+function binds `request.run_seed` or generates one (`core.seeding.admitted_run_seed`,
+which refuses a binding that contradicts the request). The binding is recorded
+from the first receipt on as `run_seed` / `run_seed_source` on
+`CandidatePreparationReceipt` and, for reusable preparation, on both
+`ReusablePreparationReceipt` and its native receipt; terminal and retained-selection
+verification require the two to agree. `ReusableCandidatePreparationRequest.run_seed`
+is never copied into the captured native request (`captured_request`). The
+prepared `CandidateRunRequest` carries no seed: a candidate built from a
+preparation admits its own seed and records the preparation's only as
+`OperationRecord.preparation_run_seed`
+([operations contract](../candidate_operations/candidate-operations-contract.md#run-seed-issue-983)).
+Preparation does not consume the seed yet; data-analysis sampling derives from it
+in a later #983 step.
+
 Paths must be canonical absolute local paths. Manifest/profile are existing
 regular files; data is an existing directory. Output and future workspace must
 be absent (including symlinks), with existing directory parents. They cannot

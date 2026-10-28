@@ -9,6 +9,7 @@ from pydantic import TypeAdapter
 
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
+from core.seeding import RunSeedBinding, admitted_run_seed
 from execute_tools.impl_attempts import impl_attempt_dir
 from tools.workflow_preview.files import observe_file
 from tools.workspace_sandbox.profile import SandboxProfile
@@ -16,7 +17,7 @@ from tools.workspace_sandbox.runner import ExecutionResult, SpawnObserver, run, 
 
 from .admission import admit_input_paths
 from .layout import candidate_proposal_dir
-from .models import CandidateRunReceipt, CandidateRunRequest
+from .models import RECEIPT_IDENTITY_FIELDS, CandidateRunReceipt, CandidateRunRequest
 from .preflight import fresh_preview, require_credentials
 
 
@@ -48,16 +49,7 @@ def reconcile(
         child = CandidateRunReceipt.model_validate_json(
             read_graph_control(child_path) if graph_request is not None else child_path.read_bytes()
         )
-        for name in (
-            "run_id",
-            "run_name",
-            "workspace",
-            "declaration_digest",
-            "node_ids",
-            "selected_constructor_routes",
-            "ledger_path",
-            "log_path",
-        ):
+        for name in RECEIPT_IDENTITY_FIELDS:
             if getattr(child, name) != getattr(initial, name):
                 raise ValueError(f"child receipt changed {name}")
         if graph_request is not None:
@@ -107,14 +99,19 @@ def launch_candidate(
     request: CandidateRunRequest,
     *,
     invocation_id: UUID | None = None,
+    run_seed: RunSeedBinding | None = None,
     on_sandbox_spawn: SpawnObserver | None = None,
 ) -> CandidateRunReceipt:
     """Run precisely one chain; failures preserve the claimed workspace.
 
+    ``run_seed`` is the seed an operation admission already bound (issue #983);
+    a direct call omits it and this entry boundary binds ``request.run_seed`` or
+    generates one. Either way the initial receipt records it before any node runs.
     ``on_sandbox_spawn`` receives the sandbox PID before the chain is awaited (the
     host reservation ledger binds it); omitted, the launch is unchanged.
     """
     request = CandidateRunRequest.model_validate_json(request.model_dump_json())
+    seed = admitted_run_seed(request.run_seed, run_seed)
     identity = (
         uuid4()
         if invocation_id is None
@@ -141,6 +138,8 @@ def launch_candidate(
         selected_constructor_routes=observed.selected_constructor_routes,
         ledger_path=str(workspace / "token_usage.jsonl"),
         log_path=str(control / "worker.log"),
+        run_seed=seed.value,
+        run_seed_source=seed.source,
     )
     graph = request.preview.execution_profile is not None
     if graph:
