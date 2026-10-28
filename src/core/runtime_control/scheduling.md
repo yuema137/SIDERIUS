@@ -3,8 +3,9 @@
 Owner: `scheduling.py`. Scope: typed resource requests, an explicit host
 budget, and the pure `plan_dispatch` decision that places, queues or refuses
 ready units against a reservation ledger. This module has no production
-caller yet; budget intake, environment projection, process dispatch,
-receipts and timing are later owners (B3-2, B3-4, B3-5). Without a
+dispatch caller yet; budget intake, the run-invariant fields and the child
+environment projection are below; process dispatch, receipts and timing are
+later owners (B3-4, B3-5). Without a
 `HostBudget`, execution remains serial and nothing here is consulted.
 
 ## Inputs
@@ -104,10 +105,54 @@ and the budget: permuting either tuple yields an identical `ScheduleDecision`.
 - `ScheduleDecision`: `budget_digest`, `placements` (placed and queued, in
   ordinal order), `refused`; properties `placed` and `queued`.
 
+## Budget intake, run invariants and child environment
+
+Owner: `budget_intake.py` (decision B3-Q8: a JSON file only, no environment
+variable).
+
+- `load_host_budget_file(path) -> HostBudget` reads one UTF-8 JSON object
+  holding every `HostBudget` field except `source`, validates it once and
+  returns a budget with `source="file"`. Consumers read the returned object,
+  never the file. Refusals raise `HostBudgetFileError` naming the path: an
+  unreadable or non-JSON file, a non-object top level, duplicate keys at any
+  depth (never resolved last-wins), a file that declares `source` (intake owns
+  provenance), and any `HostBudget` validation failure. Nothing is defaulted,
+  discovered or read from the environment; each slot's `ceiling` is the
+  operator's declared `ResolvedGpuCeiling`, e.g.
+
+  ```json
+  {"gpus": [{"uuid": "GPU-…", "hardware_class": {"device_name": "…",
+     "total_memory_bytes": 51539607552, "compute_capability": [8, 9]},
+     "ceiling": {"operator_ceiling_gib": 40.0, "operator_source": "caller",
+                 "host_quota_gib": null, "measured_capacity_gib": 47.5}}],
+   "host_memory_gib": 64.0, "cpu_slots": 8, "max_concurrent_units": 2}
+  ```
+
+- `scheduling_mode_for(budget)` is the one mode rule: `None` ⇒ `serial`, a
+  budget ⇒ `parallel-v1` (also when `max_concurrent_units == 1`).
+- Run invariants (`core/run_invariants.py`): `LockLaunchIdentity.host_budget`
+  carries the validated budget to `build_run_invariants`, which records
+  `scheduling_mode` (`_CANONICAL`, decision B3-Q7) and `host_budget`
+  (`HostBudgetProvenance`: `digest`, `max_concurrent_units`, `source`;
+  `_PROVENANCE`). The two travel together (`parallel-v1` ⇔ budget present).
+  Both are omitted from the lock when serial, so legacy and budget-less locks
+  keep their bytes and a legacy lock parses as `serial`. Resume matrix:
+  serial↔parallel-v1 refuses; parallel-v1 with a different budget validates.
+- Child environment (`core/subprocess_env.py`):
+  `subprocess_env(..., cuda_visible_devices=Placement.cuda_visible_devices)`
+  sets `CUDA_VISIBLE_DEVICES` (a slot UUID, or `""` for a placed CPU-only
+  unit, replacing any inherited value). The default `None` leaves the
+  environment exactly as before; no other key changes with a placement.
+
+No launch flag or console upload calls the loader yet: a run that recorded
+`parallel-v1` while still dispatching serially would misstate its trace
+semantics, so wiring belongs with the dispatching owner (B3-4/B3-5).
+
 ## Limits and validation
 
 A ledger sum within the ceiling is admission evidence, not a guarantee
 against other host users (see [GPU ceilings](gpu-ceilings.md)). Wall time
 is not admitted here; time-budget coupling on a shared GPU (decision
 B3-Q6) belongs to the dispatching owners. Focused CPU tests:
-`tests/unit/core/test_scheduling.py`. No GPU, process or LLM was exercised.
+`tests/unit/core/test_scheduling.py`, `tests/unit/core/test_budget_intake.py`,
+`tests/unit/core/test_subprocess_env_placement.py`. No GPU, process or LLM was exercised.
