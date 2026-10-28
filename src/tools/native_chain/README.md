@@ -10,6 +10,8 @@ a working bubblewrap sandbox, and external directories for inputs, data and runs
    and `final_iteration`, and `chain_args` containing the native scientific CLI
    tokens. For example, `chain_args` can contain `--task_composition`, its path,
    `--data_dir`, and the separate data directory path. The workspace must not exist.
+   To fix the run seed, add `"run_seed": N` (an integer) inside `run`. Leave it
+   out and the first iteration picks a seed and records it in the workspace.
 2. Save a request JSON containing `source` (the declaration path), `output`
    (a new review directory), `read_only` (task code/configuration roots),
    `task_check: {"timeout_seconds": 60}`, and `input_max_bytes: 16777216`.
