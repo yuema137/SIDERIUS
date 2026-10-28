@@ -31,6 +31,7 @@ from agent.schemas.hyperparam_tuning import (
     TimeAdmissionSource,
     serialize_expert_advice,
 )
+from agent.schemas.judge import JudgeRoutes
 from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.parameter_rules import ParameterRules
@@ -92,6 +93,8 @@ def local_validated_model(
     # Issue #983 — the locked run seed and the caller-owned seed coordinates.
     run_seed: int | None = None,
     seed_coordinates: SeedCoordinates | None = None,
+    # B2-4 — the locked judge routes, echoed for the tuner's lock validation.
+    judge_routes: JudgeRoutes | None = None,
     cleanup_denoised: bool = False,
     retain_model_outputs: bool = False,
     retain_training_checkpoints: bool = False,
@@ -388,6 +391,7 @@ def local_validated_model(
         train_validation_align=train_validation_align,
         run_seed=run_seed,
         seed_coordinates=seed_coordinates or SeedCoordinates(),
+        judge_routes=judge_routes,
         cleanup_denoised=cleanup_denoised,
         retain_model_outputs=retain_model_outputs,
         retain_training_checkpoints=retain_training_checkpoints,

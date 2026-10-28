@@ -135,23 +135,29 @@ to the [candidate-worker contract](../../tools/candidate_worker/candidate-worker
 ### Authored loop stop conditions
 
 `AuthoredLoop(final_iteration, feedback, stop_conditions=())` optionally declares
-deterministic hard criteria, a tuple of the discriminated `StopCondition` union
-(`kind` is the discriminator):
+stop criteria, a tuple of the discriminated `StopCondition` union (`kind` is the
+discriminator): two deterministic hard criteria and one LLM-judged criterion:
 
 | Constructor | Fields | Meaning |
 | --- | --- | --- |
 | `MetricThresholdStop` | `kind="metric_threshold"`, `metric_id: str` (non-empty, required), `threshold: float` (finite) | stop once the loop incumbent is at least `threshold` under the run metric's direction |
 | `NoImprovementStop` | `kind="no_improvement"`, `completed_bodies: int` (> 0, < `final_iteration`) | stop after that many consecutive completed bodies without a strict incumbent improvement |
-| `JudgeStop` | `kind="judge"` | reserved; always refused ("judge stop conditions are deferred to the next stage") |
+| `JudgeStop` | `kind="judge"`, `criterion: str` (1..2000 chars, required), `min_completed_bodies: int = 1` (> 0, < `final_iteration`), `on_failure: "fail" \| "continue" = "fail"` | ask the operator-routed LLM stop judge whether to stop, only when no deterministic condition fired |
 
 Direction is never declared: it comes from the run's `MetricSpec`, and
 `metric_id` must equal that spec's opaque id at execution time. Validation refuses
-more than one condition of the same kind and a `completed_bodies` that cannot be
-reached before the final iteration. Conditions are any-of in declared order (a
-disjunctive stop, not a graph join). An empty tuple is omitted from serialization
+more than one condition of the same kind, a `completed_bodies` that cannot be
+reached before the final iteration, and a judge `min_completed_bodies` at or above
+`final_iteration` (the final boundary is never judged). Deterministic conditions are
+any-of in declared order (a disjunctive stop, not a graph join). A `JudgeStop` is
+always consulted after them, whatever its declared position; its position only
+fixes its `condition_index`. The judge's model route is not part of the declaration:
+it is the operator's `WorkflowLLMConfig.judge.stop`, and every field of `JudgeStop`
+renders in canonical source (defaults included). An empty tuple is omitted from serialization
 and canonical source, so the declaration digest and source bytes of a loop without
 conditions are unchanged. Execution semantics, precedence and readback belong to
-the candidate-worker contract ("Deterministic stop conditions").
+the candidate-worker contract ("Deterministic stop conditions" and "Judge stop
+condition").
 
 ## Route declarations
 
@@ -362,8 +368,7 @@ from this explicit allowlist: `TaskReferences`, `ExternalBinding`,
 `WorkflowDocument`, `ReusableTaskReferences`, `ManagedCandidateBinding`,
 `CandidatePreparationOptions`, `ReusableWorkflowDefinition`,
 `ReusableWorkflowDocument`, plus the loop constructors `AuthoredLoop`, `LoopFeedback`,
-`MetricThresholdStop`, `NoImprovementStop` and the reserved, always-refused
-`JudgeStop`, plus the route constructors `Branch`, `RouteCase`, `BoolIs`, `EnumIn`,
+`MetricThresholdStop`, `NoImprovementStop` and `JudgeStop`, plus the route constructors `Branch`, `RouteCase`, `BoolIs`, `EnumIn`,
 `MetricAtLeast`, `IsMissing`, `AllOf`, `AnyOf`, `Not` and `SelectedSource`, plus the
 adaptor constructors `AdaptorInstance`, `InputPort`, `PortBinding`, `AdaptorSource`,
 `AdaptorRequest` and the thirteen strategy constructors listed under
@@ -415,6 +420,28 @@ For Python-authored projects source is authoritative and JSON is an explicit
 export; existing JSON callers keep their explicit authority. Launchers do not
 automatically select a representation. GUI saving, revision publication,
 conflict handling and immutable launches are separate work.
+
+### Targeted node edits (`source_edits.py`)
+
+`insert_node(source, node, position) -> str` and `remove_nodes(source, nodes) -> str`
+edit the exact UTF-8 bytes of an already-parseable dedicated module instead of
+re-rendering it. Spans come from `ast` (one-based lines, UTF-8 byte columns);
+nothing is evaluated. Insertion appends one canonically rendered `NodeInstance`
+after the last element of `definition.nodes` and one `NodePosition` after the last
+element of `positions` (an empty `()` becomes an indented block; a missing
+`positions` keyword is appended to the root call), reusing the neighbouring
+element's indentation and trailing-comma style. Constructor names the new
+element needs and the import lacks are appended to the single import statement.
+Removal deletes each named node element and its position element: the whole
+lines when the element stands alone on them (including its trailing comment),
+otherwise only the element and its separator. Imports are never removed (unused
+imports remain valid). Every other byte, including comments and formatting, is
+unchanged, so add-then-remove on the same source restores identical bytes when no
+import or `positions` keyword had to be created. Tuples that are not literal
+tuples, or node ids that are not plain string literals, raise `SourceEditError`.
+These helpers do not validate: the caller re-parses the result with
+`parse_workflow_source`, which remains the sole declaration validator, and they
+do not decide which dependants may lose an input (the authoring owner refuses).
 
 ## Offline conversion CLI
 

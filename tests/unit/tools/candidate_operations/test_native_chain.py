@@ -556,3 +556,59 @@ def test_new_terminal_writer_records_current_observer_policy(chain, monkeypatch)
     snapshot = read_operation(record.config, record.submission.request_id)
     assert snapshot.native_chain.evidence.availability == "available"
     assert snapshot.native_chain.evidence == snapshot.native_chain.terminal.evidence
+
+
+def test_locked_seed_is_read_back_without_disturbing_a_recorded_terminal(chain):
+    """Issue #983 S5: a terminal recorded before the observer read seeds (its
+    evidence has none) must still compare equal once the workspace lock holds
+    a seed. Fails if the seed is folded into the compared evidence (the old
+    terminal would then read as ``changed_after_terminal``) or if the snapshot
+    omits the lock's seed and source."""
+    from core.run_invariants import RunInvariants, run_seed_lock_fields, write_run_invariants
+
+    record, _ = chain
+    workspace, _ = _saved_observation_terminal(chain, 2)
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.native_chain.run_seed is None
+    write_run_invariants(
+        str(workspace),
+        RunInvariants(
+            resolved_data_scope=[0],
+            health_gate_enabled=False,
+            health_config_sha256=None,
+            runtime_estimator_identity="estimator-v1",
+            runtime_policy_identity="policy-v1",
+            **run_seed_lock_fields(4_503_599_627_370_497, "generated"),
+        ),
+    )
+    snapshot = read_operation(record.config, record.submission.request_id)
+    assert snapshot.native_chain.evidence == snapshot.native_chain.terminal.evidence
+    assert snapshot.native_chain.evidence.anomalies == ()
+    assert (snapshot.native_chain.run_seed, snapshot.native_chain.run_seed_source) == (
+        4_503_599_627_370_497,
+        "generated",
+    )
+
+
+def test_lock_seed_the_reviewed_declaration_does_not_explain_is_not_shown(chain):
+    """Issue #983 S5 review: a seedless declaration's lock rewritten (or forged)
+    as an operator seed must not read back as the run's seed. Fails if the
+    snapshot echoes the lock without checking it against the admission."""
+    from core.run_invariants import RunInvariants, run_seed_lock_fields, write_run_invariants
+
+    record, _ = chain
+    workspace, _ = _saved_observation_terminal(chain, 2)
+    write_run_invariants(
+        str(workspace),
+        RunInvariants(
+            resolved_data_scope=[0],
+            health_gate_enabled=False,
+            health_config_sha256=None,
+            runtime_estimator_identity="estimator-v1",
+            runtime_policy_identity="policy-v1",
+            **run_seed_lock_fields(7, "operator"),
+        ),
+    )
+    observed = read_operation(record.config, record.submission.request_id).native_chain
+    assert observed.run_seed is None and observed.run_seed_source is None
+    assert observed.run_seed_anomaly == "lock_contradicts_declaration"

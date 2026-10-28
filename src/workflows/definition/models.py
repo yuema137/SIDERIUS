@@ -124,13 +124,18 @@ class NoImprovementStop(DeclarationModel):
 
 
 class JudgeStop(DeclarationModel):
-    """Reserved slot for a future judge implementation of the stop contract."""
+    """Stop when the LLM stop judge decides so at a completed-body boundary.
+
+    Consulted only after every deterministic condition continued, never at the final
+    boundary and never before ``min_completed_bodies``. The route is operator-owned
+    (``WorkflowLLMConfig.judge.stop``), never declared here. ``on_failure="continue"``
+    records a failed call as an abstention; ``"fail"`` ends the loop ``failed``.
+    """
 
     kind: Literal["judge"] = "judge"
-
-    @model_validator(mode="after")
-    def refuse(self) -> Self:
-        raise ValueError("judge stop conditions are deferred to the next stage")
+    criterion: str = Field(min_length=1, max_length=2000)
+    min_completed_bodies: Annotated[int, Field(gt=0)] = 1
+    on_failure: Literal["fail", "continue"] = "fail"
 
 
 StopCondition = Annotated[

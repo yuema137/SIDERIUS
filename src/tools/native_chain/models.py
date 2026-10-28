@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, Field, model_validator
 
 from core.generated_artifact_name import validate_generated_artifact_name
+from core.seeding import RunSeed
 from tools.setup_review.composition_models import TaskCheckSettings
 from tools.setup_review.environment_models import EnvironmentPreviewReport
 from workflows.reviewed_launch_binding import BindingModel, Digest, InputFilePin
@@ -45,6 +46,7 @@ PROTECTED = frozenset(
         "force_fresh",
         "seed_paths",
         "source_paths",
+        "run_seed",
         "dry_run",
         "validation_fixed_candidate_plan",
         "fixed_candidate_plan",
@@ -66,6 +68,10 @@ class NativeChainRunBinding(BindingModel):
     workspace: CanonicalPath
     run_name: Text
     final_iteration: PositiveInt
+    #: The operator's explicit run seed (issue #983). Absent means the first
+    #: iteration's startup generates one and locks it; omitted from the
+    #: serialized declaration when absent, so seedless digests are unchanged.
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def meaningful_name(self):
@@ -105,6 +111,7 @@ class NativeChainDeclaration(BindingModel):
             "--start_iter",
             str(start_iteration),
             "--no_auto_resume",
+            *(() if self.run.run_seed is None else ("--run_seed", str(self.run.run_seed))),
             *self.chain_args,
         )
 
@@ -169,7 +176,11 @@ class NativeChainCapture(BindingModel):
         ):
             raise ValueError("capture_observation_mismatch")
         values = {row.name: row.declared_value for row in current.parameters}
-        if values.get("run_name") != declaration.run.run_name or values.get("start_iteration") != 1:
+        if (
+            values.get("run_name") != declaration.run.run_name
+            or values.get("start_iteration") != 1
+            or values.get("run_seed") != declaration.run.run_seed
+        ):
             raise ValueError("capture_run_mismatch")
         return self
 
