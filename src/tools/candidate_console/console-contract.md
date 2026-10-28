@@ -256,7 +256,17 @@ JSON ≤256 KiB). Refusals are `{"error": {code, message}}` and never echo input
 | --- | --- | --- |
 | `GET /api/settings` | `SettingsView`: `enabled`, `writable`, `settings_sha256` (file on disk), `pending`, `active` + `active_sha256` (startup snapshot), `restart_required = settings_sha256 != active_sha256`, `rows`, choice cards (allowlist IDs and library files whose bytes match their name), `data_roots` (ID/label), `tasks` (with the `data_root` origin), `workspace_root`, `WorkspaceReadiness`, `host` | — |
 | `PUT /api/settings` | `SettingsWrite{expected_sha256, settings}`; under one process lock: re-read the file no-follow and compare sha256 (absent matches only `null`), resolve console.json with the candidate settings, run `validate_resolved`, then `publish_bytes_atomically` (0600) after `canonical(parent)`; returns the new view | 403 `read_only` (no policy, `browser_writable=false`, or no context); 409 `stale`; 422 `settings_invalid` with the `SettingsInvalid` predicate, or a generic validation message |
+| `POST /api/settings/library` | `LibraryUpload{kind: "llm"\|"advice", label (1..63), content}`; content bytes are validated first (`parse_llm_config_bytes` → 422 `invalid_file` "Not an LLM profile: …"; `parse_advice_bytes(label="upload")` → 422 with the owner's message), then published with `publish_bytes_write_once` (0600) to `library/<kind>/<slug>-<sha12>.json` after `canonical(dir)`; `slug` lowercases the label to `[a-z0-9-]`, ≤50; returns `LibraryRef` | 403 `read_only`; 422 `invalid_file` or empty slug; 409 `exists` when that name holds different bytes (identical bytes return the existing ref); 409 `unavailable` without a library directory |
 | `GET /api/settings/folders?root_id=&subpath=&limit=` | `FolderListing{entries, incomplete}`: direct children of an allowlisted root, walked with `files.open_directory` then `O_DIRECTORY\|O_NOFOLLOW` per segment and `os.scandir(fd)`; directories as `directory`, symlinks as `link`, files omitted; sorted; at most `limit` (1..200) of at most 4096 examined; `incomplete` when more exist | 404 unknown root or unavailable/linked folder; 422 subpath syntax (`check_subpath`) or limit |
+
+Cards (`settings_library.py`): `ProfileCard{label, ref, routes, required_names,
+problem}` projects routes with `setup_review.routes.node_llm_routes` over every
+role and names with `candidate_worker.preflight.credential_requirements` (names
+only); `AdviceCard{label, ref, present_keys, unsupported_keys, problem}` reads with
+`safe_bytes` + `parse_advice_bytes` and marks `interpret`/`analysis`/`mindset`
+(no reusable carrier yet). Library cards list only regular files whose bytes hash
+to their name; an unreadable allowlisted file shows `problem` instead of failing
+the view.
 
 `SettingRow{name, task_id, origin, label, effective}` covers `advice` (global) and,
 per task, `llm_profile`, `data_root`, `preparation_root`, `candidate_root`,
