@@ -113,6 +113,7 @@ try {
   for (const contract of byContract.keys()) assert.ok(legendIds.includes(contract), `legend lists ${contract}`);
   assert.match(await legend.locator('li[data-contract="proposal.output"]').textContent(), /Model plan/);
   assert.equal(await legend.locator('.circuit-contract-legend-direction .circuit-port-direction').count(), 2, 'legend explains both arrows');
+  assert.match(await legend.locator('li[data-contract="proposal.output"]').getAttribute('title'), /model specification/, 'server description is the row tooltip');
   assert.ok(await legend.locator('li[data-contract="proposal.output"] .circuit-contract-swatch[data-contract-shape="square"]').count());
 
   // C1 hover preview: compatible inputs highlight, incompatible ones dim, nothing is selected.
@@ -156,6 +157,9 @@ try {
   // C1 drag: press an output, drag over a compatible input (highlighted), release to bind.
   await page.locator('#circuit-fit').click();
   const from = await output('alternate').boundingBox(), to = await input('build_left', 'output').boundingBox();
+  // A drop outside the window hits nothing (elementFromPoint is null): fail clearly instead of timing out.
+  const windowSize = await page.evaluate(() => ({width: innerWidth, height: innerHeight}));
+  for (const box of [from, to]) assert.ok(box.y + box.height / 2 < windowSize.height && box.x + box.width / 2 < windowSize.width, `drag endpoint on screen: ${JSON.stringify(box)} in ${JSON.stringify(windowSize)}`);
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2); await page.mouse.down();
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {steps: 6});
   assert.ok(await input('build_left', 'output').evaluate(element => element.classList.contains('compatible')), 'drag highlights the target');

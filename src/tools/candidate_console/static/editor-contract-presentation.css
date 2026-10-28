@@ -62,5 +62,3 @@
 .circuit-output > .circuit-port-direction { left: auto; right: 9px; }
 .circuit-port-direction { color: var(--contract-colour, var(--text)); font-weight: 700; }
 .circuit-contract-legend-direction .circuit-port-direction { margin: 0 .2rem; }
-.circuit-contract-legend-direction { margin: 4px 0; color: var(--muted); }
-.circuit-contract-legend-description { color: var(--muted); }

@@ -101,19 +101,19 @@
     for (const item of inventory) { ids.add(learn(item.socket_contract)); ids.add(learn(item.node_output_contract)); }
     const box = document.createElement('details'); box.className = 'circuit-contract-legend';
     text('summary', `Port types (${ids.size})`, box);
-    text('p', 'Colour, shape and name identify the data type (schema) a socket carries; the same type has the same name everywhere. A wire can join only an output and an input with the same contract; the server decides which connections are offered. Filled socket: output or required input. Hollow socket: optional input.', box, 'circuit-contract-legend-note');
-    const key = text('p', '', box, 'circuit-contract-legend-direction');
+    const note = text('p', 'Colour, shape and name identify the data type (schema) a socket carries; the same type has the same name everywhere. A wire can join only an output and an input with the same contract; the server decides which connections are offered. Filled socket: output or required input. Hollow socket: optional input. ', box, 'circuit-contract-legend-note');
+    // Direction key inline in the note, so the open legend stays as short as before.
+    const key = text('span', '', note, 'circuit-contract-legend-direction');
     text('span', '→', key, 'circuit-port-direction').setAttribute('aria-hidden', 'true');
-    text('span', ' before a name: the module receives this type.  ', key);
+    text('span', ' before a label: the module receives that type; ', key);
     text('span', '→', key, 'circuit-port-direction').setAttribute('aria-hidden', 'true');
-    text('span', ' after a name: the module sends it.', key);
+    text('span', ' after a label: the module sends it.', key);
     const list = text('ul', '', box, 'circuit-contract-legend-list');
     for (const id of [...ids].sort()) {
       const row = text('li', '', list); row.dataset.contract = id;
+      // The description is the row tooltip: rows stay one compact line each.
       const token = describe(id); row.title = token.description;
-      swatch(row, id); text('span', token.name, row, 'circuit-contract-legend-name');
-      if (token.description) text('span', token.description, row, 'circuit-contract-legend-description');
-      text('code', id, row);
+      swatch(row, id); text('span', token.name, row, 'circuit-contract-legend-name'); text('code', id, row);
     }
     parent.append(box); return box;
   }

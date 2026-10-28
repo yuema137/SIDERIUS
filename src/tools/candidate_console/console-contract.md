@@ -500,8 +500,8 @@ from the table (a newer server catalog) gets a stable hash-derived token, and an
 id without a server name shows id-derived words. A name names the schema only;
 each canvas socket carries a direction arrow (before an input's label, after an
 output's; `data-contract-direction` `receives`/`sends`, accessible name and
-tooltip prefixed "Receives <name>." / "Sends <name>."), and the legend explains
-both arrows and shows each type's description. Port
+tooltip prefixed "Receives <name>." / "Sends <name>."), and the legend note explains
+both arrows; each legend row's tooltip is the type's server description (rows stay one line). Port
 pills show the readable name (the id stays in the tooltip), wires take the colour of
 the result they carry, required inputs and outputs have filled sockets and optional
 inputs hollow ones, and a closed "Port types (N)" legend lists the contracts present
