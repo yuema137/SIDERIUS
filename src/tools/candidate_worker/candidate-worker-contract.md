@@ -271,6 +271,9 @@ startup controls. `SUPPORTED_LAUNCH_FIELDS`, `INACTIVE_LAUNCH_FIELDS` and
 direct workflow, not automatic CLI host-profile resolution. Inactive history,
 outer iteration/retry, omitted-stage/advice, raw `plan_overrides`, cooperative
 allocation, and chain-incumbent controls must equal their native defaults.
+The chain-incumbent controls include the two formal deltas
+(`skip_formal_min_delta`, `bypass_formal_time_budget_min_delta`): only those
+gates consume them, and the gates stay off on this ingress (issue #1012).
 Those defaults do not activate omitted phases or outer retries. Tuning advice,
 ordinary budgets, epoch limits, typed frozen portions, retention, parameter
 rules and runtime controls use the native owners. `data_dir` must match the
@@ -303,12 +306,10 @@ before its first call; resolved settings are saved to
 `candidate_run/training_settings.json`. `CandidateTrainingSettings` serializes
 an accepted nonfinite float as the JSON string `"Infinity"`, `"-Infinity"` or
 `"NaN"` (`ser_json_inf_nan="strings"`), so admission's own JSON round trip and
-the saved document preserve it exactly; finite values are byte-identical. The graph tuning input that
-`graph_evidence` rereads is written with the same string encoding. Ingress
-may write such a value as a string (for example `"-inf"`). Whether a value may be
-nonfinite stays with its owner: formal deltas are unconsumed while the
-chain-incumbent gates are disabled (`validate_formal_launch`), as they always are
-on this ingress (issue #1012).
+the saved document preserve it exactly; finite values are byte-identical. The
+graph tuning input that `graph_evidence` rereads is written with the same string
+encoding. Ingress may write such a value as a string (for example `"-inf"`).
+Whether a value may be nonfinite stays with its owner (issue #1012).
 
 Passed validation returns typed in-memory outputs to training. Missing model
 or loss sources refuse before construction/staging. The shared construction
