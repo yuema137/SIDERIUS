@@ -20,6 +20,14 @@ from tools.candidate_operations.models import OperationFailure
 
 from .files import canonical, config_bytes, open_directory, private_bytes
 from .models import ConsoleConfig
+from .settings_export import (
+    ExportFile,
+    ExportRefused,
+    ExportRequest,
+    ExportResult,
+    download,
+    export,
+)
 from .settings_file import (
     SettingsInvalid,
     advice_path,
@@ -336,6 +344,25 @@ class ConsoleSettings:
                 return store(workspace, upload)
             except LibraryRefused as error:
                 raise SettingsRefusal(error.status, error.code, error.message) from None
+
+    def export(self, request: ExportRequest) -> ExportResult:
+        """Write-once native-format export under the workspace; never overwrites."""
+        workspace = self.context.workspace_root
+        if not self.writable or workspace is None:
+            raise SettingsRefusal(403, "read_only", "global settings are read-only on this console")
+        try:
+            return export(self.config, workspace, request)
+        except ExportRefused as error:
+            raise SettingsRefusal(error.status, error.code, error.message) from None
+
+    def download(self, name: str, file: ExportFile) -> bytes:
+        workspace = self.context.workspace_root
+        if workspace is None:
+            raise SettingsRefusal(404, "not_found", "export is unavailable")
+        try:
+            return download(workspace, name, file)
+        except ExportRefused as error:
+            raise SettingsRefusal(error.status, error.code, error.message) from None
 
     def folders(self, root_id: str, subpath: str, limit: int) -> FolderListing:
         """Direct child directory names under an allowlisted root; links shown, never followed."""
