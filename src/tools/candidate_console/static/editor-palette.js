@@ -71,8 +71,10 @@
       }
     }
   }
+  // The catalog is fetched only while the Workflow view is shown: other pages never request it.
+  const visible = () => window.consoleNavigation?.view === 'workflow';
   async function load() {
-    if (catalog || loading || !window.consoleSession?.connected) return;
+    if (catalog || loading || !window.consoleSession?.connected || !visible()) return;
     const revision = window.consoleSession.revision; loading = revision; renderList();
     try { const value = await window.consoleSession.request('editor/node-catalog'); if (revision === window.consoleSession.revision) catalog = value.entries; }
     catch (error) { if (!error.stale) host.querySelector('.palette-note').textContent = 'Capability catalog unavailable: ' + error.message; }
@@ -101,6 +103,7 @@
       event.preventDefault(); add(catalog[Number(index)], {x: event.clientX, y: event.clientY});
     });
     window.consoleSession?.subscribe(() => { if (window.consoleSession.connected) void load(); });
+    window.addEventListener('console-view', event => { if (event.detail.view === 'workflow') void load(); });
     renderList(); void load();
   }
   function setState(next) {
