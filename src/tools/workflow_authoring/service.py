@@ -27,18 +27,23 @@ from workflows.definition.source import (
 from .loop import loop_template, with_loop
 from .models import (
     MAX_SOURCE_BYTES,
+    AddNodeProposal,
     DocumentProposal,
     DraftProposal,
     DraftRequest,
     DraftView,
     LoopProposal,
+    NodeDraftRequest,
+    NodeDraftView,
     Project,
+    RemoveNodeProposal,
     ReviewRequest,
     ReviewView,
     SaveRequest,
     SaveView,
     SourceView,
 )
+from .node_edits import NodeEditRefusal, add_node, inspect_node, remove_node
 from .options import binding_projection
 from .task_models import TaskReferenceReview, TaskReferenceTarget, TaskReferenceUpdateProposal
 from .training import training_inspector
@@ -225,6 +230,12 @@ class WorkflowAuthoring:
         self._base(self._read_bytes()[0], request.expected_sha256)
         return DraftView(draft=request.draft, inspection=inspect_draft(request.draft))
 
+    def inspect_node_draft(self, request: NodeDraftRequest) -> NodeDraftView:
+        """Inspect a pending node (possibly with unbound inputs) without rendering a save."""
+        request = NodeDraftRequest.model_validate_json(request.model_dump_json())
+        self._base(self._read_bytes()[0], request.expected_sha256)
+        return inspect_node(request.proposal)
+
     def _base(self, payload: bytes, expected: str) -> SourceView:
         current = self._view(payload)
         if current.sha256 != expected:
@@ -251,6 +262,7 @@ class WorkflowAuthoring:
                 )
             proposal = DocumentProposal(kind="document", document=inspection.document)
         task_review = None
+        node_edit = None
         if isinstance(proposal, TaskReferenceUpdateProposal):
             from .task_references import review_task_references
 
@@ -276,6 +288,16 @@ class WorkflowAuthoring:
             source = render_workflow_source(updated)
         elif isinstance(proposal, LoopProposal):
             source = render_workflow_source(with_loop(proposal.source, proposal.loop))
+        elif isinstance(proposal, (AddNodeProposal, RemoveNodeProposal)):
+            self._base(current_payload, request.expected_sha256)
+            try:
+                source, node_edit = (
+                    add_node(proposal)
+                    if isinstance(proposal, AddNodeProposal)
+                    else remove_node(proposal)
+                )
+            except NodeEditRefusal as error:
+                raise AuthoringError(error.code, str(error)) from error
         else:
             source = (
                 render_workflow_source(proposal.document)
@@ -283,6 +305,8 @@ class WorkflowAuthoring:
                 else proposal.source
             )
         review = reviewed_source(base, source, task_review)
+        if node_edit is not None:
+            review = review.model_copy(update={"node_edit": node_edit})
         if not isinstance(proposal, TaskReferenceUpdateProposal) and (
             request.task_reference_selection is not None
             or any(

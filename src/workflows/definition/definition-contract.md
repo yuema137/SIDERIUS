@@ -421,6 +421,28 @@ export; existing JSON callers keep their explicit authority. Launchers do not
 automatically select a representation. GUI saving, revision publication,
 conflict handling and immutable launches are separate work.
 
+### Targeted node edits (`source_edits.py`)
+
+`insert_node(source, node, position) -> str` and `remove_nodes(source, nodes) -> str`
+edit the exact UTF-8 bytes of an already-parseable dedicated module instead of
+re-rendering it. Spans come from `ast` (one-based lines, UTF-8 byte columns);
+nothing is evaluated. Insertion appends one canonically rendered `NodeInstance`
+after the last element of `definition.nodes` and one `NodePosition` after the last
+element of `positions` (an empty `()` becomes an indented block; a missing
+`positions` keyword is appended to the root call), reusing the neighbouring
+element's indentation and trailing-comma style. Constructor names the new
+element needs and the import lacks are appended to the single import statement.
+Removal deletes each named node element and its position element: the whole
+lines when the element stands alone on them (including its trailing comment),
+otherwise only the element and its separator. Imports are never removed (unused
+imports remain valid). Every other byte, including comments and formatting, is
+unchanged, so add-then-remove on the same source restores identical bytes when no
+import or `positions` keyword had to be created. Tuples that are not literal
+tuples, or node ids that are not plain string literals, raise `SourceEditError`.
+These helpers do not validate: the caller re-parses the result with
+`parse_workflow_source`, which remains the sole declaration validator, and they
+do not decide which dependants may lose an input (the authoring owner refuses).
+
 ## Offline conversion CLI
 
 `python -m workflows.definition to-json --input PATH` reads restricted Python

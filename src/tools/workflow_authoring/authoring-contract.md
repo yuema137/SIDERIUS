@@ -137,6 +137,52 @@ document, not necessarily the saved one: only `expected_sha256` binds the saved
 source. The console's unified draft relies on this to review layout and inspector
 edits together with binding patches in one `DraftProposal`.
 
+## Node add/remove proposals and catalog projection
+
+`GET /api/editor/node-catalog` returns `NodeCatalog` (`options.node_catalog`), a
+read-only projection of the native catalog: one `CatalogEntry` per capability per
+protocol whose output is that capability's input (with owner and ordered
+`CatalogArgument` name/contract/required), plus one external-request route
+(`protocol=null`) per capability. The browser palette lists only these entries.
+
+`AddNodeProposal(kind="add_node", source, node, capability, protocol, binding,
+arguments, x, y)` and `RemoveNodeProposal(kind="remove_node", source, nodes)` are
+`ReviewRequest` proposals applied to the exact proposal source (like
+`LoopProposal`, so a previously reviewed unsaved source can carry them), but as
+targeted byte edits (`workflows.definition.source_edits`), not canonical
+re-rendering: comments and every unaffected byte survive. The request schema
+refuses (422 `validation`) a capability outside `CAPABILITIES`, a protocol that does
+not produce the capability's input, a binding on a protocol route, arguments on an
+external route, and unknown or duplicate sockets. Review then refuses with 409:
+`node_edit` (duplicate node id, unknown node, non-literal source shape),
+`draft_incomplete` (one diagnostic line per unbound required input),
+`draft_invalid` (a bound source the catalog projection does not offer for that
+socket), or `node_dependants`. The edited source then passes the ordinary
+`reviewed_source` parse/validation, task-reference and Save boundary; a successful
+review adds `node_edit: NodeEditSummary` (`added`, `removed`, `disconnected` input
+connections of removed nodes, and a `message`). The diff remains the authority.
+
+Removal deletes each node, its own request bindings and its layout position.
+It refuses (`node_dependants`, nothing written) when a remaining node reads a
+removed result through any argument, when the research-loop feedback names a removed
+node, or when no capability would remain; it never rewires or disconnects other
+nodes implicitly. Removing a dependent chain together is allowed. The edited source
+is then re-parsed and validated before it is returned: a removal that leaves another
+reference dangling (a route source or target, a `SelectedSource` merge candidate, an
+adaptor input) is refused as `node_dependants` with the validator's diagnostics
+("Cannot remove <ids>: ..."), never returned as source. Those consumers are not yet
+named individually like ResultSource readers are.
+
+A node with unbound required inputs is a draft-only state. `POST
+/api/editor/{project_id}/node-draft` accepts `NodeDraftRequest(expected_sha256,
+proposal)` and returns `NodeDraftView(proposal, status, diagnostics, ports)`:
+`incomplete`/`invalid`/`complete` with the same messages Review would give, and
+`ports` in the ordinary `PortInventoryEntry` shape (choices are the base
+document's contract-matching externals and node results). It checks the saved
+digest, renders nothing for publication and writes no recovery copy; a stale base
+is a conflict. Only a complete add can be reviewed, so a saved document is always
+valid. Constructor imports added by an insertion are kept by a later removal.
+
 ## Native training inspector
 
 Source/read and review projections include optional typed `training` presentation
