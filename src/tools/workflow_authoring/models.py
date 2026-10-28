@@ -3,10 +3,11 @@
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from workflows.definition import ArgumentBinding, AuthoredLoop, AuthoredWorkflowDocument
 from workflows.definition.catalog import CAPABILITIES, PROTOCOLS
+from workflows.definition.contract_names import ContractKind, contract_name
 from workflows.definition.draft import DraftInspection, WorkflowDraft
 from workflows.definition.models import Identifier, Source
 from workflows.definition.source import SourceDiagnostic
@@ -198,10 +199,26 @@ class SaveRequest(SourceProposal):
 
 
 class NativeContract(Model):
-    """One inert contract name and its catalog-owned native type label."""
+    """One inert contract id, its catalog-owned native type label and its
+    presentation (name, description, kind) from the single ``contract_names`` owner."""
 
     id: str
     native_type: str
+
+    @computed_field
+    @property
+    def name(self) -> str:
+        return contract_name(self.id).name
+
+    @computed_field
+    @property
+    def description(self) -> str:
+        return contract_name(self.id).description
+
+    @computed_field
+    @property
+    def kind(self) -> ContractKind:
+        return contract_name(self.id).kind
 
 
 class BindingChoice(Model):

@@ -181,14 +181,14 @@
       button.title = detail;
       button.setAttribute('aria-label', detail);
       element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
-      const type = element('span', contracts.describe(contract.id).name, button, 'circuit-port-contract');
+      const type = element('span', contracts.describe(contract).name, button, 'circuit-port-contract');
       type.setAttribute('aria-hidden', 'true');
       element('span', metadata.bound ? (metadata.required ? 'required' : 'optional') : `${metadata.required ? 'Required' : 'Optional'} · unbound`, button,
         `circuit-port-requirement${metadata.bound ? '' : ' circuit-port-unbound-label'}`);
       button.classList.toggle('is-unbound', !metadata.bound);
       button.dataset.contract = contract.id;
       button.dataset.required = String(metadata.required);
-      contracts.decorate(button, contract.id, metadata.required);
+      contracts.decorate(button, contract, metadata.required);
     } else {
       const contract = projection.inventory.find(value => value.node === node.id)?.node_output_contract;
       const detail = `${node.id}.result output${contract ? `; contract ${contract.id}: ${contract.native_type}` : ''}`;
@@ -196,14 +196,15 @@
       button.setAttribute('aria-label', detail);
       element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
       if (contract) {
-        const type = element('span', contracts.describe(contract.id).name, button, 'circuit-port-contract');
+        const type = element('span', contracts.describe(contract).name, button, 'circuit-port-contract');
         type.setAttribute('aria-hidden', 'true');
         button.dataset.contract = contract.id;
-        contracts.decorate(button, contract.id);
+        contracts.decorate(button, contract);
       }
     }
     if (output) { button.dataset.output = ''; button.setAttribute('aria-pressed', 'false'); }
     else { button.dataset.input = ''; button.dataset.argument = argument || ''; }
+    if (button.dataset.contract) contracts.direction(button, button.dataset.contract, output);
     element('span', '', button, 'circuit-socket');
     button.addEventListener('click', () => {
       if (projection !== snapshot || !projection.enabled) return;

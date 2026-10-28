@@ -68,7 +68,31 @@ try {
   assert.ok(byContract.size >= 6, `families graph shows several contracts: ${[...byContract.keys()]}`);
   const tokens = [...byContract.values()].map(value => JSON.parse(value)).map(([shape, colour]) => `${shape}|${colour}`);
   assert.equal(new Set(tokens).size, tokens.length, 'distinct contracts render distinct colour+shape pairs');
-  assert.equal(await input('build_left', 'output').locator('.circuit-port-contract').textContent(), 'Proposal result');
+  assert.equal(await input('build_left', 'output').locator('.circuit-port-contract').textContent(), 'Model plan');
+  // Names come from the server and name the schema only: the producing output and the
+  // consuming input show the same name; direction is an arrow on the socket.
+  assert.equal(await output('hypothesis').locator('.circuit-port-contract').textContent(), 'Model plan');
+  for (const port of ports) assert.doesNotMatch(port.name, /\b(input|output|request|result|in|out)\b/i, `${port.id} name has no direction word`);
+  const arrows = await page.evaluate(() => [...document.querySelectorAll('.circuit-port[data-contract]')].map(port => ({
+    output: port.hasAttribute('data-output'), direction: port.dataset.contractDirection, label: port.getAttribute('aria-label'),
+    first: port.firstElementChild?.classList.contains('circuit-port-direction'),
+    last: [...port.querySelectorAll(':scope > .circuit-port-direction')].length === 1})));
+  for (const arrow of arrows) {
+    assert.equal(arrow.direction, arrow.output ? 'sends' : 'receives');
+    assert.match(arrow.label, arrow.output ? /^Sends / : /^Receives /);
+    assert.ok(arrow.last, 'one direction arrow per socket');
+    if (!arrow.output) assert.ok(arrow.first, 'incoming arrow precedes the input label');
+  }
+  assert.match(await output('hypothesis').getAttribute('aria-label'), /^Sends Model plan\./);
+  // Arrows sit in the port padding: they add no height, so measured layout keeps cards apart.
+  const arrowFlow = await page.evaluate(() => [...document.querySelectorAll('.circuit-port > .circuit-port-direction')]
+    .every(mark => getComputedStyle(mark).position === 'absolute'));
+  assert.ok(arrowFlow, 'direction arrows take no layout space');
+  const cardRects = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => ({
+    node: card.dataset.node, left: card.offsetLeft, top: card.offsetTop, right: card.offsetLeft + card.offsetWidth, bottom: card.offsetTop + card.offsetHeight})));
+  for (const [i, a] of cardRects.entries()) for (const b of cardRects.slice(i + 1)) {
+    assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.node} and ${b.node} do not overlap`);
+  }
   // Required inputs/outputs are filled; optional inputs are hollow.
   for (const port of ports.filter(value => value.required !== undefined)) {
     assert.equal(port.fill, port.required === 'true' ? 'filled' : 'hollow', port.id);
@@ -87,7 +111,9 @@ try {
   await legend.locator('summary').click();
   const legendIds = await legend.locator('li').evaluateAll(items => items.map(item => item.dataset.contract));
   for (const contract of byContract.keys()) assert.ok(legendIds.includes(contract), `legend lists ${contract}`);
-  assert.match(await legend.locator('li[data-contract="proposal.output"]').textContent(), /Proposal result/);
+  assert.match(await legend.locator('li[data-contract="proposal.output"]').textContent(), /Model plan/);
+  assert.equal(await legend.locator('.circuit-contract-legend-direction .circuit-port-direction').count(), 2, 'legend explains both arrows');
+  assert.match(await legend.locator('li[data-contract="proposal.output"]').getAttribute('title'), /model specification/, 'server description is the row tooltip');
   assert.ok(await legend.locator('li[data-contract="proposal.output"] .circuit-contract-swatch[data-contract-shape="square"]').count());
 
   // C1 hover preview: compatible inputs highlight, incompatible ones dim, nothing is selected.
@@ -112,7 +138,7 @@ try {
 
   // Refused connection names both contracts.
   await output('check_left').click(); await input('build_left', 'output').click();
-  assert.match(await message(), /refused: build_left\.output expects proposal\.output \(Proposal result\), but check_left\.result provides validation\.output \(Validation result\)/);
+  assert.match(await message(), /refused: build_left\.output expects proposal\.output \(Model plan\), but check_left\.result provides validation\.output \(Code verdict\)/);
   assert.equal(await dirty(), false); await page.keyboard.press('Escape');
 
   // U5: the protocol mapping chip expands to source -> argument field mappings.
@@ -130,7 +156,13 @@ try {
 
   // C1 drag: press an output, drag over a compatible input (highlighted), release to bind.
   await page.locator('#circuit-fit').click();
+  // As a user would: bring the canvas (and the drop target) into the window before dragging.
+  await page.locator('.circuit-viewport').scrollIntoViewIfNeeded();
+  await input('build_left', 'output').scrollIntoViewIfNeeded();
   const from = await output('alternate').boundingBox(), to = await input('build_left', 'output').boundingBox();
+  // A drop outside the window hits nothing (elementFromPoint is null): fail clearly instead of timing out.
+  const windowSize = await page.evaluate(() => ({width: innerWidth, height: innerHeight}));
+  for (const box of [from, to]) assert.ok(box.y + box.height / 2 < windowSize.height && box.x + box.width / 2 < windowSize.width, `drag endpoint on screen: ${JSON.stringify(box)} in ${JSON.stringify(windowSize)}`);
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2); await page.mouse.down();
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {steps: 6});
   assert.ok(await input('build_left', 'output').evaluate(element => element.classList.contains('compatible')), 'drag highlights the target');
@@ -145,7 +177,7 @@ try {
     await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, `port-legibility-${theme}.png`), fullPage: true});
   }
   assert.deepEqual(faults, []);
-  console.log('PASS distinct contract tokens, filled/hollow sockets, wire colour, legend, hover preview, named refusal, mapping chip and drag-to-connect; no API/GPU');
+  console.log('PASS server-owned schema names, direction arrows, distinct contract tokens, filled/hollow sockets, wire colour, legend, hover preview, named refusal, mapping chip and drag-to-connect; no API/GPU');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');

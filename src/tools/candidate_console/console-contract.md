@@ -487,12 +487,21 @@ no chip.
 
 Port legibility is presentation keyed on the server-sent contract id
 (`editor-contract-presentation.js`, styles in `editor-contract-presentation.css`).
-A table gives each catalog contract a readable name, a colour token
+Names, descriptions and kinds are not owned by the browser: every projected
+contract object carries `name`, `description` and `kind` from the single server
+owner ([contract schema names](../../workflows/definition/contract-names.md)),
+and the module learns them from those objects. Its table gives each catalog
+contract only a colour token
 (`--contract-<colour>`, defined for both themes) and a socket shape (`circle` for
 `<capability>.input`, `square` for `<capability>.output`, `diamond` for
 `optional.*`, `capsule` for other contracts); a unit census binds the table to
-`CONTRACTS` and requires distinct (colour, shape) pairs and names. An id missing
-from the table (a newer server catalog) gets a stable hash-derived token. Port
+`CONTRACTS` and requires distinct (colour, shape) pairs. An id missing
+from the table (a newer server catalog) gets a stable hash-derived token, and an
+id without a server name shows id-derived words. A name names the schema only;
+each canvas socket carries a direction arrow (before an input's label, after an
+output's; `data-contract-direction` `receives`/`sends`, accessible name and
+tooltip prefixed "Receives <name>." / "Sends <name>."), and the legend note explains
+both arrows; each legend row's tooltip is the type's server description (rows stay one line). Port
 pills show the readable name (the id stays in the tooltip), wires take the colour of
 the result they carry, required inputs and outputs have filled sockets and optional
 inputs hollow ones, and a closed "Port types (N)" legend lists the contracts present
