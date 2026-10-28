@@ -88,7 +88,7 @@ try {
   await page.locator('#editor-advanced').evaluate(el => {el.open = true;});
   const source = await page.locator('#editor-source').inputValue();
   await page.locator('#editor-source').fill(source + '\n# pending browser draft\n');
-  assert.match(await page.locator('#capture-source').textContent(), /Unsaved draft edits/);
+  assert.match(await page.locator('#capture-source').textContent(), /Unsaved edits are not in this run/);
   assert.equal(await page.locator('#capture-launch').isEnabled(), true);
   await page.locator('nav a[href="#monitor"]').click(); await page.locator('nav a[href="#workflow"]').click();
   assert.match(await page.locator('#editor-source').inputValue(), /pending browser draft/);
@@ -162,7 +162,7 @@ try {
   await page.locator('#capture-earlier').evaluate(el => {el.open = true;});
   await page.locator('#capture-task').selectOption('synthetic');
   await page.locator('#capture-refresh').click(); await open(metadata.captures[1]);
-  assert.match(await page.locator('#capture-source').textContent(), /differs/);
+  assert.match(await page.locator('#capture-source').textContent(), /You have since saved .*; it is not in this run/);
   await page.screenshot({path: join(evidence, 'capture-review.png'), fullPage: true});
   await writeFile(join(root, 'reject'), 'reject'); await page.locator('#capture-launch').click();
   await page.locator('#capture-operation-status').filter({hasText: 'Finished'}).waitFor({timeout: 90000});
