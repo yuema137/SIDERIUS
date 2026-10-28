@@ -28,6 +28,11 @@ and tuning; `mindset` supplies the proposer's preamble.
 Sparse advice is valid: omitted keys mean no advice for those agents. Present
 keys must carry readable text. The loader reads, hashes and parses the same
 bytes; a supplied digest must match the observed digest.
+Callers that already hold the bytes, such as the candidate console reading an
+allowlisted or uploaded file, use `workflows.advice.parse_advice_bytes(data,
+label=...)`. It opens no file. `load_advice_artifact` delegates to it after its
+single read and digest check, so both give the same verdict and the same message
+text, with `label` in place of the path.
 
 ## The key set is closed
 
