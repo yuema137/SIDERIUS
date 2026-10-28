@@ -454,6 +454,32 @@ The family profile generates N independent instances, not N outputs from one
 proposer call; no scientific diversity, ranking, aggregation, parallel execution,
 training, conditional routing, buffers, human gates or graph resume is implied.
 
+Branch isolation within one body (audited for B3 parallel scheduling): no
+family or branch reads state an independent sibling wrote. All family inputs
+are materialized from the captured snapshots before the first node runs. Each
+implementation writes its plugin, `description.md`, tests and losses only below
+its own `graph_instances/<implementation-id>/.../impl_001/`; the worker never
+registers into the workspace `generated_library` (capability index, models,
+losses) and never writes `<workspace>/plugins/`, which are the shared locations
+the proposer, implementor and model-description readers consult. The validator
+loads plugins inside its captured-module rollback boundary and does not populate
+the process model/loss registries. The shared `token_usage.jsonl` is append-only;
+the only in-run read is `LLMBridge`'s first-row `run_id` identity check. Every
+aggregating reader (token read projection, iteration rollup, campaign spend,
+baseline report) groups by run, iteration, label or provider, never by row
+position; `validate_token_usage_jsonl` checks order only against iteration-flush
+markers and warns, without failing, on non-monotonic timestamps. Rows carry no
+unit identity yet. Only a tuning node mutates process registries
+(`stage_native_plugins`); the only profile admitting tuning (interpretation
+candidate) has one branch, so tuning is the body's last node, and the next loop
+body is sequential by design. Witness:
+`tests/unit/tools/candidate_worker/test_branch_isolation.py` runs real native
+bodies with a scripted provider in three declaration orders and requires
+byte-identical family-1 proposal input, prompts and debug dump. A future profile
+that promotes into the workspace library, writes `<workspace>/plugins/`, or
+admits several tuning nodes in one body must snapshot those reads per unit or
+run each unit in its own process before independent units may run concurrently.
+
 Reusable version-2 source and managed preparation also support this profile through
 [the reusable family contract](../candidate_prepare/candidate-prepare-contract.md#reusable-independent-proposal-families).
 Code callers may still supply version-1 native inputs directly. Both routes use
