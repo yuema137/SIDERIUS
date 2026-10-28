@@ -30,6 +30,7 @@ from core.capability_registry import CapabilityRegistry
 from core.generated_library import bind_generated_library_to_workspace
 from core.sandbox_executor import TidmadSandbox, get_loss_dir, get_plugin_dir
 from core.training_execution_bindings import TrainingExecutionBindings
+from core.training_seeds import SeedContext
 from execute_tools.health_checks.config import HealthChecksConfig
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
@@ -41,6 +42,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
 from nodes.ml_hyperparameter_tune_agent.loss_inventory import resolve_run_custom_loss_inventory
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
+from tests.helpers.run_seed import TEST_RUN_SEED
 from workflows.model_exploration import (
     _commit_candidate_capabilities,
     _promote_loss_to_global,
@@ -215,6 +217,7 @@ def _plan(composition, proposal, verdict, storage, sandbox):
         planner_strategy="native-timing-v1",
         is_trial=True,
         health_gate_enabled=False,
+        run_seed=TEST_RUN_SEED,
     )
     inventory = resolve_run_custom_loss_inventory(
         CapabilityRegistry(), composition.forward_contract.model_io, ref
@@ -334,7 +337,7 @@ def test_fresh_loss_reaches_native_cpu_training(tmp_path, monkeypatch):
             params["model_config"],
             params["train_config"],
             params["loss_config"],
-            train_base_seed=17,
+            seed_context=SeedContext(run_seed=17),
             execution_bindings=TrainingExecutionBindings(
                 task_scopes=params["task_scopes"],
                 expected_custom_loss_snapshot=params["expected_custom_loss_snapshot"],

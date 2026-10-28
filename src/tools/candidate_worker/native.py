@@ -11,6 +11,7 @@ from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 from . import phases
+from .budget import WorkerBudget
 from .inputs import NativeInputs, materialize
 from .invocation import fixed_invocations
 from .loop_models import LoopContinuation
@@ -31,6 +32,8 @@ def run_candidate_phases(
     inputs: NativeInputs,
     config: WorkflowLLMConfig,
     implementor_blocks: ImplementorTaskBlocks | None,
+    *,
+    budget: WorkerBudget | None = None,
 ) -> CandidatePhaseResult:
     proposal_context, implementation_context, validation_context = fixed_invocations(
         request, initial, inputs
@@ -42,7 +45,7 @@ def run_candidate_phases(
         implementation_context, request, initial, inputs, config, proposal, implementor_blocks
     )
     validated, validation_path = phases.run_validation(
-        validation_context, request, initial, inputs, config, proposal, implemented
+        validation_context, request, initial, inputs, config, proposal, implemented, budget=budget
     )
     seed, attempt = inputs.proposal, inputs.attempt
     assert seed.storage.local is not None and seed.task_composition_ref is not None
@@ -72,9 +75,13 @@ def sequence(
     inputs: NativeInputs,
     config: WorkflowLLMConfig,
     implementor_blocks: ImplementorTaskBlocks | None,
+    *,
+    budget: WorkerBudget | None = None,
 ) -> CandidateRunReceipt:
     """Preserve the legacy three-stage receipt surface."""
-    return run_candidate_phases(request, initial, inputs, config, implementor_blocks).receipt
+    return run_candidate_phases(
+        request, initial, inputs, config, implementor_blocks, budget=budget
+    ).receipt
 
 
 def execute_native(
@@ -82,7 +89,9 @@ def execute_native(
     initial: CandidateRunReceipt,
     *,
     continuation: LoopContinuation | None = None,
+    budget: WorkerBudget | None = None,
 ) -> CandidateRunReceipt:
+    """``budget`` is the worker's declared wall budget; ``None`` bounds no child."""
     config = WorkflowLLMConfig.default()
     for index, observation in enumerate(request.files):
         if observation.reference == "llm_config":
@@ -104,7 +113,7 @@ def execute_native(
 
             with iteration_owner(initial.workspace) as lease:
                 result = execute_loop(
-                    request, initial, composition, config, continuation=continuation
+                    request, initial, composition, config, continuation=continuation, budget=budget
                 )
                 if result.status == "paused" and (lease is None or lease.unresolved):
                     raise ValueError("native cleanup cannot authorize paused checkpoint")
@@ -112,7 +121,7 @@ def execute_native(
         if request.preview.execution_profile is not None:
             from .graph import execute_fanout
 
-            return execute_fanout(request, initial, composition, config)
+            return execute_fanout(request, initial, composition, config, budget=budget)
         if any(node.capability == "tuning" for node in request.preview.document.definition.nodes):
             from .training import execute_training
             from .training_admission import admit_training
@@ -120,8 +129,10 @@ def execute_native(
             admitted = admit_training(request, initial, composition, config)
             inputs = materialize(request, Path(initial.workspace), composition, config, admitted)
             phases = run_candidate_phases(
-                request, initial, inputs, config, composition.implementor_blocks
+                request, initial, inputs, config, composition.implementor_blocks, budget=budget
             )
             return execute_training(phases, admitted)
         inputs = materialize(request, Path(initial.workspace), composition, config)
-        return sequence(request, initial, inputs, config, composition.implementor_blocks)
+        return sequence(
+            request, initial, inputs, config, composition.implementor_blocks, budget=budget
+        )

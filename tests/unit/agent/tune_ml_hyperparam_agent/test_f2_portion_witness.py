@@ -27,6 +27,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.scoring_stubs import stub_scoring
 from tests.unit.agent.tune_ml_hyperparam_agent.test_tuning_agent import (
     FAKE_PLAN_WITH_TRIAL,
@@ -79,6 +80,7 @@ def _run_real_route(tmp_path, plan_overrides):
         stub_scoring(mock_sandbox, [1.0] * 20, 1.5)
 
         inp = HyperparamTuningInput(
+            run_seed=TEST_RUN_SEED,
             planner_strategy="native-timing-v1",
             model_type="punet",
             file_index=6,

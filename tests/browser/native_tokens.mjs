@@ -37,6 +37,7 @@ try {
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
   const snapshots = [];
   async function reconnect(id) {
+    if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click();
     await page.locator('#token').fill(metadata.token);
     const received = page.waitForResponse(response => new URL(response.url()).pathname === `/api/operations/${id}`);
     await page.locator('#access-form button').click();

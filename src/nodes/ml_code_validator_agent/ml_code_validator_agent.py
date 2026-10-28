@@ -47,8 +47,6 @@ import argparse
 import importlib.util
 import json
 import os
-import subprocess
-import sys
 
 import torch
 
@@ -64,6 +62,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import LLMCodeReview, ValidatorInput, ValidatorOutput
 from agent.skills.forbidden_pattern_skill import check_file as _check_forbidden_patterns
 from agent.skills.forbidden_pattern_skill import check_source as _check_forbidden_source
+from agent.skills.generated_pytest import PytestLimit, run_generated_pytest
 from agent.skills.model_io_probe_skill import (
     ProbeConstructionError,
     build_model_input,
@@ -72,7 +71,6 @@ from agent.skills.model_io_probe_skill import (
     probe_config_kwargs,
 )
 from core.generated_artifact_name import validate_generated_artifact_name
-from core.local_code.child import prepare_child
 from core.local_code.failure import raise_if_code_package_failure
 from core.subprocess_env import subprocess_env
 from ml_models.plugin_loader import PLUGIN_LEGAL_OUTPUT_TYPES
@@ -342,6 +340,8 @@ def _check_plugin(model_file_path: str) -> tuple[bool, str | None]:
 def _run_tests(
     test_file_path: str,
     model_probe_context: ModelProbeContext | None = None,
+    *,
+    test_limit: PytestLimit | None = None,
 ) -> tuple[bool, str]:
     """
     Run pytest on ``test_file_path``.
@@ -360,6 +360,10 @@ def _run_tests(
     success. Re-validating a previously-registered plugin here is both
     wasted work and, as v16 showed, actively harmful.
 
+    Pytest runs as a group-supervised child (issue #984, ``generated_pytest``).
+    ``test_limit`` is the caller's declared limit; ``None`` applies no
+    deadline. Exceeding it fails the check (``PytestLimit.exceeded_message``).
+
     Returns (passed, full_stdout_stderr).
     """
     if not test_file_path or not os.path.isfile(test_file_path):
@@ -370,19 +374,8 @@ def _run_tests(
     if model_probe_context is not None:
         from agent.skills.task_model_validation import run_task_model_tests
 
-        return run_task_model_tests(test_file_path)
-    invocation = prepare_child(
-        [sys.executable, "-m", "pytest", test_file_path, "-v", "--tb=short"],
-        subprocess_env(),
-    )
-    try:
-        result = subprocess.run(invocation.argv, capture_output=True, text=True, env=invocation.env)
-    except Exception as exc:
-        invocation.check(getattr(exc, "returncode", None))
-        raise
-    invocation.check(result.returncode)
-    output = result.stdout + result.stderr
-    return result.returncode == 0, output
+        return run_task_model_tests(test_file_path, limit=test_limit)
+    return run_generated_pytest(test_file_path, subprocess_env(), limit=test_limit)
 
 
 def _check_description(description_file_path: str) -> tuple[bool, str | None]:
@@ -773,7 +766,12 @@ class MLCodeValidatorAgent:
         )
         self.bridge = self._bridge_factory(**bridge_kwargs)
 
-    def run(self, inp: ValidatorInput) -> ValidatorOutput:
+    def run(self, inp: ValidatorInput, *, test_limit: PytestLimit | None = None) -> ValidatorOutput:
+        """Validate one candidate.
+
+        ``test_limit`` is the caller's declared pytest limit (issue
+        #984); ``None`` keeps pytest group-supervised without a deadline.
+        """
         if inp.storage.local is not None:
             validate_generated_artifact_name(
                 inp.storage.local.run_name, field="storage.local.run_name"
@@ -787,7 +785,9 @@ class MLCodeValidatorAgent:
             if inp.model_probe_context is not None
             else {}
         )
-        tests_ok, test_output = _run_tests(inp.test_file_path, **probe_options)
+        tests_ok, test_output = _run_tests(
+            inp.test_file_path, **probe_options, test_limit=test_limit
+        )
 
         # 3. Description
         desc_ok, desc_err = _check_description(inp.description_file_path)

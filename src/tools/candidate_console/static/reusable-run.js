@@ -3,6 +3,7 @@
   'use strict';
   const $ = id => document.getElementById('capture-' + id);
   const session = window.consoleSession, coordinator = window.reusableIntents;
+  const stopControl = window.operationStop.mount('capture-stop');
   const profileDescriptions = {
     'native-proposal-families/v1': ' Independent proposal instances executed serially.',
     'native-literature-candidate/v1': ' Native literature review feeds one proposal, implementation and validation.',
@@ -53,6 +54,7 @@
   function invalidate() { generation++; selected = null; review = null; $('summary').replaceChildren(); $('details').textContent = ''; controls(); }
   function showIntent() {
     $('intent').hidden = !intent;
+    stopControl.render(null);
     if (!intent) return;
     $('operation-id').textContent = intent.payload.candidate_operation_id;
     $('operation-status').textContent = 'Retained launch intent. Check status or explicitly retry this same operation.';
@@ -67,6 +69,7 @@
     if (!coordinator.observe('candidate', intent, value)) return;
     terminal = coordinator.dismissible('candidate', intent);
     $('operation-status').textContent = `Operation ${state}${value.native_status ? ' · Native ' + value.native_status : ''}.`;
+    stopControl.render(value.state ? value : null);
     $('monitor').hidden = false; $('finish').hidden = !terminal; $('finish').textContent = 'Dismiss completed operation'; controls();
   }
   async function launchRetained(initial = false) {

@@ -1,7 +1,7 @@
 # Native candidate execution contract
 
-`CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None)`
-are the common JSON/Python boundary.
+`CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None,
+on_sandbox_spawn=None, cancel_requested=None)` are the common JSON/Python boundary.
 The CLI decodes the same request and calls that function. The parent imports
 inert declaration/preview/routing schemas and public pure evidence projections;
 it never composes tasks, executes task/generated plugins or constructs agents/providers. `child` verifies captured inputs, binds generated
@@ -13,6 +13,26 @@ filesystem effects. The native launch uses its hex form as the existing `run_id`
 for artifacts and accounting. Omission preserves native `uuid4().hex` generation.
 Request/receipt schemas, CLI behavior and exclusive claim ownership are unchanged;
 only the claim winner can publish records with that invocation identity.
+
+`on_sandbox_spawn(pid)` is forwarded to `workspace_sandbox.runner.run` /
+`run_observed` as `on_spawn`. It is called once with the bwrap PID right after
+`Popen`, before the chain is awaited and while the PID is unreaped, inside the
+runner's cleanup `try` (an observer exception still terminates and reaps the
+sandbox). The host reservation ledger uses it to publish the sandbox identity
+(candidate operations contract, "Host reservation ledger"). Omitted, the runner
+is called exactly as before.
+
+`cancel_requested()` (also accepted by `launch_continuation`) is forwarded to the
+runner, which polls it right after spawn and every `CANCEL_POLL_SECONDS` while it
+waits. When it returns true while the sandbox still runs, the runner's existing
+group cleanup terminates it and reports `ExecutionResult.status == "cancelled"`
+(a sandbox that already exited keeps its natural outcome); the receipt is the
+launch receipt with status `cancelled` and no loop/graph trace. A child receipt
+claiming `cancelled` after a normal exit reconciles to `failed`: only supervision
+records cancellation. A cancelled loop's `supervision.json` fails `require_clean`,
+so it is never resumable. Omitted, the runner is called exactly as before. The
+operator route is the candidate operations contract, "Cancel an active candidate
+operation".
 
 ## Selected inputs and task authority
 
@@ -151,8 +171,8 @@ they do not qualify fresh end-to-end reuse. There is no library promotion.
 The child writes `child.json` only after native validation completes. The parent
 reconciles the sandbox return code/status, immutable launch identity, validation
 status and managed native record paths before writing `receipt.json`. Timeout,
-process failure, interruption and absent/malformed/inconsistent child results
-cannot become validation success. Partial records remain inspectable.
+process failure, interruption, operator cancellation and absent/malformed/inconsistent
+child results cannot become validation success. Partial records remain inspectable.
 
 The receipt is an execution index with task fingerprint, candidate/node IDs,
 storage/output paths, selected constructor routes, log and usage-ledger paths.
@@ -298,6 +318,23 @@ An infrastructure abort returns `failed` while retaining its native output.
 Rejected validation still returns three records and `rejected`. Parent timeout,
 interruption or process failure overrides a child's reported completion.
 
+Each worker process entry (`child.execute`, `loop_resume.execute_continuation`)
+anchors one `budget.WorkerBudget` from `CandidateRunRequest.timeout_seconds` and
+passes it explicitly through `execute_native`/`execute_loop`/`execute_fanout`/
+`run_candidate_phases` to `phases.run_validation`, which bounds the validator's
+pytest child by `pytest_limit()`, the `remaining_seconds()` as a
+`PytestLimit(source="worker_budget")` (issue #984). On a graph profile the
+validation node runs in a unit process: `unit_dispatch.node_invocation` records
+the budget's `remaining_seconds()` at dispatch as
+`ValidationUnit.worker_budget_seconds` (`None` without a budget), and
+`unit_child.run_invocation_file` re-anchors a `WorkerBudget` from it right after
+reading the invocation and passes it to `phases.run_validation`. Every anchor
+follows the launch it measures from, so the value is an upper bound; the
+sandbox limit still governs. A spent
+budget yields a minimal positive limit, failing the pytest check at its first
+deadline poll. Direct callers that pass no budget run pytest group-supervised
+without a deadline.
+
 The optional `training_output` receipt field contains the model name and native
 output SHA-256. It is omitted entirely for legacy receipts. Reconcile and later
 `candidate_operations` reads reach the same inert fixed-path/identity/digest
@@ -393,11 +430,211 @@ The proposal seed is still published once under `candidate_run/proposal_input.js
 
 The existing child dispatches ready nodes serially in declaration order. All
 required predecessor results must have succeeded before constructing the consumer.
-Values move through typed in-memory results, never peer-file communication.
+Values move through typed results held by the dispatching worker, never
+peer-file communication; each dispatched node runs as one unit process (below).
 Validation rejection is retained and independent siblings can continue. A native
 exception aborts further effects; remaining instances become blocked. Training,
 routing, loops, human pauses, buffers, cross-branch aggregation and graph resume
 are not supported by this profile.
+
+#### Per-unit processes (B3-3)
+
+Every graph profile (`execution_profile` set, including loop bodies) runs each
+dispatched node, except adaptors (`adaptor_phase.execute_adaptor` runs those in the worker), in its
+own child process, still one at a time. Readiness,
+input materialization, predecessor-result selection, terminal classification
+and the trace stay in the worker (`graph.execute_fanout`). The fixed
+three/four-stage path is unchanged and runs in the worker.
+
+- `unit_dispatch.node_invocation` builds a frozen `unit_models.NodeInvocation`:
+  the `execute_fanout` arguments (`request`, `initial`, `config`), the bound
+  composition's `manifest_path`, `composition_fingerprint` and
+  `physical_data_root`, `node_id`, `iteration`, the selected native `storage`,
+  and a phase payload discriminated by `phase` (`ProposalUnit`,
+  `ImplementationUnit`, `ValidationUnit`, `LiteratureUnit`,
+  `InterpretationUnit`, `TuningUnit`). `ValidationUnit.worker_budget_seconds`
+  carries the remaining worker budget (issue #984, above). A proposal after a literature review
+  carries the review evidence already applied. `TuningUnit` carries the
+  predecessor outputs of the branch `adaptor_phase.tuning_branch` selected in
+  the worker (the selection adaptor's contribution, else the only branch), `chain_formal_incumbent_reference` and
+  `AdmittedTraining`: the `TrainingAdmission` without its task composition and
+  LLM config, which `admission_from` refuses to build if restoring it would not
+  equal the admitted value.
+- `unit_runner.run_unit` publishes the invocation write-once at
+  `candidate_control_dir(workspace, iteration)/units/<node_id>/invocation.json`
+  (the directory must not exist), runs
+  `python -m tools.candidate_worker.unit_child <invocation>` through
+  `core.runtime_control.observed_subprocess.supervise_subprocess` with
+  `core.subprocess_env.subprocess_env()` (no device selector, so the worker's
+  GPUs) and reads the write-once `result.json` beside it. Both files are
+  bounded by the 4 MiB control envelope (`core.control_json.JSON_LIMIT`) on
+  write and read through `graph_evidence.read_graph_control`; an oversized
+  invocation fails its node before the child starts. A result over the bound
+  (in practice only a tuning output; the largest real `run_output` today is
+  about 1.1 MB) becomes `failed`/`native_failure` after training has run
+  (sizing this bound from the tuner's limits is tracked in #1015).
+- The unit runs with `PYTHONSAFEPATH=1` (added only when the worker lacks it,
+  flagged by `SIDERIUS_UNIT_SAFE_PATH_ADDED`), because `-m` would otherwise put
+  its cwd, the writable workspace where earlier generated code can write,
+  first on `sys.path`. The child removes both variables at entry, so its own
+  subprocesses see the worker's environment.
+- Transport (`unit_transport.encode_transport`/`decode_transport`) writes two
+  JSON lines: the `model_fields_set` tree of every nested model, then the
+  value's complete JSON with inf/NaN kept as JSON constants (`-inf` scoring
+  sentinels and launch knobs are valid values). Decoding validates the JSON and restores each model's
+  set fields, because LLM-config defaults, protocol mappings and
+  reconciliation read `model_fields_set` (an `exclude_unset` dump cannot carry
+  validator-filled fields such as a tuning output's metric contract). Encoding
+  refuses a value whose decoded `model_dump(mode="python")` differs from the
+  original's under NaN-aware structural equality (NaN equals NaN, +/-inf
+  compare exactly, so a stable lossy encoding such as -inf -> null is
+  refused), that is not a byte fixpoint of decode and re-encode (covers set
+  fields), or that decodes with a different set-field shape; a refused
+  invocation fails its node (`failed`/`native_failure`) before any child
+  starts. The child's `NodeUnitResult` and phase output cross back under the
+  same rule.
+- `unit_child` requires the generated-library binding the worker placed in its
+  environment, recomposes the task from `manifest_path`, refuses a different
+  `semantic_fingerprint`, binds the composition with the transported data root
+  and calls the same native phase function the worker called before B3-3
+  (`phases.run_*`, `run_literature`, `run_interpretation`, `run_training`).
+  Its stderr joins the inherited stdout, so `worker.log` still holds the unit's
+  output and tracebacks in order.
+
+`NodeUnitResult.outcome` keeps the in-process failure semantics: `returned`
+yields the output and record path; `raised` (native exception, traceback
+logged by the child) becomes `failed`/`native_failure` with remaining nodes
+blocked; `exited` re-raises `SystemExit(exit_code)` and `interrupted`
+re-raises `KeyboardInterrupt` in the worker, as the in-process call propagated
+them. A unit process that exits nonzero without a result (crash, kill) is also
+`failed`/`native_failure` after the worker logs the supervision error; an
+in-process crash instead ended the whole worker without a trace. The unit
+shares the worker's session and process group (a plain supervised call), so
+the sandbox wall-time deadline and terminal signals reach it as before.
+Subprocess lifecycles the unit observed (for example tuner children) are
+returned in `NodeUnitResult.lifecycles` and replayed in order through
+`replay_process_lifecycle` to the worker's observer, so a loop body's
+`iteration_owner` lease still sees uncertain cleanup. Replay happens before
+the result's identity check, so a refused result cannot hide that evidence.
+Grandchildren left by a killed unit that stay in the worker's process group
+are reaped by the sandbox's group cleanup when the worker exits; supervised
+grandchildren that created their own session (owned-group supervision) are
+reaped only when the bubblewrap PID namespace is torn down.
+
+Each unit pays its own interpreter start, native imports and task
+recomposition, measured in review at about 2.5–2.8 s and 680 MB peak RSS per
+unit on CPU. That time is charged against the run's `timeout_seconds`; the
+memory is released before the next unit starts.
+
+Parity limits, all outside recorded scientific outputs:
+
+- The torch default RNG is process-global. Before B3-3 the implementor
+  self-check and validator probes of one body drew unseeded inputs and probe
+  weights from one shared stream; each unit now starts its own fresh,
+  nondeterministic stream. Neither was reproducible. Probes stay unseeded;
+  seeding them is a separate behaviour decision.
+- `subprocess_env` sets `PYTHONHASHSEED=0` unless the operator set it, so unit
+  string hashing is fixed where the worker's was per-process random.
+- Each unit imports native modules and process registries afresh; registry
+  writes (only tuning writes them) no longer outlive their unit.
+- `units/<node_id>/` adds two control files per dispatched node; the trace,
+  records and receipt bytes are unchanged
+  (`test_unrouted_graph_trace_bytes_are_unchanged`).
+- `core/runtime_control/observed_subprocess.py` gained
+  `replay_process_lifecycle`, so `gpu_protection.protection_mechanism_digest()`
+  (recorded on protection receipts) moves from `d3f8cf19…` to `b79dbdde…`. The
+  rendering, verifier and estimation assembly digests are unchanged.
+
+Tests run units through an in-process seam (`native_runner` replaces
+`unit_runner.spawn_unit` with `unit_child.run_invocation_file`), which keeps the
+file transport, recomposition and result mapping. `test_unit_process.py` runs
+real unit processes with a generated provider harness: it requires the pinned
+accepted and failed trace digests, prompts and normalized records equal to the
+in-process run, a distinct process per unit importing this checkout, no
+registry write visible to a later unit or the worker, a crashed unit treated as
+a native failure, an adaptor-selected branch (reversed bindings) reaching a
+real tuning unit with the verifier's verdict and staged-bytes checks passing,
+replay of a unit's subprocess lifecycle, -inf values and a
+validator-filled nested field crossing the transport, and no import of
+`tools`/`json` shadows planted in the workspace.
+
+`tools.candidate_worker.readiness.next_dispatch` is the single readiness
+authority. It is pure: `ReadinessInput` carries every declared node in
+declaration order as `NodeReadiness(node_id, predecessors, state, reason,
+routing)` (`pending` for undecided nodes), `aborted`, and `decisions` (the
+recorded `RouteEvaluationOutput` values, at most one per branch; empty for
+every profile except `native-routed-candidate/v1`). It refuses duplicate ids, undeclared
+predecessors or merge candidates, two decisions for one branch, a `skipped`
+node without a reason in `SKIP_REASONS` (B1: `route_not_selected`; B6-4:
+`insufficient_items`, set through `skipped_input`, see "Literature adaptor
+profiles"), and a node
+whose merge candidate is also one of its `predecessors`, or whose
+`NodeRouting.control` is set without `route` or is not one of its `predecessors`.
+`predecessors` are the
+required sources (including a route's control edge), excluding merge
+candidates: declared dependency facts list every candidate as a consumer
+dependency, so `readiness_input` removes a node's merge candidates from its slot
+predecessors (safe because declaration validation refuses a plain dependence on
+a merged arm). It
+inspects the first `pending` node whose sources (predecessors plus every merge
+candidate) are all terminal (neither `pending` nor `running`) and returns one
+action as `ReadinessOutput`: `next=<node_id>` to dispatch it, or
+`terminal=((node_id, state, reason),)` to close it without dispatch;
+`next=None, terminal=()` means no node can act. An adaptor slot
+(`kind="adaptor"`) follows its own rule (see "Opt-in first-passing selection").
+For a capability node, the per-node rule `_close_reason`, in precedence order:
+
+1. `aborted` (an earlier native failure) → `blocked/dependency_not_successful`.
+2. Any required source `failed`, `rejected` or `blocked` →
+   `blocked/dependency_not_successful`. Blocked beats skipped. Exception
+   (B1-PR5, B1-Q1 fallback): `NodeRouting.control` names the branch source when
+   the target binds no data from it (a control-only edge). That source blocks only
+   when `failed` or `blocked`; a `rejected` source still produced the record its
+   decision read, so rule 4 decides. A target that also reads the source's data
+   keeps rule 2 (pinned: `test_readiness.py` route rows).
+3. Any required source `skipped` → `skipped` with that source's reason (first
+   skipped source in predecessor order). This generic propagation applies to any
+   skip reason, so later reasons (B6 `insufficient_items`) need no second rule;
+   skipped never satisfies a required input.
+4. `NodeRouting.route` (the node is an entry target of that branch): dispatched
+   when the branch decision lists it in `selected_targets`, closed
+   `skipped/route_not_selected` when it lists it in `skipped_targets`. A missing
+   decision, or one naming neither, raises `ValueError` (never treated as
+   selected). Arm interiors are skipped by rule 3, not by a separate arm list.
+
+A merge (`NodeRouting.merges`, one `MergeReadiness(branch, candidates)` per
+`SelectedSource` argument; each `MergeCandidate(node, entry)` names the entry
+targets of the arm it lies in) consumes only the candidate whose `entry` equals
+the decision's `selected_targets` as a set (declared order carries no meaning); non-selected candidates (skipped or blocked)
+are ignored. No unique match raises `ValueError`. Without a decision (the branch
+source never succeeded) the consumer is blocked if any candidate is
+failed/rejected/blocked, inherits the skip if all are skipped, and otherwise
+raises. `body_status(states, tuning=...)` is the one body aggregate: `failed` if
+any node failed, else `rejected` if any node was rejected, else
+`completed`/`accepted`; `skipped` and `blocked` are neutral (blocked only follows
+a failure or rejection). `validation_passed` is unchanged: with tuning it
+requires every validation node `succeeded`. That rule is not reached by a routed
+run: the routed profile is the selection profile, whose `validation_passed` is
+the selection adaptor's outcome. `readiness.may_run(node_id, value)` applies the
+same per-node rule (without abort) to a fully recorded trace; the verifier uses
+it as its per-entry dependency check, so a merge consumer is checked against the
+selected candidate only and a control-only source may be `rejected`.
+
+`execute_fanout` dispatches from this decision, and `verify_graph_trace` replays
+the recorded terminal states through `graph_evidence.replay_readiness(nodes, *,
+decisions=(), routing=None)`, which refuses a node readiness would dispatch but
+the trace closed, and a node readiness would close whose recorded `(state,
+reason)` differs (for example dispatched inside a non-selected arm, or `blocked`
+where readiness derives `skipped`). The verifier also accepts `skipped` without a
+record path/digest only with a `SKIP_REASONS` reason. Both call sites pass the
+recorded decisions and `route_phase.node_routing(definition)` (empty for an
+unrouted declaration), so a `skipped` state in an unrouted trace is refused by
+replay. Adding the `skipped` state and `route_not_selected` reason does
+not change existing trace bytes (pinned by
+`test_unrouted_graph_trace_bytes_are_unchanged`). If no node can act while some
+remain undecided (unreachable for a validated acyclic declaration),
+`execute_fanout` raises `RuntimeError("graph readiness found no dispatchable
+node")` and `verify_graph_trace` raises `ValueError`.
 
 The final optional `graph_trace` contains every declared node exactly once: its
 capability, predecessor IDs, managed storage, terminal state, fixed reason code and
@@ -454,11 +691,255 @@ The family profile generates N independent instances, not N outputs from one
 proposer call; no scientific diversity, ranking, aggregation, parallel execution,
 training, conditional routing, buffers, human gates or graph resume is implied.
 
+Branch isolation within one body (audited for B3 parallel scheduling): no
+family or branch reads a file or plugin registry an independent sibling wrote.
+Family inputs are materialized from the captured snapshots before the first node
+runs; the interpretation candidate re-materializes its proposal input after the
+interpretation node, inside its single chain, which has no sibling. Each
+implementation writes its plugin, `description.md`, tests and losses only below
+its own `graph_instances/<implementation-id>/.../impl_001/`. The worker never
+registers into the workspace `generated_library` (capability index, models,
+losses) and never writes `<workspace>/plugins/`. These are the shared locations
+that the proposer, implementor and model-description readers consult. The
+validator loads a generated plugin with a plain `exec_module` that does not
+enter `sys.modules`, and it does not populate the process model/loss registries.
+Only a tuning node mutates those registries (`stage_native_plugins`). The only
+profile admitting tuning (interpretation candidate) has one branch, so tuning is
+the body's last node; the next loop body is sequential by design.
+
+One process-global state is shared: the torch default RNG. The implementor
+self-check and the validator probes draw unseeded probe inputs, and their probe
+models draw initial weights from it. A family-1 node's probe tensors and weights
+therefore depend on how many draws earlier nodes made. Recorded outputs are
+unaffected (pass/fail, shapes, gradient checks and records compare equal across
+declaration orders). The stream is not reproducible even serially: an unseeded
+process starts from a nondeterministic torch default seed. Since B3-3 each unit
+runs in its own process and draws from a fresh stream instead of a shared one
+(see Per-unit processes). Seeding the probes is a behaviour change outside B3.
+
+The shared `token_usage.jsonl` is append-only. By source reading (the witness
+below replaces `LLMBridge`), the only in-run read is `LLMBridge`'s first-row
+`run_id` identity check. Every aggregating reader (token read projection,
+iteration rollup, campaign spend, baseline report) groups by run, iteration,
+label or provider, never by row position. `validate_token_usage_jsonl` checks
+order only against iteration-flush markers, and warns without failing on
+non-monotonic timestamps. Rows carry no unit identity; optional unit attribution
+is deferred to parallel dispatch, so serial ledgers are unchanged.
+
+The B3-0 audit therefore found nothing to snapshot per body. Witness:
+`tests/unit/tools/candidate_worker/test_branch_isolation.py` runs real native
+node bodies with a scripted provider in three declaration orders. Its two
+families propose distinct models. It requires the actual dispatch sequence to
+equal the declaration order, and no node to leave a process-registry write
+behind. It requires an empty workspace `generated_library` and no
+`<workspace>/plugins/`. Finally it requires byte-identical family-1 proposal
+input, prompts, debug dump and normalized proposal, implementation and
+validation records. A future profile that promotes into the workspace library,
+writes `<workspace>/plugins/`, or admits several tuning nodes in one body must
+snapshot those reads per unit, or run each unit in its own process, before
+independent units may run concurrently.
+
 Reusable version-2 source and managed preparation also support this profile through
 [the reusable family contract](../candidate_prepare/candidate-prepare-contract.md#reusable-independent-proposal-families).
 Code callers may still supply version-1 native inputs directly. Both routes use
 the same existing operation/HTTP observation without loading an editor.
 
+
+### Opt-in first-passing selection (S1, B6-3)
+
+`WorkflowPreviewRequest.execution_profile="native-proposal-fanout-selection/v1"`
+(`workflows.definition.fanout.SELECTION_PROFILE`) admits B6 scenario S1: one
+external proposal, its complete implementation/validation branches (the
+proposal-fanout ownership rules above), exactly one declared adaptor and exactly
+one tuning node. Admission (`fanout.selection_candidate`) requires:
+
+- `adaptor_format="siderius.adaptors/v1"` and one `AdaptorInstance` with one
+  `validation.output` input port, `combine=pass/v1`, `select=first-admissible/v1`,
+  `distribute=single/v1` (no other strategy triple is admitted);
+- the port binding lists every validator `ResultSource` exactly once, in any order;
+  that declared binding order is the selection order;
+- the tuner uses `validated-candidate-to-tuning` with `proposal` = the proposal
+  result, `validation` = `AdaptorSource(adaptor=<id>)` and an external `settings`
+  (`candidate.check_tuning_edge` accepts either a validator id or this adaptor
+  source); no route and no loop.
+
+`ProposalFamilies.selection = AdaptorSelection(adaptor, validators)` records the
+admitted adaptor and its bound validators in declared order; `tuning` names the
+tuner. Every other profile still refuses an adaptor document
+(`ADAPTORS_NOT_ADMITTED`). The proposal seed path and branch storage slots are
+those of `native-proposal-fanout/v1`; training admission and the native tuner path
+are those of the interpretation profile's training ("Native training after
+interpretation"), so the seed must leave training-owned fields unset or equal.
+
+**Readiness.** `NodeReadiness.kind` is `"capability"` (default) or `"adaptor"`
+(B6-D8). An adaptor is ready once every bound source is terminal; `_close_reason`
+closes it `blocked/dependency_not_successful` only after an abort or when a source
+is `failed` or `blocked`. A `rejected` or `skipped` source does not close it; the
+strategy treats it as inadmissible. An adaptor never carries routing.
+Its consumers keep the capability rule, so a `rejected` adaptor blocks the tuner.
+
+**Execution** (`adaptor_phase.execute_adaptor`). Items are built by
+`adaptor_items` in declared port order, then binding position, never completion
+order. Every succeeded or rejected source's native record is read (digest checked
+against the trace) and parsed with the contract's native model
+(`workflows.custom_adaptors.contracts.native_type`). A rejected source must be
+rejected by its record (a `VALIDITY_GATED_CONTRACTS` value with `passed=False`),
+else `ValueError`; it becomes an item with state `rejected` and no value. A
+route-skipped source becomes an item with state `skipped`, no value, and
+`AdaptorInputRef.record_sha256` = its skip record digest from
+`route_phase.skip_citations` (see "Routed execution"). A `skipped` source without
+a citation raises `SkippedAdaptorInputError`, which `execute_adaptor` re-raises
+instead of closing the slot; any other state raises `ValueError`. The pure
+`run_deterministic_adaptor` decides with `metric=None` (no metric-ranking kind is
+admitted), and `build_adaptor_record` builds the `AdaptorRecord`. Each emitted
+output value is published write-once as canonical JSON at
+`candidate_run[/iteration_NNN]/adaptors/<id>.out.result.json` (`<id>.out.result.<i>.json`
+for indexed outputs), then the record at `.../adaptors/<id>.json`; the file digest of
+an output equals its `OutputDigest.sha256`. The trace slot closes with the outcome
+status and reason (`succeeded`; `rejected/no_admissible_input`;
+`rejected|failed/insufficient_items`), the record path and its digest. The closure
+is computed before anything is published. Any other exception
+closes it `failed/native_failure` without a record and stops later effects, as for
+a native node. The tuner trains the branch whose validator the adaptor emitted
+(`adaptor_phase.tuning_branch`, read from the outcome's contribution); all
+validators rejected gives `rejected/no_admissible_input` and a blocked tuner.
+
+**Trace.** `GraphTrace.adaptors` holds one `GraphNodeEvidence` per declared
+adaptor, in declaration order, with `capability="adaptor"`, predecessor ids,
+`storage` = the adaptors control directory, state, reason, record path and digest.
+It is omitted when empty, so unadapted traces keep their bytes (pinned:
+`test_unrouted_graph_trace_bytes_are_unchanged`,
+`test_unadapted_training_trace_bytes_are_unchanged`). `GraphTrace` refuses an
+`"adaptor"` capability in `nodes` and any other capability in `adaptors`.
+`GraphReason` gains `no_admissible_input`, `insufficient_items` and the reserved
+`judge_failure` (B6-8). Adaptor records are not in `native_output_paths`.
+
+**Body outcome** (`adaptor_phase.body_outcome`, shared by worker and verifier).
+A `rejected` node bound to an adaptor that `succeeded` was an inadmissible input
+the adaptor absorbed; it is neutral in `body_status`, like a skip. Adaptor states
+themselves count. Under the selection profile the selected path decides the body:
+selected input and tuner `succeeded` gives `completed`; an adaptor
+`rejected/no_admissible_input` (or `insufficient_items`) gives `rejected` with a
+blocked tuner. `validation_passed` is the selected candidate's validation, i.e.
+`True` iff the selection adaptor `succeeded`. Every branch keeps its own node
+state in the trace (a rejected sibling stays `rejected/validation_rejected`).
+Profiles without adaptors keep the existing rules (pinned trace bytes above).
+
+**Verification.** `verify_graph_trace` checks adaptor membership and bindings
+against `expected_adaptors`, record path/digest of a decided adaptor, that its
+sources were terminal and none failed or blocked, and replays readiness over nodes
+then adaptors. `adaptor_phase.verify_adaptors` then recomputes each recorded
+adaptor from the native records the trace names and requires the record bytes, each
+emitted output's bytes and the trace `(state, reason)` to equal the recomputation;
+an `<id>.out.*` file the recomputation does not emit is refused. Selection inputs
+are trace states, so the native verifier loop also requires every `validation`
+entry's state to be its record's verdict (`succeeded` iff `ValidatorOutput.passed`,
+else `rejected`), read from the digest-checked record. `verify_graph_training`
+reads the trained (implementation, validation) pair from the verified outcome
+(`tuning_branch`), checks the validation record and the tuner identity as before,
+and binds the tuner to that implementation from record facts only, mirroring
+`artifacts.verify_artifacts`. A generated model (its `model_file_path` under the
+attempt's `models` directory) is copied verbatim by `stage_native_plugins`, so the
+staged `get_plugin_dir(<tuner storage>, run_name)/<model>.py` must equal its bytes;
+this applies to every trained profile and changes no record. A reused task-declared
+package model (`test_file_path == ""`, model outside the attempt) is trained from
+its declared source and `stage_model_source` copies nothing, so no bytes are
+compared; under the selection profile a staged copy then contradicts the record and
+is refused. An unreadable staged or model file is a `ValueError` ("tuner staged
+model ..."), never an incidental `OSError`.
+Witness: `tests/unit/tools/candidate_worker/test_adaptor_selection.py` (second
+branch trained when the first is rejected; all rejected; declared and reversed
+binding order over execution order; tampered record/output/closure; extra output
+file; relabelled validator verdict; staged model of a sibling; declared package
+reuse; missing staged model; shape refusals).
+
+Not admitted: v2 reusable source, managed preparation and console for this profile;
+any other strategy triple, metric ranking, per-item/split distribution, routes,
+loops, custom and LLM strategies (split distribution runs only under the literature
+split profile, "Literature adaptor profiles" below). Routes run only under
+`native-routed-candidate/v1` (next section).
+
+### Routed execution profile (B1-PR5)
+
+`WorkflowPreviewRequest.execution_profile="native-routed-candidate/v1"`
+(`workflows.definition.fanout.ROUTED_PROFILE`) admits the S1 selection node set
+(same admission, `fanout.selection_candidate`, via `fanout.routed_candidate`) plus
+at least one declared route whose arms (targets and every node they dominate,
+`routes.branch_arms`) contain only implementation/validation nodes: an arm holding
+the selection adaptor or the tuner is refused ("the routed profile routes only
+implementation/validation arms, never the adaptor or the tuner"), because gating
+training on a predicate (B1-Q1(b), not chosen) would let a body complete untrained.
+It is the only profile whose `refuse_declaration_only` call passes
+`admits_routes=True`. Every other profile, the fixed candidate, v2 reusable
+sources, managed preparation and the console profile lists still refuse a routed
+document (`ROUTING_NOT_ADMITTED`). No loop is admitted (`admit_loop` admits only
+the interpretation profile; B1-Q5 leaves no admissible route target in the
+single-branch interpretation loop, so routed loops wait for a later design). First
+consumer (B1-Q1(a)): a fallback branch, e.g. `Branch(source=check0,
+cases=(RouteCase(when=BoolIs("validation.passed", False), targets=("build1",)),))`:
+`build1`/`check1` run only when `check0` rejects, and the first-admissible adaptor
+trains whichever validator passed (a passing fallback rescues the body; the
+absorbed `check0` rejection is neutral).
+
+**Run metric.** `route_phase.admit_route_metric(definition, composed)` derives the
+run metric once, before any effect in `execute_fanout`: the composed task metric
+(no loop, so no seed reconciliation). `route_eval.admit_route_metrics` refuses a
+`metric_at_least` naming another metric there (`RouteConditionError`; the child
+fails, no node is dispatched). The same object is passed to every
+`RouteEvaluationInput`. In the selection node set only a tuning record carries a
+metric observable and the tuner has no descendants, so a `metric_at_least` route
+is not declarable today; the admission is generic.
+
+**Decisions.** After each node closes, `route_phase.decide_routes` decides every
+branch whose source it is, provided it closed `succeeded` or `rejected` with a
+record: `project_observation` from the record path, a digest check against the
+trace's `record_sha256`, then `evaluate_route`. A `failed` source decides nothing
+and its targets are blocked. Any exception during projection or evaluation is a
+`RouteConditionError` raised out of `execute_fanout` (outside the node's own
+failure handling): the body fails as an uncertain child failure, never reading the
+route as false. This is deliberately fail-closed for B1-PR5: the child exits
+nonzero, the receipt is `failed` with no `graph_trace`, and native records already
+written for nodes that ran in that body stay on disk unindexed by any receipt (they
+are never read as evidence). A per-body failure that keeps its trace, as adaptor
+exceptions do (`failed/native_failure`), is tracked in issue #1016. Each decision is recorded as
+`GraphRouteEvidence(branch_id, source_node, source_record_sha256,
+evaluator="siderius.route/v1", decision, decided_by="predicate")` and fed to
+readiness. `GraphTrace.routes` lists them in branch declaration order and is
+omitted when empty (unrouted bytes unchanged). `route_phase.node_routing` builds
+each node's `NodeRouting` from the declaration through the public
+`workflows.definition.routes` helpers `route_targets` (entry target → branch,
+source, `control_only`) and `merge_arms` (merge candidate → its arm's entry
+targets, via `branch_arms`).
+
+**Skip records.** A route-skipped node's skip record is the `GraphRouteEvidence`
+that skipped it: directly (it is a `skipped_targets` entry of its own branch) or by
+propagation (the walk follows the first route-skipped predecessor to the deciding
+branch). `route_phase.skip_citations` maps each such node to
+`evidence_digest(evidence)` = SHA-256 of the evidence's canonical JSON; an
+adaptor cites it as `AdaptorInputRef.record_sha256` of the skipped input. The
+worker computes citations at adaptor dispatch, the verifier from the trace; both
+feed `adaptor_phase.decide`, so the adaptor record is recomputed byte for byte.
+The `routes.py` arm-label relaxation stands for this shape: the adaptor reads both
+arms (one outside, one inside the fallback arm) and runs either way (B6-D8), so its
+tuner consumer is not refused.
+
+**Verification.** `verify_graph_trace` additionally runs
+`route_phase.verify_routes`: for every node closed `succeeded`/`rejected` with a
+record it re-projects and re-evaluates each branch it sources and requires the
+recorded tuple to equal the re-derivation (a forged decision, source digest,
+missing or extra decision is refused: "graph route evidence does not match its
+re-derivation"). The verifier holds no composition, so it evaluates under the
+source record's own stamped metric, which the worker already reconciled with the
+run metric (a tuning record without a stamp would make a metric route
+unverifiable; not declarable today). Readiness replay then uses the recorded
+decisions, refusing a node dispatched in a non-selected arm and any terminal
+`(state, reason)` readiness would not produce.
+Witness: `tests/unit/tools/candidate_worker/test_routed_profile.py` (tuner- or adaptor-gating route refused; passing
+`check0` skips the fallback and the adaptor cites the skip record; rejected
+`check0` runs the fallback, trains `build1` and completes; both rejected; forged
+decision, source digest and dropped decision refused; metric admission before any
+dispatch; refusal by every other profile; unrouted selection trace bytes pinned on
+base 405d7aaf; console projection of skipped nodes).
 
 ### Opt-in native literature candidate
 
@@ -531,6 +1012,94 @@ advice field, N-way aggregation, parallelism, training, conditional routing, buf
 human pause or resume. Shared proposal advice is not literature advice. Historical
 scientific settings remain experiment-owned. Omitted/default fixed, fanout and
 family profiles retain their serialization and native scientific payloads.
+
+### Literature adaptor profiles (S2 collection, S3 split; B6-4)
+
+Two opt-in v1 profiles (`fanout.LITERATURE_COLLECTION_PROFILE`,
+`fanout.LITERATURE_SPLIT_PROFILE`) connect reviews to proposals through one declared
+deterministic adaptor. Both reuse the single-review profile above for every review
+(external `literature.input`, managed storage/cache/diagnostic paths, route,
+network and task/constraint admission against **every** proposal seed the review
+feeds, `capture_record`) and the family branch ownership rules
+(`_proposal_branches`) for proposals, implementations and validators. No tuner, loop
+or route is admitted. `ProposalFamilies.literature_adaptor =
+LiteratureAdaptorEdges(adaptor, reviews, protocol, proposals)` records the reviews in
+the adaptor's declared binding order (`LiteratureReview(node, binding)`) and each
+proposal's seed binding and adaptor output index (`LiteratureProposal(node,
+seed_binding, index)`); `ProposalFamilies.literature_reviews` lists the review ids of
+either literature shape. Proposal diagnostics are per node
+(`candidate_run/proposal_inputs/<proposal-id>.json`, debug under
+`candidate_run/debug/<proposal-id>/`).
+
+| Profile | Admission (`fanout.literature_collection_candidate` / `literature_split_candidate`) |
+| --- | --- |
+| `native-literature-collection/v1` (S2) | ≥ 1 external reviews; one adaptor with one `literature.output` port binding every review result exactly once, `collect/v1` + `all/v1` + `single/v1`; exactly one proposal using `literature-collection-to-proposal(reviews=AdaptorSource(<adaptor>), proposal_input=<external seed>)`; its complete branches |
+| `native-literature-split/v1` (S3) | exactly one external review; one adaptor with one `literature.output` port bound to it and `split-items/v1(field="findings", count=M, on_short)` after any COMBINE/SELECT pair the declaration validation table admits (S3 is `field-rank/v1(confidence, descending)` + `top-k/v1(k)`); exactly M proposals, each `literature-to-proposal(output=AdaptorSource(<adaptor>, index=i), proposal_input=<external seed>)`, indices `0..M-1` each bound once; one complete family per proposal |
+
+**Protocol application** (`literature_edges.proposal_input`, the one owner unit
+dispatch and the verifier call). The single-review profile keeps
+`local_typed_evidence(review, proposal_input=seed)` unchanged. S2 converts the
+adaptor's `CollectedItems` into the catalogued `literature.collection`
+(`literature_collection`: one `NamedLiteratureReviewOutput(contribution_id=<source
+review node id>, output=<review>)` per collected entry, in collected order) and
+applies `local_typed_evidence_many`; the proposer prompt therefore renders the
+existing collection section, one `### Review: <review node id>` heading per review in
+declared binding order, never completion order. Renaming a review node therefore
+changes the proposer prompt (operator-accepted, 2026-10-28). This profile is the first
+framework producer of a collection: before B6-4 only hand-written
+`ProposalInput.literature_review_evidence` seeds reached the collection renderer.
+Every proposal seed under either adaptor profile must leave
+`literature_review_evidence` unset; `materialize_fanout` refuses one that carries it
+before any review or proposer call (the reusable-preparation rule). S3 applies `local_typed_evidence` to
+output `i`, a `LiteratureReviewOutput` whose `findings` hold exactly the one entry
+`split-items/v1` placed there (all other fields of the review unchanged), so family
+`i` sees the singular literature section with that one claim. With `field-rank/v1`
++ `top-k/v1`, index `i` is the `i`-th ranked finding by self-reported `confidence`
+(the ranking's `provenance="self-reported"` is recorded in the adaptor record, not
+rendered in the prompt). No prompt template, agent schema or rendering owner changes
+(`rendering_assembly_digest` unchanged).
+
+**Shortfall and per-index skip.** Under `on_short="skip"`, fewer than M split entries
+leave indices `n..M-1` `skipped` in the outcome and record. Under `field-rank/v1`
+a finding whose `confidence` is `None` is unranked and never kept by `top-k/v1`, so
+unscored findings alone can cause a shortfall (and a skip or failure per `on_short`). `adaptor_phase.skipped_inputs`
+maps every node whose request reads a skipped index to `insufficient_items`;
+`readiness_input(..., skipped_inputs=...)` sets `NodeReadiness.skipped_input`, and
+`_close_reason` closes that node `skipped/insufficient_items` after the blocked rule
+(a failed/rejected/blocked source still blocks) and before its own route decision.
+`readiness.SKIP_REASONS` now holds `route_not_selected` and `insufficient_items`, so
+generic skip propagation carries the reason to the family's implementation and
+validator. A skipped node is neutral in `body_status`; a node skipped this way cannot
+feed an adaptor (`SkippedAdaptorInputError`, no profile binds one). Under
+`on_short="fail"` any shortfall closes the adaptor `failed/insufficient_items` with its
+record; more split entries than M closes it `failed/too_many_items` (never truncated;
+`GraphReason` gains `too_many_items`). A failed adaptor stops later effects, so every
+proposal is `blocked` and the body is `failed`. Zero admissible inputs or zero entries
+without a fail policy is `rejected` (no outputs), which blocks every proposal.
+
+**Verification.** `verify_graph_trace` recomputes the adaptors
+(`verify_adaptors`) before readiness replay and replays with the recomputed
+`skipped_inputs`, so a proposal that ran on a non-emitted index, or a family skipped
+despite an emitted one or with another reason, is refused ("graph trace violates
+serial readiness"). `literature_edges.verify_literature_evidence` (moved from
+`graph_evidence`, extended to many reviews and proposals) checks every succeeded
+review's diagnostic input against its capture and every fed seed, the review record's
+digest and run binding, and requires each succeeded proposal's diagnostic input to
+equal `proposal_input` over the verified review records and adaptor outcomes (a
+reordered collection or a sibling's finding is refused: "proposal input does not match
+the declared literature edge").
+Witness: `tests/unit/tools/candidate_worker/test_literature_adaptors.py` (binding
+order over execution order with per-review attribution in the proposer prompt; a seed
+already carrying literature evidence refused before any call; self-reported ranking
+provenance in the S3 record;
+skip of the short index with ranked findings per family; relabelled skip and swapped
+finding refused; `on_short="fail"` and `too_many_items` failures recorded and blocking;
+admission refusals).
+
+Not admitted: v2 reusable source, managed preparation and console for these profiles
+(B6-7); tuning after either profile; collection over other contracts
+(`tuning.collection`, B6-9); `per-item/v1` and `replicate/v1` distribution; custom and
+LLM strategies.
 
 ## Opt-in native interpretation candidate
 
@@ -807,3 +1376,54 @@ A resumed segment rebuilds its score carrier from the same whole-run replay, so 
 incumbent and the no-improvement window span segments. A condition-completed run is
 `completed`, not a resumable checkpoint. Receipts and source without conditions are
 byte-identical to those before this feature.
+
+## Route evaluator (pure)
+
+`tools.candidate_worker.route_eval` decides one declared `Branch` (definition
+contract, "Route declarations") from one native record. Its execution caller is
+`route_phase.decide_routes` under `native-routed-candidate/v1` ("Routed execution
+profile" above); readiness consumes its output (skip semantics above).
+
+- `project_observation(branch, capability, record_path, *, iteration)` reads the
+  branch source's committed record once (no-follow, 4 MiB bound), validates it with
+  the native output schema of `CAPABILITIES[capability].output`
+  (`ValidatorOutput` for `validation.output`, `HyperparamTuningOutput` for
+  `tuning.output`), and returns `RouteObservation(source_node, iteration,
+  record_sha256, values, metric_spec)`. `record_sha256` hashes exactly the parsed
+  bytes; `values` holds only the observables the branch reads, in first-read order,
+  each taken from the native attribute `RouteObservable.attribute` (the last segment
+  of its `ROUTE_OBSERVABLES` field, the same name the catalog drift test checks);
+  `metric_spec` is chosen explicitly per contract (the tuning record's `metric_spec`;
+  `None` for validation records). An observable outside the source contract, or a
+  contract without a projection owner, raises `RouteConditionError`. Reading or
+  parsing may also raise `OSError`, `ValueError` (4 MiB bound, record changed) or
+  pydantic `ValidationError`: **every** projection exception fails the body
+  (`route_phase.decide_routes` re-raises each as `RouteConditionError`).
+- `evaluate_route(RouteEvaluationInput(branch, observation, metric))` is pure (no
+  I/O). It returns `RouteEvaluationOutput(branch_id, selected_case, selected_targets,
+  skipped_targets, case_results)`: cases are tested in declared order and the first
+  match wins; `case_results` has one predicate outcome per case up to and including
+  the match. With no match, `selected_case` is `None` and `selected_targets` is the
+  default (or empty when `default` is `None`). `skipped_targets` lists every other
+  entry target in declared order; arm expansion belongs to readiness.
+- Leaves: `bool_is` and `enum_in` compare the projected value; `metric_at_least` is
+  `MetricOrder(metric).is_at_least(value, threshold)` (ties hold; direction only from
+  the run `MetricSpec`); an absent metric value makes `metric_at_least` false and
+  `is_missing` true (decision B1-Q4).
+- Before any case is evaluated, `evaluate_route` checks every leaf of every case:
+  its observable is catalogued with the leaf's kind, present in the observation, and
+  of the catalogued kind (bool; str within the catalog values; float or `None` for a
+  metric). Neither an earlier matching case nor a short-circuiting `all_of`/`any_of`
+  can therefore hide an unevaluable leaf.
+- Fail closed (`RouteConditionError`, a `ValueError`; the body fails, never "false"):
+  an observable missing from the observation, a value of the wrong kind (for example
+  `None` for a bool), a `metric_at_least` without a bound run metric or naming another
+  metric id, and a record `metric_spec` stamp that does not reconcile with the run
+  metric (`reconcile_metric_specs`, always called; with no run metric a stamp alone is
+  accepted and only `metric_at_least` needs a metric).
+- Metric admission: `admit_route_metrics(branches, metric)` is the one identity check
+  and runs over every case of every branch, so an earlier matching case cannot hide a
+  mismatched later one. Execution admission must call it before any dispatch;
+  `evaluate_route` repeats it as its own precondition for replay.
+
+Tests: `tests/unit/tools/candidate_worker/test_route_eval.py`.

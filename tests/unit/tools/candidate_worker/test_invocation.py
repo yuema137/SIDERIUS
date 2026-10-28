@@ -116,11 +116,11 @@ def test_fixed_sequence_consumes_declared_invocations_and_native_context(
     ):
         original_run = agent_type.run
 
-        def observe(self, value, *, _phase=phase, _run=original_run):
+        def observe(self, value, *, _phase=phase, _run=original_run, **options):
             assert active_composition_fingerprint() == composition.semantic_fingerprint
             assert active_task_manifest_path() == composition.provenance.manifest_path
             calls[_phase] = value.model_copy(deep=True)
-            output = _run(self, value)
+            output = _run(self, value, **options)
             # Native nodes normally write first; the phase boundary must preserve those bytes.
             names = {
                 "proposal": "proposal",
@@ -134,9 +134,9 @@ def test_fixed_sequence_consumes_declared_invocations_and_native_context(
         monkeypatch.setattr(agent_type, "run", observe)
         original_phase = getattr(phases, f"run_{phase}")
 
-        def invoke(context, *args, _phase=phase, _run=original_phase):
+        def invoke(context, *args, _phase=phase, _run=original_phase, **options):
             seen.append((context, _phase))
-            return _run(context, *args)
+            return _run(context, *args, **options)
 
         monkeypatch.setattr(phases, f"run_{phase}", invoke)
 
@@ -223,7 +223,7 @@ def test_phase_binding_refuses_before_native_call(
 
     monkeypatch.setattr(phases, agent_name, constructed)
 
-    def corrupt(context, *args):
+    def corrupt(context, *args, **options):
         changes = {
             "node": {"node_id": "foreign_node"},
             "phase": {"phase": "validation" if phase != "validation" else "implementation"},
@@ -232,7 +232,7 @@ def test_phase_binding_refuses_before_native_call(
             "storage": {"storage_workspace": str(Path(context.storage_workspace) / "other")},
             "storage_run": {"storage_run_name": "foreign_run"},
         }[fault]
-        return original(replace(context, **changes), *args)
+        return original(replace(context, **changes), *args, **options)
 
     monkeypatch.setattr(phases, f"run_{phase}", corrupt)
     receipt = launch_candidate(prepared)
