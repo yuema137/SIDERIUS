@@ -143,17 +143,26 @@ external inputs such as storage. Only existing inputs can be rewired here.
 A large workflow opens zoomed out (never below 75%, so text stays readable; scroll the
 canvas for the rest). The controls at the bottom right of the canvas (zoom, **Actual
 size**, **Fit to view**) change only the view. Optional inputs that no wire feeds are
-folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, **Arrange view** shows a non-overlapping
-layout without changing the file.
+folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, the canvas says so;
+**Tidy up** arranges them (one edit you can undo).
+
+**Check the loop** (bottom right) sends a small dot along every connection in the
+order the modules run, then along the research loop's dashed feedback wire. If
+something is missing, the dot stops there: that socket glows soft red and one sentence
+under the card says what is not connected. With reduced motion turned on in your
+system settings, the glow appears without the moving dot.
 
 Drag a node heading to move it, or focus the heading and use Alt + arrow keys.
 These edits stay local until you press **Save** (it checks the workflow) and then
 **Save version** in the row that opens. **Tidy up** (bottom-right of the canvas) lines
-the cards up left to right; it is one edit you can undo.
+the cards up left to right in pipeline order (modules with no wire go in the next
+column); it is one edit you can undo. Click a card and press Delete to delete it; Undo
+brings it back. Keyboard users can press Tab once on the Workflow page and choose
+**Skip to canvas**.
 For a bound workflow, choose its matching configured task version and acknowledge
 the findings. Prepare a new run on the Run page to check its supported execution profile.
 
-To add nodes, click or drag entries from **Add capability**, or hover a card and
+To add nodes, click or drag entries from **Modules**, or hover a card and
 press the **+** beside an output that is not connected yet: pick a module and it is
 added to the right, already connected. You can add several nodes, move any card and
 wire them in any order. A node with a missing required input shows it in red, the
@@ -164,7 +173,8 @@ When a required input such as `storage` has nothing to connect, select the node.
 Under that input, Selection explains what the input is. Open **Create external
 input…**, keep or change the suggested id, and type the project-relative path of
 the JSON file that will hold the value, for example `inputs/build_store.json`.
-Reusable workflows can choose **Managed by the run** instead. Then click
+In a reusable workflow there is no path to type: the run supplies the input when it
+is prepared (reusable preparation accepts only such managed inputs). Then click
 **Create and connect**. Undo, Redo and Discard cover all of these edits.
 
 ## Bind a task version
@@ -400,7 +410,8 @@ budgets and diagnostic settings are demonstration choices, not scientific defaul
 
 Select **fit / tuning** in Workflow Editor. The small inspector edits trial/formal
 budget minutes, epoch ceilings, portions, sampling seed, training base seed and
-retention flags. **Use native default** removes the key; **None** explicitly stores
+retention flags. Open **Training settings** (collapsed, with the number of changed
+fields). **Default** removes the key; **None** explicitly stores
 null where supported. Empty numbers block review; zero is validated by the native
 owner. Sampling and training seeds are independent. Epoch ceilings constrain native
 planning rather than specifying final epochs. Outer candidate timeout remains seconds.
