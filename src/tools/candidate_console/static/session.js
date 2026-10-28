@@ -35,12 +35,12 @@
     if (!(response.headers.get('content-type') || '').includes('application/json')) return null;
     try { return await response.json(); } catch (_) { return null; }
   }
-  async function request(path, payload) {
+  async function request(path, payload, method = payload === undefined ? 'GET' : 'POST') {
     const version = revision;
     let response;
     try {
       response = await fetch('/api/' + path, {
-        method: payload === undefined ? 'GET' : 'POST', cache: 'no-store', credentials: 'omit',
+        method, cache: 'no-store', credentials: 'omit',
         headers: {Authorization: 'Bearer ' + token, ...(payload === undefined ? {} : {'Content-Type': 'application/json'})},
         ...(payload === undefined ? {} : {body: JSON.stringify(payload)})
       });

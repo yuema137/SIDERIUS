@@ -1,5 +1,6 @@
 """Saved-source review and recovery-first preparation through native owners."""
 
+from pathlib import Path
 from uuid import UUID
 
 from pydantic import Field, field_validator
@@ -28,6 +29,7 @@ from .readiness_models import CredentialReadiness
 from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_policy import check_request_policy, configured_capture
 from .service import CandidateConsole
+from .settings_file import protected_paths
 
 
 class NewRunSelection(PreviewModel):
@@ -99,8 +101,11 @@ def check_declared_launch_policy(document: ReusableWorkflowDocument) -> None:
 
 
 class ReusablePreparation:
-    def __init__(self, console: CandidateConsole):
+    def __init__(self, console: CandidateConsole, *, protected: tuple[Path, ...] | None = None):
+        """``protected``: paths no read-only input may overlap at admission; by default
+        derived from the config alone (``create_app`` adds the workspace settings/library)."""
         self.console = console
+        self.protected = protected_paths(console.config) if protected is None else protected
 
     def _review(
         self, project_id: str, selection: NewRunSelection
@@ -126,7 +131,7 @@ class ReusablePreparation:
         try:
             inspected = inspect_reusable_source(request)
             check_request_policy(task, inspected.request)
-            plan = preflight_reusable_candidate(request)
+            plan = preflight_reusable_candidate(request, protected=self.protected)
             check_request_policy(task, plan.binding.request)
             check_declared_launch_policy(plan.document)
         except OperationFailure:
