@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="/editor-parameters.css">
   <link rel="stylesheet" href="/page-guidance.css">
   <link rel="stylesheet" href="/editor-draft.css">
+  <link rel="stylesheet" href="/editor-palette.css">
   <script src="/number-format.js" defer></script>
   <script src="/session.js" defer></script>
   <script src="/token-presenter.js" defer></script>
@@ -31,6 +32,7 @@
   <script src="/editor-node-parameters.js" defer></script>
   <script src="/editor-versions.js" defer></script>
   <script src="/editor-draft.js" defer></script>
+  <script src="/editor-palette.js" defer></script>
   <script src="/editor.js" defer></script>
   <script src="/navigation.js" defer></script>
   <script src="/recorded-example.js" defer></script>
@@ -154,8 +156,11 @@
   <div class="editor-workspace">
     <section class="card workflow-canvas-panel">
       <h2>Workflow canvas</h2>
-      <details class="canvas-help"><summary>Canvas controls</summary><p>Select a capability to inspect its request. Select an output (or drag from it) and then a highlighted input to rebind it; hovering an output previews which inputs accept it. Port colour and shape name the contract (see Port types); a refused connection names both contracts. The Mapping chip on a card expands the protocol mapping from each source to its argument. Drag a capability heading to move it; Alt + arrow keys also move the selected capability. Optional inputs that are not connected are folded into an "optional inputs" row on each card; expand it to connect one. Fit to view, zoom and Arrange view change only what you see: saved positions change only when you move a card, review and save.</p></details>
-      <div id="editor-graph"></div>
+      <details class="canvas-help"><summary>Canvas controls</summary><p>Select a capability to inspect its request. Select an output (or drag from it) and then a highlighted input to rebind it; hovering an output previews which inputs accept it. Port colour and shape name the contract (see Port types); a refused connection names both contracts. The Mapping chip on a card expands the protocol mapping from each source to its argument. Drag a capability heading to move it; Alt + arrow keys also move the selected capability. Optional inputs that are not connected are folded into an "optional inputs" row on each card; expand it to connect one. Fit to view, zoom and Arrange view change only what you see: saved positions change only when you move a card, review and save. Add a capability from the palette by clicking it or dragging it onto the canvas; remove the selected capability with Delete, its context menu or Remove capability in Selection.</p></details>
+      <div class="editor-canvas-layout">
+        <section id="editor-palette" class="editor-palette" aria-label="Add capability"></section>
+        <div id="editor-graph"></div>
+      </div>
       <details class="connection-list"><summary>Connection mappings</summary><ul id="editor-edges"></ul></details>
     </section>
     <section class="card workflow-inspector-panel">

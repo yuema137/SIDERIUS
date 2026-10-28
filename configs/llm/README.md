@@ -95,8 +95,10 @@ access or successful training on your task.
 The profile fills every workflow model slot: interpretation, data analysis,
 all three proposal stages, implementation, validation, tuning planner and
 reflector, and both literature stages. Enabling an optional capability does not
-switch it to a more expensive model. The default file leaves planner strategy selection to the installation.
-It does not select a paper compatibility profile. It does not enable those capabilities
+switch it to a more expensive model. The profile selects the framework's
+native planner (`tune.planner_strategy: native-timing-v1`), so it runs on a
+clean install without an experiment package. It does not select a paper
+compatibility profile. It does not enable those capabilities
 or set data size, training budgets, iteration count, or failed-round limits.
 
 For the first flow check, explicitly set one iteration, one round and

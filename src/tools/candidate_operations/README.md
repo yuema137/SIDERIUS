@@ -218,14 +218,18 @@ directory gains `placement.json`, which names the GPU it was given. If the budge
 is currently full, the submission returns `queued`: it waits its turn, in the
 order submissions arrived, and starts by itself once earlier runs end (status
 shows `queued` until then). To drop a waiting run, cancel it; it is removed from
-the queue without running. A run that could never fit is refused with
+the queue without running. Each waiting run keeps a process of about 0.56 GiB of
+memory open while it waits, and nothing limits how many can wait, so do not
+queue more runs than the host's memory can hold. A run that could never fit is refused with
 `resource_refused`. Two runs sharing one GPU slow each other
 down, which can change what a time budget admits. So a `time_budgeted` run is only
 placed on a GPU no other run is using, and no run is placed beside it. If every
 GPU is in use, it waits in the queue. If you accept that contention, set
 `"acknowledge_shared_gpu_time_budget": true` in the budget file before the first
 submission. Changing the budget file while runs hold reservations is refused with
-`budget_mismatch`.
+`budget_mismatch`. If a submission or a release reports `ledger_format`, the
+ledger file was written by an earlier SIDERIUS version. Wait until the runs it
+lists have ended, move the named `ledger.json` aside, and retry.
 
 A graph run can also run its independent nodes at the same time. To allow it,
 add a `parallel` block to the run request that says what one node of each kind

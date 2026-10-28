@@ -493,7 +493,7 @@ def test_loop_without_stop_conditions_keeps_pre_stop_source_bytes_and_digest():
     )
 
 
-def test_stop_conditions_roundtrip_and_refuse_judge_duplicates_and_unreachable_k():
+def test_stop_conditions_roundtrip_and_refuse_duplicates_and_unreachable_bounds():
     from pydantic import ValidationError
 
     from workflows.definition import JudgeStop, MetricThresholdStop, NoImprovementStop
@@ -503,25 +503,32 @@ def test_stop_conditions_roundtrip_and_refuse_judge_duplicates_and_unreachable_k
     source = render_workflow_source(document)
     assert parse_workflow_source(source) == document
     assert "MetricThresholdStop(" in source and "    NoImprovementStop,\n" in source
+    # A judge-free loop never imports the judge constructor (canonical bytes unchanged).
     assert "JudgeStop" not in source
     only = render_workflow_source(loop_document(threshold))
     assert "NoImprovementStop" not in only
     assert (
         document.definition.declaration_digest() != loop_document().definition.declaration_digest()
     )
-    with pytest.raises(ValidationError, match="judge stop conditions are deferred"):
-        JudgeStop()
-    with pytest.raises(WorkflowSourceError):
-        parse_workflow_source(
-            source.replace(
-                "    NoImprovementStop,\n", "    NoImprovementStop,\n    JudgeStop,\n", 1
-            )
-            .replace("NoImprovementStop(\n", "JudgeStop(\n", 1)
-            .replace("                    completed_bodies=2,\n", "", 1)
-            .replace("kind='no_improvement'", "kind='judge'")
-        )
     with pytest.raises(ValidationError, match="more than one stop condition"):
         loop_document(threshold, threshold)
     with pytest.raises(ValidationError, match="below final_iteration"):
         loop_document(NoImprovementStop(completed_bodies=3))
     loop_document(NoImprovementStop(completed_bodies=2))
+    # A judge first consulted at the final boundary (never judged) could never run.
+    with pytest.raises(ValidationError, match="judge min_completed_bodies must be below"):
+        loop_document(JudgeStop(criterion="plateau", min_completed_bodies=3))
+    with pytest.raises(ValidationError, match="more than one stop condition"):
+        loop_document(JudgeStop(criterion="a"), JudgeStop(criterion="b"))
+
+
+def test_judge_stop_roundtrips_every_field_through_canonical_source():
+    from workflows.definition import JudgeStop
+
+    judge = JudgeStop(criterion="Stop once 'gains' plateau.", min_completed_bodies=2)
+    document = loop_document(judge)
+    source = render_workflow_source(document)
+    # Fails if the renderer drops defaulted fields or forgets the judge import.
+    assert "    JudgeStop,\n" in source
+    assert "min_completed_bodies=2" in source and "on_failure='fail'" in source
+    assert parse_workflow_source(source) == document

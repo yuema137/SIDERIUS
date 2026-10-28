@@ -699,7 +699,15 @@ class TestCensusDLegacyLockKeySet:
         drain semantics can change a failed body's trace, so a workspace
         cannot switch mode on resume. Omitted at ``serial``, so every legacy
         and every budget-less lock stays byte-identical and resumable; the
-        budget itself (``host_budget``) is ``_PROVENANCE``."""
+        budget itself (``host_budget``) is ``_PROVENANCE``.
+
+        DECLARED DELTA (B2-4, operator decision B deferred from B2-2):
+        ``judge_routes`` joined — the resolved LLM-judge routes (provider,
+        model, effort, output and retry bounds per family). A recorded judge
+        verdict replays only against the route that produced it, so a
+        continuation cannot switch judge model or bounds. Omitted at ``None``
+        (no ``judge`` block), so every judge-free lock stays byte-identical
+        and resumable."""
         from core.run_invariants import RunInvariants
 
         assert RunInvariants._CANONICAL == (
@@ -762,4 +770,6 @@ class TestCensusDLegacyLockKeySet:
             "seed_derivation",
             # B3-2 — the declared delta documented above.
             "scheduling_mode",
+            # B2-4 — the declared delta documented above.
+            "judge_routes",
         )
