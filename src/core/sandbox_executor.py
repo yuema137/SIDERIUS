@@ -90,7 +90,7 @@ from core.task_transport import (
     task_manifest_argv as _task_manifest_argv,
 )
 from core.training_execution_bindings import TrainingExecutionBindings
-from core.training_seeds import SeedContext
+from core.training_seeds import SeedContext, publish_seed_context
 from execute_tools.data_paths import resolve_physical_data_root
 from execute_tools.dataset_config import (
     DataScope,
@@ -1208,8 +1208,7 @@ class TidmadSandbox:
                 sc_path = os.path.abspath(
                     os.path.join(self.dirs["configs"], f"seed_context_{exp_id}.json")
                 )
-                with open(sc_path, "w") as f:
-                    f.write(seed_context.model_dump_json())
+                publish_seed_context(sc_path, seed_context)
                 cmd.extend(["--seed_context_json", sc_path])
             # V19 PR 2: RESOLVED ordering only — the subprocess never learns
             # about proposals or overrides. Flags are appended only when

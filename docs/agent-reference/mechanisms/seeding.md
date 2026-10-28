@@ -246,17 +246,25 @@ Owner: `nodes/ml_hyperparameter_tune_agent/attempt_seeds.py`
 
 Owner: `core/retired_seed_pins.py`. `sampling_seed` and `train_base_seed` are
 removed from `WorkflowLaunchConfig`, `HyperparamTuningInput`, `ProposalInput`,
-both protocols and the authored-editor controls. An input that still names
-one is refused with `RetiredSeedPin`
+both protocols and the authored-editor controls.
+
+**Readback rule.** Records written before the retirement stay readable. A
+`null` pin (every pre-S3b tuner input wrote both as `null`) is dropped. A set
+pin is kept as historical provenance in the owning schema's
+`retired_seed_pins` field and is never an execution input.
+
+**Execution rule.** Launching or continuing anything that carries a set pin
+is refused with `RetiredSeedPin`
 (`… carries retired seed pin(s) […]: seeds derive from run_seed; set --run_seed`):
 
-| surface | behavior |
-|---|---|
-| `--sampling_seed` (runner CLI) / `run_chain.sh --sampling_seed` | parse error / exit 1 with the message |
-| `HyperparamTuningInput` (any key present, even `null`) | `ValidationError` |
-| candidate training settings / saved workflow `launch` | `ValidationError` |
-| reviewed launch projection recorded before the retirement (`LaunchExpectations.check_projection`) | **migration:** a `null` pin is dropped before comparison, so a seedless saved review still matches; a non-null pin refuses |
-| archived `trial_config_{exp_id}.json` with `train_base_seed` | read as plain JSON evidence; not re-validated |
+| surface | readback | execution |
+|---|---|---|
+| `--sampling_seed` (runner CLI) / `run_chain.sh --sampling_seed` | — | parse error (exit 2) / exit 1 with the message |
+| `HyperparamTuningInput` (`tuning_input.json`, graph evidence) | `null` dropped; set pins → `retired_seed_pins` | `HyperparamTuningAgent.run` refuses before any LLM call |
+| candidate training settings / saved workflow `launch` (`request.json`) | `null` dropped; set pins → `CandidateTrainingSettings.retired_seed_pins` | candidate training admission refuses (covers loop continuation) |
+| `ProposalInput` (`proposal.json`) | ignored (`extra="ignore"`, unchanged) | the protocol has no pin parameter |
+| reviewed launch projection (`LaunchExpectations.check_projection`) | `null` pins dropped before comparison | a set pin refuses |
+| archived `trial_config_{exp_id}.json` with `train_base_seed` | plain JSON evidence; not re-validated | — |
 
 ### Child environment
 

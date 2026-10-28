@@ -172,27 +172,68 @@ class TestStandaloneEntryBoundary:
         )
         assert self._run_main(self._argv(locked)) == 41
         assert "[seed] run_seed=41 source=locked" in capsys.readouterr().out
+        with pytest.raises(SystemExit) as exit_info:
+            self._run_main(self._argv(locked, "--run_seed", "5"))
+        assert exit_info.value.code == 2
+        assert "run_seed: locked=41 vs this run=5" in capsys.readouterr().err
 
 
 class TestRetiredSeedPins:
-    @pytest.mark.parametrize("name", ["sampling_seed", "train_base_seed"])
-    def test_tuner_input_refuses_a_retired_pin_even_when_null(self, name):
-        """T13. Fails if a retired pin is silently ignored by the node input."""
+    def test_archived_tuner_input_reads_and_null_pins_drop(self):
+        """T13 readback. Fails if a pre-retirement tuner input, which always
+        wrote ``"sampling_seed": null, "train_base_seed": null``, no longer
+        validates on the graph-evidence read path."""
         from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 
-        with pytest.raises(ValueError, match="seeds derive from run_seed; set --run_seed"):
-            HyperparamTuningInput.model_validate({"model_type": "fcnet", name: None})
+        raw = json.loads((REPO_ROOT / "tests/fixtures/native_tuner_input/empty.json").read_text())
+        assert raw["sampling_seed"] is None and raw["train_base_seed"] is None
+        restored = HyperparamTuningInput.model_validate(raw)
+        assert restored.retired_seed_pins is None
 
-    def test_saved_settings_and_cli_refuse_a_retired_pin(self):
-        """T13. Fails if a saved workflow/settings launch or the runner CLI
-        accepts a retired pin instead of refusing with the run-seed message."""
-        from tests.unit.sdsc_submission_scripts.test_arxiv_u1_identity_chain_wiring import _args
+    def test_a_set_pin_is_readable_provenance_but_never_runs(self, tmp_path, monkeypatch):
+        """T13. Fails if a recorded set pin is lost on readback, or if the
+        tuner executes an input that still carries one."""
+        from core.retired_seed_pins import RetiredSeedPin
+
+        bridge = RecordingLLMBridge.for_agent(PSEUDO_AGENT_FOLDER)
+        with pytest.raises(RetiredSeedPin, match="seeds derive from run_seed; set --run_seed"):
+            run_bounded_pseudo_iteration(
+                tmp_path,
+                monkeypatch,
+                preflight_results=_preflight(),
+                input_overrides={"sampling_seed": 137, "train_base_seed": None},
+                bridge=bridge,
+            )
+        assert bridge.calls == []
+
+    def test_old_settings_document_reads_but_admission_refuses(self):
+        """T13 readback. Fails if an old reusable request whose launch carried
+        pins 17/23 no longer parses, or if the pins silently vanish instead of
+        reaching the admission refusal."""
+        from core.retired_seed_pins import RetiredSeedPin, refuse_set_pins
         from workflows.candidate_training_settings import parse_training_settings
 
-        with pytest.raises(ValueError, match="seeds derive from run_seed"):
-            parse_training_settings(json.dumps({"launch": {"train_base_seed": 3}}))
+        settings = parse_training_settings(
+            json.dumps({"launch": {"sampling_seed": 17, "train_base_seed": 23}})
+        )
+        assert settings.retired_seed_pins == {"sampling_seed": 17, "train_base_seed": 23}
+        assert (
+            parse_training_settings(
+                json.dumps({"launch": {"sampling_seed": None}})
+            ).retired_seed_pins
+            is None
+        )
+        with pytest.raises(RetiredSeedPin):
+            refuse_set_pins(settings.retired_seed_pins, "candidate training settings")
+
+    def test_runner_cli_refuses_a_retired_pin_with_the_run_seed_message(self, capsys):
+        """T13. Fails if the runner CLI accepts --sampling_seed or refuses it
+        without naming the replacement."""
+        from workflows.standard_cli import build_parser
+
         with pytest.raises(SystemExit):
-            _args(("--sampling_seed", "5"))
+            build_parser().parse_args(["--sampling_seed", "5"])
+        assert "seeds derive from run_seed; set --run_seed" in capsys.readouterr().err
 
     def test_seedless_saved_review_stays_comparable(self):
         """T13 migration. Fails if a launch review recorded before the

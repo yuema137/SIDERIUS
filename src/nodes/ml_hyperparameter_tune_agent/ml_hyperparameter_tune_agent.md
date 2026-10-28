@@ -150,8 +150,9 @@ Each attempt's `train_sampling_seed`, `eval_sampling_seed` and the trainer's
 `seed_context` derive from `run_seed` at
 `seed_coordinates + (round, attempt=total_attempts)`; see
 [seeding](../../../docs/agent-reference/mechanisms/seeding.md#tuner-attempt-seeds).
-The retired `sampling_seed` / `train_base_seed` fields are refused
-(`RetiredSeedPin`).
+The retired `sampling_seed` / `train_base_seed` fields: a `null` value on
+readback is dropped; a set value is kept in `retired_seed_pins` (provenance)
+and `run()` refuses to execute it (`RetiredSeedPin`).
 
 ### Selection topology (Step-02b)
 

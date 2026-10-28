@@ -16,6 +16,7 @@ from typing import Final, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.durable_io import publish_bytes_write_once
 from core.seeding import (
     SEED_DERIVATION,
     MissingRunSeed,
@@ -106,6 +107,17 @@ class TrainingSeedPlan:
             order=self._derive("trainer.epoch_order", k),
             shuffle=self._derive("trainer.epoch_shuffle", k),
         )
+
+
+def publish_seed_context(path: str, context: SeedContext) -> None:
+    """Write the trainer handoff once; a retry of the same attempt must match it."""
+    payload = context.model_dump_json().encode()
+    try:
+        publish_bytes_write_once(path, payload)
+    except FileExistsError:
+        with open(path, "rb") as existing:
+            if existing.read() != payload:
+                raise ValueError(f"{path} already holds a different SeedContext") from None
 
 
 def require_seed_plan(plan: TrainingSeedPlan | None) -> TrainingSeedPlan:

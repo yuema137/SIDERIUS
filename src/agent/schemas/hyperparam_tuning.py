@@ -41,7 +41,7 @@ from agent.schemas.training_diagnosis import TrainingDiagnosis
 from core.checkpoint_selection import SelectedCheckpoint
 from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.record_role import AttemptRole, RecordRoleError, is_formal_role
-from core.retired_seed_pins import refuse_retired_seed_pins
+from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 
 # One vocabulary for the admission posture, shared with the policy that
 # enforces it. Two independent spellings would let a value be acceptable
@@ -2226,6 +2226,14 @@ class HyperparamTuningInput(BaseModel):
             "Every attempt seed derives from it; None is refused (MissingRunSeed)."
         ),
     )
+    retired_seed_pins: RetiredSeedPins | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Issue #983 — readback only: a set sampling_seed/train_base_seed from a "
+            "pre-retirement record, kept as provenance. The tuner refuses to run it."
+        ),
+    )
     seed_coordinates: SeedCoordinates = Field(
         default_factory=SeedCoordinates,
         exclude_if=lambda value: value == SeedCoordinates(),
@@ -2238,9 +2246,8 @@ class HyperparamTuningInput(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _refuse_retired_seed_pins(cls, data: Any) -> Any:
-        refuse_retired_seed_pins(data, "HyperparamTuningInput")
-        return data
+    def _migrate_retired_seed_pins(cls, data: Any) -> Any:
+        return split_retired_seed_pins(data)
 
     @field_validator("seed_coordinates")
     @classmethod
