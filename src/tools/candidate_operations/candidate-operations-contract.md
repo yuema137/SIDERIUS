@@ -830,6 +830,12 @@ and returns `False` only when `operations/` or the `operations/<UUID>` entry is
 absent; any present entry, even one still mid-admission, returns `True`. Callers
 that need a typed refusal raise `UnknownOperation` (code `unknown_operation`).
 
+`loop_control_requests(config, operation_id) -> (stop_requested, pause_requested)` is
+read-only: it reuses the worker's `stop_requested`/`pause_requested` readers on the
+root's claimed workspace (Stop run-wide, Pause per segment), returns `(False, False)`
+for a non-loop operation or before the root worker claims its workspace, and raises
+`ValueError` for a marker naming another run.
+
 ### Control an authored loop from code or the CLI
 
 CLI `review-resume` and the native continuation above serve captured native

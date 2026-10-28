@@ -37,6 +37,14 @@ def _stop_calls(monkeypatch, failure=None):
     return calls
 
 
+def without_requests(loop):
+    """Request flags are covered against real markers in test_loop_resume; drop them here."""
+    if loop is None:
+        return None
+    assert (loop.pop("stop_requested"), loop.pop("pause_requested")) == (False, False)
+    return loop
+
+
 def test_stop_route_delegates_once_and_acknowledges_only_a_request(console_config, monkeypatch):
     """Fails if the route skips the owner, calls it twice, or claims termination."""
     calls = _stop_calls(monkeypatch)
@@ -238,6 +246,10 @@ def test_status_loop_bound_from_submission_and_bodies_only_from_receipt(
         "tools.candidate_console.service.operation_admitted", lambda config, value: True
     )
     monkeypatch.setattr(
+        "tools.candidate_console.service.loop_control_requests",
+        lambda config, value: (False, False),
+    )
+    monkeypatch.setattr(
         "tools.candidate_console.service.read_operation",
         lambda config, value: _snapshot(value, receipt),
     )
@@ -248,4 +260,4 @@ def test_status_loop_bound_from_submission_and_bodies_only_from_receipt(
         ),
     )
     status = client(console_config).get(f"/api/operations/{operation_id}").json()
-    assert status.get("loop") == expected
+    assert without_requests(status.get("loop")) == expected

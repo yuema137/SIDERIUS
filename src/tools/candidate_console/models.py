@@ -221,6 +221,10 @@ class LoopStatusView(PreviewModel):
     # The receipt's verified reason when a declared stop condition completed the loop
     # before its limit; absent otherwise (and absent while no receipt exists).
     stop_reason: StopReason | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Durable Stop/Pause requests recorded for this run (Stop) or segment (Pause), read
+    # from the worker's own marker files; the receipt still decides what took effect.
+    stop_requested: bool = False
+    pause_requested: bool = False
 
 
 class LoopStopSelection(PreviewModel):

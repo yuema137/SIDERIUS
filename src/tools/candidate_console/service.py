@@ -16,6 +16,7 @@ from tools.candidate_operations import (
     PreparedCandidate,
     PrepareOperation,
     list_operations,
+    loop_control_requests,
     loop_root_operation,
     operation_admitted,
     read_operation,
@@ -81,7 +82,7 @@ def preparation_request(
 
 
 def loop_status(
-    operation_store: OperationStoreConfig, snapshot: OperationSnapshot
+    operation_store: OperationStoreConfig, snapshot: OperationSnapshot, *, requests: bool = False
 ) -> LoopStatusView | None:
     """Declared loop bound from the root submission; bodies only from this segment's receipt.
 
@@ -98,10 +99,17 @@ def loop_status(
         raise OperationFailure("kind", "operation loop definition is missing")
     receipt = snapshot.receipt
     trace = receipt.loop_trace if isinstance(receipt, CandidateRunReceipt) else None
+    stop, pause = (
+        loop_control_requests(operation_store, snapshot.operation_id)
+        if requests
+        else (False, False)
+    )
     return LoopStatusView(
         final_iteration=loop.final_iteration,
         attempted_iterations=None if trace is None else trace.attempted_iterations,
         stop_reason=None if trace is None else trace.stop_reason,
+        stop_requested=stop,
+        pause_requested=pause,
     )
 
 
@@ -244,7 +252,7 @@ class CandidateConsole:
             validation_passed=receipt.validation_passed
             if isinstance(receipt, CandidateRunReceipt)
             else None,
-            loop=loop_status(self.config.operation_store, snapshot),
+            loop=loop_status(self.config.operation_store, snapshot, requests=True),
         )
 
     def operations(self, limit: int = 50) -> OperationListView:

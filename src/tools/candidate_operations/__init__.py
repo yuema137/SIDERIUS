@@ -2,7 +2,12 @@
 
 from .listing import list_operations
 from .logs import read_operation_log
-from .loop_resume import loop_root_operation, request_loop_pause, review_loop_resume
+from .loop_resume import (
+    loop_control_requests,
+    loop_root_operation,
+    request_loop_pause,
+    review_loop_resume,
+)
 from .models import (
     CandidateLoopResumeOperation,
     CandidateLoopResumeRequest,
@@ -65,6 +70,7 @@ __all__ = [
     "build_reusable_operation",
     "list_operations",
     "lookup_operation_request",
+    "loop_control_requests",
     "loop_root_operation",
     "operation_admitted",
     "operation_request_digest",

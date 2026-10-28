@@ -341,7 +341,15 @@ the existing status poll, with recorded values unrounded. The receipt's body
 numbers (`attempted_iterations`, `stop_reason.iteration` and its incumbent
 iterations) are whole-run indices, so a resumed segment's line says "Body numbers
 count the whole run, including earlier segments." The console never
-infers per-body progress from an active process. Fixed and non-candidate
+infers per-body progress from an active process. `stop_requested` and
+`pause_requested` (status only; `false` in the operation list) are read by
+`candidate_operations.loop_control_requests` from the worker's own durable markers
+with the worker's scoping: Stop is run-wide (`candidate_run/stop.json`), Pause belongs
+to this operation's segment only (root `candidate_run/pause.json` or
+`continuations/<segment>/pause.json`). They report recorded requests, never their
+effect; the receipt still decides whether a Stop or Pause took effect. Monitor renders
+the Stop/Pause controls from these fields, so a reload or another tab shows a pending
+Stop and hides Pause once a Stop is recorded. Fixed and non-candidate
 operations omit the field. `StatusView.successor_operation_id` forwards the
 operations readback for a segment that a Resume has continued; the segment keeps
 its own receipt.
