@@ -65,3 +65,44 @@ def test_positive_vram_budget_still_launches(tmp_path, monkeypatch, field):
             run_name="preflight",
             launch=WorkflowLaunchConfig(**{field: 12.0}),
         )
+
+
+def test_iteration_cli_refuses_zero_vram_budget_before_workspace_binding(
+    tmp_path, monkeypatch, capsys
+):
+    """#1044 review: --trial_vram_budget_gb 0 passed main()'s early check and was
+    refused only inside run_workflow, after workspace binding."""
+    import sys
+
+    from core import generated_library
+    from workflows import run_one_iteration
+
+    workspace = tmp_path / "uncreated-run"
+    monkeypatch.setattr(generated_library, "bind_generated_library_to_workspace", _stop_startup)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_one_iteration.py",
+            "--workspace",
+            str(workspace),
+            "--run_name",
+            "preflight",
+            "--start_iteration",
+            "1",
+            "--task_composition",
+            str(tmp_path / "must-not-be-opened.yaml"),
+            "--data_dir",
+            str(tmp_path / "must-not-be-read"),
+            "--trial_vram_budget_gb",
+            "0",
+        ],
+    )
+    with pytest.raises(SystemExit) as error:
+        run_one_iteration.main()
+    assert error.value.code == 2
+    message = capsys.readouterr().err
+    assert "trial_vram_budget_gb=0.0" in message
+    # None is admissible, so the refusal says how to run without a ceiling.
+    assert "Omit it (None)" in message
+    assert not workspace.exists()
