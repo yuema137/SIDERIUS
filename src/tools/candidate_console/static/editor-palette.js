@@ -66,7 +66,7 @@
   }
   function renderList() {
     const list = host.querySelector('.palette-list'); list.replaceChildren(); guidance().hide(canvas); syncGuide();
-    if (!catalog) { element('p', loading ? 'Loading capabilities…' : 'Connect to load the capability catalog.', list, 'palette-empty'); return; }
+    if (!catalog) { element('p', loading ? 'Loading modules…' : 'Connect to load the modules.', list, 'palette-empty'); return; }
     const query = host.querySelector('.palette-search').value.trim().toLowerCase();
     const groups = new Map();
     catalog.forEach((entry, index) => {
@@ -76,7 +76,7 @@
       if (!groups.has(entry.capability)) groups.set(entry.capability, []);
       groups.get(entry.capability).push([entry, index]);
     });
-    if (!groups.size) { element('p', 'No capability matches the search.', list, 'palette-empty'); return; }
+    if (!groups.size) { element('p', 'No module matches the search.', list, 'palette-empty'); return; }
     // Groups follow the server's research-stage order (guide.capabilities[].stage).
     for (const capability of guidance().order(guide, groups.keys())) {
       const entries = groups.get(capability);
@@ -111,27 +111,27 @@
     if (catalog || loading || !window.consoleSession?.connected || !visible()) return;
     const revision = window.consoleSession.revision; loading = revision; renderList();
     try { const value = await window.consoleSession.request('editor/node-catalog'); if (revision === window.consoleSession.revision) { catalog = value.entries; guide = value.guide || null; } }
-    catch (error) { if (!error.stale) host.querySelector('.palette-note').textContent = 'Capability catalog unavailable: ' + error.message; }
+    catch (error) { if (!error.stale) host.querySelector('.palette-note').textContent = 'Modules unavailable: ' + error.message; }
     finally { if (loading === revision) loading = null; if (host) renderList(); window.dispatchEvent(new Event('editor-node-catalog')); }
   }
   function mount(container, graphElement, callbacks) {
     host = container; canvas = graphElement; actions = callbacks; host.replaceChildren();
     // Side rail beside the canvas (editor-palette.css keeps it sticky in view); under 900px
     // it collapses to a drawer opened by this toggle. Click-to-add works in both layouts.
-    element('h3', 'Add capability', host);
-    const toggle = element('button', 'Add capability', host, 'palette-toggle');
+    element('h3', 'Modules', host);
+    const toggle = element('button', 'Modules', host, 'palette-toggle');
     toggle.type = 'button'; toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', 'editor-palette-body');
     toggle.prepend(window.consoleIcons?.make('plus', 20) || '');
     toggle.addEventListener('click', () => toggle.setAttribute('aria-expanded', String(host.classList.toggle('open'))));
     const body = element('div', '', host, 'palette-body'); body.id = 'editor-palette-body';
     const search = element('input', '', body, 'palette-search');
-    search.type = 'search'; search.placeholder = 'Search capabilities'; search.setAttribute('aria-label', 'Search capabilities');
+    search.type = 'search'; search.placeholder = 'Search modules'; search.setAttribute('aria-label', 'Search modules');
     search.addEventListener('input', renderList);
     const start = element('div', '', body, 'palette-guide'); start.hidden = true; start.setAttribute('role', 'note');
     element('div', '', body, 'palette-list');
-    const cancel = element('button', 'Cancel new node', body, 'palette-cancel');
+    const cancel = element('button', 'Cancel new module', body, 'palette-cancel secondary');
     cancel.type = 'button'; cancel.hidden = true; cancel.addEventListener('click', () => actions.cancel());
-    element('p', 'Click or drag a capability onto the canvas. A new node stays a local draft until its required inputs are connected and you review and save.', body, 'palette-note').setAttribute('role', 'status');
+    element('p', 'Click or drag a module onto the canvas. It stays a draft until its required inputs are connected and you save.', body, 'palette-note').setAttribute('role', 'status');
     canvas.addEventListener('dragover', event => { if (state.enabled && [...event.dataTransfer.types].includes('text/plain')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } });
     canvas.addEventListener('drop', event => {
       const data = event.dataTransfer.getData('text/plain'), index = data.startsWith(PREFIX) ? data.slice(PREFIX.length) : '';
@@ -148,7 +148,7 @@
     if (!host) return;
     for (const entry of host.querySelectorAll('.palette-entry')) entry.setAttribute('aria-disabled', String(!state.enabled));
     const cancel = host.querySelector('.palette-cancel');
-    cancel.hidden = !state.pendingNode; cancel.textContent = state.pendingNode ? `Cancel new node ${state.pendingNode}` : 'Cancel new node';
+    cancel.hidden = !state.pendingNode; cancel.textContent = state.pendingNode ? `Cancel new module ${state.pendingNode}` : 'Cancel new module';
     if (!catalog) void load();
   }
   // The pending node is drawn from the proposal plus server-projected ports (draft.view.ports).
@@ -174,11 +174,13 @@
   const draftMessage = view => view.status === 'complete'
     ? `New node ${view.proposal.node} is complete. Review the exact Python insertion, then save.`
     : `New node ${view.proposal.node} is a draft (${view.status}): ${view.diagnostics.join(' ')} Connect its inputs on the canvas or in Selection.`;
+  // Delete: a trash icon in the Selection header (tour #15); always succeeds in the draft, Undo restores.
   function inspectorActions(parent, nodeId, options) {
-    const button = element('button', 'Remove capability', parent, 'editor-remove-node');
+    const button = element('button', '', parent, 'editor-remove-node secondary icon-button');
     button.type = 'button'; button.disabled = !options.enabled;
-    button.setAttribute('aria-label', `Remove ${nodeId}`);
-    button.title = 'Review shows the exact source removal and refuses while other capabilities still read this one.';
+    button.append(window.consoleIcons?.make('trash', 16) || '');
+    element('span', 'Delete module', button, 'sr-only');
+    button.setAttribute('aria-label', `Delete ${nodeId}`); button.title = 'Delete module (Undo brings it back)';
     button.addEventListener('click', () => options.remove([nodeId]));
   }
   let menu = null;
@@ -187,7 +189,7 @@
     event.preventDefault(); closeMenu();
     menu = element('div', '', document.body, 'node-context-menu'); menu.setAttribute('role', 'menu');
     menu.style.left = event.clientX + 'px'; menu.style.top = event.clientY + 'px';
-    const item = element('button', `Remove ${nodeId}`, menu); item.type = 'button'; item.setAttribute('role', 'menuitem');
+    const item = element('button', 'Delete module', menu); item.type = 'button'; item.setAttribute('role', 'menuitem');
     item.addEventListener('click', () => { closeMenu(); remove([nodeId]); });
     item.focus();
   }

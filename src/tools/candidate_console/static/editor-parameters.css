@@ -27,3 +27,9 @@
 .training-field .field-help { display: block; color: var(--muted); }
 .training-reset { margin: .2rem 0; font-size: .8rem; }
 .model-hyperparameters dd, .model-hyperparameters dt { overflow-wrap: anywhere; }
+/* Training settings (tour #11, spec §8.2): Default chip, a reset icon only when changed,
+ * the error under its own field. */
+.training-field .field-error { display: block; color: var(--error); }
+.training-field .field-error:empty { display: none; }
+.training-field .training-reset { width: 28px; min-width: 28px; height: 28px; min-height: 28px; margin: 0 0 0 var(--space-1); padding: 0; vertical-align: middle; }
+.training-field .training-reset[hidden] { display: none; }

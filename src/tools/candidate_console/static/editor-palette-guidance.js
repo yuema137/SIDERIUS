@@ -71,7 +71,7 @@
       const marker = element('span', '', summary, 'palette-badge'); marker.dataset.badge = tag; marker.title = tag;
       element('span', tag, marker, 'palette-visually-hidden');
     }
-    if (info) element('span', String(info.stage + 1), summary, 'palette-step').setAttribute('aria-label', `Step ${info.stage + 1}`);
+    // Rows are already in pipeline order; no step-number badge (tour #13).
     summary.setAttribute('aria-label', `${capabilityLabel(capability)}${info ? `, step ${info.stage + 1}` : ''}${tag ? `, ${tag}` : ''}, ${count} route${count === 1 ? '' : 's'}`);
   }
   function details(parent, capability, guide, entries) {

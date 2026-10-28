@@ -88,10 +88,12 @@ try {
   assert.equal(await page.locator('.circuit-problem-badge').count(), 0);
   assert.equal(await problems.isHidden(), true);
 
-  // U7/U8/C8: the tuning inspector lists every training setting expanded, with help and reset.
+  // U7/U8/C8: the tuning inspector lists every training setting (one click open), with help and reset.
   await page.locator('#circuit-node-fit').click();
   const settings = page.locator('#editor-training-settings');
-  assert.equal(await settings.evaluate(details => details.open), true, 'Defaults are listed expanded on selection');
+  assert.equal(await settings.evaluate(details => details.open), false, 'Collapsed on selection, with a changed-count summary (spec §8.1)');
+  assert.match(await settings.locator('summary').textContent(), /^Training settings · \d+ of \d+ changed$/);
+  await settings.locator('summary').click();
   const rows = settings.locator('[data-training-field]');
   assert.ok((await rows.count()) > 5);
   assert.equal(await rows.count(), await settings.locator('[data-training-mode]').count());

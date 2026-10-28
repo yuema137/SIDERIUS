@@ -36,9 +36,18 @@
     return projection.inventory.find(value => value.node === node && value.argument === argument);
   }
   // Refusal reason naming both server-sent contracts (presentation only).
-  const refusal = (source, node, argument) => contracts.refusal(`${source.node}.result`,
+  const refusal = (source, node, argument) => contracts.refusal(capabilityOf(source.node),
     projection.inventory.find(value => value.node === source.node)?.node_output_contract.id,
-    `${node}.${argument || 'request'}`, choice(node, argument)?.socket_contract.id);
+    'this input', choice(node, argument)?.socket_contract.id);
+  // A refused drop is explained where it happened (tour #7, spec K10): one sentence under the
+  // input; it goes away with the next gesture or render.
+  function anchorNote(port, text) {
+    host.querySelector('.circuit-anchor-note')?.remove();
+    const card = port.closest('.circuit-card'), note = element('p', text, host.querySelector('.circuit-world'), 'circuit-walk-note circuit-anchor-note');
+    note.setAttribute('role', 'status');
+    note.style.left = card.offsetLeft + 'px'; note.style.width = card.offsetWidth + 'px';
+    note.style.top = card.offsetTop + port.offsetTop + port.offsetHeight + 4 + 'px';
+  }
   // `source` is the pending output, or a hovered output for a preview without selecting it.
   function highlight(source = pending) {
     if (!host) return;
@@ -238,10 +247,10 @@
     button.addEventListener('click', () => {
       if (projection !== snapshot || !projection.enabled) return;
       if (!projection.allowBindingChange) { say('Review/save or discard the current edits before changing a connection.'); return; }
-      if (output) { pending = {kind: 'result', node: node.id, port: 'result'}; highlight(); say(`Selected ${node.id}.result. Choose a highlighted input, or press Escape to cancel.`); return; }
-      if (!pending) { say('Select a result output socket first. External bindings remain available in the inspector.'); return; }
+      if (output) { host.querySelector('.circuit-anchor-note')?.remove(); pending = {kind: 'result', node: node.id, port: 'result'}; highlight(); say(`Selected the output of ${capabilityOf(node.id)}. Choose a highlighted input, or press Escape to cancel.`); return; }
+      if (!pending) { say('Choose an output first (the socket on the right side of a module).'); return; }
       const selected = choice(node.id, argument)?.choices.find(value => same(value.source, pending));
-      if (!selected) { say(refusal(pending, node.id, argument)); return; }
+      if (!selected) { const reason = refusal(pending, node.id, argument); say(reason); anchorNote(button, reason); return; }
       cancel(); actions.bind(node.id, argument, selected.source);
     });
     if (output) {
@@ -256,7 +265,8 @@
     return button;
   }
   const button = (parent, text, id, onClick, icon = null) => {
-    const value = element('button', text, parent, 'circuit-view-button'); value.type = 'button'; value.id = id;
+    // Canvas controls are secondary (tour #15): Save stays the page's one primary action.
+    const value = element('button', text, parent, 'circuit-view-button secondary'); value.type = 'button'; value.id = id;
     if (icon && window.consoleIcons) value.prepend(window.consoleIcons.make(icon));
     value.addEventListener('click', onClick); return value;
   };
@@ -302,7 +312,7 @@
     else if (previous && !view.fitPending) view.scroll = {left: previous.scrollLeft, top: previous.scrollTop};
     window.editorCircuitWalk?.stop();
     host = container; projection = value; actions = callbacks; cancel(false); selectedWire = null; host.replaceChildren();
-    const message = element('p', 'Select a capability to inspect it. Choose an output, then a highlighted input to rebind.', host, 'circuit-message');
+    const message = element('p', 'Select a module to see its inputs. Drag from an output to a highlighted input to connect them.', host, 'circuit-message');
     message.setAttribute('role', 'status');
     toolbar(host, value);
     if (value.document) contracts.legend(host, value.inventory);
@@ -359,7 +369,7 @@
         else { gesture.card.style.left = gesture.left + 'px'; gesture.card.style.top = gesture.top + 'px'; draw(); }
       });
       heading.addEventListener('pointercancel', event => {
-        if (projection === value && drag?.node === node.id && drag.pointerId === event.pointerId) { cancel(); say('Node move cancelled.'); }
+        if (projection === value && drag?.node === node.id && drag.pointerId === event.pointerId) { cancel(); say('Move cancelled.'); }
       });
       // Server inventory marks required sockets; an unbound one flags the whole card.
       const missing = value.inventory.filter(item => item.node === node.id && item.required && !item.bound).length;
@@ -446,8 +456,9 @@
   }
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
-    if (pending || drag) { cancel(); say('Circuit gesture cancelled.'); }
-    if (selectedWire) { selectedWire = null; highlight(); say('Wire selection cancelled.'); }
+    if (pending || drag) { cancel(); say('Cancelled.'); }
+    if (selectedWire) { selectedWire = null; highlight(); say('Connection deselected.'); }
+    host?.querySelector('.circuit-anchor-note')?.remove();
   });
   // Drag-to-connect: a press on an output released over an input clicks that input.
   document.addEventListener('pointerup', event => {
@@ -472,7 +483,7 @@
     setTimeout(() => document.removeEventListener('click', swallow, {capture: true}), 0);
   });
   document.addEventListener('pointercancel', () => { if (document.body.classList.contains('circuit-gesture')) gesture(false); });
-  document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Connection selection cancelled.'); } });
+  document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Cancelled.'); } });
   document.addEventListener('pointermove', event => {
     if (!pending || !host?.contains(event.target)) return;
     const output = host.querySelector(`#circuit-output-${CSS.escape(pending.node)}`), svg = wireLayer();

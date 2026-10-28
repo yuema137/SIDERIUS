@@ -142,7 +142,7 @@ try {
   await waitUntil(async () => (await ids()).length === 2, 'module added');
   const added = (await ids()).find(id => !before.includes(id));
   await waitUntil(async () => (await page.locator(`.circuit-wire-target[data-from="p"][data-to="${added}"]`).count()) === 1, 'added module wired to its source');
-  assert.match(await page.locator('#editor-undo').getAttribute('title'), /Add capability/, 'Add + wire is one undo step');
+  assert.match(await page.locator('#editor-undo').getAttribute('title'), /Add module/, 'Add + wire is one undo step');
   await page.locator('.circuit-card[data-node="p"]').hover();
   assert.equal(await handleOf('p').count(), 0, 'A connected output no longer offers +');
 
@@ -150,7 +150,7 @@ try {
   const heading = page.locator(`#circuit-node-${added}`), box = await heading.boundingBox();
   await page.mouse.move(box.x + 30, box.y + 10); await page.mouse.down();
   await page.mouse.move(box.x + 30, box.y + 74, {steps: 4}); await page.mouse.up();
-  await waitUntil(async () => /Move capability/.test(await page.locator('#editor-undo').getAttribute('title')), 'drag recorded');
+  await waitUntil(async () => /Move module/.test(await page.locator('#editor-undo').getAttribute('title')), 'drag recorded');
   await page.locator('#circuit-tidy').click();
   await waitUntil(async () => /Tidy up layout/.test(await page.locator('#editor-undo').getAttribute('title')), 'tidy recorded');
   assert.deepEqual(await overlaps(), [], 'Tidy up leaves no overlapping cards');

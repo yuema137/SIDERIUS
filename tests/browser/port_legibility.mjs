@@ -109,7 +109,7 @@ try {
 
   // Legend lists every contract present in the graph with its swatch and readable name.
   const legend = page.locator('.circuit-contract-legend');
-  assert.match(await legend.locator('summary').textContent(), /^Port types \(\d+\)$/);
+  assert.match(await legend.locator('summary').textContent(), /^Connector types \(\d+\)$/);
   await legend.locator('summary').click();
   const legendIds = await legend.locator('li').evaluateAll(items => items.map(item => item.dataset.contract));
   for (const contract of byContract.keys()) assert.ok(legendIds.includes(contract), `legend lists ${contract}`);

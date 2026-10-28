@@ -150,7 +150,7 @@ try {
     await theme.selectOption(mode);
     await waitUntil(async () => (await page.locator('html').getAttribute('data-theme')) === mode, `theme ${mode}`);
     const targets = [
-      palette.locator('.palette-guide'), validation.locator('summary .capability-name'), validation.locator('.palette-step'),
+      palette.locator('.palette-guide'), validation.locator('summary .capability-name'),
       palette.locator('.palette-category[data-capability="proposal"] .palette-badge'), validation.locator('.palette-details-description'),
       validation.locator('.palette-details-from'), route.locator('.palette-entry-route'), route.locator('.palette-chip').first(),
     ];

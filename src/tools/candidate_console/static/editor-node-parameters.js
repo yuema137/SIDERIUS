@@ -8,7 +8,9 @@
     parent.append(element); return element;
   };
   const show = value => JSON.stringify(value);
-  const INVALID = 'Enter a valid number, or choose default / None.';
+  const INVALID = 'Enter a number, or choose Default.';
+  // Collapsed by default (spec §8.1); an author who opened it keeps it open across re-renders.
+  let trainingOpen = false;
   const stateOf = (launch, name) => !Object.hasOwn(launch, name) ? 'unset' : launch[name] === null ? 'null' : 'supplied';
   // Help lists only what the native schema declares; absent metadata is not shown.
   function helpText(control) {
@@ -22,9 +24,12 @@
       help.exclusive_maximum !== null && help.exclusive_maximum !== undefined ? `< ${help.exclusive_maximum}` : null,
     ].filter(Boolean);
     if (bounds.length) parts.push(`Range: ${bounds.join(', ')}`);
-    if (help.has_schema_default) parts.push(`Schema default: ${show(help.schema_default)}`);
-    parts.push(`Native preview: ${show(control.effective)} (updated on review)`);
     return parts.join(' · ');
+  }
+  // Schema default and native preview are advanced detail (tour #9): raw JSON values.
+  function nativeText(control) {
+    const help = control.help || {};
+    return `${help.has_schema_default ? `Schema default: ${show(help.schema_default)} · ` : ''}Native preview: ${show(control.effective)} (updated on review)`;
   }
   /**
    * state: {training, launch(), saved, drafts}; launch() returns the draft's sparse
@@ -33,11 +38,12 @@
    */
   function render(parent, state, actions) {
     const {training, saved, drafts} = state;
-    const group = node('details', '', parent, 'training-settings'); group.open = true;
+    const group = node('details', '', parent, 'training-settings'); group.open = trainingOpen;
     group.id = 'editor-training-settings';
+    group.addEventListener('toggle', () => { trainingOpen = group.open; });
     const summary = node('summary', '', group);
-    node('p', 'Epochs are ceilings; native planning resolves epochs. Task-owned rules may further constrain this run.', group);
-    node('p', `Preparation output restriction: ${show(training.allowed_output_types)}`, group);
+    for (const text of ['Epochs are ceilings; native planning resolves epochs. Task-owned rules may further constrain this run.',
+      `Preparation output restriction: ${show(training.allowed_output_types)}`]) node('p', text, group, 'muted').dataset.uiFlag = 'advanced';
     const rows = [];
     // Badges, counts and Reset follow every edit without re-rendering (focus stays put).
     const update = () => {
@@ -50,9 +56,10 @@
         if (changed) changedCount++;
         row.dataset.modified = String(changed); row.dataset.unsaved = String(unsaved);
         badge.textContent = unsaved ? 'Changed, not saved' : changed ? 'Modified' : 'Default';
-        reset.disabled = !changed;
+        // Reset is a small icon shown only when there is something to reset (spec §8.2).
+        reset.disabled = !changed; reset.hidden = !changed;
       }
-      summary.textContent = `Training settings · ${changedCount} of ${rows.length} changed from default`;
+      summary.textContent = `Training settings · ${changedCount} of ${rows.length} changed`;
     };
     for (const control of training.controls) {
       const name = control.name, launch = state.launch(), current = stateOf(launch, name);
@@ -61,7 +68,7 @@
       const badge = node('span', '', wrapper, 'training-badge'); badge.dataset.trainingBadge = name;
       const modeSelect = node('select', '', wrapper);
       modeSelect.dataset.trainingMode = name;
-      for (const [value, title] of [['unset', 'Use native default'], ['supplied', 'Set value'], ...(control.nullable ? [['null', 'None']] : [])]) {
+      for (const [value, title] of [['unset', 'Default'], ['supplied', 'Set value'], ...(control.nullable ? [['null', 'None']] : [])]) {
         node('option', title, modeSelect).value = value;
       }
       modeSelect.value = current;
@@ -72,20 +79,26 @@
       if (input.type === 'checkbox') input.checked = value === true; else input.value = value ?? '';
       if (drafts.has(name)) { modeSelect.value = 'supplied'; input.value = drafts.get(name); input.setCustomValidity(INVALID); }
       input.disabled = modeSelect.value !== 'supplied';
+      // Validation sits under its own control (spec §8.2), not only in the page status.
+      const error = node('small', '', row, 'field-error'); error.id = `editor-training-error-${name}`; error.setAttribute('role', 'status');
       const help = node('small', helpText(control), row, 'field-help'); help.id = `editor-training-help-${name}`;
+      const native = node('span', `${help.textContent ? ' · ' : ''}${nativeText(control)}`, help); native.dataset.uiFlag = 'advanced';
       input.setAttribute('aria-describedby', help.id); modeSelect.setAttribute('aria-describedby', help.id);
-      const reset = node('button', 'Reset to default', row, 'training-reset'); reset.type = 'button';
+      const reset = node('button', '', row, 'training-reset secondary icon-button'); reset.type = 'button';
+      reset.append(window.consoleIcons?.make('rotate-ccw', 16) || ''); node('span', 'Reset to default', reset, 'sr-only'); reset.title = 'Reset to default';
       reset.dataset.trainingReset = name;
       reset.setAttribute('aria-label', `Reset ${control.label} to the native default`);
       rows.push({name, row, badge, reset});
+      const invalid = on => { error.textContent = on ? INVALID : ''; input.setAttribute('aria-invalid', String(on)); };
+      if (drafts.has(name)) invalid(true);
       const setValue = () => {
-        input.setCustomValidity('');
+        input.setCustomValidity(''); invalid(false);
         if (input.type === 'checkbox') actions.supply(name, input.checked);
         else if (input.value.trim() !== '' && Number.isFinite(input.valueAsNumber) && input.checkValidity()) actions.supply(name, input.valueAsNumber);
-        else { input.setCustomValidity(INVALID); actions.invalid(name, input.value); }
+        else { input.setCustomValidity(INVALID); invalid(true); actions.invalid(name, input.value); }
       };
       modeSelect.addEventListener('change', () => {
-        input.disabled = modeSelect.value !== 'supplied'; input.setCustomValidity('');
+        input.disabled = modeSelect.value !== 'supplied'; input.setCustomValidity(''); invalid(false);
         if (modeSelect.value === 'unset') actions.unset(name, false);
         else if (modeSelect.value === 'null') actions.supply(name, null);
         else setValue();
@@ -95,9 +108,10 @@
       reset.addEventListener('click', () => actions.unset(name, true));
     }
     update();
-    node('p', 'Workflow parameter rules (exact / range / allowed / predicate):', group);
-    node('pre', JSON.stringify(state.launch().workflow_parameter_rules ?? null, null, 2), group);
-    const advanced = node('button', 'Edit advanced settings and rules in source', group); advanced.type = 'button';
+    const rules = node('div', '', group, 'training-rules'); rules.dataset.uiFlag = 'advanced';
+    node('p', 'Workflow parameter rules (exact / range / allowed / predicate):', rules);
+    node('pre', JSON.stringify(state.launch().workflow_parameter_rules ?? null, null, 2), rules);
+    const advanced = node('button', 'Edit advanced settings and rules in source', rules, 'secondary'); advanced.type = 'button';
     advanced.addEventListener('click', actions.openSource);
   }
   // Model hyperparameters belong to the task manifest; the editor names the owner only.
@@ -116,8 +130,8 @@
     node('legend', 'Loop and stop settings', group);
     const role = loop.feedback.source.node === nodeId ? 'feeds results back' : 'receives feedback';
     const stops = loop.stop_conditions?.length || 0;
-    node('p', `This capability ${role} in the research loop: up to ${loop.final_iteration} iterations, ${stops} stop condition${stops === 1 ? '' : 's'}.`, group);
-    const button = node('button', 'Edit loop and stop settings', group); button.type = 'button';
+    node('p', `This module ${role} in the research loop: up to ${loop.final_iteration} iterations, ${stops} stop condition${stops === 1 ? '' : 's'}.`, group);
+    const button = node('button', 'Edit loop and stop settings', group, 'secondary'); button.type = 'button';
     button.addEventListener('click', open);
   }
   window.editorNodeParameters = Object.freeze({training: render, modelOwner: renderModelOwner, loopPointer: renderLoopPointer, helpText});

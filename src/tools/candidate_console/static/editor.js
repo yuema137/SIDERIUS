@@ -225,7 +225,7 @@
   }
   // A reviewed source, task-reference or node add/remove becomes the draft's new anchor (one undoable step).
   const foldLabel = proposal => ({source: 'Source edits', task_references: 'Task reference update',
-    add_node: `Add capability ${proposal.node}`, node_drafts: `Draft: ${NodeDrafts.summary(proposal)}`, remove_node: `Remove capability ${proposal.nodes?.join(', ')}`})[proposal.kind];
+    add_node: `Add module ${proposal.node}`, node_drafts: `Draft: ${NodeDrafts.summary(proposal)}`, remove_node: `Delete module ${proposal.nodes?.join(', ')}`})[proposal.kind];
   function fold(value, label) {
     restore(viewState(value)); sourceDirty = false; draft.record(draftState(), label);
   }
@@ -242,7 +242,9 @@
   }
   // `source` was offered (or is a just-created input); pending sockets edit the pending node.
   function applyBinding(nodeId, argument, source, label = null) {
-    const what = label || `${source ? 'Connect' : 'Disconnect'} ${nodeId}.${argument ?? 'request'}`;
+    // Undo label in plain words: "Connect Implement · Model plan".
+    const {module, connector} = problemLabels(nodeId, argument ?? 'request');
+    const what = label || `${source ? 'Connect' : 'Disconnect'} ${module || nodeId}${connector ? ` · ${connector}` : ''}`;
     if (isPending(nodeId)) {
       pendingNodes = NodeDrafts.bind(pendingNodes, nodeId, argument, source); reproject(); changed(what); render();
       status('Checking the new nodes with the workflow declaration validator…'); return true;
@@ -318,13 +320,13 @@
   // saved-node removal reviews a remove_node proposal on an unedited draft. The server reviews exact bytes.
   const canEditNodes = () => canEditCircuit() && !!draft;
   function startNode(fields) {
-    if (!canEditNodes()) { status('Correct the invalid field or resolve the conflict before adding a capability.'); return; }
+    if (!canEditNodes()) { status('Correct the invalid field or resolve the conflict before adding a module.'); return; }
     // Inputs candidate preparation generates (per-node storage, …) are bound as managed
     // bindings in the same draft edit (editor-managed-inputs.js; roles from the server).
     const {catalog, ...item} = fields, taken = [...graph.definition.externals, ...newExternals].map(value => value.id);
     const provided = window.editorManagedInputs.provide({binding: null, arguments: [], ...item}, catalog, anchor.managedRoles || [], taken);
     pendingNodes = [...pendingNodes, provided.item]; newExternals = [...newExternals, ...provided.externals]; selected = item.node; reproject();
-    changed(`Add capability ${item.node}`); render();
+    changed(`Add module ${item.node}`); render();
   }
   async function inspectNode() {
     const id = project, sha = base.sha256, key = nodeKey(); inspectingNode = key;
@@ -375,7 +377,7 @@
       select: value => { if (live()) { selected = value; render(); } },
       bind: (nodeId, argument, source) => { if (live()) updateBindingDraft(nodeId, argument, source); },
       disconnect: (nodeId, argument) => { if (live()) updateBindingDraft(nodeId, argument, null); },
-      move: (layout, label = 'Move capability') => {
+      move: (layout, label = 'Move module') => {
         if (!live() || !canEditCircuit()) return;
         for (const {node: nodeId, x, y} of NodeDrafts.moves(draftState(), layout)) {
           const item = pendingNodes.find(value => value.node === nodeId);
@@ -383,7 +385,7 @@
           const position = graph.positions.find(value => value.node === nodeId);
           if (position) { position.x = x; position.y = y; } else graph.positions.push({node: nodeId, x, y});
         }
-        reproject(); changed(label); render(); status('Node position changed locally. Save to keep the layout.');
+        reproject(); changed(label); render(); status('Moved. Save to keep the layout.');
       }
     });
     if (!display) return;
@@ -420,8 +422,10 @@
     const item = display.definition.nodes.find(n => n.id === selected);
     if (item) {
       const heading = node('div', '', $('inspector'));
+      heading.className = 'inspector-heading';
       const capabilityLabel = window.editorCapabilityPresentation.append(heading, item.capability, item.id, 'inspector-capability-heading');
       heading.setAttribute('aria-label', `${capabilityLabel}, instance ${item.id}`);
+      window.editorNodePalette?.inspectorActions(heading, item.id, {remove: removeNodes, enabled: canEditCircuit()});
       // Order: advice first (editor-advice.js), then inputs, then advanced detail and actions.
       window.editorAdvice?.render($('inspector'), {document: graph, item, inventory, enabled: canEditCircuit()},
         (mutate, label) => { if (graph === capturedGraph) { mutate(graph); changed(label, `advice:${item.id}`); } });
@@ -448,8 +452,10 @@
         select.addEventListener('change', () => {
           if (graph === capturedGraph && select.value !== '') updateBindingDraft(item.id, option.argument, option.choices[Number(select.value)].source);
         });
-        const disconnect = node('button', 'Disconnect', $('inspector'));
-        disconnect.type = 'button'; disconnect.className = 'editor-disconnect';
+        // An unlink icon per row (tour #15), never a full-size primary button.
+        const disconnect = node('button', '', $('inspector'));
+        disconnect.type = 'button'; disconnect.className = 'editor-disconnect secondary icon-button'; disconnect.title = 'Disconnect';
+        disconnect.append(window.consoleIcons?.make('unlink', 16) || ''); node('span', 'Disconnect', disconnect).className = 'sr-only';
         disconnect.setAttribute('aria-label', `Disconnect ${item.id}.${option.argument || 'request'}`);
         disconnect.disabled = !option.bound || bindingConflict();
         disconnect.hidden = !option.bound;
@@ -477,7 +483,6 @@
         node('dt', option.argument || 'Request', mappingList);
         node('dd', option.source ? (option.source.kind === 'external' ? `external:${option.source.binding}` : `${option.source.node}.${option.source.port}`) : 'unbound', mappingList);
       }
-      window.editorNodePalette?.inspectorActions($('inspector'), item.id, {remove: removeNodes, enabled: canEditCircuit()});
     }
     for (const key of Object.keys(graph.definition.task)) field($('references'), `task.${key}`, graph.definition.task[key], value => { graph.definition.task[key] = value; });
     for (const external of [...graph.definition.externals, ...newExternals]) {
