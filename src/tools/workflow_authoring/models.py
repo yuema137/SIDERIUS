@@ -324,6 +324,16 @@ class PortInventoryEntry(Model):
     node_input_contract: NativeContract
     node_output_contract: NativeContract
     protocol_mapping: ProtocolMapping | None
+    # Bound to a managed binding that candidate preparation generates itself (per-node
+    # storage, training settings, ...): not a user requirement; the editor hides it.
+    framework_supplied: bool = False
+
+
+class ManagedRole(Model):
+    """An input candidate preparation supplies for this document (``argument=None``: request)."""
+
+    contract: str
+    argument: str | None
 
 
 class SourceView(Model):
@@ -337,6 +347,8 @@ class SourceView(Model):
     diagnostics: tuple[SourceDiagnostic, ...] = ()
     binding_options: tuple[BindingOptions, ...] = ()
     port_inventory: tuple[PortInventoryEntry, ...] = ()
+    # Inputs a new node of this document gets as managed bindings (empty for v1 sources).
+    managed_roles: tuple[ManagedRole, ...] = ()
     status: Literal["declaration_only"] = "declaration_only"
 
 
@@ -348,6 +360,7 @@ class ReviewView(Model):
     loop_template: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
     binding_options: tuple[BindingOptions, ...]
     port_inventory: tuple[PortInventoryEntry, ...] = ()
+    managed_roles: tuple[ManagedRole, ...] = ()
     source: str
     sha256: Digest
     diff: str

@@ -29,7 +29,8 @@
   }
   const cards = () => [...(canvas?.querySelectorAll('.circuit-card') || [])];
   function instanceId(capability) {
-    const taken = new Set(cards().map(card => card.dataset.node));
+    // Deleted (draft) and pending ids stay reserved too: the server refuses a reused id.
+    const taken = new Set([...cards().map(card => card.dataset.node), ...(window.workflowEditor?.state.nodeIds || [])]);
     let id = capability, n = 1;
     while (taken.has(id)) id = `${capability}${++n}`;
     return id;
@@ -47,7 +48,7 @@
   function add(entry, point = null) {
     if (!state.enabled || !actions) return;
     const {x, y} = placement(point);
-    actions.add({node: instanceId(entry.capability), capability: entry.capability, protocol: entry.protocol, x, y});
+    actions.add({node: instanceId(entry.capability), capability: entry.capability, protocol: entry.protocol, x, y, catalog: entry});
   }
   // `+` add-handle (editor-canvas-add.js): routes with an argument that carries the source
   // card's output contract (presentation filter; the server inspection still decides).
@@ -59,7 +60,7 @@
     const argument = accepting(entry, contractId).sort((a, b) => Number(b.required) - Number(a.required))[0];
     if (!state.enabled || !actions || !card?._position || !argument) return false;
     actions.add({node: instanceId(entry.capability), capability: entry.capability, protocol: entry.protocol,
-      x: card._position.x + card.offsetWidth + 80, y: card._position.y,
+      x: card._position.x + card.offsetWidth + 80, y: card._position.y, catalog: entry,
       arguments: [{name: argument.name, source: {kind: 'result', node: sourceNode, port: 'result'}}]});
     return true;
   }

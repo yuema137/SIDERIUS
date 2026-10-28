@@ -101,6 +101,11 @@ try {
   await gallery.locator('#editor-template-blank').click();
   await waitUntil(async () => !(await gallery.evaluate(dialog => dialog.open)), 'gallery closed');
   assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('palette-search')), true, 'Blank workflow focuses the module search');
+  // Blank empties the canvas in the draft and shows the empty state; Undo brings the module back.
+  await waitUntil(async () => (await page.locator('#editor-graph .circuit-card').count()) === 0, 'blank canvas');
+  assert.equal(await page.locator('#workflow-start-guide').isVisible(), true, 'Blank shows the §7.2 empty state');
+  await page.locator('#editor-undo').click();
+  await page.locator('.circuit-card[data-node="p"]').waitFor();
   await page.waitForTimeout(100);
   // The canvas viewport is bounded by the frame: it scrolls inside, the panel never does.
   const bounded = async label => {

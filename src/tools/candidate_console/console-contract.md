@@ -1121,6 +1121,26 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   inside the card; the requirement text is its own line. Instance ids show only with
   advanced tools. Wire and card drags suppress text selection (`body.circuit-gesture`,
   `preventDefault` on pointerdown, selection cleared at the end).
+- Framework-supplied inputs (operator rule 2026-10-28): `PortInventoryEntry.framework_supplied`
+  marks a socket bound to a `ManagedCandidateBinding` in a role candidate preparation
+  generates (`candidate_prepare.resolution.managed_argument_roles` /
+  `managed_request_supported`: per-node `storage`, tuning `settings`, a proposal's
+  `proposal.input` request; for `native-interpretation-candidate/v1` also `data_dir`,
+  `task_composition_ref`, `human_advice`, `expert_context`, `constraint_context`,
+  `workflow_parameter_rules` and the interpretation request). Such sockets get no canvas
+  socket, inspector row, problem, walk-through stop or "Create external input"; the
+  advanced Mapping details still list them. `SourceView`/`ReviewView.managed_roles` lists
+  the required roles a new node gets: any add (palette, `+`, template) binds them in the
+  same draft edit as the shipped examples do (`editor-managed-inputs.js`):
+  `ManagedCandidateBinding(id="<node>_store", contract="storage")`,
+  `id="training"` for `native-training.settings`, `id="initial"` for `proposal.input`
+  (a taken id falls back to `<node>_training` / `<node>_initial`, then a number). v1
+  sources have no managed roles: their storage is a real input the author supplies.
+  Deleting a node also drops managed bindings only it read (preparation refuses unused
+  bindings). Gallery **Blank workflow** deletes every module in the draft (undoable)
+  and shows the empty state. Witness: `tests/browser/managed_storage.mjs` (Blank on
+  the reusable project, Propose/Implement/Validate without any storage input, saved
+  binding shape equal to `examples/workflow_declarations/reusable_candidate.py`).
 - Delete (operator rule 2026-10-28) always succeeds in the draft, with no confirmation:
   Delete key, context menu or Remove in Selection adds saved nodes to the draft's
   `removed` list (pending nodes are cancelled), disconnects every socket that read them

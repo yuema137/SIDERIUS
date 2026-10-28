@@ -256,3 +256,95 @@ def test_deleting_an_unread_node_keeps_every_other_byte(tmp_path):
         if line[:1] in "+-"
     ]
     assert changed and all(line.startswith("- ") for line in changed), "only deletions"
+
+
+def test_deleting_a_node_drops_its_managed_storage_binding(tmp_path):
+    """Fails if a deleted node's generated storage binding stays behind: candidate
+    preparation refuses unused external bindings, so the saved workflow could not run."""
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[3] / "examples/workflow_declarations/reusable_candidate.py"
+    ).read_text()
+    editor = editor_for(tmp_path, source)
+    reviewed = review(editor, drafts(source, removed=("check",)))
+    externals = {item.id for item in reviewed.document.definition.externals}
+    assert "check_store" not in externals and "build_store" in externals
+
+
+def test_framework_supplied_inputs_are_marked_only_where_preparation_supplies_them():
+    """Fails if a generated input (managed per-node storage, managed proposal request)
+    is presented as a user requirement, or if a v1 source's literal storage (which the
+    author must supply) is hidden; the roles come from candidate preparation."""
+    from pathlib import Path
+
+    from tools.workflow_authoring.options import binding_projection, managed_roles
+
+    root = Path(__file__).resolve().parents[3]
+    reusable = parse_workflow_source(
+        (root / "examples/workflow_declarations/reusable_candidate.py").read_text()
+    )
+    supplied = {
+        (port.node, port.argument)
+        for port in binding_projection(reusable)[1]
+        if port.framework_supplied
+    }
+    assert supplied == {("hypothesis", None), ("build", "storage"), ("check", "storage")}
+    assert ("storage", "storage") in {(r.contract, r.argument) for r in managed_roles(reusable)}
+    legacy = parse_workflow_source(commented_canonical())
+    assert not any(port.framework_supplied for port in binding_projection(legacy)[1])
+    assert managed_roles(legacy) == ()
+
+
+def test_blank_then_rebuilt_reusable_workflow_reviews_with_managed_storage(tmp_path):
+    """Fails if replacing every module (Blank, then new Propose/Implement/Validate with
+    managed storage) is refused because old and new modules were validated together, or
+    if the deleted modules' generated bindings survive."""
+    from pathlib import Path
+
+    from workflows.definition import ManagedCandidateBinding
+
+    source = (
+        Path(__file__).resolve().parents[3] / "examples/workflow_declarations/reusable_candidate.py"
+    ).read_text()
+    editor = editor_for(tmp_path, source)
+    proposal = drafts(
+        source,
+        {
+            "node": "proposal",
+            "capability": "proposal",
+            "protocol": None,
+            "binding": "proposal_initial",
+            "x": 0.0,
+            "y": 0.0,
+        },
+        pending(
+            "implementation",
+            "proposal-to-implementation",
+            300.0,
+            output="proposal",
+            storage="@implementation_store",
+        ),
+        pending(
+            "validation",
+            "implementation-to-validation",
+            600.0,
+            output="implementation",
+            storage="@validation_store",
+        ),
+        externals=(
+            ManagedCandidateBinding(id="proposal_initial", contract="proposal.input"),
+            ManagedCandidateBinding(id="implementation_store", contract="storage"),
+            ManagedCandidateBinding(id="validation_store", contract="storage"),
+        ),
+        removed=("hypothesis", "build", "check"),
+    )
+    reviewed = review(editor, proposal)
+    ids = {item.id for item in reviewed.document.definition.externals}
+    assert {"implementation_store", "validation_store", "proposal_initial"} <= ids
+    assert not ids & {"initial", "build_store", "check_store"}
+    assert [node.id for node in reviewed.document.definition.nodes] == [
+        "proposal",
+        "implementation",
+        "validation",
+    ]

@@ -352,7 +352,7 @@
       const options = value.inventory.filter(item => item.node === node.id);
       // Required inputs and optional inputs fed by a wire always show; every other optional
       // input (not connected, or fed by an external input) folds into one "+N optional" row.
-      const folded = options.filter(option => !option.required && option.source?.kind !== 'result');
+      const folded = options.filter(option => !option.required && option.source?.kind !== 'result' && !option.framework_supplied);
       let group = null;
       if (folded.length) {
         group = document.createElement('details'); group.className = 'circuit-optional'; group.dataset.node = node.id;
@@ -365,7 +365,10 @@
         });
       }
       for (const option of options) {
-        const input = port(folded.includes(option) ? group : card, node, option.argument, false, option); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;
+        // Framework-supplied inputs (managed storage, …) get no socket; Mapping details list them.
+        if (!option.framework_supplied) {
+          const input = port(folded.includes(option) ? group : card, node, option.argument, false, option); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;
+        }
         element('dt', option.argument || 'Request', mappingList);
         element('dd', option.source ? (option.source.kind === 'external' ? `external:${option.source.binding}` : `${option.source.node}.${option.source.port}`) : 'unbound', mappingList);
       }

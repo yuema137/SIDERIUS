@@ -1,11 +1,14 @@
 """GUI choices derive exclusively from the native typed catalog."""
 
+from tools.candidate_prepare.resolution import managed_argument_roles, managed_request_supported
 from workflows.definition import (
     AuthoredWorkflowDocument,
     ExternalRequest,
     ExternalSource,
+    ManagedCandidateBinding,
     ProtocolRequest,
     ResultSource,
+    ReusableWorkflowDocument,
 )
 from workflows.definition.catalog import CAPABILITIES, CONTRACTS, PROTOCOLS
 
@@ -15,6 +18,7 @@ from .models import (
     BindingOptions,
     CatalogArgument,
     CatalogEntry,
+    ManagedRole,
     NativeContract,
     NodeCatalog,
     PendingNode,
@@ -54,6 +58,52 @@ def port_choices(
     return externals + (nodes if results else ())
 
 
+def framework_supplied(
+    document: AuthoredWorkflowDocument, capability: str, argument: str | None, source
+) -> bool:
+    """Whether a bound socket is a managed input that candidate preparation generates."""
+    if not isinstance(document, ReusableWorkflowDocument) or not isinstance(source, ExternalSource):
+        return False
+    external = next(
+        (item for item in document.definition.externals if item.id == source.binding), None
+    )
+    if not isinstance(external, ManagedCandidateBinding):
+        return False
+    profile = document.execution_profile
+    if argument is None:
+        return managed_request_supported(profile, capability, external.contract)
+    return (external.contract, argument) in managed_argument_roles(profile)
+
+
+def managed_roles(document: AuthoredWorkflowDocument | None) -> tuple[ManagedRole, ...]:
+    """Required inputs a new node gets as managed bindings (reusable documents only).
+
+    Required protocol arguments in a managed argument role, and managed request routes;
+    optional managed roles stay the author's choice.
+    """
+    if not isinstance(document, ReusableWorkflowDocument):
+        return ()
+    profile = document.execution_profile
+    roles = managed_argument_roles(profile)
+    required = {
+        (item.contract, item.name)
+        for protocol in PROTOCOLS.values()
+        for item in protocol.arguments
+        if item.required
+    }
+    requests = {
+        (capability.input, None)
+        for name, capability in CAPABILITIES.items()
+        if managed_request_supported(profile, name, capability.input)
+        # Managed literature also needs explicit literature_settings: the author's choice.
+        and capability.input != "literature.input"
+    }
+    return tuple(
+        ManagedRole(contract=contract, argument=argument)
+        for contract, argument in sorted(roles & required) + sorted(requests)
+    )
+
+
 def binding_projection(
     document: AuthoredWorkflowDocument,
     choices_from: AuthoredWorkflowDocument | None = None,
@@ -84,6 +134,12 @@ def binding_projection(
                     node_input_contract=contract_info(capability.input),
                     node_output_contract=contract_info(capability.output),
                     protocol_mapping=None,
+                    framework_supplied=framework_supplied(
+                        choices_from or document,
+                        node.capability,
+                        None,
+                        ExternalSource(binding=node.request.binding),
+                    ),
                 )
             )
         else:
@@ -110,6 +166,13 @@ def binding_projection(
                         node_input_contract=contract_info(capability.input),
                         node_output_contract=contract_info(capability.output),
                         protocol_mapping=mapping,
+                        framework_supplied=argument is not None
+                        and framework_supplied(
+                            choices_from or document,
+                            node.capability,
+                            argument.name,
+                            argument.source,
+                        ),
                     )
                 )
     ports = tuple(inventory)
@@ -196,6 +259,7 @@ def pending_node_ports(
                 node_input_contract=node_input,
                 node_output_contract=node_output,
                 protocol_mapping=None,
+                framework_supplied=framework_supplied(document, proposal.capability, None, source),
             ),
         )
     protocol = PROTOCOLS[proposal.protocol]
@@ -215,6 +279,9 @@ def pending_node_ports(
             node_input_contract=node_input,
             node_output_contract=node_output,
             protocol_mapping=mapping,
+            framework_supplied=framework_supplied(
+                document, proposal.capability, item.name, bound.get(item.name)
+            ),
         )
         for item in protocol.arguments
     )

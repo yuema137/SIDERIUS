@@ -53,7 +53,7 @@ from .node_edits import (
     inspect_node_drafts,
     remove_node,
 )
-from .options import binding_projection
+from .options import binding_projection, managed_roles
 from .task_models import TaskReferenceReview, TaskReferenceTarget, TaskReferenceUpdateProposal
 from .training import training_inspector
 from .versions import (
@@ -102,6 +102,7 @@ def reviewed_source(
         document=document,
         binding_options=legacy_options,
         port_inventory=port_inventory,
+        managed_roles=managed_roles(document),
         training=training_inspector(document),
         loop_template=loop_template(document),
         task_reference_update=task_review,
@@ -214,6 +215,7 @@ class WorkflowAuthoring:
             document=document,
             binding_options=legacy_options,
             port_inventory=port_inventory,
+            managed_roles=managed_roles(document),
             training=training_inspector(document),
             loop_template=loop_template(document),
         )

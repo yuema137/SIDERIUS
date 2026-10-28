@@ -84,9 +84,12 @@
     const detail = $('editor-template-detail'); detail.replaceChildren();
     if (chosen === BLANK) {
       element('h3', 'Blank workflow', detail);
-      element('p', 'Pick modules from the list on the left and connect them. Your current workflow stays as it is; nothing changes until you add a module.', detail, 'muted');
-      const start = element('button', 'Add modules myself', detail); start.type = 'button'; start.id = 'editor-template-blank';
-      start.addEventListener('click', () => { $('editor-template-gallery').close(); document.querySelector('#editor-palette .palette-search')?.focus(); });
+      element('p', 'Starts an empty canvas in your unsaved draft (Undo brings the current modules back). Then pick modules from the list on the left.', detail, 'muted');
+      const start = element('button', 'Start blank', detail); start.type = 'button'; start.id = 'editor-template-blank';
+      start.addEventListener('click', () => {
+        $('editor-template-gallery').close(); window.workflowEditor.clearAll();
+        document.querySelector('#editor-palette .palette-search')?.focus();
+      });
       return;
     }
     const template = catalog?.find(item => item.id === chosen);

@@ -26,7 +26,7 @@
   const reproject = () => { ({graph: display, inventory} = graph ? NodeDrafts.project(draftState(), nodeView() || lastNodeView) : {graph: null, inventory: []}); };
   // Draft state of one server projection; the edited document never aliases its anchor.
   const viewState = value => ({document: clone(value.document), bindings: [], training: value.training, loopTemplate: value.loop_template || null,
-    anchor: {source: value.source, document: clone(value.document), inventory: clone(value.port_inventory || [])}});
+    anchor: {source: value.source, document: clone(value.document), inventory: clone(value.port_inventory || []), managedRoles: clone(value.managed_roles || [])}});
   const clone = value => JSON.parse(JSON.stringify(value));
   const status = message => { $('status').textContent = message; };
   const current = (id, version) => project === id && generation === version;
@@ -43,9 +43,13 @@
     sourceAvailable, reusableSource: base?.document?.definition?.schema_version === 2, saving, conflict: !!conflict,
     // Page-bar presentation (editor-page-bar.js): checked proposal, task chip and pending task findings.
     reviewed: !!reviewed, taskReview: !!taskReview(), taskSelected: !!taskSelection,
+    // Every node id the draft knows (saved, pending, deleted): new instance ids avoid all of them.
+    nodeIds: [...new Set([...(anchor?.document?.definition.nodes || []).map(n => n.id), ...(graph?.definition.nodes || []).map(n => n.id), ...pendingNodes.map(n => n.node)])],
     taskBinding: base?.document?.task_binding ? {package_id: base.document.task_binding.package_id, revision: base.document.task_binding.revision} : null});
   // importSource: a template's unsaved source enters the ordinary source Review (editor-templates.js).
-  window.workflowEditor = Object.freeze({get state() { return projection(); }, importSource: (source, label) => reviewProposal({kind: 'source', source}, label)});
+  window.workflowEditor = Object.freeze({get state() { return projection(); }, importSource: (source, label) => reviewProposal({kind: 'source', source}, label),
+    // "Blank workflow": delete every module in the draft (undoable); the empty state shows.
+    clearAll: () => { const ids = (display?.definition.nodes || []).map(n => n.id); if (ids.length) removeNodes(ids); return ids.length; }});
   const bindingEqual = (a, b) => !!a && !!b && ['schema_version', 'package_id', 'revision', 'semantic_fingerprint', 'task_data_path_id'].every(key => a[key] === b[key]);
   const taskReview = () => reviewed?.taskReview;
   function taskAccepted() {
@@ -298,8 +302,12 @@
   const canEditNodes = () => canEditCircuit() && !!draft;
   function startNode(fields) {
     if (!canEditNodes()) { status('Correct the invalid field or resolve the conflict before adding a capability.'); return; }
-    pendingNodes = [...pendingNodes, {binding: null, arguments: [], ...fields}]; selected = fields.node; reproject();
-    changed(`Add capability ${fields.node}`); render();
+    // Inputs candidate preparation generates (per-node storage, …) are bound as managed
+    // bindings in the same draft edit (editor-managed-inputs.js; roles from the server).
+    const {catalog, ...item} = fields, taken = [...graph.definition.externals, ...newExternals].map(value => value.id);
+    const provided = window.editorManagedInputs.provide({binding: null, arguments: [], ...item}, catalog, anchor.managedRoles || [], taken);
+    pendingNodes = [...pendingNodes, provided.item]; newExternals = [...newExternals, ...provided.externals]; selected = item.node; reproject();
+    changed(`Add capability ${item.node}`); render();
   }
   async function inspectNode() {
     const id = project, sha = base.sha256, key = nodeKey(); inspectingNode = key;
@@ -401,7 +409,8 @@
       window.editorAdvice?.render($('inspector'), {document: graph, item, inventory, enabled: canEditCircuit()},
         (mutate, label) => { if (graph === capturedGraph) { mutate(graph); changed(label, `advice:${item.id}`); } });
       node('h3', 'Inputs', $('inspector'));
-      for (const option of inventory.filter(entry => entry.node === item.id)) {
+      // Framework-supplied inputs (managed storage, …) are no user requirement: advanced Mapping details only.
+      for (const option of inventory.filter(entry => entry.node === item.id && !entry.framework_supplied)) {
         // "[swatch] Connector name · Required" (spec §8.2); the field name is advanced detail.
         const state = `${option.required ? 'Required' : 'Optional'}${option.bound ? '' : ' · Not connected'}`;
         const label = window.editorInspectorRows.label($('inspector'), option, state);
