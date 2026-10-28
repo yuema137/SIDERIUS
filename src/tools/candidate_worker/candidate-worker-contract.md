@@ -607,12 +607,14 @@ Its consumers keep the capability rule, so a `rejected` adaptor blocks the tuner
 
 **Execution** (`adaptor_phase.execute_adaptor`). Items are built by
 `adaptor_items` in declared port order, then binding position, never completion
-order. A succeeded source's value is parsed from its native record (digest checked
-against the trace) with the contract's native model
-(`workflows.custom_adaptors.contracts.native_type`); a rejected source becomes an
-item with state `rejected` and no value; a `skipped` source raises
-`SkippedAdaptorInputError` (routed execution, B1-PR5, must first provide a skip
-record to cite as provenance); any other state raises `ValueError`. The pure
+order. Every succeeded or rejected source's native record is read (digest checked
+against the trace) and parsed with the contract's native model
+(`workflows.custom_adaptors.contracts.native_type`). A rejected source must be
+rejected by its record (a `VALIDITY_GATED_CONTRACTS` value with `passed=False`),
+else `ValueError`; it becomes an item with state `rejected` and no value. A
+`skipped` source raises `SkippedAdaptorInputError` (routed execution, B1-PR5, must
+first provide a skip record to cite as provenance), which `execute_adaptor`
+re-raises instead of closing the slot; any other state raises `ValueError`. The pure
 `run_deterministic_adaptor` decides with `metric=None` (no metric-ranking kind is
 admitted), and `build_adaptor_record` builds the `AdaptorRecord`. Each emitted
 output value is published write-once as canonical JSON at
@@ -620,7 +622,8 @@ output value is published write-once as canonical JSON at
 for indexed outputs), then the record at `.../adaptors/<id>.json`; the file digest of
 an output equals its `OutputDigest.sha256`. The trace slot closes with the outcome
 status and reason (`succeeded`; `rejected/no_admissible_input`;
-`rejected|failed/insufficient_items`), the record path and its digest. An exception
+`rejected|failed/insufficient_items`), the record path and its digest. The closure
+is computed before anything is published. Any other exception
 closes it `failed/native_failure` without a record and stops later effects, as for
 a native node. The tuner trains the branch whose validator the adaptor emitted
 (`adaptor_phase.tuning_branch`, read from the outcome's contribution); all
@@ -652,11 +655,21 @@ against `expected_adaptors`, record path/digest of a decided adaptor, that its
 sources were terminal and none failed or blocked, and replays readiness over nodes
 then adaptors. `adaptor_phase.verify_adaptors` then recomputes each recorded
 adaptor from the native records the trace names and requires the record bytes, each
-emitted output's bytes and the trace `(state, reason)` to equal the recomputation.
-`verify_graph_training` verifies the tuner against the validator the verified
-outcome selected. Witness: `tests/unit/tools/candidate_worker/test_adaptor_selection.py`
-(second branch trained when the first is rejected; all rejected; declared order
-over execution order; tampered record/output/closure; shape refusals).
+emitted output's bytes and the trace `(state, reason)` to equal the recomputation;
+an `<id>.out.*` file the recomputation does not emit is refused. Selection inputs
+are trace states, so the native verifier loop also requires every `validation`
+entry's state to be its record's verdict (`succeeded` iff `ValidatorOutput.passed`,
+else `rejected`), read from the digest-checked record. `verify_graph_training`
+reads the trained (implementation, validation) pair from the verified outcome
+(`tuning_branch`), checks the validation record and the tuner identity as before,
+and binds the tuner to that implementation: the staged
+`get_plugin_dir(<tuner storage>, run_name)/<model>.py` must equal the bytes of the
+pair's `ImplementorOutput.model_file_path` (`stage_native_plugins` copies it
+verbatim; this applies to every trained profile and changes no record).
+Witness: `tests/unit/tools/candidate_worker/test_adaptor_selection.py` (second
+branch trained when the first is rejected; all rejected; declared and reversed
+binding order over execution order; tampered record/output/closure; extra output
+file; relabelled validator verdict; staged model of a sibling; shape refusals).
 
 Not admitted: v2 reusable source, managed preparation and console for this profile;
 any other strategy triple, metric ranking, per-item/split distribution, routes,

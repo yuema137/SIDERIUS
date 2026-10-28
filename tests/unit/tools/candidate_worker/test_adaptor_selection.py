@@ -129,6 +129,153 @@ def test_declared_binding_order_not_execution_order_decides(
     verify_graph_trace(request, parent, receipt)
 
 
+def test_reversed_binding_order_selects_the_other_branch(
+    prepared, training_runner, native_runner, trained
+):
+    """Same execution order, bindings reversed: check1 is first, so build1 trains."""
+    request = selection_request(prepared, bindings=["check1", "check0"])
+    receipt, parent = run(request)
+    assert receipt.status == "completed", receipt.error
+    ((implementation, _),) = trained
+    assert "/build1/" in implementation.model_file_path
+    verify_graph_trace(request, parent, receipt)
+
+
+@pytest.fixture
+def distinct_branches(native_runner, monkeypatch):
+    """Each implementation call emits different model bytes (branch ordinal comment)."""
+    original = Provider.generate
+    count = []
+
+    def generate(self, system, user, **kwargs):
+        result = original(self, system, user, **kwargs)
+        if kwargs.get("label") == "implementor.code":
+            count.append(1)
+            result["forward_body"] += f"  # branch {len(count)}"
+        return result
+
+    monkeypatch.setattr(Provider, "generate", generate)
+
+
+def test_verifier_refuses_a_relabelled_validator_verdict(
+    prepared, training_runner, native_runner, trained
+):
+    """Review F1(a): both validators passed; the trace claims check0 rejected and the
+    adaptor record/output are recomputed self-consistently to select check1. Model
+    bytes are equal across branches, so only the verdict check can refuse.
+    """
+    from core.canonical_json import canonical_json_bytes
+    from tools.candidate_worker.graph_evidence import record_digest
+    from workflows.adaptors import (
+        AdaptorInputRef,
+        AdaptorItem,
+        build_adaptor_record,
+        run_deterministic_adaptor,
+    )
+    from workflows.definition import ResultSource
+
+    request = selection_request(prepared)
+    receipt, parent = run(request)
+    assert receipt.status == "completed", receipt.error
+    nodes = {item.node_id: item for item in receipt.graph_trace.nodes}
+    adaptor = request.preview.document.definition.adaptors[0]
+    items = []
+    for position, node in enumerate(("check0", "check1")):
+        entry = nodes[node]
+        value = None
+        if node == "check1":
+            from agent.schemas.validator import ValidatorOutput
+
+            value = ValidatorOutput.model_validate_json(Path(entry.record_path).read_bytes())
+        items.append(
+            AdaptorItem(
+                ref=AdaptorInputRef(
+                    port="checks",
+                    position=position,
+                    source=ResultSource(node=node),
+                    record_sha256=entry.record_sha256,
+                ),
+                contract="validation.output",
+                state="rejected" if node == "check0" else "succeeded",
+                value=value,
+            )
+        )
+    outcome = run_deterministic_adaptor(
+        tuple(items),
+        combine_strategy=adaptor.combine,
+        select_strategy=adaptor.select,
+        distribute_strategy=adaptor.distribute,
+        metric=None,
+    )
+    forged_record = build_adaptor_record(
+        adaptor_id="pick",
+        iteration=1,
+        combine=adaptor.combine,
+        select=adaptor.select,
+        distribute=adaptor.distribute,
+        outcome=outcome,
+    )
+    workspace = Path(receipt.workspace)
+    record_path = adaptor_record_path(workspace, "pick")
+    output_path = adaptor_output_path(workspace, "pick", "result", None)
+    for path, value in ((record_path, forged_record), (output_path, outcome.outputs[0].value)):
+        path.unlink()
+        path.write_bytes(canonical_json_bytes(value))
+    trace = receipt.graph_trace
+    forged = receipt.model_copy(
+        update={
+            "graph_trace": trace.model_copy(
+                update={
+                    "nodes": tuple(
+                        item.model_copy(
+                            update={"state": "rejected", "reason": "validation_rejected"}
+                        )
+                        if item.node_id == "check0"
+                        else item
+                        for item in trace.nodes
+                    ),
+                    "adaptors": (
+                        trace.adaptors[0].model_copy(
+                            update={"record_sha256": record_digest(str(record_path))}
+                        ),
+                    ),
+                }
+            ),
+            "status": "completed",
+        }
+    )
+    with pytest.raises(ValueError, match="contradicts its native verdict"):
+        verify_graph_trace(request, parent, forged)
+
+
+def test_verifier_binds_the_tuner_to_the_selected_branch_bytes(
+    prepared, training_runner, rejecting, distinct_branches, trained
+):
+    """Review F1(b): the staged model must be the selected implementation's bytes."""
+    from core.sandbox_executor import get_plugin_dir
+
+    rejecting.add(0)
+    request = selection_request(prepared)
+    receipt, parent = run(request)
+    assert receipt.status == "completed", receipt.error
+    verify_graph_trace(request, parent, receipt)
+    nodes = {item.node_id: item for item in receipt.graph_trace.nodes}
+    sibling = json.loads(Path(nodes["build0"].record_path).read_bytes())["model_file_path"]
+    staged = Path(get_plugin_dir(nodes["train"].storage, receipt.run_name)) / "worker_linear.py"
+    assert staged.read_bytes() != Path(sibling).read_bytes()
+    staged.write_bytes(Path(sibling).read_bytes())
+    with pytest.raises(ValueError, match="staged model differs"):
+        verify_graph_trace(request, parent, receipt)
+
+
+def test_verifier_refuses_an_extra_adaptor_output_file(prepared, training_runner, native_runner):
+    request = selection_request(prepared)
+    receipt, parent = run(request)
+    adaptor_output_path(Path(receipt.workspace), "pick", "result", 0).write_bytes(b"{}")
+    with pytest.raises(ValueError, match="outputs its record does not derive"):
+        verify_graph_trace(request, parent, receipt)
+
+
 def _with_adaptor(receipt, entry):
     trace = receipt.graph_trace.model_copy(update={"adaptors": (entry,)})
     return receipt.model_copy(update={"graph_trace": trace})

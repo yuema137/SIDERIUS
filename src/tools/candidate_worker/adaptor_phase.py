@@ -32,6 +32,7 @@ from workflows.definition import (
     ReusableWorkflowDefinition,
     WorkflowDefinition,
 )
+from workflows.definition.catalog import VALIDITY_GATED_CONTRACTS
 from workflows.definition.fanout import ProposalFamilies, execution_families
 
 from . import readiness
@@ -102,9 +103,15 @@ def adaptor_items(
                 or entry.record_sha256 is None
             ):
                 raise ValueError(f"adaptor {adaptor.id}: input {source.node} has no native record")
-            value = None
-            if entry.state == "succeeded":
-                value = _native_value(port.contract, entry)
+            # Rejected sources are read too: their state must be the record's verdict.
+            value = _native_value(port.contract, entry)
+            if entry.state == "rejected":
+                if not _rejected_by_record(port.contract, value):
+                    raise ValueError(
+                        f"adaptor {adaptor.id}: input {source.node} is rejected "
+                        "but its native record does not reject it"
+                    )
+                value = None
             items.append(
                 AdaptorItem(
                     ref=AdaptorInputRef(
@@ -130,6 +137,13 @@ def _native_value(contract: str, entry: GraphNodeEvidence) -> BaseModel:
     if not (isinstance(value_type, type) and issubclass(value_type, BaseModel)):
         raise ValueError(f"contract {contract} has no native record model")
     return value_type.model_validate_json(payload)
+
+
+def _rejected_by_record(contract: str, value: BaseModel) -> bool:
+    """Only a validity-gated record can carry a rejection (``passed=False``)."""
+    if contract not in VALIDITY_GATED_CONTRACTS:
+        return False
+    return getattr(value, "passed", True) is False
 
 
 def decide(
@@ -178,10 +192,12 @@ def execute_adaptor(
     """Decide, publish outputs then the record (write-once), and close the trace slot.
 
     Any exception is an uncertain failure: the slot fails without a record and
-    the caller stops later effects, as for a native node.
+    the caller stops later effects, as for a native node. A skipped input is a
+    contract gap (no skip record exists yet), never a run outcome, so it propagates.
     """
     try:
         outcome, record = decide(adaptor, entries, iteration=iteration)
+        state, reason = graph_closure(outcome)
         adaptor_dir(workspace, iteration=iteration).mkdir(parents=True, exist_ok=True)
         for output in outcome.outputs:
             if output.value is not None:
@@ -191,21 +207,22 @@ def execute_adaptor(
                 publish_bytes_write_once(str(path), canonical_json_bytes(output.value))
         path = adaptor_record_path(workspace, adaptor.id, iteration=iteration)
         publish_bytes_write_once(str(path), canonical_json_bytes(record))
-        state, reason = graph_closure(outcome)
+        closed = slot.model_copy(
+            update={
+                "state": state,
+                "reason": reason,
+                "record_path": str(path),
+                "record_sha256": record_digest(str(path)),
+            }
+        )
+    except SkippedAdaptorInputError:
+        raise
     except Exception:
         traceback.print_exc()
         failed = slot.model_copy(
             update={"state": "failed", "reason": "native_failure", "record_path": None}
         )
         return failed, None
-    closed = slot.model_copy(
-        update={
-            "state": state,
-            "reason": reason,
-            "record_path": str(path),
-            "record_sha256": record_digest(str(path)),
-        }
-    )
     return closed, outcome
 
 
@@ -233,14 +250,23 @@ def verify_adaptors(
             raise ValueError(f"adaptor {adaptor.id} record does not match its recomputation")
         if (entry.state, entry.reason) != graph_closure(outcome):
             raise ValueError(f"adaptor {adaptor.id} terminal state does not match its record")
+        emitted = set()
         for output in outcome.outputs:
             if output.value is None:
                 continue
             path = adaptor_output_path(
                 workspace, adaptor.id, PORT, output.index, iteration=iteration
             )
+            emitted.add(path.name)
             if read_graph_control(path) != canonical_json_bytes(output.value):
                 raise ValueError(f"adaptor {adaptor.id} output does not match its recomputation")
+        published = {
+            path.name
+            for path in adaptor_dir(workspace, iteration=iteration).iterdir()
+            if path.name.startswith(f"{adaptor.id}.out.")
+        }
+        if published != emitted:
+            raise ValueError(f"adaptor {adaptor.id} published outputs its record does not derive")
         outcomes[adaptor.id] = outcome
     return outcomes
 
