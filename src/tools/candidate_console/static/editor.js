@@ -118,7 +118,7 @@
     draftControls.render({dirty: pending(), canUndo: operable && draft.canUndo, canRedo: operable && draft.canRedo,
       undoLabel: draft?.undoLabel, redoLabel: draft?.redoLabel, canDiscard: !!draft && !saving && !conflict && pending()});
     renderTaskControls();
-    window.editorCircuit?.setEnabled(canEditCircuit());
+    window.editorCircuit?.setEnabled(canEditCircuit(), canSelectNode());
     window.editorLoopControls?.setEnabled($('loop'), canEditLoop());
     window.editorNodePalette?.setState({enabled: canEditNodes(), pendingNode: nodeEdit?.node || null});
   }
@@ -193,7 +193,8 @@
   function fold(value, label) {
     restore(viewState(value)); sourceDirty = false; draft.record(draftState(), label);
   }
-  const canEditCircuit = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict && !draftsPending();
+  const canSelectNode = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict;
+  const canEditCircuit = () => canSelectNode() && !draftsPending();
   // An invalid limit draft must stay editable so the author can correct it.
   const canEditLoop = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict &&
     trainingDrafts.size === 0 && !nodeEdit;
@@ -299,7 +300,7 @@
     $('edges').replaceChildren();
     const id = project, document = graph;
     const live = () => project === id && graph === document;
-    window.editorCircuit.render($('graph'), {viewKey: id, document: graph, inventory, selected, enabled: canEditCircuit(),
+    window.editorCircuit.render($('graph'), {viewKey: id, document: graph, inventory, selected, enabled: canEditCircuit(), selectable: canSelectNode(),
       allowBindingChange: true, allowMove: !nodeEdit}, {
       remove: ids => { if (live()) removeNodes(ids); }, menu: (nodeId, event) => { if (live()) window.editorNodePalette.contextMenu(event, nodeId, removeNodes); },
       select: value => { if (live()) { selected = value; render(); } },
