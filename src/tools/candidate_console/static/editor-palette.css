@@ -18,19 +18,22 @@
 .editor-palette .palette-category[data-capability="implementation"] { --capability-accent: var(--capability-implementation); --capability-tint: var(--capability-implementation-tint); }
 .editor-palette .palette-category[data-capability="validation"] { --capability-accent: var(--capability-validation); --capability-tint: var(--capability-validation-tint); }
 .editor-palette .palette-category[data-capability="tuning"] { --capability-accent: var(--capability-tuning); --capability-tint: var(--capability-tuning-tint); }
-.editor-palette .palette-row { display: flex; align-items: center; gap: .35rem; min-height: 2.1rem; padding: .25rem .45rem; cursor: pointer; list-style: none; color: var(--text); }
+.editor-palette .palette-row { display: flex; align-items: center; gap: .4rem; box-sizing: border-box; height: 2.25rem; padding: 0 .5rem; cursor: pointer; list-style: none; color: var(--text); overflow: hidden; }
 .editor-palette .palette-row::-webkit-details-marker { display: none; }
-.editor-palette .palette-row::after { content: "▸"; color: var(--text); font-size: .7rem; }
+.editor-palette .palette-row::after { flex: none; content: "▸"; color: var(--text); font-size: .7rem; }
 .editor-palette .palette-category[open] > .palette-row { background: var(--capability-tint); }
 .editor-palette .palette-category[open] > .palette-row::after { content: '▾'; }
 .editor-palette .palette-row:hover { background: var(--hover); }
 .editor-palette .palette-row:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
-.editor-palette .palette-row .capability-heading { flex: 1; grid-template-columns: 20px minmax(0, 1fr); grid-template-rows: auto; gap: 0 6px; }
-.editor-palette .palette-row .capability-heading svg { grid-row: 1; width: 18px; height: 18px; }
-.editor-palette .palette-row .capability-name { font-size: .78rem; }
-.editor-palette .palette-step { min-width: 1.1rem; padding: 0 .25rem; border: 1px solid var(--control-border); border-radius: 999px; color: var(--text); font-size: .64rem; font-weight: 700; text-align: center; }
-.editor-palette .palette-badge { padding: 0 .3rem; border: 1px solid var(--control-border); border-radius: 999px; color: var(--text); font-size: .62rem; font-weight: 700; white-space: nowrap; }
-.editor-palette .palette-badge[data-badge="Start here"] { border-color: var(--focus); background: var(--hover); }
+.editor-palette .palette-row .capability-heading { display: flex; align-items: center; flex: 1; min-width: 0; gap: .4rem; }
+.editor-palette .palette-row .capability-heading svg { flex: none; width: 18px; height: 18px; }
+.editor-palette .palette-row .capability-name { flex: 1; min-width: 0; font-size: .82rem; font-weight: 650; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; word-break: normal; }
+.editor-palette .palette-step { flex: none; min-width: 1.1rem; padding: 0 .25rem; border: 1px solid var(--control-border); border-radius: 999px; color: var(--text); font-size: .64rem; font-weight: 700; text-align: center; }
+/* Start here / Optional context marker: a dot with accessible text and a tooltip. */
+.editor-palette .palette-badge { flex: none; width: .55rem; height: .55rem; box-sizing: border-box; border: 2px solid var(--focus); border-radius: 50%; color: var(--text); }
+.editor-palette .palette-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.editor-palette .palette-details-badge { font-weight: 700; }
+.editor-palette .palette-badge[data-badge="Start here"] { background: var(--focus); }
 .editor-palette .palette-details { padding: .3rem .5rem .45rem; border-top: 1px solid var(--control-border); background: var(--capability-tint); color: var(--text); font-size: .72rem; line-height: 1.35; }
 .editor-palette .palette-details p { margin: .15rem 0; }
 .editor-palette .palette-details-label { font-weight: 700; }
@@ -46,7 +49,12 @@
 .editor-palette .palette-entry:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .editor-palette .palette-entry[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
 .editor-palette .palette-guide { margin: 0 0 .45rem; padding: .35rem .45rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--hover); color: var(--text); font-size: .74rem; line-height: 1.35; }
-.editor-palette .palette-guide.palette-guide-empty { border: 2px dashed var(--focus); font-weight: 600; }
+.editor-palette .palette-guide p { margin: 0; }
+.editor-palette .palette-guide-more { margin: .2rem 0 0; }
+.editor-palette .palette-guide-more summary { padding: 0; font-size: .72rem; }
+.editor-palette .palette-guide-more p { margin-top: .2rem; }
+.editor-palette .palette-guide.palette-guide-empty { border: 2px dashed var(--focus); }
+.editor-palette .palette-guide.palette-guide-empty .palette-guide-lead { font-weight: 600; }
 /* Hover/focus popover (appended to <body> so the rail's scroll box never clips it). */
 .palette-popover { position: fixed; z-index: 30; width: min(22rem, calc(100vw - 16px)); overflow: auto; box-sizing: border-box; padding: .55rem .7rem; border: 1px solid var(--control-border); border-radius: .5rem; background: var(--panel); color: var(--text); box-shadow: 0 6px 20px #0004; font-size: .76rem; line-height: 1.4; }
 .palette-popover .capability-heading { grid-template-columns: 24px minmax(0, 1fr); grid-template-rows: auto; }

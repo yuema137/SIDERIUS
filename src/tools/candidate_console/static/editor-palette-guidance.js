@@ -10,7 +10,8 @@
  * shape tokens come from editor-contract-presentation.js keyed on the id. */
 (() => {
   'use strict';
-  const capabilityLabel = name => window.editorCapabilityPresentation.label(name);
+  // Sentence-case display titles from editor-capability-presentation.js (their owner).
+  const capabilityLabel = name => window.editorCapabilityPresentation.title(name);
   const contracts = () => window.editorContractPresentation;
   const element = (tag, text, parent, className) => {
     const value = document.createElement(tag); value.textContent = text;
@@ -52,19 +53,32 @@
     if (optional) element('span', `+${optional} optional`, chips, 'palette-chip palette-chip-more');
     chip(chips, typeName(entry.output_contract), entry.output_contract.id, true, 'sends');
   }
-  // Collapsed row (summary) and expanded details of one capability in the stack.
+  // Icon + display title on one line (ellipsis; full title as tooltip).
+  function titled(parent, capability, className) {
+    window.editorCapabilityPresentation.append(parent, capability, '', className);
+    parent.querySelector('.capability-instance')?.remove();
+    const name = parent.querySelector('.capability-name');
+    name.textContent = capabilityLabel(capability); name.title = capabilityLabel(capability);
+  }
+  // Collapsed row (summary): icon | title | marker | step | chevron, one uniform line.
+  // The Start here / Optional context badge is a small marker (accessible text and
+  // tooltip) here, and a full line in the expanded details.
   function heading(summary, capability, guide, count) {
-    window.editorCapabilityPresentation.append(summary, capability, '', 'palette-row-heading');
-    summary.querySelector('.capability-instance')?.remove();
+    titled(summary, capability, 'palette-row-heading');
     const info = guideFor(guide, capability);
-    if (info) element('span', String(info.stage + 1), summary, 'palette-step').setAttribute('aria-label', `Step ${info.stage + 1}`);
     const tag = badge(guide, capability);
-    if (tag) element('span', tag, summary, 'palette-badge').dataset.badge = tag;
+    if (tag) {
+      const marker = element('span', '', summary, 'palette-badge'); marker.dataset.badge = tag; marker.title = tag;
+      element('span', tag, marker, 'palette-visually-hidden');
+    }
+    if (info) element('span', String(info.stage + 1), summary, 'palette-step').setAttribute('aria-label', `Step ${info.stage + 1}`);
     summary.setAttribute('aria-label', `${capabilityLabel(capability)}${info ? `, step ${info.stage + 1}` : ''}${tag ? `, ${tag}` : ''}, ${count} route${count === 1 ? '' : 's'}`);
   }
   function details(parent, capability, guide, entries) {
     const info = guideFor(guide, capability);
     const box = element('div', '', parent, 'palette-details');
+    const tag = badge(guide, capability);
+    if (tag) element('p', tag === 'Start here' ? 'Start here: add this first.' : 'Optional context: feeds the chain when you want it.', box, 'palette-details-badge').dataset.badge = tag;
     if (info) element('p', info.description, box, 'palette-details-description');
     const output = entries[0]?.output_contract;
     if (output) {
@@ -101,8 +115,7 @@
   function fill(entry, guide) {
     const box = ensurePopover(); box.replaceChildren();
     const info = guideFor(guide, entry.capability);
-    window.editorCapabilityPresentation.append(box, entry.capability, '', 'palette-popover-heading');
-    box.querySelector('.capability-instance')?.remove();
+    titled(box, entry.capability, 'palette-popover-heading');
     element('p', info?.description || '', box, 'palette-popover-description');
     element('p', entry.protocol ? `Request route: ${entry.protocol}. ${routeText(entry)}.` : 'Request route: external. Its whole request is one external input (a binding).', box, 'palette-popover-route');
     element('h4', 'Receives', box);
@@ -165,12 +178,17 @@
   }
 
   // Start guide: the build chain and context feeders, both server-derived.
-  function startText(guide, empty) {
-    if (!guide?.chain.length) return '';
+  // Start guide: one sentence (build chain) plus a "How it works" disclosure.
+  function startGuide(box, guide, empty) {
+    box.replaceChildren();
+    if (!guide?.chain.length) return false;
     const [first, ...rest] = guide.chain.map(capabilityLabel);
-    const chain = `Start with ${first}${rest.length ? `, then add ${rest.join(' → ')}` : ''}.`;
-    const context = guide.context.length ? ` ${list(guide.context)} add${guide.context.length === 1 ? 's' : ''} optional context that feeds the chain.` : '';
-    return `${empty ? 'The canvas is empty. ' : ''}${chain}${context} Expand a capability to see its types and connections; hover or focus a route for a preview.`;
+    element('p', `${empty ? 'The canvas is empty. ' : ''}Start with ${first}${rest.length ? `, then add ${rest.join(' → ')}` : ''}.`, box, 'palette-guide-lead');
+    const more = element('details', '', box, 'palette-guide-more');
+    element('summary', 'How it works', more);
+    if (guide.context.length) element('p', `${list(guide.context)} add${guide.context.length === 1 ? 's' : ''} optional context that feeds the chain.`, more);
+    element('p', 'Expand a capability to see what it receives, what it sends and what it connects to. Hover or focus a route for a preview; click, press Enter or drag it onto the canvas to add it.', more);
+    return true;
   }
   function badge(guide, capability) {
     if (guide?.chain[0] === capability) return 'Start here';
@@ -182,5 +200,5 @@
     const rank = name => guideFor(guide, name)?.stage ?? Number.MAX_SAFE_INTEGER;
     return [...capabilities].sort((a, b) => rank(a) - rank(b));
   }
-  window.editorPaletteGuidance = Object.freeze({card, heading, details, attach, hide, startText, order, guideFor});
+  window.editorPaletteGuidance = Object.freeze({card, heading, details, attach, hide, startGuide, order, guideFor});
 })();

@@ -22,7 +22,9 @@
     const box = host?.querySelector('.palette-guide');
     if (!box) return;
     const empty = !!catalog && !cards().length;
-    box.textContent = guidance().startText(guide, empty); box.hidden = !box.textContent;
+    // Rebuild only when the text changes so an open "How it works" stays open.
+    const key = `${!!guide}:${empty}`;
+    if (box.dataset.key !== key) { box.dataset.key = key; box.hidden = !guidance().startGuide(box, guide, empty); }
     box.classList.toggle('palette-guide-empty', empty);
   }
   const cards = () => [...(canvas?.querySelectorAll('.circuit-card') || [])];
@@ -109,7 +111,7 @@
     const search = element('input', '', body, 'palette-search');
     search.type = 'search'; search.placeholder = 'Search capabilities'; search.setAttribute('aria-label', 'Search capabilities');
     search.addEventListener('input', renderList);
-    const start = element('p', '', body, 'palette-guide'); start.hidden = true; start.setAttribute('role', 'note');
+    const start = element('div', '', body, 'palette-guide'); start.hidden = true; start.setAttribute('role', 'note');
     element('div', '', body, 'palette-list');
     const cancel = element('button', 'Cancel new node', body, 'palette-cancel');
     cancel.type = 'button'; cancel.hidden = true; cancel.addEventListener('click', () => actions.cancel());

@@ -515,11 +515,13 @@ Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
 drag payload. It lists
 `GET /api/editor/node-catalog` entries (fetched once per connection, only while the
 Workflow view is shown; other pages never request it) as a compact, aligned stack
-of one collapsed `details.palette-category` row per capability (icon, label, step
-number, "Start here" on `guide.chain[0]`, "Optional context" on `guide.context`) in
-`guide` stage order, with a text search (matching rows open). Above the stack a start
-guide renders `guide.chain`/`guide.context` (emphasised while the canvas has no
-card). Expanding a row (accordion, open state kept across re-renders) shows the
+of one uniform-height collapsed `details.palette-category` row per capability (icon,
+sentence-case title from `editorCapabilityPresentation.title` on one line with
+ellipsis and a full-title tooltip, a dot marker with accessible text and tooltip for
+"Start here" on `guide.chain[0]` / "Optional context" on `guide.context`, step
+number) in `guide` stage order, with a text search (matching rows open). Above the
+stack a one-sentence start guide renders `guide.chain` (emphasised while the canvas
+has no card) with a "How it works" disclosure naming `guide.context`. Expanding a row (accordion, open state kept across re-renders) shows the
 server description, the sent type, connects-from/to and one addable `.palette-entry`
 per route with contract chips: "→ <name>" for each received (required) type and
 "<name> →" for the sent type (`data-direction` receives/sends, accessible text

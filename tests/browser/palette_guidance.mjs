@@ -67,12 +67,21 @@ try {
     assert.ok(Math.abs(rows[i].left - rows[0].left) < .5 && Math.abs(rows[i].width - rows[0].width) < .5, 'aligned rows');
   }
   assert.ok(rows.every(row => row.bottom - row.top < 48), `compact rows ${JSON.stringify(rows.map(row => row.bottom - row.top))}`);
+  assert.ok(rows.every(row => Math.abs((row.bottom - row.top) - (rows[0].bottom - rows[0].top)) < 1), 'uniform row height (badges never add a line)');
+  // Sentence-case title on one line (ellipsis, never broken mid-word), full title as tooltip.
+  const names = await palette.locator('.palette-row .capability-name').evaluateAll(items => items.map(item => ({
+    text: item.textContent, title: item.title,
+    nowrap: getComputedStyle(item).whiteSpace === 'nowrap'})));
+  assert.deepEqual(names.map(item => item.text), ['Interpret results', 'Literature review', 'Propose model', 'Implement', 'Validate', 'Train & tune']);
+  assert.ok(names.every(item => item.nowrap && item.title === item.text), JSON.stringify(names));
   assert.equal(rows.find(row => row.capability === 'proposal').badge, 'Start here');
+  assert.equal(await palette.locator('.palette-category[data-capability="proposal"] .palette-badge').getAttribute('title'), 'Start here');
   assert.equal(rows.find(row => row.capability === 'interpretation').badge, 'Optional context');
   assert.equal(rows.find(row => row.capability === 'literature').badge, 'Optional context');
   const guide = await palette.locator('.palette-guide').textContent();
-  assert.match(guide, /Start with PROPOSE, then add IMPLEMENT → VALIDATE → TRAIN & TUNE\./);
-  assert.match(guide, /INTERPRET, LITERATURE add optional context/);
+  assert.match(await palette.locator('.palette-guide-lead').textContent(), /^Start with Propose model, then add Implement → Validate → Train & tune\.$/);
+  assert.match(guide, /Interpret results, Literature review add optional context/);
+  assert.equal(await palette.locator('.palette-guide-more').evaluate(more => more.open), false, 'details behind How it works');
 
   // Accordion details: description, output type, connections and typed routes.
   const validation = palette.locator('.palette-category[data-capability="validation"]');
@@ -83,8 +92,8 @@ try {
   assert.equal(await sends.getAttribute('data-contract'), 'validation.output');
   assert.equal(await sends.getAttribute('data-direction'), 'sends');
   assert.match(await sends.textContent(), /→$/, 'sent type reads "<name> →"');
-  assert.equal(await validation.locator('.palette-details-from').textContent(), 'Connects from: PROPOSE, IMPLEMENT');
-  assert.equal(await validation.locator('.palette-details-to').textContent(), 'Connects to: TRAIN & TUNE');
+  assert.equal(await validation.locator('.palette-details-from').textContent(), 'Connects from: Propose model, Implement');
+  assert.equal(await validation.locator('.palette-details-to').textContent(), 'Connects to: Train & tune');
   const route = validation.locator('.palette-entry[data-protocol="implementation-to-validation"]');
   assert.deepEqual(await route.locator('.palette-chip[data-contract]').evaluateAll(chips => chips.map(chip => chip.dataset.contract)),
     ['implementation.output', 'storage', 'validation.output']);
@@ -103,11 +112,11 @@ try {
   await popover.waitFor({state: 'visible'});
   const text = await popover.textContent();
   assert.match(text, /Receives/); assert.match(text, /Sends/);
-  assert.match(await popover.locator('li[data-argument="output"]').textContent(), /required · from IMPLEMENT/);
+  assert.match(await popover.locator('li[data-argument="output"]').textContent(), /required · from Implement/);
   assert.match(await popover.locator('li[data-argument="storage"]').textContent(), /required · external input/);
   assert.match(await popover.locator('li[data-argument="llm_provider"]').textContent(), /optional/);
-  assert.equal(await popover.locator('.palette-popover-from').textContent(), 'Connects from: PROPOSE, IMPLEMENT');
-  assert.equal(await popover.locator('.palette-popover-to').textContent(), 'Connects to: TRAIN & TUNE');
+  assert.equal(await popover.locator('.palette-popover-from').textContent(), 'Connects from: Propose model, Implement');
+  assert.equal(await popover.locator('.palette-popover-to').textContent(), 'Connects to: Train & tune');
   assert.equal(await route.getAttribute('aria-describedby'), 'palette-popover');
   const lit = () => page.locator('.circuit-port.palette-compatible').evaluateAll(ports => ports.map(port => port.id).sort());
   assert.deepEqual(await lit(), ['circuit-output-implement']);
@@ -126,8 +135,8 @@ try {
   await page.keyboard.press('Tab');
   await waitUntil(async () => tuningRoute.evaluate(element => element === document.activeElement), 'tab to tuning route');
   await popover.waitFor({state: 'visible'});
-  assert.match(await popover.locator('li[data-argument="validation"]').textContent(), /from VALIDATE/);
-  assert.match(await popover.locator('li[data-argument="proposal"]').textContent(), /from PROPOSE/);
+  assert.match(await popover.locator('li[data-argument="validation"]').textContent(), /from Validate/);
+  assert.match(await popover.locator('li[data-argument="proposal"]').textContent(), /from Propose model/);
   assert.equal(await popover.locator('.palette-popover-to').textContent(), 'Connects to: no other capability (final step)');
   assert.deepEqual(await lit(), ['circuit-output-propose', 'circuit-output-validate']);
   assert.equal(await tuningRoute.evaluate(element => element.matches(':focus-visible')), true);
