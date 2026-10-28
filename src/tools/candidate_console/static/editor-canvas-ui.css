@@ -33,9 +33,11 @@
 /* Connector legend: a bottom-left chip; opened, a popover above it (K14, review #16). */
 #editor-graph > .circuit-contract-legend { position: relative; margin: var(--space-2) 0 0; max-height: none !important; overflow: visible !important; }
 .circuit-contract-legend > summary { display: inline-flex; align-items: center; min-height: 28px; padding: 0 var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--panel); white-space: nowrap; }
-.circuit-contract-legend-popover { position: absolute; z-index: 15; left: 0; bottom: calc(100% + var(--space-1)); width: min(360px, 60vw); max-height: 320px; overflow: auto;
+.circuit-contract-legend-popover { position: absolute; z-index: 15; left: 0; bottom: calc(100% + var(--space-1)); width: min(440px, 64vw); max-height: 320px; overflow: auto;
   padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); box-shadow: var(--elev-2); }
-.circuit-contract-legend-list { display: grid; gap: var(--space-1); }
+/* Two columns keep the open legend short enough to read without scrolling at 1024px. */
+.circuit-contract-legend-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1) var(--space-3); }
+.circuit-contract-legend-list li { min-width: 0; }
 
 /* Problems: page-bar chip + popover (spec §9), never a card in the page flow. */
 .problems-chip { display: inline-flex; align-items: center; gap: var(--space-1); background: var(--panel); }
