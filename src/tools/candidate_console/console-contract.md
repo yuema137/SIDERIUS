@@ -556,7 +556,8 @@ list never enables Review: Review remains disabled for an incomplete draft.
 Witness: `tests/browser/required_defaults.mjs`.
 
 Socket/drag gestures send no requests. Source editing, disconnection, conflict,
-saving and invalid training drafts gate mutations; stale rendered projections
+saving and invalid training/loop drafts gate mutations (invalid drafts do not block
+capability selection, which is navigation); stale rendered projections
 cannot mutate a replacement document. Required whole-declaration checks remain
 Review/Save, with execution-profile/alias admission owned by separate native
 preparation. Type-compatible highlights do not claim runtime compatibility. Existing
@@ -664,8 +665,9 @@ part of the projection.
 
 Slow control: `operations-list.js` renders the list as links to
 `#slow-control/<UUID>`, so selecting a row uses the existing route and Status and
-logs owner. It loads when a bare `#slow-control` route is shown while connected,
-and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
+logs owner. It loads once per connection (session revision) when any Slow control
+route is shown while connected, including `#slow-control/<UUID>`, again whenever the
+bare `#slow-control` route is entered, and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
 operation for live status). Manual UUID entry remains available.
 
 ## Persistent views, routing and session
