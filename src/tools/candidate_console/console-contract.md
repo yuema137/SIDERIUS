@@ -118,16 +118,24 @@ bytes are refused. It writes `settings/console.json` write-once only when absent
 When `console.json` exists and names this workspace, `init` also creates the missing
 derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
 them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
-It never deletes, overwrites or follows a symlink; a refusal names the folder and
-exits 2. Residual race: `core.durable_io` publishes by path, so after the no-follow
+Under any umask it creates folders as 0700 and the token as 0600 (it sets umask
+077 for its own duration and `fchmod`s created folders). It never deletes, overwrites
+or follows a symlink. Refusals exit 2 and say which item failed:
+`WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
+or the library default profile, when it is a symlink, unreadable or has different
+bytes); `MissingSetting` from an existing console.json names the task field; an
+unusable `--workspace` gets its own message. Residual race: `core.durable_io` publishes by path, so after the no-follow
 parent check only a same-user process, which already owns the workspace, can swap
 a parent.
 
 **`WorkspaceReadiness`** (`readiness_models.py`, beside `CredentialReadiness`) is an
 ephemeral, name-only projection: `workspace_status` and one `WorkspaceEntry(name,
 status, created_by)` per fixed child, per derived task output root and per derived
-`data/<task_id>`. `status` is `present|missing|not_directory|symlink|not_owner`,
-computed with no-follow `stat` relative to a no-follow root descriptor; task data
+`data/<task_id>`. `status` is `present|missing|not_directory|symlink|not_owner|unreadable`
+(`missing` only for not-found; other open/stat refusals map to `symlink`,
+`not_directory` or `unreadable`),
+computed with no-follow `stat` relative to a root descriptor opened by
+`files.open_directory` (the same no-follow walk as private reads); task data
 (`created_by="operator"`) reports presence only. `created_by="writer"` entries do
 not affect `ready`. `init_command` is set when `init` could fix a missing item. No
 `os.access` probe and no creation. `check`/`serve` print non-present entries and

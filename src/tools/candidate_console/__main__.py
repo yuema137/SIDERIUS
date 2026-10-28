@@ -1,9 +1,10 @@
 """Explicit single-process loopback console; no reload or proxy trust."""
 
 import argparse
+import contextlib
 import sys
 
-from .config import validate_config
+from .config import load_console
 from .files import config_bytes
 from .readiness_models import WorkspaceReadiness
 from .settings_models import ResolvedConsole
@@ -33,19 +34,15 @@ def _print_readiness(readiness: WorkspaceReadiness | None) -> None:
 
 def _load(path: str) -> ResolvedConsole | None:
     try:
-        resolved = resolve_console(config_bytes(path))
+        return load_console(path)
     except MissingSetting as error:
         print(f"Console configuration is incomplete: {error}.", file=sys.stderr)
-        return None
     except (OSError, ValueError):
         print(INVALID, file=sys.stderr)
-        return None
-    try:
-        return ResolvedConsole(validate_config(resolved.config), resolved.settings)
-    except (OSError, ValueError):
-        print(INVALID, file=sys.stderr)
-        _print_readiness(workspace_readiness(resolved))
-        return None
+        # Name unusable workspace folders when the file itself resolves.
+        with contextlib.suppress(OSError, ValueError):
+            _print_readiness(workspace_readiness(resolve_console(config_bytes(path))))
+    return None
 
 
 def main() -> int:
@@ -66,10 +63,16 @@ def main() -> int:
         except WorkspaceRefused as error:
             print(f"Workspace init refused: {error}. Nothing was deleted.", file=sys.stderr)
             return 2
+        except MissingSetting as error:
+            print(
+                f"Workspace init stopped: console.json is incomplete: {error}. "
+                "Nothing was deleted.",
+                file=sys.stderr,
+            )
+            return 2
         except (OSError, ValueError):
             print(
-                "Workspace init failed: --workspace must be an existing canonical directory "
-                "without symlinks. Nothing was deleted.",
+                "Workspace init failed: a filesystem operation was refused. Nothing was deleted.",
                 file=sys.stderr,
             )
             return 2

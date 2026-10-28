@@ -21,7 +21,7 @@ import stat
 from collections.abc import Iterator
 from pathlib import Path
 
-from .files import canonical, config_bytes
+from .files import canonical, config_bytes, open_directory
 from .readiness_models import WorkspaceEntry, WorkspaceReadiness, WorkspaceStatus
 from .settings_models import ConsoleFile, ResolvedConsole, SettingsContext
 
@@ -127,23 +127,29 @@ def _owned(descriptor: int) -> bool:
 
 @contextlib.contextmanager
 def _open_directory(path: Path) -> Iterator[int]:
-    """Open a canonical directory by walking no-follow descriptors from ``/``."""
-    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    directory = open_directory(path)
     try:
-        for part in path.parts[1:]:
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
-            os.close(directory)
-            directory = child
         yield directory
     finally:
         os.close(directory)
 
 
+def _refused_status(error: OSError) -> WorkspaceStatus:
+    """Map an open/stat failure: not found is ``missing``; anything else is not usable."""
+    if isinstance(error, FileNotFoundError):
+        return "missing"
+    if error.errno == errno.ELOOP:
+        return "symlink"
+    if error.errno == errno.ENOTDIR:
+        return "not_directory"
+    return "unreadable"
+
+
 def _status(directory: int, name: str, *, owned: bool = True) -> WorkspaceStatus:
     try:
         metadata = os.stat(name, dir_fd=directory, follow_symlinks=False)
-    except FileNotFoundError:
-        return "missing"
+    except OSError as error:
+        return _refused_status(error)
     if stat.S_ISLNK(metadata.st_mode):
         return "symlink"
     if not stat.S_ISDIR(metadata.st_mode):
@@ -207,8 +213,8 @@ def workspace_readiness(resolved: ResolvedConsole) -> WorkspaceReadiness | None:
                         ),
                     )
                 )
-    except OSError:
-        root_status = "missing"
+    except OSError as error:
+        root_status = _refused_status(error)
     ready = root_status == "present" and all(
         entry.status == "present" for entry in entries if entry.created_by != "writer"
     )
@@ -229,7 +235,10 @@ def _status_under(root: int, parent: str, leaf: str, *, owned: bool) -> Workspac
     status = _status(root, parent)
     if status != "present":
         return "missing" if status == "missing" else status
-    child = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+    try:
+        child = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+    except OSError as error:
+        return _refused_status(error)
     try:
         return _status(child, leaf, owned=owned)
     finally:
@@ -253,10 +262,19 @@ def _write_once(path: Path, payload: bytes, *, label: str) -> None:
     try:
         publish_bytes_write_once(str(path), payload)
     except FileExistsError:
-        if config_bytes(str(path)) != payload:
+        if _existing_file(path, label=label) != payload:
             raise WorkspaceRefused(
                 f"{label} exists with different content; left unchanged"
             ) from None
+
+
+def _existing_file(path: Path, *, label: str) -> bytes:
+    try:
+        return config_bytes(str(path))
+    except (OSError, ValueError):
+        raise WorkspaceRefused(
+            f"{label} must be a regular file you can read, not a symlink; left unchanged"
+        ) from None
 
 
 def _create_token(settings: int) -> None:
@@ -283,12 +301,29 @@ def init_workspace(parent: str, *, port: int = DEFAULT_PORT) -> Path:
     never replaced. With an existing console.json, the derived per-task output roots
     of its tasks are created too (never ``data/<task_id>``).
     """
-    import hashlib
-
     if not 1024 <= port <= 65535:
         raise WorkspaceRefused("port must be between 1024 and 65535")
-    base = canonical(parent)
+    try:
+        base = canonical(parent)
+        if not base.is_dir():
+            raise NotADirectoryError(parent)
+    except (OSError, ValueError):
+        raise WorkspaceRefused(
+            "--workspace must be an existing canonical directory without symlinks"
+        ) from None
     workspace = base / WORKSPACE_DIRECTORY
+    # A restrictive umask must not leave unusable (mode 000) folders: mkdir modes
+    # are 0700 under a 077 umask, and created folders are fchmod-ed to 0700 too.
+    previous = os.umask(0o077)
+    try:
+        return _init(base, workspace, port)
+    finally:
+        os.umask(previous)
+
+
+def _init(base: Path, workspace: Path, port: int) -> Path:
+    import hashlib
+
     with _open_directory(base) as directory:
         if not _owned(directory):
             raise WorkspaceRefused(
@@ -320,7 +355,7 @@ def init_workspace(parent: str, *, port: int = DEFAULT_PORT) -> Path:
                 console, (json.dumps(skeleton, indent=2) + "\n").encode(), label="console.json"
             )
         else:
-            resolved = resolve_console(config_bytes(str(console)))
+            resolved = resolve_console(_existing_file(console, label="settings/console.json"))
             if resolved.settings.workspace_root == workspace:
                 for task_id, field in resolved.settings.derived_task_fields():
                     if field in TASK_OUTPUT_PARENTS:
