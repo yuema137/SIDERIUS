@@ -301,7 +301,7 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
   `OperationFailure("integrity", ...)` → HTTP 409 with the generic sanitized
   message; an unknown operation is 404.
 
-Slow control: `graph-results-monitor.js` owns `window.renderGraphResults` and the
+Monitor: `graph-results-monitor.js` owns `window.renderGraphResults` and the
 `#graph-results-observation` section. `app.js` requests the route once per
 selected operation inside the existing poll, only for `kind == "candidate"` and
 `state == "completed"`; the existing monitor epoch fences replies and selection
@@ -332,7 +332,7 @@ declaration (`candidate_operations.loop_root_operation`, which follows immutable
 only from this segment's native receipt `loop_trace` (`null` while no receipt
 exists; counts are cumulative over the run). `stop_reason` is the receipt's
 verified `loop_trace.stop_reason`, present only when a declared stop condition
-completed the loop early; Slow control renders it in plain words ("Research loop
+completed the loop early; Monitor renders it in plain words ("Research loop
 stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
 higher is better; best at body 3)", or "… no improvement for 2 bodies …") from
 the existing status poll, with recorded values unrounded. The receipt's body
@@ -361,7 +361,7 @@ even when the loop has since become terminal (the backend replays the marker
 before its running check); a 200 is therefore an idempotent acknowledgement,
 never evidence that the loop is still running.
 
-Slow control: `loop-control.js` owns `window.renderLoopControl` and
+Monitor: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
 **Stop at next boundary** is shown only for a status with `loop` (root or resumed
 segment), state `active` and no receipt. A click disables the button for the pending request, so
@@ -400,7 +400,7 @@ digest), `kind`, `not_ready` and `runtime` 409 with route-local fixed messages;
 `credentials` 409 carrying missing names only; `busy`/`conflict` use the global
 messages. Unknown predecessor 404.
 
-Slow control shows **Pause at next boundary** beside Stop for an active loop
+Monitor shows **Pause at next boundary** beside Stop for an active loop
 segment with no receipt; after acknowledgement it reads "Pause requested … Not yet
 paused." A `paused` receipt reads "paused at a completed body boundary after N of M
 bodies" and is resumable, never "ended". Without a successor it offers **Review
@@ -420,7 +420,7 @@ projections in `candidate_worker/test_loop_resume.py` (real two-segment store), 
 
 `ConsoleConfig.recorded_examples` defaults to empty. The authenticated
 `GET /api/recorded-examples` lists only configured entries; the detail GET takes
-an allowlist ID, never a browser-supplied filesystem path. Slow control presents
+an allowlist ID, never a browser-supplied filesystem path. Monitor presents
 the captured three-stage proposal/implementation/validation result, labelled with
 the editor's paper capability names, and reads
 reported provider usage through the existing candidate-token owner and shared
@@ -770,21 +770,22 @@ most 4096 directory entries are examined per request; a larger store reports
 status. Receipts, digests, workspace/log/output paths and credentials are not
 part of the projection.
 
-Slow control: `operations-list.js` renders the list as links to
-`#slow-control/<UUID>`, so selecting a row uses the existing route and Status and
-logs owner. It loads once per connection (session revision) when any Slow control
-route is shown while connected, including `#slow-control/<UUID>`, again whenever the
-bare `#slow-control` route is entered, and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
+Monitor: `operations-list.js` renders the list as links to
+`#monitor/<UUID>`, so selecting a row uses the existing route and Status and
+logs owner. It loads once per connection (session revision) when any Monitor
+route is shown while connected, including `#monitor/<UUID>`, again whenever the
+bare `#monitor` route is entered, and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
 operation for live status). Manual UUID entry remains available.
 
 ## Persistent views, routing and session
 
 `index.html` owns a single document with persistent Home, Workflow, Run and Slow
 control sections. `navigation.js` owns `/#home`, `/#workflow`, `/#run`,
-`/#slow-control` and `/#slow-control/<UUID>`; `document.title` names Workflow and
+`/#monitor` and `/#monitor/<UUID>` (the former `#slow-control[/<UUID>]` is rewritten to the matching
+`#monitor` route with `history.replaceState` before routing, so old links keep working); `document.title` names Workflow and
 Run. Empty fragments use Home. Complete UUID validation
 precedes operation selection; invalid routes show a local error and suspend
-operation polling without mutating a native request. Bare Slow control retains
+operation polling without mutating a native request. Bare Monitor retains
 selection; repeated identical UUIDs do not reset the monitor epoch/log cursor.
 Back/Forward and internal links hide inactive sections with `hidden`, update
 `aria-current`, and focus the active heading on explicit fragment changes.
@@ -836,7 +837,7 @@ Workflow references, **Advanced source** and **Details** (save behavior and
 concurrent-writer notes) start collapsed; successful Review opens the exact diff. Disclosure toggles do not change edit mode or reviewed bytes.
 Unsupported-source status and Inspect source remain visible; conflicts retain
 visible summary/actions. A `beforeunload` guard applies only to a real document
-exit with pending editor changes. Slow control shows operation identity, native
+exit with pending editor changes. Monitor shows operation identity, native
 state, observed time and token quality; facts, token rows and logs are disclosures.
 It infers neither scientific success nor complete billing.
 
@@ -847,7 +848,7 @@ It infers neither scientific success nor complete billing.
 | `#home` | Workflow journey; **Open workflow** | **Advanced**: native chain card; collapsed **Prepare configured task** |
 | `#workflow` | Project, task package/version, canvas + Selection; **Save reviewed source** (Refresh and Review are secondary buttons); **Next: prepare a run** | Research loop panel; collapsed References, Advanced source, Review exact Python changes, Details |
 | `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; collapsed captured resources |
-| `#slow-control` | Recent operations; Status and logs | Loop controls, observations, token table, logs, Recorded example |
+| `#monitor` | Recent operations; Status and logs | Loop controls, observations, token table, logs, Recorded example |
 
 `page-guidance.js` is presentation only and owns no request or draft state. It reads
 `window.workflowEditor.state` and `window.newRunGate.ready`. `new-run.js` remains the
@@ -867,7 +868,7 @@ When the connection is absent or no workflow source is open, Workflow shows
 **Start from a task example** (select a task, edit, save, run) with a one-line state.
 A step line (`#step-indicator`, `role="navigation"`, not a `<nav>` element) shows
 Task › Workflow › Run › Results on Workflow (Task until a source is open), Run and
-Slow control, with `aria-current="step"` and a done mark for completed steps; it is
+Monitor, with `aria-current="step"` and a done mark for completed steps; it is
 hidden on Home. Witness: `tests/browser/page_guidance.mjs`.
 
 Navigation qualification: `tests/browser/console_navigation.mjs` uses the same

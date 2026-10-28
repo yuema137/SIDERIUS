@@ -344,8 +344,8 @@ main > #route-status:empty { display: none; }
 .access-connected button { min-height: 36px; padding: 5px 12px; }
 
 /* Home: the workflow journey is the primary path; native chain and configured task are advanced. */
-#view-home, #view-slow-control { display: grid; gap: 16px; align-content: start; }
-#view-home > h1, #view-slow-control > h1 { margin: 0; }
+#view-home, #view-monitor { display: grid; gap: 16px; align-content: start; }
+#view-home > h1, #view-monitor > h1 { margin: 0; }
 .journey-steps { margin: 8px 0 0; padding-left: 1.4em; display: grid; gap: 6px; }
 .section-heading { margin: 8px 0 0; font-size: 1.05rem; color: var(--muted); }
 #view-home > details { margin: 0; }
@@ -363,10 +363,10 @@ main > #route-status:empty { display: none; }
 .button-link:hover { background: var(--primary-hover); }
 .actions a:not(.button-link) { align-self: center; }
 
-/* Slow control: operations list beside Status and logs on desktop widths. */
-.slow-control-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+/* Monitor: operations list beside Status and logs on desktop widths. */
+.monitor-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 @media (min-width: 1100px) {
-  .slow-control-layout { grid-template-columns: minmax(280px, 400px) minmax(0, 1fr); }
+  .monitor-layout { grid-template-columns: minmax(280px, 400px) minmax(0, 1fr); }
 }
 .operations-actions { margin-top: 0; }
 .operations-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 70vh; overflow-y: auto; }

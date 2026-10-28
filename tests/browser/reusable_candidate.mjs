@@ -87,7 +87,7 @@ try {
   await page.locator('#editor-source').fill(source + '\n# pending browser draft\n');
   assert.match(await page.locator('#capture-source').textContent(), /Unsaved draft edits/);
   assert.equal(await page.locator('#capture-launch').isEnabled(), true);
-  await page.locator('nav a[href="#slow-control"]').click(); await page.locator('nav a[href="#workflow"]').click();
+  await page.locator('nav a[href="#monitor"]').click(); await page.locator('nav a[href="#workflow"]').click();
   assert.match(await page.locator('#editor-source').inputValue(), /pending browser draft/);
   await page.locator('nav a[href="#run"]').click();
   // Storage refusal must prevent POST; it must not silently launch an unrecoverable UUID.

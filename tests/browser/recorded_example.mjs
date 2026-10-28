@@ -33,7 +33,7 @@ try {
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
-  await page.goto(`${metadata.origin}/#slow-control`);
+  await page.goto(`${metadata.origin}/#monitor`);
   await page.locator('#recorded-example-choice option[value="tess-recorded"]').waitFor({state: 'attached'});
   await page.locator('#recorded-example-open').click();
   await page.locator('#recorded-example-status').filter({hasText: 'Candidate validation evidence verified'}).waitFor();
@@ -82,7 +82,7 @@ try {
   assert.deepEqual(faults, []);
   assert.ok(calls.length >= 3);
   assert.ok(calls.every(call => call.method === 'GET'), 'recorded example uses GET only');
-  // '/api/operations' is Slow control's read-only list (bare route); no single-operation route is read.
+  // '/api/operations' is Monitor's read-only list (bare route); no single-operation route is read.
   assert.ok(calls.every(call => ['/api/choices', '/api/native-chain/choices', '/api/operations', '/api/recorded-examples', `/api/recorded-examples/${metadata.example_id}`, '/api/recorded-examples/tess-recorded-b', '/api/recorded-examples/tess-invalid-declaration'].includes(call.path)), 'no operation, preparation, launch, review, token, or log route is called');
   assert.ok(responses.filter(response => response.path === '/api/recorded-examples/tess-invalid-declaration').every(response => response.status === 409));
   assert.ok(responses.filter(response => response.path !== '/api/recorded-examples/tess-invalid-declaration').every(response => response.status === 200));

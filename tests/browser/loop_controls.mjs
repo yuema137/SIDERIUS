@@ -64,7 +64,7 @@ try {
     }
     assert.equal(request.method(), 'GET');
     if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
-    // Slow control lists this console's operations once per connection, also on UUID routes.
+    // Monitor lists this console's operations once per connection, also on UUID routes.
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
     if (url.pathname.endsWith('/log')) return reply({text: '', next_offset: 0, observed_size: 0, truncated: false, missing: false});
@@ -101,7 +101,7 @@ try {
     }
     throw new Error('unexpected path ' + url.pathname);
   });
-  await page.goto(`${metadata.origin}/#slow-control/${running}`);
+  await page.goto(`${metadata.origin}/#monitor/${running}`);
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
@@ -125,12 +125,12 @@ try {
   assert.ok(await stop.isHidden());
   assert.equal(posts.length, 1);
 
-  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, fixed);
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, fixed);
   await page.locator('#monitor-status').filter({hasText: 'State: active'}).waitFor();
   await page.locator('#operation-observed').filter({hasText: fixed}).waitFor();
   assert.ok(await page.locator('#loop-control').isHidden(), 'a candidate without a declared loop has no loop control');
 
-  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, finished);
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, finished);
   await state.filter({hasText: 'Research loop finished after 3 of 3 bodies.'}).waitFor();
   assert.ok(await stop.isHidden(), 'a finished loop has no Stop');
   assert.ok(!(await state.textContent()).includes('Stop'), 'Stop state does not leak across operations');
@@ -140,7 +140,7 @@ try {
 
   // Pause -> "Pause requested" -> paused receipt -> reviewed Resume -> resumed segment.
   const pause = page.locator('#loop-pause'), resumeGroup = page.locator('#loop-resume-group');
-  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, pausing);
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, pausing);
   await state.filter({hasText: 'Research loop: up to 3 bodies.'}).waitFor();
   await pause.waitFor({state: 'visible'});
   await pause.dblclick();
@@ -164,14 +164,14 @@ try {
   await page.locator('#loop-resume-summary').filter({hasText: 'body 2 of 3'}).waitFor();
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-paused-review.png'), fullPage: true});
   await page.locator('#loop-resume').dblclick();
-  await page.waitForFunction(id => location.hash.startsWith('#slow-control/') && location.hash !== '#slow-control/' + id, pausing);
+  await page.waitForFunction(id => location.hash.startsWith('#monitor/') && location.hash !== '#monitor/' + id, pausing);
   assert.equal(resumePosts.length, 1, 'a double click issues exactly one Resume');
   assert.deepEqual(Object.keys(resumePosts[0]).sort(), ['expected_receipt_digest', 'predecessor_operation_id', 'request_id']);
   assert.equal(resumePosts[0].predecessor_operation_id, pausing);
   assert.equal(resumePosts[0].expected_receipt_digest, digest);
   const retainedId = await page.evaluate(id => JSON.parse(localStorage.getItem('siderius.loop-resume.v1:' + id)).request_id, pausing);
   assert.equal(retainedId, resumePosts[0].request_id, 'the request UUID is retained before submission');
-  assert.equal(await page.evaluate(() => location.hash), '#slow-control/' + resumed);
+  assert.equal(await page.evaluate(() => location.hash), '#monitor/' + resumed);
 
   await state.filter({hasText: 'Resumed segment. Research loop: up to 3 bodies.'}).waitFor();
   await stop.waitFor({state: 'visible'});
@@ -183,22 +183,22 @@ try {
   assert.ok(await stop.isHidden() && await resumeGroup.isHidden());
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-resumed.png'), fullPage: true});
 
-  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, pausing);
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, pausing);
   await page.locator('#loop-continued').filter({hasText: 'Continued by ' + resumed}).waitFor();
-  assert.equal(await page.locator('#loop-successor').getAttribute('href'), '#slow-control/' + resumed);
+  assert.equal(await page.locator('#loop-successor').getAttribute('href'), '#monitor/' + resumed);
   assert.ok(await resumeGroup.isHidden(), 'a continued segment offers no second Resume');
   assert.equal(await page.evaluate(id => localStorage.getItem('siderius.loop-resume.v1:' + id), pausing), null, 'retained intent released once the successor is observed');
 
   // A declared stop condition completed the loop early: the receipt's reason reads in plain words.
-  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, thresholdStop);
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, thresholdStop);
   await state.filter({hasText: 'Research loop stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85, higher is better; best at body 3).'}).waitFor();
   assert.ok(await stop.isHidden());
-  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, patienceStop);
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, patienceStop);
   await state.filter({hasText: 'Research loop stopped early after body 4 of up to 6: no improvement for 2 bodies (condition: 2 bodies; best -1.25 at body 2).'}).waitFor();
   assert.ok(!(await state.textContent()).includes('finished after'), 'an early stop never reads as reaching the limit');
   assert.ok(!(await state.textContent()).includes('whole run'), 'a root segment needs no whole-run note');
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-stop-reason.png'), fullPage: true});
-  await page.evaluate(id => { location.hash = 'slow-control/' + id; }, resumedStop);
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, resumedStop);
   await state.filter({hasText: 'Resumed segment. Research loop stopped early after body 3 of up to 5: no improvement for 2 bodies (condition: 2 bodies; best 0.75 at body 1). Body numbers count the whole run, including earlier segments.'}).waitFor();
   assert.equal(resumePosts.length, 1);
   assert.equal(posts.length, 1);

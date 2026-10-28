@@ -53,7 +53,7 @@ try {
   }));
   async function retainAcrossViews() {
     const before = await editorSnapshot(), count = posts.length;
-    for (const view of ['slow-control', 'home', 'run', 'workflow']) await page.locator(`nav a[href="#${view}"]`).click();
+    for (const view of ['monitor', 'home', 'run', 'workflow']) await page.locator(`nav a[href="#${view}"]`).click();
     assert.deepEqual(await editorSnapshot(), before);
     assert.equal(posts.length, count, 'Navigation never submits');
     assert.equal(await page.locator('#token').inputValue(), '');

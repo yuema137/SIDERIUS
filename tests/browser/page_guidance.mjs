@@ -48,7 +48,7 @@ try {
   assert.equal(await page.locator('#view-workflow #new-run-task, #view-workflow #capture-run').count(), 0, 'Workflow page carries no run preparation');
   assert.equal(await page.locator('#view-run #new-run-task').count(), 1);
   assert.equal(await page.locator('#view-run #capture-launch').count(), 1);
-  assert.deepEqual(await page.locator('nav.actions a').allTextContents(), ['Home', 'Workflow Editor', 'Run', 'Slow control']);
+  assert.deepEqual(await page.locator('nav.actions a').allTextContents(), ['Home', 'Workflow Editor', 'Run', 'Monitor']);
 
   // First run, before Connect: the task-example guide and the Task step lead.
   assert.equal(await page.locator('#workflow-start-guide').isVisible(), true);
@@ -106,10 +106,10 @@ try {
   await page.locator('#view-workflow').waitFor();
   assert.match(await source.inputValue(), /unsaved page guidance edit/, 'Route changes keep the draft');
 
-  // Home keeps the journey without the step indicator; Slow control is the Results step.
+  // Home keeps the journey without the step indicator; Monitor is the Results step.
   await nav('home');
   assert.equal(await page.locator('#step-indicator').isHidden(), true);
-  await nav('slow-control');
+  await nav('monitor');
   assert.equal(await current(), 'Results');
 
   assert.equal(await readFile(metadata.reusable_source, 'utf8').then(text => text.includes('unsaved page guidance edit')), false);

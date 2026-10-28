@@ -57,7 +57,7 @@ try {
     return {operation_id: status.operation_id, kind: status.kind, state: status.state, evidence: status.native_chain.evidence.availability, connected: true};
   }
   for (const id of [metadata.root_id, metadata.successor_id]) {
-    await page.goto(`${metadata.origin}/#slow-control/${id}`);
+    await page.goto(`${metadata.origin}/#monitor/${id}`);
     const status = await reconnect(id);
     await page.locator('#tokens-status').filter({hasText: 'Whole-run cumulative usage.'}).waitFor();
     await page.locator('#token-rows tr').first().waitFor({state: 'attached'});

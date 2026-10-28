@@ -29,7 +29,7 @@
     $('workflow-start-state').textContent = !session.connected ? 'Connect above to load the configured projects.'
       : !state.projectId ? 'No workflow project is open. Choose one in Project, or ask the console operator to configure one.' : '';
     const view = window.consoleNavigation.view;
-    const current = {workflow: opened ? 'workflow' : 'task', run: 'run', 'slow-control': 'results'}[view] || null;
+    const current = {workflow: opened ? 'workflow' : 'task', run: 'run', 'monitor': 'results'}[view] || null;
     const done = {task: opened, workflow: ready};
     $('step-indicator').hidden = !current;
     for (const item of $('step-indicator').querySelectorAll('[data-step]')) {

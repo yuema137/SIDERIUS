@@ -38,7 +38,7 @@ try {
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
     const reply = json => route.fulfill({status: 200, json});
     if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
-    // Slow control lists this console's operations once per connection, also on UUID routes.
+    // Monitor lists this console's operations once per connection, also on UUID routes.
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     assert.ok(url.pathname.startsWith(`/api/operations/${operation}`));
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
@@ -54,7 +54,7 @@ try {
       process: {status: 'exited', reason: 'observed'}, finishing: false, receipt_available: true, native_status: 'completed',
       native_id: 'fixture-run', validation_passed: true, reason: 'native_terminal'});
   });
-  await page.goto(`${metadata.origin}/#slow-control/${operation}`);
+  await page.goto(`${metadata.origin}/#monitor/${operation}`);
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();

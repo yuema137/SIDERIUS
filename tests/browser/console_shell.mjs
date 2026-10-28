@@ -1,5 +1,5 @@
 /** Console shell witnesses over a stubbed API (no provider/GPU/native effects):
- * the connect card collapses to one line on every view, Slow control lists operations
+ * the connect card collapses to one line on every view, Monitor lists operations
  * and opens one in Status and logs, metric values are display-rounded with the exact
  * value kept, Home leads with the workflow journey, and nav/content share one edge.
  * Required: EDITOR_PYTHON, CONSOLE_PLAYWRIGHT_MODULE, CONSOLE_BROWSER_EXECUTABLE. */
@@ -85,7 +85,7 @@ try {
 
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
-  for (const view of ['home', 'workflow', 'run', 'slow-control']) {
+  for (const view of ['home', 'workflow', 'run', 'monitor']) {
     await page.locator(`nav a[href="#${view}"]`).click();
     assert.equal(await page.locator('#token').isHidden(), true, `${view}: token field collapses after connecting`);
     assert.equal(await page.locator('#access-heading').isHidden(), true, `${view}: connect heading collapses`);
@@ -94,16 +94,16 @@ try {
     assert.ok((await page.locator('#access-section').boundingBox()).height < 90, `${view}: connected line stays compact`);
   }
 
-  // Slow control without a selected operation lists this console's operations.
+  // Monitor without a selected operation lists this console's operations.
   const items = page.locator('#operations-list li');
   await items.nth(1).waitFor();
   assert.equal(await items.count(), 2);
   assert.match(await items.nth(0).textContent(), /five_node · candidate/);
   assert.match(await items.nth(0).textContent(), /3 of 3 bodies/);
   assert.match(await page.locator('#operations-status').textContent(), /1 record could not be verified/);
-  assert.ok(Math.abs((await left('#view-slow-control .operations-panel')) - (await left('nav.actions a'))) <= 2, 'Slow control content aligns with nav');
+  assert.ok(Math.abs((await left('#view-monitor .operations-panel')) - (await left('nav.actions a'))) <= 2, 'Monitor content aligns with nav');
   await items.nth(0).locator('a').click();
-  assert.equal(new URL(page.url()).hash, '#slow-control/' + loopRun);
+  assert.equal(new URL(page.url()).hash, '#monitor/' + loopRun);
   await page.locator('#monitor-status').filter({hasText: 'State: completed · Native: completed'}).waitFor();
   assert.equal(await page.locator('#operation-id').inputValue(), loopRun);
   assert.equal(await items.nth(0).locator('a').getAttribute('aria-current'), 'true');

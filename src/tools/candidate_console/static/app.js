@@ -61,7 +61,7 @@
   window.consoleSession.subscribe(state => {
     connected = state.connected; monitorEpoch++;
     controls();
-    if (connected) { if (window.consoleNavigation?.view !== 'slow-control') void loadChoices(); void poll(); }
+    if (connected) { if (window.consoleNavigation?.view !== 'monitor') void loadChoices(); void poll(); }
     else {
       if (monitorId) say('monitor-status', 'Observation unconfirmed. Reconnect to refresh; last displayed facts are retained.');
       if (preparation?.pending) say('prepare-status', 'Submission unconfirmed after connection change. Read this UUID or retry the same frozen request.');
@@ -177,7 +177,7 @@
   $('monitor-form').addEventListener('submit', async event => {
     event.preventDefault(); const id = $('operation-id').value.trim();
     if (!window.consoleNavigation.isOperationId(id)) { say('monitor-status', 'Enter a complete operation UUID.'); $('operation-id').focus(); return; }
-    setMonitor(id); location.hash = 'slow-control/' + id; await poll();
+    setMonitor(id); location.hash = 'monitor/' + id; await poll();
   });
   $('log-kind').addEventListener('change', () => { monitorEpoch++; cursor = 0; logText = ''; say('log', ''); void poll(); });
   async function readMonitor() {

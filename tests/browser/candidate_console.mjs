@@ -126,7 +126,7 @@ try {
   assert.equal(requests.filter(item => item.method === 'POST').length, 1);
   assert.equal(await page.locator('#prepare-form').getByLabel('Run name', { exact: true }).isDisabled(), true);
   const uncertainId = await page.locator('#prepare-id').textContent();
-  await page.locator('nav a[href="#slow-control"]').click();
+  await page.locator('nav a[href="#monitor"]').click();
   await page.locator('nav a[href="#home"]').click();
   await page.locator('#access-change').click(); // Connected pages collapse the token form.
   await page.locator('#token').fill('browser-fixture-token');
@@ -160,7 +160,7 @@ try {
   const launches = requests.filter(item => item.path === '/api/candidates');
   assert.equal(launches.length, 3);
   assert.deepEqual(launches[0].body, launches[1].body); assert.deepEqual(launches[1].body, launches[2].body);
-  await page.locator('nav a[href="#slow-control"]').click();
+  await page.locator('nav a[href="#monitor"]').click();
   await page.locator('details', {has: page.locator('#tokens-table')}).getByText('Reported token table', {exact: true}).click(); // Recorded example has its own table.
   await page.getByText('Activity and logs', {exact: true}).click();
   await page.locator('#monitor-status').filter({ hasText: 'Native: rejected' }).waitFor({state: 'attached'});

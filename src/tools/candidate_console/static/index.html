@@ -45,7 +45,7 @@
 <header class="console-header"><div class="brand">SIDERIUS <span>Local candidate console</span></div><details class="console-intro"><summary>About this console</summary><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></details>
   <div class="theme-control"><label for="theme-preference">Color theme</label><select id="theme-preference"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
 </header>
-<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#slow-control">Slow control</a></nav>
+<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#monitor">Monitor</a></nav>
 <main>
 <p id="route-status" role="status"></p>
   <section class="card" id="access-section" aria-labelledby="access-heading">
@@ -56,7 +56,7 @@
     <div id="access-connected" class="access-connected" hidden><button id="access-change" type="button" class="secondary">Change token</button><button id="access-disconnect" type="button" class="secondary">Disconnect console</button></div>
   </section>
   <div class="step-indicator" id="step-indicator" role="navigation" aria-label="Workflow steps" hidden><ol>
-    <li data-step="task"><a href="#workflow">Task</a></li><li data-step="workflow"><a href="#workflow">Workflow</a></li><li data-step="run"><a href="#run">Run</a></li><li data-step="results"><a href="#slow-control">Results</a></li>
+    <li data-step="task"><a href="#workflow">Task</a></li><li data-step="workflow"><a href="#workflow">Workflow</a></li><li data-step="run"><a href="#run">Run</a></li><li data-step="results"><a href="#monitor">Results</a></li>
   </ol></div>
   <section id="view-home" data-view="home"><h1 tabindex="-1">Home</h1>
 <section class="card journey" aria-labelledby="journey-heading">
@@ -65,9 +65,9 @@
     <li><strong>Open the workflow</strong> and choose a configured project.</li>
     <li><strong>Edit and review</strong> the workflow on the canvas, then save the reviewed source.</li>
     <li><strong>Prepare a new run</strong> on the Run page from the saved version and review its inputs and limits.</li>
-    <li><strong>Launch and monitor</strong> the run; follow it in Slow control.</li>
+    <li><strong>Launch and monitor</strong> the run; follow it in Monitor.</li>
   </ol>
-  <div class="actions"><a class="button-link" href="#workflow">Open workflow</a><a href="#slow-control">See recent operations</a></div>
+  <div class="actions"><a class="button-link" href="#workflow">Open workflow</a><a href="#monitor">See recent operations</a></div>
 </section>
 <h2 class="section-heading">Advanced</h2>
 <section class="card" aria-labelledby="native-chain-heading">
@@ -79,7 +79,7 @@
 <details><summary>Reviewed run, input identities and execution policy</summary><div id="native-chain-details"></div></details>
 <button id="native-chain-launch" disabled>Launch native chain</button>
 <section id="native-chain-intent" hidden><p id="native-chain-operation-id" class="mono"></p>
-<div class="actions"><button id="native-chain-check" disabled>Check native admission</button><button id="native-chain-retry" disabled>Retry same native launch</button><a id="native-chain-monitor">Open native Slow control</a><button id="native-chain-new" disabled>Review another native capture</button></div></section>
+<div class="actions"><button id="native-chain-check" disabled>Check native admission</button><button id="native-chain-retry" disabled>Retry same native launch</button><a id="native-chain-monitor">Open native monitor</a><button id="native-chain-new" disabled>Review another native capture</button></div></section>
 </section>
 <details id="configured-task"><summary>Prepare configured task</summary><p>Native Prepare generates its configured candidate. It does not run the selected editor declaration.</p>
   <div class="columns">
@@ -226,8 +226,8 @@
     </section>
   </section>
 </section>
-<section id="view-slow-control" data-view="slow-control" hidden><h1 tabindex="-1">Slow control</h1>
-<div class="slow-control-layout">
+<section id="view-monitor" data-view="monitor" hidden><h1 tabindex="-1">Monitor</h1>
+<div class="monitor-layout">
   <section class="card operations-panel" aria-labelledby="operations-heading">
     <p class="eyebrow">This console's operations</p><h2 id="operations-heading">Recent operations</h2>
     <div class="actions operations-actions"><button id="operations-refresh" type="button" class="secondary" disabled>Refresh list</button></div>
