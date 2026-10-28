@@ -752,3 +752,57 @@ def test_formal_delta_without_its_gates_is_refused_not_ignored(
     assert "unsupported fresh training controls" in (receipt.error or "")
     assert field in (receipt.error or "")
     assert not any(name == "tuner" for name, _ in training_runner)
+
+
+def test_candidate_settings_nonfinite_floats_inherit_the_string_encoding():
+    """#1042 review: settings losslessness rests on ``ser_json_inf_nan="strings"``
+    reaching every float. Dataclasses (``WorkflowLaunchConfig``) inherit it; a
+    nested ``BaseModel`` uses its own config, so a float there that admits inf/NaN
+    would round-trip as ``null`` again. Fails naming any such field."""
+    import dataclasses
+    import typing
+
+    from pydantic import BaseModel, TypeAdapter, ValidationError
+
+    from workflows.candidate_training_settings import CandidateTrainingSettings
+
+    def admits_inf(annotation) -> bool:
+        try:
+            TypeAdapter(annotation).validate_python(float("inf"))
+        except ValidationError:
+            return False
+        return True
+
+    def floats(annotation) -> bool:
+        return annotation is float or any(floats(arg) for arg in typing.get_args(annotation))
+
+    offenders, seen = [], set()
+
+    def walk(annotation, path):
+        for arg in (annotation, *typing.get_args(annotation)):
+            if isinstance(arg, type) and arg not in seen:
+                if issubclass(arg, BaseModel):
+                    seen.add(arg)
+                    inherits = arg.model_config.get("ser_json_inf_nan") == "strings"
+                    for name, info in arg.model_fields.items():
+                        annotation = info.rebuild_annotation()
+                        if floats(info.annotation) and not inherits and admits_inf(annotation):
+                            offenders.append(f"{path}.{name} ({arg.__name__})")
+                        walk(info.annotation, f"{path}.{name}")
+                elif dataclasses.is_dataclass(arg):
+                    seen.add(arg)
+                    for name, hint in typing.get_type_hints(arg).items():
+                        walk(hint, f"{path}.{name}")
+            elif arg is not annotation:
+                walk(arg, path)
+
+    for name, info in CandidateTrainingSettings.model_fields.items():
+        walk(info.annotation, name)
+    # Known gap, owned by parameter_rules.py: the follow-up after #1058/#1060
+    # makes ParameterRule bounds and exact/allowed refuse non-finite numbers.
+    # Exact equality makes this fail both on a new gap and once that lands.
+    known = [
+        "launch.workflow_parameter_rules.rules.range.min (NumericRange)",
+        "launch.workflow_parameter_rules.rules.range.max (NumericRange)",
+    ]
+    assert offenders == known, offenders
