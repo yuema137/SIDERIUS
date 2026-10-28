@@ -12,6 +12,12 @@ from pydantic import Field, model_validator
 
 from .base import DeclarationModel
 
+#: The one ceiling on adaptor output fan-out. Every DISTRIBUTE ``count`` is at
+#: most this, so static topology and B3 control-size admission are computed
+#: from a bounded number. The custom-adaptor manifest (``OutputSpec.count``)
+#: imports the same constant, so built-in and custom outputs share one cap.
+MAX_ADAPTOR_OUTPUTS = 64
+
 
 class PassCombine(DeclarationModel):
     """The admissible items, unchanged, in declared order."""
@@ -105,7 +111,7 @@ class PerItemDistribute(DeclarationModel):
     """Selected item ``i`` goes to output index ``i``."""
 
     kind: Literal["per-item/v1"] = "per-item/v1"
-    count: Annotated[int, Field(ge=1)]
+    count: Annotated[int, Field(ge=1, le=MAX_ADAPTOR_OUTPUTS)]
     on_short: Literal["skip", "fail"]
 
 
@@ -114,13 +120,13 @@ class SplitItemsDistribute(DeclarationModel):
 
     kind: Literal["split-items/v1"] = "split-items/v1"
     field: str = Field(min_length=1)
-    count: Annotated[int, Field(ge=1)]
+    count: Annotated[int, Field(ge=1, le=MAX_ADAPTOR_OUTPUTS)]
     on_short: Literal["skip", "fail"]
 
 
 class ReplicateDistribute(DeclarationModel):
     kind: Literal["replicate/v1"] = "replicate/v1"
-    count: Annotated[int, Field(ge=2)]
+    count: Annotated[int, Field(ge=2, le=MAX_ADAPTOR_OUTPUTS)]
 
 
 DistributeStrategy = Annotated[
