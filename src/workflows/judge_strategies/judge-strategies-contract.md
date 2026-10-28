@@ -59,7 +59,7 @@ admitted iff `refusals` is empty. Refusal codes:
 | --- | --- |
 | `kind_not_implemented` | the kind is not in `IMPLEMENTED_KINDS` (only refusal reported; `static_call_bound=None`) |
 | `no_input_ports` | `inputs` is empty (only refusal reported; `static_call_bound=None`) |
-| `batch_too_large` | `scoring="batch"` with an item capacity above `MAX_SCORED_ITEMS_PER_CALL` (16; `agent/schemas/judge.py`), so one batch prompt has a fixed size bound; use `per_item` |
+| `batch_too_large` | a kind that lists every item in one call (`lists_every_item`: every kind except `rubric-rank` with `scoring="per_item"`) over an item capacity above `MAX_SCORED_ITEMS_PER_CALL` (16; `agent/schemas/judge.py`), so every prompt has a fixed size bound; rubric-rank: use `per_item` |
 | `unbounded_port` | a `many` port without `max_items`: the static call bound needs the item capacity (`one` port = 1, `many` port = `max_items`) |
 | `mixed_contracts` | ports of more than one contract |
 | `unprojectable_contract` | no projector in `ITEM_PROJECTORS` (v1: `proposal.output`, `literature.output`) |
@@ -95,7 +95,8 @@ with the omitted count recorded as a field. `proposal.output` projects
 
 `StrategyInvocation(adaptor_id, iteration, strategy, items, output_contract,
 expected_count, rubric, task_guidance, evidence_dir)` refuses: duplicate items;
-batch scoring of more than `MAX_SCORED_ITEMS_PER_CALL` items;
+more than `MAX_SCORED_ITEMS_PER_CALL` items for a kind that lists every item in
+one call (the same cap is the request schemas' `max_length`, e.g. `MergeRequest.items`);
 items of more than one contract; a `rubric` that is absent for `rubric-rank/v1`,
 present for another kind, or whose `rubric_ref(rubric)` differs from
 `strategy.rubric` (content digest); `task_guidance` present iff
