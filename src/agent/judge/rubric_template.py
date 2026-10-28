@@ -1,7 +1,7 @@
 """``judge.rubric/v1``: the ``rubric-rank/v1`` scoring prompt (one scorer call).
 
 The judge returns one integer per declared criterion and item. Criterion weights
-are not shown: the weighted total is computed by framework code, never by the LLM.
+are not shown: the weighted mean is computed by framework code, never by the LLM.
 """
 
 from __future__ import annotations

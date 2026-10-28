@@ -103,7 +103,7 @@ Parameters: `rubric: RubricRef`, `scoring: "per_item" | "batch"`, `repeats: 1..3
 `scorer` call with `RubricScoringRequest(rubric, criterion, repeat, items,
 guidance)` (`items` is one item for `per_item`, all items for `batch`).
 
-Every item is scored, including a single item (N ≥ 1): its rubric total is a
+Every item is scored, including a single item (N ≥ 1): its rubric weighted mean is a
 value `threshold(basis="rubric")` reads, so the "one item → skipped" shortcut of
 ordinal ranking kinds does not apply.
 
@@ -119,8 +119,11 @@ rubric's criteria with integers in `[scale_min, scale_max]`; otherwise
 
 The fold (pure, imports no metric owner): per item and criterion, the median of
 the repeats' integers (`statistics.median`; with 2 repeats the mean of the two);
-`weighted_total = Σ weight × median` in rubric criterion order; ranking by
-`weighted_total` descending, equal totals in input order. `RubricScore` is not a
+`weighted_mean = Σ(weight × median) / Σ weight` in rubric criterion order, so it
+always lies on the rubric scale `[scale_min, scale_max]` and a
+`threshold(basis="rubric", at_least)` reads on that scale independently of how the
+weights are normalized; ranking by `weighted_mean` descending, equal means in
+input order. `RubricScore` is not a
 metric: it never enters `MetricOrder`, tuning records, the incumbent, Health or
 stop conditions.
 
@@ -163,11 +166,44 @@ before the planner is done although its last call decided; the re-derived
 outcome differs from the recorded one; any file under `evidence_dir` is not
 accounted for. It returns the recorded `StrategyResult`.
 
+## B6-8 consumer contract
+
+The adaptor wiring (B6-8) is the only intended caller. It must:
+
+1. **Declare.** Add `LLMStrategy` to `AdaptorInstance.combine` and the kinds to
+   `catalog.ADAPTOR_STRATEGIES` (owner `workflows.judge_strategies`); new fields stay
+   omitted when absent so existing declaration bytes and digests do not move.
+2. **Admit.** At declaration validation and launch admission, call
+   `admit_llm_strategy(strategy, inputs=adaptor.inputs, output_contract=<derived>,
+   select=adaptor.select, cardinality=derive_cardinality(select, distribute))` and
+   refuse on any refusal. Validate a declared `Fallback.combine` by running the
+   deterministic validation table on the adaptor with `combine` replaced by it.
+   Sum every adaptor's `static_call_bound` × iterations plus the JudgeStop bound and
+   refuse when it exceeds the locked `JudgeRoutes.max_judge_calls`; at run time,
+   refuse a call that would cross that cap.
+3. **Invoke.** Build items with `strategy_items(admissible AdaptorItems in declared
+   order)`; never invoke with zero admissible items (`rejected/no_admissible_input`).
+   Resolve `rubric` with `resolve_rubric_ref(strategy.rubric, task + experiment
+   rubrics)`; pass the task's composed `JudgeTaskBlocks` iff `guidance ==
+   "task_blocks"`. Assign `evidence_dir = candidate_control_dir(workspace,
+   iteration=N)/adaptors/<id>.judge/`, unique per invocation and write-once. Pass the
+   run lock's `JudgeRoutes` and a `JudgeRunContext` of the same iteration.
+4. **Consume.** `decided` → map `ItemRanking` to a B6 `Ranking(basis="rubric")`
+   with `RankEntry.value = RubricScore.weighted_mean`, then SELECT/DISTRIBUTE;
+   `fallback` → run `fallback_combine` deterministically on the same items;
+   `failed` → adaptor `failed`, reason `judge_failure`. Record
+   `(<evidence_dir>/strategy.json, evidence_sha256)` in
+   `AdaptorRecord.strategy_evidence` and the fallback kind in `AdaptorRecord.fallback`.
+5. **Replay.** Rebuild the same invocation from verified records and call
+   `replay_llm_strategy(invocation, locked_routes, expected_sha256=<recorded>)`;
+   never call `run_llm_strategy` on readback or resume.
+
 ## Validation evidence
 
-`tests/unit/workflows/test_judge_strategies.py`: hand-computed weighted totals
+`tests/unit/workflows/test_judge_strategies.py`: hand-computed weighted means
 and input-order ties; per-criterion median of repeats; LLM-supplied total
-refused; incomplete, foreign or out-of-scale verdicts end the chain and report
+refused; weighted mean pinned to the rubric scale and a rubric threshold
+read on that scale through B6 `select`; incomplete, foreign or out-of-scale verdicts end the chain and report
 the declared fallback (and replay); inadmissible or reordered inputs refused;
 replay equality and refusal of an edited call, a re-anchored truncation, stray
 files, a reordered invocation and another route; run refusals before any call;

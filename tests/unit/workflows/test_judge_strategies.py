@@ -26,7 +26,16 @@ from agent.schemas.judge import (
 from agent.schemas.judge_task import JudgeTaskBlocks, RubricCriterion, RubricSpec, rubric_ref
 from agent.schemas.literature_review import LiteratureReviewOutput
 from agent.schemas.proposal import AgentCard, ExpertContextItem
-from workflows.adaptors import AdaptorInputRef, AdaptorItem, AdaptorStrategyError
+from workflows.adaptors import (
+    AdaptorInputRef,
+    AdaptorItem,
+    AdaptorStrategyError,
+    Combined,
+    RankEntry,
+    Ranking,
+    Unit,
+    select,
+)
 from workflows.definition.adaptor_strategies import (
     AllSelect,
     CardinalityBound,
@@ -187,16 +196,16 @@ def run(value: StrategyInvocation, bridge: StubBridge, tmp_path: Path):
 def test_rubric_ranking_is_code_weighted_and_ties_keep_input_order(tmp_path):
     """Defect: totals ignore weights, rank lower-first, or break ties against input order.
 
-    Hand-computed with weights novelty=2, rigor=1: reviews:2 = 13, reviews:0 = 9 and
-    reviews:1 = 9 tie, so input order puts reviews:0 first. Unweighted totals would
-    be 8, 7, 5.
+    Hand-computed weighted means (novelty=2, rigor=1, Σw=3): reviews:2 = 13/3,
+    reviews:0 = 9/3 and reviews:1 = 9/3 tie, so input order puts reviews:0 first.
+    Unweighted means would be 4, 3.5, 2.5.
     """
     result = run(invocation(tmp_path), StubBridge(), tmp_path)
     ranking = result.outcome.ranking
     assert result.outcome.status == "decided"
     assert ranking is not None
     assert ranking.order == ("reviews:2", "reviews:0", "reviews:1")
-    assert [score.weighted_total for score in ranking.scores] == [13.0, 9.0, 9.0]
+    assert [score.weighted_mean for score in ranking.scores] == [13 / 3, 3.0, 3.0]
 
 
 def test_median_of_repeats_is_taken_per_criterion(tmp_path):
@@ -211,8 +220,50 @@ def test_median_of_repeats_is_taken_per_criterion(tmp_path):
     assert ranking is not None
     score = next(s for s in ranking.scores if s.item_id == "reviews:0")
     assert [c.value for c in score.per_criterion] == [2.0, 5.0]
-    assert score.weighted_total == 9.0
+    assert score.weighted_mean == 3.0
     assert len(bridge.calls) == 9  # per_item: 3 items x 3 repeats
+
+
+@pytest.mark.parametrize("bound", [RUBRIC.scale_min, RUBRIC.scale_max])
+def test_weighted_mean_stays_on_the_rubric_scale(tmp_path, bound):
+    """Defect: the aggregate leaves [scale_min, scale_max] (e.g. an un-normalized sum),
+    so a rubric threshold would depend on how the weights happen to be scaled."""
+    table = {item_id: {"novelty": [bound], "rigor": [bound]} for item_id in TABLE}
+    ranking = run(invocation(tmp_path), StubBridge(table), tmp_path).outcome.ranking
+    assert ranking is not None
+    assert {score.weighted_mean for score in ranking.scores} == {float(bound)}
+
+
+def test_rubric_threshold_reads_the_weighted_mean_on_the_rubric_scale(tmp_path):
+    """Defect: threshold(basis=rubric, at_least=4) keeps items below 4 on the 1..5 scale.
+
+    Means are 13/3, 3 and 3: only reviews:2 clears 4 (a weighted sum, 13/9/9, would
+    keep all three).
+    """
+    value = invocation(tmp_path)
+    ranking = run(value, StubBridge(), tmp_path).outcome.ranking
+    assert ranking is not None
+    by_id = {item.item_id: (index, item) for index, item in enumerate(value.items)}
+    units = tuple(
+        Unit(
+            value=literature(index).value,
+            element_contract="literature.output",
+            inputs=(item.ref,),
+            role="selected",
+        )
+        for index, item in by_id.values()
+    )
+    entries = tuple(
+        RankEntry(unit=by_id[s.item_id][0], ref=by_id[s.item_id][1].ref, value=s.weighted_mean)
+        for s in ranking.scores
+    )
+    combined = Combined(
+        combine_kind="rubric-rank/v1",
+        units=units,
+        ranking=Ranking(basis="rubric", entries=entries),
+    )
+    kept = select(ThresholdSelect(basis="rubric", at_least=4.0), combined, None)
+    assert [value.items[index].item_id for index in kept] == ["reviews:2"]
 
 
 def test_llm_supplied_total_is_refused_not_used(tmp_path):
@@ -261,7 +312,7 @@ def test_incomplete_or_out_of_scale_verdict_ends_the_chain_with_its_fallback(tmp
 
 
 def test_out_of_scale_score_is_inadmissible(tmp_path):
-    """Defect: an integer outside the declared scale reaches the weighted total."""
+    """Defect: an integer outside the declared scale reaches the weighted mean."""
 
     def too_high(verdict, _index):
         verdict["item_scores"][0]["scores"][0]["score"] = 6
@@ -427,10 +478,12 @@ def test_admission_refuses_each_invalid_combination(kwargs, code):
 def test_rubric_threshold_over_metric_scored_items_is_not_a_reorder():
     """Defect: Q-B2-2 refuses the filter it permits (threshold basis rubric / all)."""
     port = InputPort(name="t", contract="tuning.output", cardinality="one")
-    for select in (ThresholdSelect(basis="rubric", at_least=1.0), AllSelect()):
+    for selector in (ThresholdSelect(basis="rubric", at_least=1.0), AllSelect()):
         codes = {
             r.code
-            for r in admit(select=select, inputs=(port,), output_contract="tuning.output").refusals
+            for r in admit(
+                select=selector, inputs=(port,), output_contract="tuning.output"
+            ).refusals
         }
         assert "metric_scored_reorder" not in codes
 
@@ -489,7 +542,7 @@ PINS = (
     "345abefce759e4a8efcd08d5c5536243987f991369c4f5c44f94061a967c3bcf",
     "10f9b57f6617c18502aeaa1f3b876f2521c4956ad6dae291e82de677c522505b",
     "12a45544271d27491375c8b740a48daddfdc07d1ed8ebef8bb36b7f5f1a8ee34",
-    "e499ec87d72561e8e999afc30a9e22f318d8b50d2047cdc2c39ca5e496a4f5fc",
+    "aa3dc8ac13d44bcfaa3860371e26bb2f496257b9e9990d947ca0f5199f724e34",
 )
 
 

@@ -1,10 +1,10 @@
 """``rubric-rank/v1``: plan the scorer calls and fold their verdicts into a ranking.
 
 Pure. The LLM supplies per-criterion integers only; this module takes the median
-of the declared repeats per criterion, computes the weighted total
-(sum of ``weight * median`` in rubric criterion order) and orders items by that
-total, higher first, ties in input order. A rubric total is not a task metric:
-this module deliberately imports no metric owner (an AST guard enforces it).
+of the declared repeats per criterion, computes the weighted mean
+(``sum(weight * median) / sum(weight)`` in rubric criterion order, so it lies on
+the rubric scale) and orders items by it, higher first, ties in input order. A rubric
+score is not a task metric: this module deliberately imports no metric owner (an AST guard enforces it).
 """
 
 from statistics import median
@@ -61,7 +61,7 @@ def plan_call(invocation: StrategyInvocation, call_index: int) -> PlannedCall | 
 
 
 def fold(invocation: StrategyInvocation, verdicts: tuple[RubricVerdict, ...]) -> ItemRanking:
-    """Rank every item from validated verdicts; totals are never taken from the LLM."""
+    """Rank every item from validated verdicts; the mean is never taken from the LLM."""
     strategy, judged = _parts(invocation)
     if len(verdicts) != call_bound(strategy, len(judged)):
         raise StrategyError("rubric-rank/v1 folds only a complete set of scorer verdicts")
@@ -81,18 +81,19 @@ def fold(invocation: StrategyInvocation, verdicts: tuple[RubricVerdict, ...]) ->
             )
             for criterion in rubric.criteria
         )
-        total = sum(
+        weighted = sum(
             criterion.weight * value.value
             for criterion, value in zip(rubric.criteria, per_criterion, strict=True)
         )
+        mean = weighted / sum(criterion.weight for criterion in rubric.criteria)
         scores.append(
             RubricScore(
                 rubric=strategy.rubric,
                 item_id=item.item_id,
                 per_criterion=per_criterion,
-                weighted_total=total,
+                weighted_mean=mean,
             )
         )
-    # Stable sort: equal totals keep input order (tie_break="input_order").
-    ranked = tuple(sorted(scores, key=lambda score: -score.weighted_total))
+    # Stable sort: equal means keep input order (tie_break="input_order").
+    ranked = tuple(sorted(scores, key=lambda score: -score.weighted_mean))
     return ItemRanking(order=tuple(score.item_id for score in ranked), scores=ranked)

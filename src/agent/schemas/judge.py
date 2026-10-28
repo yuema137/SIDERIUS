@@ -211,7 +211,7 @@ class ItemCriterionScores(JudgeModel):
 
 
 class RubricVerdict(JudgeModel):
-    """Per-criterion integers only; the weighted total is computed by framework code."""
+    """Per-criterion integers only; the weighted mean is computed by framework code."""
 
     kind: Literal["rubric"]
     item_scores: tuple[ItemCriterionScores, ...] = Field(min_length=1)

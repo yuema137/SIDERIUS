@@ -103,7 +103,9 @@ class RubricScore(JudgeModel):
     rubric: RubricRef
     item_id: str = Field(min_length=1)
     per_criterion: tuple[CriterionValue, ...] = Field(min_length=1)
-    weighted_total: float = Field(allow_inf_nan=False)  # computed by framework code
+    # Σ(weight × median) / Σ weight, computed by framework code; lies on the rubric
+    # scale [scale_min, scale_max], which threshold/v1 (basis rubric) reads.
+    weighted_mean: float = Field(allow_inf_nan=False)
 
 
 class ItemRanking(JudgeModel):
