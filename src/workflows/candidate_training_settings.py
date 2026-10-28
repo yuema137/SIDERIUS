@@ -6,7 +6,6 @@ instructions to execute omitted history, retries or analysis phases.
 """
 
 import json
-import math
 from dataclasses import fields
 from typing import Any, Self
 
@@ -17,10 +16,9 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ProposalInput
 from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
-from core.runtime_control.decision_policy import RuntimeBudget
 from core.runtime_control.validation_limits import validate_phase_deadline
 from execute_tools.dataset_config import DataScope
-from workflows.run_config import WorkflowLaunchConfig, validate_launch_trial_overrides
+from workflows.run_config import WorkflowLaunchConfig, validate_launch_admission
 
 SUPPORTED_LAUNCH_FIELDS = frozenset(
     {
@@ -140,18 +138,6 @@ MANAGED_LAUNCH_FIELDS = frozenset(
 )
 
 
-def validate_fresh_time_budget(minutes: float | None) -> None:
-    """Validate fresh-ingress minutes against the native seconds budget owner."""
-    if minutes is None:
-        return
-    seconds = minutes * 60.0
-    if not math.isfinite(seconds):
-        raise ValueError("training time budget must be finite")
-    TypeAdapter(RuntimeBudget.model_fields["time_seconds"].rebuild_annotation()).validate_python(
-        seconds
-    )
-
-
 class CandidateTrainingSettings(BaseModel):
     """Child-validated native launch and the seven run-level startup controls."""
 
@@ -214,9 +200,7 @@ class CandidateTrainingSettings(BaseModel):
             TypeAdapter(
                 ProposalInput.model_fields["vram_budget_gb"].rebuild_annotation()
             ).validate_python(value)
-        validate_fresh_time_budget(self.launch.trial_time_budget_minutes)
-        validate_fresh_time_budget(self.launch.formal_time_budget_minutes)
-        validate_launch_trial_overrides(self.launch)
+        validate_launch_admission(self.launch)
         validate_phase_deadline(
             self.launch.validation_max_phase_seconds,
             watchdog_enabled=self.launch.runtime_watchdog_enabled,
