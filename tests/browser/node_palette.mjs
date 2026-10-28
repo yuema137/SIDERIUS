@@ -53,11 +53,11 @@ try {
   await page.locator('#circuit-node-validation').waitFor();
   await waitUntil(async () => (await pendingText()).includes('Pending new node validation · incomplete'), 'incomplete draft');
   assert.match(await page.locator('#circuit-input-validation-output').textContent(), /Required · unbound/);
-  assert.equal(await entry.getAttribute('aria-disabled'), 'true', 'Palette is inactive while a new node is pending');
+  assert.equal(await entry.getAttribute('aria-disabled'), 'false', 'Palette stays active while a new node is pending');
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'A draft node never touches disk');
-  assert.ok(posts.some(item => item.url.endsWith('/node-draft') && item.body.proposal.capability === 'validation' && item.body.proposal.arguments.length === 0));
+  assert.ok(posts.some(item => item.url.endsWith('/nodes-draft') && item.body.proposal.nodes[0].capability === 'validation' && item.body.proposal.nodes[0].arguments.length === 0));
 
   // Bind its inputs on the canvas and in Selection; the draft becomes complete.
   await page.locator('#circuit-output-implement').click();
@@ -70,7 +70,7 @@ try {
   const diff = await page.locator('#editor-diff').textContent();
   assert.match(diff, /\+\s+id='validation'/);
   assert.doesNotMatch(diff, /^-(?!--)/m, 'Adding a node only inserts lines');
-  assert.match(await statusText(), /Adds validation node 'validation'/);
+  assert.match(await statusText(), /Adds 1 node\(s\) \(validation\)/);
   await page.locator('#editor-save').click();
   await waitUntil(async () => (await statusText()).includes('Saved reviewed'), 'save add');
   const added = await readFile(metadata.source, 'utf8');
@@ -123,7 +123,7 @@ try {
   await page.locator('#editor-undo').click();
   await page.locator('#circuit-node-proposal').waitFor();
   await waitUntil(async () => (await pendingText()).includes('Pending new node proposal'), 'undo restores pending node');
-  assert.equal(await source.getAttribute('aria-disabled'), 'true');
+  assert.equal(await source.getAttribute('aria-disabled'), 'false');
   await palette.locator('.palette-cancel').click();
   await waitUntil(async () => (await pendingText()) === 'No pending edits.', 'cancel');
   assert.equal(await page.locator('#circuit-node-proposal').count(), 0);

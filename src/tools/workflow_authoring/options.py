@@ -10,13 +10,13 @@ from workflows.definition import (
 from workflows.definition.catalog import CAPABILITIES, CONTRACTS, PROTOCOLS
 
 from .models import (
-    AddNodeProposal,
     BindingChoice,
     BindingOptions,
     CatalogArgument,
     CatalogEntry,
     NativeContract,
     NodeCatalog,
+    PendingNode,
     PortChoice,
     PortInventoryEntry,
     ProtocolMapping,
@@ -55,12 +55,17 @@ def port_choices(
 
 def binding_projection(
     document: AuthoredWorkflowDocument,
+    choices_from: AuthoredWorkflowDocument | None = None,
 ) -> tuple[tuple[BindingOptions, ...], tuple[PortInventoryEntry, ...]]:
-    """Project catalog ports and preserve the legacy bound-option wire shape/order."""
+    """Project catalog ports and preserve the legacy bound-option wire shape/order.
+
+    ``choices_from`` (default ``document``) supplies the offered sources, e.g. a
+    node draft projection that adds pending nodes and new externals.
+    """
     definition = document.definition
 
     def choices(contract_id: str, results: bool) -> tuple[PortChoice, ...]:
-        return port_choices(document, contract_id, results)
+        return port_choices(choices_from or document, contract_id, results)
 
     inventory: list[PortInventoryEntry] = []
     for node in definition.nodes:
@@ -170,7 +175,7 @@ def node_catalog() -> NodeCatalog:
 
 
 def pending_node_ports(
-    document: AuthoredWorkflowDocument, proposal: AddNodeProposal
+    document: AuthoredWorkflowDocument, proposal: PendingNode
 ) -> tuple[PortInventoryEntry, ...]:
     """Inventory entries for a node that is not yet part of a valid document."""
     capability = CAPABILITIES[proposal.capability]

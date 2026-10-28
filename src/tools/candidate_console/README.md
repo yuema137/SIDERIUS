@@ -136,7 +136,18 @@ Drag a node heading to move it, or focus the heading and use Alt + arrow keys.
 These edits stay local until **Review changes** and **Save reviewed source**.
 For a bound workflow, choose its matching configured task version and acknowledge
 the findings. Prepare a new run on the Run page to check its supported execution profile.
-New nodes and optional input changes still use Advanced source.
+
+To add nodes, click or drag entries from **Add capability**. You can add several
+nodes, move any card and wire them in any order. A node with a missing required
+input shows it in red, and **Review changes** stays disabled until every
+required input is connected.
+
+When a required input such as `storage` has nothing to connect, select the node.
+Under that input, Selection explains what the input is. Open **Create external
+input…**, keep or change the suggested id, and type the project-relative path of
+the JSON file that will hold the value, for example `inputs/build_store.json`.
+Reusable workflows can choose **Managed by the run** instead. Then click
+**Create and connect**. Undo, Redo and Discard cover all of these edits.
 
 ## Bind a task version
 

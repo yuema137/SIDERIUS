@@ -5,9 +5,15 @@ from typing import Annotated, Literal, Self
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
-from workflows.definition import ArgumentBinding, AuthoredLoop, AuthoredWorkflowDocument
+from workflows.definition import (
+    ArgumentBinding,
+    AuthoredLoop,
+    AuthoredWorkflowDocument,
+    ExternalBinding,
+    ManagedCandidateBinding,
+)
 from workflows.definition.catalog import CAPABILITIES, PROTOCOLS
-from workflows.definition.draft import DraftInspection, WorkflowDraft
+from workflows.definition.draft import BindingPatch, DraftInspection, DraftProblem, WorkflowDraft
 from workflows.definition.models import Identifier, Source
 from workflows.definition.source import SourceDiagnostic
 
@@ -55,8 +61,8 @@ class LoopProposal(Model):
     loop: AuthoredLoop | None
 
 
-class AddNodeProposal(Model):
-    """Insert one catalog node into the exact proposal source; other bytes stay.
+class PendingNode(Model):
+    """One catalog node that is not yet part of the source.
 
     ``protocol=None`` selects the capability's external request route
     (``binding``); otherwise ``arguments`` bind the protocol's sockets. Unbound
@@ -64,8 +70,6 @@ class AddNodeProposal(Model):
     ``draft_incomplete`` and nothing invalid can reach Save.
     """
 
-    kind: Literal["add_node"]
-    source: BoundedSource
     node: Identifier
     capability: str
     protocol: str | None = None
@@ -95,15 +99,71 @@ class AddNodeProposal(Model):
             raise ValueError("arguments must be unique protocol sockets")
         return self
 
-    def missing_inputs(self) -> tuple[str, ...]:
+    def missing_problems(self) -> tuple[DraftProblem, ...]:
+        """Located problems for each required input that is still unbound."""
         if self.protocol is None:
-            return () if self.binding else (f"{self.node}.request: required input is unbound",)
-        bound = {item.name for item in self.arguments}
+            fields = () if self.binding else ("request",)
+        else:
+            bound = {item.name for item in self.arguments}
+            fields = tuple(
+                item.name
+                for item in PROTOCOLS[self.protocol].arguments
+                if item.required and item.name not in bound
+            )
         return tuple(
-            f"{self.node}.{item.name}: required input is unbound"
-            for item in PROTOCOLS[self.protocol].arguments
-            if item.required and item.name not in bound
+            DraftProblem(
+                code="required_unbound",
+                node=self.node,
+                field=field,
+                message=f"{self.node}.{field}: required input is unbound",
+            )
+            for field in fields
         )
+
+    def missing_inputs(self) -> tuple[str, ...]:
+        return tuple(item.message for item in self.missing_problems())
+
+
+class AddNodeProposal(PendingNode):
+    """Insert one catalog node into the exact proposal source; other bytes stay."""
+
+    kind: Literal["add_node"]
+    source: BoundedSource
+
+
+NewExternal = ExternalBinding | ManagedCandidateBinding
+
+
+class NodeDraftsProposal(Model):
+    """Any number of pending nodes and new external inputs over one anchor source.
+
+    With ``document`` absent and no ``bindings`` the result is a targeted
+    insertion: every anchor byte (comments, formatting) stays and only the new
+    externals, nodes, positions and constructor imports are added. ``document``
+    carries edits of the existing content (moves, inspector, loop) and
+    ``bindings`` patch existing sockets; either one renders the combined
+    document canonically, exactly like a document or binding-draft proposal.
+    Pending nodes may read each other, new externals and existing results.
+    """
+
+    kind: Literal["node_drafts"]
+    source: BoundedSource
+    nodes: tuple[PendingNode, ...] = ()
+    externals: tuple[NewExternal, ...] = ()
+    document: AuthoredWorkflowDocument | None = None
+    bindings: tuple[BindingPatch, ...] = ()
+
+    @model_validator(mode="after")
+    def unique_additions(self) -> Self:
+        if not self.nodes and not self.externals:
+            raise ValueError("a node draft adds at least one node or external input")
+        for values, label in (
+            ([item.node for item in self.nodes], "node"),
+            ([item.id for item in self.externals], "external input"),
+        ):
+            if len(set(values)) != len(values):
+                raise ValueError(f"new {label} ids must be unique")
+        return self
 
 
 class RemoveNodeProposal(Model):
@@ -162,6 +222,7 @@ class ReviewRequest(Model):
         | DocumentProposal
         | DraftProposal
         | AddNodeProposal
+        | NodeDraftsProposal
         | RemoveNodeProposal
         | TaskReferenceUpdateProposal,
         Field(discriminator="kind"),
@@ -311,3 +372,42 @@ class NodeDraftView(Model):
     status: Literal["incomplete", "invalid", "complete"]
     diagnostics: tuple[str, ...] = ()
     ports: tuple[PortInventoryEntry, ...]
+
+
+class NodeDraftsRequest(Model):
+    expected_sha256: Digest
+    proposal: NodeDraftsProposal
+
+
+class NodeDraftsView(Model):
+    """Inert inspection of a multi-node draft.
+
+    ``ports`` cover every node of the projected graph (existing and pending);
+    existing sockets show their source in ``proposal.document`` (or the anchor)
+    without ``proposal.bindings``, which the browser projects itself. Choices
+    include pending results and new externals of the matching contract.
+    """
+
+    status: Literal["incomplete", "invalid", "complete"]
+    diagnostics: tuple[str, ...] = ()
+    problems: tuple[DraftProblem, ...] = ()
+    ports: tuple[PortInventoryEntry, ...]
+
+
+class ExternalInputKind(Model):
+    """How a new external input of one catalog contract can be declared.
+
+    ``managed`` means a reusable (v2) workflow may leave the value to candidate
+    preparation (``ManagedCandidateBinding``); otherwise the author names a
+    project-relative JSON file holding a ``native_type`` value. ``summary`` and
+    ``example`` are presentation text only; no location is ever defaulted.
+    """
+
+    contract: NativeContract
+    managed: bool
+    summary: str
+    example: str
+
+
+class ExternalInputCatalog(Model):
+    entries: tuple[ExternalInputKind, ...]

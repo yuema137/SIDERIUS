@@ -455,8 +455,10 @@ Version history panel and owns no record policy. Save error `version_record`
 means nothing was written (the reviewed proposal is retained); the distinct
 `version_record_not_updated` means the source was saved but its record was not, so
 `editor.js` adopts the returned saved `current` view. `GET /api/editor/node-catalog`
-and `POST /api/editor/{project_id}/node-draft` serve the node palette (a project
-named `node-catalog`, like `projects`, is shadowed by the fixed route). The existing console
+and `POST /api/editor/{project_id}/nodes-draft` serve the node palette, and
+`GET /api/editor/external-inputs` serves the inspector's input creation (projects
+named `node-catalog` or `external-inputs`, like `projects`, are shadowed by the
+fixed routes; the older single-node `node-draft` route remains for API clients). The existing console
 Bearer token, origin, host and 256 KiB wire-body admission apply to every API
 route. Browser requests select project IDs and never filesystem destinations.
 The [authoring contract](../workflow_authoring/authoring-contract.md) owns source
@@ -517,22 +519,42 @@ drag payload. It lists
 Workflow view is shown; other pages never request it) grouped by capability with a text search,
 and adds one by click (placed right of the existing cards) or by dragging an entry
 onto the canvas (dropped at that world position). It proposes an unused instance
-id (`<capability>`, `<capability>2`, ...). The pending node is the unified
-draft's `node` field (AddNodeProposal fields without `source`; `editorDraft.proposal`
-turns it into `add_node` on `anchor.source`), so it is part of the dirty flag,
-undo/redo and Discard. The canvas and Selection draw it from the proposal plus the
-server's `node-draft` ports (`editor.js` caches each inspected view by proposal, so
-undo/redo redraw without a request), its required inputs show as unbound, and
-binding them goes through the same canvas/inspector gestures, each one draft
-operation (other nodes cannot be rewired or moved, and inspector, reference and
-loop edits are disabled, until it is reviewed, cancelled, undone or discarded).
-Review is disabled until `node-draft` reports `complete`; "Cancel new node" is an
-undoable draft operation and sends no request. Adding or removing requires a draft
-with no structured edits over its anchor (Review/save or discard them first); the
-anchor may be a reviewed, unsaved Source edit or an earlier reviewed node add/remove.
-A successful `add_node`/`remove_node` review becomes the draft's new anchor (one
-undo step, like a reviewed Source edit), so several node edits can be reviewed in
-sequence and saved together.
+id (`<capability>`, `<capability>2`, ...). Pending nodes are the unified draft's
+`nodes` list and new external inputs its `externals` list (`editor-node-drafts.js`,
+`window.editorNodeDrafts`, holds their projection and list edits; `editorDraft.proposal`
+turns them into one `node_drafts` proposal on `anchor.source`, see the authoring
+contract). Any number of nodes may be pending beside moves, wiring, inspector,
+reference and loop edits; everything is part of the dirty flag, undo/redo and Discard.
+Every card, pending or saved, can be moved at any time. Moving only pending cards
+records only their positions, so the review stays a byte-preserving insertion. The
+canvas and Selection draw the edited document plus pending nodes. Ports come from
+`POST …/nodes-draft`, which covers the whole projected graph; its choices include
+pending results and new inputs. `editor.js` caches views by `editorNodeDrafts.key`
+(layout excluded, so moves never re-inspect) and reuses the last view while checking.
+Unbound required inputs show red (P2) and are wired with the ordinary
+canvas/inspector gestures, saved -> pending and pending -> pending included. While
+anything is pending, Review is disabled until the current view is `complete`. The
+binding-only `…/draft` inspection is then not used, because `nodes-draft` also
+applies the binding patches. Removing a pending node ("Cancel new node" for the
+newest, Delete, context menu or Selection) is an undoable draft operation and sends
+no request. Sockets that read it are disconnected (pending) or return to their saved
+source (patches); the status line names them. Removing a *saved* node still needs a
+draft with no structured edits over its anchor. A successful `node_drafts` or
+`remove_node` review becomes the draft's new anchor (one undo step, like a reviewed
+Source edit).
+
+Inspector input creation (`editor-external-inputs.js`, `editor-external-inputs.css`).
+Under each unbound socket whose contract `GET /api/editor/external-inputs` lists,
+Selection shows one line: the contract id, the server `summary`, and whether
+existing inputs of that contract are offered in the select above. A collapsed
+"Create external input…" form asks for an input id (suggested `<node>_<argument>`,
+de-duplicated), and for a reusable (schema 2) document with a `managed` contract,
+"Managed by the run" or "A JSON file in the project". It also asks for the
+project-relative file path; the path is never prefilled, only an `e.g.
+inputs/<id>.json` placeholder. "Create and connect" validates the id
+(identifier, unused) and a non-empty path. It then adds the binding to the draft's
+`externals` and connects the socket as one undoable operation ("Create input …").
+The server validates the result.
 Removal is offered by Delete/Backspace on a focused capability heading, its
 context menu and "Remove capability" in Selection; it sends a `remove_node` review
 directly (Review is the explanation: refusal text or `node_edit.message` plus the
@@ -609,16 +631,17 @@ Witness: `tests/browser/required_defaults.mjs`.
 
 Unified draft (`editor-draft.js`, `window.editorDraft`; `editor.js` delegates).
 Wiring, disconnection, layout moves, inspector, training, research-loop edits and
-a pending palette node are operations on one draft state `{document, bindings,
-anchor, node, training, loopTemplate}`: `document` is the edited authored document, `bindings` are
+pending palette nodes and new external inputs are operations on one draft state
+`{document, bindings, anchor, nodes, externals, training, loopTemplate}`: `document` is the edited authored document, `bindings` are
 `BindingPatch` values relative to `anchor.inventory`, and `anchor` is the last
 server projection the draft starts from (`{source, document, inventory}` of the
 loaded source, or of a reviewed Source/task-reference update). There is no edit
 mode: any mix accumulates, with one dirty flag (`workflowEditor.state.dirty`,
-true while the draft identity `{document, bindings, anchor.source, node}` differs from
+true while the draft identity `{document, bindings, anchor.source, nodes, externals}` differs from
 the loaded state, or while Source text is dirty). Review selects the existing
-typed proposal from the draft: a pending node → `AddNodeProposal` on
-`anchor.source` (see the node palette below); patches present → `DraftProposal` whose
+typed proposal from the draft: pending nodes or new inputs → `NodeDraftsProposal`
+on `anchor.source`, which carries `document` only when the saved content was edited
+and the binding patches (see the node palette below); patches present → `DraftProposal` whose
 `base_document` is the edited document (layout and inspector edits travel with
 the patches); otherwise document changes outside the loop → `DocumentProposal`;
 loop-only changes → `LoopProposal` on `anchor.source`; no change →
@@ -719,6 +742,13 @@ new node, review/save keeping author comments, drag source and canvas centre bot
 in view before the drag, refused removal of a node others
 read (Delete key), the context menu, byte-identical inspector removal of the added
 node, Discard and Undo of a pending dragged node, and cancelling it.
+`tests/browser/free_node_drafts.mjs` (same fixture; unit owner
+`tests/unit/tools/test_workflow_node_drafts.py`) adds two pending nodes and moves
+both (pointer and Alt+Arrow). It wires saved -> pending and pending -> pending,
+explains and creates the missing `storage` input in Selection (empty path refused,
+undo/redo), and reuses it from the second node's select. It checks that Review stays
+blocked while incomplete, then reviews one `node_drafts` proposal with
+`document: null` and only inserted lines and saves it with author comments kept.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
