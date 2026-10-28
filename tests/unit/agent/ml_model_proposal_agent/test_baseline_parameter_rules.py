@@ -1,9 +1,11 @@
 """The effective candidate baseline must be resolved before resource preflight."""
 
 import pytest
+from pydantic import BaseModel
 
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.parameter_rules import ParameterRuleError, ParameterRules
+from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY, get_config_class
 from nodes.ml_model_proposal_agent.parameter_rules import (
     render_proposal_parameter_rules,
     resolve_proposal_baseline_config,
@@ -89,8 +91,10 @@ def test_unconstrained_baseline_is_unchanged_and_generation_contract_is_visible(
     )
 
 
-def test_template_base_model_type_does_not_judge_the_proposed_model_locks() -> None:
-    """Fails if a template base's config class refuses a lock meant for the new model."""
+def test_rules_are_judged_against_the_proposed_model_not_the_template_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fails if the template base, or nothing, judges a lock meant for the proposed model."""
     # ``hidden_width`` is not a PUNetConfig field; the proposed model may declare it.
     baseline = {"model_type": "punet", "model_config": {"hidden_width": 8}}
     rules = _rules("model_config.hidden_width", {"exact": 16})
@@ -98,3 +102,31 @@ def test_template_base_model_type_does_not_judge_the_proposed_model_locks() -> N
     effective = _resolve(baseline, workflow=rules)
 
     assert effective["model_config"]["hidden_width"] == 16
+    assert effective["model_type"] == "punet"
+
+    # Once the proposed model's config class exists, it is the one that judges.
+    class _ProposedConfig(BaseModel):
+        model_type: str = "proposed_candidate"
+        width: int = 8
+
+    get_config_class("punet")  # populate the registry before patching it
+    monkeypatch.setitem(PLUGIN_CONFIG_REGISTRY, "proposed_candidate", _ProposedConfig)
+    with pytest.raises(ParameterRuleError, match=r"model_config\.hidden_width.*_ProposedConfig"):
+        _resolve(baseline, workflow=rules)
+
+
+def test_unknown_proposed_model_defers_without_judging_the_template_base() -> None:
+    """Fails if a caller without a proposed model is judged by the baseline's template type."""
+    # PUNetConfig would refuse both: an unknown field and a boolean for an int.
+    baseline = {"model_type": "punet", "model_config": {"hidden_width": 8}}
+    rules = ParameterRules.model_validate(
+        {"model_config.hidden_width": {"exact": 16}, "model_config.depth": {"exact": True}}
+    )
+
+    effective = resolve_proposal_baseline_config(
+        baseline, composition_ref=None, workflow_rules=rules
+    )
+
+    assert effective["model_config"] == {"hidden_width": 16, "depth": True}
+    assert effective["model_type"] == "punet"
+    assert baseline == {"model_type": "punet", "model_config": {"hidden_width": 8}}

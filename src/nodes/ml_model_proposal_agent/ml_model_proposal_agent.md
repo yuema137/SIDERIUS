@@ -267,9 +267,13 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
   into the effective `baseline_config` before `ProposalOutput` validation and
   preflight. Supplied values under range/allowlist/predicate rules are checked;
   omitted non-exact tuner knobs are deferred. `model_config` rules are judged
-  against the proposed `model_name`, not a template base `model_type` in the
-  baseline; because that model has no config class before implementation,
-  its target check is left to the tuner. The prompt shows these typed
+  against the proposed `model_name` (`resolve_proposal_baseline_config(...,
+  proposed_model_type=...)`, which both proposer construction sites pass),
+  never a template base `model_type` in the baseline. Because that model has
+  no config class before implementation, its target and boolean-value checks
+  are left to the tuner. `proposed_model_type` is optional for external
+  callers; `None` means the proposed model is not known yet and defers the
+  same checks. The prompt shows these typed
   declarations. With no rules, raw proposal parsing and prompt bytes remain
   unchanged. This prevents an exact experiment-owned temporal dimension from
   being absent at preflight without inventing a task default. The estimate
