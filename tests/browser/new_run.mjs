@@ -46,10 +46,9 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   let context = await browser.newContext(), page = await context.newPage();
-  const connect = async () => { if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click(); await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
-    // New run controls live in the collapsed "Prepare a new run" disclosure (51b3e8c5); open it as a user would.
-    const runDetails = page.locator('.workflow-run-details');
-    if (await runDetails.isVisible() && !(await runDetails.evaluate(element => element.open))) await runDetails.locator('> summary').click(); };
+  const connect = async () => { if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click(); await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor(); };
+  // Run preparation lives on its own #run page; authoring stays on #workflow.
+  const view = async name => { await page.locator(`nav a[href="#${name}"]`).click(); await page.locator(`#view-${name}`).waitFor(); };
   const requests = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => {if (request.method() === 'POST') requests.push(request.url());});
@@ -109,10 +108,16 @@ try {
   const source = await page.locator('#editor-source').inputValue();
   await page.locator('#editor-source').fill(source + '\n# saved by new run browser\n');
   if (training) assert.equal(await page.locator('[data-training="sampling_seed"]').isDisabled(), true);
+  assert.equal(await page.locator('#workflow-next-run').isDisabled(), true, 'Unsaved edits keep the Run handoff closed');
+  await view('run');
+  assert.match(await page.locator('#run-source-state').textContent(), /Save first/);
   await page.locator('#new-run-task').selectOption('synthetic');
   assert.equal(await page.locator('#new-run-review').isDisabled(), true);
+  await view('workflow');
   await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
   await page.locator('#editor-status').filter({hasText: 'Saved reviewed bytes'}).waitFor();
+  await page.locator('#workflow-next-run').click(); await page.locator('#view-run').waitFor();
+  assert.match(await page.locator('#run-source-state').textContent(), /ready to run/);
   let saved = await readFile(metadata.source);
   // Delayed review cannot survive task change, source change, or a new session.
   let release, waiting = false;
@@ -134,10 +139,12 @@ try {
     });
     await page.locator('#new-run-review').click(); await until(() => delayed);
     if (change === 'source') {
+      await view('workflow');
       await page.locator('#editor-source').fill(saved.toString() + '\n# changed while reviewing\n');
       await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
       await page.locator('#editor-status').filter({hasText: 'Saved reviewed bytes'}).waitFor();
       saved = await readFile(metadata.source);
+      await view('run');
     } else {
       await connect();
     }

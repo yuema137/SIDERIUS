@@ -29,6 +29,7 @@ from workflows.adaptors import (
 )
 from workflows.adaptors.record import canonical_sha256
 from workflows.definition.adaptor_strategies import (
+    MAX_ADAPTOR_OUTPUTS,
     AllSelect,
     CardinalityBound,
     CollectCombine,
@@ -509,3 +510,18 @@ def test_adaptor_input_provenance_refuses_a_route_merge():
     payload = ref(0).model_dump(mode="json") | {"source": merge.model_dump(mode="json")}
     with pytest.raises(ValidationError, match="never a route merge"):
         AdaptorInputRef.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    ("model", "fields"),
+    [
+        (PerItemDistribute, {"on_short": "skip"}),
+        (SplitItemsDistribute, {"field": "findings", "on_short": "skip"}),
+        (ReplicateDistribute, {}),
+    ],
+)
+def test_distribute_count_is_capped_at_the_adaptor_output_owner(model, fields):
+    """Fan-out above the ceiling is refused at declaration, and the ceiling itself is admitted."""
+    with pytest.raises(ValidationError):
+        model(count=MAX_ADAPTOR_OUTPUTS + 1, **fields)
+    assert model(count=MAX_ADAPTOR_OUTPUTS, **fields).count == MAX_ADAPTOR_OUTPUTS

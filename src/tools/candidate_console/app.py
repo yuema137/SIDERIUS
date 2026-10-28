@@ -266,16 +266,23 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "editor-contract-presentation.js": "text/javascript",
             "editor-contract-presentation.css": "text/css",
             "editor-circuit.js": "text/javascript",
+            "editor-palette.js": "text/javascript",
             "editor-circuit-geometry.js": "text/javascript",
             "editor-task-controls.js": "text/javascript",
             "editor-loop-controls.js": "text/javascript",
             "editor-problems.js": "text/javascript",
             "editor-node-parameters.js": "text/javascript",
+            "editor-versions.js": "text/javascript",
+            "editor-draft.js": "text/javascript",
+            "editor-draft.css": "text/css",
             "reusable-run.js": "text/javascript",
             "reusable-intents.js": "text/javascript",
             "new-run.js": "text/javascript",
+            "page-guidance.js": "text/javascript",
+            "page-guidance.css": "text/css",
             "editor.css": "text/css",
             "editor-parameters.css": "text/css",
+            "editor-palette.css": "text/css",
         }
         if asset not in types:
             raise HTTPException(404)

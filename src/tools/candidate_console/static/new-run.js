@@ -17,6 +17,8 @@
   const ready = () => session.connected && editor.candidateEnabled &&
     editor.sourceAvailable && editor.reusableSource && editor.savedSha256 &&
     !editor.dirty && !editor.sourceDirty && !editor.conflict && !editor.saving;
+  // The single Run gate: page guidance reads it and never re-derives eligibility.
+  window.newRunGate = Object.freeze({get ready() { return !!ready(); }});
   const current = (version, revision, project) =>
     generation === version && session.revision === revision && editor.projectId === project;
   const api = (suffix, body, project = editor.projectId) =>
@@ -35,6 +37,7 @@
     $('prerequisites').textContent = ready()
       ? 'Saved source ready. Choose a configured task and resource set, then review preparation.'
       : 'Select a runnable project with supported reusable source. Save edits and resolve conflicts before preparation.';
+    window.dispatchEvent(new CustomEvent('new-run-gate', {detail: {ready: !!ready()}}));
   }
   function invalidate() {
     generation++;
@@ -49,7 +52,13 @@
     const id = intent.payload.selection.preparation_operation_id;
     $('operation-id').textContent = id;
     $('monitor').href = '#slow-control/' + id;
-    $('operation-status').textContent = 'Retained preparation intent. Check or retry this exact operation; current editor changes are separate.';
+    // Display-only: a malformed stored version (hand-edited storage) is ignored.
+    const stored = intent.source_version;
+    const version = stored && typeof stored === 'object' && typeof stored.sha256 === 'string' &&
+      /^[0-9a-f]{64}$/.test(stored.sha256) && (stored.name === null || stored.name === undefined || typeof stored.name === 'string')
+      ? stored : null;
+    const named = version ? ` for source version ${version.name ? `"${version.name}"` : 'unnamed'} (${version.sha256.slice(0, 12)})` : '';
+    $('operation-status').textContent = `Retained preparation intent${named}. Check or retry this exact operation; current editor changes are separate.`;
   }
   function restore() {
     try {
@@ -96,7 +105,7 @@
     }
   }
   async function tasks() {
-    if (!session.connected || window.consoleNavigation?.view !== 'workflow' || tasksRevision === session.revision) return;
+    if (!session.connected || !['workflow', 'run'].includes(window.consoleNavigation?.view) || tasksRevision === session.revision) return;
     const version = generation;
     const revision = session.revision;
     const project = editor.projectId;
@@ -121,7 +130,7 @@
     if (JSON.stringify(editor) !== previous) { invalidate(); if (session.connected) void tasks(); }
   });
   session.subscribe(() => { invalidate(); tasksRevision = null; if (session.connected) void tasks(); });
-  window.addEventListener('console-view', event => { if (event.detail.view === 'workflow') void tasks(); });
+  window.addEventListener('console-view', event => { if (['workflow', 'run'].includes(event.detail.view)) void tasks(); });
   $('task').addEventListener('change', invalidate); $('name').addEventListener('input', invalidate);
   $('review').addEventListener('click', async () => {
     if (!ready() || busy || !$('task').value || !$('name').value) return;
@@ -141,7 +150,7 @@
       $('details').textContent = [
         `${value.effects}`,
         `Source: ${value.source_path}`,
-        `Saved source version verified.`,
+        `Saved source version verified: ${value.source_version_name ? `"${value.source_version_name}"` : 'unnamed'} (${value.selection.expected_source_sha256.slice(0, 12)}).`,
         `Task: ${value.task_label}`,
         `Manifest: ${value.task_manifest}`,
         `Data: ${value.data_root}`,
@@ -163,6 +172,8 @@
     if (!ready() || !review || busy || intent || !coordinator.eligible()) return;
     const exact = {
       version: 1, origin: location.origin, project: editor.projectId,
+      // Display record only; payload binds the SHA-256 exactly as before.
+      source_version: {name: review.source_version_name ?? null, sha256: review.selection.expected_source_sha256},
       payload: {selection: review.selection, expectation: review.expectation}
     };
     try { coordinator.save('preparation', exact); }

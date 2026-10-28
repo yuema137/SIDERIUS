@@ -10,6 +10,9 @@
   <link rel="stylesheet" href="/editor.css">
   <link rel="stylesheet" href="/editor-contract-presentation.css">
   <link rel="stylesheet" href="/editor-parameters.css">
+  <link rel="stylesheet" href="/page-guidance.css">
+  <link rel="stylesheet" href="/editor-draft.css">
+  <link rel="stylesheet" href="/editor-palette.css">
   <script src="/number-format.js" defer></script>
   <script src="/session.js" defer></script>
   <script src="/token-presenter.js" defer></script>
@@ -27,6 +30,9 @@
   <script src="/editor-circuit.js" defer></script>
   <script src="/editor-problems.js" defer></script>
   <script src="/editor-node-parameters.js" defer></script>
+  <script src="/editor-versions.js" defer></script>
+  <script src="/editor-draft.js" defer></script>
+  <script src="/editor-palette.js" defer></script>
   <script src="/editor.js" defer></script>
   <script src="/navigation.js" defer></script>
   <script src="/recorded-example.js" defer></script>
@@ -34,12 +40,13 @@
   <script src="/reusable-run.js" defer></script>
   <script src="/new-run.js" defer></script>
   <script src="/native-chain.js" defer></script>
+  <script src="/page-guidance.js" defer></script>
 </head>
 <body>
 <header class="console-header"><div class="brand">SIDERIUS <span>Local candidate console</span></div><details class="console-intro"><summary>About this console</summary><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></details>
   <div class="theme-control"><label for="theme-preference">Color theme</label><select id="theme-preference"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
 </header>
-<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#slow-control">Slow control</a></nav>
+<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#slow-control">Slow control</a></nav>
 <main>
 <p id="route-status" role="status"></p>
   <section class="card" id="access-section" aria-labelledby="access-heading">
@@ -49,13 +56,16 @@
     <p id="access-status" role="status">Not connected.</p>
     <div id="access-connected" class="access-connected" hidden><button id="access-change" type="button" class="secondary">Change token</button><button id="access-disconnect" type="button" class="secondary">Disconnect console</button></div>
   </section>
+  <div class="step-indicator" id="step-indicator" role="navigation" aria-label="Workflow steps" hidden><ol>
+    <li data-step="task"><a href="#workflow">Task</a></li><li data-step="workflow"><a href="#workflow">Workflow</a></li><li data-step="run"><a href="#run">Run</a></li><li data-step="results"><a href="#slow-control">Results</a></li>
+  </ol></div>
   <section id="view-home" data-view="home"><h1 tabindex="-1">Home</h1>
 <section class="card journey" aria-labelledby="journey-heading">
   <p class="eyebrow">Main path</p><h2 id="journey-heading">Run a workflow</h2>
   <ol class="journey-steps">
     <li><strong>Open the workflow</strong> and choose a configured project.</li>
     <li><strong>Edit and review</strong> the workflow on the canvas, then save the reviewed source.</li>
-    <li><strong>Prepare a new run</strong> from the saved source and review its inputs and limits.</li>
+    <li><strong>Prepare a new run</strong> on the Run page from the saved version and review its inputs and limits.</li>
     <li><strong>Launch and monitor</strong> the run; follow it in Slow control.</li>
   </ol>
   <div class="actions"><a class="button-link" href="#workflow">Open workflow</a><a href="#slow-control">See recent operations</a></div>
@@ -108,18 +118,29 @@
   <section class="card workflow-project">
     <label for="editor-project">Project</label><select id="editor-project" disabled></select>
     <button id="editor-inspect" type="button" hidden>Inspect source</button><p id="editor-status" role="status">Connect to open a configured project.</p>
-    <details><summary>Save behavior</summary><p class="muted">Saving updates source for future New run captures. It does not launch a run or change existing captures. Task-bound publication checks the explicitly selected native task identity.</p></details>
   </section>
   <section class="card workflow-task-details" aria-label="Task package and version">
     <section class="editor-task-controls" id="editor-task-controls" aria-label="Task package and version"><h2>Task package and version</h2><p id="editor-task-state">Connect to see which task package and version this workflow uses.</p></section>
   </section>
   </div>
+  <section class="card start-guide" id="workflow-start-guide" aria-labelledby="start-guide-heading" hidden>
+    <p class="eyebrow">First run</p><h2 id="start-guide-heading">Start from a task example</h2>
+    <ol class="journey-steps">
+      <li><strong>Select a task</strong>: choose a configured project in <strong>Project</strong> above, then its task package and version.</li>
+      <li><strong>Edit</strong> connections and settings on the workflow canvas.</li>
+      <li><strong>Save</strong>: <strong>Review changes</strong>, then <strong>Save reviewed source</strong>. Each save is a new saved version.</li>
+      <li><strong>Run</strong>: choose <strong>Next: prepare a run</strong> to prepare and launch that saved version.</li>
+    </ol>
+    <p id="workflow-start-state" class="muted"></p>
+  </section>
   <section class="card workflow-actions">
     <div class="actions">
-      <button id="editor-refresh" disabled>Refresh from disk</button>
-      <button id="editor-review" disabled>Review changes</button>
+      <button id="editor-refresh" class="secondary" disabled>Refresh from disk</button>
+      <button id="editor-review" class="secondary" disabled>Review changes</button>
+      <label for="editor-version-name">Version name</label><input id="editor-version-name" type="text" maxlength="64" spellcheck="false" aria-describedby="editor-version-help">
       <button id="editor-save" disabled>Save reviewed source</button>
     </div>
+    <p id="editor-version-help" class="muted">Each Save records this name, the time and the file's SHA-256 beside the source. Leave the suggested name or type your own.</p>
     <p id="editor-pending">No pending edits.</p>
     <section id="editor-problems" aria-label="Problems" aria-live="polite" hidden></section>
     <div id="editor-conflict" hidden>
@@ -130,12 +151,16 @@
       <button id="editor-discard">Discard my edits and reload</button>
       <button id="editor-rebase">Edit my proposal against current source</button>
     </div>
+    <div class="workflow-next"><button id="workflow-next-run" type="button" disabled>Next: prepare a run</button><p id="workflow-next-state" role="status">Save the reviewed workflow first. Run is enabled only for a saved version.</p></div>
   </section>
   <div class="editor-workspace">
     <section class="card workflow-canvas-panel">
       <h2>Workflow canvas</h2>
-      <details class="canvas-help"><summary>Canvas controls</summary><p>Select a capability to inspect its request. Select an output (or drag from it) and then a highlighted input to rebind it; hovering an output previews which inputs accept it. Port colour and shape name the contract (see Port types); a refused connection names both contracts. The Mapping chip on a card expands the protocol mapping from each source to its argument. Drag a capability heading to move it; Alt + arrow keys also move the selected capability. Optional inputs that are not connected are folded into an "optional inputs" row on each card; expand it to connect one. Fit to view, zoom and Arrange view change only what you see: saved positions change only when you move a card, review and save.</p></details>
-      <div id="editor-graph"></div>
+      <details class="canvas-help"><summary>Canvas controls</summary><p>Select a capability to inspect its request. Select an output (or drag from it) and then a highlighted input to rebind it; hovering an output previews which inputs accept it. Port colour and shape name the contract (see Port types); a refused connection names both contracts. The Mapping chip on a card expands the protocol mapping from each source to its argument. Drag a capability heading to move it; Alt + arrow keys also move the selected capability. Optional inputs that are not connected are folded into an "optional inputs" row on each card; expand it to connect one. Fit to view, zoom and Arrange view change only what you see: saved positions change only when you move a card, review and save. Add a capability from the palette by clicking it or dragging it onto the canvas; remove the selected capability with Delete, its context menu or Remove capability in Selection.</p></details>
+      <div class="editor-canvas-layout">
+        <section id="editor-palette" class="editor-palette" aria-label="Add capability"></section>
+        <div id="editor-graph"></div>
+      </div>
       <details class="connection-list"><summary>Connection mappings</summary><ul id="editor-edges"></ul></details>
     </section>
     <section class="card workflow-inspector-panel">
@@ -146,7 +171,7 @@
   </div>
   <section class="card workflow-loop-panel" id="editor-loop" aria-label="Research loop"></section>
   <details class="card"><summary>References</summary><div id="editor-references"></div></details>
-  <details class="card" id="editor-advanced"><summary>Advanced → Source</summary>
+  <details class="card" id="editor-advanced"><summary>Advanced source</summary>
     <p id="editor-path" class="mono"></p><p id="editor-revision" class="mono"></p>
     <h2>Python source</h2>
     <p>Source edits may add supported nodes. Review validates and projects the graph. After inspector edits, review first to update this panel before typing source changes. Inspector edits use canonical Python rendering; inspect formatting and comment changes in the diff.</p>
@@ -157,13 +182,24 @@
     <pre id="editor-diff"></pre>
     <p>Every edit invalidates review. Save writes exactly the reviewed bytes.</p>
   </details>
-  <details class="card workflow-run-details"><summary>Prepare a new run</summary>
-  <section aria-labelledby="new-run-heading">
-    <h2 id="new-run-heading">New run</h2>
+  <details class="card" id="editor-history"><summary>Version history</summary></details>
+  <details class="card" id="workflow-details"><summary>Details</summary>
+    <h2>Save behavior</h2><p class="muted">Saving updates source for future New run captures. It does not launch a run or change existing captures. Task-bound publication checks the explicitly selected native task identity.</p>
+    <h2>Concurrent writers</h2><p class="muted">Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</p>
+  </details>
+</section>
+<section id="view-run" data-view="run" hidden><h1 tabindex="-1">Run</h1>
+  <section class="card run-source" aria-labelledby="run-source-heading">
+    <p class="eyebrow">Saved workflow version</p><h2 id="run-source-heading">What this run uses</h2>
+    <p id="run-source-state" role="status">Connect to see which saved workflow version a run uses.</p>
+    <div class="actions"><a href="#workflow">Back to workflow</a></div>
+  </section>
+  <section class="card run-step" aria-labelledby="new-run-heading">
+    <p class="eyebrow">1 · Prepare</p><h2 id="new-run-heading">New run</h2>
     <p id="new-run-prerequisites">Select a runnable project and save source edits.</p>
     <label for="new-run-task">Configured task and resources</label><select id="new-run-task"><option value="">Choose task and resources</option></select>
     <label for="new-run-name">Run name</label><input id="new-run-name" type="text" value="candidate" maxlength="128">
-    <button id="new-run-review" disabled>Review preparation</button>
+    <button id="new-run-review" class="secondary" disabled>Review preparation</button>
     <p id="new-run-status" role="status"></p><details open><summary>Selected source, inputs and resource limits</summary><pre id="new-run-details"></pre></details>
     <button id="new-run-prepare" disabled>Prepare saved source</button>
     <section id="new-run-intent" hidden aria-label="Retained preparation operation">
@@ -171,17 +207,17 @@
       <div class="actions"><button id="new-run-check" disabled>Check status</button><button id="new-run-retry" disabled>Retry same preparation</button><a id="new-run-monitor">Monitor preparation</a><button id="new-run-open" disabled>Open prepared run</button><button id="new-run-dismiss" disabled>Dismiss terminal or refused preparation</button></div>
     </section>
   </section>
-  <section aria-labelledby="capture-heading">
-    <h2 id="capture-heading">Prepared run</h2>
-    <p>Open a prepared capture, review its saved inputs, then start a candidate. Current edits apply to future captures.</p>
+  <section class="card run-step" aria-labelledby="capture-heading">
+    <p class="eyebrow">2 · Review and launch</p><h2 id="capture-heading">Prepared run</h2>
+    <p>Open a prepared capture, review its saved inputs, then start a candidate. Current workflow edits apply only to future captures.</p>
     <label for="capture-task">Configured task</label><select id="capture-task" disabled></select>
-    <div class="actions"><button id="capture-refresh" disabled>Refresh prepared runs</button><button id="capture-more" hidden disabled>More runs</button></div>
-    <p id="capture-guidance">Use New run above to prepare saved reusable source, or refresh existing prepared runs.</p>
+    <div class="actions"><button id="capture-refresh" class="secondary" disabled>Refresh prepared runs</button><button id="capture-more" hidden disabled>More runs</button></div>
+    <p id="capture-guidance">Use New run above to prepare the saved version, or refresh existing prepared runs.</p>
     <label for="capture-run">Prepared capture</label><select id="capture-run" disabled><option value="">Choose a prepared run</option></select>
-    <button id="capture-open" disabled>Open prepared run</button>
+    <button id="capture-open" class="secondary" disabled>Open prepared run</button>
     <p id="capture-status" role="status">Connect and select a runnable project.</p>
     <p id="capture-source"></p>
-    <button id="capture-review" disabled>Review capture</button>
+    <button id="capture-review" class="secondary" disabled>Review capture</button>
     <div id="capture-summary"></div>
     <details><summary>Captured resources and version</summary><pre id="capture-details"></pre></details>
     <button id="capture-launch" disabled>Launch captured run</button>
@@ -190,8 +226,7 @@
       <div class="actions"><button id="capture-check" disabled>Check status</button><button id="capture-retry" disabled>Retry same operation</button><a id="capture-monitor" hidden>Monitor operation</a><button id="capture-finish" hidden>Dismiss completed operation</button></div>
       <div id="capture-stop-group" class="actions" hidden><button id="capture-stop-button" type="button">Stop run</button></div><p id="capture-stop-status" role="status"></p>
     </section>
-  </section></details>
-  <footer>Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</footer>
+  </section>
 </section>
 <section id="view-slow-control" data-view="slow-control" hidden><h1 tabindex="-1">Slow control</h1>
 <div class="slow-control-layout">

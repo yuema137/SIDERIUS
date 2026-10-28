@@ -27,21 +27,42 @@ from workflows.definition.source import (
 from .loop import loop_template, with_loop
 from .models import (
     MAX_SOURCE_BYTES,
+    AddNodeProposal,
     DocumentProposal,
     DraftProposal,
     DraftRequest,
     DraftView,
     LoopProposal,
+    NodeDraftRequest,
+    NodeDraftView,
     Project,
+    RemoveNodeProposal,
     ReviewRequest,
     ReviewView,
     SaveRequest,
     SaveView,
     SourceView,
 )
+from .node_edits import NodeEditRefusal, add_node, inspect_node, remove_node
 from .options import binding_projection
 from .task_models import TaskReferenceReview, TaskReferenceTarget, TaskReferenceUpdateProposal
 from .training import training_inspector
+from .versions import (
+    VersionDetail,
+    VersionEntry,
+    VersionList,
+    VersionRecord,
+    VersionRecordError,
+    appended_record,
+    encode_record,
+    next_name,
+    project_versions,
+    read_record,
+    read_recovery_copy,
+    version_diff,
+    version_record_path,
+    write_record,
+)
 
 
 def digest(payload: bytes) -> str:
@@ -209,6 +230,12 @@ class WorkflowAuthoring:
         self._base(self._read_bytes()[0], request.expected_sha256)
         return DraftView(draft=request.draft, inspection=inspect_draft(request.draft))
 
+    def inspect_node_draft(self, request: NodeDraftRequest) -> NodeDraftView:
+        """Inspect a pending node (possibly with unbound inputs) without rendering a save."""
+        request = NodeDraftRequest.model_validate_json(request.model_dump_json())
+        self._base(self._read_bytes()[0], request.expected_sha256)
+        return inspect_node(request.proposal)
+
     def _base(self, payload: bytes, expected: str) -> SourceView:
         current = self._view(payload)
         if current.sha256 != expected:
@@ -235,6 +262,7 @@ class WorkflowAuthoring:
                 )
             proposal = DocumentProposal(kind="document", document=inspection.document)
         task_review = None
+        node_edit = None
         if isinstance(proposal, TaskReferenceUpdateProposal):
             from .task_references import review_task_references
 
@@ -260,6 +288,16 @@ class WorkflowAuthoring:
             source = render_workflow_source(updated)
         elif isinstance(proposal, LoopProposal):
             source = render_workflow_source(with_loop(proposal.source, proposal.loop))
+        elif isinstance(proposal, (AddNodeProposal, RemoveNodeProposal)):
+            self._base(current_payload, request.expected_sha256)
+            try:
+                source, node_edit = (
+                    add_node(proposal)
+                    if isinstance(proposal, AddNodeProposal)
+                    else remove_node(proposal)
+                )
+            except NodeEditRefusal as error:
+                raise AuthoringError(error.code, str(error)) from error
         else:
             source = (
                 render_workflow_source(proposal.document)
@@ -267,6 +305,8 @@ class WorkflowAuthoring:
                 else proposal.source
             )
         review = reviewed_source(base, source, task_review)
+        if node_edit is not None:
+            review = review.model_copy(update={"node_edit": node_edit})
         if not isinstance(proposal, TaskReferenceUpdateProposal) and (
             request.task_reference_selection is not None
             or any(
@@ -382,6 +422,7 @@ class WorkflowAuthoring:
                     "pin removal or unbound task-reference publication is unsupported",
                 )
             unchanged = previous == payload
+            record = None if unchanged else self._next_record(previous, payload, request)
             recovery = () if unchanged else (self._recover(previous), self._recover(payload))
             self._verify_publication(current, proposed, request)
             final, final_mode = self._read_bytes()
@@ -392,7 +433,97 @@ class WorkflowAuthoring:
             if unchanged:
                 return SaveView(sha256=digest(payload), recovery_ids=(), unchanged=True)
             publish_bytes_atomically(str(self.project.source_file), payload, mode=mode)
-            return SaveView(sha256=digest(payload), recovery_ids=recovery)
+            assert record is not None
+            record_bytes, record_mode, name = record
+            try:
+                write_record(
+                    self.project.source_file,
+                    record_bytes,
+                    mode if record_mode is None else record_mode,
+                )
+            except (OSError, VersionRecordError) as error:
+                raise AuthoringError(
+                    "version_record_not_updated",
+                    "Source saved, but its version record was not updated; the next Save "
+                    "records this content as an unnamed observed version",
+                    self._view(payload),
+                ) from error
+            return SaveView(sha256=digest(payload), recovery_ids=recovery, version_name=name)
+
+    def _next_record(
+        self, previous: bytes, payload: bytes, request: SaveRequest
+    ) -> tuple[bytes, int | None, str]:
+        """Validate the record and name before any write; refusal leaves every file intact."""
+        try:
+            record, mode = read_record(self.project.source_file)
+            updated, name = appended_record(
+                self.project.source_file,
+                record,
+                digest(previous),
+                digest(payload),
+                request.version_name,
+            )
+            return encode_record(updated), mode, name
+        except VersionRecordError as error:
+            raise AuthoringError("version_record", str(error)) from error
+
+    def _version_rows(self) -> tuple[VersionRecord | None, bytes, tuple[VersionEntry, ...]]:
+        current = self._read_bytes()[0]
+        try:
+            record = read_record(self.project.source_file)[0]
+        except VersionRecordError as error:
+            raise AuthoringError("version_record", str(error)) from error
+        self._recovery_directory()
+        recorded = {version.sha256 for version in record.versions} if record else set()
+        available = {
+            sha
+            for sha in recorded
+            if read_recovery_copy(self.project.recovery_directory, sha) is not None
+        }
+        available.add(digest(current))
+        rows = project_versions(record, digest(current), frozenset(available))
+        return record, current, rows
+
+    def versions(self) -> VersionList:
+        """Read-only history; a source without a record lists one unrecorded current row."""
+        record, current, rows = self._version_rows()
+        return VersionList(
+            record_path=str(version_record_path(self.project.source_file)),
+            record_present=record is not None,
+            current_sha256=digest(current),
+            next_name=next_name(record),
+            versions=rows,
+        )
+
+    def version(self, index: int, expected_sha256: str) -> VersionDetail:
+        """Read-only bytes of one listed version and its diff from the preceding row."""
+        _, current, rows = self._version_rows()
+        if not 0 <= index < len(rows) or rows[index].sha256 != expected_sha256:
+            raise AuthoringError("conflict", "version history changed; list versions again")
+
+        def content(row: VersionEntry) -> bytes | None:
+            if row.sha256 == digest(current):
+                return current
+            return read_recovery_copy(self.project.recovery_directory, row.sha256)
+
+        row = rows[index]
+        previous = rows[index - 1] if index else None
+        payload = content(row)
+        before = content(previous) if previous is not None else None
+        diff = None
+        if payload is not None and before is not None and previous is not None:
+            diff = version_diff(
+                before,
+                payload,
+                f"{previous.name or 'unnamed'}/{previous.sha256[:12]}",
+                f"{row.name or 'unnamed'}/{row.sha256[:12]}",
+            )
+        return VersionDetail(
+            version=row,
+            source=payload.decode("utf-8", errors="replace") if payload is not None else None,
+            previous=previous,
+            diff=diff,
+        )
 
     def _verify_publication(
         self, current: SourceView, proposed: AuthoredWorkflowDocument, request: SaveRequest

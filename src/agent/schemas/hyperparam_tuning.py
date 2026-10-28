@@ -30,6 +30,7 @@ from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
+from agent.schemas.judge import JudgeRoutes
 from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.model_io_contract import TensorContract
 from agent.schemas.model_probe import ModelProbeContext
@@ -2248,6 +2249,16 @@ class HyperparamTuningInput(BaseModel):
         description=(
             "Issue #983 — the run seed its entry boundary resolved and locked. "
             "Every attempt seed derives from it; None is refused (MissingRunSeed)."
+        ),
+    )
+    # --- Judge routes (B2-4) ---
+    judge_routes: JudgeRoutes | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "B2-4 — the run lock's judge routes, echoed so the tuner's lock "
+            "validation agrees with the workflow's. Never read for behaviour; "
+            "None (no judge block) keeps the input and lock bytes."
         ),
     )
     retired_seed_pins: RetiredSeedPins | None = Field(

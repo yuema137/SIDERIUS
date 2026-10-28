@@ -137,8 +137,8 @@
     if (!editor.candidateEnabled && editor.projectId) status('This project is editable but not enabled for candidate runs.');
     controls();
   });
-  session.subscribe(() => { if (!session.connected) { generation++; review = null; $('summary').replaceChildren(); $('details').textContent = ''; } controls(); if (session.connected && window.consoleNavigation?.view === 'workflow') void loadTasks(); });
-  window.addEventListener('console-view', event => { if (event.detail.view === 'workflow') void loadTasks(); });
+  session.subscribe(() => { if (!session.connected) { generation++; review = null; $('summary').replaceChildren(); $('details').textContent = ''; } controls(); if (session.connected && ['workflow', 'run'].includes(window.consoleNavigation?.view)) void loadTasks(); });
+  window.addEventListener('console-view', event => { if (['workflow', 'run'].includes(event.detail.view)) void loadTasks(); });
   $('task').addEventListener('change', () => { invalidate(); $('run').replaceChildren(option('', 'Choose a prepared run')); void list(); });
   $('run').addEventListener('change', invalidate);
   $('refresh').addEventListener('click', () => { generation++; void list(); });
@@ -203,8 +203,11 @@
   window.reusableCandidate = Object.freeze({async openPrepared(context) {
     if (!session.connected || editor.projectId !== context.project) { status('Select the retained project in Workflow before opening this run.'); return; }
     const captureHeading = document.getElementById('capture-heading');
-    captureHeading.closest('.workflow-run-details').open = true;
-    captureHeading.scrollIntoView({block: 'start'});
+    // Scroll only once the Run panel is visible: the hashchange route runs asynchronously.
+    const scroll = () => requestAnimationFrame(() => captureHeading.scrollIntoView({block: 'start'}));
+    if (window.consoleNavigation.view !== 'run') {
+      window.addEventListener('console-view', scroll, {once: true}); location.hash = 'run';
+    } else scroll();
     invalidate(); handoffGeneration = generation; tasksRevision = session.revision;
     const version = generation, revision = session.revision;
     if (![...$('task').options].some(item => item.value === context.task)) {

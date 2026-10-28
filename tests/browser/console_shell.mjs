@@ -85,7 +85,7 @@ try {
 
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
-  for (const view of ['home', 'workflow', 'slow-control']) {
+  for (const view of ['home', 'workflow', 'run', 'slow-control']) {
     await page.locator(`nav a[href="#${view}"]`).click();
     assert.equal(await page.locator('#token').isHidden(), true, `${view}: token field collapses after connecting`);
     assert.equal(await page.locator('#access-heading').isHidden(), true, `${view}: connect heading collapses`);

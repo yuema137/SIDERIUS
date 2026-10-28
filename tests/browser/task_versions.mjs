@@ -88,10 +88,13 @@ try {
   const boundAcceptance = requests.findLast(item => item.path.endsWith('/save')).body.task_reference_acceptance;
   assert.equal(boundAcceptance.adopt_current_snapshot, false);
   assert.deepEqual(boundAcceptance.acknowledged_findings, [{code: 'identity_verified', reference: 'task_binding'}, {code: 'authored_changes', reference: 'source'}]);
-  // Inspector edits cannot be replaced by Update; a no-op document review still verifies.
+  // Pending draft edits cannot be replaced by Update; a layout-only document review still verifies.
+  // (Unified draft: an input event that changes no value is not an edit, so move a card instead.)
   await page.locator('#editor-task-use-saved').click();
   const reference = page.locator('#editor-references input').first();
   await reference.evaluate(element => {element.dispatchEvent(new Event('input', {bubbles: true}));});
+  assert.equal(await page.evaluate(() => window.workflowEditor.state.dirty), false, 'A no-op input event is not a pending edit');
+  await page.locator('#editor-graph .editor-node').first().focus(); await page.keyboard.press('Alt+ArrowDown');
   assert.ok(await update.isDisabled()); assert.ok(await source.isDisabled());
   await page.locator('#editor-review').click(); await page.locator('#editor-task-acknowledge').waitFor();
   assert.equal(requests.at(-1).body.proposal.kind, 'document');

@@ -103,6 +103,29 @@ def resolve_run_seed(explicit: int | None) -> RunSeedBinding:
     return RunSeedBinding(value=explicit, source="operator")
 
 
+def admitted_run_seed(explicit: int | None, admitted: RunSeedBinding | None) -> RunSeedBinding:
+    """The binding an entry boundary executes: the admitted one, else a fresh resolution.
+
+    ``explicit`` is the request's own ``run_seed``. An operation admission that
+    already resolved the seed passes it as ``admitted``; it must be exactly what
+    :func:`resolve_run_seed` would have bound for ``explicit`` (the operator's
+    value, or a generated one when ``explicit`` is ``None``). A direct caller
+    passes ``admitted=None`` and the seed is resolved here.
+
+    Raises:
+        ValueError: ``admitted`` disagrees with ``explicit``.
+    """
+    if admitted is None:
+        return resolve_run_seed(explicit)
+    expected_source = "generated" if explicit is None else "operator"
+    if admitted.source != expected_source or (explicit is not None and admitted.value != explicit):
+        raise ValueError(
+            f"admitted run seed {admitted.value} (source={admitted.source}) disagrees with "
+            f"the request's run_seed={explicit!r}"
+        )
+    return admitted
+
+
 def format_seed_line(run_seed: int, source: SeedLineSource) -> str:
     """The one operator-visible ``[seed]`` stdout line, printed before execution."""
     return f"[seed] run_seed={run_seed} source={source}"

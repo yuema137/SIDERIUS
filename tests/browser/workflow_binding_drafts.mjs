@@ -93,7 +93,7 @@ try {
   const savesBeforeCancel = posts.filter(item => item.url.endsWith('/save')).length;
   await page.locator('button[aria-label="Disconnect validate.llm_provider"]').click();
   await waitUntil(async () => (await page.locator('#editor-pending').textContent()).includes('complete'));
-  await page.locator('#editor-cancel-binding-draft').click();
+  await page.locator('#editor-discard-draft').click();
   assert.equal(await page.locator('#editor-source').inputValue(), stableSource);
   assert.equal(await readFile(metadata.source, 'utf8'), savedBytes);
   assert.equal(posts.filter(item => item.url.endsWith('/review')).length, reviewsBeforeCancel);

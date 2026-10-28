@@ -84,8 +84,9 @@ Total: 10 records (1 success + 9 OOM-skip), 10 plan calls, 1 reflect call.
 - `output.consecutive_fail_rounds_at_exit == 3`
 - `output.termination_reason == "aborted_fail_rounds"`
 - `output.gate_exhaustion is not None` with Trigger B framing:
-  - `summary_message` contains `"Model too large"` and
-    `"3 consecutive rounds"` and `"after 1 successful round"`.
+  - `summary_message` contains `"exhausted attempts at resource preflight"`
+    and `"3 consecutive rounds"` and `"after 1 successful round"`, and does
+    not contain `"Model too large"` (a VRAM-gated burst).
 
 ## Why budget = 0.1 GB
 

@@ -505,7 +505,16 @@ the persistent shell and memory-only session with the operation monitor; its
 source/review policy remains owned by `editor.js`. `GET /api/editor/projects`
 returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
 `POST /api/editor/{project_id}/review` validates `ReviewRequest`; `POST
-/api/editor/{project_id}/save` validates `SaveRequest`. The existing console
+/api/editor/{project_id}/save` validates `SaveRequest`. GET
+`/api/editor/{project_id}/versions` returns `VersionList` and GET
+`/versions/{index}?sha256=` returns read-only `VersionDetail` (see named versions
+in the authoring contract); `editor-versions.js` renders the Save name field and
+Version history panel and owns no record policy. Save error `version_record`
+means nothing was written (the reviewed proposal is retained); the distinct
+`version_record_not_updated` means the source was saved but its record was not, so
+`editor.js` adopts the returned saved `current` view. `GET /api/editor/node-catalog`
+and `POST /api/editor/{project_id}/node-draft` serve the node palette (a project
+named `node-catalog`, like `projects`, is shadowed by the fixed route). The existing console
 Bearer token, origin, host and 256 KiB wire-body admission apply to every API
 route. Browser requests select project IDs and never filesystem destinations.
 The [authoring contract](../workflow_authoring/authoring-contract.md) owns source
@@ -552,8 +561,41 @@ over an input binds exactly as output-then-input clicks do. A refused or dimmed
 input states `<input> expects <socket contract> (<name>), but <source> provides
 <output contract> (<name>)`, or that the server does not offer the source although
 both contracts match.
-External source chips remain inspector bindings. Omitted optional ports, argument
-creation/deletion and new nodes are not graphical controls in this slice.
+External source chips remain inspector bindings. Omitted optional ports and argument
+creation/deletion are not graphical controls in this slice.
+
+The node palette (`editor-palette.js`, `editor-palette.css`; presentation only,
+`editor.js` owns the draft) is a sticky side rail left of the canvas
+(`.editor-canvas-layout`; own scroll, at most the viewport height) so a drag
+source and the canvas share the screen; under 900px it collapses to a drawer opened
+by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
+Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
+drag payload. It lists
+`GET /api/editor/node-catalog` entries (fetched once per connection, only while the
+Workflow view is shown; other pages never request it) grouped by capability with a text search,
+and adds one by click (placed right of the existing cards) or by dragging an entry
+onto the canvas (dropped at that world position). It proposes an unused instance
+id (`<capability>`, `<capability>2`, ...). The pending node is the unified
+draft's `node` field (AddNodeProposal fields without `source`; `editorDraft.proposal`
+turns it into `add_node` on `anchor.source`), so it is part of the dirty flag,
+undo/redo and Discard. The canvas and Selection draw it from the proposal plus the
+server's `node-draft` ports (`editor.js` caches each inspected view by proposal, so
+undo/redo redraw without a request), its required inputs show as unbound, and
+binding them goes through the same canvas/inspector gestures, each one draft
+operation (other nodes cannot be rewired or moved, and inspector, reference and
+loop edits are disabled, until it is reviewed, cancelled, undone or discarded).
+Review is disabled until `node-draft` reports `complete`; "Cancel new node" is an
+undoable draft operation and sends no request. Adding or removing requires a draft
+with no structured edits over its anchor (Review/save or discard them first); the
+anchor may be a reviewed, unsaved Source edit or an earlier reviewed node add/remove.
+A successful `add_node`/`remove_node` review becomes the draft's new anchor (one
+undo step, like a reviewed Source edit), so several node edits can be reviewed in
+sequence and saved together.
+Removal is offered by Delete/Backspace on a focused capability heading, its
+context menu and "Remove capability" in Selection; it sends a `remove_node` review
+directly (Review is the explanation: refusal text or `node_edit.message` plus the
+exact diff). Removing several nodes at once asks for confirmation; the canvas has
+no multi-selection yet, so current gestures remove one node without a prompt.
 Required and bound inputs always render as card rows; optional unbound inputs fold
 into one `.circuit-optional` disclosure per card ("N optional inputs"), expandable
 and remembered across re-renders of the same graph. While an output is pending,
@@ -580,8 +622,8 @@ enabled only when the server returned `loop_template`, or the declared loop as o
 fieldset per facet: Iteration limit (`final_iteration`, whole number ≥ 1; invalid
 or empty values stay local and block Review) and Feedback (paper capability labels
 from `editorCapabilityPresentation.label`, read-only endpoints). Remove deletes the
-loop. Loop-only edits review as `LoopProposal` on the current exact source; with
-other inspector edits pending, the whole document proposal carries them. A third
+loop. Loop-only edits review as `LoopProposal` on the draft's anchor source; with
+other draft edits pending, the document or draft proposal carries them. A third
 fieldset, Stop conditions, adds/removes at most one `metric_threshold` (metric id
 text plus threshold; the editor does not know the task metric) and one
 `no_improvement` (completed bodies); `judge` is never offered. All stop-condition
@@ -595,7 +637,7 @@ diagnostic `field_path`. Loop edits preserve bytes only for an already-canonical
 source; Review re-renders the whole declaration, so hand-formatted or commented
 sources are rewritten (visible in the diff). The panel
 does not draw a back-edge or annotate cards, and it shares the source-dirty,
-binding-draft, conflict and saving fences. Capture review (`ReusableCaptureReview.loop`)
+conflict and saving fences of the unified draft. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
 from the captured declaration, and the launch summary states "up to N iterations"
 or "none (one workflow body)", followed by "stops early when …" for each declared
@@ -619,11 +661,61 @@ gets `.has-required-unbound` (red outline/glow) and a `.circuit-problem-badge`.
 server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
 (`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
 focuses the inspector select for `field` (and marks the canvas input
-`.problem-focus`); an unlocated item opens Advanced → Source at its line. The
+`.problem-focus`); an unlocated item opens Advanced source at its line. The
 list never enables Review: Review remains disabled for an incomplete draft.
 Witness: `tests/browser/required_defaults.mjs`.
 
-Socket/drag gestures send no requests. Source editing, disconnection, conflict,
+Unified draft (`editor-draft.js`, `window.editorDraft`; `editor.js` delegates).
+Wiring, disconnection, layout moves, inspector, training, research-loop edits and
+a pending palette node are operations on one draft state `{document, bindings,
+anchor, node, training, loopTemplate}`: `document` is the edited authored document, `bindings` are
+`BindingPatch` values relative to `anchor.inventory`, and `anchor` is the last
+server projection the draft starts from (`{source, document, inventory}` of the
+loaded source, or of a reviewed Source/task-reference update). There is no edit
+mode: any mix accumulates, with one dirty flag (`workflowEditor.state.dirty`,
+true while the draft identity `{document, bindings, anchor.source, node}` differs from
+the loaded state, or while Source text is dirty). Review selects the existing
+typed proposal from the draft: a pending node → `AddNodeProposal` on
+`anchor.source` (see the node palette below); patches present → `DraftProposal` whose
+`base_document` is the edited document (layout and inspector edits travel with
+the patches); otherwise document changes outside the loop → `DocumentProposal`;
+loop-only changes → `LoopProposal` on `anchor.source`; no change →
+`SourceProposal(anchor.source)`. Dirty Source text reviews as `SourceProposal`;
+its reviewed projection becomes the new anchor as one history step. Binding
+inspection (`POST …/draft`, read-only) belongs to the current patch set: layout
+or inspector edits keep it, any patch change (including undo/redo) re-inspects (a binding edit that returns
+to the loaded bindings inspects nothing and clears the previous problems list),
+and Review stays disabled until the current patch set inspects `complete`. A
+no-op input event is not an edit. The server API is unchanged.
+Training-settings actions from `editor-node-parameters.js` (value, mode, per-field
+Reset) are draft operations too: typing in one field coalesces, each Reset is its
+own undo step, and undo/redo re-render the badges from the restored document.
+History: every operation records one undo step (consecutive typing in one field
+coalesces, limit 200). Secondary **Undo**/**Redo** buttons (Save stays the one
+primary editor action) and Ctrl/Cmd+Z,
+Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only) restore
+earlier states and invalidate any review. **Discard changes** restores the loaded
+state without reading disk and is itself undoable, including dirty Source text:
+the discard step carries the typed text (`sourceText`) and Undo restores it as
+dirty Source text (invalid training/loop field text is not kept). **Refresh from
+disk** re-reads and asks first when dirty. Undo/Redo are disabled while Source
+text is dirty or an invalid training/loop field draft is pending (Ctrl/Cmd+Z
+then reports why and keeps the typed text); Undo/Redo/Discard are disabled
+during Save and while a conflict is shown (the conflict panel's own
+Discard/Rebase apply). Rebase stays disabled while binding patches are pending;
+it makes the current disk version Discard's target and restarts history there.
+Structured edits are re-applied onto the disk projection by a three-way merge
+(`editorDraft.reapply`, ancestor = the previous base document; arrays merge by
+`id`/`node`/`name`; where both sides changed one value the draft's value wins
+and the status names the paths), so later proposals keep the disk change.
+Pending Source text (dirty, or reviewed into the anchor) is a whole-file
+proposal and is kept unchanged; the status states that it does not include the
+disk change. A dirty draft prefixes the
+page title with `* `, shows an "Unsaved changes" badge in the Workflow heading and
+arms the `beforeunload` guard. Save still writes exactly the reviewed bytes and
+resets history to the saved state.
+
+Socket/drag gestures send no review or save requests. Source editing, disconnection, conflict,
 saving and invalid training/loop drafts gate mutations (invalid drafts do not block
 capability selection, which is navigation); stale rendered projections
 cannot mutate a replacement document. Required whole-declaration checks remain
@@ -680,6 +772,13 @@ eight-node families fixture and checks one distinct colour+shape token and reada
 pill name per contract, filled/hollow sockets, wire colour, the legend, hover
 preview (highlight/dim without selecting), the two-contract refusal, the mapping
 chip's field rows and drag-to-connect, without writing the source.
+`tests/browser/node_palette.mjs` (same variables; unit owner
+`tests/unit/tools/test_workflow_node_edits.py`) checks palette categories/search,
+click and drag add, the incomplete-draft Review gate with no disk write, binding the
+new node, review/save keeping author comments, drag source and canvas centre both
+in view before the drag, refused removal of a node others
+read (Delete key), the context menu, byte-identical inspector removal of the added
+node, Discard and Undo of a pending dragged node, and cancelling it.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
@@ -740,9 +839,10 @@ operation for live status). Manual UUID entry remains available.
 
 ## Persistent views, routing and session
 
-`index.html` owns a single document with persistent Home, Workflow and Slow control
-sections. `navigation.js` owns `/#home`, `/#workflow`, `/#slow-control` and
-`/#slow-control/<UUID>`. Empty fragments use Home. Complete UUID validation
+`index.html` owns a single document with persistent Home, Workflow, Run and Slow
+control sections. `navigation.js` owns `/#home`, `/#workflow`, `/#run`,
+`/#slow-control` and `/#slow-control/<UUID>`; `document.title` names Workflow and
+Run. Empty fragments use Home. Complete UUID validation
 precedes operation selection; invalid routes show a local error and suspend
 operation polling without mutating a native request. Bare Slow control retains
 selection; repeated identical UUIDs do not reset the monitor epoch/log cursor.
@@ -779,12 +879,12 @@ handlers also refuse disconnected actions. Explicit conflict Discard/Rebase rema
 local and usable, but do not restore network actions until authenticated reconnect. Reconnect only refreshes
 reads; POSTs never retry automatically. Initial editor/project reads that span a
 reconnect restart for the new revision without replacing a loaded pending draft.
-Editor projects load only on Workflow entry. Choices/project failures remain local;
+Editor projects load only on Workflow or Run entry (Run reads the open project's saved version). Choices/project failures remain local;
 known-operation reads need neither task choices nor editor configuration. The one
 existing visible-document two-second polling loop retains its cursor/epoch owners.
 
 Home leads with the workflow journey (open the workflow, edit and review, prepare
-a new run, launch and monitor) and its **Open workflow** action. The native chain
+a new run on the Run page, launch and monitor) and its **Open workflow** action. The native chain
 and configured-task flows follow under **Advanced**. All views share one shell:
 a compact header (title, about, theme), navigation and content aligned on one
 left edge, up to 1920px wide.
@@ -792,13 +892,43 @@ left edge, up to 1920px wide.
 Home's configured-task flow is a secondary disclosure independent of the editor
 selection. Prepared workspace, identity, routes, limits, devices/network and
 credential blockers remain visible before explicit Launch within that flow.
-Workflow references and Advanced → Source start collapsed; successful Review
-opens the exact diff. Disclosure toggles do not change edit mode or reviewed bytes.
+Workflow references, **Advanced source** and **Details** (save behavior and
+concurrent-writer notes) start collapsed; successful Review opens the exact diff. Disclosure toggles do not change edit mode or reviewed bytes.
 Unsupported-source status and Inspect source remain visible; conflicts retain
 visible summary/actions. A `beforeunload` guard applies only to a real document
 exit with pending editor changes. Slow control shows operation identity, native
 state, observed time and token quality; facts, token rows and logs are disclosures.
 It infers neither scientific success nor complete billing.
+
+### Page inventory and guidance
+
+| Route | Primary content and action | Secondary content |
+| --- | --- | --- |
+| `#home` | Workflow journey; **Open workflow** | **Advanced**: native chain card; collapsed **Prepare configured task** |
+| `#workflow` | Project, task package/version, canvas + Selection; **Save reviewed source** (Refresh and Review are secondary buttons); **Next: prepare a run** | Research loop panel; collapsed References, Advanced source, Review exact Python changes, Details |
+| `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; collapsed captured resources |
+| `#slow-control` | Recent operations; Status and logs | Loop controls, observations, token table, logs, Recorded example |
+
+`page-guidance.js` is presentation only and owns no request or draft state. It reads
+`window.workflowEditor.state` and `window.newRunGate.ready`. `new-run.js` remains the
+single Run gate: it exports `newRunGate.ready` (its existing `ready()` predicate) and
+dispatches `new-run-gate` from its `controls()`. **Next: prepare a run** is enabled
+exactly when that gate is open and only sets `location.hash = 'run'`; its text and
+the Run page's `#run-source-state` show `Saved version <sha256[:12]> of <project> is
+ready to run.` or the first closing reason (not connected, no project, source not
+open, project not runnable, not a reusable declaration, conflict, saving, unsaved
+edits). Those reasons explain a closed gate and never open it. The New run and
+Prepared run controllers keep their element IDs and behavior; their task loaders run
+on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
+opening a disclosure, and scrolls to the capture heading only after the
+`console-view` event shows the Run panel (next animation frame).
+
+When the connection is absent or no workflow source is open, Workflow shows
+**Start from a task example** (select a task, edit, save, run) with a one-line state.
+A step line (`#step-indicator`, `role="navigation"`, not a `<nav>` element) shows
+Task › Workflow › Run › Results on Workflow (Task until a source is open), Run and
+Slow control, with `aria-current="step"` and a done mark for completed steps; it is
+hidden on Home. Witness: `tests/browser/page_guidance.mjs`.
 
 Navigation qualification: `tests/browser/console_navigation.mjs` uses the same
 explicit environment as the editor gate. Its temporary synthetic observations
@@ -901,7 +1031,10 @@ flow. The New run adapter below consumes this monitor without adding job persist
 `ReusablePreparation(console)` in `reusable_preparation.py` exposes
 `review(project_id, NewRunSelection)` and `prepare(project_id, NewRunIntent)`.
 POST `/api/editor/{project_id}/reusable-preparations/review` returns `NewRunReview`;
-POST `/prepare` returns existing `OperationHandle` with HTTP 202. Both use the
+POST `/prepare` returns existing `OperationHandle` with HTTP 202. `NewRunReview.source_version_name`
+(omitted when absent) is the recorded Save name of `expected_source_sha256`,
+display-only and outside the expectation and native request; the browser keeps it
+as `source_version` beside, not inside, the retained intent payload. Both use the
 same authentication/origin/body boundary and threadpool transport as capture APIs.
 Selection accepts only task_id, run_name, run_id, preparation_operation_id and
 expected_source_sha256. Intent adds native `ReusablePreparationExpectation`;
@@ -1017,7 +1150,8 @@ identical typed request. Operation admission owns concurrent claims and rechecks
 No console runtime, claim, request registry or automatic retry is introduced.
 
 Fresh review/launch refuses pinned input or capture paths writable by configured
-authoring projects: source_file, sibling .<source-name>.authoring.lock and recovery
+authoring projects: source_file, sibling .<source-name>.authoring.lock,
+<source-name>.versions.json and recovery
 descendants. Writable destination/recovery overlap also refuses. Unrelated sources
 in the same project remain editable. Existing-record recovery bypasses this fresh
 policy. External edits remain subject to native capture rechecks before dispatch.
@@ -1054,7 +1188,7 @@ use the same token table; selecting another UUID clears prior rows/times/provena
 and epoch checks fence late responses. Native cumulative scope appears in the
 status line; identity provenance and scientific/billing limitations are in the
 expandable detail. Direct UUID navigation/reconnect needs no choice
-or editor fetch; the existing New run task loader is deferred to Workflow entry. Empty candidate choices disable Prepare with explanatory copy.
+or editor fetch; the existing New run task loader is deferred to Workflow or Run entry. Empty candidate choices disable Prepare with explanatory copy.
 
 `tests/browser/native_chain.mjs` uses the explicit Python/Playwright/Chromium and
 CONSOLE_EVIDENCE_DIR variables. From a clean committed checkout it creates an

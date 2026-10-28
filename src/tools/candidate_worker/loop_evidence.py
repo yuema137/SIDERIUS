@@ -15,9 +15,11 @@ from .graph_evidence import expected_nodes, read_graph_control, verify_graph_tra
 from .layout import candidate_control_dir
 from .loop_stop import (
     BodyScore,
+    JudgeBoundaryVerdict,
     StopReason,
     captured_metric,
     evaluate_stop,
+    needs_stop_judge,
     project_body_score,
     stop_input,
 )
@@ -116,13 +118,22 @@ def verify_loop(
 
     # A segment may pause only after dispatching its own body, never at its resume point.
     resumed_at = verify_segment(initial, receipt)
-    if trace.attempted_iterations < loop.final_iteration and not has_successor(initial, receipt):
+    successor = has_successor(initial, receipt)
+    if trace.attempted_iterations < loop.final_iteration and not successor:
         require_unused_next(request, initial, trace.attempted_iterations)
     _, bodies, scores = replay_completed(request, initial, trace.attempted_iterations)
     last = bodies[-1] if bodies else None
-    derived = derive_stop(request, initial, scores)
+    derived, verdicts = derive_stop(request, initial, bodies, scores)
     if trace.stop_reason != derived:
         raise ValueError("loop stop reason disagrees with re-derived stop conditions")
+    if trace.judge_verdicts != verdicts:
+        raise ValueError("loop judge verdicts disagree with the recorded judge evidence")
+    from .loop_judge import require_accounted_judge_evidence, require_judge_cap
+
+    require_judge_cap(initial.workspace, loop, len(verdicts))
+    require_accounted_judge_evidence(
+        Path(initial.workspace), verdicts, trace.attempted_iterations, successor=successor
+    )
     expected = (
         last.status
         if last is not None and last.status != "completed"
@@ -145,23 +156,36 @@ def verify_loop(
 def derive_stop(
     request: CandidateRunRequest,
     initial: CandidateRunReceipt,
+    bodies: tuple[CandidateRunReceipt, ...],
     scores: tuple[BodyScore, ...],
-) -> StopReason | None:
+) -> tuple[StopReason | None, tuple[JudgeBoundaryVerdict, ...]]:
     """Re-run the stateless evaluator at every completed boundary; trust no recorded value.
 
-    Returns the reason that must end the loop at its last completed body, if any.
+    A boundary ``needs_stop_judge`` names must hold judge evidence that replays from the
+    re-projected request (``replay_stop_judge``); ``verify_loop`` refuses every judge
+    evidence file these verdicts do not account for. Returns the reason that must end the loop at its last completed body, if any, and
+    every judged boundary's verdict in order (the trace must record exactly these).
     """
+    from .loop_judge import replay_stop_judge
+
     loop = request.preview.document.definition.loop
     assert loop is not None
     if not loop.stop_conditions:
-        return None
+        return None, ()
     seed = captured_metric(request, initial)
+    completed = tuple(body for body in bodies if body.status == "completed")
     reason = None
+    verdicts: list[JudgeBoundaryVerdict] = []
     for count in range(1, len(scores) + 1):
         if reason is not None:
             raise ValueError("loop continued past a met stop condition")
-        reason = evaluate_stop(stop_input(loop, seed, scores[:count])).reason
-    return reason
+        value = stop_input(loop, seed, scores[:count])
+        if needs_stop_judge(value):
+            verdict = replay_stop_judge(request, initial, completed[:count], value)
+            verdicts.append(verdict)
+            value = value.model_copy(update={"judge_verdict": verdict})
+        reason = evaluate_stop(value).reason
+    return reason, tuple(verdicts)
 
 
 def require_unused_next(
