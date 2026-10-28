@@ -1409,8 +1409,11 @@ under the commit-time policy (`core.resume.classify_committed_record`), else
 `unknown`; the incumbent, its iteration and the non-improving count from
 `incumbent_fold`; `metric_id` and `DirectionWords` from `MetricOrder.direction_words`;
 per body the SHA-256 of its verified interpretation record and the first 2000
-characters of its `take_home_message`; the declared `criterion`. `task_guidance_sha256`
-is `None`: `judge.stop/v1` renders no task guidance text.
+characters of its `take_home_message`; the declared `criterion`.
+`task_guidance_sha256` is always `None` in this version: `judge.stop/v1` renders no
+task `judge_blocks` text, and readback has no composition to re-derive a guidance
+digest from, so the request claims no guidance. Rendering task guidance requires a
+new template version (tracked as a follow-up).
 
 Failure. Provider error, deadline, invalid payload or inadmissible choice is recorded
 as evidence (`status` `failed`/`timed_out`) before the policy applies. Under
@@ -1426,9 +1429,19 @@ verified body records, reads the evidence (missing evidence refuses), and requir
 canonical bytes and equality of the recorded request, `PromptIdentity` (template,
 prompt and response-schema digests), usage label and the locked route. A failure
 recorded under `on_failure="fail"` on a non-failed loop refuses. Evidence at a
-boundary that is never judged refuses. The `stop_reason` equality check of
-`verify_loop` anchors the stopping verdict by `evidence_sha256`, so an edited stop
-verdict refuses.
+boundary that is never judged refuses.
+
+Anchoring. `LoopTrace.judge_verdicts` records every judged boundary's verified
+`JudgeBoundaryVerdict(iteration, decision, evidence_path, evidence_sha256,
+request_sha256)` in order (`continue`, `stop` and abstentions alike), and
+`LoopTrace.judge_abstentions` counts the abstentions (`decision=None`; the model
+requires the count to match). Both are omitted when empty/zero, so judge-free traces
+keep their bytes. `verify_loop` requires `judge_verdicts` to equal exactly the
+verdicts `derive_stop` re-derives from the evidence, and `stop_reason` to equal the
+re-derived reason, so any edit to any judged boundary's evidence (a `continue`
+rationale included) changes its digest and refuses. A continuation takes the
+predecessor's verdicts from its verified trace and appends its own, so a resumed
+trace anchors the whole run.
 
 Resume. A paused boundary already holds its judge evidence; `resume_history` returns
 every completed body receipt with the score carrier, the continuation starts at the
@@ -1439,17 +1452,17 @@ Cost bound: at most `final_iteration - min_completed_bodies` judge calls per run
 per judged boundary; usage rows land in the run's `token_usage.jsonl` under label
 `judge.stop`.
 
-Limitations: a `continue` (or abstention) verdict is checked against its re-projected
-request, prompt, schema and route, but its payload is not anchored by a digest held
-elsewhere, so an edited `continue` rationale is not detected (an edit to `stop` is).
-No run-level `max_judge_calls` cap exists yet; the per-run bound above is static.
-The GUI does not yet offer or render the judge condition (B2-5).
+Limitations: there is no run-level `max_judge_calls` cap; the static bound above (one
+call per judged boundary) is the cost bound. The GUI does not yet offer or render the
+judge condition (B2-5).
 
 Tests: `tests/unit/tools/candidate_worker/test_loop_stop.py` (pure precedence and
 verdict rules), `tests/unit/tools/candidate_worker/test_loop_judge.py` (stub bridge
 through real bodies: anchored reason, replay without a call, tamper/missing/orphan/
-route refusals, deterministic-first and final-boundary zero calls, both failure
-policies, admission refusal, Pause precedence and resume without re-judging).
+route refusals, multi-boundary verdict reconstruction and an edited `continue`
+rationale refused, deterministic-first and final-boundary zero calls, both failure
+policies with the abstention count, admission refusal, Pause precedence and resume
+without re-judging).
 
 ## Route evaluator (pure)
 

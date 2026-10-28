@@ -91,6 +91,7 @@ def test_judge_stop_completes_with_an_anchored_reason_and_replays_without_a_call
     receipt = launch_candidate(request)
     assert receipt.status == "completed", receipt.error
     assert receipt.loop_trace.attempted_iterations == 2
+    assert [(v.iteration, v.decision) for v in receipt.loop_trace.judge_verdicts] == [(2, "stop")]
     assert [(iteration, label) for iteration, label, _ in calls] == [(2, "judge.stop")]
     path = evidence(receipt.workspace, 2)
     reason = receipt.loop_trace.stop_reason
@@ -169,8 +170,11 @@ def test_a_deterministic_stop_never_calls_the_judge(
 def test_continue_verdicts_run_to_the_limit_without_judging_the_final_body(
     prepared, loop_tuner, judge_bridge, monkeypatch
 ):
-    """Fails if the final boundary (owned by the final limit) is judged, or a continue
-    verdict leaves a reason in the trace."""
+    """Fails if the final boundary (owned by the final limit) is judged, a continue
+    verdict leaves a reason, replay does not reconstruct each boundary's verdict, or a
+    continue verdict's evidence is not anchored (an edited rationale would pass)."""
+    from agent.schemas.data_analysis.common import canonical_json_bytes
+    from agent.schemas.judge import JudgeCallEvidence
     from workflows.definition import JudgeStop
 
     calls, decisions = judge_bridge
@@ -180,10 +184,31 @@ def test_continue_verdicts_run_to_the_limit_without_judging_the_final_body(
     scored_bodies(monkeypatch, (low, low, low))
     receipt = launch_candidate(request)
     assert receipt.status == "completed", receipt.error
-    assert receipt.loop_trace.model_dump_json() == '{"attempted_iterations":3}'
+    trace = receipt.loop_trace
+    assert trace.stop_reason is None and trace.judge_abstentions == 0
+    assert [(item.iteration, item.decision) for item in trace.judge_verdicts] == [
+        (1, "continue"),
+        (2, "continue"),
+    ]
+    assert [item.evidence_sha256 for item in trace.judge_verdicts] == [
+        hashlib.sha256(evidence(receipt.workspace, i).read_bytes()).hexdigest() for i in (1, 2)
+    ]
     assert [iteration for iteration, _, _ in calls] == [1, 2]
     assert not evidence(receipt.workspace, 3).exists()
-    verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
+    # Replay reconstructs every boundary's verdict exactly (multi-boundary readback).
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    verify_loop(request, parent, receipt)
+    assert len(calls) == 2
+
+    # An edited continue rationale replays canonically, but its anchored digest refuses it.
+    path = evidence(receipt.workspace, 1)
+    tampered = json.loads(path.read_bytes())
+    tampered["payload"]["rationale"] = "rewritten after the fact"
+    path.write_bytes(
+        canonical_json_bytes(JudgeCallEvidence.model_validate_json(json.dumps(tampered)))
+    )
+    with pytest.raises(ValueError, match="judge verdicts disagree"):
+        verify_loop(request, parent, receipt)
 
 
 @pytest.mark.parametrize("on_failure", ["fail", "continue"])
@@ -211,6 +236,9 @@ def test_a_failed_judge_call_fails_the_loop_or_is_a_recorded_abstention(
         return
     assert receipt.status == "completed", receipt.error
     assert receipt.loop_trace.attempted_iterations == 3
+    # The readback summary counts the abstention; its failed record is anchored too.
+    assert receipt.loop_trace.judge_abstentions == 1
+    assert [item.decision for item in receipt.loop_trace.judge_verdicts] == [None, "continue"]
     assert [iteration for iteration, _, _ in calls] == [1, 2]
     verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
 
@@ -295,6 +323,7 @@ def test_continue_leaves_a_pending_pause_in_force_and_resume_never_rejudges(
     process_segments()
     paused = read_operation(config, root_id).receipt
     assert paused.status == "paused" and paused.loop_trace.attempted_iterations == 1
+    assert [item.decision for item in paused.loop_trace.judge_verdicts] == ["continue"]
     first = evidence(paused.workspace, 1).read_bytes()
     assert json.loads(first)["payload"]["decision"] == "continue"
     review = review_loop_resume(config, root_id)
@@ -314,6 +343,11 @@ def test_continue_leaves_a_pending_pause_in_force_and_resume_never_rejudges(
     assert resumed.loop_trace.attempted_iterations == 2
     assert resumed.loop_trace.stop_reason.kind == "judge"
     assert resumed.loop_trace.stop_reason.iteration == 2
+    # The continuation carries the predecessor's anchored verdict forward.
+    assert [(item.iteration, item.decision) for item in resumed.loop_trace.judge_verdicts] == [
+        (1, "continue"),
+        (2, "stop"),
+    ]
     assert evidence(resumed.workspace, 1).read_bytes() == first
     second = json.loads(evidence(resumed.workspace, 2).read_bytes())
     assert [item["iteration"] for item in second["request"]["content"]["bodies"]] == [1, 2]
