@@ -24,6 +24,7 @@ from workflows.definition import TaskBinding
 from workflows.definition.source import WorkflowSourceError
 
 from .models import TaskChoice
+from .template_routes import add_template_routes
 
 
 class EditorTaskChoice(BaseModel):
@@ -127,6 +128,9 @@ def editor_router(
     def catalog() -> NodeCatalog:
         """Read-only projection of the native catalog for the node palette."""
         return node_catalog()
+
+    # Template gallery and advice targets (template_routes.py); fixed paths first.
+    add_template_routes(router, selected, perform)
 
     @router.get("/{project_id}")
     def read(project_id: str):

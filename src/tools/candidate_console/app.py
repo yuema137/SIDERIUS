@@ -265,6 +265,9 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "editor.css": "text/css",
             "editor-parameters.css": "text/css",
             "editor-palette.css": "text/css",
+            "editor-templates.js": "text/javascript",
+            "editor-templates.css": "text/css",
+            "editor-advice.js": "text/javascript",
         }
         if asset not in types:
             raise HTTPException(404)
