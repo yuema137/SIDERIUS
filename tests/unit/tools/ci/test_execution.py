@@ -6,15 +6,18 @@ reported as a product result, or let a real failure be reported as green.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from tools.ci import execution
 from tools.ci.execution import (
     THREAD_VARS,
     BulkResult,
     ShardResult,
     WorkdirInsideSourceTree,
+    changed_paths,
     run_bulk,
     run_shard,
     shard_environment,
@@ -267,14 +270,20 @@ class TestTheWorkflowUploadsEvidenceThatExists:
         Run 32834492183 failed in bulk and SKIPPED the sensitive step, so a
         whole class of evidence was absent from a run meant to produce the
         complete failure batch. A workflow that stops at the first red step is
-        the fix-one/rerun loop wearing different clothes. Fails as: the guard
-        is dropped and a bulk failure again conceals the sensitive lane.
+        the fix-one/rerun loop wearing different clothes. Fails as: the
+        sensitive job comes to depend on the bulk matrix, so a bulk failure
+        again skips and conceals the sensitive lane.
         """
-        wf = (Path(__file__).resolve().parents[4] / ".github/workflows/ci.yml").read_text(
-            encoding="utf-8"
-        )
-        sensitive = wf.split("sensitive lane (serial, quiesced)")[1].split("- name:")[0]
-        assert "if: always()" in sensitive
+        import yaml
+
+        jobs = yaml.safe_load(
+            (Path(__file__).resolve().parents[4] / ".github/workflows/ci.yml").read_text(
+                encoding="utf-8"
+            )
+        )["jobs"]
+        # The lane is its own job; it must never wait on (and so be skipped
+        # by) the bulk matrix.
+        assert jobs["sensitive"]["needs"] == "prepare"
 
     def test_an_empty_evidence_artifact_fails_the_step(self):
         """A warning is not enough: the upload exists so a RED stays attributable.
@@ -331,8 +340,7 @@ class TestTheHarnessNeverWritesInsideTheSourceTree:
         A directory beside the checkout is outside it. Fails as: the guard is
         over-broad and no usable workdir exists.
         """
-        root = tmp_path / "repo"
-        root.mkdir()
+        root = _git_repo(tmp_path / "repo", {})
         result = run_bulk(
             root, plan_shards([], count=1), sha="d", workdir=tmp_path / "scratch", threads=1
         )
@@ -349,3 +357,54 @@ class TestTheHarnessNeverWritesInsideTheSourceTree:
         )
         assert 'root / ".ci_parity"' not in src
         assert "tempfile.gettempdir()" in src
+
+
+def _git_repo(root: Path, files: dict[str, str]) -> Path:
+    """A git checkout whose index tracks ``files`` (no commit needed)."""
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    for name, text in files.items():
+        (root / name).write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    return root
+
+
+class TestCheckoutMutationMakesTheRunRed:
+    """#973: a shard edited a tracked manifest and a sibling shard failed.
+
+    The in-process guard cannot see a test's subprocesses; the harness compares
+    tracked-file digests around the whole run as the backstop.
+    """
+
+    def test_a_shard_rewriting_a_tracked_file_turns_a_passing_run_red(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Every shard passed, yet the checkout changed underneath its siblings.
+
+        Fails as: run_bulk never re-digests the checkout, so ``ok`` stays True
+        and ``checkout_mutations`` is empty.
+        """
+        root = _git_repo(tmp_path / "repo", {"manifest.yaml": "a\n", "keep.txt": "k\n"})
+
+        def mutating_shard(root_arg: Path, index: int, files, **_kw) -> ShardResult:
+            (root_arg / "manifest.yaml").write_text("a\n\n", encoding="utf-8")
+            return _result(index, 0)
+
+        monkeypatch.setattr(execution, "run_shard", mutating_shard)
+        result = run_bulk(
+            root, plan_shards(["t.py"], count=1), sha="d", workdir=tmp_path / "w", threads=1
+        )
+        assert result.checkout_mutations == ["manifest.yaml"]
+        assert result.ok is False
+        assert "CHECKOUT MUTATED" in result.render() and "manifest.yaml" in result.render()
+
+    def test_a_deleted_tracked_file_is_a_mutation(self, tmp_path: Path):
+        """Removal is a change too, not a file that merely stopped being hashed.
+
+        Fails as: a path missing on one side is skipped, so a deleted tracked
+        file never reaches ``checkout_mutations``.
+        """
+        root = _git_repo(tmp_path / "repo", {"gone.txt": "g\n", "kept.txt": "k\n"})
+        before = execution.tracked_digests(root)
+        (root / "gone.txt").unlink()
+        assert changed_paths(before, execution.tracked_digests(root)) == ["gone.txt"]

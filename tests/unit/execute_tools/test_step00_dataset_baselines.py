@@ -80,7 +80,7 @@ class TestTC1TrialConfigResolution:
                 "file_index": None,
                 "train_sampling_seed": 12345,
                 "eval_sampling_seed": 12345,
-                "train_base_seed": 67890,
+                "seed_context": {"run_seed": 67890},
                 "resolved_order_strategy": "shuffle",
                 "resolved_file_order": None,
             }
@@ -103,7 +103,7 @@ class TestTC1TrialConfigResolution:
                 "mode": "formal",
                 "train_sampling_seed": 12345,
                 "eval_sampling_seed": 12345,
-                "train_base_seed": 67890,
+                "seed_context": {"run_seed": 67890},
             }
         )
         assert_json_golden(

@@ -66,6 +66,12 @@ records (`metric_result` / `metric_refusal`), typed training results.
   the explicit uncomposed compatibility path.
 - Scientific metric implementations and their frozen definitions belong to the
   task package. Generic execution does not select a scientific formula.
+- **Seeded training**: `train_engine_sandbox.run_experiment_streaming`
+  requires a `TrainingSeedPlan` (`None` raises `MissingRunSeed`), seeds the
+  process RNGs before model construction (`process_seeding.seed_process`) and
+  gives every `DataLoader` an explicit generator and `worker_init_fn`. The
+  trainer CLI is a run-seed entry boundary (`--seed_context_json`, otherwise
+  generated). See the [seeding mechanism](../../docs/agent-reference/mechanisms/seeding.md#trainer-seeding).
 
 ## Non-owned semantics
 

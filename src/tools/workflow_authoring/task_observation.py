@@ -9,7 +9,7 @@ from tools.setup_review.composition_models import (
     CompositionObservation,
 )
 from tools.setup_review.composition_transport import manifest_digest
-from workflows.llm_config import WorkflowLLMConfig
+from workflows.llm_config import parse_llm_config_bytes
 
 from .task_models import TaskReferenceTarget
 
@@ -22,7 +22,7 @@ def observe_target(
             raise ValueError("configured task references must be canonical absolute paths")
     if not target.inspection_root.is_dir():
         raise ValueError("configured task inspection parent must exist")
-    config = WorkflowLLMConfig.model_validate_json(target.llm_config_file.read_bytes())
+    config = parse_llm_config_bytes(target.llm_config_file.read_bytes())
     job = CompositionJob(
         manifest=str(target.manifest),
         manifest_sha256=manifest_digest(str(target.manifest)),

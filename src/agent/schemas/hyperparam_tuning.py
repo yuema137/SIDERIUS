@@ -41,6 +41,7 @@ from agent.schemas.training_diagnosis import TrainingDiagnosis
 from core.checkpoint_selection import SelectedCheckpoint
 from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.record_role import AttemptRole, RecordRoleError, is_formal_role
+from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 
 # One vocabulary for the admission posture, shared with the policy that
 # enforces it. Two independent spellings would let a value be acceptable
@@ -62,7 +63,9 @@ from core.runtime_control.verifier_provider import (
     resolve_runtime_verifier_identity,
 )
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
+from core.seeding import RunSeed, SeedCoordinates
 from core.target_standardization import TargetStandardizationReceipt
+from core.training_seeds import SeedContext
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
@@ -1159,8 +1162,9 @@ class TrialConfig(BaseModel):
         description="Seed for build_sample_set() to select validation PSD segments. "
         "Same as train_sampling_seed when train_validation_align=True.",
     )
-    train_base_seed: int = Field(
-        description="Base seed for per-epoch training subsampling. Epoch n uses seed = train_base_seed + n.",
+    seed_context: SeedContext = Field(
+        description="Issue #983 — the run seed and attempt coordinates the trainer "
+        "derives every training seed from (init, epoch subsample, order, shuffle).",
     )
 
     @model_validator(mode="after")
@@ -2213,24 +2217,47 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
-    # --- Reproducibility seeds (optional — auto-generated when not provided) ---
-    sampling_seed: int | None = Field(
+    # --- Run seed (issue #983) ---
+    run_seed: RunSeed | None = Field(
         default=None,
+        exclude_if=lambda value: value is None,
         description=(
-            "Seed for build_sample_set() — determines which PSD segments form the "
-            "data scope. When None, auto-generated from SHA-256(run_name + attempt). "
-            "Set this to replay a previous run's exact data sampling. "
-            "Read from a previous trial_config_{exp_id}.json."
+            "Issue #983 — the run seed its entry boundary resolved and locked. "
+            "Every attempt seed derives from it; None is refused (MissingRunSeed)."
         ),
     )
-    train_base_seed: int | None = Field(
+    retired_seed_pins: RetiredSeedPins | None = Field(
         default=None,
+        exclude_if=lambda value: value is None,
         description=(
-            "Base seed for per-epoch training subsampling. Epoch n uses "
-            "train_base_seed + n. When None, auto-generated. "
-            "Read from a previous trial_config_{exp_id}.json."
+            "Issue #983 — readback only: a set sampling_seed/train_base_seed from a "
+            "pre-retirement record, kept as provenance. The tuner refuses to run it."
         ),
     )
+    seed_coordinates: SeedCoordinates = Field(
+        default_factory=SeedCoordinates,
+        exclude_if=lambda value: value == SeedCoordinates(),
+        description=(
+            "Issue #983 — the caller-owned position of this tuner run (global "
+            "iteration, authored node_id, fan-out branch). The tuner adds round "
+            "and attempt; epoch belongs to the trainer."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_retired_seed_pins(cls, data: Any) -> Any:
+        return split_retired_seed_pins(data)
+
+    @field_validator("seed_coordinates")
+    @classmethod
+    def _tuner_owns_round_attempt_epoch(cls, value: SeedCoordinates) -> SeedCoordinates:
+        if value.round is not None or value.attempt is not None or value.epoch is not None:
+            raise ValueError(
+                "seed_coordinates.round/attempt/epoch are tuner- and trainer-owned; "
+                "the caller supplies only iteration, node_id and branch"
+            )
+        return value
 
     # --- Time-budget gate (evaluate_time_skill) ---
     # See docs/resource_estimator_implement.md §2.7 + Phase I. The single

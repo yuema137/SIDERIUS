@@ -1,9 +1,9 @@
 """Derive and verify final graph evidence without importing native node consumers."""
 
 import hashlib
-import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from core.chain_state import ChainState
 from core.control_json import JSON_LIMIT, encode_control
@@ -11,9 +11,15 @@ from core.file_identity import open_identity_file, regular_file_snapshot
 from execute_tools.impl_attempts import impl_attempt_dir
 from workflows.definition.fanout import execution_families
 
-from .graph_models import GraphCapability, GraphNodeEvidence, GraphTrace
-from .layout import candidate_control_dir, graph_instance_dir
+from . import readiness
+from .graph_models import GraphCapability, GraphNodeEvidence, GraphReason, GraphState, GraphTrace
+from .layout import graph_instance_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .route_eval import RouteEvaluationOutput
+
+if TYPE_CHECKING:
+    from agent.schemas.proposal import ProposalOutput
+    from workflows.adaptors import AdaptorOutcome
 
 
 def expected_nodes(
@@ -58,24 +64,32 @@ def admit_graph_control(
     request: CandidateRunRequest, initial: CandidateRunReceipt, *, iteration: int = 1
 ) -> None:
     """Reserve actual encoded space for every node's largest terminal representation."""
+    from .adaptor_phase import expected_adaptors
+
     encode_control(request)
     encode_control(initial)
-    nodes = tuple(
-        item.model_copy(
-            update={
-                "state": "succeeded",
-                "record_sha256": "f" * 64,
-                "reason": "dependency_not_successful",
-            }
+    nodes, adaptors = (
+        tuple(
+            item.model_copy(
+                update={
+                    "state": "succeeded",
+                    "record_sha256": "f" * 64,
+                    "reason": "dependency_not_successful",
+                }
+            )
+            for item in slots
         )
-        for item in expected_nodes(request, initial, iteration=iteration)
+        for slots in (
+            expected_nodes(request, initial, iteration=iteration),
+            expected_adaptors(request, initial, iteration=iteration),
+        )
     )
     encode_control(
         initial.model_copy(
             update={
                 "status": "rejected",
                 "validation_passed": False,
-                "graph_trace": GraphTrace(nodes=nodes),
+                "graph_trace": GraphTrace(nodes=nodes, adaptors=adaptors),
                 "native_output_paths": tuple(item.record_path for item in nodes),
                 "error": "graph_control_overflow",
             }
@@ -105,6 +119,57 @@ def record_digest(path: str) -> str:
         return digest.hexdigest()
 
 
+# Reasons a node closed without a native record may carry, by terminal state.
+_UNDISPATCHED_REASONS: dict[GraphState, frozenset[GraphReason]] = {
+    "failed": frozenset(("native_failure",)),
+    "blocked": frozenset(("dependency_not_successful",)),
+    "skipped": readiness.SKIP_REASONS,
+}
+
+
+def replay_readiness(
+    nodes: tuple[GraphNodeEvidence, ...],
+    *,
+    decisions: tuple[RouteEvaluationOutput, ...] = (),
+    routing: Mapping[str, readiness.NodeRouting] | None = None,
+    skipped_inputs: Mapping[str, GraphReason] | None = None,
+) -> None:
+    """Replay readiness only, never native execution, over recorded terminal states.
+
+    Every node readiness closes must carry exactly the closing state and reason;
+    every node it dispatches must have been dispatched (succeeded, rejected or
+    failed), so a node run inside a non-selected arm or a skip readiness would not
+    produce is refused. Uncertainty (a failure) stops later effects.
+    """
+    recorded = {item.node_id: item for item in nodes}
+    complete: dict[str, GraphNodeEvidence] = {}
+    aborted = False
+    while len(complete) < len(nodes):
+        step = readiness.next_dispatch(
+            readiness.readiness_input(
+                nodes,
+                complete,
+                aborted=aborted,
+                decisions=decisions,
+                routing=routing,
+                skipped_inputs=skipped_inputs,
+            )
+        )
+        if step.next is not None:
+            item = recorded[step.next]
+            valid = item.state in ("succeeded", "rejected", "failed")
+        elif step.terminal:
+            node_id, state, reason = step.terminal[0]
+            item = recorded[node_id]
+            valid = (item.state, item.reason) == (state, reason)
+        else:
+            raise ValueError("graph trace violates serial readiness or failure stop")
+        if not valid:
+            raise ValueError("graph trace violates serial readiness or failure stop")
+        aborted = aborted or item.state == "failed"
+        complete[item.node_id] = item
+
+
 def verify_graph_trace(
     request: CandidateRunRequest,
     initial: CandidateRunReceipt,
@@ -129,19 +194,35 @@ def verify_graph_trace(
     trace = receipt.graph_trace
     if trace is None:
         if (
-            receipt.status not in ("failed", "interrupted", "timed_out")
+            receipt.status not in ("failed", "interrupted", "timed_out", "cancelled")
             or receipt.native_output_paths
             or receipt.validation_passed is not None
         ):
             raise ValueError("graph receipt lacks terminal trace")
         return
+    from .adaptor_phase import body_outcome, expected_adaptors, skipped_inputs, verify_adaptors
+    from .route_phase import node_routing, skip_citations, verify_routes
+
+    definition = request.preview.document.definition
     expected = expected_nodes(request, initial, iteration=iteration)
-    if len(trace.nodes) != len(expected):
+    expected_adaptor = expected_adaptors(request, initial, iteration=iteration)
+    if len(trace.nodes) != len(expected) or len(trace.adaptors) != len(expected_adaptor):
         raise ValueError("graph trace membership mismatch")
     shape = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     )
-    states = {item.node_id: item.state for item in trace.nodes}
+    states: dict[str, GraphState] = {
+        item.node_id: item.state for item in (*trace.nodes, *trace.adaptors)
+    }
+    routing = node_routing(definition)
+    decisions = tuple(item.decision for item in trace.routes)
+    recorded = readiness.readiness_input(
+        (*trace.nodes, *trace.adaptors),
+        {item.node_id: item for item in (*trace.nodes, *trace.adaptors)},
+        aborted=False,
+        decisions=decisions,
+        routing=routing,
+    )
     for item, slot in zip(trace.nodes, expected, strict=True):
         if (item.node_id, item.capability, item.predecessors, item.storage) != (
             slot.node_id,
@@ -156,7 +237,9 @@ def verify_graph_trace(
             item.capability == "tuning" and item.state == "failed" and item.record_path is not None
         )
         if item.state in ("succeeded", "rejected") or native_abort:
-            if any(states[key] != "succeeded" for key in item.predecessors):
+            # Merge consumers against the selected candidate only; a control-only
+            # route source may be rejected (readiness owns the per-node rule).
+            if not readiness.may_run(item.node_id, recorded):
                 raise ValueError("graph invocation ran before all predecessors succeeded")
             if (
                 item.record_path is None
@@ -172,47 +255,39 @@ def verify_graph_trace(
                 else None
             ) or (item.state == "rejected" and item.capability != "validation"):
                 raise ValueError("graph terminal reason mismatch")
+            if item.capability == "validation":
+                _check_validation_verdict(item)
         elif (
             item.record_path is not None
             or item.record_sha256 is not None
-            or item.reason
-            != ("native_failure" if item.state == "failed" else "dependency_not_successful")
+            or item.reason not in _UNDISPATCHED_REASONS[item.state]
         ):
             raise ValueError("graph incomplete invocation claims output")
-    # Replay readiness only, never native execution: uncertainty stops later effects.
-    pending = {item.node_id: item for item in trace.nodes}
-    complete: dict[str, str] = {}
-    aborted = False
-    while pending:
-        item = next(item for item in pending.values() if set(item.predecessors).issubset(complete))
-        blocked = aborted or any(complete[key] != "succeeded" for key in item.predecessors)
-        if (item.state == "blocked") != blocked:
-            raise ValueError("graph trace violates serial readiness or failure stop")
-        aborted = aborted or item.state == "failed"
-        complete[item.node_id] = item.state
-        del pending[item.node_id]
-    status = (
-        "failed"
-        if "failed" in states.values()
-        else (
-            "rejected"
-            if "rejected" in states.values()
-            else "completed"
-            if shape.tuning
-            else "accepted"
-        )
+    for item, slot in zip(trace.adaptors, expected_adaptor, strict=True):
+        _check_adaptor_entry(item, slot, states)
+    verify_routes(definition, trace.nodes, trace.routes, iteration=iteration)
+    entries = {item.node_id: item for item in (*trace.nodes, *trace.adaptors)}
+    outcomes = verify_adaptors(
+        request,
+        trace.nodes,
+        trace.adaptors,
+        workspace=Path(initial.workspace),
+        iteration=iteration,
+        skips=skip_citations(entries, trace.routes, routing),
     )
+    # Index skips come from the recomputed outcomes, so the replay refuses a node
+    # that ran on a non-emitted adaptor output (or was skipped despite one).
+    replay_readiness(
+        (*trace.nodes, *trace.adaptors),
+        decisions=decisions,
+        routing=routing,
+        skipped_inputs=skipped_inputs(definition, outcomes),
+    )
+    status, validation_passed = body_outcome(shape, definition, trace)
     if (
         ("blocked" in states.values() and status in ("accepted", "completed"))
         or receipt.status != status
-        or receipt.validation_passed
-        != (
-            all(
-                item.state == "succeeded" for item in trace.nodes if item.capability == "validation"
-            )
-            if shape.tuning
-            else status == "accepted"
-        )
+        or receipt.validation_passed != validation_passed
     ):
         raise ValueError("graph aggregate outcome mismatch")
     if (
@@ -228,14 +303,12 @@ def verify_graph_trace(
             trace,
             iteration=iteration,
             incumbent=None if history is None else history.chain_formal_incumbent_reference,
+            outcomes=outcomes,
         )
-    if (
-        execution_families(
-            request.preview.document.definition, request.preview.execution_profile
-        ).literature
-        is not None
-    ):
-        verify_literature_evidence(request, initial, trace, iteration=iteration)
+    if shape.literature_reviews:
+        from .literature_edges import verify_literature_evidence
+
+        verify_literature_evidence(request, initial, trace, iteration=iteration, outcomes=outcomes)
     if (
         execution_families(
             request.preview.document.definition, request.preview.execution_profile
@@ -247,101 +320,49 @@ def verify_graph_trace(
         )
 
 
-def verify_literature_evidence(
-    request: CandidateRunRequest,
-    initial: CandidateRunReceipt,
-    trace: GraphTrace,
-    *,
-    iteration: int = 1,
+def _check_validation_verdict(item: GraphNodeEvidence) -> None:
+    """A validator's trace state is its native verdict, read from the checked record.
+
+    Adaptors select by these states, so a trace may not relabel a verdict.
+    """
+    from agent.schemas.validator import ValidatorOutput
+
+    assert item.record_path is not None
+    payload = read_graph_control(Path(item.record_path))
+    if hashlib.sha256(payload).hexdigest() != item.record_sha256:
+        raise ValueError("graph native record mismatch")
+    passed = ValidatorOutput.model_validate_json(payload).passed
+    if item.state != ("succeeded" if passed else "rejected"):
+        raise ValueError("graph validation state contradicts its native verdict")
+
+
+def _check_adaptor_entry(
+    item: GraphNodeEvidence, slot: GraphNodeEvidence, states: Mapping[str, GraphState]
 ) -> None:
-    """Reconstruct the typed edge from captured source inputs, not child claims."""
-    from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
-    from agent.schemas.proposal import ProposalInput
-    from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
-        local_typed_evidence,
-    )
-    from agent.schemas.storage import LocalStorageConfig, StorageConfig
-
-    from .inputs import require_storage
-    from .layout import literature_input_path, proposal_input_path
-
-    edge = execution_families(
-        request.preview.document.definition, request.preview.execution_profile
-    ).literature
-    assert edge is not None
-    nodes = {node.node_id: node for node in trace.nodes}
-    if nodes[edge.review].state != "succeeded":
-        return
-    workspace = Path(initial.workspace)
-
-    def captured(binding: str) -> bytes:
-        index, observation = next(
-            (index, item)
-            for index, item in enumerate(request.files)
-            if item.reference == f"external.{binding}"
-        )
-        payload = read_graph_control(
-            candidate_control_dir(workspace, iteration=iteration) / f"input_{index:03}.snapshot"
-        )
-        if hashlib.sha256(payload).hexdigest() != observation.sha256:
-            raise ValueError("literature captured input digest mismatch")
-        return payload
-
-    selected = LiteratureReviewInput.model_validate_json(captured(edge.review_binding))
-    managed = StorageConfig(
-        backend="local",
-        local=LocalStorageConfig(
-            workspace=nodes[edge.review].storage,
-            run_name=request.run_name,
-        ),
-    )
-    require_storage(selected.storage, managed)
-    selected.storage = managed
-    actual = LiteratureReviewInput.model_validate_json(
-        read_graph_control(literature_input_path(workspace, edge.review, iteration=iteration))
-    )
-    seed_payload = json.loads(captured(edge.seed_binding))
-    seed_storage = StorageConfig(
-        backend="local",
-        local=LocalStorageConfig(
-            workspace=nodes[edge.proposal].storage,
-            run_name=request.run_name,
-        ),
-    )
-    seed_payload.setdefault("storage", seed_storage.model_dump(mode="json"))
-    seed = ProposalInput.model_validate(seed_payload)
-    require_storage(seed.storage, seed_storage)
-    seed.storage = seed_storage
-    if (
-        actual != selected
-        or selected.run_name != request.run_name
-        or (selected.task_description, selected.constraint_context)
-        != (seed.task_description, seed.constraint_context)
+    """Binding, record and readiness facts of one adaptor entry; its content is recomputed."""
+    if (item.node_id, item.capability, item.predecessors, item.storage) != (
+        slot.node_id,
+        slot.capability,
+        slot.predecessors,
+        slot.storage,
     ):
-        raise ValueError("literature diagnostic/task binding mismatch")
-    path = nodes[edge.review].record_path
-    assert path is not None
-    with open_identity_file(path, require_no_follow=True) as handle:
-        before = regular_file_snapshot(handle)
-        payload = handle.read()
-        if (
-            regular_file_snapshot(handle) != before
-            or hashlib.sha256(payload).hexdigest() != nodes[edge.review].record_sha256
+        raise ValueError("graph trace binding mismatch")
+    if item.state in ("pending", "running"):
+        raise ValueError("graph terminal contains unfinished invocation")
+    if item.record_path is None:
+        if item.record_sha256 is not None or item.reason not in _UNDISPATCHED_REASONS.get(
+            item.state, frozenset()
         ):
-            raise ValueError("literature native record changed while verifying")
-    output = LiteratureReviewOutput.model_validate_json(payload)
-    if output.run_name != request.run_name:
-        raise ValueError("literature native record run binding mismatch")
-    if nodes[edge.proposal].state == "succeeded":
-        proposal = ProposalInput.model_validate_json(
-            read_graph_control(
-                proposal_input_path(
-                    workspace, request.preview.execution_profile, edge.proposal, iteration=iteration
-                )
-            )
-        )
-        if proposal != local_typed_evidence(output, proposal_input=seed):
-            raise ValueError("proposal input does not match the declared literature edge")
+            raise ValueError("graph incomplete invocation claims output")
+        return
+    if item.state not in ("succeeded", "rejected", "failed") or any(
+        states[key] in ("pending", "running", "failed", "blocked") for key in item.predecessors
+    ):
+        raise ValueError("graph adaptor ran before its inputs were terminal")
+    if item.record_path != slot.record_path or item.record_sha256 != record_digest(
+        item.record_path
+    ):
+        raise ValueError("graph adaptor record mismatch")
 
 
 def verify_interpretation_evidence(
@@ -516,8 +537,13 @@ def verify_graph_training(
     *,
     iteration: int,
     incumbent: float | None = None,
+    outcomes: "Mapping[str, AdaptorOutcome] | None" = None,
 ) -> None:
-    """Verify native identity/transport without running task plugins or training admission."""
+    """Verify native identity/transport without running task plugins or training admission.
+
+    ``outcomes`` are the verified adaptor outcomes; under a selection adaptor the
+    trained validation is the one it emitted, otherwise the profile's only branch.
+    """
     from agent.schemas.hyperparam_tuning import HyperparamTuningInput
     from agent.schemas.proposal import ProposalInput, ProposalOutput
     from agent.schemas.validator import ValidatorOutput
@@ -535,8 +561,11 @@ def verify_graph_training(
         if tuner.state == "succeeded":
             raise ValueError("successful tuning lacks native output")
         return
+    from .adaptor_phase import tuning_branch
+
+    implementation_node, validation_node = tuning_branch(shape, outcomes or {})
     proposal_path = nodes[shape.families[0].proposal].record_path
-    validation_path = nodes[shape.branches[0][1]].record_path
+    validation_path = nodes[validation_node].record_path
     assert proposal_path is not None and validation_path is not None
     proposal = ProposalOutput.model_validate_json(Path(proposal_path).read_bytes())
     validation = ValidatorOutput.model_validate_json(Path(validation_path).read_bytes())
@@ -556,6 +585,13 @@ def verify_graph_training(
         )
     )
     output = NativeOutputIdentity.model_validate_json(Path(tuner.record_path).read_bytes())
+    _check_staged_implementation(
+        nodes[implementation_node],
+        tuner.storage,
+        initial.run_name,
+        proposal,
+        selected=shape.selection is not None,
+    )
     if (
         not validation.passed
         or value.storage.local is None
@@ -576,3 +612,45 @@ def verify_graph_training(
         != ("failed" if output.termination_reason == "infrastructure_abort" else "succeeded")
     ):
         raise ValueError("graph native training identity/termination mismatch")
+
+
+def _check_staged_implementation(
+    implementation_node: GraphNodeEvidence,
+    tuner_storage: str,
+    run_name: str,
+    proposal: "ProposalOutput",
+    *,
+    selected: bool,
+) -> None:
+    """The tuner trained the trained branch's model bytes, not a sibling's.
+
+    Mirrors ``artifacts.verify_artifacts`` from record facts only. A generated
+    model lives under the attempt's ``models`` directory and
+    ``stage_native_plugins`` copies it verbatim to
+    ``get_plugin_dir(<tuner storage>, run_name)/<model>.py``: the bytes must match.
+    A reused task-declared package model (empty ``test_file_path``, model outside
+    the attempt) is trained from its declared source and nothing is staged; under
+    a selection adaptor (``selected``) a staged copy then contradicts the record.
+    """
+    from agent.schemas.implementor import ImplementorOutput
+    from core.sandbox_executor import get_plugin_dir
+
+    assert implementation_node.record_path is not None
+    payload = read_graph_control(Path(implementation_node.record_path))
+    if hashlib.sha256(payload).hexdigest() != implementation_node.record_sha256:
+        raise ValueError("graph native record mismatch")
+    implementation = ImplementorOutput.model_validate_json(payload)
+    staged = Path(get_plugin_dir(tuner_storage, run_name)) / f"{proposal.model_name}.py"
+    plugins = Path(implementation_node.storage) / "models"
+    if not Path(implementation.model_file_path).resolve().is_relative_to(plugins.resolve()):
+        if implementation.test_file_path != "":
+            raise ValueError("tuner staged model: reused model lacks the empty test sentinel")
+        if selected and staged.exists():
+            raise ValueError("tuner staged model contradicts the trained branch's declared reuse")
+        return
+    try:
+        same = staged.read_bytes() == Path(implementation.model_file_path).read_bytes()
+    except OSError as error:
+        raise ValueError(f"tuner staged model is unreadable: {error}") from error
+    if not same:
+        raise ValueError("tuner staged model differs from the trained branch implementation")

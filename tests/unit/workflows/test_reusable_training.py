@@ -66,8 +66,7 @@ def test_training_sparse_roundtrip_and_alias_resolution():
         "launch": {
             "trial_time_budget_minutes": None,
             "formal_time_budget_minutes": 7.0,
-            "sampling_seed": 17,
-            "train_base_seed": 23,
+            "trial_max_epochs": 2,
         },
         "health_gate_files": [1, 3],
     }
@@ -137,7 +136,7 @@ def test_source_training_validation_does_not_resolve_runtime_effects(monkeypatch
     from core.runtime_control import verifier_provider
     from workflows import run_config, task_composition
 
-    supplied = {"launch": {"sampling_seed": 19, "runtime_verifier": "selected-user-verifier"}}
+    supplied = {"launch": {"trial_max_epochs": 4, "runtime_verifier": "selected-user-verifier"}}
     source = render_workflow_source(training_document(supplied))
 
     def forbidden(*args, **kwargs):
@@ -162,14 +161,14 @@ def test_effective_ingress_inserts_only_output_restriction_and_refuses_conflicts
     assert json.loads(effective_training_settings({}, None)) == {
         "launch": {"allowed_output_types": None}
     }
-    source = {"launch": {"sampling_seed": 0, "formal_time_budget_minutes": None}}
+    source = {"launch": {"trial_max_epochs": 1, "formal_time_budget_minutes": None}}
     assert json.loads(effective_training_settings(source, ("classifier",))) == {
         "launch": {
-            "sampling_seed": 0,
+            "trial_max_epochs": 1,
             "formal_time_budget_minutes": None,
             "allowed_output_types": ["classifier"],
         }
     }
-    assert source == {"launch": {"sampling_seed": 0, "formal_time_budget_minutes": None}}
+    assert source == {"launch": {"trial_max_epochs": 1, "formal_time_budget_minutes": None}}
     with pytest.raises(ValueError, match="allowed_output_types"):
         training_document({"launch": {"allowed_output_types": None}})

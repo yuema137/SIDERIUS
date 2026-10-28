@@ -11,6 +11,7 @@ from agent.schemas.custom_loss_target import resolve_custom_loss_target
 from agent.schemas.custom_loss_validation import validate_custom_loss_plugin
 from agent.schemas.model_io_contract import Dimension, ModelIOContract, TensorAxis, TensorContract
 from core.local_code import CodePackageDeclaration, bind_code_package, capture_package
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from ml_models import loss_models_sandbox as losses
 from ml_models import loss_plugin_loader as loader
 from ml_models.models_format_sandbox import DtypeAdmissibility, LossConfig
@@ -207,7 +208,7 @@ def test_native_loops_and_validation_preserve_fractional_batches(tmp_path, monke
                 data_dir=fx.data_dir,
                 sandbox_dirs=_sandbox(tmp_path, "run"),
                 exp_id="run",
-                train_base_seed=123,
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=123)),
                 profile=fx.profile,
                 **data_path.scope_kwargs(fx.full_sample_set(), None),
             )
@@ -352,7 +353,7 @@ def test_early_target_resolution_checks_active_identity_before_plugin_import(
                 data_dir=fx.data_dir,
                 sandbox_dirs=_sandbox(tmp_path, "run"),
                 exp_id="run",
-                train_base_seed=123,
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=123)),
                 profile=fx.profile,
                 expected_custom_loss_snapshot=expected,
             )

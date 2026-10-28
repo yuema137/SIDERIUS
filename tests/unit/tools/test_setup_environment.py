@@ -156,6 +156,7 @@ def test_owner_projection_defaults_and_saved_task_current_environment_are_separa
     del expected_values["gpu_execution_policy"]
     del expected_values["runtime_verifier"]
     del expected_values["runtime_verifier_identity"]
+    del expected_values["run_seed"]  # Issue #983: omitted when unset.
     assert report.launch_settings == json.loads(json.dumps(expected_values))
     assert calls == ["discover"]
     assert report.dataset_directory == str(tmp_path / "data")

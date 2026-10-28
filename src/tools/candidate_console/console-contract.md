@@ -291,6 +291,12 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
   its `record_sha256` is re-checked with `record_digest`, then the file is validated
   as JSON and against the `HyperparamTuningOutput` schema. Any other state returns
   `result=null` (no score, even if a record file exists).
+- `skipped`: every node of that body's verified `graph_trace.nodes` in state
+  `skipped`, in declaration order, as `GraphSkippedNode(node_id, reason)` (for a
+  `native-routed-candidate/v1` run: the arm a route decision did not select,
+  `route_not_selected`). A skipped node is not run and is never shown as a failure;
+  a skipped tuner has `tuning_state="skipped"` and `result=null`. The field is
+  omitted when empty, so unrouted projections keep their bytes.
 - `GraphRunSummary` is the path-free subset of `RunView`: run name, model type,
   status, termination reason, times, completed rounds, total attempts, `metric`,
   `metric_source`, `ranking_refusal`, declared secondary metric identities, the
@@ -308,7 +314,10 @@ selected operation inside the existing poll, only for `kind == "candidate"` and
 clears the section. 404/409 are final for that selection; other failures retry on
 the next existing poll. Each body is its own section (`Iteration N` for several
 bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
-(`TRAIN & TUNE`). No cross-body score or ordering is computed or displayed.
+(`TRAIN & TUNE`). A body with `skipped` nodes adds one muted line
+"Skipped, not run: <node> (<reason>), ...". No cross-body score or ordering is
+computed or displayed; route decision details (observable values, case) are
+B1-PR6 monitor work.
 Non-integer numbers are display-rounded by `number-format.js` (up to four
 decimals; four significant digits for magnitudes below 1e-3 or from 1e9); the
 exact reported value stays in the cell's tooltip. Stop-condition values in the
@@ -317,7 +326,9 @@ transported values are unchanged.
 
 Witnesses: `test_console_graph_results_reuse_native_run_report_without_paths`
 (native graph record vs `project_run`, no path, failed stage has no score, changed
-record refused), `test_two_native_bodies_preserve_advice_and_verify_feedback`
+record refused), `test_console_graph_results_list_the_skipped_arm` (routed body:
+skipped fallback arm listed, tuning result still projected),
+`test_two_native_bodies_preserve_advice_and_verify_feedback`
 (two loop bodies in verified order, refused body → integrity) and
 `tests/browser/graph_results_monitor.mjs` (synthetic GET-only two-body render).
 Provider and tuner effects are offline doubles; these establish projection, not
@@ -415,6 +426,53 @@ its per-body results once completed. A continued predecessor shows "Continued by
 `tests/unit/tools/candidate_console/test_loop_pause_resume.py`, the console
 projections in `candidate_worker/test_loop_resume.py` (real two-segment store), and
 `tests/browser/loop_controls.mjs` (stubbed API).
+
+## Stop run (operator cancel)
+
+`CandidateConsole.cancel_operation(UUID)` delegates once to
+`candidate_operations.request_cancel`, which owns kind/terminal/liveness admission,
+idempotency, the write-once `cancel.json` intent and the child-enforced group
+termination ([operations contract](../candidate_operations/candidate-operations-contract.md#cancel-an-active-candidate-operation)).
+HTTP POST `/api/operations/{UUID}/cancel` passes the ordinary mutation boundary
+and accepts only the empty JSON object (`OperationCancelSelection`). Success returns
+`OperationCancelAcknowledgement` `{"operation_id": UUID, "outcome": "requested"}`:
+recorded, never stopped. A repeated POST replays the first request and returns 200
+even after the run became terminal. Refusals: unknown operation 404; `kind`
+(not a candidate operation), `terminal` (already finished; nothing stopped),
+`starting` (no process identity yet; retry shortly) and `not_running` (process
+gone; nothing to stop) 409 with route-local fixed messages in
+`OPERATION_CANCEL_REFUSALS`; `integrity` and others 409 with the generic message.
+Native detail and paths are never echoed.
+
+`StatusView.cancel_requested` and `StatusView.cancellable` mirror the snapshot
+fields and are omitted when false, so existing status bytes are unchanged unless a
+new cancel is possible (then `cancellable: true` is added).
+`cancellable` is the single authority for offering Stop run; the page keeps no
+kind or state list of its own.
+
+Browser: `operation-stop.js` owns `window.operationStop.mount(prefix)`, which
+binds `#<prefix>-group`, `#<prefix>-button` and `#<prefix>-status` and returns
+`render(status | null)`. It is mounted twice and draws only from statuses the page
+already reads (no extra polling): Slow control (`operation-stop`, every monitor
+poll) and the Run page retained candidate intent (`capture-stop`, on Check status
+or launch). **Stop run** is shown only while the latest status has `cancellable`
+true and no acknowledgement is held. A click opens `window.confirm` stating that the
+run ends immediately, cannot be undone or resumed, produces no candidate result,
+keeps files written so far in the run folder, and that a model call in progress
+may still be billed without appearing in the token report; declining sends nothing. Accepting disables the button for the pending request, so
+one click sequence issues one POST. Status text: "Sending Stop…", then "Stopping
+the run…" until a receipt; native `cancelled` reads "Run stopped. Files written so
+far stay in the run folder; no candidate result is produced."; a receipt with another status after a request reads "Stop was
+requested, but the run finished first."; a refusal reads "Stop was not recorded:
+<message>" (a network failure adds that retrying is safe). While the session is
+disconnected or the page's latest poll failed (`observation(true)` from `app.js`),
+the line is prefixed "Last observed:"; the next successful render clears it. State
+resets when another operation is selected. While `cancel_requested` is true the loop **Stop at next
+boundary** and **Pause at next boundary** controls are hidden, and a `cancelled`
+loop receipt reads "Research loop stopped by you before it finished. Files written
+so far stay in the run folder; this run cannot be resumed." Witnesses:
+`tests/unit/tools/candidate_console/test_operation_cancel.py` and
+`tests/browser/operation_stop.mjs` (stubbed API).
 
 ## Recorded candidate examples
 

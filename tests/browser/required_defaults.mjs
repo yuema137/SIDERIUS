@@ -83,36 +83,36 @@ try {
   assert.equal(await rows.count(), await settings.locator('[data-training-reset]').count(), 'Each field has its own reset');
   const row = name => settings.locator(`[data-training-field="${name}"]`);
   const badge = name => settings.locator(`[data-training-badge="${name}"]`);
-  assert.equal(await badge('sampling_seed').textContent(), 'Modified', 'Authored value differs from the native default');
+  assert.equal(await badge('trial_time_budget_minutes').textContent(), 'Modified', 'Authored value differs from the native default');
   assert.equal(await badge('trial_max_epochs').textContent(), 'Default');
   assert.equal(await settings.locator('[data-training-reset="trial_max_epochs"]').isDisabled(), true);
   // Help comes from the native schema: the launch-config default, not a browser copy.
   assert.match(await row('formal_portion').locator('.field-help').textContent(), /Schema default: 0\.1/);
-  assert.match(await row('sampling_seed').locator('.field-help').textContent(), /Native preview: 17/);
+  assert.match(await row('trial_time_budget_minutes').locator('.field-help').textContent(), /Native preview: 2 /);
 
   await settings.locator('[data-training-mode="trial_max_epochs"]').selectOption('supplied');
   await settings.locator('[data-training="trial_max_epochs"]').fill('4');
   assert.equal(await badge('trial_max_epochs').textContent(), 'Changed, not saved');
   assert.equal(await row('trial_max_epochs').getAttribute('data-modified'), 'true');
   assert.equal(await settings.locator('[data-training-reset="trial_max_epochs"]').isDisabled(), false);
-  await settings.locator('[data-training-reset="sampling_seed"]').click();
-  assert.equal(await settings.locator('[data-training-mode="sampling_seed"]').inputValue(), 'unset');
-  assert.equal(await settings.locator('[data-training="sampling_seed"]').isDisabled(), true);
-  assert.equal(await row('sampling_seed').getAttribute('data-modified'), 'false');
-  assert.equal(await badge('sampling_seed').textContent(), 'Changed, not saved', 'Reset differs from the saved value until saved');
+  await settings.locator('[data-training-reset="trial_time_budget_minutes"]').click();
+  assert.equal(await settings.locator('[data-training-mode="trial_time_budget_minutes"]').inputValue(), 'unset');
+  assert.equal(await settings.locator('[data-training="trial_time_budget_minutes"]').isDisabled(), true);
+  assert.equal(await row('trial_time_budget_minutes').getAttribute('data-modified'), 'false');
+  assert.equal(await badge('trial_time_budget_minutes').textContent(), 'Changed, not saved', 'Reset differs from the saved value until saved');
   // Parameter edits are unified-draft operations: one Reset is one undo step, redo reapplies it.
   assert.match(await page.locator('#editor-undo').getAttribute('title'), /^Undo: Reset /);
   await page.locator('#editor-undo').click();
-  assert.equal(await settings.locator('[data-training-mode="sampling_seed"]').inputValue(), 'supplied', 'Undo restores the reset value');
+  assert.equal(await settings.locator('[data-training-mode="trial_time_budget_minutes"]').inputValue(), 'supplied', 'Undo restores the reset value');
   assert.equal(await badge('trial_max_epochs').textContent(), 'Changed, not saved', 'Undo reverts only the last operation');
   await page.locator('#editor-redo').click();
-  assert.equal(await settings.locator('[data-training-mode="sampling_seed"]').inputValue(), 'unset');
+  assert.equal(await settings.locator('[data-training-mode="trial_time_budget_minutes"]').inputValue(), 'unset');
   // An invalid field being typed blocks undo/redo: restoring a state would drop the typed text.
   await settings.locator('[data-training="trial_max_epochs"]').fill('');
   assert.equal(await page.locator('#editor-undo').isDisabled(), true, 'Undo waits for the invalid field');
   await page.locator('#view-workflow h1').focus(); await page.keyboard.press('Control+z');
   assert.equal(await settings.locator('[data-training="trial_max_epochs"]').inputValue(), '', 'Ctrl+Z keeps the invalid typed text');
-  assert.equal(await settings.locator('[data-training-mode="sampling_seed"]').inputValue(), 'unset', 'Ctrl+Z did not undo');
+  assert.equal(await settings.locator('[data-training-mode="trial_time_budget_minutes"]').inputValue(), 'unset', 'Ctrl+Z did not undo');
   assert.match(await page.locator('#editor-status').textContent(), /Correct or reset the invalid field first/);
   await settings.locator('[data-training="trial_max_epochs"]').fill('4');
   assert.equal(await page.locator('#editor-undo').isDisabled(), false, 'A valid value re-enables undo');
@@ -127,13 +127,13 @@ try {
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   const diff = await page.locator('#editor-diff').textContent();
-  assert.match(diff, /trial_max_epochs/); assert.match(diff, /-.*sampling_seed/);
+  assert.match(diff, /trial_max_epochs/); assert.match(diff, /-.*trial_time_budget_minutes/);
   await page.locator('#editor-save').click();
   await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
   const saved = await readFile(metadata.interpretation_source, 'utf8');
-  assert.match(saved, /'trial_max_epochs': 4/); assert.doesNotMatch(saved, /sampling_seed/);
+  assert.match(saved, /'trial_max_epochs': 4/); assert.doesNotMatch(saved, /trial_time_budget_minutes/);
   await page.locator('#circuit-node-fit').click();
-  assert.equal(await page.locator('[data-training-badge="sampling_seed"]').textContent(), 'Default');
+  assert.equal(await page.locator('[data-training-badge="trial_time_budget_minutes"]').textContent(), 'Default');
   assert.equal(await page.locator('[data-training-badge="trial_max_epochs"]').textContent(), 'Modified');
   await page.locator('#editor-node-loop-settings button').click();
   assert.equal(await page.evaluate(() => !!document.activeElement?.closest('#editor-loop')), true);

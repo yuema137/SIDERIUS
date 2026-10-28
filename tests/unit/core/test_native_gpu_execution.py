@@ -24,6 +24,7 @@ from core.runtime_control.inference_startup import (
 )
 from core.runtime_control.measurement_allowance import MeasurementAllowance
 from core.runtime_control.observed_subprocess import supervise_process
+from core.training_seeds import SeedContext
 from tests.unit.core.test_checkpoint_inference_measurement import bound_spec
 from tests.unit.core.test_gpu_runtime_protection import Clock, policy
 
@@ -754,7 +755,7 @@ def test_inference_dispatch_binds_actual_cpu_checkpoint_and_current_batch(
         exp_id="exp-a",
         model_type=bound_spec.request.model_type,
         task_scopes=object(),
-        trial_config=SimpleNamespace(train_base_seed=19, train_portion=0.25),
+        trial_config=SimpleNamespace(seed_context=SeedContext(run_seed=19), train_portion=0.25),
         active_params={
             "model_config": {},
             "train_config": {"batch_size": 1},

@@ -24,6 +24,7 @@ from .models import (
     LoopPauseSelection,
     LoopResumeSelection,
     LoopStopSelection,
+    OperationCancelSelection,
     PreparedSelection,
     PrepareSelection,
 )
@@ -43,6 +44,14 @@ LOOP_STOP_REFUSALS = {
     "kind": "Stop is available only for an authored candidate research loop",
     "not_ready": "candidate loop has not claimed its workspace yet; read status and retry",
     "not_running": "candidate loop is terminal or not confirmed running; Stop was not recorded",
+}
+
+
+OPERATION_CANCEL_REFUSALS = {
+    "kind": "Stop run is available only for candidate operations",
+    "terminal": "this run has already finished; nothing was stopped",
+    "starting": "the run is still starting; try again in a moment",
+    "not_running": "the run's process is no longer running; nothing to stop",
 }
 
 
@@ -160,6 +169,14 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     def status(operation_id: UUID):
         return service.status(operation_id)
 
+    @app.post("/api/operations/{operation_id}/cancel")
+    async def cancel(operation_id: UUID, request: Request):
+        OperationCancelSelection.model_validate_json(await request.body())
+        try:
+            return await run_in_threadpool(service.cancel_operation, operation_id)
+        except OperationFailure as error:
+            return refusal(OPERATION_CANCEL_REFUSALS, error)
+
     @app.post("/api/operations/{operation_id}/loop-stop")
     async def loop_stop(operation_id: UUID, request: Request):
         LoopStopSelection.model_validate_json(await request.body())
@@ -232,6 +249,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "native-chain-monitor.js": "text/javascript",
             "graph-results-monitor.js": "text/javascript",
             "loop-control.js": "text/javascript",
+            "operation-stop.js": "text/javascript",
             "token-presenter.js": "text/javascript",
             "recorded-example.js": "text/javascript",
             "session.js": "text/javascript",

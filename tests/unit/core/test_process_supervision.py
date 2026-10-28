@@ -141,6 +141,21 @@ def test_zero_exit_with_descendant_is_not_clean_even_after_cleanup(tmp_path, inh
         assert evidence.group_cleanup.final.status == "present"
 
 
+def test_unclean_lifecycle_error_retains_drained_child_output():
+    """Callers that may tolerate terminated leftovers would otherwise lose output."""
+    body = (
+        "import subprocess,sys; "
+        "subprocess.Popen([sys.executable,'-c','import time; time.sleep(20)'],"
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+        "print('leader-out'); print('leader-err', file=sys.stderr)"
+    )
+    with pytest.raises(ProcessSupervisionError) as caught:
+        run(body, limits=limits())
+    assert caught.value.lifecycle.returncode == 0
+    assert "leader-out" in caught.value.stdout
+    assert "leader-err" in caught.value.stderr
+
+
 def test_rss_breach_terminates_only_owned_group():
     foreign = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(20)"], start_new_session=True
