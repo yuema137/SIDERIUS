@@ -58,6 +58,16 @@ try {
     assert.equal(request.method(), 'GET');
     if (unreachable && url.pathname.startsWith('/api/operations/')) return route.abort('connectionrefused');
     if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
+    if (url.pathname === '/api/operations') {
+      // The Slow-control operations list (operations-list.js) polls this; no assertion below reads it.
+      assert.equal(url.searchParams.get('limit'), '50');
+      return reply({operations: [
+        {operation_id: running, kind: 'candidate', run_name: 'candidate', project_id: 'five_node', admitted_at: '2026-10-28T10:00:00+00:00',
+          state: runningTerminal ? 'completed' : 'active', native_status: runningTerminal ? 'cancelled' : null},
+        {operation_id: finished, kind: 'candidate', run_name: 'candidate', project_id: 'five_node', admitted_at: '2026-10-27T09:00:00+00:00',
+          state: 'completed', native_status: 'accepted'},
+      ], unreadable: 0, examined: 2, incomplete: false});
+    }
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
     if (url.pathname.endsWith('/log')) return reply({text: '', next_offset: 0, observed_size: 0, truncated: false, missing: false});
     if (url.pathname.endsWith('/graph-results')) return reply({operation_id: url.pathname.split('/')[3], available: false, bodies: []});
