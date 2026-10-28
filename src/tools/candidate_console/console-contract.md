@@ -1032,8 +1032,14 @@ opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
 
 **Quick start** (`quick-start.js`): Home `#home-quick-start` routes to `#workflow` and
-opens `#quick-start-dialog`, whose **Task** select mirrors the editor's own
-`#editor-project` options (each project carries its own task and data references).
+opens `#quick-start-dialog`, whose **Project (its task and data)** select mirrors the
+editor's own `#editor-project` options, runnable projects first; an edit-only project
+is labelled and warns "You can edit this project but not run it from this console."
+(L-7). **Open research loop** first reads the project (`GET /api/editor/<id>`): a
+failure shows "Couldn't open <project>: <reason>" in the dialog and keeps the button
+for a retry; a project that then does not finish loading within 20 s shows the
+editor's status instead of hanging (L-3). After the import, focus moves to the first
+advice field (L-6).
 **Open research loop** selects that project through the editor's ordinary project
 change (its pending-edits confirmation applies), waits for the saved source, then calls
 `editorTemplates.importById('single-research-loop')`, the gallery's existing import

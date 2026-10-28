@@ -3,7 +3,7 @@
  * training parameters are visible in the ordinary panel. Nothing is written before Save. */
 import assert from 'node:assert/strict';
 import {spawn, execFileSync} from 'node:child_process';
-import {mkdir, readFile} from 'node:fs/promises';
+import {mkdir, readFile, rename} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join, resolve, dirname} from 'node:path';
@@ -54,6 +54,13 @@ try {
   await page.locator('#quick-start-project option[value="reusable"]').waitFor({state: 'attached'});
   await page.locator('#quick-start-project').selectOption('reusable');
   await page.screenshot({path: join(evidence, 'quick-start-dialog.png')});
+  // L-3: an unopenable project fails in the dialog with its reason and can be retried.
+  await rename(metadata.reusable_source, metadata.reusable_source + '.aside');
+  await page.locator('#quick-start-open').click();
+  await page.locator('#quick-start-status').filter({hasText: "Couldn't open reusable"}).waitFor();
+  assert.equal(await page.locator('#quick-start-open').isEnabled(), true, 'Retry stays available');
+  assert.equal(await dialog.evaluate(el => el.open), true);
+  await rename(metadata.reusable_source + '.aside', metadata.reusable_source);
   await page.locator('#quick-start-open').click();
   await waitUntil(async () => !(await dialog.evaluate(el => el.open)), 20000);
   for (const id of ['interpret', 'propose', 'implement', 'validate', 'train']) await page.locator(`#circuit-node-${id}`).waitFor();
