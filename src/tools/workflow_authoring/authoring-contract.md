@@ -80,14 +80,17 @@ SHA-256 remains the version identity, and A → B → A records a third row with
 absent means the next unused `vN`, where N starts at one more than the number of
 named Saves. Under the existing source lock and before any recovery copy or source
 write, Save reads and validates the record (regular owned single-link file, no
-symlink, at most 256 KiB, matching `source_name`, at most 1000 rows), refuses a used
+symlink, at most 512 KiB, matching `source_name`, at most 1000 rows), refuses a used
 name and prepares the appended record; any such refusal is `version_record` and
-writes nothing. If the last recorded SHA differs from the base, an `observed` row
-precedes the `saved` row. After the source is atomically replaced, the record is
-published by temp file + fsync + rename, keeping its permission bits (a new record
-takes the source's bits). If that write fails, Save returns `version_record` with
-the saved `current` view: the source is saved, the old record is intact, and the
-next Save records these bytes as an `observed` row. Identical bytes record nothing.
+writes nothing. The byte cap is sized so 1000 worst-case rows (64 four-byte UTF-8
+name characters) always fit, so the row cap is the operative Save limit; either
+refusal message names both limits. If the last recorded SHA differs from the base,
+an `observed` row precedes the `saved` row. After the source is atomically replaced,
+the record is published by temp file + fsync + rename, keeping its permission bits
+(a new record takes the source's bits). If that write fails, Save returns the
+distinct code `version_record_not_updated` with the saved `current` view: the source
+is saved, the old record is intact, and the next Save records these bytes as an
+`observed` row. Identical bytes record nothing.
 `SaveView.version_name` reports the recorded name.
 
 Without a record, workflows keep working: `GET /versions` lists the current bytes
@@ -147,8 +150,10 @@ Each `TrainingControl.help` (`TrainingControlHelp`) projects the field's entry i
 `CandidateTrainingSettings.model_json_schema()` for `WorkflowLaunchConfig`:
 `description`, `unit`, `minimum`/`maximum`, `exclusive_minimum`/`exclusive_maximum`
 (read from the field or its nullable `anyOf` branch) and `schema_default` (the
-launch-config field default). Keys the schema does not declare stay `null` and are
-not shown; today only `schema_default` is declared for the presented controls.
+launch-config field default). `has_schema_default` is true only when the schema
+declares a `default` key, so a declared `null` default (shown as "Schema default:
+null") is distinct from an absent default (no default line). Other keys the schema
+does not declare stay `null` and are not shown.
 `effective` remains the resolved native value for the document.
 Nested workflow parameter rules are read-only in the inspector and editable in
 Source; untouched rules and advanced fields survive edits. Task rules are resolved

@@ -11,7 +11,7 @@
     node('p', `Data path: ${binding.task_data_path_id}`, details);
     node('p', `Fingerprint: ${binding.semantic_fingerprint}`, details);
   };
-  const GUIDE = 'https://github.com/Galileo-Sandbox/SIDERIUS/blob/master/src/tools/candidate_console/README.md#bind-a-task-version';
+  const GUIDE = 'https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#bind-a-task-version';
   // The panel always states which task package/version the workflow uses (never an empty box).
   function usage(parent, state) {
     const binding = state.savedBinding;

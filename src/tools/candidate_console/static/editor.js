@@ -114,7 +114,7 @@
     draftControls.render({dirty: pending(), canUndo: operable && draft.canUndo, canRedo: operable && draft.canRedo,
       undoLabel: draft?.undoLabel, redoLabel: draft?.redoLabel, canDiscard: !!draft && !saving && !conflict && pending()});
     renderTaskControls();
-    window.editorCircuit?.setEnabled(canEditCircuit());
+    window.editorCircuit?.setEnabled(canEditCircuit(), canSelectNode());
     window.editorLoopControls?.setEnabled($('loop'), canEditLoop());
   }
   const pendingText = () => sourceDirty ? 'Pending source edits · not saved'
@@ -183,7 +183,8 @@
   function fold(value, label) {
     restore(viewState(value)); sourceDirty = false; draft.record(draftState(), label);
   }
-  const canEditCircuit = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict && !draftsPending();
+  const canSelectNode = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict;
+  const canEditCircuit = () => canSelectNode() && !draftsPending();
   // An invalid limit draft must stay editable so the author can correct it.
   const canEditLoop = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict &&
     trainingDrafts.size === 0;
@@ -247,7 +248,7 @@
     $('edges').replaceChildren();
     const id = project, document = graph;
     const live = () => project === id && graph === document;
-    window.editorCircuit.render($('graph'), {viewKey: id, document: graph, inventory, selected, enabled: canEditCircuit(),
+    window.editorCircuit.render($('graph'), {viewKey: id, document: graph, inventory, selected, enabled: canEditCircuit(), selectable: canSelectNode(),
       allowBindingChange: true, allowMove: true}, {
       select: value => { if (live()) { selected = value; render(); } },
       bind: (nodeId, argument, source) => { if (live()) updateBindingDraft(nodeId, argument, source); },
@@ -513,7 +514,7 @@
       if (error.stale) return;
       if (!current(id, version)) return;
       // Source bytes were published; only the version record write failed.
-      if (error.code === 'version_record' && error.value?.current) { adopt(error.value.current); status(error.message); return; }
+      if (error.code === 'version_record_not_updated' && error.value?.current) { adopt(error.value.current); status(error.message); return; }
       if (error.code === 'version_record') { status(error.message + ' Save refused before writing; reviewed proposal retained.'); return; }
       if (hasSourceConflict(error) && error.value?.current) { showConflict(error.value.current); reviewed = null; }
       else if (error.value?.proposal?.task_reference_update) {

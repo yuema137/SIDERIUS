@@ -406,7 +406,7 @@ class WorkflowAuthoring:
                 )
             except (OSError, VersionRecordError) as error:
                 raise AuthoringError(
-                    "version_record",
+                    "version_record_not_updated",
                     "Source saved, but its version record was not updated; the next Save "
                     "records this content as an unnamed observed version",
                     self._view(payload),

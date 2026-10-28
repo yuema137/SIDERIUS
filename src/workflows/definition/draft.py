@@ -123,7 +123,10 @@ def inspect_draft(draft: WorkflowDraft) -> DraftInspection:
                 item.name == patch.argument and item.required
                 for item in PROTOCOLS[request["protocol"]].arguments
             ):
-                assert patch.argument is not None
+                if patch.argument is None:
+                    raise ValueError(
+                        f"node {patch.node!r}: required argument patch has no argument name"
+                    )
                 incomplete.append(_unbound(patch.node, patch.argument))
     if incomplete:
         return DraftInspection(
