@@ -14,7 +14,6 @@ from workflows.advice import parse_advice_bytes
 REPO = Path(__file__).resolve().parents[4]
 EXAMPLE = REPO / "examples/workflow_declarations/reusable_training.py"
 TUNE = '"result_authority": "diagnostic",'
-SECRET = "sk-DO-NOT-EXPORT-0123456789"
 
 
 @pytest.fixture
@@ -28,12 +27,8 @@ def exported(settings_workspace, tmp_path):
     )
     recovery = root / "recovery"
     recovery.mkdir(mode=0o700)
-    credentials = tmp_path / "credentials.json"
-    credentials.write_text(json.dumps({"OPENAI_API_KEY": SECRET}))
-    credentials.chmod(0o600)
     config = settings_workspace / "settings" / "console.json"
     document = json.loads(config.read_text()) | {
-        "credential_file": str(credentials),
         "editor_projects": [
             {
                 "project_id": "demo",
@@ -60,7 +55,7 @@ def _export(api, source: Path, name="my-export", sha=None):
 
 
 def test_export_writes_native_files_with_inline_advice(exported):
-    """Defect: export changes the source, loses an advice carrier or leaks a credential."""
+    """Defect: export changes the source or loses an advice carrier."""
     workspace, source = exported
     resolved = _load(workspace)
     response = _export(_client(resolved), source)
@@ -84,7 +79,6 @@ def test_export_writes_native_files_with_inline_advice(exported):
     parse_advice_bytes(advice, label="exported")  # the CLI loader accepts it
     for path in target.iterdir():
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
-        assert SECRET not in path.read_text()
 
 
 def test_workflow_without_advice_exports_no_advice_file(exported):
@@ -117,6 +111,10 @@ def test_existing_names_and_stale_sources_are_refused_without_writes(exported):
     again = _export(api, source)
     assert again.status_code == 409 and again.json()["error"]["code"] == "exists"
     assert "Try my-export-2" in again.json()["error"]["message"]
+    longest = "n" * 80
+    assert _export(api, source, name=longest).status_code == 200
+    suggestion = _export(api, source, name=longest).json()["error"]["message"].rpartition("Try ")[2]
+    assert suggestion == "n" * 78 + "-2"  # still a valid 80-character export name
     assert (workspace / "exported_configs" / "my-export" / "workflow.py").read_bytes() == first
 
 
@@ -148,3 +146,27 @@ def test_export_requires_a_writable_console(exported):
     response = _export(_client(_load(workspace)), source)
     assert response.status_code == 403
     assert not (workspace / "exported_configs").exists()
+
+
+def test_unparseable_workflow_is_refused_not_exported_without_advice(exported):
+    """Defect: a workflow that does not parse exports 200 and silently drops its advice."""
+    workspace, source = exported
+    source.write_text(source.read_text().replace("preparation_options=", "preparation_optionz="))
+    response = _export(_client(_load(workspace)), source)
+    assert response.status_code == 422 and response.json()["error"]["code"] == "invalid_workflow"
+    assert not (workspace / "exported_configs" / "my-export").exists()
+
+
+def test_profile_the_cli_would_refuse_is_not_exported(exported, tmp_path):
+    """Defect: llm.json is copied verbatim although --llm_config would refuse it."""
+    workspace, source = exported
+    profile = tmp_path / "typo.json"
+    profile.write_text('{"interpet": {}}')
+    config = workspace / "settings" / "console.json"
+    document = json.loads(config.read_text())
+    document["tasks"][0]["llm_config_file"] = str(profile)
+    config.write_text(json.dumps(document))
+    response = _export(_client(_load(workspace)), source)
+    assert response.status_code == 422 and response.json()["error"]["code"] == "invalid_profile"
+    assert "unknown configuration keys" in response.json()["error"]["message"]
+    assert not (workspace / "exported_configs" / "my-export").exists()

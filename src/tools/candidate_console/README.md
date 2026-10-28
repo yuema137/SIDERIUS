@@ -241,25 +241,41 @@ readable but invalid, you can also choose values and **Save** to replace it.
 **Workspace** lists missing workspace folders and, when `init` can create them,
 the command to run on the server.
 
-### Export a workflow for the command line
+### Copy a workflow's model profile and advice to files
 
-On **Settings**, **Export a workflow** writes three plain files on the server
-under `siderius_workspace/exported_configs/<export name>/`:
+On **Settings**, **Export a workflow** copies three plain files into
+`siderius_workspace/exported_configs/<export name>/` on the server:
 
-- `workflow.py`: the workflow exactly as last saved in Workflow Editor;
-- `llm.json`: the model profile the selected task uses, usable with the
-  command-line `--llm_config`;
-- `advice.json`: the advice written in the workflow itself (its proposal,
-  implementation, validation and tuning advice) in the command-line advice
-  format. A workflow without its own advice gets no `advice.json`.
+| File | What it is | What reads it |
+| --- | --- | --- |
+| `llm.json` | the model profile the selected task uses | the command-line `--llm_config` |
+| `advice.json` | the advice written in the workflow itself (proposal, implementation, validation and tuning advice), in the command-line advice format | the command-line `--advice` |
+| `workflow.py` | the workflow exactly as last saved in Workflow Editor | no command-line flag; keep it as a record or copy it into an editor project |
 
-Credentials, the console token and the credential file path are never
-exported. Choose the project, the task and a name, then select **Export**.
-**Download** buttons then save each file to this computer. An export name that
-is already used is refused with a free name to try instead; exports are never
-overwritten. If the workflow changes on disk while you export, the export is
-refused; reload and try again. Exporting needs the same `browser_writable`
-setting as saving.
+A workflow without advice of its own gets no `advice.json`. Credentials, the
+console token and the credential file path are never exported. The export uses
+the values the running console uses; settings saved since the last restart are
+not included.
+
+1. Choose the project, the task and an export name, then select **Export**.
+2. Success reads "Exported to exported_configs/<name> on the server", followed by
+   one **Download** button per file. Downloads save the files to this computer.
+3. On the server, pass the files to a command-line run in place of your own
+   paths, for example (the other flags are those of
+   [your first run](../../../docs/getting-started/first-run.md)):
+
+   ```bash
+   bash scripts/launch/run_chain.sh \
+       --llm_config /absolute/project/siderius_workspace/exported_configs/my-export/llm.json \
+       --advice /absolute/project/siderius_workspace/exported_configs/my-export/advice.json \
+       ...
+   ```
+
+An export name that is already used is refused with a free name to try; exports
+are never overwritten. The export is also refused when the saved workflow
+changed on disk while you exported, when it does not parse, or when the task's
+model profile would be refused by `--llm_config`; the message says which.
+Exporting needs the same `browser_writable` setting as saving.
 
 When you review a new run on the **Run** page, the details also say where the
 model profile and data folder come from: `console.json`, this Settings page, or
