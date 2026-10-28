@@ -238,14 +238,36 @@ for effectful runs:
 
 - In a source checkout, `src/workflows/run_one_iteration.py` (which
   `run_chain.sh` invokes) loads `<checkout>/.env` when the module is imported.
-- Every `LLMBridge` construction calls `load_dotenv()` without a path.
-  python-dotenv then uses the nearest `.env` found by walking upward from the
-  bridge module's directory (from the current working directory only in a REPL
-  or debugger). In a source checkout this is normally `<checkout>/.env`.
+- Every `LLMBridge` construction calls python-dotenv's default search
+  (`find_dotenv()`, then `load_dotenv` on its result). It uses the nearest
+  `.env` found by walking upward from `src/agent/` (from the current working
+  directory in a REPL, a notebook or under a debugger/coverage tracer). In a
+  source checkout this is normally `<checkout>/.env`, but if the checkout has
+  none the search continues to its parent directories: a git worktree under
+  another checkout picks up that checkout's `.env`, and an installed package
+  can pick up a `.env` above its virtual environment or in the home directory.
 - The paper resolver also loads the checkout's `.env` as a compatibility fallback
   when `S2_API_KEY` is absent. No loader overrides a variable that is
   already set; all add every missing variable in the file, not only keys.
   `PYTHON_DOTENV_DISABLED=1` disables all three loaders.
+- The command-line and bridge loaders above (not the paper resolver) report
+  what they load through one shared helper. Reporting adds log records only:
+  the loaded file, precedence and exit status stay as described. When a non-empty
+  file is actually read, it logs once per process per file, at INFO on logger
+  `agent.credential_environment`:
+  `Compatibility dotenv loaded <resolved path> (variables already set in the environment take precedence).`
+  It then emits a WARNING when the file is outside the SIDERIUS source
+  checkout (`... is outside the SIDERIUS checkout <root>; it was found by
+  searching parent directories. ...`), when no source checkout exists
+  (`... was loaded but no SIDERIUS source checkout was detected; ...`), or
+  when the file's mode grants any group/other permission (`... is accessible
+  to group or other users (mode 644); restrict it with chmod 600.`). Nothing
+  is logged when the file is absent, empty or `PYTHON_DOTENV_DISABLED=1`.
+- When a provider's key variable (for example `GEMINI_API_KEY`) is set but
+  empty or whitespace-only, the bridge logs a WARNING naming the variable and
+  provider (`GEMINI_API_KEY is set but empty or whitespace-only; ...`) and
+  continues as before; an unset variable behaves as before. No
+  message contains a value.
 - `.env` is ignored by the checkout's `.gitignore` (pattern `*.env`). Keeping
   values there still places secrets inside the source tree, which this
   procedure avoids.
