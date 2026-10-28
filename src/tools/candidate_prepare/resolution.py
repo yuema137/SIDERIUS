@@ -15,12 +15,13 @@ from workflows.definition import (
     ExternalRequest,
     ExternalSource,
     ManagedCandidateBinding,
+    ProtocolRequest,
     ReusableWorkflowDocument,
     TaskReferences,
     WorkflowDefinition,
     WorkflowDocument,
 )
-from workflows.definition.candidate import candidate_nodes
+from workflows.definition.candidate import ADAPTORS_NOT_ADMITTED, candidate_nodes
 from workflows.definition.fanout import execution_families
 from workflows.definition.models import DeclarationModel, Identifier, Location
 
@@ -111,6 +112,8 @@ def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[
                 raise ValueError("Reusable proposal requires a managed proposal binding")
             used.add(external.id)
             continue
+        if not isinstance(request, ProtocolRequest):
+            raise ValueError(ADAPTORS_NOT_ADMITTED)
         for argument in request.arguments:
             if not isinstance(argument.source, ExternalSource):
                 if argument.name not in result_roles:

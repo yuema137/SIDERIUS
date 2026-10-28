@@ -356,12 +356,20 @@ def test_paused_continuation_resumes_again_across_two_hops(
     process_segments()
     root = Path(read_operation(config, root_id).receipt.workspace) / "candidate_run"
     # An edited captured input refuses BEFORE reservation, so the one Resume stays unused.
-    source = Path(request.files[0].path)
+    # Edit a test-owned input, never files[0] (the checkout's shared task manifest):
+    # concurrent CI shards observe that file and fail "selected input changed" (#973).
+    project = Path(request.preview.project_root)
+    owned = (Path(item.path) for item in request.files)
+    source = next((path for path in owned if path.is_relative_to(project)), None)
+    assert source is not None, f"no captured input under the tmp project {project}"
+    assert project.is_relative_to(tmp_path) and source.is_relative_to(tmp_path)
     original = source.read_bytes()
     source.write_bytes(original + b"\n")
-    with pytest.raises(OperationFailure, match="captured loop inputs changed"):
-        resume(root_id, first_id)
-    source.write_bytes(original)
+    try:
+        with pytest.raises(OperationFailure, match="captured loop inputs changed"):
+            resume(root_id, first_id)
+    finally:
+        source.write_bytes(original)
     assert not (root / "successor.json").exists()
 
     first = resume(root_id, first_id)
