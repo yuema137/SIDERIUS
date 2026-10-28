@@ -38,6 +38,8 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `proposal_blocks` | — | task science for the proposer's prompts | the proposer gets **no** task science |
 | `implementor_blocks` | — | task science for the implementor's prompts | the implementor renders nothing |
 | `interpretation_blocks` | — | task science for the interpreter's prompts | the interpreter renders no task blocks |
+| `judge_blocks` | — | task guidance for LLM judges (see [Judge guidance and rubrics](#judge-guidance-and-rubrics)) | judges receive no task guidance; fingerprint unchanged |
+| `rubrics` | — | task-owned, versioned judge rubric files | the task offers no rubric; fingerprint unchanged |
 | `model_plugins` | — | the pack's model-plugin root + the model types it must produce | nothing bound; legacy discovery only |
 | `loss_plugins` | — | the pack's loss-plugin root | nothing bound; legacy loss discovery only |
 | `objective` | — | the task's **authoritative** training objective (overrides the planner) | no override; the planner's choice governs |
@@ -449,6 +451,10 @@ implementor_blocks:                            # optional
   config: ./declared/implementor_blocks.yaml
 interpretation_blocks:                         # optional
   config: ./declared/interpretation_blocks.yaml
+judge_blocks:                                  # optional; or `none: true`
+  config: ./declared/judge_blocks.yaml
+rubrics:                                       # optional; order is not semantic
+  - config: ./declared/rubrics/plausibility_v1.yaml
 
 model_plugins:                                 # optional
   dir: ./plugins                               # resolved, content-identity-pinned
@@ -603,6 +609,72 @@ Notes:
   > wrong advice for a declared pack plugin. Such a manifest now fails to
   > launch. That is the same defect surfacing earlier and with the real cause;
   > the fix is to export the two missing symbols, not to revert the check.
+
+## Judge guidance and rubrics
+
+Both sections are optional and independent. Owner:
+`workflows/judge_task_composition.py` (section shapes); schemas:
+`agent/schemas/judge_task.py`. The composed value is
+`RunTaskComposition.judge_task: JudgeTaskDeclarations | None`; it is `None`
+when `judge_blocks` is absent or `none: true` **and** `rubrics` is absent or
+`[]`. Consumers (judge prompts, rubric strategies) are separate changes; this
+section only declares and identifies the inputs.
+
+`judge_blocks.config` names a YAML mapping validated by `JudgeTaskBlocks`
+(`extra="forbid"`, every key optional):
+
+```yaml
+evaluation_guidance: >-
+  A result is only credible when the residual spectrum is flat above 1 kHz.
+failure_signatures: >-
+  Near-zero loss with a constant output indicates collapsed training.
+```
+
+Each `rubrics[i].config` names a YAML (or JSON) mapping validated by
+`RubricSpec`:
+
+```yaml
+schema_version: siderius.rubric/v1
+id: plausibility                 # ^[a-zA-Z][a-zA-Z0-9_-]*$
+version: "1"
+scale_min: 1                     # integer scale; scale_max must exceed scale_min
+scale_max: 5
+criteria:                        # at least one; names unique within the rubric
+  - name: physical_consistency
+    description: Respects conservation laws stated by the task.
+    weight: 2.0                  # > 0
+  - name: novelty
+    description: Differs materially from earlier candidates.
+    weight: 1.0
+```
+
+A rubric is **not a metric**. It has no direction and no total, never enters
+`MetricOrder`, records' score fields, Health or stop conditions. A judge
+returns integers per criterion; framework code computes any weighted total.
+
+Identity and refusal rules:
+
+- Every entry accepts only the key `config`; a section of the wrong type, an
+  unknown key, a missing file, a non-mapping file or a schema violation fails
+  composition with `TaskCompositionError` (`judge_blocks/rubrics could not be
+  composed: ...`).
+- Duplicate criterion names within a rubric are refused, as is the same
+  `(id, version)` declared by two rubric files.
+- `rubric_sha256(spec)` is the sha256 of the validated spec's canonical JSON
+  (sorted keys, compact separators). A consumer binds a rubric by
+  `RubricRef(id, version, sha256)`; `resolve_rubric_ref` raises
+  `RubricRefError` with `reason="unknown_rubric"` or
+  `reason="digest_mismatch"`. Changing a rubric's content therefore requires
+  a new `version`; a reference to the old digest is refused, never silently
+  rebound. Formatting-only edits that leave the validated content unchanged
+  keep the digest.
+- Fingerprint: when declared, the semantic payload gains `judge_blocks` (the
+  validated guidance) and/or `rubrics` (each rubric's `RubricRef`, sorted by
+  `(id, version)`). When neither is declared no key is added, so the semantic
+  payload is byte-identical to a manifest written before these sections
+  existed.
+- Launch binding: the declaration files are pinned as roles `judge_blocks` and
+  `rubric[<index>]` (`workflows/reviewed_launch_binding.py`).
 
 ## Beyond the manifest: `--data_dir`
 

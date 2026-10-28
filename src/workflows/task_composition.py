@@ -108,6 +108,7 @@ from ml_models.model_descriptions import DescriptionSourcePolicy
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.custom_loss_contract import TaskOwnedCustomLoss
     from agent.schemas.interpretation import InterpretationTaskBlocks
+    from agent.schemas.judge_task import JudgeTaskDeclarations
     from agent.schemas.task_config import ForwardContract
     from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
     from execute_tools.dataset_config import DatasetProfile
@@ -136,6 +137,8 @@ _MANIFEST_KEYS = frozenset(
         "interpretation_blocks",
         "proposal_blocks",
         "implementor_blocks",
+        "judge_blocks",
+        "rubrics",
         "task_config",
         "deliverable",
         "model_plugins",
@@ -283,6 +286,14 @@ class RunTaskComposition:
     two siblings use. ``None`` is the un-declared state and renders NOTHING —
     a composed task that declares none gets no implementor science rather
     than TIDMAD's.
+    """
+
+    judge_task: JudgeTaskDeclarations | None = None
+    """The run's DECLARED judge guidance and rubrics, or ``None``.
+
+    Composed from the optional ``judge_blocks:`` and ``rubrics:`` sections by
+    :mod:`workflows.judge_task_composition`. ``None`` is the un-declared state:
+    no judge guidance, no task rubric, and an unchanged semantic fingerprint.
     """
 
     model_plugins: Any = None
@@ -2083,6 +2094,7 @@ def compute_semantic_fingerprint(
     deliverable_naming_declaration: dict[str, Any] | None = None,
     proposal_blocks: Any = None,
     implementor_blocks: Any = None,
+    judge_task: JudgeTaskDeclarations | None = None,
     task_data_path_config: dict[str, Any] | None = None,
     task_data_path_content_identity: str | None = None,
     observable_declarations: list[dict[str, Any]] | None = None,
@@ -2185,6 +2197,11 @@ def compute_semantic_fingerprint(
     # byte-unchanged.
     if implementor_blocks is not None:
         payload["implementor_blocks"] = implementor_blocks.model_dump(mode="json")
+    # Declared judge guidance and rubric references change what judges are
+    # asked and how they score, so they join identity. ADDITIVE WHEN DECLARED
+    # (keys ``judge_blocks`` / ``rubrics``): undeclared fingerprints are unchanged.
+    if judge_task is not None:
+        payload.update(judge_task.canonical_identity())
     # A framework-provided objective has no plugin file whose content digest
     # can carry its selected parameters. The validated declaration therefore
     # joins identity directly. Additive only when this form is declared, so
@@ -2731,6 +2748,15 @@ def _compose_resolved_task_bindings(
     implementor_blocks, implementor_path = _compose_implementor_blocks(raw, manifest_dir)
     if implementor_path is not None:
         source_paths["implementor_blocks"] = implementor_path
+    from workflows.judge_task_composition import compose_judge_task
+
+    try:
+        composed_judge = compose_judge_task(raw, lambda ref: _resolve_path(ref, manifest_dir))
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"judge_blocks/rubrics could not be composed: {type(exc).__name__}: {exc}"
+        ) from exc
+    source_paths.update(composed_judge.source_paths)
 
     from workflows.data_analysis_composition import compose_workflow_data_analysis
 
@@ -2830,6 +2856,7 @@ def _compose_resolved_task_bindings(
         ),
         proposal_blocks=proposal_blocks,
         implementor_blocks=implementor_blocks,
+        judge_task=composed_judge.declarations,
         task_data_path_config=task_data_path_config,
         task_data_path_content_identity=impl_content_identity,
         observable_declarations=observable_declarations,
@@ -2857,6 +2884,7 @@ def _compose_resolved_task_bindings(
         interpretation_blocks=interpretation_blocks,
         proposal_blocks=proposal_blocks,
         implementor_blocks=implementor_blocks,
+        judge_task=composed_judge.declarations,
         task_description=description,
         forward_contract=contract,
         semantic_fingerprint=fingerprint,
