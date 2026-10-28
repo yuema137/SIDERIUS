@@ -553,7 +553,8 @@ def test_cancel_removes_a_queued_operation_without_running_it(
     )
     path = _operation_dir(store_b, waiting)
     codes: list[int] = []
-    worker = threading.Thread(target=lambda: codes.append(execute(path)))
+    # Daemon: a regression that never leaves the queue must not hang the session.
+    worker = threading.Thread(target=lambda: codes.append(execute(path)), daemon=True)
     worker.start()
     try:
         deadline = time.monotonic() + 10
