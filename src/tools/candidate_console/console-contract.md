@@ -155,6 +155,7 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | POST /api/preparations | PrepareSelection → OperationHandle, 202 |
 | GET /api/preparations/{UUID}/review | PreparedReview |
 | POST /api/candidates | LaunchSelection → OperationHandle, 202 |
+| GET /api/operations | `limit=1..200` (default 50) → `OperationListView`, read-only; see "Operation list" |
 | GET /api/operations/{UUID} | StatusView |
 | GET /api/operations/{UUID}/tokens | CandidateTokenSnapshot, read-only fixed native projection |
 | GET /api/operations/{UUID}/graph-results | GraphResultsView, read-only per-body native tuning report projection |
@@ -317,6 +318,11 @@ bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning
 "Skipped, not run: <node> (<reason>), ...". No cross-body score or ordering is
 computed or displayed; route decision details (observable values, case) are
 B1-PR6 monitor work.
+Non-integer numbers are display-rounded by `number-format.js` (up to four
+decimals; four significant digits for magnitudes below 1e-3 or from 1e9); the
+exact reported value stays in the cell's tooltip. Stop-condition values in the
+loop state are rounded the same way, with exact values in its tooltip. Stored and
+transported values are unchanged.
 
 Witnesses: `test_console_graph_results_reuse_native_run_report_without_paths`
 (native graph record vs `project_run`, no path, failed stage has no score, changed
@@ -475,6 +481,25 @@ Bindings/profile/options are not inferred from card order or geometry. Request
 protocols display as adaptor labels inside their actual consumer, not extra nodes.
 External source chips remain inspector bindings. Omitted optional ports, argument
 creation/deletion and new nodes are not graphical controls in this slice.
+Required and bound inputs always render as card rows; optional unbound inputs fold
+into one `.circuit-optional` disclosure per card ("N optional inputs"), expandable
+and remembered across re-renders of the same graph. While an output is pending,
+the summary is highlighted when a folded input is type-compatible.
+
+Canvas view state (zoom, scroll, Arrange view, expanded optional rows) is owned by
+`editor-circuit.js`, keyed by project and node IDs, and never reaches a document:
+viewing sends no request and cannot change saved bytes. The canvas is a CSS
+`transform: scale()` of the world, with positions kept in document pixels
+(drags divide screen deltas by the zoom). On opening a graph it fits once
+(`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
+canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size and
+Arrange view. The canvas grows with its zoomed content up to
+`clamp(420px, 100vh - 200px, 860px)`, shows edge shadows toward unseen content,
+and a note states how many capabilities are partly outside the view. Arrange view
+displays `geometry.place` with no stored positions (display only); a move made
+there records the displayed layout as an ordinary local edit and leaves Arrange
+view. Overlapping saved cards (`geometry.overlaps`) and unrouteable wires are
+reported with that display-only way out.
 
 The workflow-level Research loop panel (`editor-loop-controls.js`, view only;
 `editor.js` owns the draft) shows "No research loop declared" with an Add action
@@ -504,7 +529,8 @@ or "none (one workflow body)", followed by "stops early when …" for each decla
 stop condition.
 
 Socket/drag gestures send no requests. Source editing, disconnection, conflict,
-saving and invalid training drafts gate mutations; stale rendered projections
+saving and invalid training/loop drafts gate mutations (invalid drafts do not block
+capability selection, which is navigation); stale rendered projections
 cannot mutate a replacement document. Required whole-declaration checks remain
 Review/Save, with execution-profile/alias admission owned by separate native
 preparation. Type-compatible highlights do not claim runtime compatibility. Existing
@@ -549,7 +575,12 @@ node tests/browser/workflow_editor.mjs
 `tests/browser/capability_layout.mjs` (same variables) opens a five-node authored
 loop and checks paper headings, no generic card, pairwise-disjoint cards in light
 and dark themes, and full-layout persistence for pointer and keyboard moves;
-`tests/browser/circuit_geometry.mjs` checks fallback placement without a browser.
+`tests/browser/circuit_geometry.mjs` checks fallback placement, fit-scale bounds
+and overlap detection without a browser. `tests/browser/editor_canvas_fit.mjs`
+(same variables) checks at 1440x900 that all five cards are in view after
+fit-on-open, that view controls send nothing and keep bytes, folded optional
+inputs, the disjoint fully wired interpretation fixture, Arrange view on an
+overlapping layout, zoomed drag arithmetic and a non-empty task panel.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
@@ -581,6 +612,33 @@ existing admissions fail closed. Clients must retain the same UUID on ambiguous
 responses and may inspect it through the existing monitor.
 
 
+## Operation list
+
+`GET /api/operations` lists operations admitted by this console's own operation
+store, most recently admitted first, at most `limit` rows. The owner is
+`tools.candidate_operations.list_operations`: it enumerates only
+`{state_root}/operations/<UUID>` entries, verifies each through the same
+`load_record` path as a single read, sorts by the record's `admitted_at`, and
+projects at most `limit` rows through `read_operation`. It creates nothing,
+claims nothing, and never launches. A non-canonical entry name or a record that
+fails verification (unreadable, invalid JSON, identity or configuration
+mismatch) is skipped and counted in `unreadable`, never guessed into a row. At
+most 4096 directory entries are examined per request; a larger store reports
+`incomplete=true`, and other operations remain readable by UUID.
+
+`OperationListView.operations[]` carries `operation_id`, `kind`, `run_name`,
+`project_id` (the reviewed editor project, when recorded), `admitted_at`,
+`state`, `native_status` and, for authored loops, the same `LoopStatusView` as
+status. Receipts, digests, workspace/log/output paths and credentials are not
+part of the projection.
+
+Slow control: `operations-list.js` renders the list as links to
+`#slow-control/<UUID>`, so selecting a row uses the existing route and Status and
+logs owner. It loads once per connection (session revision) when any Slow control
+route is shown while connected, including `#slow-control/<UUID>`, again whenever the
+bare `#slow-control` route is entered, and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
+operation for live status). Manual UUID entry remains available.
+
 ## Persistent views, routing and session
 
 `index.html` owns a single document with persistent Home, Workflow and Slow control
@@ -606,7 +664,11 @@ Theme enum, optional last-operation UUID and the versioned exact reusable launch
 intent are persisted. The launch intent contains only origin/project navigation
 context, retained preparation identity, request digest and operation UUID; never
 source bytes, native requests or credentials.
-Reload/new tab requires Connect again.
+Reload/new tab requires Connect again. Once connected, the access card collapses
+on every view to one status line with **Change token** (reopens the form; the
+current connection stays until a new Connect) and **Disconnect console** (clears the
+in-memory token, bumps the revision and publishes a disconnected state, exactly as a
+401 does). Any disconnect reopens the form.
 
 Connect validates through the explicit deep-link operation GET, otherwise choices
 GET. Operation 404/409 means unavailable data and does not reject valid access.
@@ -621,6 +683,12 @@ reconnect restart for the new revision without replacing a loaded pending draft.
 Editor projects load only on Workflow entry. Choices/project failures remain local;
 known-operation reads need neither task choices nor editor configuration. The one
 existing visible-document two-second polling loop retains its cursor/epoch owners.
+
+Home leads with the workflow journey (open the workflow, edit and review, prepare
+a new run, launch and monitor) and its **Open workflow** action. The native chain
+and configured-task flows follow under **Advanced**. All views share one shell:
+a compact header (title, about, theme), navigation and content aligned on one
+left edge, up to 1920px wide.
 
 Home's configured-task flow is a secondary disclosure independent of the editor
 selection. Prepared workspace, identity, routes, limits, devices/network and
@@ -909,6 +977,13 @@ are present. Empty choices preserve ordinary unbound editing. This inert GET
 does not inspect files, compose/import tasks or start native observations; internal
 resource paths/settings and credentials are absent. Metadata is configured intent,
 not verification of current task contents or execution readiness.
+
+The Task package and version panel is always visible and never empty: it states
+the saved binding (`This workflow uses task package …, version …`) or that the
+workflow is unbound, then either the version selector with Update workflow
+references (when choices exist) or `#editor-task-unavailable`, which explains that
+no configured task declares `task_revision` and links the README's "Bind a task
+version". Refresh task choices is always present.
 
 Workflow builder shows saved binding separately and starts with no task selection.
 Users explicitly select a choice (or click the unique matching saved-choice action).

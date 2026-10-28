@@ -502,3 +502,23 @@ def test_loop_proposal_against_a_stale_source_version_is_a_conflict(editor_confi
         assert response.status_code == 409, response.text
         assert response.json()["error"]["code"] == "conflict"
         assert path.read_bytes() == current
+
+
+def test_interpretation_fixture_saves_complete_disjoint_positions():
+    """Fails if the browser ``interpretation`` fixture again leaves a node to fallback
+    placement or saves cards closer than one card width plus gap (the UX walkthrough
+    of 2026-10-27 showed interpret at x=-80 under build at x=120 and two cards off
+    to the right). CI runs no browser, so this pins the fixture data itself."""
+    from itertools import pairwise
+
+    from tests.browser.workflow_editor_server import interpretation_profile_source
+    from workflows.definition import parse_workflow_source
+
+    document = parse_workflow_source(interpretation_profile_source())
+    nodes = {node.id for node in document.definition.nodes}
+    positions = {position.node: (position.x, position.y) for position in document.positions}
+    assert set(positions) == nodes
+    # editor.css owns a 215 px card; 300 px leaves a routing channel between columns.
+    placed = sorted(positions.values())
+    for (x1, y1), (x2, y2) in pairwise(placed):
+        assert x2 - x1 >= 300 or abs(y2 - y1) >= 600, (placed, (x1, y1), (x2, y2))

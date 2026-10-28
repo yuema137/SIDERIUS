@@ -38,6 +38,8 @@ try {
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
     const reply = json => route.fulfill({status: 200, json});
     if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
+    // Slow control lists this console's operations once per connection, also on UUID routes.
+    if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     assert.ok(url.pathname.startsWith(`/api/operations/${operation}`));
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
     if (url.pathname.endsWith('/log')) return reply({text: '', next_offset: 0, observed_size: 0, truncated: false, missing: false});

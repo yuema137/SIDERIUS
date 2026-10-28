@@ -2,6 +2,10 @@
 (() => {
   'use strict';
   let projection = null, actions = null, host = null, pending = null, drag = null, selectedWire = null;
+  // View-only state (zoom, scroll, arranged view, expanded optional inputs). It is
+  // kept per opened graph and never reaches a document, so viewing never changes source.
+  let view = {key: null, scale: 1, fitPending: false, arranged: false, scroll: null, expanded: new Set()};
+  const CARD_GAP = {x: 135, y: 90};
   const geometry = window.editorCircuitGeometry;
   const presentation = window.editorCapabilityPresentation;
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -31,6 +35,12 @@
       input.title = pending ? (compatible ? 'Type-compatible source. Click to rebind; review before saving.' : 'This source is not offered for this input by the server.') : 'Select an output socket first.';
     }
     for (const output of host.querySelectorAll('[data-output]')) output.setAttribute('aria-pressed', String(output.dataset.node === pending?.node));
+    for (const group of host.querySelectorAll('.circuit-optional')) {
+      const compatible = [...group.querySelectorAll('[data-input]')].filter(input => input.classList.contains('compatible')).length;
+      const summary = group.querySelector('summary');
+      summary.classList.toggle('compatible', compatible > 0);
+      summary.title = compatible ? `${compatible} compatible optional input${compatible === 1 ? '' : 's'}; expand to connect.` : '';
+    }
     const disconnect = host.querySelector('.circuit-disconnect');
     if (disconnect) { disconnect.hidden = !selectedWire; disconnect.disabled = !projection.enabled || projection.allowBindingChange === false; }
     for (const target of host.querySelectorAll('.circuit-wire-target')) {
@@ -52,17 +62,75 @@
     selectedWire = null; highlight();
     actions.disconnect(target.to, target.argument);
   }
+  // Screen pixels to world (document-layout) pixels under the view zoom.
+  const toWorld = (clientX, clientY) => {
+    const origin = host.querySelector('.circuit-world').getBoundingClientRect();
+    return {x: (clientX - origin.left) / view.scale, y: (clientY - origin.top) / view.scale};
+  };
   const point = socket => {
     const rect = socket.querySelector('.circuit-socket').getBoundingClientRect();
-    const origin = host.querySelector('.circuit-world').getBoundingClientRect();
-    return {x: rect.left + rect.width / 2 - origin.left, y: rect.top + rect.height / 2 - origin.top};
+    return toWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
   };
+  // Layout offsets are unaffected by the zoom transform, so boxes stay in world pixels.
+  const cardBox = (card, margin = 0) => ({left: card.offsetLeft - margin, right: card.offsetLeft + card.offsetWidth + margin,
+    top: card.offsetTop - margin, bottom: card.offsetTop + card.offsetHeight + margin});
+  function sizeWorld() {
+    const world = host.querySelector('.circuit-world'), sizer = host.querySelector('.circuit-sizer');
+    const cards = [...world.querySelectorAll('.circuit-card')];
+    const size = {width: Math.max(0, ...cards.map(card => card.offsetLeft + card.offsetWidth + 80)),
+      height: Math.max(0, ...cards.map(card => card.offsetTop + card.offsetHeight + 80))};
+    world.style.width = size.width + 'px'; world.style.height = size.height + 'px';
+    sizer.style.width = size.width * view.scale + 'px'; sizer.style.height = size.height * view.scale + 'px';
+    return size;
+  }
+  function updateVisibility() {
+    const viewport = host?.querySelector('.circuit-viewport'), note = host?.querySelector('.circuit-view-note');
+    if (!viewport || !note) return;
+    const frame = viewport.getBoundingClientRect();
+    const inner = {left: frame.left + viewport.clientLeft, top: frame.top + viewport.clientTop};
+    inner.right = inner.left + viewport.clientWidth; inner.bottom = inner.top + viewport.clientHeight;
+    const cards = [...viewport.querySelectorAll('.circuit-card')];
+    const outside = cards.filter(card => {
+      const box = card.getBoundingClientRect();
+      return box.left < inner.left - 1 || box.right > inner.right + 1 || box.top < inner.top - 1 || box.bottom > inner.bottom + 1;
+    });
+    viewport.dataset.outsideCards = String(outside.length);
+    const zoom = host.querySelector('.circuit-zoom'); if (zoom) zoom.textContent = `${Math.round(view.scale * 100)} %`;
+    note.textContent = (outside.length
+      ? `${outside.length} of ${cards.length} capabilities are partly outside the view. Scroll the canvas or use Fit to view.`
+      : `All ${cards.length} capabilities are in view.`) +
+      (view.arranged ? ' Arranged view: display only; the saved positions are unchanged.' : '');
+    // Edge shadows mark each side that still has content to scroll to.
+    const shadows = [];
+    if (viewport.scrollLeft > 1) shadows.push('inset 14px 0 12px -12px var(--edge)');
+    if (viewport.scrollLeft + viewport.clientWidth < viewport.scrollWidth - 1) shadows.push('inset -14px 0 12px -12px var(--edge)');
+    if (viewport.scrollTop > 1) shadows.push('inset 0 14px 12px -12px var(--edge)');
+    if (viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - 1) shadows.push('inset 0 -14px 12px -12px var(--edge)');
+    viewport.style.boxShadow = shadows.join(', ');
+  }
+  function applyScale(scale) {
+    view.scale = scale;
+    const world = host.querySelector('.circuit-world');
+    world.style.transform = scale === 1 ? '' : `scale(${scale})`;
+    sizeWorld(); updateVisibility();
+  }
+  // Fit the whole graph into the canvas (view only; never below the legibility floor).
+  function fit() {
+    const viewport = host?.querySelector('.circuit-viewport');
+    if (!viewport || !viewport.clientWidth || !projection?.document) return;
+    view.fitPending = false;
+    const content = sizeWorld(), max = parseFloat(getComputedStyle(viewport).maxHeight);
+    const available = {width: viewport.clientWidth - 2, height: (Number.isFinite(max) ? max : viewport.clientHeight) - 2};
+    applyScale(geometry.fitScale(content, available));
+    viewport.scrollLeft = 0; viewport.scrollTop = 0; updateVisibility();
+  }
   function draw() {
     if (!host) return;
     const svg = host.querySelector('svg'); svg.replaceChildren();
     const world = host.querySelector('.circuit-world');
-    const cards = [...world.querySelectorAll('.circuit-card')], rect = world.getBoundingClientRect();
-    const boxes = cards.map(card => { const b = card.getBoundingClientRect(); return {left: b.left - rect.left - 5, right: b.right - rect.left + 5, top: b.top - rect.top - 5, bottom: b.bottom - rect.top + 5}; });
+    sizeWorld();
+    const cards = [...world.querySelectorAll('.circuit-card')];
+    const boxes = cards.map(card => cardBox(card, 5));
     const occupied = new Set();
     for (const input of world.querySelectorAll('[data-input]')) {
       const option = choice(input.dataset.node, input.dataset.argument || null);
@@ -71,7 +139,7 @@
       const output = [...world.querySelectorAll('[data-output]')].find(value => value.dataset.node === source.node);
       if (!output) continue;
       const route = geometry.route(point(output), point(input), boxes, cards.indexOf(output.closest('.circuit-card')), cards.indexOf(input.closest('.circuit-card')), occupied);
-      if (!route) { say('Some wires could not be routed around the current cards. Move overlapping cards; the connection list retains every binding.'); continue; }
+      if (!route) { say('Some wires could not be routed around overlapping or crowded cards. Use Arrange view (display only) or Fit to view, or move cards; the connection list retains every binding.'); continue; }
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', geometry.path(route)); path.classList.add('circuit-wire');
       path.dataset.from = source.node; path.dataset.to = input.dataset.node; path.dataset.argument = option.argument;
@@ -90,7 +158,7 @@
       });
       svg.append(target);
     }
-    highlight();
+    highlight(); updateVisibility();
   }
   function port(parent, node, argument, output, metadata = null) {
     const snapshot = projection;
@@ -139,20 +207,52 @@
     });
     return button;
   }
+  const button = (parent, text, id, onClick) => {
+    const value = element('button', text, parent, 'circuit-view-button'); value.type = 'button'; value.id = id;
+    value.addEventListener('click', onClick); return value;
+  };
+  // Re-render the current projection after a view-only change (arranged view).
+  const rerender = () => { if (host && projection) render(host, projection, actions); };
+  function toolbar(parent, value) {
+    const bar = element('div', '', parent, 'circuit-toolbar');
+    bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Canvas view');
+    button(bar, 'Fit to view', 'circuit-fit', fit).title = 'Scale the view so every capability is visible. Saved positions are unchanged.';
+    button(bar, '−', 'circuit-zoom-out', () => applyScale(Math.max(0.4, Math.round((view.scale - 0.1) * 10) / 10))).setAttribute('aria-label', 'Zoom out');
+    const zoom = element('span', `${Math.round(view.scale * 100)} %`, bar, 'circuit-zoom'); zoom.setAttribute('aria-label', 'Canvas zoom');
+    button(bar, '+', 'circuit-zoom-in', () => applyScale(Math.min(1, Math.round((view.scale + 0.1) * 10) / 10))).setAttribute('aria-label', 'Zoom in');
+    button(bar, 'Actual size', 'circuit-zoom-reset', () => applyScale(1));
+    const arrange = button(bar, view.arranged ? 'Show saved layout' : 'Arrange view', 'circuit-arrange', () => {
+      view.arranged = !view.arranged; view.fitPending = true; view.scroll = null; rerender();
+    });
+    arrange.setAttribute('aria-pressed', String(view.arranged));
+    arrange.title = 'Display a non-overlapping layout derived from the connections. Display only: saved positions change only if you then move a card, review and save.';
+    arrange.disabled = !value.document;
+    const note = element('p', '', parent, 'circuit-view-note'); note.setAttribute('aria-live', 'polite');
+  }
   function render(container, value, callbacks) {
     const focus = container.contains(document.activeElement) ? document.activeElement.id : null;
+    const key = `${value.viewKey ?? ''}|${(value.document?.definition.nodes || []).map(node => node.id).join(',')}`;
+    const previous = container.querySelector('.circuit-viewport');
+    if (view.key !== key) view = {key, scale: 1, fitPending: true, arranged: false, scroll: null, expanded: new Set()};
+    else if (previous && !view.fitPending) view.scroll = {left: previous.scrollLeft, top: previous.scrollTop};
     host = container; projection = value; actions = callbacks; cancel(false); selectedWire = null; host.replaceChildren();
     const message = element('p', 'Select a capability to inspect it. Choose an output, then a highlighted input to rebind.', host, 'circuit-message');
     message.setAttribute('role', 'status');
+    toolbar(host, value);
     const disconnect = element('button', 'Disconnect selected connection', host, 'circuit-disconnect');
     disconnect.type = 'button'; disconnect.hidden = true; disconnect.addEventListener('click', disconnectSelectedWire);
-    const viewport = element('div', '', host, 'circuit-viewport'), world = element('div', '', viewport, 'circuit-world');
+    const viewport = element('div', '', host, 'circuit-viewport'), sizer = element('div', '', viewport, 'circuit-sizer');
+    const world = element('div', '', sizer, 'circuit-world');
+    viewport.addEventListener('scroll', updateVisibility, {passive: true});
+    viewObserver.disconnect(); viewObserver.observe(viewport);
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('role', 'group'); svg.setAttribute('aria-label', 'Workflow connections'); world.append(svg);
     if (!value.document) return;
     const saved = new Map(value.document.positions.map(p => [p.node, p]));
     const cards = [];
     // A move persists every displayed position, so later sources never mix stored and fallback layouts.
+    // Moving a card in the arranged view adopts the displayed layout as an ordinary local edit.
     const layout = (moved, x, y) => cards.map(card => card.dataset.node === moved ? {node: moved, x, y} : {node: card.dataset.node, ...card._position});
+    const move = positions => { view.arranged = false; actions.move(positions); };
     for (const node of value.document.definition.nodes) {
       const card = element('article', '', world, 'circuit-card'); card.dataset.node = node.id; card.dataset.capability = node.capability;
       const heading = element('button', '', card, 'editor-node');
@@ -162,11 +262,11 @@
       const role = [...heading.querySelector('.capability-heading').classList].find(name => name.startsWith('capability-') && name !== 'capability-heading');
       if (role) card.classList.add(role);
       heading.setAttribute('aria-pressed', String(node.id === value.selected));
-      heading.addEventListener('click', () => { if (projection === value && projection.enabled) actions.select(node.id); });
+      heading.addEventListener('click', () => { if (projection === value && projection.selectable) actions.select(node.id); });
       heading.addEventListener('keydown', event => {
         if (projection !== value || !projection.enabled || projection.allowMove === false || !event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
         event.preventDefault(); const position = card._position;
-        actions.move(layout(node.id, position.x + (event.key === 'ArrowLeft' ? -20 : event.key === 'ArrowRight' ? 20 : 0), position.y + (event.key === 'ArrowUp' ? -20 : event.key === 'ArrowDown' ? 20 : 0)));
+        move(layout(node.id, position.x + (event.key === 'ArrowLeft' ? -20 : event.key === 'ArrowRight' ? 20 : 0), position.y + (event.key === 'ArrowUp' ? -20 : event.key === 'ArrowDown' ? 20 : 0)));
       });
       heading.addEventListener('pointerdown', event => {
         if (projection !== value || !projection.enabled || projection.allowMove === false || event.button !== 0 || drag) return;
@@ -175,13 +275,13 @@
       });
       heading.addEventListener('pointermove', event => {
         if (projection !== value || !drag || drag.node !== node.id || drag.pointerId !== event.pointerId) return;
-        card.style.left = drag.left + event.clientX - drag.startX + 'px'; card.style.top = drag.top + event.clientY - drag.startY + 'px'; draw();
+        card.style.left = drag.left + (event.clientX - drag.startX) / view.scale + 'px'; card.style.top = drag.top + (event.clientY - drag.startY) / view.scale + 'px'; draw();
       });
       heading.addEventListener('pointerup', event => {
         if (projection !== value || !drag || drag.node !== node.id || drag.pointerId !== event.pointerId) return;
         const gesture = drag; drag = null;
         const dx = event.clientX - gesture.startX, dy = event.clientY - gesture.startY;
-        if (projection.enabled && Math.abs(dx) + Math.abs(dy) > 3) actions.move(layout(node.id, Math.round(gesture.position.x + dx), Math.round(gesture.position.y + dy)));
+        if (projection.enabled && Math.abs(dx) + Math.abs(dy) > 3) move(layout(node.id, Math.round(gesture.position.x + dx / view.scale), Math.round(gesture.position.y + dy / view.scale)));
         else { gesture.card.style.left = gesture.left + 'px'; gesture.card.style.top = gesture.top + 'px'; draw(); }
       });
       heading.addEventListener('pointercancel', event => {
@@ -199,34 +299,60 @@
         element('dt', 'Protocol owner', mappingList); element('dd', protocolMapping.owner, mappingList);
         element('dt', 'Mapped input contract', mappingList); element('dd', protocolMapping.output_contract.id, mappingList);
       }
-      for (const option of value.inventory.filter(item => item.node === node.id)) {
-        const input = port(card, node, option.argument, false, option); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;
+      const options = value.inventory.filter(item => item.node === node.id);
+      // Required and bound inputs always show; optional unbound ones fold into one expandable row.
+      const folded = options.filter(option => !option.required && !option.bound);
+      let group = null;
+      if (folded.length) {
+        group = document.createElement('details'); group.className = 'circuit-optional'; group.dataset.node = node.id;
+        const summary = element('summary', `${folded.length} optional input${folded.length === 1 ? '' : 's'}`, group);
+        summary.id = `circuit-optional-${node.id}`;
+        group.open = view.expanded.has(node.id);
+        group.addEventListener('toggle', () => {
+          if (group.open) view.expanded.add(node.id); else view.expanded.delete(node.id);
+          if (projection === value) draw();
+        });
+      }
+      for (const option of options) {
+        const input = port(folded.includes(option) ? group : card, node, option.argument, false, option); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;
         element('dt', option.argument || 'Request', mappingList);
         element('dd', option.source ? (option.source.kind === 'external' ? `external:${option.source.binding}` : `${option.source.node}.${option.source.port}`) : 'unbound', mappingList);
       }
+      if (group) card.append(group);
       const output = port(card, node, null, true); output.id = `circuit-output-${node.id}`;
       cards.push(card);
     }
     // Card size comes from the rendered cards (editor.css owns it), never a copied constant.
     const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
-    const placed = geometry.place(value.document.definition.nodes, saved, size, {x: 135, y: 90});
+    // The arranged view uses the same placement with no stored positions: display only.
+    const placed = geometry.place(value.document.definition.nodes, view.arranged ? new Map() : saved, size, CARD_GAP);
     for (const card of cards) card._position = placed.get(card.dataset.node);
     const ox = 60 - Math.min(0, ...cards.map(card => card._position.x)), oy = 60 - Math.min(0, ...cards.map(card => card._position.y));
     for (const card of cards) { card.style.left = card._position.x + ox + 'px'; card.style.top = card._position.y + oy + 'px'; }
-    world.style.width = Math.max(700, ...cards.map(card => card.offsetLeft + card.offsetWidth + 80)) + 'px';
-    world.style.height = Math.max(300, ...cards.map(card => card.offsetTop + card.offsetHeight + 80)) + 'px';
-    setEnabled(value.enabled); draw();
+    world.style.transform = view.scale === 1 ? '' : `scale(${view.scale})`;
+    sizeWorld();
+    setEnabled(value.enabled, value.selectable ?? value.enabled); draw();
+    if (view.fitPending) fit();
+    else if (view.scroll) { viewport.scrollLeft = view.scroll.left; viewport.scrollTop = view.scroll.top; }
+    updateVisibility();
+    const overlapping = geometry.overlaps(cards.map(card => cardBox(card)));
+    if (!view.arranged && overlapping.length) {
+      const names = overlapping.map(([a, b]) => `${cards[a].dataset.node} and ${cards[b].dataset.node}`).join('; ');
+      say(`Saved card positions overlap (${names}). Arrange view shows a non-overlapping layout without changing the saved source; moving a card there adopts that layout as a reviewable edit.`);
+    }
     if (focus) document.getElementById(focus)?.focus({preventScroll: true});
   }
-  function setEnabled(enabled) {
+  // Selecting a capability is navigation, not an edit: invalid inspector drafts block edits
+  // (enabled) but must not trap the author on one node (selectable).
+  function setEnabled(enabled, selectable = enabled) {
     if (!projection || !host) return;
-    projection.enabled = enabled;
+    projection.enabled = enabled; projection.selectable = selectable;
     for (const port of host.querySelectorAll('.circuit-port')) port.disabled = !enabled;
     const disconnect = host.querySelector('.circuit-disconnect'); if (disconnect) disconnect.disabled = !enabled || projection.allowBindingChange === false;
     for (const target of host.querySelectorAll('.circuit-wire-target')) {
       target.setAttribute('aria-disabled', String(!enabled)); target.setAttribute('tabindex', enabled ? '0' : '-1');
     }
-    for (const heading of host.querySelectorAll('.editor-node')) heading.setAttribute('aria-disabled', String(!enabled));
+    for (const heading of host.querySelectorAll('.editor-node')) heading.setAttribute('aria-disabled', String(!selectable));
     if (!enabled) { cancel(); selectedWire = null; highlight(); }
   }
   document.addEventListener('keydown', event => {
@@ -238,12 +364,16 @@
   document.addEventListener('pointermove', event => {
     if (!pending || !host?.contains(event.target)) return;
     const output = host.querySelector(`#circuit-output-${CSS.escape(pending.node)}`), svg = host.querySelector('svg');
-    const origin = host.querySelector('.circuit-world').getBoundingClientRect();
-    const start = point(output), end = {x: event.clientX - origin.left, y: event.clientY - origin.top};
+    const start = point(output), end = toWorld(event.clientX, event.clientY);
     svg.querySelector('.circuit-pending')?.remove();
     const path = document.createElementNS(svg.namespaceURI, 'path'); path.classList.add('circuit-pending');
     path.setAttribute('d', geometry.path([start, {x: (start.x + end.x) / 2, y: start.y}, {x: (start.x + end.x) / 2, y: end.y}, end])); svg.append(path);
   });
   new ResizeObserver(() => { if (projection?.document) draw(); }).observe(document.body);
+  // A canvas rendered while hidden (zero width) fits once it is first laid out.
+  const viewObserver = new ResizeObserver(() => {
+    if (!projection?.document) return;
+    if (view.fitPending) fit(); else updateVisibility();
+  });
   window.editorCircuit = Object.freeze({render, setEnabled});
 })();

@@ -330,6 +330,18 @@ remains unknown/nonreleasable. This is ownership binding, not global admission.
 No automatic retry, resume, cancellation, force-clear, attachment, queue, HTTP or
 cross-store resource/spend admission is supplied.
 
+## Operation list
+
+`list_operations(config, limit=50) -> OperationListing` is read-only. It lists only
+`{state_root}/operations/<UUID>` entries of the configured store (an absent store
+lists nothing and is not created), verifies each through `load_record`, orders by
+`admitted_at` (newest first, then operation UUID) and returns at most `limit`
+(1..200) entries, each with its `read_operation` snapshot, `admitted_at`, and the
+generated `run_name` / reviewed `project_id` when recorded. Non-canonical names and
+records that fail verification are counted in `unreadable`, never listed. At most
+4096 entries are examined per call (`incomplete` reports more). Callers that
+expose the result must project away receipts and paths.
+
 ## Logs and validation
 
 `read_operation_log` selects only `operation.log` or native fixed `worker.log`.

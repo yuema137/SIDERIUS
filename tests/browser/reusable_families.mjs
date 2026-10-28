@@ -58,6 +58,8 @@ try {
   await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
   assert.equal(await page.locator('.editor-node').count(), 8);
   assert.match(await page.locator('#editor-source').inputValue(), /native-proposal-families\/v1/);
+  // New run controls live in the collapsed "Prepare a new run" disclosure (51b3e8c5).
+  await page.locator('.workflow-run-details > summary').click();
   await page.locator('#new-run-task').selectOption('synthetic');
   await page.locator('#new-run-review').click();
   await page.locator('#new-run-status').filter({hasText: 'Preparation reviewed'}).waitFor();

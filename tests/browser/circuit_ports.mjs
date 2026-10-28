@@ -16,7 +16,10 @@ import {createInterface} from 'node:readline';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[key], `Set ${key}`);
 await mkdir(process.env.CONSOLE_EVIDENCE_DIR, {recursive: false});
-const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.changed_task_fixture'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
+// This witness exercises the eight-node families graph (alternate, build_left, check_left;
+// execution_profile native-proposal-families/v1), so it pins that fixture profile itself
+// rather than depending on the caller's environment (the default profile has three nodes).
+const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.changed_task_fixture'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, CONSOLE_TASK_PROFILE: 'families'}});
 let errors = '', browser;
 server.stderr.on('data', chunk => {errors += chunk;});
 const lines = createInterface({input: server.stdout});
@@ -89,6 +92,8 @@ try {
   const beforePosition = await page.locator('.circuit-card[data-node="build_left"]').evaluate(element => element._position);
   const beforeLayout = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => ({node: card.dataset.node, ...card._position})));
   await page.locator('#circuit-node-build_left').focus(); await page.keyboard.press('Alt+ArrowDown');
+  // Pointer deltas below are screen pixels; compare them at 100 % (fit-on-open may have zoomed out).
+  await page.locator('#circuit-zoom-reset').click();
   const header = page.locator('#circuit-node-build_left'); await header.scrollIntoViewIfNeeded();
   const rect = await header.boundingBox();
   await header.evaluate(element => element.addEventListener('pointerdown', event => { element.dataset.testPointer = event.pointerId; }, {once: true}));

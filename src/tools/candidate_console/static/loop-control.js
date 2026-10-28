@@ -8,15 +8,17 @@
   const counted = (loop, verb) => loop.attempted_iterations == null
     ? `${verb}; the body count is unavailable.`
     : `${verb} after ${loop.attempted_iterations} of ${loop.final_iteration} bodies.`;
-  // The receipt's verified stop reason in plain words; values are shown exactly as recorded.
+  // The receipt's verified stop reason in plain words; numbers are display-rounded and the
+  // exact recorded values stay available as the state's tooltip (see render).
+  const number = value => window.consoleNumbers ? window.consoleNumbers.format(value) : String(value);
   function stopReason(reason, limit) {
     const after = `stopped early after body ${reason.iteration} of up to ${limit}`;
     if (reason.kind === 'metric_threshold') {
-      return `${after}: ${reason.metric_id} reached ${reason.incumbent} (threshold ${reason.threshold}, ${reason.direction} is better; best at body ${reason.incumbent_iteration})`;
+      return `${after}: ${reason.metric_id} reached ${number(reason.incumbent)} (threshold ${number(reason.threshold)}, ${reason.direction} is better; best at body ${reason.incumbent_iteration})`;
     }
     if (reason.kind === 'no_improvement') {
       const bodies = n => `${n} bod${n === 1 ? 'y' : 'ies'}`;
-      const best = reason.incumbent == null ? 'no valid score yet' : `best ${reason.incumbent} at body ${reason.last_improvement_iteration}`;
+      const best = reason.incumbent == null ? 'no valid score yet' : `best ${number(reason.incumbent)} at body ${reason.last_improvement_iteration}`;
       return `${after}: no improvement for ${bodies(reason.non_improving_bodies)} (condition: ${bodies(reason.k)}; ${best})`;
     }
     return `${after}: stop condition ${reason.kind}`;
@@ -64,6 +66,9 @@
     }
     panel.hidden = false;
     $('loop-state').textContent = describe(status);
+    const reason = status.receipt_available ? status.loop.stop_reason : null;
+    const exact = reason ? ['incumbent', 'threshold'].filter(key => typeof reason[key] === 'number').map(key => `${key} ${reason[key]}`) : [];
+    if (exact.length) $('loop-state').title = 'Exact recorded values: ' + exact.join(', '); else $('loop-state').removeAttribute('title');
     const connected = session().connected;
     const running = status.state === 'active' && !status.receipt_available;
     const pending = request.stop.pending || request.pause.pending;
