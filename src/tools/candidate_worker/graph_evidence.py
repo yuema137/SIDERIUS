@@ -11,7 +11,8 @@ from core.file_identity import open_identity_file, regular_file_snapshot
 from execute_tools.impl_attempts import impl_attempt_dir
 from workflows.definition.fanout import execution_families
 
-from .graph_models import GraphCapability, GraphNodeEvidence, GraphTrace
+from . import readiness
+from .graph_models import GraphCapability, GraphNodeEvidence, GraphState, GraphTrace
 from .layout import candidate_control_dir, graph_instance_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
 
@@ -141,7 +142,7 @@ def verify_graph_trace(
     shape = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     )
-    states = {item.node_id: item.state for item in trace.nodes}
+    states: dict[str, GraphState] = {item.node_id: item.state for item in trace.nodes}
     for item, slot in zip(trace.nodes, expected, strict=True):
         if (item.node_id, item.capability, item.predecessors, item.storage) != (
             slot.node_id,
@@ -180,17 +181,19 @@ def verify_graph_trace(
         ):
             raise ValueError("graph incomplete invocation claims output")
     # Replay readiness only, never native execution: uncertainty stops later effects.
-    pending = {item.node_id: item for item in trace.nodes}
-    complete: dict[str, str] = {}
+    complete: dict[str, GraphState] = {}
     aborted = False
-    while pending:
-        item = next(item for item in pending.values() if set(item.predecessors).issubset(complete))
-        blocked = aborted or any(complete[key] != "succeeded" for key in item.predecessors)
-        if (item.state == "blocked") != blocked:
+    while len(complete) < len(trace.nodes):
+        decision = readiness.next_dispatch(
+            readiness.readiness_input(trace.nodes, complete, aborted=aborted)
+        )
+        node_id = decision.next or next((key for key, _, _ in decision.terminal), None)
+        if node_id is None:
             raise ValueError("graph trace violates serial readiness or failure stop")
-        aborted = aborted or item.state == "failed"
-        complete[item.node_id] = item.state
-        del pending[item.node_id]
+        if (states[node_id] == "blocked") != bool(decision.terminal):
+            raise ValueError("graph trace violates serial readiness or failure stop")
+        aborted = aborted or states[node_id] == "failed"
+        complete[node_id] = states[node_id]
     status = (
         "failed"
         if "failed" in states.values()
