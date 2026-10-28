@@ -270,14 +270,20 @@ class TestTheWorkflowUploadsEvidenceThatExists:
         Run 32834492183 failed in bulk and SKIPPED the sensitive step, so a
         whole class of evidence was absent from a run meant to produce the
         complete failure batch. A workflow that stops at the first red step is
-        the fix-one/rerun loop wearing different clothes. Fails as: the guard
-        is dropped and a bulk failure again conceals the sensitive lane.
+        the fix-one/rerun loop wearing different clothes. Fails as: the
+        sensitive job comes to depend on the bulk matrix, so a bulk failure
+        again skips and conceals the sensitive lane.
         """
-        wf = (Path(__file__).resolve().parents[4] / ".github/workflows/ci.yml").read_text(
-            encoding="utf-8"
-        )
-        sensitive = wf.split("sensitive lane (serial, quiesced)")[1].split("- name:")[0]
-        assert "if: always()" in sensitive
+        import yaml
+
+        jobs = yaml.safe_load(
+            (Path(__file__).resolve().parents[4] / ".github/workflows/ci.yml").read_text(
+                encoding="utf-8"
+            )
+        )["jobs"]
+        # The lane is its own job; it must never wait on (and so be skipped
+        # by) the bulk matrix.
+        assert jobs["sensitive"]["needs"] == "prepare"
 
     def test_an_empty_evidence_artifact_fails_the_step(self):
         """A warning is not enough: the upload exists so a RED stays attributable.
