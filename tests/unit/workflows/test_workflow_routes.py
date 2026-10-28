@@ -305,6 +305,7 @@ def _merge_consumer_guarded_by_arm(payload) -> None:
         (lambda p: p["routes"][0].pop("default"), "requires a default arm"),
         # The merge consumer is also guarded from inside arm x.
         (_merge_consumer_guarded_by_arm, "also depends on one arm it merges"),
+        (lambda p: p["routes"][0].update(default=["iy", "tune"]), "also depends on one arm"),
         # A plain (non-merge) dependency on both arms of one branch.
         (_both_arms_without_merge, "two exclusive arms without a merge"),
     ],

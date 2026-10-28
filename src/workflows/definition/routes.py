@@ -132,8 +132,9 @@ def _check_merges(
 ) -> None:
     """A merged branch always runs one arm, and the merge takes one candidate from each.
 
-    Full coverage also places the consumer outside every arm: each candidate's arm
-    reaches it on a path that avoids the other arms' targets.
+    Full coverage places a non-target consumer outside every arm: each candidate's arm
+    reaches it on a path that avoids the other arms' targets. A consumer that is itself
+    a target of the merged branch is refused by the arm-dependency check.
     """
     for consumer, merge in _selected_sources(definition):
         branch_arms = arms.get(merge.branch)

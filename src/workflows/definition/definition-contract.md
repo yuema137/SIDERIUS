@@ -212,10 +212,10 @@ the source passes through one of that entry's targets. Validation refuses:
 - a `SelectedSource(branch, candidates=(ResultSource, ...))` merge argument whose branch
   is unknown or has no `default` (otherwise no arm might run and the merge would starve),
   whose candidates (at least 2) do not share the argument's output contract, or do not lie
-  one in each arm (every case plus the default). Full coverage places the consumer outside
-  every arm;
+  one in each arm (every case plus the default). Full coverage places a non-target consumer
+  outside every arm;
 - a merge consumer that also depends on an arm of the branch it merges through another
-  data or control edge;
+  data or control edge, or that is itself a target of that branch;
 - with a `loop`, any arm containing the loop feedback source or any of its predecessors,
   including merge candidates (decision Q5(a); conservative in v1).
 
