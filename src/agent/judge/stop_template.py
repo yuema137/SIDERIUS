@@ -30,9 +30,7 @@ _USER_FRAME = (
 
 
 def _render_user(request: CallRequest) -> str:
-    stop = request.stop
-    if stop is None:
-        raise ValueError("judge.stop/v1 renders only stop requests")
+    stop = request.content
     words = stop.direction_words
     facts = json.dumps(stop.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=False)
     return _USER_FRAME.format(

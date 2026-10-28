@@ -37,6 +37,14 @@ class JudgeCallRefused(RuntimeError):
     """The call was refused before any provider contact; nothing was written."""
 
 
+class JudgeEvidenceConflict(RuntimeError):
+    """Another writer published evidence at this path after admission.
+
+    The provider call has already happened and its usage rows are recorded;
+    the record built by this call was not published.
+    """
+
+
 def bridge_for_route(route: JudgeRoute) -> JudgeBridge:
     from agent.llm_bridge import LLMBridge
 
@@ -49,7 +57,11 @@ def bridge_for_route(route: JudgeRoute) -> JudgeBridge:
     )
 
 
-def _admit(request: CallRequest, max_calls: int, evidence_path: Path) -> None:
+def _admit(
+    request: CallRequest, context: JudgeRunContext, max_calls: int, evidence_path: Path
+) -> None:
+    if request.content.kind == "stop" and context.iteration != request.content.iteration:
+        raise JudgeCallRefused("usage context iteration differs from the judged iteration")
     if max_calls <= 0:
         raise JudgeCallRefused("a judge call requires a positive max_calls cap")
     if request.call_index >= max_calls:
@@ -60,24 +72,59 @@ def _admit(request: CallRequest, max_calls: int, evidence_path: Path) -> None:
         raise JudgeCallRefused(f"judge evidence already exists; never reused: {evidence_path}")
 
 
-def _failure(code: str, exc: BaseException) -> dict[str, Any]:
+def _failure(code: str, message: str) -> dict[str, Any]:
     status = "timed_out" if code == "deadline" else "failed"
-    message = f"{type(exc).__name__}: {exc}"[:2000]
-    return {"status": status, "payload": None, "failure_code": code, "failure_message": message}
+    return {
+        "status": status,
+        "payload": None,
+        "failure_code": code,
+        "failure_message": message[:2000],
+    }
 
 
-def _call(template: JudgeTemplate, bridge: JudgeBridge, system: str, user: str) -> dict[str, Any]:
+def _described(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _bound_bridge(
+    route: JudgeRoute,
+    context: JudgeRunContext,
+    bridge_factory: Callable[[JudgeRoute], JudgeBridge],
+) -> JudgeBridge:
     try:
-        raw = bridge.generate(system, user, label=template.usage_label)
+        remaining_seconds("judge.before_request")
+        bridge = bridge_factory(route)
+        bridge.set_run_context(
+            workspace=context.workspace,
+            iter=context.iteration,
+            run_name=context.run_name,
+            run_id=context.run_id,
+        )
+    except Exception as exc:
+        raise JudgeCallRefused(f"judge bridge unavailable: {_described(exc)}") from exc
+    return bridge
+
+
+def _call(
+    template: JudgeTemplate,
+    request: CallRequest,
+    bridge: JudgeBridge,
+    prompt: tuple[str, str],
+) -> dict[str, Any]:
+    try:
+        raw = bridge.generate(*prompt, label=template.usage_label)
         remaining_seconds("judge.response")
     except TimeoutError as exc:
-        return _failure("deadline", exc)
+        return _failure("deadline", _described(exc))
     except Exception as exc:  # provider failure after the route's finite retries
-        return _failure("provider_error", exc)
+        return _failure("provider_error", _described(exc))
     try:
         payload = template.response_model.model_validate_json(json.dumps(raw))
     except ValidationError as exc:
-        return _failure("invalid_payload", exc)
+        return _failure("invalid_payload", _described(exc))
+    refusal = template.check_payload(request, payload) if template.check_payload else None
+    if refusal is not None:
+        return _failure("inadmissible_choice", refusal)
     return {"status": "decided", "payload": payload, "failure_code": None, "failure_message": None}
 
 
@@ -93,30 +140,30 @@ def run_judge_call(
 ) -> JudgeCallEvidence:
     """Make one bounded call and publish its write-once evidence.
 
-    Provider, deadline and payload failures are recorded as evidence with a
-    ``failure_code``; the consumer's declared ``on_failure`` decides what a
-    failed call means. Refusals (cap, existing evidence) raise before any call.
+    Provider, deadline, payload and admissibility failures are recorded as
+    evidence with a ``failure_code``; the consumer's declared ``on_failure``
+    decides what a failed call means. ``JudgeCallRefused`` is raised before
+    any provider contact and without writing. One writer per evidence path is
+    assumed; a concurrent publish raises ``JudgeEvidenceConflict``.
     """
-    _admit(request, max_calls, evidence_path)
-    system, user = template.render(request)
-    prompt = template.identity(request)
-    remaining_seconds("judge.before_request")
-    bridge = bridge_factory(route)
-    bridge.set_run_context(
-        workspace=context.workspace,
-        iter=context.iteration,
-        run_name=context.run_name,
-        run_id=context.run_id,
-    )
-    outcome = _call(template, bridge, system, user)
+    _admit(request, context, max_calls, evidence_path)
+    rendered = template.render(request)
+    identity = template.identity(request)
+    bridge = _bound_bridge(route, context, bridge_factory)
+    outcome = _call(template, request, bridge, rendered)
     evidence = JudgeCallEvidence(
         request=request,
         request_sha256=canonical_sha256(request),
-        prompt=prompt,
+        prompt=identity,
         route=route,
         usage_label=template.usage_label,
         **outcome,
     )
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
-    publish_bytes_write_once(str(evidence_path), canonical_json_bytes(evidence))
+    try:
+        publish_bytes_write_once(str(evidence_path), canonical_json_bytes(evidence))
+    except FileExistsError as exc:
+        raise JudgeEvidenceConflict(
+            f"judge evidence published concurrently: {evidence_path}"
+        ) from exc
     return evidence

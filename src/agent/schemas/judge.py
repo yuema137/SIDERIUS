@@ -57,6 +57,7 @@ class JudgeBodyFacts(JudgeModel):
 
 
 class StopJudgeRequest(JudgeModel):
+    kind: Literal["stop"] = "stop"
     condition_index: int = Field(ge=0)
     iteration: int = Field(gt=0)
     final_iteration: int = Field(gt=0)
@@ -78,11 +79,36 @@ class StopJudgeRequest(JudgeModel):
         iterations = [body.iteration for body in self.bodies]
         if iterations != sorted(set(iterations)) or iterations[-1] != self.iteration:
             raise ValueError("bodies must be increasing and end at the judged iteration")
-        if (self.incumbent is None) != (self.incumbent_iteration is None):
-            raise ValueError("incumbent value and iteration are set together")
+        if self.non_improving_bodies > len(self.bodies):
+            raise ValueError("non_improving_bodies cannot exceed the completed bodies")
+        self._require_ranked_incumbent()
         if len(self.interpretation_digests) != len(self.interpretation_excerpts):
             raise ValueError("each interpretation excerpt needs its digest")
+        if len(self.interpretation_excerpts) > len(self.bodies):
+            raise ValueError("at most one interpretation excerpt per completed body")
         return self
+
+    def _require_ranked_incumbent(self) -> None:
+        if (self.incumbent is None) != (self.incumbent_iteration is None):
+            raise ValueError("incumbent value and iteration are set together")
+        ranked = [body for body in self.bodies if body.rank is not None]
+        if self.incumbent is None:
+            if ranked:
+                raise ValueError("ranked bodies require an incumbent")
+            return
+        if not any(
+            body.iteration == self.incumbent_iteration
+            and body.rank == 1
+            and body.value == self.incumbent
+            for body in ranked
+        ):
+            raise ValueError("the incumbent must be a rank-1 body with the same value")
+
+
+# Role content kind -> the call roles that may carry it. Strategy content kinds
+# join the CallContent union and this table in their own changes.
+CallContent = Annotated[StopJudgeRequest, Field(discriminator="kind")]
+_ROLES_BY_CONTENT: dict[str, frozenset[str]] = {"stop": frozenset({"stop"})}
 
 
 class CallRequest(JudgeModel):
@@ -92,17 +118,18 @@ class CallRequest(JudgeModel):
     call_role: CallRole
     call_index: int = Field(ge=0)
     prior_turns: tuple[Digest, ...]
-    stop: StopJudgeRequest | None = None
+    content: CallContent
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
         if len(self.prior_turns) != self.call_index:
             raise ValueError("prior_turns must cover every earlier call of the chain")
-        if (self.call_role == "stop") != (self.stop is not None):
-            raise ValueError("a stop request is carried exactly by call_role 'stop'")
-        if self.call_role == "stop" and self.invocation_sha256 is not None:
-            raise ValueError("a stop call belongs to no strategy invocation")
-        if self.call_role != "stop" and self.invocation_sha256 is None:
+        if self.call_role not in _ROLES_BY_CONTENT[self.content.kind]:
+            raise ValueError(f"call_role {self.call_role!r} cannot carry {self.content.kind!r}")
+        is_stop = self.content.kind == "stop"
+        if is_stop and (self.invocation_sha256 is not None or self.call_index != 0):
+            raise ValueError("a stop call is a single call outside any strategy invocation")
+        if not is_stop and self.invocation_sha256 is None:
             raise ValueError("a strategy call names its invocation")
         return self
 

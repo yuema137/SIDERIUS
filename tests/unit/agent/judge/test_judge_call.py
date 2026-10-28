@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -47,31 +48,36 @@ VERDICT = {
 }
 
 
-def stop_request(*, call_index: int = 0, prior_turns: tuple[str, ...] = ()) -> CallRequest:
+def stop_content(**overrides) -> StopJudgeRequest:
+    fields = {
+        "condition_index": 1,
+        "iteration": 3,
+        "final_iteration": 5,
+        "bodies": (
+            JudgeBodyFacts(iteration=1, value=0.5, rank=2, health="valid"),
+            JudgeBodyFacts(iteration=2, value=None, rank=None, health="unknown"),
+            JudgeBodyFacts(iteration=3, value=0.25, rank=1, health="valid"),
+        ),
+        "incumbent": 0.25,
+        "incumbent_iteration": 3,
+        "non_improving_bodies": 0,
+        "metric_id": "metric-fixture",
+        "direction_words": DirectionWords(verb="minimize", comparative="lower", antonym="higher"),
+        "interpretation_digests": ("a" * 64,),
+        "interpretation_excerpts": ("loss plateaued",),
+        "criterion": "Stop when further bodies are unlikely to help.",
+        "task_guidance_sha256": None,
+    }
+    return StopJudgeRequest(**{**fields, **overrides})
+
+
+def stop_request() -> CallRequest:
     return CallRequest(
         invocation_sha256=None,
         call_role="stop",
-        call_index=call_index,
-        prior_turns=prior_turns,
-        stop=StopJudgeRequest(
-            condition_index=1,
-            iteration=3,
-            final_iteration=5,
-            bodies=(
-                JudgeBodyFacts(iteration=1, value=0.5, rank=2, health="valid"),
-                JudgeBodyFacts(iteration=2, value=None, rank=None, health="unknown"),
-                JudgeBodyFacts(iteration=3, value=0.25, rank=1, health="valid"),
-            ),
-            incumbent=0.25,
-            incumbent_iteration=3,
-            non_improving_bodies=0,
-            metric_id="metric-fixture",
-            direction_words=DirectionWords(verb="minimize", comparative="lower", antonym="higher"),
-            interpretation_digests=("a" * 64,),
-            interpretation_excerpts=("loss plateaued",),
-            criterion="Stop when further bodies are unlikely to help.",
-            task_guidance_sha256=None,
-        ),
+        call_index=0,
+        prior_turns=(),
+        content=stop_content(),
     )
 
 
@@ -91,53 +97,62 @@ class StubBridge:
         return self.result
 
 
-def run(tmp_path: Path, bridge: StubBridge, request: CallRequest | None = None, name="0.json"):
+def run(tmp_path: Path, bridge: StubBridge, *, template=STOP_TEMPLATE, max_calls=4, iteration=3):
     return run_judge_call(
-        request or stop_request(),
-        template=STOP_TEMPLATE,
+        stop_request(),
+        template=template,
         route=ROUTE,
-        context=JudgeRunContext(workspace=tmp_path, iteration=3, run_name="r", run_id="run-1"),
-        evidence_path=tmp_path / "judge" / name,
-        max_calls=4,
+        context=JudgeRunContext(
+            workspace=tmp_path, iteration=iteration, run_name="r", run_id="run-1"
+        ),
+        evidence_path=tmp_path / "judge" / "0.json",
+        max_calls=max_calls,
         bridge_factory=lambda _route: bridge,
+    )
+
+
+def replay(tmp_path: Path, recorded: JudgeCallEvidence, template=STOP_TEMPLATE):
+    return verify_call_evidence(
+        tmp_path / "judge" / "0.json",
+        expected_sha256=evidence_sha256(recorded),
+        request=stop_request(),
+        template=template,
+        route=ROUTE,
     )
 
 
 def test_stop_prompt_bytes_are_pinned_for_a_fixed_request():
     """Defect: rendering drifts (key order, clock, template edit) without a version bump."""
+    assert canonical_sha256(stop_request()) == (
+        "f9f4864d8ca9b5674bef2b96a8b47eb4e7e39da8acab106d6417b5bb5a8ec4c9"
+    )
     identity = STOP_TEMPLATE.identity(stop_request())
     assert identity.template_sha256 == (
         "7dcdc035d67dd519b24d80190f4991b2046680d9957baf6b95c068d90e89a038"
     )
     assert identity.prompt_sha256 == (
-        "cb0c52c75e2c96fc9904337f54b736ca2769f6033b5dbbd757489fbe60a068ec"
+        "0a1a9877a01eaf9cdfc35fb1e35e02638a604bed4c5cb74211828e07d373a302"
+    )
+    # Pydantic's JSON-schema output is part of the template version.
+    assert identity.response_schema_sha256 == (
+        "ba9971349c7096dbfbc356beddb080b967f0ed23f33e779125bfb8424a4da0c2"
     )
     _, user = STOP_TEMPLATE.render(stop_request())
     assert "minimize it; lower values are better and higher values are worse" in user
 
 
-def test_replay_reproduces_the_run_without_calling_a_provider(tmp_path, monkeypatch):
-    """Defect: readback re-calls the LLM or rebuilds a different outcome."""
+def test_replay_rebuilds_the_recorded_outcome(tmp_path):
+    """Defect: readback rebuilds a different outcome than the recorded call.
+
+    That readback cannot reach a provider is owned by the AST import guard below.
+    """
     bridge = StubBridge()
     recorded = run(tmp_path, bridge)
     assert recorded.status == "decided" and len(bridge.calls) == 1
     assert bridge.contexts == [
         {"workspace": tmp_path, "iter": 3, "run_name": "r", "run_id": "run-1"}
     ]
-
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("replay called a provider")
-
-    monkeypatch.setattr("agent.llm_bridge.LLMBridge.generate", forbidden)
-    replayed = verify_call_evidence(
-        tmp_path / "judge" / "0.json",
-        expected_sha256=evidence_sha256(recorded),
-        request=stop_request(),
-        template=STOP_TEMPLATE,
-        route=ROUTE,
-    )
-    assert replayed == recorded
-    assert len(bridge.calls) == 1
+    assert replay(tmp_path, recorded) == recorded
 
 
 def _rewrite(path: Path, update) -> str:
@@ -154,7 +169,7 @@ def _rewrite(path: Path, update) -> str:
 @pytest.mark.parametrize(
     ("update", "message"),
     [
-        (lambda d: d["request"]["stop"].update(criterion="other"), "request differs"),
+        (lambda d: d["request"]["content"].update(criterion="other"), "request differs"),
         (lambda d: d["prompt"].update(response_schema_sha256="b" * 64), "prompt or response"),
         (lambda d: d["route"].update(model_id="other-model"), "route differs"),
     ],
@@ -190,18 +205,23 @@ def test_payload_edit_is_refused_by_the_anchoring_digest(tmp_path):
         )
 
 
+def _chained(evidence: JudgeCallEvidence, earlier: list[JudgeCallEvidence]):
+    """A later chain call; no multi-call content kind exists yet, so copy unvalidated."""
+    request = evidence.request.model_copy(
+        update={"call_index": len(earlier), "prior_turns": chain_prior_turns(earlier)}
+    )
+    return evidence.model_copy(update={"request": request})
+
+
 def test_reordered_call_chain_is_refused(tmp_path):
     """Defect: chained calls can be dropped, spliced or reordered undetected."""
-    first = run(tmp_path, StubBridge(), name="0.json")
-    second = run(
-        tmp_path,
-        StubBridge(),
-        stop_request(call_index=1, prior_turns=chain_prior_turns([first])),
-        name="1.json",
-    )
+    first = run(tmp_path, StubBridge())
+    second = _chained(first, [first])
     verify_call_chain([first, second])
-    with pytest.raises(JudgeEvidenceError):
+    with pytest.raises(JudgeEvidenceError, match="call_index"):
         verify_call_chain([second, first])
+    with pytest.raises(JudgeEvidenceError, match="earlier calls"):
+        verify_call_chain([first, _chained(first, [second])])
 
 
 @pytest.mark.parametrize(
@@ -209,32 +229,72 @@ def test_reordered_call_chain_is_refused(tmp_path):
     [
         ({**VERDICT, "decision": "maybe"}, "failed", "invalid_payload"),
         ({**VERDICT, "score": 1.0}, "failed", "invalid_payload"),
+        ("stop", "failed", "invalid_payload"),
+        ([VERDICT], "failed", "invalid_payload"),
         (ValueError("not JSON after retries"), "failed", "provider_error"),
         (ExecutionDeadlineExceeded("judge"), "timed_out", "deadline"),
     ],
-    ids=["bad_value", "extra_key", "provider", "deadline"],
+    ids=["bad_value", "extra_key", "string", "array", "provider", "deadline"],
 )
 def test_failed_calls_are_published_and_replayable(tmp_path, result, status, code):
     """Defect: an invalid or failed call is used, lost, or not inspectable."""
     recorded = run(tmp_path, StubBridge(result))
     assert (recorded.status, recorded.failure_code, recorded.payload) == (status, code, None)
-    replayed = verify_call_evidence(
-        tmp_path / "judge" / "0.json",
-        expected_sha256=evidence_sha256(recorded),
-        request=stop_request(),
-        template=STOP_TEMPLATE,
-        route=ROUTE,
+    assert replay(tmp_path, recorded) == recorded
+
+
+def test_inadmissible_payload_is_recorded_not_used(tmp_path):
+    """Defect: a schema-valid choice outside the request's admissible set is accepted."""
+    checked = replace(
+        STOP_TEMPLATE,
+        check_payload=lambda request, payload: (
+            "stop not allowed" if request.content.iteration < 4 else None
+        ),
     )
-    assert replayed == recorded
+    recorded = run(tmp_path, StubBridge(), template=checked)
+    assert (recorded.status, recorded.failure_code, recorded.failure_message) == (
+        "failed",
+        "inadmissible_choice",
+        "stop not allowed",
+    )
+    assert replay(tmp_path, recorded, checked) == recorded
 
 
-def test_cap_and_existing_evidence_refuse_before_any_call(tmp_path):
-    """Defect: a call exceeds its declared cap or silently reuses old evidence."""
+def _broken_factory(_route):
+    raise KeyError("OPENAI_API_KEY")
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"max_calls": 0}, "positive max_calls"),
+        ({"iteration": 2}, "usage context iteration"),
+    ],
+    ids=["cap", "context_iteration"],
+)
+def test_admission_refuses_before_any_call(tmp_path, kwargs, message):
+    """Defect: an uncapped or misattributed call reaches the provider."""
     bridge = StubBridge()
-    over_cap = stop_request(call_index=4, prior_turns=("c" * 64,) * 4)
-    with pytest.raises(JudgeCallRefused, match="exceeds the declared cap"):
-        run(tmp_path, bridge, over_cap)
+    with pytest.raises(JudgeCallRefused, match=message):
+        run(tmp_path, bridge, **kwargs)
+    assert not bridge.calls and not (tmp_path / "judge").exists()
+
+
+def test_existing_evidence_and_unavailable_bridge_refuse_without_a_call(tmp_path):
+    """Defect: old evidence is reused, or a setup failure escapes untyped."""
+    with pytest.raises(JudgeCallRefused, match="bridge unavailable: KeyError") as raised:
+        run_judge_call(
+            stop_request(),
+            template=STOP_TEMPLATE,
+            route=ROUTE,
+            context=JudgeRunContext(workspace=tmp_path, iteration=3, run_name="r", run_id="x"),
+            evidence_path=tmp_path / "judge" / "0.json",
+            max_calls=1,
+            bridge_factory=_broken_factory,
+        )
+    assert isinstance(raised.value.__cause__, KeyError)
     assert not (tmp_path / "judge").exists()
+    bridge = StubBridge()
     run(tmp_path, bridge)
     with pytest.raises(JudgeCallRefused, match="already exists"):
         run(tmp_path, bridge)
@@ -286,3 +346,22 @@ def test_a_health_invalid_body_cannot_present_a_metric_value():
     """Defect: the judge is shown an INVALID/UNKNOWN body's value as a usable score."""
     with pytest.raises(ValueError, match="Health-valid"):
         JudgeBodyFacts(iteration=1, value=0.1, rank=1, health="invalid")
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"final_iteration": 3}, "final boundary is never judged"),
+        ({"incumbent": 0.5, "incumbent_iteration": 1}, "rank-1 body"),
+        ({"non_improving_bodies": 4}, "cannot exceed"),
+        (
+            {"interpretation_digests": ("a" * 64,) * 4, "interpretation_excerpts": ("x",) * 4},
+            "one interpretation excerpt per",
+        ),
+    ],
+    ids=["final_boundary_Q_B2_6", "incumbent_not_rank_1", "non_improving", "excerpts"],
+)
+def test_stop_request_refuses_incoherent_facts(overrides, message):
+    """Defect: the judge sees a final-boundary call or facts the core could not produce."""
+    with pytest.raises(ValueError, match=message):
+        stop_content(**overrides)

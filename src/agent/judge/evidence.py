@@ -68,6 +68,9 @@ def verify_call_evidence(
     payload = evidence.payload
     if payload is not None and not isinstance(payload, template.response_model):
         raise JudgeEvidenceError("judge evidence payload is not the template's response type")
+    check = template.check_payload
+    if payload is not None and check is not None and check(request, payload) is not None:
+        raise JudgeEvidenceError("judge evidence payload is inadmissible for its request")
     return evidence
 
 
@@ -75,11 +78,13 @@ def verify_call_chain(evidences: Sequence[JudgeCallEvidence]) -> None:
     """Require one invocation's calls in recorded order, each covering all earlier ones."""
     if not evidences:
         return
-    invocation = evidences[0].request.invocation_sha256
+    first = evidences[0].request
     for index, evidence in enumerate(evidences):
         request = evidence.request
-        if request.invocation_sha256 != invocation:
+        if request.invocation_sha256 != first.invocation_sha256:
             raise JudgeEvidenceError("judge call chain mixes invocations")
+        if request.content.kind != first.content.kind:
+            raise JudgeEvidenceError("judge call chain mixes request content kinds")
         if request.call_index != index:
             raise JudgeEvidenceError(f"judge call {index} records call_index {request.call_index}")
         if request.prior_turns != chain_prior_turns(evidences[:index]):

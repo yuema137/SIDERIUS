@@ -22,6 +22,9 @@ class JudgeTemplate:
     response_model: type[BaseModel]
     render_user: Callable[[CallRequest], str]
     user_frame: str
+    # Request-aware admissibility of a validated payload; returns a refusal
+    # message (recorded as ``inadmissible_choice``) or ``None``.
+    check_payload: Callable[[CallRequest, BaseModel], str | None] | None = None
 
     @property
     def template_sha256(self) -> str:
