@@ -100,7 +100,8 @@ def _validate_advice_consumability(content: dict, *, resolved: str, observed: st
 
     Args:
         content: The parsed advice mapping.
-        resolved: Absolute path, for the message.
+        resolved: Names the bytes in the message: the CLI's resolved path, or a
+            path-free caller's label.
         observed: The artifact's observed digest, for the message — the
             operator needs to know WHICH bytes were refused.
 
@@ -178,7 +179,8 @@ class AdviceArtifact:
     """The advice artifact this process actually read.
 
     Attributes:
-        path: The resolved ABSOLUTE path the bytes came from.
+        path: Names the bytes: the CLI loader's resolved absolute path, or the
+            ``label`` a ``parse_advice_bytes`` caller supplied.
         sha256: The OBSERVED sha256 of those exact bytes. This — never a
             declared value — is what reaches the workspace lock.
         content: The parsed advice mapping, from the SAME bytes.
@@ -259,7 +261,8 @@ def parse_advice_bytes(data: bytes, *, label: str) -> AdviceArtifact:
     ``load_advice_artifact`` delegates here after its single read and digest
     certification, so a path-free caller (bytes uploaded to, or read no-follow
     by, the candidate console) gets the identical verdict and message text.
-    No file is opened.
+    No file is opened, and no size bound is applied: the caller owns it (the
+    console's 256 KiB request boundary for uploads, ``safe_bytes`` for reads).
 
     Args:
         data: The exact bytes to parse; the digest is computed over them.
@@ -272,7 +275,7 @@ def parse_advice_bytes(data: bytes, *, label: str) -> AdviceArtifact:
         mapping from the same bytes.
 
     Raises:
-        AdviceArtifactError: the bytes do not parse as a JSON object, or their
+        AdviceArtifactError: the bytes are not UTF-8 JSON or not a JSON object, or their
             content cannot inject (see ``_validate_advice_consumability``).
     """
     observed = hashlib.sha256(data).hexdigest()
@@ -282,6 +285,12 @@ def parse_advice_bytes(data: bytes, *, label: str) -> AdviceArtifact:
         raise AdviceArtifactError(
             f"advice artifact at {label} (sha256={observed}) is not valid JSON: {exc}"
         ) from exc
+    except UnicodeDecodeError as exc:
+        # Position only: the codec's own text quotes the offending byte.
+        raise AdviceArtifactError(
+            f"advice artifact at {label} (sha256={observed}) is not valid UTF-8 JSON "
+            f"(invalid byte at position {exc.start})."
+        ) from None
     if not isinstance(content, dict):
         raise AdviceArtifactError(
             f"advice artifact at {label} (sha256={observed}) must be a JSON "
