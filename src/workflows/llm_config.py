@@ -737,6 +737,9 @@ class WorkflowLLMConfig(BaseModel):
           construct `LitReviewLLMConfig` explicitly instead of using
           `.uniform()`. (Design Decision 3, 2026-06-11.)
 
+        The tuner selects the framework's native planner, so this legacy
+        profile runs on a clean install without an installed planner default.
+
         When called with no reflector overrides, the tuner uses the same
         provider/model for both sub-calls (legacy behavior).
 
@@ -764,6 +767,7 @@ class WorkflowLLMConfig(BaseModel):
             proposing=base_cfg,
         )
         tune_cfg = TunerLLMConfig(
+            planner_strategy="native-timing-v1",
             planner=base_cfg,
             reflector=NodeLLMConfig(
                 provider=reflect_provider or provider,  # type: ignore[arg-type]

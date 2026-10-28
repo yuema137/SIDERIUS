@@ -47,10 +47,14 @@ def test_default_all_eleven_actual_routes_and_export():
 
 @pytest.mark.parametrize(
     "profile",
-    ["automatic", *sorted(p.name for p in (checkout_root() / "configs/llm").glob("*.json"))],
+    [
+        "automatic",
+        "legacy",
+        *sorted(p.name for p in (checkout_root() / "configs/llm").glob("*.json")),
+    ],
 )
 def test_shipped_profile_resolves_one_planner_on_clean_install(profile, monkeypatch):
-    """Issue #1034: a shipped profile omitting the planner refused on a clean install.
+    """Issue #1034: a framework-built or shipped profile omitting the planner refused.
 
     A clean install declares no ``siderius.planner_strategy_defaults`` entry point,
     so an omitted selection finds zero providers and the run refuses before planning.
@@ -60,11 +64,12 @@ def test_shipped_profile_resolves_one_planner_on_clean_install(profile, monkeypa
         return []
 
     monkeypatch.setattr(strategies, "entry_points", clean_install)
-    config = (
-        WorkflowLLMConfig.default()
-        if profile == "automatic"
-        else WorkflowLLMConfig.from_json(str(checkout_root() / "configs/llm" / profile))
-    )
+    if profile == "automatic":
+        config = WorkflowLLMConfig.default()
+    elif profile == "legacy":
+        config = WorkflowLLMConfig.uniform("gemini", "legacy-model")
+    else:
+        config = WorkflowLLMConfig.from_json(str(checkout_root() / "configs/llm" / profile))
     assert config.tune is not None
     selected = strategies.resolve_planner_strategy(config.tune.planner_strategy)
     assert selected.identity.name == "native-timing-v1"

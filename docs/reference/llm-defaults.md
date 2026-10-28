@@ -42,7 +42,8 @@ repair attempts, workflow attempts and cumulative spending limits are distinct.
 Direct node retry behavior is unchanged. The automatic profile and its export
 select `tune.planner_strategy: native-timing-v1`, the framework's native planner,
 so a clean install with no `siderius.planner_strategy_defaults` provider resolves
-exactly one planner (issue #1034). No historical strategy is selected here;
+exactly one planner (issue #1034). The deprecated `--llm_model` profile
+(`WorkflowLLMConfig.uniform()`) selects the same native planner. No historical strategy is selected here;
 scientific historical behavior belongs to exp profiles, not model defaults.
 An explicit JSON file that omits `tune.planner_strategy` still resolves the
 installed default declaration, as described in

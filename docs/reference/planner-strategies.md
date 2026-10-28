@@ -22,16 +22,19 @@ standalone tuner exposes `--planner_strategy`. Workflow callers use their
   `siderius.planner_strategies`.
 - Omission resolves exactly one entry point in
   `siderius.planner_strategy_defaults`. There is no inferred scientific default.
-- Missing or ambiguous providers refuse before the planner request. Discovery
-  never downloads or installs anything. Install the experiment's declared
+- Missing or ambiguous providers refuse before the planner request. The
+  `ValueError` names `tune.planner_strategy` and the built-in
+  `native-timing-v1` as the fix, alongside installing exactly one declaring
+  experiment package. Discovery never downloads or installs anything. Install the experiment's declared
   compatibility distribution, or explicitly select an available provider.
 
 An explicit selection bypasses default discovery. The default is a deployment
 choice, not an inference from task names or prior scores. Providers are trusted
 installed Python code, with the same trust requirements as other task plugins.
-The framework's `configs/llm/*.json` profiles and the automatic profile from
+The framework's `configs/llm/*.json` profiles, the automatic profile from
 `WorkflowLLMConfig.default()` (used when `--llm_config` and `--llm_model` are
-omitted) explicitly select `native-timing-v1`; they do not require an installed
+omitted) and the deprecated `--llm_model` profile from
+`WorkflowLLMConfig.uniform()` explicitly select `native-timing-v1`; they do not require an installed
 experiment package. `test_economical_defaults.py` resolves every shipped
 profile with no installed entry points. Omission therefore applies only to an
 explicit configuration file, CLI call or direct API call that leaves the field

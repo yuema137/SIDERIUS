@@ -35,12 +35,14 @@ def test_manual_provider_reaches_request_without_mutating_execution_schema(monke
 
 
 def test_absent_and_ambiguous_install_defaults_refuse(monkeypatch):
+    """A refusal must name the config field and the built-in choice (issue #1034)."""
     for installed in ([], [object(), object()]):
         monkeypatch.setattr(
             strategies, "entry_points", lambda installed=installed, **kwargs: installed
         )
-        with pytest.raises(ValueError, match="Expected one declared"):
+        with pytest.raises(ValueError, match="Expected one declared") as refused:
             strategies.resolve_planner_strategy(None)
+        assert "tune.planner_strategy (built-in: native-timing-v1)" in str(refused.value)
 
 
 def test_explicit_selection_does_not_load_install_default(monkeypatch):

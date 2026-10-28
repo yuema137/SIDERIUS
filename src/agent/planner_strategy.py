@@ -19,6 +19,9 @@ from agent.prompt_templates.tuner.rendering import TunerTaskRender
 from agent.schemas.planner_timing import PlannerTimingContext
 from core.planner_strategy_identity import PlannerStrategyIdentity, source_fingerprint
 
+NATIVE_PLANNER_STRATEGY = "native-timing-v1"
+"""The framework's built-in planner; selecting it never loads an installed plugin."""
+
 
 @dataclass(frozen=True)
 class PlannerStrategy:
@@ -73,7 +76,7 @@ def resolve_planner_strategy(
     selection: str | None, *, expected: PlannerStrategyIdentity | None = None
 ) -> PlannerStrategy:
     """Use an explicit provider or the installed default; never guess a legacy version."""
-    if selection == "native-timing-v1":
+    if selection == NATIVE_PLANNER_STRATEGY:
         from agent import prompts
 
         digest = source_fingerprint({"prompts.py": Path(prompts.__file__).read_bytes()})
@@ -99,8 +102,9 @@ def resolve_planner_strategy(
     if len(matches) != 1:
         raise ValueError(
             f"Expected one declared planner strategy for {selection or 'installed default'!r}, "
-            f"found {len(matches)}. Select an installed version explicitly or install exactly "
-            "one experiment-owned default provider. No historical strategy is inferred."
+            f"found {len(matches)}. Set tune.planner_strategy (built-in: "
+            f"{NATIVE_PLANNER_STRATEGY}) or another installed provider, or install exactly one "
+            "experiment package that declares a default. No historical strategy is inferred."
         )
     resolved = matches[0].load()()
     if not isinstance(resolved, PlannerStrategy):
