@@ -1,14 +1,13 @@
 /** First-use journey witness: the operator's real first use in the default (beginner) view,
  * real Chromium + real authoring API + temporary projects (workflow_editor_server), 1440x1100.
- * Home -> connect in the header banner -> choose the project -> Home "Start from a template"
- * -> gallery (Blank workflow first) -> Use template -> the advice field has focus -> type
- * advice -> add a module with the `+` beside an unconnected output (added already wired)
- * -> Tidy up (one undoable edit) and drag a card -> set its Storage folder (and any other
- * external input) through "Create external input" -> Save opens the confirmation step ->
- * Save version writes the checked bytes -> Next: Run opens the Run page.
- * Asserts: advanced sections hidden, connection collapses to a header chip, canvas fully
- * visible without page scroll, cards never overlap after Tidy up, the template import does
- * not open the save step, and no unexpected POST before Save.
+ * Home -> connect in the header banner -> Home "Start from a template" -> gallery, Blank
+ * workflow first -> module search focused -> `+` beside the unconnected output adds Implement
+ * already wired -> drag + Tidy up (undoable, no overlap) -> Storage folder via "Create
+ * external input" -> Save opens the confirmation step (Cancel, then Save version).
+ * Then the runnable reusable project: Templates -> Use template -> advice focused -> type
+ * advice -> no dead `+` on the fixed template shape -> Tidy up -> Save version -> Next: Run.
+ * Also: advanced sections hidden, connection collapses to a header chip, canvas fully
+ * visible without page scroll, no POST other than checks before Save.
  * Explicit env: EDITOR_PYTHON, CONSOLE_PLAYWRIGHT_MODULE, CONSOLE_BROWSER_EXECUTABLE. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -77,11 +76,31 @@ try {
   assert.equal(await page.locator('#token').isHidden(), true);
   assert.ok((await page.locator('#access-section').boundingBox()).height <= 40, 'Connected state is one chip');
 
-  // 3. Choose the workflow project in the page bar; the canvas fills the window without page scroll.
-  await page.locator('nav a[href="#workflow"]').click(); await page.locator('#view-workflow').waitFor();
+  const ids = async () => page.locator('#editor-graph .circuit-card').evaluateAll(cards => cards.map(card => card.dataset.node));
+  const handleOf = id => page.locator(`.circuit-card[data-node="${id}"] > .circuit-add-next`);
+  const saveVersion = async name => {
+    await page.locator('#editor-review').click();
+    await page.locator('#editor-save-confirm').waitFor();
+    await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()), 'checked');
+    await page.locator('#editor-version-name').fill(name);
+    await page.screenshot({path: join(evidence, `save-step-${name}.png`)});
+    await page.locator('#editor-save').click();
+    await waitUntil(async () => (await status()).includes(`Saved reviewed bytes as version "${name}"`), `saved ${name}`);
+    assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'The step closes after Save');
+  };
+
+  // 3. Path A, build it yourself (first project, a one-module workflow): Home "Start from a
+  //    template" -> Blank workflow (first card) -> module search focused.
+  await page.locator('#home-start-template').click();
+  const gallery = page.locator('#editor-template-gallery');
+  await waitUntil(async () => new URL(page.url()).hash === '#workflow' && await gallery.evaluate(dialog => dialog.open), 'gallery');
   await waitUntil(async () => (await status()).includes('Opened supported'), 'first project');
-  await page.locator('#editor-project').selectOption('reusable');
-  await waitUntil(async () => (await page.locator('#editor-path').textContent()) === metadata.reusable_source, 'reusable project');
+  await gallery.locator('.template-card[data-template="single-loop-with-advice"]').waitFor();
+  assert.equal(await gallery.locator('.template-card').first().getAttribute('data-template'), 'blank', 'Blank workflow is the first card');
+  await gallery.locator('.template-card[data-template="blank"]').click();
+  await gallery.locator('#editor-template-blank').click();
+  await waitUntil(async () => !(await gallery.evaluate(dialog => dialog.open)), 'gallery closed');
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('palette-search')), true, 'Blank workflow focuses the module search');
   await page.waitForTimeout(100);
   const frame = await page.evaluate(() => {
     const viewport = document.querySelector('.circuit-viewport').getBoundingClientRect(), workspace = document.querySelector('.editor-workspace').getBoundingClientRect();
@@ -90,63 +109,36 @@ try {
   assert.equal(frame.scrollY, 0);
   assert.ok(frame.top >= 0 && frame.bottom <= frame.innerHeight && frame.workspaceBottom <= frame.innerHeight + 1 && frame.height >= 400,
     `Canvas visible without page scroll and tall: ${JSON.stringify(frame)}`);
-  assert.match(await page.locator('#editor-task-chip').textContent(), /^Task: /, 'Task state is one chip');
   await page.screenshot({path: join(evidence, 'workflow-open-1440.png')});
 
-  // 4. Home "Start from a template" opens the gallery; Blank workflow comes first.
-  await page.locator('nav a[href="#home"]').click();
-  await page.locator('#home-start-template').click();
-  const gallery = page.locator('#editor-template-gallery');
-  await waitUntil(async () => new URL(page.url()).hash === '#workflow' && await gallery.evaluate(dialog => dialog.open), 'gallery');
-  await gallery.locator('.template-card[data-template="single-loop-with-advice"]').waitFor();
-  assert.equal(await gallery.locator('.template-card').first().getAttribute('data-template'), 'blank', 'Blank workflow is the first card');
-  await gallery.locator('.template-card[data-template="single-loop-with-advice"]').click();
-  assert.equal(await gallery.locator('#editor-template-import').textContent(), 'Use template');
-  const sourceBefore = await readFile(metadata.reusable_source);
-  await gallery.locator('#editor-template-import').click();
-  await waitUntil(async () => !(await gallery.evaluate(dialog => dialog.open)), 'gallery closed');
-  await waitUntil(async () => (await status()).includes('Declaration validated'), 'template checked');
-  assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'A template import does not open the save step');
-  assert.ok((await readFile(metadata.reusable_source)).equals(sourceBefore), 'Using a template writes nothing');
-
-  // 5. "Use template" focuses the advice field; type advice.
-  await waitUntil(() => page.evaluate(() => document.activeElement?.classList.contains('advice-input')), 'advice focused');
-  const advice = 'Start with small models; earlier runs overfit after a few epochs.';
-  await page.keyboard.type(advice);
-  assert.equal(await page.locator('#editor-inspector .advice-input').inputValue(), advice);
-
-  // 6. Add a module with the `+` beside an unconnected output: it arrives already wired.
-  const ids = async () => page.locator('#editor-graph .circuit-card').evaluateAll(cards => cards.map(card => card.dataset.node));
+  // 4. `+` beside the unconnected output adds the next module already wired (one undo step).
   const before = await ids();
-  let source = null;
-  for (const id of before) {
-    const card = page.locator(`.circuit-card[data-node="${id}"]`);
-    await card.hover();
-    const handle = card.locator(':scope > .circuit-add-next');
-    if (!(await handle.count()) || !(await handle.isVisible())) continue;
-    await handle.click();
-    const options = page.locator('.canvas-add-popover .canvas-add-option');
-    await page.locator('.canvas-add-popover').waitFor();
-    assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('canvas-add-search')), true, 'Search has focus');
-    if (await options.count()) { await options.first().click(); source = id; break; }
-    await page.keyboard.press('Escape');
-  }
-  assert.ok(source, 'At least one unconnected output offers a module that accepts it');
-  await waitUntil(async () => (await ids()).length === before.length + 1, 'module added');
+  assert.deepEqual(before, ['p'], 'The first project holds one proposal module');
+  await page.locator('.circuit-card[data-node="p"]').hover();
+  await handleOf('p').click();
+  await page.locator('.canvas-add-popover').waitFor();
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('canvas-add-search')), true, 'Search has focus');
+  const options = page.locator('.canvas-add-popover .canvas-add-option');
+  assert.ok((await options.evaluateAll(items => items.map(item => item.dataset.protocol))).includes('proposal-to-implementation'), 'Implement accepts a model plan');
+  await page.locator('.canvas-add-search').fill('implement');
+  await page.locator('.canvas-add-popover .canvas-add-option[data-protocol="proposal-to-implementation"]').click();
+  await waitUntil(async () => (await ids()).length === 2, 'module added');
   const added = (await ids()).find(id => !before.includes(id));
-  await waitUntil(async () => (await page.locator(`.circuit-wire-target[data-from="${source}"][data-to="${added}"]`).count()) === 1, 'added module wired to its source');
+  await waitUntil(async () => (await page.locator(`.circuit-wire-target[data-from="p"][data-to="${added}"]`).count()) === 1, 'added module wired to its source');
   assert.match(await page.locator('#editor-undo').getAttribute('title'), /Add capability/, 'Add + wire is one undo step');
+  await page.locator('.circuit-card[data-node="p"]').hover();
+  assert.equal(await handleOf('p').count(), 0, 'A connected output no longer offers +');
 
-  // 7. Move cards: Tidy up (one undoable edit), then drag one card; cards never overlap.
+  // 5. Move cards: drag the new card, then Tidy up (one undoable edit); cards never overlap.
+  const heading = page.locator(`#circuit-node-${added}`), box = await heading.boundingBox();
+  await page.mouse.move(box.x + 30, box.y + 10); await page.mouse.down();
+  await page.mouse.move(box.x + 30, box.y + 74, {steps: 4}); await page.mouse.up();
+  await waitUntil(async () => /Move capability/.test(await page.locator('#editor-undo').getAttribute('title')), 'drag recorded');
   await page.locator('#circuit-tidy').click();
   await waitUntil(async () => /Tidy up layout/.test(await page.locator('#editor-undo').getAttribute('title')), 'tidy recorded');
   assert.deepEqual(await overlaps(), [], 'Tidy up leaves no overlapping cards');
-  const heading = page.locator(`#circuit-node-${added}`), box = await heading.boundingBox();
-  await page.mouse.move(box.x + 30, box.y + 10); await page.mouse.down();
-  await page.mouse.move(box.x + 30, box.y + 26, {steps: 4}); await page.mouse.up();
-  await waitUntil(async () => /Move capability/.test(await page.locator('#editor-undo').getAttribute('title')), 'drag recorded');
 
-  // 8. Storage folder (and any other external input) through "Create external input".
+  // 6. Storage folder through "Create external input" (no location is guessed).
   await heading.click();
   for (let round = 0; round < 6; round++) {
     const form = page.locator('#editor-inspector .external-input-create').first();
@@ -155,6 +147,7 @@ try {
     await form.locator('summary').click();
     const mode = form.locator('select[name="external-mode"]');
     if (await mode.count()) await mode.selectOption('file');
+    assert.equal(await form.locator('input[name="external-location"]').inputValue(), '');
     await form.locator('input[name="external-location"]').fill(`inputs/${socket.replace('.', '_')}.json`);
     const id = await form.locator('input[name="external-id"]').inputValue();
     await form.locator('button').click();
@@ -164,26 +157,52 @@ try {
   await waitUntil(async () => (await pending()).includes('· complete'), 'new module complete');
   assert.deepEqual(posts.filter(path => !/\/(draft|nodes-draft|review|template)$/.test(path)), [], 'Nothing is saved before Save');
 
-  // 9. Save: the check opens the confirmation step; Save version writes the checked bytes.
+  // 7. Save: the check opens the confirmation step; Save version writes the checked bytes.
   await page.locator('#editor-review').click();
   await page.locator('#editor-save-confirm').waitFor();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()), 'checked');
   assert.match(await page.locator('#editor-diff').textContent(), new RegExp(`id='${added}'`), 'The checked bytes add the new module');
-  await page.locator('#editor-version-name').fill('first-loop');
-  await page.screenshot({path: join(evidence, 'save-step-1440.png')});
-  await page.locator('#editor-save').click();
-  await waitUntil(async () => (await status()).includes('Saved reviewed bytes as version "first-loop"'), 'saved');
-  assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'The step closes after Save');
-  const saved = await readFile(metadata.reusable_source, 'utf8');
-  assert.ok(saved.includes(`id='${added}'`) && saved.includes(advice), 'Saved file holds the new module and the advice');
+  await page.locator('#editor-save-cancel').click();
+  assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'Cancel closes the step without saving');
+  await saveVersion('built-myself');
+  assert.match(await readFile(metadata.source, 'utf8'), new RegExp(`id='${added}'`), 'Saved file holds the new module');
 
-  // 10. Next: Run.
+  // 8. Path B, start from a template (runnable reusable project): Templates -> Use template ->
+  //    advice field focused -> type advice. A template is a complete fixed shape: no output
+  //    offers a dead `+` (the server's profile admits no extra module there).
+  await page.locator('#editor-project').selectOption('reusable');
+  await waitUntil(async () => (await page.locator('#editor-path').textContent()) === metadata.reusable_source, 'reusable project');
+  assert.match(await page.locator('#editor-task-chip').textContent(), /^Task: /, 'Task state is one chip');
+  await page.locator('#editor-template-open').click();
+  await gallery.locator('.template-card[data-template="single-loop-with-advice"]').click();
+  assert.equal(await gallery.locator('#editor-template-import').textContent(), 'Use template');
+  const sourceBefore = await readFile(metadata.reusable_source);
+  await gallery.locator('#editor-template-import').click();
+  await waitUntil(async () => !(await gallery.evaluate(dialog => dialog.open)), 'gallery closed');
+  await waitUntil(async () => (await status()).includes('Declaration validated'), 'template checked');
+  assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'A template import does not open the save step');
+  assert.ok((await readFile(metadata.reusable_source)).equals(sourceBefore), 'Using a template writes nothing');
+  await waitUntil(() => page.evaluate(() => document.activeElement?.classList.contains('advice-input')), 'advice focused');
+  const advice = 'Start with small models; earlier runs overfit after a few epochs.';
+  await page.keyboard.type(advice);
+  assert.equal(await page.locator('#editor-inspector .advice-input').inputValue(), advice);
+  for (const id of await ids()) {
+    await page.locator(`.circuit-card[data-node="${id}"]`).hover();
+    assert.equal(await handleOf(id).count(), 0, `${id}: no + where no module can follow`);
+  }
+  await page.locator('#circuit-tidy').click();
+  await waitUntil(async () => /Tidy up layout/.test(await page.locator('#editor-undo').getAttribute('title')), 'template tidy recorded');
+  assert.deepEqual(await overlaps(), [], 'Tidy up leaves the template cards disjoint');
+  await saveVersion('first-loop');
+  assert.ok((await readFile(metadata.reusable_source, 'utf8')).includes(advice), 'Saved file holds the advice');
+
+  // 9. Next: Run.
   const next = page.locator('#workflow-next-run');
   await waitUntil(async () => !(await next.isDisabled()), 'run gate open');
   await next.click(); await page.locator('#view-run').waitFor();
   assert.equal(new URL(page.url()).hash, '#run');
   assert.deepEqual(faults, []);
-  console.log(`PASS first-use journey: template -> advice -> + add wired -> tidy/drag -> storage input -> save step -> Run; screenshots in ${evidence}`);
+  console.log(`PASS first-use journey: Blank -> + add wired -> drag/tidy -> storage input -> save step; template -> advice -> tidy -> save -> Run; screenshots in ${evidence}`);
 } finally {
   await browser?.close();
   server.kill();

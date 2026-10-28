@@ -1054,22 +1054,36 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   Template imports run inside `editorPageBar.quietly()` and do not open it.
   `workflowEditor.state` gained presentation fields `reviewed`, `taskReview`,
   `taskSelected` and `taskBinding` (`{package_id, revision}` or null).
-- Canvas: header **Templates**; the circuit toolbar sits bottom-right of the canvas and
-  the connector legend bottom-left (`#editor-graph` grid). **Tidy up** (`#circuit-tidy`,
+- Canvas (at least 900 px wide): the canvas header holds **Templates**; the panel is a
+  flex column whose `#editor-graph` grid gives `.circuit-viewport` the remaining height
+  (at least 240 px); the panel scrolls only when its content cannot fit, and its header
+  is not sticky, so nothing covers the canvas. The circuit toolbar sits bottom-right of
+  the canvas and the connector legend bottom-left. The wire `<svg>` has
+  `pointer-events: none`; only `.circuit-wire-target` strokes take pointer hits, so
+  cards and ports stay hoverable and wires stay clickable. Below 900 px the panels keep
+  their natural height (no `--workspace-height`). **Tidy up** (`#circuit-tidy`,
   `layout-grid`) places every module with `editorCircuitGeometry.tidy`: columns by
   longest result-input path from a source, rows by the mean row of the sources (ties
   by id), steps = largest card + 80/32 px rounded up to 16 px, all on the 16 px grid.
   It is one draft edit through the ordinary `move` callback (label `Tidy up layout`,
   undoable, saved only with Save); Arrange view stays display-only.
 - `+` add-handle (`editor-canvas-add.js`, canvas-study V5): an output whose card feeds
-  no wire shows a 20 px `+` 8 px outside the card while the card is hovered, focused or
-  selected. It opens a search popover of catalog routes that have an argument with the
+  no wire, and whose contract at least one catalog route accepts, shows a 20 px `+` 8 px
+  outside the card while the card is hovered, focused or selected (no dead `+`; the
+  handles re-sync on the `editor-node-catalog` event after the catalog loads). It opens a search popover of catalog routes that have an argument with the
   output's contract id (`editorNodePalette.connectable`, presentation filter only).
   Choosing one calls `editorNodePalette.addConnected`, which adds a pending node 80 px
   right of the source with that argument (required first) bound to
   `{kind: 'result', node, port: 'result'}` as ONE draft edit (`Add capability <id>`);
   the server node inspection decides completeness as for palette adds. Esc closes.
 - Research loop is a section of the Selection panel (`#editor-loop.inspector-section`).
+- Templates are complete fixed shapes. Every template renders a reusable document whose
+  execution profile admits no extra module (the interpretation loop requires "one
+  interpreter and complete candidate"; the single step "exactly one proposal,
+  implementation and validation"). Their only free output is Train & tune, which no
+  catalog route accepts, so a template shows no `+`; its next step is advice and
+  parameters. `+` adds modules in free-form (schema 1) workflows. Adding modules to a
+  template shape needs a server-side profile change (not in this change).
 - Icons (spec §3): vendored Lucide sprite `static/icons.svg` (47 `<symbol id="i-NAME">`,
   shapes only, licence `static/icons-LICENSE.txt`, ISC + MIT for Feather-derived
   icons), exact-allowlisted as `image/svg+xml`. `icons.js` fetches it once, adopts only
@@ -1082,9 +1096,11 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
 - The page footer line was removed.
 
 Witnesses: `tests/browser/first_use_journey.mjs` (beginner first use at 1440×1100:
-Home → connect → project → Home template → Blank first → Use template → advice
-focused → `+` add wired → Tidy up and drag without overlap → Create external input →
-Save step → Save version → Next: Run; canvas visible without page scroll),
+Home → connect → Home template → Blank workflow first → module search focused → `+`
+adds Implement wired → drag and Tidy up without overlap → Create external input → Save
+step (Cancel, Save version); then the runnable project: Templates → Use template →
+advice focused → no `+` on the fixed shape → Tidy up → Save version → Next: Run; canvas
+visible without page scroll),
 `page_guidance.mjs`, `layout_onboarding.mjs`; `circuit_geometry.mjs` covers `tidy`
 in Node.
 

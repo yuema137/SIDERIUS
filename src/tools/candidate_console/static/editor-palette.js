@@ -111,7 +111,7 @@
     const revision = window.consoleSession.revision; loading = revision; renderList();
     try { const value = await window.consoleSession.request('editor/node-catalog'); if (revision === window.consoleSession.revision) { catalog = value.entries; guide = value.guide || null; } }
     catch (error) { if (!error.stale) host.querySelector('.palette-note').textContent = 'Capability catalog unavailable: ' + error.message; }
-    finally { if (loading === revision) loading = null; if (host) renderList(); }
+    finally { if (loading === revision) loading = null; if (host) renderList(); window.dispatchEvent(new Event('editor-node-catalog')); }
   }
   function mount(container, graphElement, callbacks) {
     host = container; canvas = graphElement; actions = callbacks; host.replaceChildren();

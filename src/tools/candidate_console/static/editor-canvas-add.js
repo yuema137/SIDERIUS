@@ -1,5 +1,6 @@
 /* `+` add-handles on unconnected outputs (canvas-study V5): presentation only.
- * When a card is hovered, focused or selected, an output that feeds no wire shows a `+`.
+ * When a card is hovered, focused or selected, an output that feeds no wire shows a `+`,
+ * but only if at least one catalog route accepts that output's contract (no dead `+`).
  * It opens a small search of the catalog routes that accept that output's contract
  * (editor-palette.js connectable, the presentation filter of GET /api/editor/node-catalog);
  * choosing one adds the module to the right with that input already connected, as ONE
@@ -59,7 +60,7 @@
       const nodeId = card.dataset.node, output = card.querySelector(`#circuit-output-${CSS.escape(nodeId)}`);
       const connected = !!graph.querySelector(`.circuit-wire-target[data-from="${CSS.escape(nodeId)}"]`);
       let handle = card.querySelector(':scope > .circuit-add-next');
-      const wanted = output && output.dataset.contract && !output.disabled && !connected;
+      const wanted = output && output.dataset.contract && !output.disabled && !connected && palette().connectable(output.dataset.contract).length > 0;
       if (!wanted) { handle?.remove(); continue; }
       if (!handle) {
         handle = element('button', '', card, 'circuit-add-next'); handle.type = 'button';
@@ -76,4 +77,5 @@
   new MutationObserver(() => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; sync(); }); }).observe(graph, {childList: true, subtree: true});
   document.addEventListener('pointerdown', event => { if (popover && !popover.contains(event.target) && !event.target.closest?.('.circuit-add-next')) close(false); });
   window.addEventListener('console-view', () => close(false));
+  window.addEventListener('editor-node-catalog', sync);
 })();

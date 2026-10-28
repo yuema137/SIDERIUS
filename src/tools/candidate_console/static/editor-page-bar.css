@@ -5,8 +5,8 @@
 .icon { flex: none; vertical-align: -3px; }
 [data-icon] { display: inline-flex; align-items: center; gap: var(--space-2); }
 button[data-icon] { justify-content: center; }
-.link-button { min-height: 32px; padding: 0 var(--space-2); border-color: transparent; background: transparent; color: var(--primary); font-weight: 600; text-decoration: underline; }
-.link-button:not(:disabled):hover { background: transparent; color: var(--primary-hover); }
+.link-button { min-height: 32px; padding: 0 var(--space-2); border-color: var(--panel); background: var(--panel); color: var(--primary); font-weight: 600; text-decoration: underline; }
+.link-button:not(:disabled):hover { background: var(--bg); color: var(--primary); }
 
 /* Connection (L6): a full-width banner under the header items until connected, then one chip. */
 .access-section { order: 99; flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); }
@@ -26,8 +26,11 @@ button[data-icon] { justify-content: center; }
 .page-bar-project select { width: auto; max-width: 240px; min-height: 32px; padding-block: 0; }
 .status-chip { min-height: 28px; max-width: 280px; padding: 0 var(--space-3); border-color: var(--border); border-radius: var(--radius-pill); background: var(--bg); color: var(--text); font-size: var(--font-label); font-weight: 600; }
 .status-chip .chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A long package id truncates instead of widening the page (min-content would keep its full text). */
+.page-bar-project > *, .status-chip { min-width: 0; }
 .status-chip.needs-attention { border-color: var(--warning); color: var(--text); background: var(--warning-bg); }
-.status-chip:not(:disabled):hover { background: var(--hover); }
+.status-chip:not(:disabled):hover { background: var(--panel); border-color: var(--control-border); }
+.status-chip.needs-attention:not(:disabled):hover { background: var(--warning-bg); border-color: var(--warning); }
 .page-bar .actions { justify-content: flex-end; }
 .edit-actions { display: flex; gap: var(--space-1); margin-right: auto; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; }
@@ -53,23 +56,38 @@ button[data-icon] { justify-content: center; }
 .page-status { align-items: baseline; }
 #editor-status { color: var(--text); }
 
-/* Docked frame fills the window below the page bar (editor-page-bar.js measures it). */
-.editor-workspace { height: var(--workspace-height, calc(100vh - 96px)); }
-.workflow-canvas-panel { position: relative; display: flex; flex-direction: column; overflow: hidden !important; }
-.canvas-header-actions { position: absolute; z-index: 3; top: var(--space-2); right: var(--space-4); }
-.canvas-header-actions button { min-height: 32px; padding: 0 var(--space-3); }
-.workflow-canvas-panel > #editor-graph { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto; column-gap: var(--space-3); }
-#editor-graph > .circuit-message { grid-column: 1 / -1; grid-row: 1; }
-#editor-graph > .circuit-disconnect { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
-#editor-graph > .circuit-viewport { grid-column: 1 / -1; grid-row: 3; height: auto; min-height: 240px; max-height: none; }
-/* Canvas controls bottom-right, the connector legend bottom-left (canvas-study V2, K14). */
-#editor-graph > .circuit-contract-legend { grid-column: 1; grid-row: 4; margin: var(--space-2) 0 0; }
-#editor-graph > .circuit-toolbar { grid-column: 2; grid-row: 4; justify-self: end; align-self: start; margin: var(--space-2) 0 0; }
-#editor-graph > .circuit-view-note { grid-column: 1 / -1; grid-row: 5; margin: var(--space-1) 0 0; }
+/* The wire layer never takes pointer hits itself: only wire strokes (.circuit-wire-target,
+ * pointer-events: stroke) do, so cards and ports above or beside it stay hoverable. */
+.circuit-world svg { pointer-events: none; }
+.workflow-canvas-panel > h2 { gap: var(--space-2); }
+.canvas-header-actions { margin-left: auto; }
+.canvas-header-actions button { min-height: 32px; padding: 0 var(--space-3); font-size: var(--font-label); }
 .workflow-canvas-panel:has(.circuit-card) > .start-guide { display: none; }
 .start-guide { display: grid; justify-items: center; gap: var(--space-2); }
 .start-guide #onboarding-start { font-size: var(--font-help); }
+/* Desktop only (>= 900px): the docked frame fills the window below the page bar
+ * (editor-page-bar.js measures --workspace-height) and the canvas viewport takes the
+ * canvas panel's remaining height. The panel scrolls only when its content cannot fit
+ * (e.g. an open legend in a short window); its header then scrolls with it (not sticky),
+ * so nothing ever covers the canvas. Below 900px the panels keep their natural height. */
+@media (min-width: 900px) {
+  .editor-workspace { height: var(--workspace-height, calc(100vh - 96px)); }
+  .editor-workspace > .workflow-canvas-panel { display: flex; flex-direction: column; overflow-y: auto; }
+  .editor-workspace > .workflow-canvas-panel > * { flex: none; }
+  .editor-workspace > .workflow-canvas-panel > h2 { position: static; }
+  .workflow-canvas-panel > #editor-graph { flex: 1 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(240px, 1fr) auto auto; column-gap: var(--space-3); }
+  #editor-graph > .circuit-message { grid-column: 1 / -1; grid-row: 1; }
+  #editor-graph > .circuit-disconnect { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  #editor-graph > .circuit-viewport { grid-column: 1 / -1; grid-row: 3; height: auto; min-height: 240px; max-height: none; }
+  /* Canvas controls bottom-right, the connector legend bottom-left (canvas-study V2, K14). */
+  #editor-graph > .circuit-contract-legend { grid-column: 1; grid-row: 4; margin: var(--space-2) 0 0; }
+  #editor-graph > .circuit-toolbar { grid-column: 2; grid-row: 4; justify-self: end; align-self: start; margin: var(--space-2) 0 0; }
+  #editor-graph > .circuit-view-note { grid-column: 1 / -1; grid-row: 5; margin: var(--space-1) 0 0; }
+  /* Without cards the empty state leads; the empty viewport stays the palette drop target. */
+  .workflow-canvas-panel:not(:has(.circuit-card)) > #editor-graph { grid-template-rows: auto auto minmax(0, 1fr) auto auto; }
+  .workflow-canvas-panel:not(:has(.circuit-card)) #editor-graph > .circuit-viewport { min-height: 0; }
+}
 
 /* Research loop: a section of the Selection panel (L5), separated by a divider. */
 .workflow-inspector-panel .inspector-section { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border); }
@@ -77,15 +95,10 @@ button[data-icon] { justify-content: center; }
 .workflow-task-details .editor-task-controls > h2 { display: none; }
 
 @media (max-width: 899px) {
-  .workflow-canvas-panel { overflow: visible !important; }
-  .workflow-canvas-panel > #editor-graph { display: block; }
-  #editor-graph > .circuit-viewport { height: min(70vh, 620px); }
-  .canvas-header-actions { position: static; margin-bottom: var(--space-2); }
+  .page-bar-project { flex-wrap: wrap; }
   .page-bar-project select { max-width: 160px; }
+  .status-chip { max-width: 100%; }
 }
-/* Without cards the empty state leads; the (empty) viewport shrinks to the remaining room
- * and stays the palette drop target. */
-.workflow-canvas-panel:not(:has(.circuit-card)) #editor-graph > .circuit-viewport { min-height: 0; }
 
 /* `+` add-handle on an unconnected output (editor-canvas-add.js, canvas-study V5): shown
  * while the card is hovered, focused or selected; 8px outside the card's right edge. */
@@ -98,7 +111,7 @@ button[data-icon] { justify-content: center; }
 .canvas-add-list { display: grid; gap: var(--space-1); overflow: auto; }
 .canvas-add-list p { margin: 0; }
 .canvas-add-option { display: flex; min-height: 36px; padding: 0 var(--space-2); border-color: transparent; background: var(--panel); color: var(--text); text-align: left; font-weight: 500; }
-.canvas-add-option:not(:disabled):hover { background: var(--hover); }
+.canvas-add-option:not(:disabled):hover { background: var(--bg); }
 .canvas-add-heading { grid-template-columns: 20px minmax(0, 1fr); }
 .canvas-add-heading svg { width: 20px; height: 20px; }
 .circuit-view-button .icon { margin-right: var(--space-1); }
