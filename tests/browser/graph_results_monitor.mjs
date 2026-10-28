@@ -47,7 +47,7 @@ try {
       total_attempts: 3, metric: {metric_id: 'example_score', direction: 'higher', verb: 'maximize', comparative: 'higher', antonym: 'lower'},
       metric_source: 'run_output_metric_spec', ranking_refusal: null, secondary_metrics: [], headline: headline(iteration * 4, `exp-${iteration}`),
       status_counts: {success: 3},
-    }}))});
+    }, ...(iteration === 2 ? {skipped: [{node_id: 'build1', reason: 'route_not_selected'}]} : {})}))});
     return reply({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture', state: 'completed',
       process: {status: 'exited', reason: 'observed'}, finishing: false, receipt_available: true, native_status: 'completed',
       native_id: 'fixture-run', validation_passed: true, reason: 'native_terminal'});
@@ -69,6 +69,8 @@ try {
   assert.equal(await panel.getByText('TRAIN & TUNE state', {exact: true}).count(), 2, 'stage uses the paper capability label');
   assert.equal(await panel.locator('.graph-result-body').count(), 2, 'per-body summaries remain separate');
   assert.equal(requests.filter(item => item.path.endsWith('/graph-results')).length, 1, 'results are read once after terminal status');
+  assert.equal(await panel.locator('.graph-result-skipped').count(), 1, 'only the routed body lists skipped nodes');
+  assert.ok(await panel.getByText('Skipped, not run: build1 (route not selected)', {exact: true}).count());
   assert.ok(requests.every(item => item.method === 'GET'));
   assert.deepEqual(faults, []);
   await page.screenshot({path: resolve(tmpdir(), 'siderius-graph-results-monitor.png'), fullPage: true});

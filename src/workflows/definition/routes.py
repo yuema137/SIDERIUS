@@ -8,6 +8,7 @@ arms: a path's last target can be reached directly, avoiding the other arms.
 """
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 from .catalog import CAPABILITIES, ROUTE_OBSERVABLES
 from .models import (
@@ -43,6 +44,87 @@ def route_entries(branch: Branch) -> tuple[tuple[str, ...], ...]:
     return cases if branch.default is None else (*cases, branch.default)
 
 
+@dataclass(frozen=True)
+class RouteTarget:
+    """One route entry target: the branch whose decision admits it and its source."""
+
+    branch: str
+    source: str
+    # True when the target binds no data from the branch source: the source then
+    # only has to finish with a record (succeeded or rejected), not succeed (B1-Q1).
+    control_only: bool
+
+
+@dataclass(frozen=True)
+class MergeArm:
+    """One merge candidate and the entry targets of the arm it lies in."""
+
+    node: str
+    entry: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MergeArms:
+    """One ``SelectedSource`` argument of a consumer, resolved to its branch arms."""
+
+    branch: str
+    candidates: tuple[MergeArm, ...]
+
+
+def branch_arms(definition: WorkflowDefinition | ReusableWorkflowDefinition, facts: Facts) -> Arms:
+    """Every branch's arms, in ``route_entries`` order; ``facts`` include control edges."""
+    children: dict[str, set[str]] = {vertex: set() for vertex, _ in facts}
+    for node, sources in facts:
+        for source in sources:
+            children[source].add(node)
+    return {
+        branch.id: tuple(
+            _arm(branch.source.node, entry, children) for entry in route_entries(branch)
+        )
+        for branch in definition.routes
+    }
+
+
+def route_targets(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> dict[str, RouteTarget]:
+    """Each route entry target of a validated definition and how it reads its source."""
+    data: dict[str, set[str]] = {}
+    for consumer, source in bound_sources(definition):
+        if isinstance(source, ResultSource):
+            data.setdefault(consumer, set()).add(source.node)
+        elif isinstance(source, SelectedSource):
+            data.setdefault(consumer, set()).update(item.node for item in source.candidates)
+    return {
+        target: RouteTarget(
+            branch=branch.id,
+            source=branch.source.node,
+            control_only=branch.source.node not in data.get(target, set()),
+        )
+        for branch in definition.routes
+        for entry in route_entries(branch)
+        for target in entry
+    }
+
+
+def merge_arms(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition, facts: Facts
+) -> dict[str, tuple[MergeArms, ...]]:
+    """Each merge consumer's ``SelectedSource`` arguments with their candidates' arm entries."""
+    arms = branch_arms(definition, facts)
+    branches = {branch.id: route_entries(branch) for branch in definition.routes}
+    merges: dict[str, list[MergeArms]] = {}
+    for consumer, merge in _selected_sources(definition):
+        candidates = tuple(
+            MergeArm(node=item.node, entry=entry)
+            for item in merge.candidates
+            for entry, arm in zip(branches[merge.branch], arms[merge.branch], strict=True)
+            if item.node in arm
+        )
+        merges.setdefault(consumer, []).append(MergeArms(merge.branch, candidates))
+    return {consumer: tuple(items) for consumer, items in merges.items()}
+
+
 def validate_routes(
     definition: WorkflowDefinition | ReusableWorkflowDefinition,
     facts: Facts,
@@ -56,11 +138,7 @@ def validate_routes(
     if len(branches) != len(definition.routes):
         raise ValueError("Branch IDs must be unique")
     capabilities = {node.id: node.capability for node in definition.nodes}
-    children: dict[str, set[str]] = {vertex: set() for vertex, _ in facts}
-    for node, sources in facts:
-        for source in sources:
-            children[source].add(node)
-    arms: Arms = {}
+    arms = branch_arms(definition, facts)
     targeted: set[str] = set()
     for branch in definition.routes:
         contract = CAPABILITIES[capabilities[branch.source.node]].output
@@ -71,7 +149,6 @@ def validate_routes(
         if len(flat) != sum(len(entry) for entry in entries) or flat & targeted:
             raise ValueError(f"route {branch.id}: a node may be one target of one branch")
         targeted |= flat
-        arms[branch.id] = tuple(_arm(branch.source.node, entry, children) for entry in entries)
     _check_merges(definition, branches, arms)
     if not definition.routes:
         return
@@ -176,7 +253,13 @@ def _check_arm_dependencies(
     arms: Arms,
     order: tuple[str, ...],
 ) -> None:
-    """Refuse a node depending on two exclusive arms of one branch except through a merge."""
+    """Refuse a node depending on two exclusive arms of one branch except through a merge.
+
+    An adaptor is exempt and carries no arm label: it is ready once every bound
+    source is terminal and treats a skipped source as inadmissible (B6-D8), so it
+    never inherits a skip and runs whichever arm was selected.
+    """
+    adaptors = {adaptor.id for adaptor in definition.adaptors}
     plain: dict[str, set[str]] = {vertex: set() for vertex in order}
     merged: dict[str, list[SelectedSource]] = {vertex: [] for vertex in order}
     for consumer, source in bound_sources(definition):
@@ -205,6 +288,9 @@ def _check_arm_dependencies(
         for merge in merged[node]:
             for item in merge.candidates:
                 current |= {label for label in labels[item.node] if label[0] != merge.branch}
+        if node in adaptors:
+            labels[node] = frozenset()
+            continue
         branches = [branch for branch, _ in current]
         if len(branches) != len(set(branches)):
             raise ValueError(f"{node}: depends on two exclusive arms without a merge")

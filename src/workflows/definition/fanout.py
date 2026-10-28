@@ -2,8 +2,10 @@
 
 from dataclasses import dataclass
 
+from .adaptor_strategies import FirstAdmissibleSelect, PassCombine, SingleDistribute
 from .candidate import check_tuning_edge, refuse_declaration_only
 from .models import (
+    AdaptorSource,
     ExternalRequest,
     ExternalSource,
     ProtocolRequest,
@@ -12,6 +14,7 @@ from .models import (
     ReusableWorkflowDefinition,
     WorkflowDefinition,
 )
+from .routes import branch_arms
 from .validation import predecessor_facts
 
 
@@ -37,6 +40,21 @@ class InterpretationEdge:
     input_binding: str
 
 
+# S1 (B6-3): fanout branches -> first passing validator -> one tuner.
+SELECTION_PROFILE = "native-proposal-fanout-selection/v1"
+# B1-PR5: the S1 node set plus declared routes, e.g. a fallback branch that runs
+# only when the first validator rejects (B1-Q1/Q2). The only profile admitting routes.
+ROUTED_PROFILE = "native-routed-candidate/v1"
+
+
+@dataclass(frozen=True)
+class AdaptorSelection:
+    """The one admitted selection adaptor and its bound validators, in declared order."""
+
+    adaptor: str
+    validators: tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class ProposalFamilies:
     families: tuple[ProposalFanout, ...]
@@ -44,6 +62,7 @@ class ProposalFamilies:
     literature: LiteratureEdge | None = None
     interpretation: InterpretationEdge | None = None
     tuning: str | None = None
+    selection: AdaptorSelection | None = None
 
     @property
     def branches(self) -> tuple[tuple[str, str], ...]:
@@ -70,7 +89,15 @@ def execution_families(
     definition: WorkflowDefinition | ReusableWorkflowDefinition, profile: str | None
 ) -> ProposalFamilies:
     """Select only an explicitly supported native graph profile."""
-    refuse_declaration_only(definition)
+    refuse_declaration_only(
+        definition,
+        admits_adaptors=profile in (SELECTION_PROFILE, ROUTED_PROFILE),
+        admits_routes=profile == ROUTED_PROFILE,
+    )
+    if profile == SELECTION_PROFILE:
+        return selection_candidate(definition)
+    if profile == ROUTED_PROFILE:
+        return routed_candidate(definition)
     if profile == "native-interpretation-candidate/v1":
         return interpretation_candidate(definition)
     if profile == "native-literature-candidate/v1":
@@ -155,6 +182,73 @@ def _proposal_branches(
         ),
         facts,
     )
+
+
+def selection_candidate(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> ProposalFamilies:
+    """S1: one proposal's complete branches, a first-admissible adaptor, one tuner.
+
+    The adaptor binds every validator result exactly once; its declared binding
+    order is the selection order. Only the deterministic S1 strategy triple is
+    admitted, so the adaptor emits at most one validation result.
+    """
+    facts = predecessor_facts(definition)
+    tuners = [node for node in definition.nodes if node.capability == "tuning"]
+    if len(tuners) != 1 or len(definition.adaptors) != 1:
+        raise ValueError("selection requires exactly one adaptor and one tuning node")
+    tuner, adaptor = tuners[0], definition.adaptors[0]
+    candidate = definition.model_copy(
+        update={"nodes": tuple(node for node in definition.nodes if node.id != tuner.id)}
+    )
+    shape = _proposal_branches(candidate, facts, external_proposals=True)
+    if len(shape.families) != 1:
+        raise ValueError("selection requires one external proposal")
+    family = shape.families[0]
+    if not (
+        isinstance(adaptor.combine, PassCombine)
+        and isinstance(adaptor.select, FirstAdmissibleSelect)
+        and isinstance(adaptor.distribute, SingleDistribute)
+    ):
+        raise ValueError("selection requires pass/v1, first-admissible/v1 and single/v1")
+    if len(adaptor.inputs) != 1 or adaptor.inputs[0].contract != "validation.output":
+        raise ValueError("selection requires one validation.output input port")
+    sources = adaptor.bindings[0].sources
+    validators = tuple(source.node for source in sources if isinstance(source, ResultSource))
+    if len(validators) != len(sources) or sorted(validators) != sorted(
+        validation for _, validation in family.branches
+    ):
+        raise ValueError("the selection adaptor must bind every validator result exactly once")
+    check_tuning_edge(tuner.request, family.proposal, AdaptorSource(adaptor=adaptor.id))
+    return ProposalFamilies(
+        shape.families,
+        facts,
+        tuning=tuner.id,
+        selection=AdaptorSelection(adaptor.id, validators),
+    )
+
+
+def routed_candidate(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> ProposalFamilies:
+    """S1 plus routes over implementation/validation arms only (B1-Q1(a), not Q1(b)).
+
+    An arm containing the tuner or the selection adaptor would gate training on a
+    predicate (Q1(b), not chosen): a body could then complete without training.
+    """
+    if not definition.routes:
+        raise ValueError("the routed profile requires at least one declared route")
+    shape = selection_candidate(definition)
+    allowed = {
+        node.id for node in definition.nodes if node.capability in ("implementation", "validation")
+    }
+    for branch, arms in branch_arms(definition, predecessor_facts(definition)).items():
+        if any(arm - allowed for arm in arms):
+            raise ValueError(
+                f"route {branch}: the routed profile routes only implementation/validation "
+                "arms, never the adaptor or the tuner"
+            )
+    return shape
 
 
 def literature_candidate(
