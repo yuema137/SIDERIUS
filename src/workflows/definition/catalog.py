@@ -247,7 +247,9 @@ _COMBINE_OWNER = "workflows.adaptors.combine.combine"
 _SELECT_OWNER = "workflows.adaptors.select.select"
 _DISTRIBUTE_OWNER = "workflows.adaptors.run.run_deterministic_adaptor"
 
-# Closed set of declarable adaptor strategy kinds (B6). The kind string carries its
+# Closed set of adaptor strategy kinds (B6). ``collect/v1`` is reserved: its model is
+# declarable but validation refuses it until its ``<contract>.collection`` output and
+# consumer protocol are catalogued (B6-4/B6-9). The kind string carries its
 # version; a changed semantic is a new row. LLM kinds join with their B2 owner.
 ADAPTOR_STRATEGIES = MappingProxyType(
     {

@@ -115,9 +115,8 @@ def _check_port(port: InputPort, binding: PortBinding, resolve: Resolve, context
 
 
 def _capacity(adaptor: AdaptorInstance) -> int:
-    """Most items the ports can hold: ``max_items`` where declared, else the bound sources."""
-    sources = {binding.port: len(binding.sources) for binding in adaptor.bindings}
-    return sum(port.max_items or sources[port.name] for port in adaptor.inputs)
+    """Most items the ports can hold: the bound sources (topology is static, B6-D6)."""
+    return sum(len(binding.sources) for binding in adaptor.bindings)
 
 
 def _check_strategies(adaptor: AdaptorInstance) -> None:
@@ -170,12 +169,15 @@ def _check_value_count(adaptor: AdaptorInstance, bound_max: int) -> None:
     select, distribute = adaptor.select, adaptor.distribute
     if isinstance(adaptor.combine, FieldRankCombine):
         # Entries of one value: only split-items/v1 distributes them, one per output.
-        if (
-            isinstance(select, TopKSelect)
-            and isinstance(distribute, SplitItemsDistribute)
-            and select.k > distribute.count
-        ):
-            raise ValueError(f"top-k/v1 k={select.k} exceeds split-items/v1 count")
+        if isinstance(select, TopKSelect) and isinstance(distribute, SplitItemsDistribute):
+            if select.k > distribute.count:
+                raise ValueError(f"top-k/v1 k={select.k} exceeds split-items/v1 count")
+            if distribute.on_short == "fail" and distribute.count > select.k:
+                # At most k entries survive, so a fail policy could never fill count outputs.
+                raise ValueError(
+                    f"split-items/v1 count={distribute.count} with on_short='fail' can never "
+                    f"be filled by top-k/v1 k={select.k}"
+                )
         return
     if not isinstance(adaptor.combine, PassCombine | MetricRankCombine):
         return  # one combined value

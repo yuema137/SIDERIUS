@@ -234,6 +234,23 @@ def test_adaptor_declarations_roundtrip_through_json_and_source(build):
     assert "    AdaptorInstance,\n" in source and "CollectCombine" not in source
 
 
+def test_reusable_v2_declaration_accepts_adaptors_and_roundtrips_source():
+    """B6-D2: v2 carries the same gated fields; a v1-only field or import would break this."""
+    from workflows.definition import ReusableWorkflowDefinition, ReusableWorkflowDocument
+
+    payload = strongest_findings().model_dump(mode="json")
+    payload.update(schema_version=2, task={"manifest": "task.json", "data_root": "data"})
+    definition = ReusableWorkflowDefinition.model_validate_json(json.dumps(payload))
+    assert definition.adaptor_format == FORMAT and len(definition.adaptors) == 2
+    document = ReusableWorkflowDocument(definition=definition)
+    source = render_workflow_source(document)
+    assert parse_workflow_source(source) == document
+    assert "    SplitItemsDistribute,\n" in source
+    payload.pop("adaptor_format")
+    with pytest.raises(ValidationError, match="require adaptor_format"):
+        ReusableWorkflowDefinition.model_validate_json(json.dumps(payload))
+
+
 def test_adaptor_source_index_is_omitted_only_when_absent():
     """An index=None dumped into canonical JSON would differ from the rendered source."""
     payload = first_passing().model_dump(mode="json")
@@ -401,7 +418,7 @@ S5_REFUSALS = [
         "threshold/v1 basis 'rubric' cannot read metric-rank/v1",
     ),
     (lambda p: _top(p).update(select={"kind": "first-admissible/v1"}), "requires pass/v1"),
-    # all/threshold are bounded by declared max_items, not only today's source count.
+    # all/threshold may keep every bound source; three cannot fit two outputs.
     (
         lambda p: (
             _top(p).update(
@@ -413,7 +430,8 @@ S5_REFUSALS = [
                 },
                 distribute={"kind": "per-item/v1", "count": 2, "on_short": "skip"},
             ),
-            _port(p).update(max_items=3),
+            p["nodes"].append(dict(p["nodes"][0], id="t3")),
+            _sources(p).append({"kind": "result", "node": "t3", "port": "result"}),
         ),
         "threshold/v1 may keep 3 values; per-item/v1 accepts at most 2",
     ),
@@ -425,15 +443,25 @@ def test_invalid_ranking_declarations_are_refused(change, match):
     _refused(best_run, change, match)
 
 
-def test_metric_threshold_within_the_declared_bound_is_accepted():
-    """The capacity rule must not refuse a threshold whose ports fit the distribute count."""
+def test_metric_threshold_within_the_bound_sources_is_accepted():
+    """Capacity is the bound source count: a generous max_items must not cause a false refusal."""
     payload = best_run().model_dump(mode="json")
     _top(payload).update(
         select={"kind": "threshold/v1", "basis": "metric", "metric_id": "m", "at_least": 0.5},
         distribute={"kind": "per-item/v1", "count": 2, "on_short": "skip"},
     )
-    _port(payload).update(max_items=2)
+    _port(payload).update(max_items=5)
     WorkflowDefinition.model_validate_json(json.dumps(payload))
+
+
+def test_split_wider_than_top_k_is_refused_only_under_a_fail_policy():
+    """At most k entries survive top-k, so count > k with on_short='fail' can only fail."""
+    payload = strongest_findings().model_dump(mode="json")
+    _top(payload)["distribute"].update(count=3, on_short="skip")
+    WorkflowDefinition.model_validate_json(json.dumps(payload))
+    _top(payload)["distribute"].update(on_short="fail")
+    with pytest.raises(ValidationError, match="can never be filled by top-k/v1 k=2"):
+        WorkflowDefinition.model_validate_json(json.dumps(payload))
 
 
 def routed_pick() -> dict:

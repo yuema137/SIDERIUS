@@ -248,7 +248,9 @@ declaration digests and source bytes (pinned: the shipped examples in
 `candidate.refuse_declaration_only` refuses any document with `adaptor_format`
 ("adaptors are declared but this execution profile does not admit them",
 `ADAPTORS_NOT_ADMITTED`), after the routing refusal, in every shape check that
-preview, preparation, worker and verifier admission use. Execution is B6-3.
+preview, preparation, worker and verifier admission use. A v2 document with
+`training_settings` runs those checks during declaration validation and therefore
+cannot declare adaptors until B6-3 admits an adaptor profile. Execution is B6-3.
 
 ### Models
 
@@ -305,8 +307,9 @@ Refused with a fixed message naming the adaptor (never coerced):
 | SELECT/COMBINE | `first-admissible/v1` requires `pass/v1`; `top-k/v1` and `threshold/v1` require a ranking (`metric-rank/v1`, `field-rank/v1`); `threshold/v1` requires its basis' ranking (`metric` → `metric-rank/v1`; `rubric` → a B2 rubric ranking, so refused until B2) |
 | split field | `split-items/v1` field must equal `SPLITTABLE_ITEMS[contract]` |
 | cardinality | `derive_cardinality(select, distribute)` must be satisfiable |
-| value count (`pass`/`metric-rank`) | `top-k/v1` `k` must not exceed what DISTRIBUTE accepts (`single`/`replicate`: 1, `per-item`: `count`); `all/v1`/`threshold/v1` require port capacity ≤ the derived bound max, where capacity sums `max_items` where declared, else the bound source count (the bound excludes the source count) |
+| value count (`pass`/`metric-rank`) | `top-k/v1` `k` must not exceed what DISTRIBUTE accepts (`single`/`replicate`: 1, `per-item`: `count`); `all/v1`/`threshold/v1` require the number of bound sources ≤ the derived bound max (the bound excludes the source count; topology is static, B6-D6, so `max_items` is not used) |
 | value count (`field-rank`) | `top-k/v1` `k` must not exceed `split-items/v1` `count` |
+| unfillable split (`field-rank`) | `top-k/v1(k)` then `split-items/v1(count > k, on_short="fail")`: at most `k` entries survive, so the adaptor could only fail |
 | output index | `AdaptorSource.index` is absent for `single/v1` and `< count` for `per-item`/`split-items`/`replicate` |
 
 Run-time-only facts (list lengths, admissibility, metric identity) stay with the

@@ -94,9 +94,8 @@ an input.
 `top-k(k)` caps max at `k`; `first-admissible` caps it at 1. An unsatisfiable
 pair (min > max) raises `ValidationError`. The bound excludes the source count:
 `all/v1` and `threshold/v1` keep up to every admissible item, so declaration
-validation refuses them unless the ports' capacity (`max_items` where declared,
-else the bound source count, summed) is `<= bound.max`; at run time an excess
-raises.
+validation refuses them unless the number of bound sources (static topology,
+B6-D6) is `<= bound.max`; at run time an excess raises.
 
 Declaration errors refused before admission (`incompatible_pair`, also a
 B6-1 validation-table row): `per-item/v1` after `collect/v1`,
