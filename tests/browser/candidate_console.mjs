@@ -246,7 +246,9 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).isDisabled(), true);
   assert.ok((await page.locator('#launch-status').textContent()).includes(hostile));
   assert.equal(await page.evaluate(() => window.hostile), undefined);
-  assert.equal(await page.locator('img').count(), 0);
+  // Hostile text must never create an image; the static brand logos are the only <img> elements.
+  assert.equal(await page.locator('img:not([data-brand-logo])').count(), 0);
+  assert.equal(await page.locator('img[data-brand-logo]').count(), 4, 'Only the four static brand logos');
   readinessBlocked = true;
   const frozenReview = await page.locator('#review').textContent();
   await page.getByRole('button', { name: 'New preparation', exact: true }).click();

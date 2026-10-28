@@ -47,6 +47,9 @@ try {
   const output = page.locator('#circuit-output-propose'), input = page.locator('#circuit-input-implement-output');
   assert.equal(await wire.count(), 1);
 
+  // A user scrolls the canvas into view before pointing at a wire; off-screen points have no hit target.
+  await page.locator('.circuit-viewport').scrollIntoViewIfNeeded();
+  await wire.scrollIntoViewIfNeeded();
   const wirePoint = await hitPoint(wire);
   assert.ok(wirePoint);
   assert.equal(await page.evaluate(({x, y}) => document.elementFromPoint(x, y)?.classList.contains('circuit-wire-target'), wirePoint), true, 'A visible wire stroke receives pointer hits');

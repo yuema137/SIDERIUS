@@ -130,7 +130,9 @@ try {
     assert.ok(!(anchor.x >= card.left && anchor.x <= card.right && anchor.y >= card.top && anchor.y <= card.bottom), `step ${index + 1}: the card does not cover its anchor`);
     await page.screenshot({path: join(evidence, `tour-step-${index + 1}-1440-${theme}.png`)});
   };
-  await page.locator('#onboarding-start').click();
+  // With a workflow open the empty-canvas guide is gone; a user opens the tour from header Help.
+  assert.equal(await page.locator('#onboarding-start').isVisible(), false, 'The empty-canvas tour entry yields to the workflow');
+  await page.locator('#onboarding-help').click();
   await checkStep(0, 'light');
   assert.equal(await page.locator('#onboarding-back').isDisabled(), true);
   await page.locator('#onboarding-next').click(); await checkStep(1, 'light');
