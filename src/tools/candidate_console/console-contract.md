@@ -682,14 +682,16 @@ loop-only changes → `LoopProposal` on `anchor.source`; no change →
 `SourceProposal(anchor.source)`. Dirty Source text reviews as `SourceProposal`;
 its reviewed projection becomes the new anchor as one history step. Binding
 inspection (`POST …/draft`, read-only) belongs to the current patch set: layout
-or inspector edits keep it, any patch change (including undo/redo) re-inspects,
+or inspector edits keep it, any patch change (including undo/redo) re-inspects (a binding edit that returns
+to the loaded bindings inspects nothing and clears the previous problems list),
 and Review stays disabled until the current patch set inspects `complete`. A
 no-op input event is not an edit. The server API is unchanged.
 Training-settings actions from `editor-node-parameters.js` (value, mode, per-field
 Reset) are draft operations too: typing in one field coalesces, each Reset is its
 own undo step, and undo/redo re-render the badges from the restored document.
 History: every operation records one undo step (consecutive typing in one field
-coalesces, limit 200). **Undo**/**Redo** buttons and Ctrl/Cmd+Z,
+coalesces, limit 200). Secondary **Undo**/**Redo** buttons (Save stays the one
+primary editor action) and Ctrl/Cmd+Z,
 Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only) restore
 earlier states and invalidate any review. **Discard changes** restores the loaded
 state without reading disk and is itself undoable, including dirty Source text:
