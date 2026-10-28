@@ -29,6 +29,7 @@ from core.local_code import (
 )
 from workflows.custom_adaptors.contracts import READABLE_CONTRACTS
 from workflows.custom_adaptors.errors import CustomAdaptorError
+from workflows.definition.adaptor_strategies import MAX_ADAPTOR_OUTPUTS
 from workflows.definition.catalog import CUSTOM_EMITTABLE
 
 AdaptorId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_.-]{2,99}$")]
@@ -70,7 +71,7 @@ class InputPortSpec(_Model):
 
 class OutputSpec(_Model):
     contract: str
-    count: Annotated[int, Field(ge=1, le=64)] = 1
+    count: Annotated[int, Field(ge=1, le=MAX_ADAPTOR_OUTPUTS)] = 1
 
 
 class AdaptorLimits(_Model):

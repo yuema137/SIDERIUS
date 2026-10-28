@@ -29,6 +29,7 @@ from workflows.adaptors import (
 )
 from workflows.adaptors.record import canonical_sha256
 from workflows.definition.adaptor_strategies import (
+    MAX_ADAPTOR_OUTPUTS,
     AllSelect,
     CardinalityBound,
     CollectCombine,
@@ -509,3 +510,31 @@ def test_adaptor_input_provenance_refuses_a_route_merge():
     payload = ref(0).model_dump(mode="json") | {"source": merge.model_dump(mode="json")}
     with pytest.raises(ValidationError, match="never a route merge"):
         AdaptorInputRef.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    ("model", "fields"),
+    [
+        (PerItemDistribute, {"on_short": "skip"}),
+        (SplitItemsDistribute, {"field": "findings", "on_short": "skip"}),
+        (ReplicateDistribute, {}),
+    ],
+)
+def test_distribute_count_is_capped_at_the_adaptor_output_owner(model, fields):
+    """Unbounded fan-out defeats static topology: 10**9 must be refused at declaration,
+    while the cap itself stays admissible."""
+    with pytest.raises(ValidationError):
+        model(count=10**9, **fields)
+    assert model(count=MAX_ADAPTOR_OUTPUTS, **fields).count == MAX_ADAPTOR_OUTPUTS
+
+
+def test_custom_adaptor_output_count_shares_the_same_ceiling():
+    """B6-5 custom manifests and built-in DISTRIBUTE must cap fan-out identically."""
+    from workflows.custom_adaptors.manifest import OutputSpec
+
+    def spec(count):
+        return OutputSpec(contract="findings/v1", count=count)
+
+    assert spec(MAX_ADAPTOR_OUTPUTS).count == MAX_ADAPTOR_OUTPUTS
+    with pytest.raises(ValidationError):
+        spec(MAX_ADAPTOR_OUTPUTS + 1)
