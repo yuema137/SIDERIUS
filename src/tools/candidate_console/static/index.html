@@ -56,6 +56,7 @@
   <script src="/run-steps.js" defer></script>
   <script src="/reusable-run.js" defer></script>
   <script src="/new-run.js" defer></script>
+  <script src="/browser-data.js" defer></script>
   <script src="/native-chain.js" defer></script>
   <script src="/onboarding.js" defer></script>
   <script src="/page-guidance.js" defer></script>
@@ -78,6 +79,7 @@
     <h2>Settings</h2>
     <label class="setting"><input type="checkbox" data-ui-setting="advanced"><span><strong>Show advanced tools</strong><span>Source editor, references, version history, mapping details and contract ids, native chains and recorded examples.</span></span></label>
     <label class="setting"><input type="checkbox" data-ui-setting="developer"><span><strong>Show developer details</strong><span>Operation facts, raw token tables, captured resources and save internals.</span></span></label>
+    <div class="setting" data-ui-flag="advanced"><button id="forget-browser-data" type="button" class="secondary">Forget this browser's console data</button><span id="forget-browser-data-status" class="muted" role="status"></span></div>
   </section>
 </header>
 <nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#monitor">Monitor</a></nav>

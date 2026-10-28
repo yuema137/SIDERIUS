@@ -217,6 +217,8 @@ try {
   await page.unroute('**/reusable-preparations/prepare');
   await page.locator('#new-run-operation-status').filter({hasText: 'Keep it'}).waitFor();
   assert.equal(await page.locator('#new-run-dismiss').isDisabled(), true, 'not_found never proves absence');
+  // SEC-4: browser data cannot be forgotten while this project's run is unconfirmed.
+  assert.equal(await page.locator('#forget-browser-data').isDisabled(), true);
   // A typed unknown_operation after this page's Retry offers Forget (R-3), and stops polling.
   statusFixture = {status: 404, json: {error: {code: 'unknown_operation', message: 'fixture unknown'}}};
   await page.locator('#new-run-operation-status').filter({hasText: 'still has no record'}).waitFor();

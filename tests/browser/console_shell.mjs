@@ -151,7 +151,23 @@ try {
   assert.equal(await page.evaluate(() => window.pollTimers), 5, 'Monitor status poll, operation-list refresh, Run preparation and launch polls (idle without their condition), and one reachability probe');
   assert.equal(requests.filter(item => item.path === '/api/operations').length >= 1, true);
   assert.deepEqual(faults, []);
-  console.log('PASS: compact connection, operation list opens Status and logs, rounded scores, journey-first Home, aligned shell');
+  // SEC-4: "Forget this browser's console data" removes preferences and remembered ids,
+  // and keeps records that may belong to a still-running operation of another store.
+  const foreign = 'siderius.reusable-preparation.v2/ffffffffffffffffffffffffffffffff/other';
+  await page.evaluate(name => {
+    localStorage.setItem('siderius.console.theme', 'dark'); localStorage.setItem('siderius.operation_id', '12121212-1212-4212-8212-121212121212');
+    localStorage.setItem(name, '{}'); localStorage.setItem('siderius.loop-resume.v2/ffffffffffffffffffffffffffffffff/abc', '{}');
+  }, foreign);
+  await page.locator('nav a[href="#home"]').click(); // Monitor routes re-remember their UUID.
+  await page.locator('#settings-toggle').click();
+  assert.equal(await page.locator('#forget-browser-data').isEnabled(), true);
+  page.once('dialog', dialog => { assert.match(dialog.message(), /2 records that may belong to a still-running operation are kept/); void dialog.accept(); });
+  await Promise.all([page.waitForEvent('load'), page.locator('#forget-browser-data').click()]);
+  // The harness init script re-enables the view flags on every load; ignore those.
+  const remaining = await page.evaluate(() => Object.keys(localStorage).filter(name => name.startsWith('siderius.') && !name.startsWith('siderius.console.ui.')).sort());
+  assert.deepEqual(remaining, ['siderius.loop-resume.v2/ffffffffffffffffffffffffffffffff/abc', foreign].sort());
+  assert.deepEqual(faults, []);
+  console.log('PASS: compact connection, operation list opens Status and logs, rounded scores, journey-first Home, aligned shell, forget browser data');
 } finally {
   await browser?.close();
   server.kill();

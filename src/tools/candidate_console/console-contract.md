@@ -928,7 +928,17 @@ event, cross-tab channel or document-transfer mechanism carries credentials.
 Theme enum, optional last-operation UUID and the versioned exact reusable launch
 intent are persisted. The launch intent contains only origin/project navigation
 context, retained preparation identity, request digest and operation UUID; never
-source bytes, native requests or credentials.
+source bytes, native requests or credentials. Operation-bearing records are keyed by the
+opaque operations store id: reusable intents (`…v2/<store>/<project>`) and loop
+Resume request ids (`siderius.loop-resume.v2/<store>/<predecessor UUID>`; a legacy
+`siderius.loop-resume.v1:<UUID>` with the same receipt digest is moved on first use).
+Preferences (theme, view flags, tour) and the last-opened operation UUID stay per
+origin because they are read before connecting. Settings (advanced) **Forget this
+browser's console data** (`browser-data.js`) removes every `siderius.*` key except
+records that may name an unfinished operation (reusable intents of other stores or
+projects, loop Resume ids); it is disabled while the open project's own retained run is
+unreleased (`reusableIntents.clearable()`), asks for confirmation, changes nothing on
+the server and reloads the page.
 Reload/new tab requires Connect again. Once connected, the access card collapses
 on every view to one status line with **Change token** (reopens the form; the
 current connection stays until a new Connect) and **Disconnect console** (clears the

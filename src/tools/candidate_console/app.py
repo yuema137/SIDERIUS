@@ -244,6 +244,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "operation-outcome.js": "text/javascript",
             "run-steps.js": "text/javascript",
             "quick-start.js": "text/javascript",
+            "browser-data.js": "text/javascript",
             "navigation.js": "text/javascript",
             "editor-entry.js": "text/javascript",
             "styles.css": "text/css",

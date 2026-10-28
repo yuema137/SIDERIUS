@@ -182,7 +182,7 @@ try {
   assert.deepEqual(Object.keys(resumePosts[0]).sort(), ['expected_receipt_digest', 'predecessor_operation_id', 'request_id']);
   assert.equal(resumePosts[0].predecessor_operation_id, pausing);
   assert.equal(resumePosts[0].expected_receipt_digest, digest);
-  const retainedId = await page.evaluate(id => JSON.parse(localStorage.getItem('siderius.loop-resume.v1:' + id)).request_id, pausing);
+  const retainedId = await page.evaluate(id => JSON.parse(localStorage.getItem(`siderius.loop-resume.v2/${window.consoleSession.operationsStoreId}/${id}`)).request_id, pausing);
   assert.equal(retainedId, resumePosts[0].request_id, 'the request UUID is retained before submission');
   assert.equal(await page.evaluate(() => location.hash), '#monitor/' + resumed);
 
@@ -200,7 +200,7 @@ try {
   await page.locator('#loop-continued').filter({hasText: 'Continued by ' + resumed}).waitFor();
   assert.equal(await page.locator('#loop-successor').getAttribute('href'), '#monitor/' + resumed);
   assert.ok(await resumeGroup.isHidden(), 'a continued segment offers no second Resume');
-  assert.equal(await page.evaluate(id => localStorage.getItem('siderius.loop-resume.v1:' + id), pausing), null, 'retained intent released once the successor is observed');
+  assert.equal(await page.evaluate(id => localStorage.getItem(`siderius.loop-resume.v2/${window.consoleSession.operationsStoreId}/${id}`), pausing), null, 'retained intent released once the successor is observed');
 
   // A declared stop condition completed the loop early: the receipt's reason reads in plain words.
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, thresholdStop);

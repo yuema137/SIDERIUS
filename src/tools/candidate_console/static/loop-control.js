@@ -25,11 +25,24 @@
     }
     return `${after}: stop condition ${reason.kind}`;
   }
-  const retainedKey = id => 'siderius.loop-resume.v1:' + id.toLowerCase();
-  function retained(review) {
+  // Keyed by the operations store (SEC-4): an id retained for another console's store is
+  // never reused here. Legacy per-origin keys are still read so a pending retry replays.
+  const legacyKey = id => 'siderius.loop-resume.v1:' + id.toLowerCase();
+  const retainedKey = (store, id) => `siderius.loop-resume.v2/${store}/${id.toLowerCase()}`;
+  async function storeId() {
+    return session().operationsStoreId || (await session().choices()).operations_store_id;
+  }
+  function retained(review, store) {
     // One client-generated request UUID per reviewed paused receipt survives reloads, so a retry
     // after an unconfirmed outcome reuses it and the owner replays instead of reserving twice.
-    const key = retainedKey(review.predecessor_operation_id);
+    const key = retainedKey(store, review.predecessor_operation_id);
+    try {
+      const legacy = JSON.parse(localStorage.getItem(legacyKey(review.predecessor_operation_id)) || 'null');
+      if (legacy?.origin === location.origin && legacy.expected_receipt_digest === review.expected_receipt_digest && localStorage.getItem(key) === null) {
+        localStorage.setItem(key, JSON.stringify(legacy));
+        localStorage.removeItem(legacyKey(review.predecessor_operation_id));
+      }
+    } catch (_) { /* An unreadable legacy record is ignored. */ }
     try {
       const value = JSON.parse(localStorage.getItem(key) || 'null');
       if (value?.origin === location.origin && value.expected_receipt_digest === review.expected_receipt_digest) return value.request_id;
@@ -84,7 +97,11 @@
     const successor = status.successor_operation_id;
     const link = $('loop-successor');
     $('loop-continued').hidden = !successor;
-    if (successor) { link.textContent = successor; link.href = '#monitor/' + successor; localStorage.removeItem(retainedKey(status.operation_id)); }
+    if (successor) {
+      link.textContent = successor; link.href = '#monitor/' + successor;
+      localStorage.removeItem(legacyKey(status.operation_id));
+      if (session().operationsStoreId) localStorage.removeItem(retainedKey(session().operationsStoreId, status.operation_id));
+    }
     const resumable = status.native_status === 'paused' && !successor && !status.finishing;
     const resume = request.resume, review = resume.review;
     $('loop-resume-group').hidden = !resumable;
@@ -128,7 +145,7 @@
     if (!last || !review || resume.pending || !review.credential_readiness.ready || !session().connected) return;
     resume.pending = true; resume.error = ''; render(last);
     try {
-      const handle = await session().request('loop-resumes', {request_id: retained(review), predecessor_operation_id: review.predecessor_operation_id, expected_receipt_digest: review.expected_receipt_digest});
+      const handle = await session().request('loop-resumes', {request_id: retained(review, await storeId()), predecessor_operation_id: review.predecessor_operation_id, expected_receipt_digest: review.expected_receipt_digest});
       if (current === request) location.hash = 'monitor/' + handle.operation_id;
     } catch (error) {
       if (error.stale) return;
