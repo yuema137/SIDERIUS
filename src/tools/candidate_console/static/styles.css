@@ -456,3 +456,5 @@ header.console-header { position: relative; min-height: var(--bar-height); }
 .quick-start { width: min(520px, calc(100vw - 32px)); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); color: var(--text); }
 .quick-start::backdrop { background: rgb(0 0 0 / 45%); }
 .quick-start h2 { margin-top: 0; }
+/* L-2: one cause line for a failed run, taken from its log. */
+.monitor-cause { padding: var(--space-2) var(--space-3); border-left: 3px solid var(--error); overflow-wrap: anywhere; }

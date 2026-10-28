@@ -907,10 +907,17 @@ step (`python -m tools.candidate_operations status --store-config … --operatio
 Manual UUID entry remains available.
 
 Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
-(M-2); `state`, `native_status`, process, reason and validation stay in the developer
+(M-2; native `failed`, `timed_out` and `interrupted` read "Failed: …" in plain words,
+and a store `unknown` state whose process reason is `missing_identity` reads
+"… is starting."). For a failed operation `#monitor-cause` shows "Cause (from the
+log): <last exception line>" (`operationOutcome.cause`, the last line shaped like
+`Name(Error|Exception|Failure|Refusal): …`) from the log text already displayed; the
+Run page reads the last 64 KiB of the native, then operation, log once and appends the
+same line. Loop body counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
 Operation facts. `#operation-observed` shows local time (ISO and UUID in its title).
-After one full read of a terminal state (`completed`/`operation_failed`, process
-`exited`, not `finishing`) the operation is no longer polled (status, log, tokens) and
+After a terminal state (`completed`/`operation_failed`, process `exited`, not
+`finishing`) has been read and its log drained to `observed_size`, the operation is
+no longer polled (status, log, tokens) and
 the line reads `Final status · observed …` (M-5); a 404 `unknown_operation` reads "This
 console has no operation with this ID…" and also stops polling (M-3). Re-entering
 Monitor or an explicit **Read operation** reads it again. Network failures keep the

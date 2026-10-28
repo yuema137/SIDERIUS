@@ -21,7 +21,8 @@
   const unfinished = () => operations.some(item => !['completed', 'operation_failed'].includes(item.state));
   function progress(loop) {
     if (!loop) return '';
-    return loop.attempted_iterations == null ? `loop up to ${loop.final_iteration} bodies` : `${loop.attempted_iterations} of ${loop.final_iteration} bodies`;
+    const bodies = window.operationOutcome.plural(loop.final_iteration, 'body', 'bodies');
+    return loop.attempted_iterations == null ? `loop up to ${bodies}` : `${loop.attempted_iterations} of ${bodies}`;
   }
   function markCurrent() {
     const selected = (window.consoleNavigation?.operation || '').toLowerCase();

@@ -7,7 +7,7 @@
   let monitorEpoch = 0, generation = 0, invalidRoute = false;
   // Monitor stops reading an operation after one full read of a terminal state (M-5) or a
   // typed unknown_operation (M-3); re-entering its route reads it once more.
-  let settled = '';
+  let settled = '', lastStatus = null;
   // Display only: strip ANSI CSI sequences (colour/cursor codes); the source log is unchanged (M-6).
   const plainLog = text => text.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
   const localTime = value => { const time = new Date(value); return Number.isNaN(time.getTime()) ? String(value) : time.toLocaleString(); };
@@ -180,7 +180,7 @@
   });
   function setMonitor(id) {
     if (monitorId.toLowerCase() === id.toLowerCase()) return;
-    monitorEpoch++; settled = ''; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
+    monitorEpoch++; settled = ''; lastStatus = null; $('monitor-cause').hidden = true; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
     $('token-rows').replaceChildren(); $('tokens-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
     say('remembered-operation', '');
     observedLine(id, null, false);
@@ -201,7 +201,7 @@
     try {
       const status = await api('operations/' + id);
       if (epoch !== monitorEpoch) return;
-      terminal = window.operationOutcome.terminal(status);
+      terminal = window.operationOutcome.terminal(status); lastStatus = status;
       window.renderNativeChain(status); window.renderLoopControl(status);
       // One plain outcome sentence (M-2); the raw enums stay in developer facts.
       const finishing = status.finishing ? ' The result is in; the worker is still finishing.' : '';
@@ -229,9 +229,13 @@
       logText = (chunk.truncated ? '[Source log truncated; cursor reset by server]\n' : '') + logText + plainLog(chunk.text);
       if (logText.length > 262144) logText = '[Earlier displayed text omitted]\n' + logText.slice(-262144);
       say('log', logText);
+      // L-2: a failed run names its cause in one line, taken from the log shown below.
+      const failure = window.operationOutcome.failed(lastStatus) ? window.operationOutcome.cause(logText) : null;
+      $('monitor-cause').hidden = !failure;
+      say('monitor-cause', failure ? 'Cause (from the log): ' + failure : '');
       say('log-status', chunk.missing ? 'Log not available yet.' : `Log observed: ${chunk.observed_size} source bytes · Next byte offset: ${cursor}`);
       // One full read after a terminal state, then no further polling of this operation.
-      if (terminal && epoch === monitorEpoch) settled = id;
+      if (terminal && epoch === monitorEpoch && (chunk.missing || cursor >= chunk.observed_size)) settled = id;
     } catch (error) {
       if (error.stale) return;
       if (epoch !== monitorEpoch) return;

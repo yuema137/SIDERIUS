@@ -109,8 +109,29 @@
     const sentence = !value.state && value.observation === 'existing'
       ? 'This run already exists (no second one was started); checking its status…'
       : window.operationOutcome.sentence(value);
-    $('operation-status').textContent = sentence + (terminal ? ' Details and logs are in Monitor.' : ' Follow it in Monitor.');
+    $('operation-status').textContent = sentence + (terminal ? ' Details and logs are in Monitor.' : ' Follow it in Monitor.') +
+      (causeFor === value.operation_id && causeText ? ` Cause (from the log): ${causeText}` : '');
     controls();
+    if (terminal && window.operationOutcome.failed(value) && causeFor !== value.operation_id) void showCause(value.operation_id);
+  }
+  // L-2: one cause line for a failed run, read once from the end of its logs.
+  let causeFor = null, causeText = '';
+  async function showCause(id) {
+    causeFor = id; causeText = '';
+    for (const kind of ['native', 'operation']) {
+      try {
+        const head = await session.request(`operations/${id}/log?kind=${kind}&offset=0&max_bytes=1`);
+        if (head.missing) continue;
+        const offset = Math.max(0, head.observed_size - 65536);
+        const tail = await session.request(`operations/${id}/log?kind=${kind}&offset=${offset}&max_bytes=65536`);
+        const found = window.operationOutcome.cause(tail.text);
+        if (found && intent?.payload.candidate_operation_id === id) {
+          causeText = found;
+          $('operation-status').textContent += ` Cause (from the log): ${found}`;
+          return;
+        }
+      } catch (error) { if (error.stale) return; }
+    }
   }
   function unresolvedMessage(error) {
     if (error.code === 'unknown_operation') {

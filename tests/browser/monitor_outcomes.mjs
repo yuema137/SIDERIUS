@@ -21,6 +21,7 @@ const lines = createInterface({input: server.stdout});
 const rejected = '56565656-5656-4656-8656-565656565656';
 const running = '78787878-7878-4878-8878-787878787878';
 const unknown = '9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a';
+const crashed = 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc';
 const delay = ms => new Promise(done => setTimeout(done, ms));
 let browser;
 try {
@@ -65,10 +66,15 @@ try {
     if (url.pathname.endsWith('/graph-results')) return reply({operation_id: id, available: false, bodies: []});
     if (url.pathname.endsWith('/log')) {
       const offset = Number(url.searchParams.get('offset'));
+      if (id === crashed) {
+        const text = 'Traceback (most recent call last):\n  File "worker.py", line 1\nexecute_tools.health_checks.launch_policy.FormalLaunchPolicyError: a formal launch must declare --healthgate_mode\n';
+        return reply({text: offset === 0 ? text : '', next_offset: text.length, observed_size: text.length, truncated: false, missing: false});
+      }
       return reply({text: offset === 0 ? '\u001b[31mred error\u001b[0m and <b>markup</b>\n' : '', next_offset: 42, observed_size: 42, truncated: false, missing: false});
     }
     if (id === unknown) return reply({error: {code: 'unknown_operation', message: 'this operation store has no operation with this ID'}}, 404);
     if (id === rejected) return reply(base(rejected, {}));
+    if (id === crashed) return reply(base(crashed, {native_status: 'failed', validation_passed: null, loop: {final_iteration: 1, attempted_iterations: 1}}));
     if (id === running) return reply(base(running, {state: 'active', process: {status: 'alive', reason: 'observed'}, receipt_available: false, native_status: null, validation_passed: null}));
     throw new Error('unexpected path ' + url.pathname);
   });
@@ -112,6 +118,12 @@ try {
   const settled = reads[rejected];
   await delay(4500);
   assert.equal(reads[rejected], settled, 'Polling stops after a terminal state');
+
+  // L-2: a failed run says so plainly and names its cause from the log.
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, crashed);
+  await page.locator('#monitor-status').filter({hasText: 'Failed: the run stopped with an error before finishing.'}).waitFor();
+  await page.locator('#monitor-cause').filter({hasText: 'Cause (from the log): execute_tools.health_checks.launch_policy.FormalLaunchPolicyError: a formal launch must declare'}).waitFor();
+  assert.match(await page.locator('#loop-state').textContent(), /after 1 of 1 body\./, 'Singular body');
 
   // M-3: a typed unknown_operation says so and stops polling.
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, unknown);

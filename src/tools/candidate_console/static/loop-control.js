@@ -9,7 +9,7 @@
   let request = null, last = null;
   const counted = (loop, verb) => loop.attempted_iterations == null
     ? `${verb}; the body count is unavailable.`
-    : `${verb} after ${loop.attempted_iterations} of ${loop.final_iteration} bodies.`;
+    : `${verb} after ${loop.attempted_iterations} of ${loop.final_iteration} bod${loop.final_iteration === 1 ? 'y' : 'ies'}.`;
   // The receipt's verified stop reason in plain words; numbers are display-rounded and the
   // exact recorded values stay available as the state's tooltip (see render).
   const number = value => window.consoleNumbers ? window.consoleNumbers.format(value) : String(value);
@@ -57,7 +57,7 @@
     const loop = status.loop, segment = status.kind === 'candidate_loop_resume' ? 'Resumed segment. ' : '';
     if (status.state === 'operation_failed' && !status.receipt_available) return segment + 'Research loop outcome unavailable: the operation failed without a native receipt.';
     if (!status.receipt_available) {
-      let text = segment + `Research loop: up to ${loop.final_iteration} bodies. The body count is reported by the native receipt at a completed boundary.`;
+      let text = segment + `Research loop: up to ${loop.final_iteration} bod${loop.final_iteration === 1 ? 'y' : 'ies'}. The body count is reported by the native receipt at a completed boundary.`;
       if (stopRecorded(status)) text += ' Stop requested: the current body completes first, and the final iteration or a native failure may still end the loop. Not yet stopped.';
       else if (pauseRecorded(status)) text += ' Pause requested: the current body completes first, and the final iteration, a Stop or a native failure may still end the loop. Not yet paused.';
       return text;
