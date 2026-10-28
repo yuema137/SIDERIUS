@@ -59,7 +59,8 @@ def test_cancel_route_admission_precedes_the_owner(console_config, monkeypatch):
     ("code", "message"),
     (
         ("terminal", "this run has already finished; nothing was stopped"),
-        ("not_running", "the run is not confirmed running; read status and retry"),
+        ("starting", "the run is still starting; try again in a moment"),
+        ("not_running", "the run's process is no longer running; nothing to stop"),
         ("integrity", "native operation could not be verified"),
     ),
 )
@@ -84,12 +85,14 @@ def test_unknown_operation_is_404_and_prepare_is_refused(console_config, monkeyp
     assert response.json()["error"]["code"] == "kind"
 
 
-@pytest.mark.parametrize("requested", [False, True])
-def test_status_projects_cancel_request(console_config, monkeypatch, requested):
-    """Fails if the page cannot tell "Stopping" from running, or if an operation without a
-    cancel request gains a new status key (existing status bytes must stay unchanged)."""
+@pytest.mark.parametrize("field", ["cancel_requested", "cancellable"])
+@pytest.mark.parametrize("value", [False, True])
+def test_status_projects_cancel_facts(console_config, monkeypatch, field, value):
+    """Fails if the page cannot tell "Stopping" from running, loses the server's single
+    cancellable verdict, or if an operation without them gains new status keys (existing
+    status bytes must stay unchanged)."""
     operation_id = uuid4()
-    snapshot = _snapshot(operation_id, None).model_copy(update={"cancel_requested": requested})
+    snapshot = _snapshot(operation_id, None).model_copy(update={field: value})
     monkeypatch.setattr(
         "tools.candidate_console.service.read_operation", lambda config, value: snapshot
     )
@@ -97,4 +100,4 @@ def test_status_projects_cancel_request(console_config, monkeypatch, requested):
         "tools.candidate_console.service.loop_root_operation", lambda config, value: None
     )
     status = client(console_config).get(f"/api/operations/{operation_id}").json()
-    assert status.get("cancel_requested", "absent") == (True if requested else "absent")
+    assert status.get(field, "absent") == (True if value else "absent")

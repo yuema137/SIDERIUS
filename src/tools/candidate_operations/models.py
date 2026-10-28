@@ -258,6 +258,8 @@ class OperationSnapshot(PreviewModel):
     finishing: bool = False
     # Omitted unless a CancelRequest is recorded; existing snapshot bytes are unchanged.
     cancel_requested: bool = Field(default=False, exclude_if=lambda value: not value)
+    # A new cancel would be recorded (cancel.cancellable); omitted when false.
+    cancellable: bool = Field(default=False, exclude_if=lambda value: not value)
     receipt_available: bool = False
     receipt_digest: str | None = None
     receipt: NativeReceipt | None = None

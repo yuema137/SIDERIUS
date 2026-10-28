@@ -3,7 +3,8 @@
 The submitter side only records a write-once ``cancel.json`` in the private
 operation directory. The operation child, which created the sandbox process
 group, polls it through ``workspace_sandbox.runner`` and terminates that group
-through the existing ``terminate_observed_group`` owner. No second kill path
+through the runner's existing cleanup owner (``terminate_observed_group`` for
+authored loops, ``terminate_remaining_group`` for other runs). No second kill path
 exists: the sandbox runs with ``--die-with-parent``, so a group cannot outlive
 an operation child that is gone. Contract: candidate-operations-contract.md,
 "Cancel an active candidate operation".
@@ -16,7 +17,13 @@ from tools.candidate_worker.models import CandidateRunReceipt
 from tools.workspace_sandbox.runner import CancelProbe
 
 from .files import publish, read_model
-from .models import CancelRequest, OperationFailure, OperationRecord, OperationStoreConfig
+from .models import (
+    CancelRequest,
+    OperationFailure,
+    OperationRecord,
+    OperationSnapshot,
+    OperationStoreConfig,
+)
 from .store import load_record, locked_store, now, operation_path, validate_config
 
 CANCEL_FILE = "cancel.json"
@@ -52,10 +59,13 @@ def require_cancel_evidence(receipt: CandidateRunReceipt, cancel: CancelRequest 
 def request_cancel(config: OperationStoreConfig, operation_id: UUID) -> CancelRequest:
     """Record cancel for one live candidate operation; idempotent, never a termination claim.
 
-    A repeated call returns the first recorded request unchanged. An operation
-    with a native receipt or failed admission refuses with ``terminal``; one not
-    confirmed alive refuses with ``not_running``. Read ``read_operation`` for the
-    outcome: the receipt status becomes ``cancelled`` unless the run finished first.
+    A repeated call returns the first recorded request unchanged. Only a verified
+    ``active`` snapshot (live wrapper, no completion, readable records) records a
+    new request. Refusals: a native receipt or failed admission is ``terminal``; an
+    integrity failure is ``integrity`` (a later intent must never vouch for an
+    unverified receipt); no published process identity yet is ``starting``; any
+    other wrapper that is not alive is ``not_running``. Read ``read_operation`` for
+    the outcome: the receipt status becomes ``cancelled`` unless the run finished first.
     """
     from .read import read_operation
 
@@ -68,13 +78,28 @@ def request_cancel(config: OperationStoreConfig, operation_id: UUID) -> CancelRe
         prior = read_cancel(path, record)
         if prior is not None:
             return prior
-        snapshot = read_operation(config, operation_id)
-        if snapshot.receipt_available or snapshot.state == "operation_failed":
-            raise OperationFailure("terminal", "operation already finished; nothing to cancel")
-        if snapshot.process.status != "alive":
-            raise OperationFailure("not_running", "operation is not confirmed running")
+        refuse_inactive(read_operation(config, operation_id))
         marker = CancelRequest(
             operation_id=operation_id, request_digest=record.request_digest, requested_at=now()
         )
         publish(path / CANCEL_FILE, marker)
         return marker
+
+
+def refuse_inactive(snapshot: OperationSnapshot) -> None:
+    """Raise the typed refusal for any snapshot that is not a verified live run."""
+    if snapshot.state == "active":
+        return
+    if snapshot.receipt_available or snapshot.state == "operation_failed":
+        raise OperationFailure("terminal", "operation already finished; nothing to cancel")
+    if snapshot.reason == "integrity_failure":
+        raise OperationFailure("integrity", "operation records could not be verified")
+    if snapshot.reason == "outcome_unresolved" and snapshot.process.reason == "missing_identity":
+        raise OperationFailure("starting", "operation is still starting; try again shortly")
+    raise OperationFailure("not_running", "operation process is gone; nothing to cancel")
+
+
+def cancellable(kind: str, state: str, requested: bool) -> bool:
+    """Whether a new cancel would be recorded: a cancellable kind, verified active, no
+    intent yet. ``OperationSnapshot.cancellable`` carries it; the console reads only that."""
+    return kind in CANCELLABLE_KINDS and state == "active" and not requested

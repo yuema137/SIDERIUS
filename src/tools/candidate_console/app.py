@@ -50,7 +50,8 @@ LOOP_STOP_REFUSALS = {
 OPERATION_CANCEL_REFUSALS = {
     "kind": "Stop run is available only for candidate operations",
     "terminal": "this run has already finished; nothing was stopped",
-    "not_running": "the run is not confirmed running; read status and retry",
+    "starting": "the run is still starting; try again in a moment",
+    "not_running": "the run's process is no longer running; nothing to stop",
 }
 
 

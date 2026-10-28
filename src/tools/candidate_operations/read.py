@@ -13,7 +13,7 @@ from tools.candidate_prepare.reusable_terminal import read_reusable_terminal
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.candidate_worker.records import verify_candidate_records
 
-from .cancel import CANCELLABLE_KINDS, read_cancel, require_cancel_evidence
+from .cancel import CANCELLABLE_KINDS, cancellable, read_cancel, require_cancel_evidence
 from .expectation import compare_reusable_expectation
 from .files import read_bytes, read_model
 from .models import (
@@ -197,6 +197,11 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
             state="active" if process.status == "alive" else "unknown",
             process=process,
             cancel_requested=cancel is not None,
+            cancellable=cancellable(
+                record.submission.kind,
+                "active" if process.status == "alive" else "unknown",
+                cancel is not None,
+            ),
             reason="observed_wrapper" if process.status == "alive" else "outcome_unresolved",
         )
     except (OSError, ValueError, ValidationError):

@@ -7,6 +7,7 @@ cleanup terminates real processes.
 """
 
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -26,7 +27,7 @@ from tools.candidate_operations.cancel import CANCEL_FILE
 from tools.candidate_operations.child import execute
 from tools.candidate_operations.files import publish
 from tools.candidate_operations.models import CancelRequest, OperationFailure, OperationRecord
-from tools.candidate_operations.process import current_identity, runtime_identity
+from tools.candidate_operations.process import current_identity, identity_of, runtime_identity
 from tools.candidate_operations.store import claim, digest, locked_store, now
 from tools.candidate_worker.launch import publish as native_publish
 from tools.candidate_worker.models import CandidateRunReceipt
@@ -90,6 +91,7 @@ def test_cancel_is_durable_write_once_and_idempotent(claimed):
     alive(record, path)
     before = read_operation(config, record.submission.request_id)
     assert before.state == "active" and "cancel_requested" not in before.model_dump_json()
+    assert before.cancellable
     first = request_cancel(config, record.submission.request_id)
     payload = (path / CANCEL_FILE).read_bytes()
     assert (first.operation_id, first.request_digest) == (
@@ -101,17 +103,29 @@ def test_cancel_is_durable_write_once_and_idempotent(claimed):
     assert (path / CANCEL_FILE).read_bytes() == payload
     snapshot = read_operation(config, record.submission.request_id)
     assert snapshot.state == "active" and snapshot.cancel_requested
+    assert not snapshot.cancellable, "a recorded cancel must not be offered again"
 
 
 def test_terminal_and_unconfirmed_operations_refuse_without_recording(claimed):
     """Fails if cancel records intent for a run that already finished or is not confirmed
-    alive; a later recorded intent would misreport that run as cancelled."""
+    alive (a later recorded intent would misreport that run as cancelled), or if the
+    launch window and a vanished wrapper share one refusal (one is retryable, one never)."""
     config, record, path = claimed
     operation_id = record.submission.request_id
     with pytest.raises(OperationFailure) as refused:
         request_cancel(config, operation_id)
+    assert refused.value.detail.code == "starting"
+    assert not read_operation(config, operation_id).cancellable
+    gone = subprocess.Popen(["/bin/sleep", "30"])
+    try:
+        identity = identity_of(record, gone.pid)
+    finally:
+        gone.kill()
+        gone.wait()
+    publish(path / "process.json", identity)
+    with pytest.raises(OperationFailure) as refused:
+        request_cancel(config, operation_id)
     assert refused.value.detail.code == "not_running"
-    alive(record, path)
     native_records(record, "accepted")
     with pytest.raises(OperationFailure) as refused:
         request_cancel(config, operation_id)
@@ -138,6 +152,15 @@ def test_cancelled_receipt_requires_recorded_intent(claimed):
     native_records(record, "cancelled")
     forged = read_operation(config, record.submission.request_id)
     assert (forged.state, forged.reason) == ("unknown", "integrity_failure")
+    assert not forged.cancellable
+    # A later operator cancel must not launder the forged receipt into a verified one.
+    with pytest.raises(OperationFailure) as refused:
+        request_cancel(config, record.submission.request_id)
+    assert refused.value.detail.code == "integrity"
+    assert not (path / CANCEL_FILE).exists()
+    relaunder = read_operation(config, record.submission.request_id)
+    assert (relaunder.state, relaunder.reason) == ("unknown", "integrity_failure")
+    # Only an intent recorded while the run was live (written directly here) vouches for it.
     publish(
         path / CANCEL_FILE,
         CancelRequest(

@@ -274,6 +274,7 @@ class StatusView(PreviewModel):
     )
     finishing: bool
     cancel_requested: bool = Field(default=False, exclude_if=lambda value: not value)
+    cancellable: bool = Field(default=False, exclude_if=lambda value: not value)
     receipt_available: bool
     native_status: str | None
     native_id: str | None
