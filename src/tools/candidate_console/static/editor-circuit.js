@@ -19,6 +19,8 @@
     parent.append(value); return value;
   };
   const wireLayer = () => host.querySelector('.circuit-world > svg');
+  // While a canvas gesture runs, nothing on the page is text-selectable (user-select: none).
+  const gesture = on => { document.body.classList.toggle('circuit-gesture', on); if (!on) getSelection()?.removeAllRanges(); };
   const say = text => { if (host) host.querySelector('.circuit-message').textContent = text; };
   function cancel(redraw = true) {
     const moved = drag;
@@ -218,7 +220,9 @@
       const preview = {kind: 'result', node: node.id, port: 'result'};
       button.addEventListener('pointerenter', () => { if (!pending && projection === snapshot && projection.enabled) highlight(preview); });
       button.addEventListener('pointerleave', () => { if (!pending && projection === snapshot) highlight(); });
-      button.addEventListener('pointerdown', event => { if (event.button === 0) { connecting = true; button.click(); } });
+      // preventDefault: a wire drag never starts a text selection (which would turn into a
+      // native drag of the selection and cancel the pointer gesture).
+      button.addEventListener('pointerdown', event => { if (event.button === 0) { event.preventDefault(); gesture(true); connecting = true; button.click(); } });
     }
     return button;
   }
@@ -307,7 +311,7 @@
       });
       heading.addEventListener('pointerdown', event => {
         if (projection !== value || !projection.enabled || projection.allowMove === false || event.button !== 0 || drag) return;
-        heading.setPointerCapture(event.pointerId);
+        event.preventDefault(); gesture(true); heading.setPointerCapture(event.pointerId);
         drag = {pointerId: event.pointerId, node: node.id, card, startX: event.clientX, startY: event.clientY, position: {...card._position}, left: card.offsetLeft, top: card.offsetTop};
       });
       heading.addEventListener('pointermove', event => {
@@ -327,7 +331,11 @@
       // Server inventory marks required sockets; an unbound one flags the whole card.
       const missing = value.inventory.filter(item => item.node === node.id && item.required && !item.bound).length;
       card.classList.toggle('has-required-unbound', missing > 0);
-      if (missing) element('span', `${missing} required input${missing === 1 ? '' : 's'} missing`, card, 'circuit-problem-badge').dataset.node = node.id;
+      // §8.3 / operator rule: the socket itself carries the red light; the card only a small count.
+      if (missing) {
+        const badge = element('span', String(missing), card, 'circuit-problem-badge'); badge.dataset.node = node.id;
+        badge.setAttribute('aria-label', `${missing} required input${missing === 1 ? '' : 's'} not connected`); badge.setAttribute('role', 'img');
+      }
       // Advanced detail (ui-settings.js): hidden for beginners, so a flag change re-renders.
       const mapping = element('details', '', card, 'circuit-mapping'); mapping.dataset.uiFlag = 'advanced';
       mapping.addEventListener('toggle', draw);
@@ -408,6 +416,7 @@
   });
   // Drag-to-connect: a press on an output released over an input clicks that input.
   document.addEventListener('pointerup', event => {
+    if (document.body.classList.contains('circuit-gesture')) gesture(false);
     if (!connecting) return;
     connecting = false;
     if (!pending || !host) return;
@@ -427,6 +436,7 @@
     document.addEventListener('click', swallow, {capture: true, once: true});
     setTimeout(() => document.removeEventListener('click', swallow, {capture: true}), 0);
   });
+  document.addEventListener('pointercancel', () => { if (document.body.classList.contains('circuit-gesture')) gesture(false); });
   document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Connection selection cancelled.'); } });
   document.addEventListener('pointermove', event => {
     if (!pending || !host?.contains(event.target)) return;

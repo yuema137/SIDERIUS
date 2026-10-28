@@ -1114,6 +1114,13 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   plain sentence and never repeat the problem list. After undo, redo and Discard the
   problems are recomputed from the restored state's cached server inspection (or
   re-inspected).
+- Unconnected required input (operator rule 2026-10-28): the socket itself shows a soft
+  red ring (`--error`, 28% ring) and its `Required · Not connected` text is `--error`; the
+  card keeps its normal outline and carries only a count badge (`.circuit-problem-badge`,
+  text = count, `aria-label` "N required input(s) not connected"). Connector labels wrap
+  inside the card; the requirement text is its own line. Instance ids show only with
+  advanced tools. Wire and card drags suppress text selection (`body.circuit-gesture`,
+  `preventDefault` on pointerdown, selection cleared at the end).
 - Delete (operator rule 2026-10-28) always succeeds in the draft, with no confirmation:
   Delete key, context menu or Remove in Selection adds saved nodes to the draft's
   `removed` list (pending nodes are cancelled), disconnects every socket that read them

@@ -46,7 +46,11 @@ try {
   await page.locator('button[aria-label="Disconnect build.output"]').click();
   await waitUntil(async () => (await pending()).includes('incomplete'));
   assert.equal(await buildCard.evaluate(card => card.classList.contains('has-required-unbound')), true);
-  assert.match(await buildCard.locator('.circuit-problem-badge').textContent(), /^1 required input missing$/);
+  // The socket carries the red light; the card only a small count badge (§8.3).
+  assert.equal(await buildCard.locator('.circuit-problem-badge').textContent(), '1');
+  assert.equal(await buildCard.locator('.circuit-problem-badge').getAttribute('aria-label'), '1 required input not connected');
+  assert.notEqual(await page.locator('#circuit-input-build-output .circuit-socket').evaluate(socket => getComputedStyle(socket).boxShadow), 'none', 'The unconnected socket shows its ring');
+  assert.equal(await buildCard.evaluate(card => getComputedStyle(card).boxShadow), 'none', 'No card-wide glow');
   assert.equal(await page.locator('.circuit-card.has-required-unbound').count(), 1, 'Only the offending card is flagged');
   // Problems live in the page-bar chip's popover (spec §9); the canvas never reflows.
   const chip = page.locator('#problems-chip');

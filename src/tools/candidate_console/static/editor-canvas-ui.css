@@ -72,3 +72,24 @@
   /* Page bar: labels drop to icons at this width (spec §1.2); names stay accessible. */
   .page-bar .workflow-next > #workflow-next-run, .page-bar .actions > #editor-review { padding: 0 var(--space-2); }
 }
+
+/* No text selection while a wire or card is dragged (editor-circuit.js gesture()). */
+body.circuit-gesture, body.circuit-gesture * { user-select: none; -webkit-user-select: none; }
+.circuit-viewport { user-select: none; -webkit-user-select: none; }
+
+/* Unconnected required input: a small "red light" on the socket itself (operator rule
+ * 2026-10-28, §8.3); the card keeps its normal outline and carries only a count badge. */
+.circuit-card.has-required-unbound { border: 1px solid var(--control-border); box-shadow: none; }
+.circuit-port.is-unbound[data-required="true"] .circuit-socket { border-color: var(--error); box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 28%, transparent); }
+.circuit-port.is-unbound[data-required="true"] .circuit-port-requirement { color: var(--error); }
+.circuit-problem-badge { position: absolute; top: 6px; right: 6px; display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin: 0; padding: 0 4px;
+  border-radius: var(--radius-pill); background: var(--error); color: var(--panel); font-size: var(--font-label); font-weight: 700; line-height: 1; }
+
+/* Connector names fit the card: the label wraps, the requirement sits on its own line. */
+.circuit-port .circuit-port-contract { max-width: 100%; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.circuit-port .circuit-port-requirement { display: block; float: none; margin-top: 1px; }
+.circuit-output { text-align: right; }
+
+/* Card header: the icon keeps clear of the card edge; instance ids are advanced detail. */
+.circuit-card .editor-node { padding: var(--space-3) var(--space-3) var(--space-2); }
+:root:not([data-ui-advanced="on"]) .circuit-card .capability-instance { display: none; }
