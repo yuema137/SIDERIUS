@@ -328,7 +328,6 @@ class ConsoleSettings:
 
     def upload(self, upload: LibraryUpload) -> LibraryRef:
         """Validate, then publish once into the workspace library; never replaces a file."""
-        upload = LibraryUpload.model_validate_json(upload.model_dump_json())
         workspace = self.context.workspace_root
         if not self.writable or workspace is None:
             raise SettingsRefusal(403, "read_only", "global settings are read-only on this console")

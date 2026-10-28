@@ -33,8 +33,6 @@ ROUTE_ROLES = (
     "validate",
     "tune",
 )
-# Keys reusable workflows cannot use yet (design §3.3); shown, never silently dropped.
-UNSUPPORTED_ADVICE_KEYS = ("interpret", "analysis", "mindset")
 
 
 class LibraryUpload(PreviewModel):
@@ -88,7 +86,7 @@ def profile_card(label: str, ref: FileRef, path: Path) -> ProfileCard:
 def advice_card(label: str, ref: FileRef, path: Path) -> AdviceCard:
     import json
 
-    from workflows.advice import ADVICE_RECOGNISED_KEYS
+    from workflows.advice import ADVICE_KEYS_WITHOUT_REUSABLE_CARRIER, ADVICE_RECOGNISED_KEYS
 
     try:
         content = json.loads(advice_bytes(path, label=label))
@@ -99,7 +97,9 @@ def advice_card(label: str, ref: FileRef, path: Path) -> AdviceCard:
         label=label,
         ref=ref,
         present_keys=present,
-        unsupported_keys=tuple(key for key in present if key in UNSUPPORTED_ADVICE_KEYS),
+        unsupported_keys=tuple(
+            key for key in present if key in ADVICE_KEYS_WITHOUT_REUSABLE_CARRIER
+        ),
     )
 
 

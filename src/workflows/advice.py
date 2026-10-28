@@ -51,6 +51,11 @@ ADVICE_PER_AGENT_KEYS = (
 )
 ADVICE_RECOGNISED_KEYS = (*ADVICE_PER_AGENT_KEYS, "mindset")
 
+#: Keys with no reusable-workflow carrier yet (interpretation is a deterministic
+#: cold start; analysis and mindset have no reusable consumer). Reusable callers
+#: must surface these, never drop them silently.
+ADVICE_KEYS_WITHOUT_REUSABLE_CARRIER = ("interpret", "analysis", "mindset")
+
 #: The ONE way to say "this key is deliberately not advice". A leading
 #: underscore marks an inert annotation block. It is spelled as an explicit
 #: opt-out precisely so

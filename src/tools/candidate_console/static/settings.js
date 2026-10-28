@@ -57,10 +57,12 @@
   async function importFile(kind, input) {
     const file = input.files[0]; input.value = '';
     if (!file || !view?.writable) return;
-    if (file.size > 200 * 1024) { say('Not imported: the file is larger than 200 KiB.'); return; }
+    // The server refuses request bodies over 256 KiB; measure the JSON body it will receive.
+    const body = {kind, label: file.name.replace(/\.json$/i, '').slice(0, 63) || kind, content: await file.text()};
+    if (new TextEncoder().encode(JSON.stringify(body)).length > 256 * 1024) { say('Not imported: the file is too large; the console accepts uploads up to about 256 KiB.'); return; }
     say('Importing…');
     try {
-      const ref = await session().request('settings/library', {kind, label: file.name.replace(/\.json$/i, '').slice(0, 63) || kind, content: await file.text()});
+      const ref = await session().request('settings/library', body);
       say(`Imported as ${ref.name} in the server library. Select it, then Save.`);
       await load(true);
     } catch (error) { if (!error.stale) say('Not imported: ' + error.message); }

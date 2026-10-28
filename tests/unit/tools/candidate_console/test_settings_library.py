@@ -64,6 +64,7 @@ def test_uploads_are_write_once_and_idempotent(workspace):
 
 
 def test_uploaded_file_is_selectable_and_survives_restart(workspace):
+    """Defect: an uploaded ref cannot be selected, or unusable advice keys are hidden."""
     api = _client(_load(workspace))
     content = json.dumps({"implement": "Keep the model small.", "mindset": "Be careful."})
     ref = api.post(
@@ -95,10 +96,10 @@ def test_default_profile_card_names_routes_and_required_keys(workspace):
         "propose",
         "implement",
     }
-    assert "sk-" not in json.dumps(default)
 
 
 def test_upload_requires_a_writable_console(workspace):
+    """Defect: a read-only console still lets the browser add library files."""
     config = workspace / "settings" / "console.json"
     config.write_text(
         json.dumps(
@@ -110,3 +111,22 @@ def test_upload_requires_a_writable_console(workspace):
         "/api/settings/library", json={"kind": "llm", "label": "x", "content": "{}"}
     )
     assert response.status_code == 403 and _files(workspace, "llm") == before
+
+
+def test_inert_profile_secrets_are_never_echoed(workspace):
+    """Defect: an upload response or the settings view returns profile file contents.
+
+    A profile may carry an inert ``_``-prefixed block; the console shows routes and
+    credential names only, never the stored text.
+    """
+    api = _client(_load(workspace))
+    secret = "sk-DO-NOT-ECHO-0123456789"
+    content = json.dumps({"_api_key": secret})
+    upload = api.post(
+        "/api/settings/library", json={"kind": "llm", "label": "mine", "content": content}
+    )
+    assert upload.status_code == 200, upload.text
+    assert secret not in upload.text
+    view = api.get("/api/settings")
+    assert any(card["ref"] == upload.json() for card in view.json()["llm_profiles"])
+    assert secret not in view.text
