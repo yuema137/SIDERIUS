@@ -454,7 +454,7 @@ reason)` differs (for example dispatched inside a non-selected arm, or `blocked`
 where readiness derives `skipped`). The verifier also accepts `skipped` without a
 record path/digest only with a `SKIP_REASONS` reason. Both call sites currently
 pass no decisions or routing, because routed documents remain refused by
-`candidate.refuse_routes`; a `skipped` state in an unrouted trace is therefore
+`candidate.refuse_declaration_only`; a `skipped` state in an unrouted trace is therefore
 refused by replay. Adding the `skipped` state and `route_not_selected` reason does
 not change existing trace bytes (pinned by
 `test_unrouted_graph_trace_bytes_are_unchanged`). If no node can act while some
@@ -923,9 +923,9 @@ byte-identical to those before this feature.
 
 `tools.candidate_worker.route_eval` decides one declared `Branch` (definition
 contract, "Route declarations (inert)") from one native record. It has no execution
-caller yet: routed documents are still refused by `candidate.refuse_routes`. Readiness
-consumes its output (skip semantics above); decision evidence and a routed profile are
-later worker work.
+caller yet: routed documents are still refused by `candidate.refuse_declaration_only`.
+Readiness consumes its output (skip semantics above); decision evidence and a routed
+profile are later worker work.
 
 - `project_observation(branch, capability, record_path, *, iteration)` reads the
   branch source's committed record once (no-follow, 4 MiB bound), validates it with

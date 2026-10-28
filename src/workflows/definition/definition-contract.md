@@ -19,11 +19,13 @@ Tests compare their complete parameter names, annotations, requiredness and
 return types with the catalog. Omitted optional arguments retain native default
 ownership; this package neither resolves nor certifies those effective values.
 
-`adaptor_strategies.py` holds the closed, versioned adaptor strategy declarations
-and the shared B6 types (`SelectStrategy`, `CardinalityBound`, `Fallback`,
-`derive_cardinality`); `catalog.py` holds `SPLITTABLE_ITEMS` and `RANKABLE_FIELDS`.
-They are not yet fields of any document. Semantics:
-[adaptor contract](../adaptors/adaptor-contract.md).
+`adaptor_strategies.py` holds the closed, versioned adaptor strategy declarations,
+the shared B6 types (`SelectStrategy`, `CardinalityBound`, `Fallback`,
+`derive_cardinality`) and `incompatible_pair`; `catalog.py` holds
+`ADAPTOR_STRATEGIES`, `SPLITTABLE_ITEMS` and `RANKABLE_FIELDS`. Documents declare
+adaptors under [Adaptor declarations](#adaptor-declarations-inert); run-time
+semantics: [adaptor contract](../adaptors/adaptor-contract.md). `base.py` holds the
+shared `DeclarationModel`, `Identifier` and `Location` (re-exported by `models.py`).
 
 ## Construction and interchange
 
@@ -85,8 +87,9 @@ multiple candidates or schedule parallel execution. Disconnected nodes with
 complete external request declarations are allowed.
 
 Apart from the optional authored `loop` described under
-[Authored loop](#authored-loop) and the inert `routes` described under
-[Route declarations](#route-declarations-inert), there are no custom/generation/aggregation
+[Authored loop](#authored-loop), the inert `routes` described under
+[Route declarations](#route-declarations-inert) and the inert `adaptors` described under
+[Adaptor declarations](#adaptor-declarations-inert), there are no custom/generation/aggregation
 adapter, feedback, arbitrary-code, constructor configuration or
 execution-control fields. Supplying such fields fails validation. Future support
 requires an audited native owner and an explicit format extension. No generic
@@ -155,7 +158,7 @@ the candidate-worker contract ("Deterministic stop conditions").
 `WorkflowDefinition.routes` and `ReusableWorkflowDefinition.routes` optionally carry
 up to 32 `Branch` declarations. An empty tuple is omitted from serialization and
 canonical source, so existing declaration digests, source bytes and receipts are
-unchanged. Routing is **declaration only**: `candidate.refuse_routes`, called first by
+unchanged. Routing is **declaration only**: `candidate.refuse_declaration_only`, called first by
 the shared shape checks `candidate.candidate_nodes` and `fanout.execution_families`,
 refuses any document with routes ("conditional routing is declared but this execution
 profile does not admit it"). Preview, preparation, worker and verifier admission all
@@ -234,6 +237,86 @@ skip propagation) are owned by `tools.candidate_worker.readiness` (candidate-wor
 contract, readiness authority); decision evidence and routed execution admission belong
 to later candidate-worker work.
 
+## Adaptor declarations (inert)
+
+`WorkflowDefinition` and `ReusableWorkflowDefinition` optionally carry
+`adaptor_format: Literal["siderius.adaptors/v1"] | None` and
+`adaptors: tuple[AdaptorInstance, ...]` (decision B6-D2: optional gated fields on v1
+and v2, because the worker consumes v1). `None` and `()` are omitted from
+serialization and canonical source, so documents without adaptors keep their
+declaration digests and source bytes (pinned: the shipped examples in
+`test_workflow_routes.py`, a loop document with stop conditions in
+`test_adaptor_declarations.py`). Adaptors are **declaration only**:
+`candidate.refuse_declaration_only` refuses any document with `adaptor_format`
+("adaptors are declared but this execution profile does not admit them",
+`ADAPTORS_NOT_ADMITTED`), after the routing refusal, in every shape check that
+preview, preparation, worker and verifier admission use. A v2 document with
+`training_settings` runs those checks during declaration validation and therefore
+cannot declare adaptors until B6-3 admits an adaptor profile. Execution is B6-3.
+
+### Models
+
+| Constructor | Fields | Notes |
+| --- | --- | --- |
+| `AdaptorInstance` | `id`, `kind="adaptor"`, `inputs: tuple[InputPort, ...]` (≥ 1), `bindings: tuple[PortBinding, ...]`, `combine: DeterministicCombine`, `select: SelectStrategy`, `distribute: DistributeStrategy` | one model (B6-D1); the output contract is derived, never authored |
+| `InputPort` | `name`, `contract` (exact catalogue contract), `cardinality: "one" \| "many"`, `min_items: int ≥ 0 = 1`, `max_items: int > 0 \| None` (omitted when `None`) | a `one` port keeps `min_items=1` and declares no `max_items` |
+| `PortBinding` | `port`, `sources: tuple[Source, ...]` | declared order is every tie-break and "first" order |
+| `AdaptorSource` | `kind="adaptor"`, `adaptor`, `port="result"`, `index: int ≥ 0 \| None` (omitted when `None`) | new `Source` variant: a protocol argument, a port source, or an `AdaptorRequest` source |
+| `AdaptorRequest` | `kind="adaptor"`, `source: AdaptorSource` | new `Request` variant: a whole capability request; the derived contract must equal the capability input |
+
+Strategy constructors are the B6-2 models (`PassCombine`, `CollectCombine`,
+`ConcatItemsCombine`, `MetricRankCombine`, `FieldRankCombine`; `AllSelect`,
+`FirstAdmissibleSelect`, `TopKSelect`, `ThresholdSelect`; `SingleDistribute`,
+`PerItemDistribute`, `SplitItemsDistribute`, `ReplicateDistribute`).
+`catalog.ADAPTOR_STRATEGIES` maps every declarable kind string to
+`AdaptorStrategyContract(stage, declaration, owner)` (inert strings, like
+`PROTOCOLS`); a test keeps it equal to the three discriminated unions. LLM kinds
+(B2) and `custom/v1` (B6-5/B6-6) are not declarable yet; they join the unions and
+the catalogue with their owners.
+
+A port source may be `ExternalSource`, `ResultSource`, `AdaptorSource` or a route
+merge `SelectedSource` (decision 2026-10-28): the merge resolves at run time to the one
+selected candidate's result, which is what record provenance (`AdaptorInputRef.source`,
+a concrete origin) names.
+
+### Format gate and graph
+
+- Any adaptor, `AdaptorSource` argument or `AdaptorRequest` requires
+  `adaptor_format="siderius.adaptors/v1"`; a format with nothing using it is refused.
+  The gate runs before reference checks.
+- Adaptor ids share the node namespace (unique, distinct from node ids). Externals
+  stay separate. Route targets and branch sources remain nodes.
+- Each adaptor's sources add dependency edges; consumers of an `AdaptorSource` depend
+  on the adaptor. Adaptors join the same Kahn cycle check and topological order
+  (`predecessor_facts` includes adaptor vertices). Adaptors are checked before node
+  requests, so a consumer never reports a symptom of an invalid adaptor.
+- Route checks treat adaptors as vertices: a merge into an adaptor port must cover
+  every arm of a branch with a default, and an adaptor may not depend on two exclusive
+  arms of one branch except through a merge.
+
+### Validation table (`adaptor_validation.py`)
+
+Refused with a fixed message naming the adaptor (never coerced):
+
+| Rule | Refusal |
+| --- | --- |
+| ports and bindings | duplicate port names or bindings; a port without exactly one binding; no source at all |
+| item bounds | `len(sources)` outside `min_items..max_items` (a `one` port: exactly 1) |
+| contracts | port contract not in `CONTRACTS`; a source whose resolved contract differs from its port contract; ports of different contracts (every deterministic kind has one element contract) |
+| derived output | `output_contract` is the element contract; `collect/v1` is refused until its `<contract>.collection` output and consumer protocol are catalogued (B6-4/B6-9) |
+| COMBINE applicability | `concat-items/v1` field must equal `SPLITTABLE_ITEMS[contract]`; `metric-rank/v1` only over `METRIC_SCORED_CONTRACTS`; `field-rank/v1` field must equal `RANKABLE_FIELDS[contract].item_field` and its ports must hold exactly one value |
+| COMBINE/DISTRIBUTE pair | `incompatible_pair`: `per-item/v1` after `collect/v1`, `concat-items/v1` or `field-rank/v1`; `split-items/v1` after `collect/v1` (the same owner the strategy core calls at run time) |
+| SELECT/COMBINE | `first-admissible/v1` requires `pass/v1`; `top-k/v1` and `threshold/v1` require a ranking (`metric-rank/v1`, `field-rank/v1`); `threshold/v1` requires its basis' ranking (`metric` → `metric-rank/v1`; `rubric` → a B2 rubric ranking, so refused until B2) |
+| split field | `split-items/v1` field must equal `SPLITTABLE_ITEMS[contract]` |
+| cardinality | `derive_cardinality(select, distribute)` must be satisfiable |
+| value count (`pass`/`metric-rank`) | `top-k/v1` `k` must not exceed what DISTRIBUTE accepts (`single`/`replicate`: 1, `per-item`: `count`); `all/v1`/`threshold/v1` require the number of bound sources ≤ the derived bound max (the bound excludes the source count; topology is static, B6-D6, so `max_items` is not used) |
+| value count (`field-rank`) | `top-k/v1` `k` must not exceed `split-items/v1` `count` |
+| unfillable split (`field-rank`) | `top-k/v1(k)` then `split-items/v1(count > k, on_short="fail")`: at most `k` entries survive, so the adaptor could only fail |
+| output index | `AdaptorSource.index` is absent for `single/v1` and `< count` for `per-item`/`split-items`/`replicate` |
+
+Run-time-only facts (list lengths, admissibility, metric identity) stay with the
+strategy core, which re-checks every rule it relies on.
+
 ## Static Python source bridge
 
 `parse_workflow_source(source: str) -> AuthoredWorkflowDocument` and
@@ -253,8 +336,11 @@ from this explicit allowlist: `TaskReferences`, `ExternalBinding`,
 `ReusableWorkflowDocument`, plus the loop constructors `AuthoredLoop`, `LoopFeedback`,
 `MetricThresholdStop`, `NoImprovementStop` and the reserved, always-refused
 `JudgeStop`, plus the route constructors `Branch`, `RouteCase`, `BoolIs`, `EnumIn`,
-`MetricAtLeast`, `IsMissing`, `AllOf`, `AnyOf`, `Not` and `SelectedSource`. The
-renderer imports loop and route constructors only when the document uses them, so
+`MetricAtLeast`, `IsMissing`, `AllOf`, `AnyOf`, `Not` and `SelectedSource`, plus the
+adaptor constructors `AdaptorInstance`, `InputPort`, `PortBinding`, `AdaptorSource`,
+`AdaptorRequest` and the thirteen strategy constructors listed under
+[Adaptor declarations](#adaptor-declarations-inert). The
+renderer imports loop, route and adaptor constructors only when the document uses them, so
 existing canonical source bytes are unchanged. Imported unused constructors are allowed; referenced
 constructors must be imported. Aliases, wildcard and relative imports fail.
 

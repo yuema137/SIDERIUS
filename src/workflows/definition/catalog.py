@@ -232,6 +232,67 @@ RANKABLE_FIELDS = MappingProxyType(
     {"literature.output": RankableField("findings", "confidence", "self-reported")}
 )
 
+
+@dataclass(frozen=True)
+class AdaptorStrategyContract:
+    """One closed, versioned adaptor strategy kind: its stage, declaration and owner."""
+
+    stage: Literal["combine", "select", "distribute"]
+    declaration: str
+    owner: str
+
+
+_STRATEGY_MODELS = "workflows.definition.adaptor_strategies"
+_COMBINE_OWNER = "workflows.adaptors.combine.combine"
+_SELECT_OWNER = "workflows.adaptors.select.select"
+_DISTRIBUTE_OWNER = "workflows.adaptors.run.run_deterministic_adaptor"
+
+# Closed set of adaptor strategy kinds (B6). ``collect/v1`` is reserved: its model is
+# declarable but validation refuses it until its ``<contract>.collection`` output and
+# consumer protocol are catalogued (B6-4/B6-9). The kind string carries its
+# version; a changed semantic is a new row. LLM kinds join with their B2 owner.
+ADAPTOR_STRATEGIES = MappingProxyType(
+    {
+        "pass/v1": AdaptorStrategyContract(
+            "combine", f"{_STRATEGY_MODELS}.PassCombine", _COMBINE_OWNER
+        ),
+        "collect/v1": AdaptorStrategyContract(
+            "combine", f"{_STRATEGY_MODELS}.CollectCombine", _COMBINE_OWNER
+        ),
+        "concat-items/v1": AdaptorStrategyContract(
+            "combine", f"{_STRATEGY_MODELS}.ConcatItemsCombine", _COMBINE_OWNER
+        ),
+        "metric-rank/v1": AdaptorStrategyContract(
+            "combine", f"{_STRATEGY_MODELS}.MetricRankCombine", _COMBINE_OWNER
+        ),
+        "field-rank/v1": AdaptorStrategyContract(
+            "combine", f"{_STRATEGY_MODELS}.FieldRankCombine", _COMBINE_OWNER
+        ),
+        "all/v1": AdaptorStrategyContract("select", f"{_STRATEGY_MODELS}.AllSelect", _SELECT_OWNER),
+        "first-admissible/v1": AdaptorStrategyContract(
+            "select", f"{_STRATEGY_MODELS}.FirstAdmissibleSelect", _SELECT_OWNER
+        ),
+        "top-k/v1": AdaptorStrategyContract(
+            "select", f"{_STRATEGY_MODELS}.TopKSelect", _SELECT_OWNER
+        ),
+        "threshold/v1": AdaptorStrategyContract(
+            "select", f"{_STRATEGY_MODELS}.ThresholdSelect", _SELECT_OWNER
+        ),
+        "single/v1": AdaptorStrategyContract(
+            "distribute", f"{_STRATEGY_MODELS}.SingleDistribute", _DISTRIBUTE_OWNER
+        ),
+        "per-item/v1": AdaptorStrategyContract(
+            "distribute", f"{_STRATEGY_MODELS}.PerItemDistribute", _DISTRIBUTE_OWNER
+        ),
+        "split-items/v1": AdaptorStrategyContract(
+            "distribute", f"{_STRATEGY_MODELS}.SplitItemsDistribute", _DISTRIBUTE_OWNER
+        ),
+        "replicate/v1": AdaptorStrategyContract(
+            "distribute", f"{_STRATEGY_MODELS}.ReplicateDistribute", _DISTRIBUTE_OWNER
+        ),
+    }
+)
+
 # Contracts whose succeeded values carry formal metric results (Health-qualified
 # admission; an LLM ranking may filter them, never reorder them).
 METRIC_SCORED_CONTRACTS = frozenset({"tuning.output"})

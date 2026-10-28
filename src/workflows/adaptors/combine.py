@@ -52,6 +52,16 @@ class Unit(AdaptorModel):
     role: Role
     entry_refs: tuple[AdaptorInputRef, ...] | None = None
 
+    @model_validator(mode="after")
+    def entry_refs_align_with_list(self) -> Self:
+        """Refuse an owner list that cannot be indexed by the value's list entries."""
+        if self.entry_refs is None:
+            return self
+        field = SPLITTABLE_ITEMS.get(self.element_contract)
+        if field is None or len(getattr(self.value, field)) != len(self.entry_refs):
+            raise ValueError("entry_refs must name one owner per entry of the catalogued list")
+        return self
+
 
 class CollectedEntry(AdaptorModel):
     contribution_id: str = Field(min_length=1)

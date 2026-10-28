@@ -2,11 +2,12 @@
 
 from dataclasses import dataclass
 
-from .candidate import check_tuning_edge, refuse_routes
+from .candidate import check_tuning_edge, refuse_declaration_only
 from .models import (
     ExternalRequest,
     ExternalSource,
     ProtocolRequest,
+    Request,
     ResultSource,
     ReusableWorkflowDefinition,
     WorkflowDefinition,
@@ -69,7 +70,7 @@ def execution_families(
     definition: WorkflowDefinition | ReusableWorkflowDefinition, profile: str | None
 ) -> ProposalFamilies:
     """Select only an explicitly supported native graph profile."""
-    refuse_routes(definition)
+    refuse_declaration_only(definition)
     if profile == "native-interpretation-candidate/v1":
         return interpretation_candidate(definition)
     if profile == "native-literature-candidate/v1":
@@ -111,7 +112,7 @@ def _proposal_branches(
         raise ValueError("fanout requires external proposals and complete validation branches")
     proposal_ids = {node.id for node in proposals}
 
-    def sources(request: ExternalRequest | ProtocolRequest, protocol: str) -> dict[str, str]:
+    def sources(request: Request, protocol: str) -> dict[str, str]:
         if not isinstance(request, ProtocolRequest) or request.protocol != protocol:
             raise ValueError(f"fanout requires {protocol}")
         return {

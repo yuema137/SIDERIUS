@@ -388,6 +388,18 @@ def test_concat_then_split_attributes_each_entry_to_its_owning_input():
     assert [o.value.findings[0].content for o in outcome.outputs] == ["r0f0", "r1f0", "r1f1"]
 
 
+def test_entry_owners_must_align_with_the_catalogued_list():
+    # Defect: a Unit builder dropping one owner shifts split provenance onto the wrong review.
+    from workflows.adaptors import Unit
+
+    review = literature(0, 0.1, 0.2)
+    owners = (ref(0).entry("findings", 0), ref(1).entry("findings", 0))
+    fields = dict(value=review.value, element_contract="literature.output", inputs=(ref(0),))
+    Unit(**fields, role="concatenated", entry_refs=owners)
+    with pytest.raises(ValidationError, match="one owner per entry"):
+        Unit(**fields, role="concatenated", entry_refs=owners[:1])
+
+
 def test_items_out_of_declared_order_are_refused():
     # Defect: a completion-ordered tuple silently changing tie-breaks and "first".
     a, b = validation(0, True), validation(1, True)
