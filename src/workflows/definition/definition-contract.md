@@ -193,9 +193,10 @@ Adding an observable is a catalog row plus that check.
 Combinators contain leaves only (no nesting), so a predicate has at most 8 leaves.
 Every leaf reads the branch's single source result; cross-node predicates need a typed
 aggregation owner and are not expressible. Direction is never declared: `metric_id` must
-equal the run `MetricSpec` id, checked by execution admission before dispatch (not by
-this package). An absent metric makes `MetricAtLeast` false, never an error; `IsMissing`
-makes that case explicit. Evaluation belongs to the future route evaluator.
+equal the run `MetricSpec` id, checked by `tools.candidate_worker.route_eval.admit_route_metrics`,
+to be called by execution admission before dispatch (PR5; not by this package). An absent metric makes `MetricAtLeast` false, never
+an error; `IsMissing` makes that case explicit. Evaluation belongs to the pure route
+evaluator (candidate-worker contract, "Route evaluator").
 
 ### Branches, arms and merges
 
