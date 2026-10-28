@@ -297,29 +297,28 @@ def test_every_catalog_capability_has_its_paper_label_and_theme_role():
         assert theme.count(f"--capability-{role}-tint:") == 2, role
 
 
-def contract_presentation_entries() -> dict[str, tuple[str, str, str]]:
-    """Parse ``{contract: (name, colour, shape)}`` from the browser's contract table."""
+def contract_presentation_entries() -> dict[str, tuple[str, str]]:
+    """Parse ``{contract: (colour, shape)}`` from the browser's contract table."""
     script = (STATIC / "editor-contract-presentation.js").read_text()
     block = re.search(r"const entries = Object\.freeze\(\{\n(.*?)\n  \}\);", script, re.S)
     assert block, "contract presentation table not found"
     rows = block.group(1).splitlines()
-    pattern = r"    '([^']+)': \{name: '([^']+)', colour: '([^']+)', shape: '([^']+)'\},"
+    pattern = r"    '([^']+)': \{colour: '([^']+)', shape: '([^']+)'\},"
     parsed = [re.fullmatch(pattern, row) for row in rows]
     assert all(parsed), f"unparsed contract rows: {rows}"
-    return {match[1]: (match[2], match[3], match[4]) for match in parsed if match}
+    return {match[1]: (match[2], match[3]) for match in parsed if match}
 
 
 def test_every_catalog_contract_has_a_distinct_port_token_in_both_themes():
     """Fails if a catalog contract falls back to a hash token (which can collide), two
-    contracts share a colour+shape or a readable name, or a colour lacks a CSS token."""
+    contracts share a colour+shape, the browser table owns names again (the server's
+    contract_names owner does), or a colour lacks a CSS token."""
     from workflows.definition.catalog import CONTRACTS
 
     entries = contract_presentation_entries()
     assert set(entries) == set(CONTRACTS)
-    tokens = [(colour, shape) for _, colour, shape in entries.values()]
+    tokens = list(entries.values())
     assert len(set(tokens)) == len(tokens)
-    names = [name for name, _, _ in entries.values()]
-    assert len(set(names)) == len(names)
     css = (STATIC / "editor-contract-presentation.css").read_text()
     for colour in {colour for colour, _ in tokens}:
         assert f"--contract-{colour}:" in css, colour
