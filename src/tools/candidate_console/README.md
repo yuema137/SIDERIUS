@@ -241,6 +241,30 @@ readable but invalid, you can also choose values and **Save** to replace it.
 **Workspace** lists missing workspace folders and, when `init` can create them,
 the command to run on the server.
 
+### Export a workflow for the command line
+
+On **Settings**, **Export a workflow** writes three plain files on the server
+under `siderius_workspace/exported_configs/<export name>/`:
+
+- `workflow.py`: the workflow exactly as last saved in Workflow Editor;
+- `llm.json`: the model profile the selected task uses, usable with the
+  command-line `--llm_config`;
+- `advice.json`: the advice written in the workflow itself (its proposal,
+  implementation, validation and tuning advice) in the command-line advice
+  format. A workflow without its own advice gets no `advice.json`.
+
+Credentials, the console token and the credential file path are never
+exported. Choose the project, the task and a name, then select **Export**.
+**Download** buttons then save each file to this computer. An export name that
+is already used is refused with a free name to try instead; exports are never
+overwritten. If the workflow changes on disk while you export, the export is
+refused; reload and try again. Exporting needs the same `browser_writable`
+setting as saving.
+
+When you review a new run on the **Run** page, the details also say where the
+model profile and data folder come from: `console.json`, this Settings page, or
+the workspace folders.
+
 ## Edit existing circuit connections
 
 In Workflow builder, select a node to open its inspector. To change a connection,
