@@ -333,7 +333,10 @@ S1_REFUSALS = [
         lambda p: _pick(p).update(combine={"kind": "metric-rank/v1", "score": "best_valid_formal"}),
         "metric-rank/v1 cannot rank validation.output",
     ),
-    (lambda p: _pick(p).update(combine={"kind": "collect/v1"}), "not catalogued yet"),
+    (
+        lambda p: _pick(p).update(combine={"kind": "collect/v1"}),
+        "no catalogued collection contract for validation.output",
+    ),
     (
         lambda p: _pick(p).update(combine={"kind": "concat-items/v1", "field": "findings"}),
         "concat-items/v1 field 'findings' is not catalogued",

@@ -1,7 +1,6 @@
 """Derive and verify final graph evidence without importing native node consumers."""
 
 import hashlib
-import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -14,7 +13,7 @@ from workflows.definition.fanout import execution_families
 
 from . import readiness
 from .graph_models import GraphCapability, GraphNodeEvidence, GraphReason, GraphState, GraphTrace
-from .layout import candidate_control_dir, graph_instance_dir
+from .layout import graph_instance_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .route_eval import RouteEvaluationOutput
 
@@ -133,6 +132,7 @@ def replay_readiness(
     *,
     decisions: tuple[RouteEvaluationOutput, ...] = (),
     routing: Mapping[str, readiness.NodeRouting] | None = None,
+    skipped_inputs: Mapping[str, GraphReason] | None = None,
 ) -> None:
     """Replay readiness only, never native execution, over recorded terminal states.
 
@@ -147,7 +147,12 @@ def replay_readiness(
     while len(complete) < len(nodes):
         step = readiness.next_dispatch(
             readiness.readiness_input(
-                nodes, complete, aborted=aborted, decisions=decisions, routing=routing
+                nodes,
+                complete,
+                aborted=aborted,
+                decisions=decisions,
+                routing=routing,
+                skipped_inputs=skipped_inputs,
             )
         )
         if step.next is not None:
@@ -195,7 +200,7 @@ def verify_graph_trace(
         ):
             raise ValueError("graph receipt lacks terminal trace")
         return
-    from .adaptor_phase import body_outcome, expected_adaptors, verify_adaptors
+    from .adaptor_phase import body_outcome, expected_adaptors, skipped_inputs, verify_adaptors
     from .route_phase import node_routing, skip_citations, verify_routes
 
     definition = request.preview.document.definition
@@ -261,7 +266,23 @@ def verify_graph_trace(
     for item, slot in zip(trace.adaptors, expected_adaptor, strict=True):
         _check_adaptor_entry(item, slot, states)
     verify_routes(definition, trace.nodes, trace.routes, iteration=iteration)
-    replay_readiness((*trace.nodes, *trace.adaptors), decisions=decisions, routing=routing)
+    entries = {item.node_id: item for item in (*trace.nodes, *trace.adaptors)}
+    outcomes = verify_adaptors(
+        request,
+        trace.nodes,
+        trace.adaptors,
+        workspace=Path(initial.workspace),
+        iteration=iteration,
+        skips=skip_citations(entries, trace.routes, routing),
+    )
+    # Index skips come from the recomputed outcomes, so the replay refuses a node
+    # that ran on a non-emitted adaptor output (or was skipped despite one).
+    replay_readiness(
+        (*trace.nodes, *trace.adaptors),
+        decisions=decisions,
+        routing=routing,
+        skipped_inputs=skipped_inputs(definition, outcomes),
+    )
     status, validation_passed = body_outcome(shape, definition, trace)
     if (
         ("blocked" in states.values() and status in ("accepted", "completed"))
@@ -275,15 +296,6 @@ def verify_graph_trace(
         or receipt.training_output is not None
     ):
         raise ValueError("graph output index mismatch")
-    entries = {item.node_id: item for item in (*trace.nodes, *trace.adaptors)}
-    outcomes = verify_adaptors(
-        request,
-        trace.nodes,
-        trace.adaptors,
-        workspace=Path(initial.workspace),
-        iteration=iteration,
-        skips=skip_citations(entries, trace.routes, routing),
-    )
     if shape.tuning is not None:
         verify_graph_training(
             request,
@@ -293,13 +305,10 @@ def verify_graph_trace(
             incumbent=None if history is None else history.chain_formal_incumbent_reference,
             outcomes=outcomes,
         )
-    if (
-        execution_families(
-            request.preview.document.definition, request.preview.execution_profile
-        ).literature
-        is not None
-    ):
-        verify_literature_evidence(request, initial, trace, iteration=iteration)
+    if shape.literature_reviews:
+        from .literature_edges import verify_literature_evidence
+
+        verify_literature_evidence(request, initial, trace, iteration=iteration, outcomes=outcomes)
     if (
         execution_families(
             request.preview.document.definition, request.preview.execution_profile
@@ -354,103 +363,6 @@ def _check_adaptor_entry(
         item.record_path
     ):
         raise ValueError("graph adaptor record mismatch")
-
-
-def verify_literature_evidence(
-    request: CandidateRunRequest,
-    initial: CandidateRunReceipt,
-    trace: GraphTrace,
-    *,
-    iteration: int = 1,
-) -> None:
-    """Reconstruct the typed edge from captured source inputs, not child claims."""
-    from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
-    from agent.schemas.proposal import ProposalInput
-    from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
-        local_typed_evidence,
-    )
-    from agent.schemas.storage import LocalStorageConfig, StorageConfig
-
-    from .inputs import require_storage
-    from .layout import literature_input_path, proposal_input_path
-
-    edge = execution_families(
-        request.preview.document.definition, request.preview.execution_profile
-    ).literature
-    assert edge is not None
-    nodes = {node.node_id: node for node in trace.nodes}
-    if nodes[edge.review].state != "succeeded":
-        return
-    workspace = Path(initial.workspace)
-
-    def captured(binding: str) -> bytes:
-        index, observation = next(
-            (index, item)
-            for index, item in enumerate(request.files)
-            if item.reference == f"external.{binding}"
-        )
-        payload = read_graph_control(
-            candidate_control_dir(workspace, iteration=iteration) / f"input_{index:03}.snapshot"
-        )
-        if hashlib.sha256(payload).hexdigest() != observation.sha256:
-            raise ValueError("literature captured input digest mismatch")
-        return payload
-
-    selected = LiteratureReviewInput.model_validate_json(captured(edge.review_binding))
-    managed = StorageConfig(
-        backend="local",
-        local=LocalStorageConfig(
-            workspace=nodes[edge.review].storage,
-            run_name=request.run_name,
-        ),
-    )
-    require_storage(selected.storage, managed)
-    selected.storage = managed
-    actual = LiteratureReviewInput.model_validate_json(
-        read_graph_control(literature_input_path(workspace, edge.review, iteration=iteration))
-    )
-    seed_payload = json.loads(captured(edge.seed_binding))
-    seed_storage = StorageConfig(
-        backend="local",
-        local=LocalStorageConfig(
-            workspace=nodes[edge.proposal].storage,
-            run_name=request.run_name,
-        ),
-    )
-    seed_payload.setdefault("storage", seed_storage.model_dump(mode="json"))
-    seed = ProposalInput.model_validate(seed_payload)
-    require_storage(seed.storage, seed_storage)
-    seed.storage = seed_storage
-    if (
-        actual != selected
-        or selected.run_name != request.run_name
-        or (selected.task_description, selected.constraint_context)
-        != (seed.task_description, seed.constraint_context)
-    ):
-        raise ValueError("literature diagnostic/task binding mismatch")
-    path = nodes[edge.review].record_path
-    assert path is not None
-    with open_identity_file(path, require_no_follow=True) as handle:
-        before = regular_file_snapshot(handle)
-        payload = handle.read()
-        if (
-            regular_file_snapshot(handle) != before
-            or hashlib.sha256(payload).hexdigest() != nodes[edge.review].record_sha256
-        ):
-            raise ValueError("literature native record changed while verifying")
-    output = LiteratureReviewOutput.model_validate_json(payload)
-    if output.run_name != request.run_name:
-        raise ValueError("literature native record run binding mismatch")
-    if nodes[edge.proposal].state == "succeeded":
-        proposal = ProposalInput.model_validate_json(
-            read_graph_control(
-                proposal_input_path(
-                    workspace, request.preview.execution_profile, edge.proposal, iteration=iteration
-                )
-            )
-        )
-        if proposal != local_typed_evidence(output, proposal_input=seed):
-            raise ValueError("proposal input does not match the declared literature edge")
 
 
 def verify_interpretation_evidence(

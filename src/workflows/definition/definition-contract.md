@@ -267,14 +267,17 @@ declaration digests and source bytes (pinned: the shipped examples in
 `test_adaptor_declarations.py`). Adaptors execute only under the opt-in v1
 execution profiles `fanout.SELECTION_PROFILE` (`native-proposal-fanout-selection/v1`,
 B6-3; shape and run-time semantics in the candidate-worker contract, "Opt-in
-first-passing selection") and `fanout.ROUTED_PROFILE` (same node set plus routes). `candidate.refuse_declaration_only(definition, *,
+first-passing selection"), `fanout.ROUTED_PROFILE` (same node set plus routes) and the
+B6-4 literature profiles `fanout.LITERATURE_COLLECTION_PROFILE`
+(`native-literature-collection/v1`, S2) and `fanout.LITERATURE_SPLIT_PROFILE`
+(`native-literature-split/v1`, S3; candidate-worker contract, "Literature adaptor
+profiles"); `fanout.ADAPTOR_PROFILES` lists all four. `candidate.refuse_declaration_only(definition, *,
 admits_adaptors=False)` refuses any document with `adaptor_format` ("adaptors are
 declared but this execution profile does not admit them", `ADAPTORS_NOT_ADMITTED`),
 after the routing refusal, in every shape check that preview, preparation, worker and
-verifier admission use; only `execution_families` for the selection and routed
-profiles passes `admits_adaptors=True`. The reusable (v2) document, preparation and console profile
-lists do not include the selection profile yet, so a v2 document cannot declare
-adaptors. `candidate_prepare.resolution` nevertheless carries `routes`,
+verifier admission use; only `execution_families` for the `ADAPTOR_PROFILES` passes
+`admits_adaptors=True`. The reusable (v2) document, preparation and console profile
+lists include none of them yet (B6-7), so a v2 document cannot declare adaptors. `candidate_prepare.resolution` nevertheless carries `routes`,
 `adaptor_format` and `adaptors` verbatim into the effective v1 definition.
 
 ### Models
@@ -328,7 +331,7 @@ Refused with a fixed message naming the adaptor (never coerced):
 | ports and bindings | duplicate port names or bindings; a port without exactly one binding; no source at all |
 | item bounds | `len(sources)` outside `min_items..max_items` (a `one` port: exactly 1) |
 | contracts | port contract not in `CONTRACTS`; a source whose resolved contract differs from its port contract; ports of different contracts (every deterministic kind has one element contract) |
-| derived output | `output_contract` is the element contract; `collect/v1` is refused until its `<contract>.collection` output and consumer protocol are catalogued (B6-4/B6-9) |
+| derived output | `output_contract` is the element contract, except `collect/v1`, whose output is `catalog.COLLECTION_CONTRACTS[element]` (`literature.output` → `literature.collection`, B6-4); `collect/v1` over an element without an entry (e.g. `tuning.output`, B6-9) is refused ("collect/v1 has no catalogued collection contract for …") |
 | COMBINE applicability | `concat-items/v1` field must equal `SPLITTABLE_ITEMS[contract]`; `metric-rank/v1` only over `METRIC_SCORED_CONTRACTS`; `field-rank/v1` field must equal `RANKABLE_FIELDS[contract].item_field` and its ports must hold exactly one value |
 | COMBINE/DISTRIBUTE pair | `incompatible_pair`: `per-item/v1` after `collect/v1`, `concat-items/v1` or `field-rank/v1`; `split-items/v1` after `collect/v1` (the same owner the strategy core calls at run time) |
 | SELECT/COMBINE | `first-admissible/v1` requires `pass/v1`; `top-k/v1` and `threshold/v1` require a ranking (`metric-rank/v1`, `field-rank/v1`); `threshold/v1` requires its basis' ranking (`metric` → `metric-rank/v1`; `rubric` → a B2 rubric ranking, so refused until B2) |
@@ -547,7 +550,14 @@ request carries the execution profile.
 The inert catalog includes `literature.input`, `literature.output`, the `literature`
 capability and `literature-to-proposal`. The latter maps a selected review `output`
 and external `proposal_input` through the existing target-owned
-`local_typed_evidence` protocol. Structural validity alone grants no execution.
+`local_typed_evidence` protocol. Since B6-4 it also includes the contract
+`literature.collection` (`list[NamedLiteratureReviewOutput]`, the existing
+`ml_literature_review_to_ml_model_propose` model: `contribution_id` plus one complete
+`LiteratureReviewOutput`) and the protocol `literature-collection-to-proposal`
+(`reviews: literature.collection`, `proposal_input: proposal.input` → `proposal.input`,
+owner `local_typed_evidence_many`, whose `Sequence` parameter accepts the catalogued
+list; the signature test records that one widening). Only a `collect/v1` adaptor
+output reaches it at run time: no profile admits a `literature.collection` external, and the S2 profile is its only executor. Structural validity alone grants no execution.
 The native worker admits exactly one review and one complete candidate only under
 [its explicit literature profile](../../tools/candidate_worker/candidate-worker-contract.md#opt-in-native-literature-candidate).
 The reusable preparation route below uses the same native profile. Existing source

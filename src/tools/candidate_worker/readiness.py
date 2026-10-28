@@ -26,7 +26,8 @@ _ADAPTOR_CLOSING: frozenset[GraphState] = frozenset(("failed", "blocked"))
 # Control-only route sources that close their target: no record was produced.
 _CONTROL_CLOSING: frozenset[GraphState] = frozenset(("failed", "blocked"))
 # Reasons a node may be `skipped` with; a consumer of a skipped source inherits it.
-SKIP_REASONS: frozenset[GraphReason] = frozenset(("route_not_selected",))
+# `insufficient_items`: the adaptor output index the node reads was not emitted (B6-4).
+SKIP_REASONS: frozenset[GraphReason] = frozenset(("route_not_selected", "insufficient_items"))
 
 BodyStatus = Literal["failed", "rejected", "completed", "accepted"]
 Closure = tuple[GraphState, GraphReason]
@@ -72,11 +73,18 @@ class NodeReadiness(StopModel):
     routing: NodeRouting = NodeRouting()
     # A capability waits for successful sources; an adaptor for terminal ones (B6-D8).
     kind: Literal["capability", "adaptor"] = "capability"
+    # The skip reason of an adaptor output index this node reads that its succeeded
+    # adaptor did not emit (per-index skip, B6-4); node states cannot carry it.
+    skipped_input: GraphReason | None = None
 
     @model_validator(mode="after")
     def _skip_has_reason(self) -> "NodeReadiness":
         if self.state == "skipped" and self.reason not in SKIP_REASONS:
             raise ValueError("a skipped node must carry a skip reason")
+        if self.skipped_input is not None and (
+            self.skipped_input not in SKIP_REASONS or self.kind == "adaptor"
+        ):
+            raise ValueError("only a capability reads a skipped adaptor output, with a skip reason")
         if set(self.predecessors) & set(_merged(self.routing)):
             raise ValueError("a merge candidate is not also a required predecessor")
         if self.kind == "adaptor" and self.routing != NodeRouting():
@@ -182,7 +190,8 @@ def _close_reason(
     Returns the state and reason to close it without dispatch, or None when it may
     run. AND over required sources: failure stop, then blocked (a failed, rejected
     or blocked source) beats skipped (a skipped source's reason is inherited, the
-    generic propagation for any skip reason), then the node's own route decision.
+    generic propagation for any skip reason; so is a skipped adaptor output index
+    the node reads), then the node's own route decision.
     A control-only route source blocks only when it failed or was blocked: a
     rejected source still has the record its decision reads (B1-Q1 fallback).
     An adaptor accepts any terminal source (B6-D8): only a failed or blocked source
@@ -207,6 +216,8 @@ def _close_reason(
         if skipped.reason is None:  # unreachable: NodeReadiness refuses a reasonless skip
             raise ValueError(f"{skipped.node_id}: skipped without a reason")
         return ("skipped", skipped.reason)
+    if node.skipped_input is not None:
+        return ("skipped", node.skipped_input)
     return _route_closure(node, decisions)
 
 
@@ -256,9 +267,15 @@ def readiness_input(
     aborted: bool,
     decisions: tuple[RouteEvaluationOutput, ...] = (),
     routing: Mapping[str, NodeRouting] | None = None,
+    skipped_inputs: Mapping[str, GraphReason] | None = None,
 ) -> ReadinessInput:
-    """Project declared graph slots plus decided terminal evidence into readiness input."""
+    """Project declared graph slots plus decided terminal evidence into readiness input.
+
+    ``skipped_inputs`` maps a node to the skip reason of an adaptor output index it
+    reads that was not emitted (``adaptor_phase.skipped_inputs``); empty without one.
+    """
     routes = routing or {}
+    skips = skipped_inputs or {}
 
     def project(slot: GraphNodeEvidence) -> NodeReadiness:
         item = decided.get(slot.node_id)
@@ -274,6 +291,7 @@ def readiness_input(
             reason=None if item is None else item.reason,
             routing=routing,
             kind="adaptor" if slot.capability == "adaptor" else "capability",
+            skipped_input=skips.get(slot.node_id),
         )
 
     return ReadinessInput(

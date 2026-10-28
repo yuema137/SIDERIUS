@@ -28,6 +28,9 @@ from workflows.adaptors.run import AdaptorReason
 from workflows.custom_adaptors.contracts import native_type
 from workflows.definition import (
     AdaptorInstance,
+    AdaptorRequest,
+    AdaptorSource,
+    ProtocolRequest,
     ResultSource,
     ReusableWorkflowDefinition,
     WorkflowDefinition,
@@ -49,8 +52,8 @@ class SkippedAdaptorInputError(ValueError):
 
     Unreachable for route skips: routed execution (B1-PR5) cites the deciding
     route evidence (``route_phase.skip_citations``). A skip with another reason
-    (B6-4 ``insufficient_items``) still needs its own record before it may reach
-    an adaptor.
+    (``insufficient_items``, a non-emitted adaptor output index) still needs its own
+    record before it may reach an adaptor; no admitted profile binds one.
     """
 
 
@@ -199,10 +202,50 @@ def graph_closure(outcome: AdaptorOutcome) -> tuple[GraphState, GraphReason | No
 
 def _graph_reason(reason: AdaptorReason | None) -> GraphReason | None:
     match reason:
-        case None | "no_admissible_input" | "insufficient_items":
+        case None | "no_admissible_input" | "insufficient_items" | "too_many_items":
             return reason
-        case "too_many_items":  # split-items/v1 only; no admitted profile declares it
-            raise ValueError("adaptor reason too_many_items is not admitted by this profile")
+
+
+def _adaptor_sources(definition: AdaptorDefinition) -> tuple[tuple[str, AdaptorSource], ...]:
+    """Every (consumer node, adaptor output) data edge, in declaration order."""
+    edges: list[tuple[str, AdaptorSource]] = []
+    for node in definition.nodes:
+        if isinstance(node.request, AdaptorRequest):
+            edges.append((node.id, node.request.source))
+        elif isinstance(node.request, ProtocolRequest):
+            edges.extend(
+                (node.id, arg.source)
+                for arg in node.request.arguments
+                if isinstance(arg.source, AdaptorSource)
+            )
+    return tuple(edges)
+
+
+def adaptor_value(outcome: AdaptorOutcome, source: AdaptorSource) -> BaseModel:
+    """The emitted value an adaptor source names; a skipped or absent output raises."""
+    output = next((item for item in outcome.outputs if item.index == source.index), None)
+    if output is None or output.value is None:
+        raise ValueError(f"adaptor {source.adaptor} emitted no output at index {source.index}")
+    return output.value
+
+
+def skipped_inputs(
+    definition: AdaptorDefinition, outcomes: Mapping[str, AdaptorOutcome]
+) -> dict[str, GraphReason]:
+    """Consumers of an output index a succeeded adaptor skipped (per-index skip).
+
+    The pure core skips an index only for a shortfall, so the reason is
+    ``insufficient_items``; readiness closes the consumer ``skipped`` with it and
+    generic skip propagation carries it to the consumer's dependants.
+    """
+    skipped: dict[str, GraphReason] = {}
+    for node_id, source in _adaptor_sources(definition):
+        outcome = outcomes.get(source.adaptor)
+        if outcome is None:
+            continue
+        if any(item.index == source.index and item.status == "skipped" for item in outcome.outputs):
+            skipped[node_id] = "insufficient_items"
+    return skipped
 
 
 def execute_adaptor(
