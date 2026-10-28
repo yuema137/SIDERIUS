@@ -60,6 +60,7 @@
   <script src="/page-guidance.js" defer></script>
   <script src="/editor-page-bar.js" defer></script>
   <script src="/editor-canvas-add.js" defer></script>
+  <script src="/settings.js" defer></script>
 </head>
 <body>
 <a href="#workflow" id="skip-to-canvas" class="skip-link" hidden>Skip to canvas</a>
@@ -80,7 +81,7 @@
     <label class="setting"><input type="checkbox" data-ui-setting="developer"><span><strong>Show developer details</strong><span>Operation facts, raw token tables, captured resources and save internals.</span></span></label>
   </section>
 </header>
-<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#monitor">Monitor</a></nav>
+<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#monitor">Monitor</a><a href="#settings">Settings</a></nav>
 <main>
 <p id="route-status" role="status"></p>
   <div class="step-indicator" id="step-indicator" role="navigation" aria-label="Workflow steps" hidden><ol>
@@ -316,6 +317,33 @@
       <p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
     </section>
   </section>
-</section></main>
+</section>
+<section id="view-settings" data-view="settings" hidden><h1 tabindex="-1">Settings</h1>
+  <section class="card" aria-labelledby="settings-global-heading">
+    <h2 id="settings-global-heading">Global settings</h2>
+    <p>A workflow's own values are used for that workflow. Values set for a task in console.json also take priority over this page.</p>
+    <p id="settings-host" class="muted"></p>
+    <p id="settings-status" role="status">Connect to load settings.</p>
+    <form id="settings-form" hidden>
+      <fieldset><legend>Models</legend><p class="muted">Used by tasks whose console.json entry leaves out <code>llm_config_file</code>.</p><div id="settings-models"></div><label for="settings-import-llm">Import from this computer…</label><input id="settings-import-llm" type="file" accept=".json,application/json"></fieldset>
+      <fieldset><legend>Advice</legend><p class="muted">Not applied to runs from here; workflows record their own advice.</p><div id="settings-advice"></div><label for="settings-import-advice">Import from this computer…</label><input id="settings-import-advice" type="file" accept=".json,application/json"></fieldset>
+      <fieldset><legend>Data folder</legend><div id="settings-data"></div></fieldset>
+      <div class="actions"><button type="submit" id="settings-save">Save settings</button><button type="button" id="settings-reload" class="secondary">Reload</button></div>
+    </form>
+    <p id="settings-pending" role="status"></p>
+  </section>
+  <section class="card" aria-labelledby="settings-workspace-heading">
+    <h2 id="settings-workspace-heading">Workspace</h2>
+    <dl id="settings-workspace" class="facts"></dl>
+    <ul id="settings-workspace-problems"></ul>
+    <p id="settings-init" hidden>Create the missing folders on the server with: <code id="settings-init-command"></code></p>
+  </section>
+  <section class="card" aria-labelledby="settings-effective-heading">
+    <h2 id="settings-effective-heading">Values in effect</h2>
+    <p class="muted">Values marked “Set in console.json” are fixed by the server and are not editable here; change console.json and restart.</p>
+    <div class="token-table" role="region" aria-labelledby="settings-effective-heading" tabindex="0"><table><thead><tr><th scope="col">Task</th><th scope="col">Setting</th><th scope="col">Source</th><th scope="col">Choice</th><th scope="col">Server path</th></tr></thead><tbody id="settings-rows"></tbody></table></div>
+  </section>
+</section>
+</main>
 </body>
 </html>

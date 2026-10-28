@@ -38,7 +38,7 @@ even when using the default models.
    | `settings/` | `console.json`, the access token file `console-token` |
    | `data/` | one folder per task, `data/<task_id>/`, that you fill with task data |
    | `operations/`, `preparations/`, `candidates/`, `runs/` | console state and run outputs |
-   | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile as `library/llm/default-<12 hex digits>.json` |
+   | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile as `library/llm/default-<12 hex characters>.json` |
    | `projects/` | a conventional place for workflow editor projects |
 
    On success it prints two lines, the configuration file and the browser
@@ -61,20 +61,40 @@ even when using the default models.
    content. Each refusal names the folder or file, exits with status 2 and
    changes nothing that already exists.
 2. Add your task to `siderius_workspace/settings/console.json`. A task needs its
-   `task_id`, `label`, `task_manifest`, `llm_config_file`, resource policy and time
-   limits; the [configuration example](console-contract.md#configuration) shows
-   every field. Leave out `data_root`, `preparation_root`, `candidate_root` and
-   `reusable_runs_root` to use the workspace folders `data/<task_id>/`,
-   `preparations/<task_id>/`, `candidates/<task_id>/` and `runs/<task_id>/`. Any
-   value you write yourself is used instead. Save an explicit LLM profile; the
-   standard one is in `library/llm/`. Then run `init` again with the same
-   `--workspace`: it creates the task's output folders, but never
+   `task_id`, `label`, `task_manifest`, resource policy and time limits; the
+   [configuration example](console-contract.md#configuration) shows every field.
+   You can leave out:
+
+   | Field | Used when left out |
+   | --- | --- |
+   | `llm_config_file` | the model profile selected in `settings/global_settings.json`; `init` selects the standard profile in `library/llm/` |
+   | `data_root` | the data folder selected for this task in `global_settings.json`, otherwise `data/<task_id>/` |
+   | `preparation_root`, `candidate_root`, `reusable_runs_root` | `preparations/<task_id>/`, `candidates/<task_id>/`, `runs/<task_id>/` |
+
+   Any value you write in `console.json` is used instead; the global settings
+   only fill fields that `console.json` leaves out. Then run `init` again with
+   the same `--workspace`: it creates the task's output folders, but never
    `data/<task_id>/`. Until you put the task data there, this run ends with
    status 2 and lists `Workspace data/<task_id>: missing`; that is expected.
-   Create `data/<task_id>/`, add the data, and run `check` (step 3). If
-   `console.json` is missing a required field, `init` names it instead, for
-   example `task my-task needs llm_config_file`. Browser users can change
+   Create `data/<task_id>/`, add the data, and run `check` (step 3). If no
+   source gives a required field, `init` names it instead, for example
+   `task my-task needs llm_config_file` when neither `console.json` nor the
+   global settings select a model profile. Browser users can change
    the native run name and three advice fields.
+
+   `console.json` reads `settings/global_settings.json` only when it contains a
+   `global_settings` block. `init` writes `"global_settings": {"browser_writable":
+   true}` into a new `console.json`, which also lets the browser save settings.
+   `init` never rewrites an existing `console.json`, so a workspace created
+   before this block existed lacks it; add that line yourself (use `false` to
+   read the file but keep the browser from changing it) and run `check`.
+
+   To offer other model profiles, advice files or data locations, list them in
+   `console.json` under `llm_profiles`, `advice_files` and `data_roots` (see
+   [Global settings](console-contract.md#global-settings)). The settings file
+   selects among those entries by ID; it never contains a file path. A data
+   location may not contain the token, credential file, `settings/`, `library/`
+   or any output folder; `check` refuses it and names the entry.
 
    A `console.json` without `workspace_root` still works as before: write every
    path yourself as an absolute, canonical path without symlinks, create the
@@ -188,6 +208,50 @@ The entry URLs are `/#home`, `/#workflow`, `/#run` and `/#monitor`. Old
 `/editor.html` link redirects to `/#workflow` before asking for credentials.
 Connection sharing applies within one document; separate tabs/windows connect
 independently.
+
+## Choose shared settings in the browser
+
+The **Settings** page chooses, for every task at once, the model profile, an
+advice file and each task's data folder. It only offers what the operator listed
+in `console.json` (`llm_profiles`, `advice_files`, `data_roots`) or saved in the
+workspace library, so the browser never types a server path.
+
+1. Open **Settings** and connect. The page says which server holds the folders:
+   paths are on the machine running the console, not on your computer.
+2. Under **Models**, pick a profile. Tasks whose `console.json` entry sets
+   `llm_config_file` keep their own; the page only fills values that
+   `console.json` leaves out. A workflow's own values are used for that workflow.
+   Each profile lists the provider key names it needs (never their values);
+   **Show routes** lists which provider and model each step uses. To add a
+   profile, choose **Import from this computer…** and pick a JSON profile; the
+   console checks it first and refuses a misspelled key without saving anything.
+3. Under **Advice**, pick a file or **None**. The choice is only saved for
+   now: no run uses it, and each workflow keeps the advice written in it.
+   **Import from this computer…** accepts an advice file in the command-line
+   format, including one you exported earlier. Each file lists which steps it
+   advises; keys that workflows cannot use yet (`interpret`, `analysis`,
+   `mindset`) are marked.
+4. Under **Data folder**, choose a data root for a task, open subfolders, and
+   select **Use <folder>**. Links are shown but cannot be selected. A task whose
+   `console.json` sets `data_root` shows "Set in console.json" instead.
+5. Select **Save settings**. Success reads "Saved; active after server
+   restart". Restart the `serve` command to use the new values; until then the
+   page lists what is saved but not yet active. **Values in effect** shows each
+   value the running console uses, where it comes from and its server path.
+
+Saving and importing need `"global_settings": {"browser_writable": true}` in
+`console.json` (`init` writes it); otherwise the page is read-only. Imported
+files are copied to `library/llm/` or `library/advice/` on the server under a
+name that ends in the first 12 hex characters of their SHA-256. Importing the
+same file again reuses that copy; library files are never replaced or deleted.
+If someone else saved in the meantime, the page says so; select **Reload** and
+choose again. A choice that would fail `check`, such as a folder that no longer
+exists, is refused with the reason and nothing is written. If
+`settings/global_settings.json` itself becomes unusable, the page says why: run
+`chmod 600` on it if its permissions changed, or fix or restore it; when it is
+readable but invalid, you can also choose values and **Save** to replace it.
+**Workspace** lists missing workspace folders and, when `init` can create them,
+the command to run on the server.
 
 ## Edit existing circuit connections
 
@@ -411,7 +475,7 @@ binding. Downstream dotenv loading is
 legacy compatibility, not a setup step or a reliable credential source.
 Preparation is offline and does not need provider keys.
 
-Restart the server after changing `console.json`, including task paths, model
+Restart the server after changing `console.json` or saving **Settings**, including task paths, model
 profile selection, resource policy, allowed names or private-file paths. Such
 changes can require a fresh Prepare. Updating values at the same credential-file
 path takes effect on the next Launch without restart; the file must still pass
