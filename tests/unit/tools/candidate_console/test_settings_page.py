@@ -235,21 +235,66 @@ def test_an_unusable_settings_file_is_named_with_its_recovery(damage, workspace)
     assert json.loads(path.read_text())["llm_profile"] == choice["llm_profile"]
 
 
-def test_save_never_writes_through_a_linked_settings_folder(workspace, tmp_path):
-    """Defect: a settings folder swapped for a link after startup redirects the write."""
+def test_save_never_writes_through_a_settings_folder_linked_after_the_cas_read(
+    workspace, tmp_path, monkeypatch
+):
+    """Defect: the publish step follows a settings folder swapped for a link after the
+    compare-and-swap read (path-based publish), redirecting the write elsewhere.
+
+    The swap happens inside validation, after the no-follow CAS read, so only the
+    publish step's own no-follow parent descriptor can refuse it.
+    """
     api = _client(_load(workspace))
     view = api.get("/api/settings").json()
     settings = workspace / "settings"
     aside = tmp_path / "settings-aside"
-    settings.rename(aside)
-    settings.symlink_to(aside)
-    before = (aside / "global_settings.json").read_bytes()
+
+    def swap_then_validate(resolved):
+        settings.rename(aside)
+        settings.symlink_to(aside)
+        return resolved
+
+    monkeypatch.setattr("tools.candidate_console.config.validate_resolved", swap_then_validate)
+    before = (settings / "global_settings.json").read_bytes()
     response = _put(api, view["settings_sha256"], llm_profile=view["pending"]["llm_profile"])
-    assert response.status_code in (409, 422)
+    assert response.status_code == 422 and response.json()["error"]["code"] == "settings_invalid"
     assert (aside / "global_settings.json").read_bytes() == before
-    assert sorted(path.name for path in aside.iterdir()) == sorted(
-        ["console.json", "console-token", "global_settings.json"]
+    assert sorted(path.name for path in aside.iterdir()) == [
+        "console-token",
+        "console.json",
+        "global_settings.json",
+    ]
+
+
+@pytest.mark.parametrize("failure", ["replace", "short_writes"])
+def test_publish_is_complete_or_leaves_no_trace(failure, tmp_path, monkeypatch):
+    """Defect: a short write publishes a truncated file, or a failed publish leaves its
+    temp file behind or damages the previous file."""
+    from tools.candidate_console import settings_service
+
+    directory = tmp_path / "settings"
+    directory.mkdir(mode=0o700)
+    target = directory / "global_settings.json"
+    target.write_text("previous")
+    payload = b"x" * 10000
+    if failure == "replace":
+
+        def refuse(*args, **kwargs):
+            raise OSError("replace refused")
+
+        monkeypatch.setattr(settings_service.os, "replace", refuse)
+        with pytest.raises(OSError, match="replace refused"):
+            settings_service._publish_private(target, payload)
+        assert target.read_text() == "previous"
+        assert sorted(path.name for path in directory.iterdir()) == ["global_settings.json"]
+        return
+    real = settings_service.os.write
+    monkeypatch.setattr(
+        "tools.candidate_console.files.os.write", lambda fd, data: real(fd, bytes(data[:7]))
     )
+    settings_service._publish_private(target, payload)
+    assert target.read_bytes() == payload
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
 def test_listing_names_a_root_that_is_no_longer_canonical(workspace, tmp_path):

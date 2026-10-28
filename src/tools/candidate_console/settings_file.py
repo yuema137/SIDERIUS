@@ -24,6 +24,7 @@ from .settings_models import (
     SETTINGS_SCHEMA,
     WORKSPACE_DATA_ROOT,
     AdviceFileChoice,
+    AllowlistRef,
     Allowlists,
     DataRootChoice,
     FileRef,
@@ -72,9 +73,31 @@ def read_settings(path: Path) -> tuple[GlobalSettings | None, str | None]:
     return settings, hashlib.sha256(payload).hexdigest()
 
 
+def _schema_names() -> frozenset[str]:
+    names: set[str] = {"allowlist", "library"}  # FileRef discriminator tags
+    for model in (GlobalSettings, AllowlistRef, LibraryRef, FolderRef):
+        names.update(model.model_fields)
+    return frozenset(names)
+
+
 def invalid_fields(error: ValidationError) -> str:
-    """Field locations only (Pydantic ``loc``), never the offending values."""
-    locations = sorted({".".join(map(str, item["loc"])) or "(document)" for item in error.errors()})
+    """Field locations only (Pydantic ``loc``), never offending values or file-supplied keys.
+
+    A location segment that is not a schema field name or list index (a mapping key
+    such as a ``data_folders`` task ID, or an unknown top-level key) is shown as
+    ``<key>``, so the message cannot echo text taken from the file.
+    """
+    known = _schema_names()
+    locations = sorted(
+        {
+            ".".join(
+                str(part) if isinstance(part, int) or part in known else "<key>"
+                for part in item["loc"]
+            )
+            or "(document)"
+            for item in error.errors()
+        }
+    )
     return ", ".join(locations[:5])
 
 

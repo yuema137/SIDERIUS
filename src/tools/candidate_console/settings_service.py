@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from tools.candidate_operations.models import OperationFailure
 
-from .files import canonical, config_bytes, open_directory, private_bytes
+from .files import canonical, config_bytes, open_directory, private_bytes, write_all
 from .models import ConsoleConfig
 from .settings_export import (
     ExportFile,
@@ -101,10 +101,12 @@ def _library_entries(workspace: Path | None, kind: str) -> tuple[tuple[LibraryRe
 def _publish_private(path: Path, payload: bytes) -> None:
     """Atomic 0600 replace inside a parent opened with no-follow descriptors.
 
-    Temp file + fsync + ``os.replace`` relative to that descriptor, so a swapped
-    parent link cannot redirect the write (design §5.1). The temp file is removed
-    only if publishing fails.
+    Temp file (complete write) + fsync + ``os.replace`` relative to that descriptor,
+    so a swapped parent link cannot redirect the write (design §5.1). On any failure
+    before the replace, the temp file this call created is removed and the previous
+    file is untouched.
     """
+    import contextlib
     import secrets
 
     directory = open_directory(canonical(str(path.parent)))
@@ -114,15 +116,16 @@ def _publish_private(path: Path, payload: bytes) -> None:
             temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory
         )
         try:
-            os.fchmod(descriptor, 0o600)
-            os.write(descriptor, payload)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        try:
+            try:
+                os.fchmod(descriptor, 0o600)
+                write_all(descriptor, payload)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
             os.replace(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
         except BaseException:
-            os.unlink(temporary, dir_fd=directory)
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary, dir_fd=directory)
             raise
         os.fsync(directory)
     finally:

@@ -22,7 +22,7 @@ from pydantic import Field
 
 from tools.workflow_preview.models import PreviewModel
 
-from .files import config_bytes, open_directory
+from .files import config_bytes, open_directory, write_all
 from .models import ConsoleConfig
 from .settings_models import Id
 
@@ -88,7 +88,7 @@ def _write_once(directory: int, name: str, payload: bytes) -> None:
     )
     try:
         os.fchmod(descriptor, 0o600)
-        os.write(descriptor, payload)
+        write_all(descriptor, payload)
         os.fsync(descriptor)
     finally:
         os.close(descriptor)

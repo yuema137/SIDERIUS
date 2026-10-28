@@ -312,3 +312,14 @@ def test_native_admission_refuses_protected_read_only_inputs(selection, tmp_path
     secret = Path(selection.data_root) / "token"
     with pytest.raises(ValueError, match="overlaps a protected path"):
         admit(selection, protected=(secret,))
+
+
+def test_settings_errors_never_echo_file_supplied_keys(workspace, monkeypatch, capsys):
+    """Defect: a schema error repeats a mapping key or unknown key taken from the file."""
+    _write_settings(
+        workspace,
+        data_folders={"SECRETKEY/../x": {"root_id": "workspace", "subpath": "a"}},
+        SECRETTOP=1,
+    )
+    code, err = _main(monkeypatch, capsys, "check", "--config", str(_console(workspace)))
+    assert code == 2 and "data_folders.<key>" in err and "SECRET" not in err
