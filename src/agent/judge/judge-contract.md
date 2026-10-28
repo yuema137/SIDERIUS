@@ -152,11 +152,14 @@ is the file digest.
    `check_payload`, a decided payload to still pass it.
 
 The returned evidence is the call's outcome; replay equals the recorded run.
-`verify_call_chain(evidences)` requires one invocation, one content kind,
+`verify_call_chain(evidences, *, content_kinds)` requires one invocation, the
+consumer's declared content-kind sequence (one kind per call, in order),
 `call_index` equal to position and `prior_turns` covering every earlier call,
-so calls cannot be reordered, dropped or spliced. Roles may differ within a
-chain (a debate mixes advocate, critic and judge calls); a stop call is always
-a one-call chain. Any mismatch raises `JudgeEvidenceError`.
+so calls cannot be reordered, dropped, spliced or re-kinded. Kinds and roles may
+differ within a chain (`primary-advisors-llm`: `advice` … `revision`; a debate:
+`advocacy`/`critique` … `debate_verdict`); a stop call is always a one-call chain.
+`replay_llm_strategy` passes its planner's kinds. Any mismatch raises
+`JudgeEvidenceError`.
 
 ## Validation evidence
 
