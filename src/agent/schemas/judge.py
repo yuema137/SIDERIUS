@@ -9,11 +9,13 @@ outcome from that record without calling a provider (see
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
+from execute_tools.evaluation_metric import MetricDirection, MetricIdentityKey
+from execute_tools.metric_order import MetricOrder
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 CallRole = Literal["advocate", "critic", "judge", "scorer", "advisor", "reviser", "merger", "stop"]
@@ -25,18 +27,25 @@ class JudgeModel(BaseModel):
 
 
 class DirectionWords(JudgeModel):
-    """``MetricOrder.direction_words()`` carried as data; never re-derived here."""
+    """``MetricOrder.direction_words`` carried as data; never re-derived here."""
 
     verb: Literal["maximize", "minimize"]
-    comparative: Literal["higher", "lower"]
-    antonym: Literal["higher", "lower"]
+    comparative: MetricDirection
+    antonym: MetricDirection
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
-        expected = "higher" if self.verb == "maximize" else "lower"
-        if self.comparative != expected or self.antonym == self.comparative:
+        if self.model_dump() not in _ORDER_WORDS:
             raise ValueError("direction words must come from one MetricOrder")
         return self
+
+
+# Every word set the direction owner can produce; the owner, not this module,
+# maps a direction to words.
+_ORDER_WORDS = tuple(
+    MetricOrder(MetricIdentityKey(id="direction-words", direction=direction)).direction_words
+    for direction in get_args(MetricDirection)
+)
 
 
 class JudgeBodyFacts(JudgeModel):

@@ -27,7 +27,7 @@ A judge consumes facts produced by the deterministic core; it never scores.
 value, rank, health)`; `value` and `rank` are set together and only when
 `health == "valid"` (an INVALID/UNKNOWN body never presents a usable value).
 Direction language is `DirectionWords(verb, comparative, antonym)`, built from
-`MetricOrder.direction_words()` by the consumer and validated for coherence;
+`MetricOrder.direction_words` by the consumer and validated for coherence;
 this package never reads a metric direction. `StopJudgeRequest` refuses
 incoherent facts:
 
