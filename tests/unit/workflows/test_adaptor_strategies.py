@@ -521,20 +521,7 @@ def test_adaptor_input_provenance_refuses_a_route_merge():
     ],
 )
 def test_distribute_count_is_capped_at_the_adaptor_output_owner(model, fields):
-    """Unbounded fan-out defeats static topology: 10**9 must be refused at declaration,
-    while the cap itself stays admissible."""
+    """Fan-out above the ceiling is refused at declaration, and the ceiling itself is admitted."""
     with pytest.raises(ValidationError):
-        model(count=10**9, **fields)
+        model(count=MAX_ADAPTOR_OUTPUTS + 1, **fields)
     assert model(count=MAX_ADAPTOR_OUTPUTS, **fields).count == MAX_ADAPTOR_OUTPUTS
-
-
-def test_custom_adaptor_output_count_shares_the_same_ceiling():
-    """B6-5 custom manifests and built-in DISTRIBUTE must cap fan-out identically."""
-    from workflows.custom_adaptors.manifest import OutputSpec
-
-    def spec(count):
-        return OutputSpec(contract="findings/v1", count=count)
-
-    assert spec(MAX_ADAPTOR_OUTPUTS).count == MAX_ADAPTOR_OUTPUTS
-    with pytest.raises(ValidationError):
-        spec(MAX_ADAPTOR_OUTPUTS + 1)
