@@ -308,7 +308,7 @@ selected operation inside the existing poll, only for `kind == "candidate"` and
 clears the section. 404/409 are final for that selection; other failures retry on
 the next existing poll. Each body is its own section (`Iteration N` for several
 bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
-(`TRAIN & TUNE`). No cross-body score or ordering is computed or displayed.
+(`Train & tune`). No cross-body score or ordering is computed or displayed.
 Non-integer numbers are display-rounded by `number-format.js` (up to four
 decimals; four significant digits for magnitudes below 1e-3 or from 1e9); the
 exact reported value stays in the cell's tooltip. Stop-condition values in the
@@ -525,8 +525,28 @@ by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
 Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
 drag payload. It lists
 `GET /api/editor/node-catalog` entries (fetched once per connection, only while the
-Workflow view is shown; other pages never request it) grouped by capability with a text search,
-and adds one by click (placed right of the existing cards) or by dragging an entry
+Workflow view is shown; other pages never request it) as a compact, aligned stack
+of one uniform-height collapsed `details.palette-category` row per capability (icon,
+display name from `editorCapabilityPresentation.label` on one line with
+ellipsis and a full-title tooltip, a dot marker with accessible text and tooltip for
+"Start here" on `guide.chain[0]` / "Optional context" on `guide.context`, step
+number) in `guide` stage order, with a text search (matching rows open). Above the
+stack a one-sentence start guide renders `guide.chain` (emphasised while the canvas
+has no card) with a "How it works" disclosure naming `guide.context`. Expanding a row (accordion, open state kept across re-renders) shows the
+server description, the sent type, connects-from/to and one addable `.palette-entry`
+per route with contract chips: "→ <name>" for each received (required) type and
+"<name> →" for the sent type (`data-direction` receives/sends, accessible text
+"receives"/"sends"; optional ones counted). Type names are the server contract
+`name` when the catalog projection carries it, else the contract id; colour/shape
+come from `editor-contract-presentation.js`. Hover or keyboard focus on a route shows
+one shared `#palette-popover` (`role=tooltip`, `aria-describedby`; Escape, blur or
+leaving dismisses it): description, request route, every received argument with
+type, required/optional and origin (`produced_by` capabilities or external input),
+the sent type and connects-from/to. While shown, canvas ports get
+`palette-compatible` when an output carries a contract the route reads from another
+capability or an input's socket contract equals the route's output contract
+(presentation only; binding still uses server `port_inventory` choices). The
+presentation lives in `editor-palette-guidance.js`. The palette adds one by click (placed right of the existing cards) or by dragging an entry
 onto the canvas (dropped at that world position). It proposes an unused instance
 id (`<capability>`, `<capability>2`, ...). Pending nodes are the unified draft's
 `nodes` list and new external inputs its `externals` list (`editor-node-drafts.js`,
@@ -700,8 +720,10 @@ partial code-authored set never overlaps. A pointer drag and Alt + arrows call t
 same move: it records every displayed position, the moved one updated, so the next
 open shows the same layout; a save without a move keeps positions unchanged.
 Keyboard buttons share pointer actions; Escape/right-click cancels a pending wire.
-Card headings use the paper capability names (`INTERPRET`, `LITERATURE`, `PROPOSE`,
-`IMPLEMENT`, `VALIDATE`, `TRAIN & TUNE`) from `editor-capability-presentation.js`;
+Card headings, palette, loop, run and result views use one sentence-case display
+name per capability (`Interpret results`, `Literature review`, `Propose model`,
+`Implement`, `Validate`, `Train & tune`; the paper figure's stages in plain words)
+from `editor-capability-presentation.js`, their single owner;
 a unit census binds that table to the catalog. Shared semantic theme tokens own colors.
 
 Source/form/base changes invalidate Review. Unreviewed inspector edits disable
@@ -758,6 +780,11 @@ explains and creates the missing `storage` input in Selection (empty path refuse
 undo/redo), and reuses it from the second node's select. It checks that Review stays
 blocked while incomplete, then reviews one `node_drafts` proposal with
 `document: null` and only inserted lines and saves it with author comments kept.
+`tests/browser/palette_guidance.mjs` (same variables and fixture) checks the
+stage-ordered compact stack (aligned, touching rows, badges, start guide), accordion
+details and typed route chips with receive/send arrows, hover and keyboard popover
+content, compatible-port highlighting and its removal, Escape, light/dark text
+contrast >= 4.5:1, the narrow drawer, and that nothing is posted or written.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser

@@ -68,7 +68,7 @@ try {
   assert.ok(await panel.getByText('body-1', {exact: true}).count());
   assert.ok(await panel.getByText('body-2', {exact: true}).count());
   assert.ok(await panel.getByText('Best score').count());
-  assert.equal(await panel.getByText('TRAIN & TUNE state', {exact: true}).count(), 2, 'stage uses the paper capability label');
+  assert.equal(await panel.getByText('Train & tune state', {exact: true}).count(), 2, 'stage uses the paper capability label');
   assert.equal(await panel.locator('.graph-result-body').count(), 2, 'per-body summaries remain separate');
   assert.equal(requests.filter(item => item.path.endsWith('/graph-results')).length, 1, 'results are read once after terminal status');
   assert.ok(requests.every(item => item.method === 'GET'));

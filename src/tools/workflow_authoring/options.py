@@ -9,6 +9,7 @@ from workflows.definition import (
 )
 from workflows.definition.catalog import CAPABILITIES, CONTRACTS, PROTOCOLS
 
+from .capability_guide import catalog_guide, producers
 from .models import (
     BindingChoice,
     BindingOptions,
@@ -165,13 +166,14 @@ def node_catalog() -> NodeCatalog:
                                 name=item.name,
                                 contract=contract_info(item.contract),
                                 required=item.required,
+                                produced_by=producers(item.contract),
                             )
                             for item in protocol.arguments
                         ),
                     )
                 )
         entries.append(CatalogEntry(**common, protocol=None, owner=None, arguments=()))
-    return NodeCatalog(entries=tuple(entries))
+    return NodeCatalog(entries=tuple(entries), guide=catalog_guide())
 
 
 def pending_node_ports(

@@ -85,7 +85,7 @@ try {
   const limit = page.locator('#editor-loop-final-iteration');
   assert.equal(await limit.inputValue(), '1');
   const feedback = await page.locator('#editor-loop-feedback').textContent();
-  assert.match(feedback, /^TRAIN & TUNE fit → .+ interpret$/);
+  assert.match(feedback, /^Train & tune fit → .+ interpret$/);
   for (const invalid of ['0', '2.5', '']) {
     await limit.fill(invalid);
     assert.equal(await page.locator('#editor-review').isDisabled(), true, `invalid limit ${JSON.stringify(invalid)} must block Review`);

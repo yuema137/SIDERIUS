@@ -257,14 +257,15 @@ def test_oversized_source_is_bounded_unavailable_not_console_startup_failure(edi
 
 
 STATIC = Path(__file__).resolve().parents[4] / "src/tools/candidate_console/static"
-# Capability names from the paper's discovery-loop figure (docs/assets/discovery-loop.svg).
+# One sentence-case display name per capability, the stages of the paper's
+# discovery-loop figure (docs/assets/discovery-loop.svg) in plain words.
 PAPER_LABELS = {
-    "interpretation": "INTERPRET",
-    "literature": "LITERATURE",
-    "proposal": "PROPOSE",
-    "implementation": "IMPLEMENT",
-    "validation": "VALIDATE",
-    "tuning": "TRAIN & TUNE",
+    "interpretation": "Interpret results",
+    "literature": "Literature review",
+    "proposal": "Propose model",
+    "implementation": "Implement",
+    "validation": "Validate",
+    "tuning": "Train & tune",
 }
 
 
