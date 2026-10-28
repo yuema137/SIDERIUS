@@ -69,7 +69,7 @@
       // Read the project once first, so an unopenable source fails here with its reason
       // and the button stays available for a retry (L-3).
       try { await window.consoleSession.request('editor/' + encodeURIComponent(project)); }
-      catch (error) { if (!error.stale) state.textContent = `Couldn't open ${project}: ${error.message} Fix it, then try again.`; return; }
+      catch (error) { if (!error.stale) state.textContent = `Couldn't open ${project}: ${String(error.message).replace(/[.\s]*$/, '.')} Fix it, then try again.`; return; }
       if ($('editor-project').value === project && !editorState().savedSha256 && !$('editor-refresh').disabled) $('editor-refresh').click();
       if ($('editor-project').value !== project) {
         $('editor-project').value = project;

@@ -93,8 +93,15 @@
     return [added && `new ${added}`, (state.removed || []).length ? `deletion of ${state.removed.join(', ')}` : ''].filter(Boolean).join('; ');
   };
   // One plain sentence; the located problems are listed by the page-bar problems chip.
-  const message = view => view.status === 'complete' ? 'New modules are complete. Save when ready.'
-    : 'Connect the inputs marked in red. The problems chip in the bar above lists them.';
+  // The sentence follows the server's problem codes (B8-5): an emptied canvas or a broken
+  // loop has nothing marked in red, so it never asks to connect red inputs.
+  const message = view => {
+    if (view.status === 'complete') return 'New modules are complete. Save when ready.';
+    const codes = new Set((view.problems || []).map(item => item.code));
+    if (codes.has('workflow_empty')) return 'The workflow is empty. Add a module from the list on the left, or Undo.';
+    if (codes.size && [...codes].every(code => code === 'loop_feedback_missing')) return 'The research loop feeds back between deleted modules. Undo the delete, or remove the research loop.';
+    return 'Connect the inputs marked in red. The problems chip in the bar above lists them.';
+  };
 
   window.editorNodeDrafts = Object.freeze({active, key, project, bind, cancel, moves, summary, message});
 })();
