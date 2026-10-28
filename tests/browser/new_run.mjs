@@ -46,7 +46,10 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   let context = await browser.newContext(), page = await context.newPage();
-  const connect = async () => { if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click(); await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor(); };
+  const connect = async () => { if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click(); await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
+    // New run controls live in the collapsed "Prepare a new run" disclosure (51b3e8c5); open it as a user would.
+    const runDetails = page.locator('.workflow-run-details');
+    if (await runDetails.isVisible() && !(await runDetails.evaluate(element => element.open))) await runDetails.locator('> summary').click(); };
   const requests = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => {if (request.method() === 'POST') requests.push(request.url());});

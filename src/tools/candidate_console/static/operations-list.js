@@ -9,7 +9,7 @@
     prepare: 'Preparation', prepare_reusable: 'Workflow preparation', candidate: 'Candidate run',
     candidate_loop_resume: 'Resumed research loop', native_chain: 'Native chain', native_chain_resume: 'Resumed native chain',
   };
-  let loading = false, operations = [];
+  let loading = false, operations = [], listedRevision = null;
   const say = text => { if ($('operations-status').textContent !== text) $('operations-status').textContent = text; };
   function when(value) {
     const time = new Date(value);
@@ -49,7 +49,7 @@
     try {
       const value = await session().request('operations?limit=50');
       if (!Array.isArray(value?.operations)) throw new Error('unexpected list response');
-      operations = value.operations; render();
+      operations = value.operations; listedRevision = session().revision; render();
       const notes = [operations.length ? `${operations.length} operation${operations.length === 1 ? '' : 's'}, most recent first.` : 'No operations have been admitted by this console yet.'];
       if (value.unreadable) notes.push(`${value.unreadable} record${value.unreadable === 1 ? '' : 's'} could not be verified and ${value.unreadable === 1 ? 'is' : 'are'} not listed.`);
       if (value.incomplete) notes.push('The store holds more records than one listing examines; open others by UUID.');
@@ -61,9 +61,10 @@
       loading = false; $('operations-refresh').disabled = !session().connected;
     }
   }
-  // Entering a bare Slow control route (re)loads the list; an explicit operation route keeps
-  // its existing request pattern, and the list there is refreshed on demand.
-  const wanted = () => window.consoleNavigation.view === 'slow-control' && !window.consoleNavigation.operation && !$('route-status').textContent;
+  // Slow control lists once per connection on any of its routes, so a connected page never
+  // shows the disconnected hint; entering the bare route again re-reads, Refresh on demand.
+  const wanted = () => window.consoleNavigation.view === 'slow-control' &&
+    (listedRevision !== session().revision || (!window.consoleNavigation.operation && !$('route-status').textContent));
   session().subscribe(state => {
     $('operations-refresh').disabled = !state.connected || loading;
     if (!state.connected) { if (operations.length) say('Not connected. The last listed operations are retained; reconnect to refresh.'); else say('Connect to list operations.'); return; }

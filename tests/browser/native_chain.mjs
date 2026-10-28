@@ -93,7 +93,8 @@ try {
   assert.equal(posts, 2);
   await page.locator('#native-chain-monitor').click();
   await page.locator('#native-chain-observation').waitFor();
-  await page.locator('#tokens-status').filter({hasText: 'Native-chain token aggregation is not supported.'}).waitFor();
+  // Native chains report whole-run cumulative tokens (ab2f40dd), not an unsupported notice.
+  await page.locator('#tokens-status').filter({hasText: 'Whole-run cumulative usage.'}).waitFor();
   let final;
   await until(async () => {
     final = await page.evaluate(id => window.consoleSession.request('operations/' + id), intent.operation_id);
@@ -170,9 +171,14 @@ async function projections(context, metadata, realStatus) {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     const reply = json => route.fulfill({json});
-    if (path === '/api/choices') return reply([]);
+    // Read-only shell lists (recorded examples, Slow control operation list) are outside this witness.
+    if (path === '/api/choices' || path === '/api/recorded-examples') return reply([]);
+    if (path === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     if (path === '/api/native-chain/choices') return reply([{choice_id: 'one', label: 'One'}, {choice_id: 'two', label: 'Two'}]);
     if (path === '/api/native-chain/review') {reviewRequestCount++; reviewReply = true; await holdReview; return reply(fakeReview);}
+    // Native chains report their own whole-run tokens (ab2f40dd); only the candidate's late
+    // reply carries stale rows, which the monitor epoch fence must drop.
+    if (path === `/api/operations/${realStatus.operation_id}/tokens`) return reply({groups: [], quality: {partial: false}, reason: 'native_evidence_unavailable', scope: 'chain_cumulative', coverage_note: 'Fixture native coverage.', observed_at: 'native-fixture'});
     if (path.endsWith('/tokens')) {tokenReply = true; await holdTokens; return reply({groups: [{provider: 'STALE-CANDIDATE', requested_model: 'old', served_model: null, reported_total_tokens: 999}], quality: {partial: false}, reason: 'reported_responses', observed_at: 'old'});}
     if (path.endsWith('/log')) return reply({next_offset: 0, observed_size: 0, text: '', missing: true});
     if (path === '/api/operations/' + candidate) {
@@ -192,9 +198,9 @@ async function projections(context, metadata, realStatus) {
   await until(() => tokenReply);
   await page.evaluate(id => {location.hash = 'slow-control/' + id;}, realStatus.operation_id);
   releaseTokens(); await page.locator('#native-chain-observation').waitFor();
-  assert.equal(await page.locator('#token-rows').textContent(), '');
-  assert.equal(await page.locator('#tokens-times').textContent(), '');
-  assert.match(await page.locator('#tokens-status').textContent(), /not supported/);
+  await page.locator('#tokens-status').filter({hasText: 'Whole-run cumulative usage.'}).waitFor({state: 'attached'});
+  assert.equal(await page.locator('#token-rows').textContent(), '', 'Late candidate token rows must not render for the native chain');
+  assert.doesNotMatch(await page.locator('#tokens-times').textContent(), /\bold\b/);
   holdStatus = true;
   await page.evaluate(id => {location.hash = 'slow-control/' + id;}, candidate);
   await until(() => statusWaiting);

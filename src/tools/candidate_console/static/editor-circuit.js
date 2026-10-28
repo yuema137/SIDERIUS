@@ -279,7 +279,7 @@
       const role = [...heading.querySelector('.capability-heading').classList].find(name => name.startsWith('capability-') && name !== 'capability-heading');
       if (role) card.classList.add(role);
       heading.setAttribute('aria-pressed', String(node.id === value.selected));
-      heading.addEventListener('click', () => { if (projection === value && projection.enabled) actions.select(node.id); });
+      heading.addEventListener('click', () => { if (projection === value && projection.selectable) actions.select(node.id); });
       heading.addEventListener('keydown', event => {
         if (projection !== value || !projection.enabled || projection.allowMove === false || !event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
         event.preventDefault(); const position = card._position;
@@ -350,7 +350,7 @@
     for (const card of cards) { card.style.left = card._position.x + ox + 'px'; card.style.top = card._position.y + oy + 'px'; }
     world.style.transform = view.scale === 1 ? '' : `scale(${view.scale})`;
     sizeWorld();
-    setEnabled(value.enabled); draw();
+    setEnabled(value.enabled, value.selectable ?? value.enabled); draw();
     if (view.fitPending) fit();
     else if (view.scroll) { viewport.scrollLeft = view.scroll.left; viewport.scrollTop = view.scroll.top; }
     updateVisibility();
@@ -361,15 +361,17 @@
     }
     if (focus) document.getElementById(focus)?.focus({preventScroll: true});
   }
-  function setEnabled(enabled) {
+  // Selecting a capability is navigation, not an edit: invalid inspector drafts block edits
+  // (enabled) but must not trap the author on one node (selectable).
+  function setEnabled(enabled, selectable = enabled) {
     if (!projection || !host) return;
-    projection.enabled = enabled;
+    projection.enabled = enabled; projection.selectable = selectable;
     for (const port of host.querySelectorAll('.circuit-port')) port.disabled = !enabled;
     const disconnect = host.querySelector('.circuit-disconnect'); if (disconnect) disconnect.disabled = !enabled || projection.allowBindingChange === false;
     for (const target of host.querySelectorAll('.circuit-wire-target')) {
       target.setAttribute('aria-disabled', String(!enabled)); target.setAttribute('tabindex', enabled ? '0' : '-1');
     }
-    for (const heading of host.querySelectorAll('.editor-node')) heading.setAttribute('aria-disabled', String(!enabled));
+    for (const heading of host.querySelectorAll('.editor-node')) heading.setAttribute('aria-disabled', String(!selectable));
     if (!enabled) { cancel(); selectedWire = null; highlight(); }
   }
   document.addEventListener('keydown', event => {
