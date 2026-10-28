@@ -40,8 +40,10 @@ receipts and timing are later owners (B3-2, B3-4, B3-5). Without a
 
 ## Decision
 
-`plan_dispatch(ready, running, budget) -> ScheduleDecision` reads no
-environment, clock, file or device.
+`plan_dispatch(ready, running, budget, *, on_refusal) -> ScheduleDecision`
+reads no environment, clock, file or device. `on_refusal`
+(`RefusalPolicy = Literal["continue", "halt"]`) is required and has no
+default, so every caller states its refusal semantics.
 
 1. `running` is the reservation ledger. Every entry must be a `placed`
    `Placement` naming this budget's digest and, for a GPU unit, one of its
@@ -55,10 +57,15 @@ environment, clock, file or device.
    - **refused** when the request cannot fit even an idle budget: host
      memory or CPU slots above the budget total, a GPU unit with no slots, or
      a VRAM request infeasible alone on every slot. Reasons start with
-     `escalated to operator`. Nothing is shrunk, re-batched or re-routed. A
-     refused unit does not hold the queue; callers that treat any refusal as
-     an abort (`resource_refused`) must inspect `refused` before dispatching
-     any placement.
+     `escalated to operator`. Nothing is shrunk, re-batched or re-routed. The
+     refusal policy then applies:
+     - `halt`: if any unit is refused, `placements` is empty and only the
+       refused units are returned. This is the graph-mode serial reference:
+       the body aborts with `resource_refused` before any effect. Graph
+       callers (B3-4) must pass `halt`.
+     - `continue`: a refused unit does not hold the queue; the remaining
+       units are planned as if it were absent. This is the cross-operation
+       mode (B3-5), where operations are independent submissions.
    - **queued** when it would fit an idle budget but the ledger is full in
      some dimension: `max_concurrent_units`, unreserved host memory,
      unreserved CPU slots, or no slot with enough unreserved VRAM. Strict
@@ -72,8 +79,12 @@ environment, clock, file or device.
      effective ceiling = min of operator ceiling, host quota, measured
      capacity). Its reasons become the placement reasons. A placed unit is
      added to the ledger before the next unit is visited.
-4. Host memory and CPU slots compare the ledger sum plus the request with
-   `<=` against the budget.
+4. Host memory and CPU slots fit when `ledger sum + request <= budget`
+   (queued when `ledger sum + request > budget`), the same form as the
+   pair-admission aggregate.
+5. Every shortfall reason ends with `(short by <excess> GiB)` printed to six
+   significant digits, so a near-boundary message whose two-decimal values
+   round equal still states why it does not fit.
 
 The result is a deterministic function of the request set, the running set
 and the budget: permuting either tuple yields an identical `ScheduleDecision`.
@@ -83,9 +94,11 @@ and the budget: permuting either tuple yields an identical `ScheduleDecision`.
 - `Placement` (frozen): `reserved` (the request), `decision`
   (`placed`/`queued`/`refused`), `gpu_uuid` (required exactly for a placed
   GPU unit), `budget_digest`, non-empty `reasons`. Derived properties:
-  `unit_id`, `dispatch_ordinal`, `cuda_visible_devices` (the placed UUID, so
-  the child sees logical device 0; `None` means the caller sets no device
-  selector). Timing (`queued_at`, `started_at`, end and exit
+  `unit_id`, `dispatch_ordinal`, `cuda_visible_devices`: for a placed GPU
+  unit the slot UUID (the child sees it as logical device 0); for a placed
+  CPU-only unit `""`, which hides every GPU so the child cannot allocate VRAM
+  the ledger does not reserve; `None` only for a queued or refused unit,
+  which must not be dispatched. Timing (`queued_at`, `started_at`, end and exit
   classification) is runner-owned receipt data, not part of this pure
   decision.
 - `ScheduleDecision`: `budget_digest`, `placements` (placed and queued, in

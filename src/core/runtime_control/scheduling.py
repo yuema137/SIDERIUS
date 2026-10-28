@@ -49,6 +49,9 @@ PositiveCount = Annotated[PositiveInt, Field(strict=True)]
 Ordinal = Annotated[NonNegativeInt, Field(strict=True)]
 GpuUuid = Annotated[str, Field(pattern=r"^(GPU|MIG)-[0-9A-Za-z-]+$")]
 Sha256Hex = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+#: ``halt``: any refusal places nothing (graph-mode serial reference).
+#: ``continue``: refused units are reported; others are still planned.
+RefusalPolicy = Literal["continue", "halt"]
 
 
 class ResourceRequest(BaseModel):
@@ -179,8 +182,14 @@ class Placement(BaseModel):
 
     @property
     def cuda_visible_devices(self) -> str | None:
-        """The child's device selector: the placed UUID, so it sees logical 0."""
-        return self.gpu_uuid
+        """The placed child's device selector; ``None`` for an unplaced unit.
+
+        A GPU unit sees only its slot (as logical 0). A placed CPU-only unit
+        gets ``""`` so it cannot allocate VRAM the ledger does not reserve.
+        """
+        if self.decision != "placed":
+            return None
+        return self.gpu_uuid if self.gpu_uuid is not None else ""
 
 
 class ScheduleDecision(BaseModel):
@@ -236,12 +245,16 @@ def plan_dispatch(
     ready: tuple[ResourceRequest, ...],
     running: tuple[Placement, ...],
     budget: HostBudget,
+    *,
+    on_refusal: RefusalPolicy,
 ) -> ScheduleDecision:
     """Place ready units first-fit in strict FIFO ordinal order; refuse impossible ones.
 
     A unit that cannot fit now is queued, and every later ordinal queues behind
     it (head-of-line blocking; no backfill). A unit that cannot fit even on an
-    empty budget is refused before any effect and does not hold the line.
+    empty budget is refused before any effect. ``on_refusal`` has no default:
+    ``halt`` returns no placements when any unit is refused; ``continue``
+    plans the remaining units as if the refused ones were absent.
     """
     digest = budget.digest
     ledger = _ledger_from_running(running, budget, digest)
@@ -264,6 +277,8 @@ def plan_dispatch(
             ledger = ledger.with_placement(placement)
         else:
             head = request
+    if refused and on_refusal == "halt":
+        admitted = []
     return ScheduleDecision(
         budget_digest=digest, placements=tuple(admitted), refused=tuple(refused)
     )
@@ -313,10 +328,11 @@ def _decide(
 def _refusal_reasons(request: ResourceRequest, budget: HostBudget) -> tuple[str, ...]:
     """Shortfalls that persist even with nothing running: escalate, never shrink."""
     reasons: list[str] = []
-    if request.host_memory_gib > budget.host_memory_gib:
+    memory_excess = request.host_memory_gib - budget.host_memory_gib
+    if memory_excess > 0:
         reasons.append(
-            f"needs {request.host_memory_gib:.2f} GiB host memory; "
-            f"budget declares {budget.host_memory_gib:.2f} GiB"
+            f"needs {request.host_memory_gib:.2f} GiB host memory; budget declares "
+            f"{budget.host_memory_gib:.2f} GiB{_short_by(memory_excess)}"
         )
     if request.cpu_slots > budget.cpu_slots:
         reasons.append(f"needs {request.cpu_slots} CPU slots; budget declares {budget.cpu_slots}")
@@ -334,7 +350,10 @@ def _gpu_refusal_reasons(request: ResourceRequest, budget: HostBudget) -> list[s
     if any(_fits(alone, slot) for slot in budget.gpus):
         return []
     largest = max(slot.ceiling.effective_gib for slot in budget.gpus)
-    return [f"needs {request.vram_gib:.2f} GiB VRAM; largest slot ceiling is {largest:.2f} GiB"]
+    return [
+        f"needs {request.vram_gib:.2f} GiB VRAM; largest slot ceiling is "
+        f"{largest:.2f} GiB{_short_by(_pair_member(request).predicted_peak_vram_gb - largest)}"
+    ]
 
 
 def _place(request: ResourceRequest, ledger: _Ledger, digest: str) -> Placement:
@@ -350,14 +369,17 @@ def _shared_shortfall(request: ResourceRequest, ledger: _Ledger) -> str | None:
     budget = ledger.budget
     if len(ledger.placed) >= budget.max_concurrent_units:
         return f"max_concurrent_units {budget.max_concurrent_units} reached"
-    free_memory = budget.host_memory_gib - ledger.host_memory_gib()
-    if request.host_memory_gib > free_memory:
+    reserved_memory = ledger.host_memory_gib()
+    if reserved_memory + request.host_memory_gib > budget.host_memory_gib:
+        over = reserved_memory + request.host_memory_gib - budget.host_memory_gib
         return (
             f"needs {request.host_memory_gib:.2f} GiB host memory; "
-            f"{free_memory:.2f} GiB unreserved in the ledger"
+            f"{budget.host_memory_gib - reserved_memory:.2f} GiB unreserved in the ledger"
+            f"{_short_by(over)}"
         )
-    free_cpu = budget.cpu_slots - ledger.cpu_slots()
-    if request.cpu_slots > free_cpu:
+    reserved_cpu = ledger.cpu_slots()
+    if reserved_cpu + request.cpu_slots > budget.cpu_slots:
+        free_cpu = budget.cpu_slots - reserved_cpu
         return f"needs {request.cpu_slots} CPU slots; {free_cpu} unreserved in the ledger"
     return None
 
@@ -371,9 +393,16 @@ def _place_on_gpu(request: ResourceRequest, ledger: _Ledger, digest: str) -> Pla
         if decision.feasible:
             return _decide(request, "placed", digest, decision.reasons, gpu_uuid=slot.uuid)
         free = decision.headroom_gib + candidate.predicted_peak_vram_gb
-        headroom.append(f"{slot.uuid}: {free:.2f} GiB unreserved")
+        headroom.append(
+            f"{slot.uuid}: {free:.2f} GiB unreserved{_short_by(-decision.headroom_gib)}"
+        )
     reason = f"needs {request.vram_gib:.2f} GiB VRAM; " + "; ".join(headroom)
     return _decide(request, "queued", digest, (reason,))
+
+
+def _short_by(excess_gib: float) -> str:
+    """Exact excess, so a near-boundary message never reads as fitting."""
+    return f" (short by {excess_gib:.6g} GiB)"
 
 
 def _fits(members: tuple[PairMember, ...], slot: GpuSlot) -> bool:
