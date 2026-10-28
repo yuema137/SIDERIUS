@@ -24,7 +24,7 @@ from workflows.definition import (
     ResultSource,
     parse_workflow_source,
 )
-from workflows.definition.catalog import CAPABILITIES, PROTOCOLS
+from workflows.definition.catalog import CAPABILITIES, COLLECTION_CONTRACTS, PROTOCOLS
 from workflows.definition.draft import BindingPatch
 
 STORE = ExternalBinding(id="store2", contract="storage", location="inputs/store2.json")
@@ -180,7 +180,8 @@ def test_external_input_catalog_explains_every_socket_contract():
     entries = {item.contract.id: item for item in external_input_catalog().entries}
     sockets = {item.contract for protocol in PROTOCOLS.values() for item in protocol.arguments}
     sockets |= {item.input for item in CAPABILITIES.values()}
-    results = {item.output for item in CAPABILITIES.values()}
+    # A collect/v1 adaptor assembles collection contracts; they are never externals.
+    results = {item.output for item in CAPABILITIES.values()} | set(COLLECTION_CONTRACTS.values())
     assert sockets - results <= entries.keys() and not results & entries.keys()
     assert all(entry.summary for entry in entries.values())
     assert entries["storage"].managed and not entries["literature.input"].managed

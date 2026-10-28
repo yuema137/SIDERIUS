@@ -55,6 +55,7 @@ only colour and shape per id.
 | `optional.parameter-rules` | Parameter rules | setting | Limits on which model and training parameters may change and how. |
 | `literature.input` | Search evidence | produced | Evidence from earlier analysis that a literature search looks for papers about. |
 | `literature.output` | Paper findings | produced | Findings from published papers, with the retrieved papers behind them. |
+| `literature.collection` | Collected paper findings | produced | Paper findings from several literature searches, each labelled with the search that produced it. |
 | `proposal.input` | Design brief | produced | Everything needed to design the next model. |
 | `proposal.output` | Model plan | produced | A complete model specification, ready to implement and train. |
 | `implementation.input` | Coding brief | produced | A model plan with run context, ready to be turned into code. |
@@ -86,7 +87,7 @@ semantic type here.
 
 `tests/unit/workflows/test_contract_names.py` checks catalog coverage, unique
 names and descriptions per schema, the word rules above, same schema ⇒ same
-name and distinct (semantic) schemas ⇒ distinct names, `produced` ⇔ exchanged by a capability, and the adaptor rule.
+name and distinct (semantic) schemas ⇒ distinct names, `produced` ⇔ exchanged by a capability or assembled by `collect/v1` (`COLLECTION_CONTRACTS`), and the adaptor rule.
 `tests/unit/tools/test_workflow_authoring.py` checks the serialized fields;
 `tests/browser/port_legibility.mjs` checks names, arrows and the legend in the
 browser. `catalog.py`/`contract_names.py` are not inputs to

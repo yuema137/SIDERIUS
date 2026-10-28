@@ -274,9 +274,7 @@ def _training_document(**launch):
     document = parse_workflow_source(source)
     settings = dict(document.training_settings)
     settings["launch"] = {
-        key: value
-        for key, value in {**settings["launch"], **launch}.items()
-        if value is not None
+        key: value for key, value in {**settings["launch"], **launch}.items() if value is not None
     }
     return document.model_copy(update={"training_settings": settings})
 

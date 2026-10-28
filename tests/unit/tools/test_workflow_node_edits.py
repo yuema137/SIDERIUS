@@ -373,6 +373,7 @@ def test_palette_guide_covers_every_capability_and_matches_protocol_edges():
     assert catalog.guide.context == ("interpretation", "literature")
     assert catalog.guide.chain == ("proposal", "implementation", "validation", "tuning")
 
+
 def test_remove_refuses_a_route_source_instead_of_returning_dangling_source():
     """Fails if removing a node only a route reads (no ResultSource consumer) returns source
     whose route still names it: the removal must be refused with the validator's reason."""

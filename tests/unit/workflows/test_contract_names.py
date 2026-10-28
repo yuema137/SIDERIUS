@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from workflows.definition.catalog import CAPABILITIES, CONTRACTS
+from workflows.definition.catalog import CAPABILITIES, COLLECTION_CONTRACTS, CONTRACTS
 from workflows.definition.contract_names import (
     SCHEMA_NAMES,
     adaptor_name,
@@ -73,7 +73,7 @@ def test_produced_schemas_are_exactly_those_capabilities_exchange():
         contract_schema(contract)
         for capability in CAPABILITIES.values()
         for contract in (capability.input, capability.output)
-    }
+    } | {contract_schema(contract) for contract in COLLECTION_CONTRACTS.values()}
     for schema, item in SCHEMA_NAMES.items():
         assert (item.kind == "produced") == (schema in exchanged), schema
 
