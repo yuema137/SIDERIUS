@@ -16,3 +16,26 @@ class CredentialReadiness(PreviewModel):
     file_status: Literal["not_needed", "not_selected", "readable", "unavailable"]
     ready: bool
     instructions: tuple[str, ...]
+
+
+# Task data (created_by="operator") reports presence only, never ownership.
+WorkspaceStatus = Literal["present", "missing", "not_directory", "symlink", "not_owner"]
+
+
+class WorkspaceEntry(PreviewModel):
+    """One fixed or derived folder by workspace-relative name; never an absolute path."""
+
+    name: str
+    status: WorkspaceStatus
+    # init: `candidate_console init` creates it; writer: created lazily when first
+    # written; operator: task data the tool never creates.
+    created_by: Literal["init", "writer", "operator"]
+
+
+class WorkspaceReadiness(PreviewModel):
+    """Ephemeral name-only layout facts; never admission and never a creation request."""
+
+    workspace_status: WorkspaceStatus
+    entries: tuple[WorkspaceEntry, ...]
+    ready: bool
+    init_command: str | None
