@@ -77,7 +77,8 @@ are unchanged. All routes are conditional possibilities, not invocation counts,
 stage activation, costs or reconciled native request values.
 
 `inactive_roles` lists every native workflow role outside these three roles,
-including unconfigured ones. No tuner, literature, interpretation or analysis
+including unconfigured ones. The `judge` entry appears only when the config declares a
+`judge` block; an undeclared `judge` is not listed. No tuner, literature, interpretation or analysis
 transport is projected. Transport resolvers are pure: preview does not read
 credentials or SDK environment. `base_url=None` leaves endpoint selection to
 later SDK/environment behavior; reported routes do not certify an effective
