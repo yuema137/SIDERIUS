@@ -14,6 +14,7 @@ from typing import Annotated, Literal, Self, get_args
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
+from agent.schemas.judge_task import JudgeTaskBlocks, RubricSpec
 from execute_tools.evaluation_metric import MetricDirection, MetricIdentityKey
 from execute_tools.metric_order import MetricOrder
 
@@ -114,10 +115,61 @@ class StopJudgeRequest(JudgeModel):
             raise ValueError("the incumbent must be a rank-1 body with the same value")
 
 
-# Role content kind -> the call roles that may carry it. Strategy content kinds
-# join the CallContent union and this table in their own changes.
-CallContent = Annotated[StopJudgeRequest, Field(discriminator="kind")]
-_ROLES_BY_CONTENT: dict[str, frozenset[str]] = {"stop": frozenset({"stop"})}
+#: Deterministic projection bounds: one item never dominates a prompt.
+MAX_PROJECTED_FIELDS = 64
+MAX_PROJECTED_CHARS = 4000
+#: Items one scoring call may list, so a batch prompt has a fixed size bound.
+MAX_SCORED_ITEMS_PER_CALL = 16
+
+
+class ProjectedField(JudgeModel):
+    name: str = Field(min_length=1, max_length=100)
+    text: str = Field(max_length=MAX_PROJECTED_CHARS)
+
+
+class ItemProjection(JudgeModel):
+    """Bounded, deterministic view of one verified value, built by its contract's projector."""
+
+    contract: str = Field(min_length=1)
+    fields: tuple[ProjectedField, ...] = Field(min_length=1, max_length=MAX_PROJECTED_FIELDS)
+
+
+class JudgedItem(JudgeModel):
+    """One admissible item as a judge sees it; ``item_id`` is the adaptor's ``<port>:<position>``."""
+
+    item_id: str = Field(min_length=1)
+    projection: ItemProjection
+
+
+class RubricScoringRequest(JudgeModel):
+    """One ``rubric-rank/v1`` scoring call: score ``items`` on every rubric criterion.
+
+    ``repeat`` distinguishes the declared repeats of the same scoring call; it is
+    hashed but not rendered.
+    """
+
+    kind: Literal["rubric_scoring"] = "rubric_scoring"
+    rubric: RubricSpec
+    criterion: str = Field(min_length=1, max_length=2000)
+    repeat: int = Field(ge=0)
+    items: tuple[JudgedItem, ...] = Field(min_length=1, max_length=MAX_SCORED_ITEMS_PER_CALL)
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def distinct_items(self) -> Self:
+        ids = [item.item_id for item in self.items]
+        if len(set(ids)) != len(ids):
+            raise ValueError("a scoring call lists each item once")
+        return self
+
+
+# Role content kind -> the call roles that may carry it. Further strategy content
+# kinds join the CallContent union and this table in their own changes.
+CallContent = Annotated[StopJudgeRequest | RubricScoringRequest, Field(discriminator="kind")]
+_ROLES_BY_CONTENT: dict[str, frozenset[str]] = {
+    "stop": frozenset({"stop"}),
+    "rubric_scoring": frozenset({"scorer"}),
+}
 
 
 class CallRequest(JudgeModel):
@@ -150,8 +202,26 @@ class StopVerdict(JudgeModel):
     confidence: Literal["low", "medium", "high"]
 
 
-# Strategy payload kinds join this as a discriminated union in their own PRs.
-CallPayload = StopVerdict
+class CriterionScore(JudgeModel):
+    criterion: str = Field(min_length=1)
+    score: int
+
+
+class ItemCriterionScores(JudgeModel):
+    item_id: str = Field(min_length=1)
+    scores: tuple[CriterionScore, ...] = Field(min_length=1)
+
+
+class RubricVerdict(JudgeModel):
+    """Per-criterion integers only; the weighted mean is computed by framework code."""
+
+    kind: Literal["rubric"]
+    item_scores: tuple[ItemCriterionScores, ...] = Field(min_length=1)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+# Further strategy payload kinds join this union in their own changes.
+CallPayload = Annotated[StopVerdict | RubricVerdict, Field(discriminator="kind")]
 
 
 class PromptIdentity(JudgeModel):
