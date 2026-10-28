@@ -1,25 +1,28 @@
 /* "Stop run" for a live candidate operation. The request records operator cancel; only the native receipt says the run stopped. */
 (() => {
   'use strict';
-  const CONFIRM = 'Stop this run? Work done so far is kept.';
-  const KINDS = ['candidate', 'candidate_loop_resume'];
-  // prefix selects one mount: `${prefix}-group` (hidden unless running), `${prefix}-button`, `${prefix}-status`.
+  const CONFIRM = 'Stop this run now? It ends immediately and cannot be undone or resumed, and it produces no candidate result. ' +
+    'Files written so far stay in the run folder. A model call already in progress may still be billed by the provider without appearing in the token report.';
+  // prefix selects one mount: `${prefix}-group` (hidden unless the server says cancellable), `${prefix}-button`, `${prefix}-status`.
   function mount(prefix) {
     const $ = name => document.getElementById(`${prefix}-${name}`);
-    let id = null, last = null, pending = false, acknowledged = false, error = '';
+    let id = null, last = null, pending = false, acknowledged = false, error = '', stale = false;
     function text(status) {
-      if (status.native_status === 'cancelled') return 'Run stopped. Work done so far is kept.';
+      if (status.native_status === 'cancelled') return 'Run stopped. Files written so far stay in the run folder; no candidate result is produced.';
       if (status.cancel_requested || acknowledged) return status.receipt_available ? 'Stop was requested, but the run finished first.' : 'Stopping the run…';
       return pending ? 'Sending Stop…' : error;
     }
     function render(status) {
       if (!status) { id = null; last = null; $('group').hidden = true; $('status').textContent = ''; return; }
-      if (status.operation_id !== id) { id = status.operation_id; pending = false; acknowledged = false; error = ''; }
+      if (status.operation_id !== id) { id = status.operation_id; pending = false; acknowledged = false; error = ''; stale = false; }
       last = status;
-      const running = KINDS.includes(status.kind) && status.state === 'active' && !status.receipt_available;
-      $('group').hidden = !running || status.cancel_requested || acknowledged;
-      $('button').disabled = pending || !window.consoleSession.connected;
-      $('status').textContent = text(status);
+      const connected = window.consoleSession.connected;
+      // The server's `cancellable` is the one authority for offering Stop run.
+      $('group').hidden = !status.cancellable || acknowledged;
+      $('button').disabled = pending || !connected;
+      const observed = text(status);
+      // While the server is unreachable this line is the last poll, not current state.
+      $('status').textContent = observed && (stale || !connected) ? 'Last observed: ' + observed : observed;
     }
     async function stop() {
       const current = id;
@@ -36,7 +39,10 @@
       }
     }
     $('button').addEventListener('click', () => { void stop(); });
-    return Object.freeze({render});
+    window.consoleSession.subscribe(() => { if (last) render(last); });
+    // The page's poll owner reports whether its latest read failed.
+    function observation(failed) { if (stale !== failed) { stale = failed; if (last) render(last); } }
+    return Object.freeze({render: status => { stale = false; render(status); }, observation});
   }
   window.operationStop = Object.freeze({mount});
 })();

@@ -215,6 +215,7 @@
       say('log-status', chunk.missing ? 'Log not available yet.' : `Log observed: ${chunk.observed_size} source bytes · Next byte offset: ${cursor}`);
     } catch (error) {
       if (error.stale) return;
+      if (epoch === monitorEpoch) monitorStop.observation(true);
       if (epoch === monitorEpoch) say('monitor-status', 'Observation stale or unavailable: ' + error.message + '. Last displayed facts are retained; disconnection does not mean stopped.');
     }
   }

@@ -1,4 +1,4 @@
-/** "Stop run" on Monitor: confirmation, one cancel POST, honest "Stopping" until the cancelled receipt. Stubbed API; no provider/GPU/native effects. */
+/** "Stop run" on Monitor: server-owned `cancellable`, confirmation, one cancel POST, honest "Stopping" until the cancelled receipt, "Last observed" while unreachable. Stubbed API; no provider/GPU/native effects. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
@@ -35,12 +35,13 @@ try {
   page.on('pageerror', error => faults.push(error.message));
   let accept = false;
   page.on('dialog', async dialog => { dialogs.push(dialog.message()); await (accept ? dialog.accept() : dialog.dismiss()); });
-  let cancelRecorded = false, runningTerminal = false, loopCancelled = false;
+  let cancelRecorded = false, runningTerminal = false, loopCancelled = false, unreachable = false;
+  // `cancellable` is the server's verdict; the page must not derive it from kind or state.
   const status = (operation, fields) => ({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture',
     state: 'active', process: {status: 'alive', reason: 'observed'}, finishing: false, receipt_available: false, native_status: null,
-    native_id: null, validation_passed: null, reason: 'fixture', ...fields});
+    native_id: null, validation_passed: null, reason: 'fixture', cancellable: true, ...fields});
   const cancelled = (operation, fields) => status(operation, {state: 'completed', process: {status: 'exited', reason: 'observed'},
-    receipt_available: true, native_status: 'cancelled', native_id: 'fixture-run', cancel_requested: true, ...fields});
+    receipt_available: true, native_status: 'cancelled', native_id: 'fixture-run', cancel_requested: true, cancellable: false, ...fields});
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url());
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
@@ -55,17 +56,19 @@ try {
       return reply({operation_id: url.pathname.split('/')[3], outcome: 'requested'});
     }
     assert.equal(request.method(), 'GET');
+    if (unreachable && url.pathname.startsWith('/api/operations/')) return route.abort('connectionrefused');
     if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
     if (url.pathname.endsWith('/log')) return reply({text: '', next_offset: 0, observed_size: 0, truncated: false, missing: false});
     if (url.pathname.endsWith('/graph-results')) return reply({operation_id: url.pathname.split('/')[3], available: false, bodies: []});
-    if (url.pathname === `/api/operations/${running}`) return reply(runningTerminal ? cancelled(running, {}) : status(running, cancelRecorded ? {cancel_requested: true} : {}));
+    if (url.pathname === `/api/operations/${running}`) return reply(runningTerminal ? cancelled(running, {}) : status(running, cancelRecorded ? {cancel_requested: true, cancellable: false} : {}));
     if (url.pathname === `/api/operations/${loop}`) {
       const declared = {loop: {final_iteration: 3, attempted_iterations: null}};
       return reply(loopCancelled ? cancelled(loop, declared) : status(loop, declared));
     }
-    if (url.pathname === `/api/operations/${finished}`) return reply(status(finished, {state: 'completed', process: {status: 'exited', reason: 'observed'}, receipt_available: true, native_status: 'accepted'}));
-    if (url.pathname === `/api/operations/${preparing}`) return reply(status(preparing, {kind: 'prepare'}));
+    if (url.pathname === `/api/operations/${finished}`) return reply(status(finished, {state: 'completed', process: {status: 'exited', reason: 'observed'}, receipt_available: true, native_status: 'accepted', cancellable: false}));
+    // An active candidate the server does not offer (e.g. an unverified record): no button despite kind and state.
+    if (url.pathname === `/api/operations/${preparing}`) return reply(status(preparing, {cancellable: false}));
     throw new Error('unexpected path ' + url.pathname);
   });
   await page.goto(`${metadata.origin}/#slow-control/${running}`);
@@ -78,7 +81,10 @@ try {
 
   // Declining the confirmation sends nothing.
   await stop.click();
-  assert.deepEqual(dialogs, ['Stop this run? Work done so far is kept.']);
+  assert.equal(dialogs.length, 1);
+  for (const phrase of ['cannot be undone or resumed', 'produces no candidate result', 'Files written so far stay in the run folder', 'may still be billed', 'token report']) {
+    assert.ok(dialogs[0].includes(phrase), `confirmation states: ${phrase}`);
+  }
   await page.waitForTimeout(500);
   assert.equal(posts.length, 0, 'a declined confirmation posts no cancel');
   assert.ok(await stop.isVisible());
@@ -93,12 +99,18 @@ try {
   assert.equal(await said.textContent(), 'Stopping the run…');
   await page.screenshot({path: resolve(tmpdir(), 'siderius-operation-stopping.png'), fullPage: true});
   runningTerminal = true;
-  await said.filter({hasText: 'Run stopped. Work done so far is kept.'}).waitFor();
+  await said.filter({hasText: 'Run stopped. Files written so far stay in the run folder; no candidate result is produced.'}).waitFor();
   await page.locator('#monitor-status').filter({hasText: 'Native: cancelled'}).waitFor();
   assert.ok(await stop.isHidden());
   await page.screenshot({path: resolve(tmpdir(), 'siderius-operation-stopped.png'), fullPage: true});
+  // A failed poll keeps the last line but marks it as an old observation.
+  unreachable = true;
+  await said.filter({hasText: 'Last observed: Run stopped.'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Observation stale or unavailable'}).waitFor();
+  unreachable = false;
+  await said.filter({hasText: /^Run stopped\./}).waitFor();
 
-  // Terminal and non-candidate operations offer no Stop run; state does not leak across operations.
+  // Operations the server marks not cancellable offer no Stop run; state does not leak across operations.
   for (const id of [finished, preparing]) {
     await page.evaluate(value => { location.hash = 'slow-control/' + value; }, id);
     await page.locator('#operation-observed').filter({hasText: id}).waitFor();
@@ -117,11 +129,11 @@ try {
   await said.filter({hasText: 'Stopping the run…'}).waitFor();
   assert.equal(posts.length, 2);
   loopCancelled = true;
-  await page.locator('#loop-state').filter({hasText: 'Research loop stopped by you before it finished. Work done so far is kept; this run cannot be resumed.'}).waitFor();
+  await page.locator('#loop-state').filter({hasText: 'Research loop stopped by you before it finished. Files written so far stay in the run folder; this run cannot be resumed.'}).waitFor();
   assert.ok(await page.locator('#loop-stop').isHidden() && await page.locator('#loop-pause').isHidden() && await page.locator('#loop-resume-group').isHidden());
   assert.deepEqual(posts, [`/api/operations/${running}/cancel`, `/api/operations/${loop}/cancel`]);
   assert.deepEqual(faults, []);
-  console.log('PASS: Stop run asks for confirmation, posts once, reads "Stopping" until the cancelled receipt, then "Run stopped"; terminal and prepare operations offer no Stop run; a cancelled loop hides boundary controls and reads as not resumable.');
+  console.log('PASS: Stop run follows the server cancellable flag, states its consequences before confirming, posts once, reads "Stopping" until the cancelled receipt, then says what is kept; a failed poll prefixes "Last observed:"; a cancelled loop hides boundary controls and reads as not resumable.');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM'); lines.close();
