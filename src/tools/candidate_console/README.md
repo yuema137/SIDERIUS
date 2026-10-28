@@ -197,6 +197,38 @@ The entry URLs are `/#home`, `/#workflow`, `/#run` and `/#slow-control`. An old
 Connection sharing applies within one document; separate tabs/windows connect
 independently.
 
+## Choose shared settings in the browser
+
+The **Settings** page chooses, for every task at once, the model profile, an
+advice file and each task's data folder. It only offers what the operator listed
+in `console.json` (`llm_profiles`, `advice_files`, `data_roots`) or saved in the
+workspace library, so the browser never types a server path.
+
+1. Open **Settings** and connect. The page says which server holds the folders:
+   paths are on the machine running the console, not on your computer.
+2. Under **Models**, pick a profile. Tasks whose `console.json` entry sets
+   `llm_config_file` keep their own; the page only fills values that
+   `console.json` leaves out. A workflow's own values are used for that workflow.
+3. Under **Advice**, pick a file or **None**. The choice is only saved for
+   now: no run uses it, and each workflow keeps the advice written in it.
+4. Under **Data folder**, choose a data root for a task, open subfolders, and
+   select **Use <folder>**. Links are shown but cannot be selected. A task whose
+   `console.json` sets `data_root` shows "Set in console.json" instead.
+5. Select **Save settings**. Success reads "Saved; active after server
+   restart". Restart the `serve` command to use the new values; until then the
+   page lists what is saved but not yet active. **Values in effect** shows each
+   value the running console uses, where it comes from and its server path.
+
+Saving needs `"global_settings": {"browser_writable": true}` in `console.json`
+(`init` writes it); otherwise the page is read-only. If someone else saved in
+the meantime, the page says so; select **Reload** and choose again. A choice
+that would fail `check`, such as a folder that no longer exists, is refused with
+the reason and nothing is written. If `settings/global_settings.json` itself
+becomes unusable, the page says why: run `chmod 600` on it if its permissions
+changed, or fix or restore it; when it is readable but invalid, you can also
+choose values and **Save** to replace it. **Workspace** lists missing workspace folders
+and, when `init` can create them, the command to run on the server.
+
 ## Edit existing circuit connections
 
 In Workflow builder, select a node to open its inspector. To change a connection,
@@ -390,7 +422,7 @@ binding. Downstream dotenv loading is
 legacy compatibility, not a setup step or a reliable credential source.
 Preparation is offline and does not need provider keys.
 
-Restart the server after changing `console.json`, including task paths, model
+Restart the server after changing `console.json` or saving **Settings**, including task paths, model
 profile selection, resource policy, allowed names or private-file paths. Such
 changes can require a fresh Prepare. Updating values at the same credential-file
 path takes effect on the next Launch without restart; the file must still pass

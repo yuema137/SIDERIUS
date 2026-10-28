@@ -14,12 +14,12 @@
   }
   const publish = () => { if (!connected) changing = false; present(); for (const listener of listeners) listener({connected, revision}); };
   const status = message => { document.getElementById('access-status').textContent = message; };
-  async function request(path, body) {
+  async function request(path, body, method = body === undefined ? 'GET' : 'POST') {
     const version = revision;
     let response;
     try {
       response = await fetch('/api/' + path, {
-        method: body === undefined ? 'GET' : 'POST', cache: 'no-store', credentials: 'omit',
+        method, cache: 'no-store', credentials: 'omit',
         headers: {Authorization: 'Bearer ' + token, ...(body === undefined ? {} : {'Content-Type': 'application/json'})},
         ...(body === undefined ? {} : {body: JSON.stringify(body)})
       });
