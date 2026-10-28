@@ -307,15 +307,18 @@ operations and resumed loop segments.
 ```
 
 The answer means the request was recorded; it is safe to run the command again.
-Within about a second the run's sandbox is shut down, including a model call in
-progress. Check `status` until `receipt.status` is `cancelled`. Work done so far
-stays in the run workspace, and the log and reported tokens stay readable. A
+The run is asked to stop within half a second and is force-killed one second
+later if it has not exited, including a model call in progress. Check `status`
+until `receipt.status` is `cancelled`. Files written so far stay in the run
+workspace, and the log and reported tokens stay readable; no candidate result is
+produced. A
 call that was in flight may still be billed by the provider without appearing in
 the token report. A cancelled loop cannot be resumed; use `pause-loop` instead if
 you want to continue later.
 
 If the run already finished, the command refuses with `terminal` and changes
-nothing. The [operations contract](candidate-operations-contract.md#cancel-an-active-candidate-operation)
+nothing. `starting` means the run has not started yet; try again in a moment.
+`not_running` means its process is gone, so there is nothing to stop. The [operations contract](candidate-operations-contract.md#cancel-an-active-candidate-operation)
 defines the full rules.
 
 ## Stop, pause or resume a research loop

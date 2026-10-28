@@ -341,28 +341,37 @@ spend admission is supplied; cancellation is an explicit operator request
 kinds refuse with `kind`: their children have no cancel probe. Owners:
 `cancel.py` (intent, probe, evidence rule), `workspace_sandbox.runner`
 (`cancel_requested` probe in the wait loop) and the existing
-`core.runtime_control.process_group.terminate_observed_group` /
-`terminate_remaining_group` cleanup. There is no second kill path.
+`core.runtime_control.process_group` cleanup the runner already uses
+(`terminate_observed_group` in `run_observed`, which authored loops use;
+`terminate_remaining_group` in `run`, which other runs use). There is no second kill path.
 
 Sequence:
 
 1. Under the store lock the owner loads and revalidates the record, then returns an
    existing `cancel.json` unchanged (idempotent; the first `requested_at` wins).
-2. Otherwise it reads `read_operation`. A native receipt or `operation_failed`
-   refuses with `terminal`; a wrapper not observed `alive` (including before
-   `process.json` exists) refuses with `not_running`. Neither records anything.
+2. Otherwise it reads `read_operation` and records only for a verified
+   `state == "active"` snapshot (live wrapper, no completion, records verified).
+   Refusals, none of which records anything: a native receipt or `operation_failed`
+   is `terminal`; `reason == "integrity_failure"` is `integrity` (a later intent
+   must never turn an unverified receipt, such as a forged `cancelled` one, into a
+   verified terminal); no `process.json` yet and no outcome is `starting` (the
+   launch window; retry shortly); any other wrapper that is not alive is
+   `not_running` (the child is gone; nothing to stop).
 3. It publishes write-once private `operations/<id>/cancel.json`
    (`CancelRequest`: `operation_id`, `request_digest`, `requested_at`). The
    acknowledgement is a request, not termination; no signal is sent by the caller.
 4. The operation child passes `cancel_probe(path, record)` to `launch_candidate` or
    `launch_continuation`, which pass it to `run` / `run_observed`. The runner polls
    it right after spawn and then every `CANCEL_POLL_SECONDS` (0.5 s). When it
-   fires, the runner leaves its wait and its existing `finally` terminates the
-   sandbox session group (TERM, 1 s grace, KILL) that this child created. An
+   fires while the sandbox is still running, the runner leaves its wait and its
+   existing `finally` terminates the sandbox session group (TERM, 1 s grace, KILL)
+   that this child created. Worst case from intent to KILL is about 0.5 s of
+   polling plus the 1 s grace. If the sandbox already exited on its own when the
+   probe fires (`process.poll()` is set), the run keeps its natural outcome. An
    unreadable or mismatched marker raises inside the wait; the group is still
    cleaned up and the receipt is `failed`.
-5. Supervision reports `ExecutionResult.status == "cancelled"` (the actual signal
-   return code, not 124). `reconcile` copies the launch receipt with status
+5. A cancelled wait reports `ExecutionResult.status == "cancelled"` (the actual
+   signal return code, not 124). `reconcile` copies the launch receipt with status
    `cancelled`; it never reads `child.json`. For loops, `supervision.json` records
    the cancelled execution, so `require_clean` refuses and the segment cannot be
    resumed. The child publishes the ordinary `native` Completion with that receipt
@@ -374,8 +383,10 @@ start. An intent recorded after the sandbox exited has no effect; the receipt ke
 its natural status and the snapshot still reports `cancel_requested`.
 
 Readback and verification. `OperationSnapshot.cancel_requested` is `true` when a
-bound `cancel.json` exists and is omitted otherwise, so existing snapshot bytes are
-unchanged. A cancelled run reads `state="completed"` with native receipt status
+bound `cancel.json` exists. `OperationSnapshot.cancellable` (`cancel.cancellable`)
+is `true` exactly when a new request would be recorded: a cancellable kind, state
+`active` and no intent yet; the console offers Stop run only from it. Both are
+omitted when false, so existing snapshot bytes are unchanged. A cancelled run reads `state="completed"` with native receipt status
 `cancelled` (distinct from `failed`, `timed_out` and `interrupted`). A `cancelled`
 receipt without a recorded `CancelRequest` is an integrity failure (`unknown`), and
 `reconcile` turns a sandbox child that claims `cancelled` after a normal exit into
@@ -390,8 +401,8 @@ completed cancellation produces; cancel itself never edits the ledger. Cancel is
 not a loop body outcome: the whole sandbox, including the loop runner, ends, so no
 declared stop condition evaluates a cancelled body. Cancel overrides a pending
 Pause or Stop; a later Pause or Stop marker cannot make a cancelled segment
-resumable. A paused or exited segment refuses with `terminal`; cancel the live
-successor by its own UUID.
+resumable. A paused segment refuses with `terminal`; cancel the live successor by its own
+UUID.
 
 Token accounting. Reported tokens include only usage recorded before termination.
 A provider call in flight when the group is killed may be billed by the provider
@@ -400,9 +411,11 @@ yet never appear in `token_usage.jsonl`; cancellation does not estimate it.
 Witnesses: `tests/unit/tools/candidate_operations/test_cancel.py` (store, refusals,
 evidence rule, and an in-process child that terminates a real long-running group),
 `tests/unit/tools/workspace_sandbox/test_cancel_runner.py` (runner group
-termination and unchanged exit/timeout semantics) and
+termination, unchanged exit/timeout semantics, a late probe after a natural exit),
 `tests/unit/tools/candidate_worker/test_cancel.py` (verifiable, unresumable loop
-receipt; a child cannot claim cancellation).
+receipt; a child cannot claim cancellation) and
+`tests/unit/tools/candidate_worker/test_loop_resume.py::test_cancel_reaches_resumed_segment_and_reads_back_trace_less`
+(the probe reaches a resumed segment; its trace-less receipt reads back).
 
 ## Logs and validation
 
