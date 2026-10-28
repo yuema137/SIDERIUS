@@ -141,7 +141,7 @@ from workflows.llm_config import (
     resolve_standard_llm_config,
 )
 from workflows.native_chain_binding import NativeChainCaptureRefusal
-from workflows.run_config import WorkflowLaunchConfig, validate_launch_admission
+from workflows.run_config import validate_launch_admission
 from workflows.runtime_settings import (
     build_required_profile_binding as build_required_profile_binding,
 )
@@ -1174,6 +1174,17 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
     return 0
 
 
+#: Stand-in identity for the pre-binding launch check in :func:`main`. Its
+#: values are inert defaults; the real identity is resolved from files later
+#: and checked on the full launch in ``run_workflow``.
+_UNRESOLVED_IDENTITY = LaunchIdentity(
+    experiment_arm=None,
+    lit_review_enabled=False,
+    lit_review_config_path=None,
+    lit_review_config_sha256=None,
+)
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -1186,22 +1197,15 @@ def main(
     expectations = chain_capture if chain_capture is not None else reviewed_setup
     if expectations is not None:
         expectations.check_entry(args)
-    # Validate the resolved schedule and time budgets before workspace binding,
-    # task imports or LLM work.
+    # Validate the schedule and every owned launch value before workspace
+    # binding, task imports or LLM work (issues #828, #1045). The launch is
+    # projected by the same builder the run uses; identity values (advice,
+    # lit-review, GPU policy) are resolved later from files, so a neutral
+    # identity stands in for them here and they are checked when resolved.
     try:
         validate_launch_admission(
-            WorkflowLaunchConfig(
-                max_rounds=args.max_rounds,
-                is_trial=args.is_trial,
-                force_formal_round=args.force_formal_round,
-                formal_training_scope_source=args.formal_training_scope_source,
-                plan_overrides=args.plan_overrides,
-                trial_portion=args.trial_portion,
-                train_portion=args.train_portion,
-                eval_portion=args.eval_portion,
-                trial_time_budget_minutes=args.trial_time_budget_minutes,
-                formal_time_budget_minutes=args.formal_time_budget_minutes,
-                bypass_formal_time_budget_minutes=args.bypass_formal_time_budget_minutes,
+            build_standard_launch_config(
+                args, _UNRESOLVED_IDENTITY, resolved_paths=[], fixed_candidate_plan=None
             )
         )
     except ValueError as exc:
