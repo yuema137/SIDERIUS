@@ -73,7 +73,6 @@ not silently restore the previous ignored-configuration behavior.
 | `trial_portion` | `float` | No | `0.1` | Fraction of segments per file for the training scope. Mirrors `HyperparamTuningInput.trial_portion`. |
 | `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
 | `train_portion` | `float` | No | `0.1` | Per-epoch fraction supplied to the static proposal-time estimate; it does not trigger data sampling in the proposer. |
-| `sampling_seed` | `int \| None` | No | `None` | Optional seed recorded as proposal context; the static estimate performs no `build_sample_set()` data access. |
 | `trial_time_budget_minutes` | `float \| None` | No | `None` | Configured Trial minutes, delivered independently in every proposer request and used by the static advisory when `is_trial=True`. `None` renders as not configured in this input; the advisory never rejects or revises a proposal. |
 | `formal_time_budget_minutes` | `float \| None` | No | `None` | Configured Formal minutes, delivered independently in every proposer request and used by the static advisory when `is_trial=False`. `None` renders as not configured in this input; the advisory never rejects or revises a proposal. |
 | `vram_budget_gb` | `float \| None` | No | `None` | Active operator-defined VRAM ceiling (GB) for the upcoming tuning iteration. Workflow picks trial vs formal budget based on `is_trial`. |

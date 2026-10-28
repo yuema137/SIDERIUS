@@ -68,11 +68,7 @@ def graph_training_request(prepared):
         }
     )
     config = json.loads((root / "llm.json").read_bytes())
-    config["tune"] = {
-        "provider": "openai",
-        "model_id": "tuner-test",
-        "planner_strategy": "native-timing-v1",
-    }
+    config["tune"] = {"planner_strategy": "native-timing-v1"}
     (root / "llm.json").write_text(json.dumps(config))
     rules = json.loads((root / "rules.json").read_bytes())
     (root / "training.json").write_text(
@@ -219,6 +215,39 @@ def test_five_node_native_training_and_parent_evidence(prepared, training_runner
     proposal_path.write_text(seed.model_copy(update={"expert_context": []}).model_dump_json())
     with pytest.raises(ValueError, match="declared interpretation edge"):
         verify_graph_trace(request, parent, receipt)
+
+
+@pytest.mark.parametrize("forged", ["run_seed", "seed_coordinates"])
+def test_graph_readback_refuses_a_forged_tuning_seed(prepared, training_runner, forged):
+    """(b) Fails if a persisted tuning input may claim another seed or position than launched."""
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+    from core.seeding import SeedCoordinates
+    from tools.candidate_worker.graph_evidence import read_graph_control
+    from tools.candidate_worker.models import CandidateRunReceipt
+
+    request = graph_training_request(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    workspace = Path(receipt.workspace)
+    launched = CandidateRunReceipt.model_validate_json(
+        read_graph_control(workspace / "candidate_run/launch.json")
+    )
+    assert launched.run_seed is not None
+    verify_graph_trace(request, launched, receipt)
+    path = tuning_input_path(workspace, "train")
+    value = HyperparamTuningInput.model_validate_json(read_graph_control(path))
+    assert (value.run_seed, value.seed_coordinates) == (
+        launched.run_seed,
+        SeedCoordinates(iteration=1, node_id="train"),
+    )
+    update = (
+        {"run_seed": launched.run_seed + 1}
+        if forged == "run_seed"
+        else {"seed_coordinates": SeedCoordinates(iteration=2, node_id="train")}
+    )
+    path.write_text(value.model_copy(update=update).model_dump_json(indent=2))
+    with pytest.raises(ValueError, match="graph native training identity"):
+        verify_graph_trace(request, launched, receipt)
 
 
 def test_saved_reusable_interpretation_profile_reaches_same_native_five_node_path(
@@ -445,11 +474,11 @@ def test_native_tuning_transports_explicit_iteration_and_incumbent(
     from dataclasses import replace
 
     from agent.schemas.storage import LocalStorageConfig, StorageConfig
-    from tools.candidate_worker import graph, training
+    from tools.candidate_worker import training
 
     request = graph_training_request(prepared)
     captured = []
-    real = graph.run_training
+    real = training.run_training
     contexts = []
     monkeypatch.setattr(
         training.HyperparamTuningAgent, "set_run_context", lambda self, **kw: contexts.append(kw)
@@ -459,7 +488,8 @@ def test_native_tuning_transports_explicit_iteration_and_incumbent(
         captured.append((args, kwargs))
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(graph, "run_training", observe)
+    # The tuning unit resolves the native call at dispatch (B3-3 unit_child).
+    monkeypatch.setattr(training, "run_training", observe)
     receipt = launch_candidate(request)
     assert receipt.status == "completed", receipt.error
     args, _ = captured[0]
@@ -487,3 +517,62 @@ def test_native_tuning_transports_explicit_iteration_and_incumbent(
     assert tuned[-1].current_run_best_formal_score == 0.75
     assert [item["iter"] for item in contexts] == [1, 2]
     assert path.is_file() and output.model_type == tuned[-1].model_type
+
+
+def test_nonfinite_tuning_score_crosses_the_tuning_unit(prepared, training_runner, monkeypatch):
+    """Fails if the unit boundary refuses a -inf tuning score sentinel, which would
+    fail a tuning node whose in-process output was valid. (A -inf
+    `skip_formal_min_delta` is refused earlier, by training admission's own JSON
+    round trip, independently of units; its transport is covered directly in
+    test_unit_process.)"""
+    from tools.candidate_worker import training
+    from tools.candidate_worker.graph_evidence import read_graph_control
+    from tools.candidate_worker.unit_models import NodeUnitResult
+    from tools.candidate_worker.unit_transport import decode_transport
+
+    tuner = training.HyperparamTuningAgent
+    real = tuner.run
+    monkeypatch.setattr(
+        tuner,
+        "run",
+        lambda self, value: real(self, value).model_copy(
+            update={"best_denoising_score": float("-inf")}
+        ),
+    )
+    receipt = launch_candidate(graph_training_request(prepared))
+    assert receipt.status == "completed", receipt.error
+    path = Path(receipt.workspace) / "candidate_run/units/train/result.json"
+    result = decode_transport(NodeUnitResult, read_graph_control(path))
+    assert result.outcome == "returned" and result.output is not None
+    output = decode_transport(training.HyperparamTuningOutput, result.output.encode())
+    assert output.best_denoising_score == float("-inf")
+
+
+# Pinned on base bce9c452 (before adaptor execution): sha256 of the trained graph
+# receipt's trace, status, validation flag and output index, with the workspace and
+# native record digests (which embed tmp paths) masked. Adaptor support must not
+# move these bytes.
+TRAINED_TRACE_SHA256 = {
+    "completed": "18c39b0014c87cf80f936184529bf32133f2735dcb1a36d8de0babfb5878ae9e",
+    "rejected": "5b6c189069ab88d4a67bbf8613661c70d3b27a1a411aa54184976651418c767d",
+}
+
+
+@pytest.mark.parametrize("outcome", sorted(TRAINED_TRACE_SHA256))
+def test_unadapted_training_trace_bytes_are_unchanged(
+    prepared, training_runner, native_runner, outcome
+):
+    """Fails if adaptor execution alters serialization or outcome of a trained graph run."""
+    import re
+
+    native_runner.reject = outcome == "rejected"
+    request = graph_training_request(prepared)
+    receipt = launch_candidate(request)
+    payload = receipt.model_dump_json(
+        include={"status", "validation_passed", "graph_trace", "native_output_paths"}
+    ).replace(receipt.workspace, "<ws>")
+    payload = re.sub(r'"record_sha256":"[0-9a-f]{64}"', '"record_sha256":"<sha>"', payload)
+    assert hashlib.sha256(payload.encode()).hexdigest() == TRAINED_TRACE_SHA256[outcome], payload
+    verify_graph_trace(
+        request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
+    )

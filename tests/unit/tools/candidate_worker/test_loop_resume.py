@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from core.runtime_control.process_group import GroupCleanup, GroupObservation
 from tools.candidate_operations import (
     CandidateLoopResumeOperation,
     CandidateLoopResumeRequest,
@@ -41,7 +42,15 @@ def process_segments(monkeypatch):
 
     operations = []
 
-    def observed(profile, argv):
+    def observed(profile, argv, *, cancel_requested=None, **_supervision):
+        # Like the runner, poll a supplied probe first: a fired probe ends the segment as
+        # cancelled before any body runs. Without a recorded intent the probe is False.
+        if cancel_requested is not None and cancel_requested():
+            return ObservedExecutionResult(
+                execution=ExecutionResult(status="cancelled", returncode=-15, elapsed_seconds=0),
+                direct_child_reaped=True,
+                cleanup=GroupCleanup(required=False, final=GroupObservation(status="absent")),
+            )
         pid = os.fork()
         if pid == 0:
             try:
@@ -369,12 +378,20 @@ def test_paused_continuation_resumes_again_across_two_hops(
     process_segments()
     root = Path(read_operation(config, root_id).receipt.workspace) / "candidate_run"
     # An edited captured input refuses BEFORE reservation, so the one Resume stays unused.
-    source = Path(request.files[0].path)
+    # Edit a test-owned input, never files[0] (the checkout's shared task manifest):
+    # concurrent CI shards observe that file and fail "selected input changed" (#973).
+    project = Path(request.preview.project_root)
+    owned = (Path(item.path) for item in request.files)
+    source = next((path for path in owned if path.is_relative_to(project)), None)
+    assert source is not None, f"no captured input under the tmp project {project}"
+    assert project.is_relative_to(tmp_path) and source.is_relative_to(tmp_path)
     original = source.read_bytes()
     source.write_bytes(original + b"\n")
-    with pytest.raises(OperationFailure, match="captured loop inputs changed"):
-        resume(root_id, first_id)
-    source.write_bytes(original)
+    try:
+        with pytest.raises(OperationFailure, match="captured loop inputs changed"):
+            resume(root_id, first_id)
+    finally:
+        source.write_bytes(original)
     assert not (root / "successor.json").exists()
 
     first = resume(root_id, first_id)
@@ -409,6 +426,25 @@ def test_paused_continuation_resumes_again_across_two_hops(
         for operation_id in (root_id, first_id, second_id)
     ]
     assert tokens[1] == tokens[0] and tokens[2] == tokens[0]
+    # Issue #983 T7/M8: every segment continues the root's admitted seed, and a
+    # resumed segment's bodies keep the global iteration (3-4, never 1-2 again).
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+    from core.seeding import SeedCoordinates
+
+    seed = read_operation(config, root_id).run_seed
+    assert seed is not None and seed.source == "generated"
+    assert [read_operation(config, item).run_seed for item in (first_id, second_id)] == [seed] * 2
+    assert (initial.run_seed, initial.run_seed_source) == (seed.value, seed.source)
+    tuned = [
+        HyperparamTuningInput.model_validate_json(
+            tuning_input_path(Path(initial.workspace), "train", iteration=iteration).read_bytes()
+        )
+        for iteration in range(1, 5)
+    ]
+    assert [(value.run_seed, value.seed_coordinates) for value in tuned] == [
+        (seed.value, SeedCoordinates(iteration=iteration, node_id="train"))
+        for iteration in range(1, 5)
+    ]
 
 
 @pytest.mark.parametrize("fault", ["native_lease", "supervisor"])
@@ -655,3 +691,152 @@ def test_resumed_segment_reports_run_total_tokens_from_both_segments(
     ] == [("openai", "fixture-model", all_calls, 11 * all_calls, 2 * all_calls, 13 * all_calls)]
     root = read_operation_tokens(config, first_id)
     assert segment.model_dump(exclude={"observed_at"}) == root.model_dump(exclude={"observed_at"})
+
+
+def test_cancel_reaches_resumed_segment_and_reads_back_trace_less(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """Fails if the operation child stops passing its cancel probe to a resumed segment's
+    supervisor (the resumed body would run to completion), or if a trace-less ``cancelled``
+    continuation receipt cannot be read back through ``read_segment`` as a verified,
+    unresumable terminal."""
+    from tools.candidate_operations import child
+    from tools.candidate_operations.cancel import CANCEL_FILE
+    from tools.candidate_operations.files import publish
+    from tools.candidate_operations.models import CancelRequest
+    from tools.candidate_operations.store import now, operation_path
+    from tools.candidate_worker import training
+
+    request = loop_request(prepared, final_iteration=2)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    first_id, next_id = uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_after_body_one(self, value):
+        output = real_tune(self, value)
+        if "iteration_001" in value.storage.local.workspace:
+            request_loop_pause(config, first_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_after_body_one)
+    # Forked operation children inherit this: only the resumed segment's probe fires.
+    real_probe = child.cancel_probe
+    monkeypatch.setattr(
+        child,
+        "cancel_probe",
+        lambda path, record: (
+            (lambda: True) if record.submission.request_id == next_id else real_probe(path, record)
+        ),
+    )
+    submit_operation(
+        config, CandidateOperation(request_id=first_id, request=request), launch_environment=env
+    )
+    process_segments()
+    review = review_loop_resume(config, first_id)
+    submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=first_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment=env,
+    )
+    process_segments()
+    unvouched = read_operation(config, next_id)
+    assert (unvouched.state, unvouched.reason) == ("unknown", "integrity_failure"), unvouched
+    publish(
+        operation_path(config, next_id) / CANCEL_FILE,
+        CancelRequest(
+            operation_id=next_id, request_digest=unvouched.request_digest, requested_at=now()
+        ),
+    )
+    second = read_operation(config, next_id)
+    assert second.state == "completed" and second.cancel_requested, second
+    assert second.receipt is not None and second.receipt.status == "cancelled"
+    assert second.receipt.loop_trace is None and second.receipt_digest
+    workspace = Path(second.receipt.workspace)
+    assert not (workspace / "candidate_run" / "iteration_002").exists()
+    assert read_operation(config, first_id).successor_operation_id == next_id
+    with pytest.raises(OperationFailure):
+        review_loop_resume(config, next_id)
+
+
+def test_resumed_segment_bounds_validator_pytest_by_its_own_worker_budget(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """Fails if loop.py or the continuation entry drops ``budget=`` (issue #984)."""
+    from tools.candidate_worker import training
+
+    validator = importlib.import_module("nodes.ml_code_validator_agent.ml_code_validator_agent")
+    record = tmp_path / "pytest_limits.jsonl"
+
+    # Forked segments inherit this double; a file carries their observations back.
+    def launched(test_file_path, env, *, limit=None):
+        with record.open("a") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "path": test_file_path,
+                        "limit": None if limit is None else limit.model_dump(),
+                    }
+                )
+                + "\n"
+            )
+        return True, "1 passed"
+
+    monkeypatch.setattr(validator, "run_generated_pytest", launched)
+    request = loop_request(prepared, final_iteration=2)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    first_id = uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_after_first_body(self, value):
+        output = real_tune(self, value)
+        if "iteration_001" in value.storage.local.workspace:
+            request_loop_pause(config, first_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_after_first_body)
+    submit_operation(
+        config,
+        CandidateOperation(request_id=first_id, request=request),
+        launch_environment={"OPENAI_API_KEY": "offline-stub"},
+    )
+    process_segments()
+    first = read_operation(config, first_id)
+    assert first.receipt is not None and first.receipt.status == "paused", first
+    review = review_loop_resume(config, first_id)
+    next_id = uuid4()
+    submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=first_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment={"OPENAI_API_KEY": "offline-stub"},
+    )
+    process_segments()
+    second = read_operation(config, next_id)
+    assert second.receipt is not None and second.receipt.status == "completed", second
+    rows = [json.loads(line) for line in record.read_text().splitlines()]
+    resumed = [row for row in rows if "iteration_002" in row["path"]]
+    assert resumed and len(resumed) < len(rows)
+    assert all(
+        row["limit"] is not None
+        and row["limit"]["source"] == "worker_budget"
+        and 0 < row["limit"]["seconds"] <= request.timeout_seconds
+        for row in rows
+    )

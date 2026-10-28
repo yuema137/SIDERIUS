@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from .models import CandidateRunReceipt, CandidateRunRequest
+from .models import RECEIPT_IDENTITY_FIELDS, CandidateRunReceipt, CandidateRunRequest
 
 
 def verify_candidate_records(
@@ -31,19 +31,11 @@ def verify_candidate_records(
         or initial.selected_constructor_routes != request.selected_constructor_routes
         or initial.log_path != str(control / "worker.log")
         or initial.ledger_path != str(workspace / "token_usage.jsonl")
+        or not _seed_matches_request(saved, initial)
     ):
         raise ValueError("native candidate launch mismatch")
     if receipt is not None:
-        for name in (
-            "run_id",
-            "run_name",
-            "workspace",
-            "declaration_digest",
-            "node_ids",
-            "selected_constructor_routes",
-            "ledger_path",
-            "log_path",
-        ):
+        for name in RECEIPT_IDENTITY_FIELDS:
             if getattr(receipt, name) != getattr(initial, name):
                 raise ValueError("native candidate receipt identity mismatch")
 
@@ -74,3 +66,15 @@ def verify_candidate_records(
                 raise ValueError("four-stage native receipt cannot end at accepted")
         elif receipt.status == "completed" or receipt.training_output is not None:
             raise ValueError("three-stage receipt cannot claim native training")
+
+
+def _seed_matches_request(request: CandidateRunRequest, initial: CandidateRunReceipt) -> bool:
+    """An explicit request seed is the launched seed; a seedless one was never 'operator'.
+
+    A receipt without a seed predates the seed contract and stays readable.
+    """
+    if initial.run_seed is None:
+        return request.run_seed is None
+    if request.run_seed is None:
+        return initial.run_seed_source == "generated"
+    return (initial.run_seed, initial.run_seed_source) == (request.run_seed, "operator")

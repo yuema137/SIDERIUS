@@ -145,7 +145,7 @@ class TestLocalFullContext:
 # wall-time budget. See docs/resource_estimator_implement.md §2.7.2/§2.7.5.
 #
 # The training-side trial-mode set (is_trial / trial_strategy / trial_portion
-# / target_files / train_portion / sampling_seed) mirrors the tuner exactly;
+# / target_files / train_portion) mirrors the tuner exactly;
 # legacy single-file mode (file_index, is_trial=False) is intentionally not
 # surfaced — modern usage uses is_trial=True with trial_strategy='target'
 # + target_files=[N] when a single file is wanted.
@@ -161,7 +161,6 @@ class TestTimeBudgetContextFields:
             # dead fields they exercised.
             pytest.param("trial_portion", 0.25, "trial_portion", 0.25, None, id="trial_portion"),
             pytest.param("train_portion", 0.5, "train_portion", 0.5, None, id="train_portion"),
-            pytest.param("sampling_seed", 1234, "sampling_seed", 1234, None, id="sampling_seed"),
             pytest.param(
                 "data_dir", "/data/tidmad", "data_dir", "/data/tidmad", None, id="data_dir"
             ),
@@ -229,7 +228,6 @@ class TestTimeBudgetContextFields:
             is_trial=True,
             trial_portion=0.5,
             train_portion=0.5,
-            sampling_seed=42,
             trial_time_budget_minutes=30.0,
             formal_time_budget_minutes=240.0,
             data_dir="/mnt/tidmad",
@@ -237,7 +235,6 @@ class TestTimeBudgetContextFields:
         assert result.is_trial is True
         assert result.trial_portion == 0.5
         assert result.train_portion == 0.5
-        assert result.sampling_seed == 42
         assert result.trial_time_budget_minutes == 30.0
         assert result.formal_time_budget_minutes == 240.0
         assert result.data_dir == "/mnt/tidmad"
@@ -246,13 +243,13 @@ class TestTimeBudgetContextFields:
         """When the caller passes none of the new kwargs, ProposalInput's
         schema defaults must take effect (mirroring HyperparamTuningInput:
         is_trial=False, trial_portion=0.1, train_portion=0.1,
-        sampling_seed=None, trial_time_budget_minutes=None,
+        trial_time_budget_minutes=None,
         formal_time_budget_minutes=None, data_dir=None)."""
         result = local_full_context(interp_output, storage)
         assert result.is_trial is False
         assert result.trial_portion == 0.1
         assert result.train_portion == 0.1
-        assert result.sampling_seed is None
+        assert not hasattr(result, "sampling_seed")  # retired (#983)
         assert result.trial_time_budget_minutes is None
         assert result.formal_time_budget_minutes is None
         assert result.data_dir is None
@@ -270,7 +267,6 @@ class TestTimeBudgetContextFields:
         assert result.is_trial is False
         assert result.trial_portion == 0.1
         assert result.train_portion == 0.1
-        assert result.sampling_seed is None
         assert result.data_dir is None
 
 

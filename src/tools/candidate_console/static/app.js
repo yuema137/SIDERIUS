@@ -22,6 +22,7 @@
   try { $('operation-id').value = localStorage.getItem('siderius.operation_id') || ''; if ($('operation-id').value) say('remembered-operation', 'Last opened on this browser.'); } catch { /* Optional convenience. */ }
 
   const api = (path, body) => window.consoleSession.request(path, body);
+  const monitorStop = window.operationStop.mount('operation-stop');
   function facts(element, rows) {
     element.replaceChildren();
     for (const [label, value] of rows) {
@@ -180,7 +181,7 @@
   });
   function setMonitor(id) {
     if (monitorId.toLowerCase() === id.toLowerCase()) return;
-    monitorEpoch++; settled = ''; lastStatus = null; $('monitor-cause').hidden = true; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
+    monitorEpoch++; settled = ''; lastStatus = null; $('monitor-cause').hidden = true; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorStop.render(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
     $('token-rows').replaceChildren(); $('tokens-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
     say('remembered-operation', '');
     observedLine(id, null, false);
@@ -202,7 +203,7 @@
       const status = await api('operations/' + id);
       if (epoch !== monitorEpoch) return;
       terminal = window.operationOutcome.terminal(status); lastStatus = status;
-      window.renderNativeChain(status); window.renderLoopControl(status);
+      window.renderNativeChain(status); window.renderLoopControl(status); monitorStop.render(status);
       // One plain outcome sentence (M-2); the raw enums stay in developer facts.
       const finishing = status.finishing ? ' The result is in; the worker is still finishing.' : '';
       say('monitor-status', window.operationOutcome.sentence(status) + finishing);
@@ -239,6 +240,7 @@
     } catch (error) {
       if (error.stale) return;
       if (epoch !== monitorEpoch) return;
+      monitorStop.observation(true);
       if (error.code === 'unknown_operation') {
         settled = id;
         say('monitor-status', 'This console has no operation with this ID. It may belong to another console or operation store.');

@@ -11,3 +11,7 @@ The preserved trees are `generated_capabilities/` (stub model/loss imports),
 `step10_p1/` (historical task-composition fixtures). Their consuming tests
 own interpretation; fixture bytes are retained as evidence, not shipped task
 support.
+
+`custom_adaptors/sibling_digest/` is a synthetic external-style custom adaptor
+(manifest, two members, one fixture) consumed by the custom adaptor manifest and
+`tools.adaptors` CLI tests; it is not shipped adaptor support.

@@ -67,6 +67,7 @@
     return segment + outcome(status, loop) + (segment && ' Body numbers count the whole run, including earlier segments.');
   }
   function outcome(status, loop) {
+    if (status.native_status === 'cancelled') return 'Research loop stopped by you before it finished. Files written so far stay in the run folder; this run cannot be resumed.';
     if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
     if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed body boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.' : ' No partial body is kept; it can be resumed from the next body after review.');
     if (status.native_status === 'completed' && loop.stop_reason) return `Research loop ${stopReason(loop.stop_reason, loop.final_iteration)}.`;
@@ -87,7 +88,8 @@
     const exact = reason ? ['incumbent', 'threshold'].filter(key => typeof reason[key] === 'number').map(key => `${key} ${reason[key]}`) : [];
     if (exact.length) $('loop-state').title = 'Exact recorded values: ' + exact.join(', '); else $('loop-state').removeAttribute('title');
     const connected = session().connected;
-    const running = status.state === 'active' && !status.receipt_available;
+    // After Stop run, boundary controls no longer apply: the whole run is being cancelled.
+    const running = status.state === 'active' && !status.receipt_available && !status.cancel_requested;
     const pending = request.stop.pending || request.pause.pending;
     $('loop-stop-group').hidden = !(running && !stopRecorded(status));
     $('loop-pause-group').hidden = !(running && !stopRecorded(status) && !pauseRecorded(status));

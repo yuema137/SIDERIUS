@@ -19,7 +19,7 @@ from workflows.tuner_preparation import prepare_native_tuner_input
 
 from .artifacts import capture_record
 from .invocation import FixedInvocationContext, invocation_from_storage
-from .models import CandidateRunReceipt
+from .models import CandidateRunReceipt, tuning_seed_scope
 from .training_admission import TrainingAdmission
 from .training_evidence import capture_training_evidence
 
@@ -50,6 +50,9 @@ def prepare_tuning_request(
         run_invariants=invariants,
         constraint_context=admitted.constraints,
         chain_formal_incumbent_reference=chain_formal_incumbent_reference,
+        # Issue #983 — the tuner's seed scope: the global loop iteration (which
+        # a resumed segment continues) and the authored tuning node.
+        seed_coordinates=tuning_seed_scope(admitted.iteration, admitted.node_id),
     )
 
 

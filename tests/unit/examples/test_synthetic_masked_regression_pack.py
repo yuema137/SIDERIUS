@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from agent.skills.evaluate_vram_skill.isolated_probe import TaskProbeDataSpec
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.task_data_path import (
     DeliverableSourceContext,
     DeliverableWriteRequest,
@@ -192,7 +193,7 @@ def test_production_training_engine_consumes_masked_supervision(
                     data_dir=bundle["data_dir"],
                     sandbox_dirs=sandbox_dirs,
                     exp_id="masked_training_witness",
-                    train_base_seed=17,
+                    seed_plan=TrainingSeedPlan(SeedContext(run_seed=17)),
                     model_io=composition.forward_contract.model_io,
                     profile=composition.dataset_profile,
                     task_scope=scope,

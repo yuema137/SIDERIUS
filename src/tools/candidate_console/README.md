@@ -99,6 +99,15 @@ even when using the default models.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
    resumed as a new segment of the same run, which shows its own results.
    A loop ended early by a declared stop condition says why, in plain words.
+   To stop a running candidate now, press **Stop run** and confirm. The run
+   ends within about 1.5 seconds (half a second to notice, then up to one second
+   before it is force-killed), including a model call in progress. It cannot be
+   resumed and produces no candidate result; files written so far stay in the run
+   folder. A call that was in flight may still be billed without appearing in the
+   token report. The page says "Stopping the run…" until the native receipt reads
+   `cancelled`, then "Run stopped." If the console loses contact with the server,
+   the line starts with "Last observed:". The Run page shows the same button for
+   a retained candidate whose last checked status is active.
    Configured **Recorded examples** appear in Monitor. They show verified
    proposal, implementation, validation and reported-token evidence only; they
    are not live operations, training results, scientific scores or billing
@@ -423,12 +432,12 @@ task; choose an installed planner strategy explicitly in the external LLM profil
 budgets and diagnostic settings are demonstration choices, not scientific defaults.
 
 Select **fit / tuning** in Workflow Editor. The small inspector edits trial/formal
-budget minutes, epoch ceilings, portions, sampling seed, training base seed and
-retention flags. Open **Training settings** (collapsed, with the number of changed
-fields). **Default** removes the key; **None** explicitly stores
-null where supported. Empty numbers block review; zero is validated by the native
-owner. Sampling and training seeds are independent. Epoch ceilings constrain native
-planning rather than specifying final epochs. Outer candidate timeout remains seconds.
+budget minutes, epoch ceilings, portions and retention flags. Open **Training
+settings** (collapsed, with the number of changed fields). **Default** removes the
+key; **None** explicitly stores null where supported. Empty numbers block review;
+zero is validated by the native owner. There is no seed setting here: each run gets
+one recorded seed at launch. Epoch ceilings constrain native planning rather than
+specifying final epochs. Outer candidate timeout remains seconds.
 
 Review shows inherited values and supplied parameter rules. Edit advanced controls
 and rules in Source; unrelated inspector changes preserve them. Review and Save,

@@ -4,16 +4,12 @@ import hashlib
 import json
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
+from pydantic import Field, JsonValue, StringConstraints, model_validator
 
 from agent.schemas.output_types import OutputTypeName
 
-Identifier = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$", max_length=100)]
-Location = Annotated[str, StringConstraints(min_length=1, pattern=r"^[^\x00]+$")]
-
-
-class DeclarationModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+from .adaptor_strategies import DeterministicCombine, DistributeStrategy, SelectStrategy
+from .base import DeclarationModel, Identifier, Location
 
 
 class TaskReferences(DeclarationModel):
@@ -41,7 +37,31 @@ class ResultSource(DeclarationModel):
     port: Literal["result"] = "result"
 
 
-Source = Annotated[ExternalSource | ResultSource, Field(discriminator="kind")]
+class SelectedSource(DeclarationModel):
+    """Merge: the result of the one candidate whose arm ``branch`` selected.
+
+    A deterministic select keyed by the recorded route decision, never an OR/race join.
+    """
+
+    kind: Literal["selected"] = "selected"
+    branch: Identifier
+    candidates: tuple[ResultSource, ...] = Field(min_length=2)
+
+
+class AdaptorSource(DeclarationModel):
+    """One output of a declared adaptor; ``index`` names one of its distributed outputs."""
+
+    kind: Literal["adaptor"] = "adaptor"
+    adaptor: Identifier
+    port: Literal["result"] = "result"
+    index: Annotated[int, Field(ge=0)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
+Source = Annotated[
+    ExternalSource | ResultSource | SelectedSource | AdaptorSource, Field(discriminator="kind")
+]
 
 
 class ArgumentBinding(DeclarationModel):
@@ -60,7 +80,14 @@ class ProtocolRequest(DeclarationModel):
     arguments: tuple[ArgumentBinding, ...]
 
 
-Request = Annotated[ExternalRequest | ProtocolRequest, Field(discriminator="kind")]
+class AdaptorRequest(DeclarationModel):
+    """A whole capability request taken from an adaptor output of exactly that contract."""
+
+    kind: Literal["adaptor"] = "adaptor"
+    source: AdaptorSource
+
+
+Request = Annotated[ExternalRequest | ProtocolRequest | AdaptorRequest, Field(discriminator="kind")]
 
 
 class NodeInstance(DeclarationModel):
@@ -97,18 +124,155 @@ class NoImprovementStop(DeclarationModel):
 
 
 class JudgeStop(DeclarationModel):
-    """Reserved slot for a future judge implementation of the stop contract."""
+    """Stop when the LLM stop judge decides so at a completed-body boundary.
+
+    Consulted only after every deterministic condition continued, never at the final
+    boundary and never before ``min_completed_bodies``. The route is operator-owned
+    (``WorkflowLLMConfig.judge.stop``), never declared here. ``on_failure="continue"``
+    records a failed call as an abstention; ``"fail"`` ends the loop ``failed``.
+    """
 
     kind: Literal["judge"] = "judge"
-
-    @model_validator(mode="after")
-    def refuse(self) -> Self:
-        raise ValueError("judge stop conditions are deferred to the next stage")
+    criterion: str = Field(min_length=1, max_length=2000)
+    min_completed_bodies: Annotated[int, Field(gt=0)] = 1
+    on_failure: Literal["fail", "continue"] = "fail"
 
 
 StopCondition = Annotated[
     MetricThresholdStop | NoImprovementStop | JudgeStop, Field(discriminator="kind")
 ]
+
+
+MAX_ROUTE_BRANCHES = 32
+MAX_ROUTE_CASES = 8
+MAX_ROUTE_LEAVES = 8
+ObservableId = Annotated[str, StringConstraints(min_length=1, max_length=100)]
+
+
+class BoolIs(DeclarationModel):
+    """True when a catalogued boolean observable equals ``value``."""
+
+    kind: Literal["bool_is"] = "bool_is"
+    observable: ObservableId
+    value: bool
+
+
+class EnumIn(DeclarationModel):
+    """True when a catalogued enum observable is one of ``values``."""
+
+    kind: Literal["enum_in"] = "enum_in"
+    observable: ObservableId
+    values: tuple[str, ...] = Field(min_length=1)
+
+
+class MetricAtLeast(DeclarationModel):
+    """True when a present metric observable is at least ``threshold`` under the run metric.
+
+    Direction comes only from the run's ``MetricSpec``; an absent value is false.
+    """
+
+    kind: Literal["metric_at_least"] = "metric_at_least"
+    observable: ObservableId
+    metric_id: str = Field(min_length=1)
+    threshold: float = Field(allow_inf_nan=False)
+
+
+class IsMissing(DeclarationModel):
+    """True when a catalogued metric observable has no value."""
+
+    kind: Literal["is_missing"] = "is_missing"
+    observable: ObservableId
+
+
+RouteLeaf = Annotated[BoolIs | EnumIn | MetricAtLeast | IsMissing, Field(discriminator="kind")]
+
+
+class AllOf(DeclarationModel):
+    kind: Literal["all_of"] = "all_of"
+    terms: tuple[RouteLeaf, ...] = Field(min_length=2, max_length=MAX_ROUTE_LEAVES)
+
+
+class AnyOf(DeclarationModel):
+    kind: Literal["any_of"] = "any_of"
+    terms: tuple[RouteLeaf, ...] = Field(min_length=2, max_length=MAX_ROUTE_LEAVES)
+
+
+class Not(DeclarationModel):
+    kind: Literal["not"] = "not"
+    term: RouteLeaf
+
+
+# One combinator level over leaves only: combinators never nest.
+RoutePredicate = Annotated[
+    BoolIs | EnumIn | MetricAtLeast | IsMissing | AllOf | AnyOf | Not,
+    Field(discriminator="kind"),
+]
+
+
+class RouteCase(DeclarationModel):
+    when: RoutePredicate
+    targets: tuple[Identifier, ...] = Field(min_length=1)
+
+
+class Branch(DeclarationModel):
+    """Exclusive route over one upstream result; the first matching case wins.
+
+    ``default=None`` means no arm runs when no case matches, so a single-case
+    branch without a default is a guard (conditional edge). Branch ids form
+    their own namespace. Declaration only: execution admission is separate.
+    """
+
+    id: Identifier
+    source: ResultSource
+    cases: tuple[RouteCase, ...] = Field(min_length=1, max_length=MAX_ROUTE_CASES)
+    default: tuple[Identifier, ...] | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+
+
+AdaptorFormat = Literal["siderius.adaptors/v1"]
+
+
+class InputPort(DeclarationModel):
+    """A typed adaptor input; a ``one`` port takes exactly one source."""
+
+    name: Identifier
+    contract: str
+    cardinality: Literal["one", "many"]
+    min_items: Annotated[int, Field(ge=0)] = 1
+    max_items: Annotated[int, Field(gt=0)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def bounded(self) -> Self:
+        if self.cardinality == "one" and (self.min_items != 1 or self.max_items is not None):
+            raise ValueError("a 'one' port takes exactly one item; it declares no item bounds")
+        if self.max_items is not None and self.min_items > self.max_items:
+            raise ValueError("min_items must not exceed max_items")
+        return self
+
+
+class PortBinding(DeclarationModel):
+    """Sources of one port; their declared order is every tie-break order."""
+
+    port: Identifier
+    sources: tuple[Source, ...]
+
+
+class AdaptorInstance(DeclarationModel):
+    """A declared COMBINE -> SELECT -> DISTRIBUTE step; its output contract is derived.
+
+    Declaration only: no execution profile admits an adaptor yet.
+    """
+
+    id: Identifier
+    kind: Literal["adaptor"] = "adaptor"
+    inputs: tuple[InputPort, ...] = Field(min_length=1)
+    bindings: tuple[PortBinding, ...]
+    combine: DeterministicCombine
+    select: SelectStrategy
+    distribute: DistributeStrategy
 
 
 class AuthoredLoop(DeclarationModel):
@@ -126,6 +290,13 @@ class WorkflowDefinition(DeclarationModel):
     externals: tuple[ExternalBinding, ...] = ()
     nodes: tuple[NodeInstance, ...] = Field(min_length=1)
     loop: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
+    routes: tuple[Branch, ...] = Field(
+        default=(), max_length=MAX_ROUTE_BRANCHES, exclude_if=lambda value: not value
+    )
+    adaptor_format: AdaptorFormat | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    adaptors: tuple[AdaptorInstance, ...] = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def validate_connections(self) -> Self:
@@ -212,6 +383,13 @@ class ReusableWorkflowDefinition(DeclarationModel):
     externals: tuple[ExternalBinding | ManagedCandidateBinding, ...] = ()
     nodes: tuple[NodeInstance, ...] = Field(min_length=1)
     loop: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
+    routes: tuple[Branch, ...] = Field(
+        default=(), max_length=MAX_ROUTE_BRANCHES, exclude_if=lambda value: not value
+    )
+    adaptor_format: AdaptorFormat | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    adaptors: tuple[AdaptorInstance, ...] = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def validate_connections(self) -> Self:

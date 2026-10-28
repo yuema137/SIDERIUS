@@ -10,6 +10,7 @@ import pytest
 
 from core.runtime_control.gpu_accounting import DeviceIdentity
 from core.runtime_control.inference_measurement_binding import MeasurementSources
+from core.training_seeds import SeedContext
 from tests.unit.core.test_native_gpu_execution import execution_policy
 from tests.unit.core.test_training_measurement_evidence import (
     assessment_run,
@@ -66,7 +67,7 @@ def test_tuner_phase_uses_actual_assessment_and_shared_budget(
         exp_id="exp",
         model_type="punet",
         task_scopes=object(),
-        trial_config=SimpleNamespace(train_base_seed=19, train_portion=0.25),
+        trial_config=SimpleNamespace(seed_context=SeedContext(run_seed=19), train_portion=0.25),
         active_params={
             "model_config": {},
             "train_config": bound_spec.train_config,

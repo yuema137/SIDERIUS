@@ -4,6 +4,7 @@ import inspect
 import json
 import subprocess
 import sys
+from collections.abc import Sequence
 from typing import get_type_hints
 
 import pytest
@@ -262,7 +263,9 @@ def test_catalog_matches_exact_native_protocol_signatures():
     from agent.schemas.parameter_rules import ParameterRules
     from agent.schemas.proposal import ExpertContextItem, ProposalInput, ProposalOutput
     from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
+        NamedLiteratureReviewOutput,
         local_typed_evidence,
+        local_typed_evidence_many,
     )
     from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
     from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
@@ -280,6 +283,7 @@ def test_catalog_matches_exact_native_protocol_signatures():
         "optional.parameter-rules": ParameterRules | None,
         "literature.input": LiteratureReviewInput,
         "literature.output": LiteratureReviewOutput,
+        "literature.collection": list[NamedLiteratureReviewOutput],
         "tuning.input": HyperparamTuningInput,
         "tuning.output": HyperparamTuningOutput,
         "native-training.settings": CandidateTrainingSettings,
@@ -300,9 +304,12 @@ def test_catalog_matches_exact_native_protocol_signatures():
         for contract in (capability.input, capability.output):
             cls = native[contract]
             assert CONTRACTS[contract] == f"{cls.__module__}.{cls.__name__}"
+    named = NamedLiteratureReviewOutput
+    assert CONTRACTS["literature.collection"] == f"list[{named.__module__}.{named.__name__}]"
     for key, function in [
         ("interpretation-to-proposal", local_full_context),
         ("literature-to-proposal", local_typed_evidence),
+        ("literature-collection-to-proposal", local_typed_evidence_many),
         ("proposal-to-implementation", local_full_spec),
         ("implementation-to-validation", local_all_fields),
     ]:
@@ -317,7 +324,12 @@ def test_catalog_matches_exact_native_protocol_signatures():
             assert tuple(signature.parameters) == tuple(arg.name for arg in descriptor.arguments)
         assert hints["return"] is native[descriptor.output]
         for argument in descriptor.arguments:
-            assert hints[argument.name] == native[argument.contract]
+            # The collection owner reads any Sequence; the catalogued value is its list.
+            expected = native[argument.contract]
+            if hints[argument.name] == Sequence[NamedLiteratureReviewOutput]:
+                assert expected == list[NamedLiteratureReviewOutput]
+            else:
+                assert hints[argument.name] == expected
             assert argument.required == (
                 signature.parameters[argument.name].default is inspect.Parameter.empty
             )

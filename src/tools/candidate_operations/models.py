@@ -5,6 +5,9 @@ from uuid import UUID
 
 from pydantic import Field, TypeAdapter, model_validator
 
+from core.runtime_control.pair_admission import PositiveGpuGiB
+from core.runtime_control.scheduling import PositiveCount, PositiveQuantity, ResourceRequest
+from core.seeding import RunSeed, RunSeedBinding, admitted_run_seed
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
 from tools.candidate_prepare.reusable_models import (
     ReusableCandidatePreparationRequest,
@@ -53,11 +56,49 @@ class ReusablePreparationExpectation(PreviewModel):
     observations: ReusablePreparationObservations
 
 
+class OperationResources(PreviewModel):
+    """The operator's explicit reservation for one candidate operation; nothing is guessed.
+
+    Consulted only by a budgeted host ledger. Wall time is not declared here: it is
+    the request's ``timeout_seconds``. ``time_budgeted`` states whether the run uses
+    a measured time budget (decision B3-Q6). ``ResourceRequest`` owns the field rules.
+    """
+
+    gpu_count: Literal[0, 1]
+    vram_gib: PositiveGpuGiB | None = None
+    vram_source: Literal["measured", "configured_cap"] | None = None
+    host_memory_gib: PositiveQuantity
+    cpu_slots: PositiveCount
+    time_budgeted: bool
+
+    @model_validator(mode="after")
+    def scheduling_rules(self):
+        self.request(unit_id="declaration", dispatch_ordinal=0, wall_seconds=1.0)
+        return self
+
+    def request(
+        self, *, unit_id: str, dispatch_ordinal: int, wall_seconds: float
+    ) -> ResourceRequest:
+        return ResourceRequest(
+            unit_id=unit_id,
+            dispatch_ordinal=dispatch_ordinal,
+            gpu_count=self.gpu_count,
+            vram_gib=self.vram_gib,
+            vram_source=self.vram_source,
+            host_memory_gib=self.host_memory_gib,
+            cpu_slots=self.cpu_slots,
+            wall_seconds=wall_seconds,
+        )
+
+
 class CandidateOperation(PreviewModel):
     kind: Literal["candidate"] = "candidate"
     request_id: UUID
     request: CandidateRunRequest
     reusable_preparation: ReusablePreparedSelection | None = None
+    resources: OperationResources | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class CandidateLoopResumeRequest(PreviewModel):
@@ -81,6 +122,9 @@ OperationSubmission = Annotated[
     Field(discriminator="kind"),
 ]
 SUBMISSION = TypeAdapter(OperationSubmission)
+#: Submissions whose admission binds a run seed (issue #983). A loop resume
+#: inherits its root's; native chains resolve theirs at chain startup.
+SEEDED_SUBMISSIONS = (PrepareOperation, ReusablePrepareOperation, CandidateOperation)
 NativeReceipt = CandidatePreparationReceipt | ReusablePreparationReceipt | CandidateRunReceipt
 
 
@@ -104,6 +148,31 @@ class OperationRecord(PreviewModel):
     native_resume_admission: NativeResumeAdmission | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    #: Issue #983 — the run seed bound at admission, before claim and spawn; a
+    #: loop resume copies its root's. ``None`` only on records that predate the
+    #: seed contract (and on native chains, whose seed lives in the chain lock).
+    run_seed: RunSeedBinding | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: Provenance: the run seed of the reusable preparation a candidate was built
+    #: from. The candidate never derives from it; it keeps its own ``run_seed``.
+    preparation_run_seed: RunSeed | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def admitted_seed_matches_request(self):
+        submission = self.submission
+        if isinstance(submission, SEEDED_SUBMISSIONS):
+            if self.run_seed is not None:
+                # Raises when the binding is not what admission binds for this request.
+                admitted_run_seed(submission.request.run_seed, self.run_seed)
+        elif self.run_seed is not None and submission.kind != "candidate_loop_resume":
+            raise ValueError(f"{submission.kind} operation records no run seed")
+        if self.preparation_run_seed is not None and (
+            not isinstance(submission, CandidateOperation)
+            or submission.reusable_preparation is None
+        ):
+            raise ValueError("preparation_run_seed requires a reusable-preparation candidate")
+        return self
 
     @model_validator(mode="after")
     def chain_binding(self):
@@ -167,6 +236,17 @@ class SpawnFailure(PreviewModel):
     reason: Literal["spawn_failed"] = "spawn_failed"
 
 
+class CancelRequest(PreviewModel):
+    """Durable, write-once operator intent to cancel one live candidate operation.
+
+    The operation child polls for it while the sandbox runs (``cancel.py``).
+    """
+
+    operation_id: UUID
+    request_digest: str
+    requested_at: str
+
+
 class Completion(PreviewModel):
     operation_id: UUID
     request_digest: str
@@ -205,12 +285,18 @@ class OperationSnapshot(PreviewModel):
         default=None, exclude_if=lambda value: value is None
     )
     finishing: bool = False
+    # Omitted unless a CancelRequest is recorded; existing snapshot bytes are unchanged.
+    cancel_requested: bool = Field(default=False, exclude_if=lambda value: not value)
+    # A new cancel would be recorded (cancel.cancellable); omitted when false.
+    cancellable: bool = Field(default=False, exclude_if=lambda value: not value)
     receipt_available: bool = False
     receipt_digest: str | None = None
     receipt: NativeReceipt | None = None
     native_chain: NativeChainObservation | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    #: The admitted record's run seed (issue #983), readable before any receipt.
+    run_seed: RunSeedBinding | None = Field(default=None, exclude_if=lambda value: value is None)
     reason: str
 
 

@@ -23,6 +23,7 @@ from tools.candidate_operations import (
     read_operation_log,
     read_operation_tokens,
     read_prepared_candidate,
+    request_cancel,
     request_loop_pause,
     request_loop_stop,
     review_loop_resume,
@@ -49,6 +50,7 @@ from .models import (
     LoopResumeSelection,
     LoopStatusView,
     LoopStopAcknowledgement,
+    OperationCancelAcknowledgement,
     OperationListItemView,
     OperationListView,
     PreparedReview,
@@ -245,7 +247,8 @@ class CandidateConsole:
             else None
         )
         return StatusView(
-            **snapshot.model_dump(exclude={"receipt", "receipt_digest"}),
+            # The run seed's console readback is issue #983 S6; the view omits it.
+            **snapshot.model_dump(exclude={"receipt", "receipt_digest", "run_seed"}),
             native_status=receipt.status if receipt else None,
             graph_trace=receipt.graph_trace if isinstance(receipt, CandidateRunReceipt) else None,
             native_id=native_id,
@@ -254,6 +257,11 @@ class CandidateConsole:
             else None,
             loop=loop_status(self.config.operation_store, snapshot, requests=True),
         )
+
+    def cancel_operation(self, operation_id: UUID) -> OperationCancelAcknowledgement:
+        """Record cancel for a live candidate; acknowledgement is not termination."""
+        request_cancel(self.config.operation_store, operation_id)
+        return OperationCancelAcknowledgement(operation_id=operation_id)
 
     def operations(self, limit: int = 50) -> OperationListView:
         """Read-only list of this store's verified records; receipts and paths stay out."""

@@ -56,7 +56,9 @@ try {
   await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
   assert.equal(requests.length, 0, 'Opening workflow must not prepare/review/launch');
   await page.locator('#editor-project').selectOption('disabled');
-  // Prepared runs live on the Run page; the project is chosen on Workflow.
+  // The Workflow page states why Run is closed; the Run page repeats it beside the capture controls.
+  await page.locator('#workflow-next-state').filter({hasText: 'not enabled'}).waitFor();
+  assert.equal(await page.locator('#workflow-next-run').isDisabled(), true);
   await page.locator('nav a[href="#run"]').click();
   await page.locator('#capture-status').filter({hasText: 'not enabled'}).waitFor();
   assert.equal(await page.locator('#capture-open').isDisabled(), true);

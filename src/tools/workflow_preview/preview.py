@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from core.retired_seed_pins import refuse_pinned_settings
 from tools.setup_review.route_models import LLMRoute
 from tools.setup_review.routes import NodeRouteRole, node_llm_routes
 from workflows.definition.candidate import candidate_nodes
@@ -96,6 +97,7 @@ def observe_bindings(
         observation, content = read_file(path, reference)
         observations.append(observation)
         if reference in training_references:
+            refuse_pinned_settings(content, reference)
             health = HealthReference.model_validate_json(content).health_checks_config
             if health is not None:
                 ref = "training.health_checks_config"
@@ -129,6 +131,9 @@ def observe_bindings(
                 | ({"lit_review"} if "literature" in nodes else set())
                 | ({"interpret"} if "interpretation" in nodes else set())
             )
+            # `judge` is not a node slot. Listing it only when declared keeps
+            # the inactive-role output of configs without it unchanged.
+            and (name != "judge" or config.judge is not None)
         ),
     )
 

@@ -4,6 +4,7 @@
   'use strict';
   const $ = id => document.getElementById('capture-' + id);
   const session = window.consoleSession, coordinator = window.reusableIntents;
+  const stopControl = window.operationStop.mount('capture-stop');
   const profileDescriptions = {
     'native-proposal-families/v1': ' Independent proposal instances executed serially.',
     'native-literature-candidate/v1': ' Native literature review feeds one proposal, implementation and validation.',
@@ -29,6 +30,9 @@
   const POLL_MS = 2000;
   const evidence = () => intent ? coordinator.state('candidate', intent) : null;
   const status = message => { $('status').textContent = message; };
+  // The reason a project cannot run outlives later task/list refreshes, which never apply to it.
+  const notEnabled = () => !!editor.projectId && !editor.candidateEnabled;
+  const NOT_ENABLED = 'This project is editable but not enabled for candidate runs.';
   const api = (suffix, body, project = editor.projectId) => session.request(`editor/${encodeURIComponent(project)}/reusable-captures${suffix}`, body);
   const current = (version, revision) => generation === version && session.revision === revision;
   const option = (value, text) => { const el = document.createElement('option'); el.value = value; el.textContent = text; return el; };
@@ -104,6 +108,7 @@
   function showIntent() {
     $('intent').hidden = !intent;
     problem = ''; observed = null;
+    stopControl.render(null);
     if (!intent) return;
     $('operation-id').textContent = intent.payload.candidate_operation_id;
     $('operation-status').textContent = 'Checking this run…';
@@ -121,6 +126,7 @@
     const sentence = !value.state && value.observation === 'existing'
       ? 'This run already exists (no second one was started); checking its status…'
       : window.operationOutcome.sentence(value);
+    stopControl.render(value.state ? value : null);
     $('operation-status').textContent = sentence + (terminal ? ' Details and logs are in Monitor.' : ' Follow it in Monitor.') +
       (causeFor === value.operation_id && causeText ? ` Cause (from the log): ${causeText}` : '');
     controls();
@@ -208,7 +214,8 @@
       $('task').replaceChildren(option('', 'Choose task and resources'), ...tasks.filter(task => task.reusable_runs_root).map(task => option(task.task_id, task.label)));
       if ([...$('task').options].some(item => item.value === previous)) $('task').value = previous;
       if ($('task').value !== previous) invalidate();
-      if (!$('task').value && !selected && !intent && editor.candidateEnabled) status(tasks.some(task => task.reusable_runs_root)
+      if (notEnabled()) status(NOT_ENABLED);
+      else if (!$('task').value && !selected && !intent && editor.candidateEnabled) status(tasks.some(task => task.reusable_runs_root)
         ? 'Prepare a run in step 1, or open an earlier prepared run below.' : 'No task is configured for runs of saved workflows on this console.');
       else if (editor.candidateEnabled && !selected) await list();
     } catch (error) { if (!error.stale) { tasksRevision = null; status(error.message); } }
@@ -221,7 +228,7 @@
       if (session.connected && editor.sourceAvailable && !editor.saving && !selected) void list();
     }
     if (previous.projectId !== editor.projectId) { invalidate(); $('run').replaceChildren(option('', 'Choose a prepared run')); if (session.connected) void list(); }
-    if (!editor.candidateEnabled && editor.projectId) status('This project is editable but not enabled for candidate runs.');
+    if (notEnabled()) status(NOT_ENABLED);
     controls();
   });
   session.subscribe(() => {

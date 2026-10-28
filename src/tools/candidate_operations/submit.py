@@ -14,6 +14,8 @@ from tools.workflow_preview.models import FileObservation
 
 from .expectation import compare_reusable_expectation
 from .files import canonical, overlap, publish, read_bytes
+from .host_admission import HostSlot, host_slot
+from .host_ledger import HostScheduling
 from .models import (
     CandidateOperation,
     OperationFailure,
@@ -32,6 +34,7 @@ from .native_resume_models import NativeResumeAdmission
 from .process import environment, runtime_identity, spawn
 from .read import releasable
 from .reusable import verify_reusable_operation
+from .seed_admission import admission_seed
 from .store import (
     claim,
     digest,
@@ -111,7 +114,12 @@ def submit_operation(
     *,
     launch_environment: Mapping[str, str],
     expected_reusable_inputs: ReusablePreparationExpectation | None = None,
+    host: HostScheduling | None = None,
 ) -> OperationHandle:
+    """Admit and dispatch one new operation; ``host`` selects the shared host ledger.
+
+    Without ``host`` no ledger is read and the launch is the serial default.
+    """
     config = validate_config(config)
     submission = validate_submission(config, submission)
     if expected_reusable_inputs is not None and submission.kind != "prepare_reusable":
@@ -129,102 +137,160 @@ def submit_operation(
                 observation="existing",
             )
         require_available(root, lambda operation_id: releasable(config, operation_id))
-        if submission.kind == "candidate":
-            verify_reusable_operation(config, submission)
-            try:
-                observed = fresh_preview(submission.request)
-            except (OSError, ValueError) as error:
-                raise OperationFailure(
-                    "candidate_preflight", "candidate inputs or routes changed; review again"
-                ) from error
-            try:
-                require_credentials(
-                    observed.selected_constructor_routes,
-                    submission.request.environment_names,
-                    launch_environment,
-                )
-            except ValueError as error:
-                # This boundary emits only names from the candidate credential policy.
-                raise OperationFailure("credentials", str(error)) from error
-        loop_names = None
-        if submission.kind == "candidate_loop_resume":
-            from .loop_resume import admit
-
-            loop_names = admit(config, submission, launch_environment)
-        chain_admission = None
-        resume_admission = None
-        if submission.kind == "native_chain_resume":
-            review = review_native_chain_resume(
+        with host_slot(host, config, submission) as slot:
+            return _admit_new(
+                root,
                 config,
-                submission.request.predecessor_operation_id,
+                submission,
+                slot,
+                slot.launch_environment(launch_environment),
+                expected_reusable_inputs,
+            )
+
+
+def _admit_new(
+    root: Path,
+    config: OperationStoreConfig,
+    submission: OperationSubmission,
+    slot: HostSlot,
+    launch_environment: Mapping[str, str],
+    expected_reusable_inputs: ReusablePreparationExpectation | None,
+) -> OperationHandle:
+    """Native admission of a new ID; the slot already overlays any placed selector."""
+    preparation_run_seed = None
+    if submission.kind == "candidate":
+        verified = verify_reusable_operation(config, submission)
+        preparation_run_seed = None if verified is None else verified.receipt.run_seed
+        try:
+            observed = fresh_preview(submission.request)
+        except (OSError, ValueError) as error:
+            raise OperationFailure(
+                "candidate_preflight", "candidate inputs or routes changed; review again"
+            ) from error
+        try:
+            require_credentials(
+                observed.selected_constructor_routes,
+                submission.request.environment_names,
+                launch_environment,
+            )
+        except ValueError as error:
+            # This boundary emits only names from the candidate credential policy.
+            raise OperationFailure("credentials", str(error)) from error
+    loop_names = None
+    if submission.kind == "candidate_loop_resume":
+        from .loop_resume import admit
+
+        loop_names = admit(config, submission, launch_environment)
+    chain_admission = None
+    resume_admission = None
+    if submission.kind == "native_chain_resume":
+        review = review_native_chain_resume(
+            config,
+            submission.request.predecessor_operation_id,
+            launch_environment=launch_environment,
+        )
+        if (
+            review.eligibility != "ready"
+            or review.review_digest != submission.request.expected_review_digest
+        ):
+            raise OperationFailure(
+                "native_resume_review", "continuation is complete or the reviewed state changed"
+            )
+        resume_admission = review.admission
+    if submission.kind == "native_chain":
+        try:
+            chain_admission = review_native_chain_operation(
+                config,
+                submission,
                 launch_environment=launch_environment,
             )
-            if (
-                review.eligibility != "ready"
-                or review.review_digest != submission.request.expected_review_digest
-            ):
-                raise OperationFailure(
-                    "native_resume_review", "continuation is complete or the reviewed state changed"
-                )
-            resume_admission = review.admission
-        if submission.kind == "native_chain":
-            try:
-                chain_admission = review_native_chain_operation(
-                    config,
-                    submission,
-                    launch_environment=launch_environment,
-                )
-            except (OSError, ValueError, subprocess.SubprocessError) as error:
-                raise OperationFailure(
-                    "native_chain_admission", "native chain capture or launch binding refused"
-                ) from error
-        names = (
-            submission.request.environment_names
-            if submission.kind == "candidate" or submission.kind == "native_chain"
-            else resume_admission.root_request.environment_names
-            if resume_admission is not None
-            else ()
-        )
-        if loop_names is not None:
-            names = loop_names
-        env = environment(names, launch_environment)
-        record = OperationRecord(
-            native_id=uuid4(),
-            submission=submission,
-            request_digest=digest(submission),
-            config=config,
-            runtime=runtime_identity(),
-            inputs=_admitted_inputs(config, submission, chain_admission, resume_admission),
-            native_chain_admission=chain_admission,
-            native_resume_admission=resume_admission,
-            admitted_at=now(),
-        )
-        compare_reusable_expectation(record, expected_reusable_inputs)
-        path = claim(root, record)
-        if submission.kind == "candidate_loop_resume":
-            from .loop_resume import reserve
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            raise OperationFailure(
+                "native_chain_admission", "native chain capture or launch binding refused"
+            ) from error
+    names = (
+        submission.request.environment_names
+        if submission.kind == "candidate" or submission.kind == "native_chain"
+        else resume_admission.root_request.environment_names
+        if resume_admission is not None
+        else ()
+    )
+    if loop_names is not None:
+        names = loop_names
+    env = environment(names, launch_environment)
+    return _claim_and_spawn(
+        root,
+        config,
+        submission,
+        slot,
+        env,
+        expected_reusable_inputs,
+        chain_admission,
+        resume_admission,
+        preparation_run_seed,
+    )
 
-            reserve(record)
-        observation = "starting"
-        try:
-            spawn(path, env)
-        except OSError:
-            # Popen failure means no executed child; any other ambiguous failure propagates
-            # with the already-durable claim intact and is never retried automatically.
-            publish(
-                path / "spawn_failure.json",
-                SpawnFailure(
-                    operation_id=submission.request_id, request_digest=record.request_digest
-                ),
-            )
-            observation = "operation_failed"
-        return OperationHandle(
-            operation_id=submission.request_id,
-            kind=submission.kind,
-            request_digest=record.request_digest,
-            observed_at=now(),
-            observation=observation,
+
+def _claim_and_spawn(
+    root: Path,
+    config: OperationStoreConfig,
+    submission: OperationSubmission,
+    slot: HostSlot,
+    env: dict[str, str],
+    expected_reusable_inputs: ReusablePreparationExpectation | None,
+    chain_admission: NativeChainAdmission | None,
+    resume_admission: NativeResumeAdmission | None,
+    preparation_run_seed: int | None,
+) -> OperationHandle:
+    loop_root = None
+    if submission.kind == "candidate_loop_resume":
+        from .loop_resume import root_record
+        from .store import load_record
+
+        loop_root = root_record(load_record(config, submission.request.predecessor_operation_id))
+    # Issue #983 — bound under the store lock, before claim(): the record is the
+    # durable seed authority the child executes.
+    record = OperationRecord(
+        native_id=uuid4(),
+        submission=submission,
+        request_digest=digest(submission),
+        config=config,
+        runtime=runtime_identity(),
+        inputs=_admitted_inputs(config, submission, chain_admission, resume_admission),
+        native_chain_admission=chain_admission,
+        native_resume_admission=resume_admission,
+        admitted_at=now(),
+        run_seed=admission_seed(submission, loop_root),
+        preparation_run_seed=preparation_run_seed,
+    )
+    compare_reusable_expectation(record, expected_reusable_inputs)
+    path = claim(root, record)
+    if submission.kind == "candidate_loop_resume":
+        from .loop_resume import reserve
+
+        reserve(record)
+    slot.reserve(path, record)
+    observation = "starting"
+    try:
+        child = spawn(path, env)
+    except OSError:
+        slot.spawn_failed(submission.request_id)
+        # Popen failure means no executed child; any other ambiguous failure propagates
+        # with the already-durable claim intact and is never retried automatically.
+        publish(
+            path / "spawn_failure.json",
+            SpawnFailure(operation_id=submission.request_id, request_digest=record.request_digest),
         )
+        observation = "operation_failed"
+    else:
+        slot.spawned(record, child)
+    return OperationHandle(
+        operation_id=submission.request_id,
+        kind=submission.kind,
+        request_digest=record.request_digest,
+        observed_at=now(),
+        observation=observation,
+    )
 
 
 def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopStop:

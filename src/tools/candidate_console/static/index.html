@@ -26,6 +26,7 @@
   <script src="/native-chain-monitor.js" defer></script>
   <script src="/graph-results-monitor.js" defer></script>
   <script src="/loop-control.js" defer></script>
+  <script src="/operation-stop.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/operations-list.js" defer></script>
   <script src="/editor-task-controls.js" defer></script>
@@ -276,6 +277,7 @@
       <p id="capture-operation-status" role="status"></p>
       <div class="actions"><a id="capture-monitor" class="button-link" hidden>Watch in Monitor</a><button id="capture-retry" class="secondary" hidden disabled>Retry same launch</button><button id="capture-finish" class="secondary" hidden>Start another run</button><button id="capture-check" class="secondary" data-ui-flag="developer" disabled>Check status now</button></div>
       <p class="mono" data-ui-flag="developer">Operation <span id="capture-operation-id"></span></p>
+      <div id="capture-stop-group" class="actions" hidden><button id="capture-stop-button" type="button">Stop run</button></div><p id="capture-stop-status" role="status"></p>
     </section>
     <details class="run-earlier" id="capture-earlier"><summary>Run an earlier prepared run instead</summary>
       <label for="capture-task">Task</label><select id="capture-task" disabled></select>
@@ -297,9 +299,11 @@
   </section>
   <section class="card" aria-labelledby="monitor-heading">
     <p class="eyebrow">Observe an operation</p><h2 id="monitor-heading">Status and logs</h2>
-    <p class="muted">Choose an operation from the list. Reading it never launches, restarts or stops it.</p>
+    <p class="muted">Choose an operation from the list. Reading it never launches, restarts or stops it; closing the page does not stop an admitted operation.</p>
     <form id="monitor-form" class="actions manual-operation" data-ui-flag="advanced"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" class="secondary" disabled>Read operation</button></form>
     <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="monitor-cause" class="monitor-cause" hidden></p><p id="operation-observed" class="muted"></p><details data-ui-flag="developer"><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
+    <div id="operation-stop-group" class="actions" hidden><button id="operation-stop-button" type="button">Stop run</button><p class="muted">Ends the run now, including any model call in progress. It cannot be resumed and produces no candidate result; files written so far stay in the run folder.</p></div>
+    <p id="operation-stop-status" role="status"></p>
     <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p>
       <div id="loop-stop-group" class="actions" hidden><button id="loop-stop" type="button">Stop at next boundary</button><p class="muted">The current body completes; no partial body is kept as a result.</p></div>
       <div id="loop-pause-group" class="actions" hidden><button id="loop-pause" type="button">Pause at next boundary</button><p class="muted">The current body completes; this run can then be reviewed and resumed from the next body.</p></div>

@@ -23,6 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from core.training_execution_bindings import TrainingExecutionBindings
+from core.training_seeds import SeedContext
 
 PACKAGES = (
     "agent",
@@ -167,7 +168,7 @@ def execute_lifecycle(manifest: Path, workspace: Path) -> dict:
             m_cfg,
             t_cfg,
             l_cfg,
-            train_base_seed=17,
+            seed_context=SeedContext(run_seed=17),
             execution_bindings=TrainingExecutionBindings(task_scopes=scopes),
         )
         assert trained["status"] == "success", trained

@@ -35,8 +35,6 @@ SETTINGS = {
         "formal_max_epochs": 8,
         "trial_portion": 0.2,
         "train_portion": 0.3,
-        "sampling_seed": 17,
-        "train_base_seed": 23,
         "healthgate_mode": "observe_only",
         "result_authority": "diagnostic",
         "workflow_parameter_rules": {
@@ -52,11 +50,7 @@ SETTINGS = {
 def add_training(request):
     config_path = Path(request.llm_config_file)
     config = json.loads(config_path.read_bytes())
-    config["tune"] = {
-        "provider": "openai",
-        "model_id": "offline-tuner",
-        "planner_strategy": "native-timing-v1",
-    }
+    config["tune"] = {"planner_strategy": "native-timing-v1"}
     config_path.write_text(json.dumps(config))
     source = Path(request.source_path)
     payload = parse_workflow_source(source.read_text()).model_dump(mode="json")
@@ -70,6 +64,16 @@ def add_training(request):
     return request.model_copy(
         update={"expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
     )
+
+
+def test_reusable_preparation_refuses_a_set_seed_pin(reusable, monkeypatch):
+    """Issue #983 T13. Fails if a reusable preparation whose source sets a
+    retired pin prepares (and spends proposal calls on) an untrainable bundle."""
+    from core.retired_seed_pins import RetiredSeedPin
+
+    monkeypatch.setitem(SETTINGS["launch"], "sampling_seed", 17)
+    with pytest.raises(RetiredSeedPin, match="seeds derive from run_seed; set --run_seed"):
+        prepare_reusable_candidate(add_training(reusable))
 
 
 def test_two_reusable_runs_reach_native_proposal_and_tuner(
@@ -94,7 +98,7 @@ def test_two_reusable_runs_reach_native_proposal_and_tuner(
         }
         seed = json.loads((output / "proposal.json").read_text())
         assert "hardware_context" not in seed and "constraint_context" not in seed
-        assert seed["sampling_seed"] == 17 and seed["trial_portion"] == 0.2
+        assert "sampling_seed" not in seed and seed["trial_portion"] == 0.2
         retained = select_reusable_preparation(prepared.envelope)
         candidate = verify_reusable_preparation(retained).request
         before = len(training_runner)
@@ -105,7 +109,8 @@ def test_two_reusable_runs_reach_native_proposal_and_tuner(
         tuned = next(value for name, value in calls if name == "tuner")
         assert (proposed.trial_time_budget_minutes, proposed.formal_time_budget_minutes) == (7, 19)
         assert (tuned.trial_time_budget_minutes, tuned.formal_time_budget_minutes) == (7, 19)
-        assert (tuned.sampling_seed, tuned.train_base_seed) == (17, 23)
+        # Issue #983: admission resolves (and locks) each run's own seed.
+        assert isinstance(tuned.run_seed, int)
         assert (tuned.trial_portion, tuned.train_portion) == (0.2, 0.3)
         verify_training_evidence(receipt)
         workspaces.append(receipt.workspace)
@@ -127,9 +132,9 @@ def test_parent_regenerates_training_inputs_despite_repaired_index(
         )
         value = json.loads(path.read_bytes())
         if change == "settings":
-            value["launch"]["sampling_seed"] = 99
+            value["launch"]["trial_portion"] = 0.9
         elif change == "seed":
-            value["sampling_seed"] = 99
+            value["trial_portion"] = 0.9
         else:
             value["constraint_context"] = None
         path.write_text(json.dumps(value))
