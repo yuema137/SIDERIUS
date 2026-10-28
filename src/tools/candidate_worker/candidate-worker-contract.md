@@ -431,7 +431,10 @@ three/four-stage path is unchanged and runs in the worker.
   GPUs) and reads the write-once `result.json` beside it. Both files are
   bounded by the 4 MiB control envelope (`core.control_json.JSON_LIMIT`) on
   write and read through `graph_evidence.read_graph_control`; an oversized
-  invocation fails its node before the child starts.
+  invocation fails its node before the child starts. A result over the bound
+  (in practice only a tuning output; the largest real `run_output` today is
+  about 1.1 MB) becomes `failed`/`native_failure` after training has run
+  (sizing this bound from the tuner's limits is tracked in #1015).
 - The unit runs with `PYTHONSAFEPATH=1` (added only when the worker lacks it,
   flagged by `SIDERIUS_UNIT_SAFE_PATH_ADDED`), because `-m` would otherwise put
   its cwd, the writable workspace where earlier generated code can write,
@@ -475,9 +478,10 @@ returned in `NodeUnitResult.lifecycles` and replayed in order through
 `replay_process_lifecycle` to the worker's observer, so a loop body's
 `iteration_owner` lease still sees uncertain cleanup. Replay happens before
 the result's identity check, so a refused result cannot hide that evidence.
-Grandchildren left by a killed unit stay in the worker's process group; the
-sandbox's group cleanup (and bubblewrap's PID namespace) reaps them when the
-worker exits, as for any descendant of the in-process dispatch.
+Grandchildren left by a killed unit that stay in the worker's process group
+are reaped by the sandbox's group cleanup when the worker exits; supervised
+grandchildren that created their own session (owned-group supervision) are
+reaped only when the bubblewrap PID namespace is torn down.
 
 Each unit pays its own interpreter start, native imports and task
 recomposition, measured in review at about 2.5–2.8 s and 680 MB peak RSS per

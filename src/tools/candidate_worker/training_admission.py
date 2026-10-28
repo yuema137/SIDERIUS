@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.ordering import resolve_ordering
@@ -38,6 +39,18 @@ class TrainingAdmission:
     bindings: WorkflowRunBindings
     constraints: ConstraintContext | None
     node_id: str
+
+
+def admitted_run_bindings(
+    composition: RunTaskComposition, config: WorkflowLLMConfig, **admitted: Any
+) -> WorkflowRunBindings:
+    """The candidate worker's one `WorkflowRunBindings` construction.
+
+    Admission supplies the facts it established; a graph unit process rebuilds
+    the same admission from its transported facts and its own re-bound
+    composition and LLM config (`unit_models.AdmittedTraining.restore`).
+    """
+    return WorkflowRunBindings(**admitted, task_composition=composition, llm_config=config)
 
 
 def reconcile_proposal(seed: ProposalInput, admitted: TrainingAdmission) -> ProposalInput:
@@ -139,7 +152,9 @@ def admit_training(
     run_launch_self_test(require_probe_runner=launch.require_probe_runner, capability=capability)
     ensure_run_invariants(initial.workspace, preparation.invariants)
     hardware = get_hardware_context(Path(initial.workspace), initial.run_name)
-    bindings = WorkflowRunBindings(
+    bindings = admitted_run_bindings(
+        composition,
+        config,
         workspace=initial.workspace,
         run_name=initial.run_name,
         run_id=initial.run_id,
@@ -158,8 +173,6 @@ def admit_training(
         if settings.file_order_override is None
         else tuple(settings.file_order_override),
         enable_structured_health_feedback=settings.enable_structured_health_feedback,
-        task_composition=composition,
-        llm_config=config,
         measurement_capability=capability,
         hardware_context=hardware,
         active_vram_budget_gb=active_vram_budget(launch),

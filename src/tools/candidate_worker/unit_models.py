@@ -31,13 +31,12 @@ from core.runtime_control.observed_subprocess import ProcessLifecycle
 from execute_tools.dataset_config import DataScope
 from workflows.candidate_training_settings import CandidateTrainingSettings
 from workflows.llm_config import WorkflowLLMConfig
-from workflows.run_bindings import WorkflowRunBindings
 from workflows.task_composition import RunTaskComposition
 
 from .inputs import NativeInputs
 from .invocation import NativePhase
 from .models import CandidateRunReceipt, CandidateRunRequest
-from .training_admission import TrainingAdmission
+from .training_admission import TrainingAdmission, admitted_run_bindings
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid")
 
@@ -95,7 +94,7 @@ class AdmittedTraining(BaseModel):
         values = {name: getattr(self, name) for name in _binding_fields()}
         return TrainingAdmission(
             self.settings,
-            WorkflowRunBindings(**values, task_composition=composition, llm_config=config),
+            admitted_run_bindings(composition, config, **values),
             self.constraints,
             self.node_id,
         )

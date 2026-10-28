@@ -7,6 +7,10 @@ each model's set fields, because protocol mappings, LLM-config defaults and
 reconciliation read `model_fields_set` (an `exclude_unset` dump cannot carry
 fields that validators fill). Encoding refuses any value whose decoded Python
 dump differs (NaN-aware) or that is not a byte fixpoint of decode/re-encode.
+The value line uses a Python-mode dump, which skips `when_used="json"`
+serializers: if a schema ever adds one, the raw field value is sent instead,
+and the decode, structural and fixpoint checks fail closed (refuse) unless it
+decodes back to the same value.
 """
 
 import json
