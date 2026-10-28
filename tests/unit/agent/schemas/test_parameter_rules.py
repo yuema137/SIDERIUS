@@ -1,5 +1,8 @@
 """Regression tests for the unified effective-plan parameter-rule contract."""
 
+import json
+import re
+
 import pytest
 
 from agent.schemas.hyperparam_tuning import (
@@ -203,6 +206,28 @@ def test_multiple_or_empty_rule_kind_declarations_remain_invalid() -> None:
         ParameterRules.model_validate(
             {"model_config.segmentation_size": {"range": None, "allowed": None}}
         )
+
+
+@pytest.mark.parametrize("kind", ["range", "allowed", "predicate"])
+def test_null_non_exact_rule_is_refused_not_reinterpreted_as_exact_null(kind: str) -> None:
+    """Catches a malformed rule silently becoming a lock that disables the scheduler."""
+    path = "train_config.lr_schedule"
+    # Pydantic reports the dotted rule key, backquoted, under ``rules``.
+    expected = rf"rules\.`{re.escape(path)}`[\s\S]*{kind} rule must not be null"
+    with pytest.raises(ValueError, match=expected):
+        ParameterRules.model_validate({path: {kind: None}})
+    # Workflow CLI ingress parses JSON text.
+    with pytest.raises(ValueError, match=expected):
+        ParameterRules.model_validate_json(json.dumps({path: {kind: None}}))
+
+
+@pytest.mark.parametrize("side", ["min", "max"])
+@pytest.mark.parametrize("bound", [True, "3"])
+def test_non_numeric_range_bound_is_refused_not_coerced(side: str, bound: object) -> None:
+    """Catches ``true`` silently becoming 1.0 or ``"3"`` becoming 3.0 in a range."""
+    path = "train_config.epochs"
+    with pytest.raises(ValueError, match=rf"rules\.`{re.escape(path)}`\.range\.{side}"):
+        ParameterRules.model_validate({path: {"range": {side: bound}}})
 
 
 def test_planning_boundary_applies_the_composed_exact_lock() -> None:
