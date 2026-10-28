@@ -50,11 +50,7 @@ SETTINGS = {
 def add_training(request):
     config_path = Path(request.llm_config_file)
     config = json.loads(config_path.read_bytes())
-    config["tune"] = {
-        "provider": "openai",
-        "model_id": "offline-tuner",
-        "planner_strategy": "native-timing-v1",
-    }
+    config["tune"] = {"planner_strategy": "native-timing-v1"}
     config_path.write_text(json.dumps(config))
     source = Path(request.source_path)
     payload = parse_workflow_source(source.read_text()).model_dump(mode="json")

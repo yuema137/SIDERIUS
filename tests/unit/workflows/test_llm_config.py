@@ -9,12 +9,19 @@ Covers:
     uniform() with and without reflect overrides, partial JSON loading
 """
 
+import argparse
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from workflows.llm_config import NodeLLMConfig, TunerLLMConfig, WorkflowLLMConfig
+from workflows.llm_config import (
+    NodeLLMConfig,
+    TunerLLMConfig,
+    WorkflowLLMConfig,
+    resolve_standard_llm_config,
+)
 
 # ---------------------------------------------------------------------------
 # NodeLLMConfig — leaf type
@@ -178,7 +185,11 @@ class TestWorkflowLLMConfigJSON:
         must load cleanly."""
         data = {
             "interpret": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
-            "propose": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
+            "propose": {
+                "comparison": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
+                "reasoning": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
+                "proposing": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
+            },
             "implement": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
             "validate": {"provider": "gemini", "model_id": "gemini-3.1-flash-lite-preview"},
             "tune": {
@@ -187,6 +198,7 @@ class TestWorkflowLLMConfigJSON:
             },
         }
         cfg = WorkflowLLMConfig.model_validate(data)
+        assert cfg.propose.reasoning.model_id == "gemini-3.1-pro-preview"
         assert cfg.interpret.provider == "gemini"
         assert cfg.tune.planner.model_id == "gemini-3.1-pro-preview"
         assert cfg.tune.reflector.model_id == "gemini-2.5-flash"
@@ -436,3 +448,99 @@ class TestWorkflowLLMConfigJudge:
         )
         assert config.interpret is not None and config.interpret.max_retries is None
         assert config.get("interpret") == {"provider": "openai", "model_id": "gpt-4o-mini"}
+
+
+class TestStrictExplicitProfileLoading:
+    """Explicit ``--llm_config`` files go through the strict loader on the CLI path.
+
+    ``resolve_standard_llm_config`` calls ``WorkflowLLMConfig.from_json``, which owns
+    the refusal of undeclared keys. Native models remain lenient for Python construction.
+    """
+
+    @staticmethod
+    def _cli_load(path):
+        args = argparse.Namespace(
+            llm_config=str(path),
+            llm_model=None,
+            reflect_provider=None,
+            reflect_model_id=None,
+        )
+        return resolve_standard_llm_config(args)
+
+    @staticmethod
+    def _write(tmp_path, payload):
+        path = tmp_path / "llm.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def test_misspelled_top_level_route_is_refused_on_cli_path(self, tmp_path):
+        path = self._write(
+            tmp_path, {"interpet": {"provider": "openai", "model_id": "gpt-4o-mini"}}
+        )
+        with pytest.raises(ValueError, match=r"llm_config: unknown configuration keys"):
+            self._cli_load(path)
+
+    def test_misspelled_nested_route_key_is_refused_on_cli_path(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            {
+                "tune": {
+                    "planner": {"provider": "openai", "model_id": "gpt-4o-mini"},
+                    "reflecter": {"provider": "openai", "model_id": "gpt-4o-mini"},
+                }
+            },
+        )
+        with pytest.raises(ValueError, match=r"llm_config\.tune.*reflecter"):
+            self._cli_load(path)
+
+    def test_misspelled_leaf_field_is_refused_on_cli_path(self, tmp_path):
+        path = self._write(
+            tmp_path, {"interpret": {"provder": "openai", "model_id": "gpt-4o-mini"}}
+        )
+        with pytest.raises(ValueError, match=r"llm_config\.interpret.*provder"):
+            self._cli_load(path)
+
+    def test_inert_underscore_keys_are_accepted_and_discarded_at_every_level(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            {
+                "_comment": "annotation",
+                "interpret": {"_note": "leaf", "provider": "openai", "model_id": "gpt-4o-mini"},
+                "tune": {
+                    "_note": "tuner",
+                    "planner": {
+                        "_note": "planner",
+                        "provider": "openai",
+                        "model_id": "gpt-4o-mini",
+                    },
+                },
+                "judge": {
+                    "aggregate": {
+                        "_note": "judge",
+                        "provider": "openai",
+                        "model_id": "gpt-4o-mini",
+                        "max_output_tokens": 400,
+                        "max_retries": 2,
+                    }
+                },
+            },
+        )
+        config = self._cli_load(path)
+        dumped = json.dumps(config.model_dump(mode="json", by_alias=True, exclude_none=True))
+        assert "_note" not in dumped and "_comment" not in dumped
+        assert config.get("interpret") == {"provider": "openai", "model_id": "gpt-4o-mini"}
+        assert config.judge is not None and config.judge.aggregate is not None
+
+    def test_shipped_certify_profile_comment_key_loads_on_cli_path(self):
+        path = Path(__file__).resolve().parents[3] / "configs" / "llm" / "certify_minimal.json"
+        assert "_comment" in json.loads(path.read_text(encoding="utf-8"))
+        config = self._cli_load(path)
+        assert config.get("interpret") == {"provider": "openai", "model_id": "gpt-4o-mini"}
+
+
+def test_default_config_round_trips_through_its_serialized_form():
+    dumped = WorkflowLLMConfig.default().model_dump(mode="json", by_alias=True, exclude_none=True)
+    again = WorkflowLLMConfig.model_validate(dumped).model_dump(
+        mode="json", by_alias=True, exclude_none=True
+    )
+    assert again == dumped

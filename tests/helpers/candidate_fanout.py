@@ -249,11 +249,7 @@ def selection_request(request, branches=2, *, bindings=None, node_order=None):
         seed.pop(name, None)
     (project / "seed.json").write_text(json.dumps(seed))
     config = json.loads((project / "llm.json").read_bytes())
-    config["tune"] = {
-        "provider": "openai",
-        "model_id": "tuner-test",
-        "planner_strategy": "native-timing-v1",
-    }
+    config["tune"] = {"planner_strategy": "native-timing-v1"}
     (project / "llm.json").write_text(json.dumps(config))
     (project / "training.json").write_text(
         json.dumps(

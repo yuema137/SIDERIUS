@@ -24,16 +24,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import warnings
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     SerializerFunctionWrapHandler,
+    TypeAdapter,
     model_serializer,
     model_validator,
 )
@@ -45,8 +46,65 @@ from agent.llm_settings import (
     default_model_for_provider,
 )
 from agent.schemas.llm_retry import RetryPolicy
+from workflows.advice import ADVICE_INERT_KEY_PREFIX as INERT_KEY_PREFIX
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
+
+
+def parse_llm_config_bytes(content: bytes) -> WorkflowLLMConfig:
+    """Strictly parse captured ``--llm_config`` JSON: the one loader for explicit profiles.
+
+    Every explicit profile reaches this function (``WorkflowLLMConfig.from_json``,
+    and through it the CLI, run and preview paths). It refuses any key that the
+    model does not declare, at every route depth, so a typo such as ``interpet``
+    or a misspelled nested route key cannot silently select node defaults. A key
+    starting with ``INERT_KEY_PREFIX`` (``"_"``, the advice-artifact convention)
+    is an inert annotation: it is accepted at any depth and discarded before
+    validation. Native models stay lenient for direct Python construction.
+    """
+    value = _drop_inert_keys(TypeAdapter(JsonValue).validate_json(content))
+    _refuse_unknown_keys(value, WorkflowLLMConfig, "llm_config")
+    return WorkflowLLMConfig.model_validate(value)
+
+
+def _drop_inert_keys(value: JsonValue) -> JsonValue:
+    if isinstance(value, dict):
+        return {
+            key: _drop_inert_keys(item)
+            for key, item in value.items()
+            if not key.startswith(INERT_KEY_PREFIX)
+        }
+    if isinstance(value, list):
+        return [_drop_inert_keys(item) for item in value]
+    return value
+
+
+def _nested_models(annotation: object) -> tuple[type[BaseModel], ...]:
+    """Return the BaseModel classes a field annotation may hold (through ``X | None``)."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return (annotation,)
+    return tuple(model for arg in get_args(annotation) for model in _nested_models(arg))
+
+
+def _refuse_unknown_keys(value: JsonValue, model: type[BaseModel], context: str) -> None:
+    """Refuse undeclared keys in one mapping, then recurse into its declared route fields."""
+    if not isinstance(value, dict):
+        return  # The native model owns shape and type errors.
+    accepted: set[str] = set()
+    for name, field in model.model_fields.items():
+        accepted.add(name)
+        if field.alias:
+            accepted.add(field.alias)
+            if field.alias != name and name in value and field.alias in value:
+                raise ValueError(f"{context}: duplicate name/alias {name!r} and {field.alias!r}")
+    if unknown := value.keys() - accepted:
+        raise ValueError(f"{context}: unknown configuration keys: {sorted(unknown)}")
+    for name, field in model.model_fields.items():
+        for key in (name, field.alias):
+            if key is None or key not in value:
+                continue
+            for child in _nested_models(field.annotation):
+                _refuse_unknown_keys(value[key], child, f"{context}.{key}")
 
 
 def resolve_standard_llm_config(args: argparse.Namespace) -> WorkflowLLMConfig:
@@ -597,10 +655,9 @@ class WorkflowLLMConfig(BaseModel):
 
     @classmethod
     def from_json(cls, path: str) -> WorkflowLLMConfig:
-        """Load from a JSON file."""
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        return cls.model_validate(data)
+        """Load an explicit profile through the strict loader (see parse_llm_config_bytes)."""
+        with open(path, "rb") as f:
+            return parse_llm_config_bytes(f.read())
 
     @classmethod
     def default(cls) -> WorkflowLLMConfig:
