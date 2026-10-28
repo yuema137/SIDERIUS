@@ -144,6 +144,18 @@ read-only projection of the native catalog: one `CatalogEntry` per capability pe
 protocol whose output is that capability's input (with owner and ordered
 `CatalogArgument` name/contract/required), plus one external-request route
 (`protocol=null`) per capability. The browser palette lists only these entries.
+Each `CatalogArgument.produced_by` names the capabilities whose output carries its
+contract (empty: an external input). `NodeCatalog.guide` (`CatalogGuide`, owner
+`capability_guide.py`) carries palette guidance derived only from `CAPABILITIES` and
+`PROTOCOLS`: per capability (`CapabilityGuide`) its stable topological `stage`,
+`connects_from`/`connects_to` (a -> b when some protocol producing b's input reads a's
+output), and a one-line `description` from `CAPABILITY_DESCRIPTIONS`, the single
+owner of that presentation text (no prompt or execution path reads it); plus
+`context` (capabilities without an upstream capability that feed one: currently
+interpretation, literature) and `chain` (the remaining stage order, the suggested
+build order: proposal, implementation, validation, tuning). A capability missing a
+description fails the catalog route; `tests/unit/tools/test_workflow_node_edits.py`
+binds the table and edges to the catalog.
 
 `AddNodeProposal(kind="add_node", source, node, capability, protocol, binding,
 arguments, x, y)` and `RemoveNodeProposal(kind="remove_node", source, nodes)` are

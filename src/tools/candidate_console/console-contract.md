@@ -514,8 +514,26 @@ by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
 Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
 drag payload. It lists
 `GET /api/editor/node-catalog` entries (fetched once per connection, only while the
-Workflow view is shown; other pages never request it) grouped by capability with a text search,
-and adds one by click (placed right of the existing cards) or by dragging an entry
+Workflow view is shown; other pages never request it) as a compact, aligned stack
+of one collapsed `details.palette-category` row per capability (icon, label, step
+number, "Start here" on `guide.chain[0]`, "Optional context" on `guide.context`) in
+`guide` stage order, with a text search (matching rows open). Above the stack a start
+guide renders `guide.chain`/`guide.context` (emphasised while the canvas has no
+card). Expanding a row (accordion, open state kept across re-renders) shows the
+server description, the sent type, connects-from/to and one addable `.palette-entry`
+per route with contract chips: "→ <name>" for each received (required) type and
+"<name> →" for the sent type (`data-direction` receives/sends, accessible text
+"receives"/"sends"; optional ones counted). Type names are the server contract
+`name` when the catalog projection carries it, else the contract id; colour/shape
+come from `editor-contract-presentation.js`. Hover or keyboard focus on a route shows
+one shared `#palette-popover` (`role=tooltip`, `aria-describedby`; Escape, blur or
+leaving dismisses it): description, request route, every received argument with
+type, required/optional and origin (`produced_by` capabilities or external input),
+the sent type and connects-from/to. While shown, canvas ports get
+`palette-compatible` when an output carries a contract the route reads from another
+capability or an input's socket contract equals the route's output contract
+(presentation only; binding still uses server `port_inventory` choices). The
+presentation lives in `editor-palette-guidance.js`. The palette adds one by click (placed right of the existing cards) or by dragging an entry
 onto the canvas (dropped at that world position). It proposes an unused instance
 id (`<capability>`, `<capability>2`, ...). The pending node is the unified
 draft's `node` field (AddNodeProposal fields without `source`; `editorDraft.proposal`
@@ -719,6 +737,11 @@ new node, review/save keeping author comments, drag source and canvas centre bot
 in view before the drag, refused removal of a node others
 read (Delete key), the context menu, byte-identical inspector removal of the added
 node, Discard and Undo of a pending dragged node, and cancelling it.
+`tests/browser/palette_guidance.mjs` (same variables and fixture) checks the
+stage-ordered compact stack (aligned, touching rows, badges, start guide), accordion
+details and typed route chips with receive/send arrows, hover and keyboard popover
+content, compatible-port highlighting and its removal, Escape, light/dark text
+contrast >= 4.5:1, the narrow drawer, and that nothing is posted or written.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser

@@ -282,6 +282,8 @@ class CatalogArgument(Model):
     name: str
     contract: NativeContract
     required: bool
+    # Capabilities whose output carries this contract; empty means an external input.
+    produced_by: tuple[str, ...] = ()
 
 
 class CatalogEntry(Model):
@@ -295,8 +297,27 @@ class CatalogEntry(Model):
     arguments: tuple[CatalogArgument, ...]
 
 
+class CapabilityGuide(Model):
+    """Palette guidance for one capability, derived from the catalog protocols."""
+
+    capability: str
+    stage: int
+    description: str
+    connects_from: tuple[str, ...]
+    connects_to: tuple[str, ...]
+
+
+class CatalogGuide(Model):
+    """Capabilities in stage order; ``chain`` is the build order, ``context`` feeders."""
+
+    capabilities: tuple[CapabilityGuide, ...]
+    chain: tuple[str, ...]
+    context: tuple[str, ...]
+
+
 class NodeCatalog(Model):
     entries: tuple[CatalogEntry, ...]
+    guide: CatalogGuide
 
 
 class NodeDraftRequest(Model):

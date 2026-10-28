@@ -6,12 +6,59 @@
 .editor-palette h3 { margin: 0 0 .4rem; font-size: .9rem; }
 .editor-palette .palette-toggle { display: none; width: 100%; text-align: left; }
 .editor-palette .palette-search { width: 100%; margin-bottom: .4rem; box-sizing: border-box; }
-.editor-palette .palette-list { display: flex; flex-direction: column; gap: .4rem; }
-.editor-palette .palette-category summary { font-size: .75rem; font-weight: 700; color: var(--muted); cursor: pointer; }
-.editor-palette .palette-entry { display: block; margin: .25rem 0; padding: .3rem .55rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--control); color: var(--text); text-align: left; font-size: .8rem; overflow-wrap: anywhere; cursor: grab; user-select: none; }
-.editor-palette .palette-entry:hover:not([aria-disabled="true"]) { border-color: var(--focus); }
+.editor-palette .palette-list { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--control-border); border-radius: .45rem; overflow: hidden; }
+/* Compact stack: one aligned row per capability (icon, name, step, badge); rows share
+ * borders so the collapsed rail has no gaps. Expanding a row shows its details. */
+.editor-palette .palette-category { --capability-accent: var(--capability-generic); --capability-tint: var(--control); border-left: 4px solid var(--capability-accent); background: var(--panel); }
+.editor-palette .palette-category + .palette-category { border-top: 1px solid var(--control-border); }
+.editor-palette .palette-category[data-capability="interpretation"] { --capability-accent: var(--capability-interpretation); --capability-tint: var(--capability-interpretation-tint); }
+.editor-palette .palette-category[data-capability="literature"] { --capability-accent: var(--capability-literature); --capability-tint: var(--capability-literature-tint); }
+.editor-palette .palette-category[data-capability="proposal"] { --capability-accent: var(--capability-proposal); --capability-tint: var(--capability-proposal-tint); }
+.editor-palette .palette-category[data-capability="implementation"] { --capability-accent: var(--capability-implementation); --capability-tint: var(--capability-implementation-tint); }
+.editor-palette .palette-category[data-capability="validation"] { --capability-accent: var(--capability-validation); --capability-tint: var(--capability-validation-tint); }
+.editor-palette .palette-category[data-capability="tuning"] { --capability-accent: var(--capability-tuning); --capability-tint: var(--capability-tuning-tint); }
+.editor-palette .palette-row { display: flex; align-items: center; gap: .35rem; min-height: 2.1rem; padding: .25rem .45rem; cursor: pointer; list-style: none; color: var(--text); }
+.editor-palette .palette-row::-webkit-details-marker { display: none; }
+.editor-palette .palette-row::after { content: "▸"; color: var(--text); font-size: .7rem; }
+.editor-palette .palette-category[open] > .palette-row { background: var(--capability-tint); }
+.editor-palette .palette-category[open] > .palette-row::after { content: '▾'; }
+.editor-palette .palette-row:hover { background: var(--hover); }
+.editor-palette .palette-row:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+.editor-palette .palette-row .capability-heading { flex: 1; grid-template-columns: 20px minmax(0, 1fr); grid-template-rows: auto; gap: 0 6px; }
+.editor-palette .palette-row .capability-heading svg { grid-row: 1; width: 18px; height: 18px; }
+.editor-palette .palette-row .capability-name { font-size: .78rem; }
+.editor-palette .palette-step { min-width: 1.1rem; padding: 0 .25rem; border: 1px solid var(--control-border); border-radius: 999px; color: var(--text); font-size: .64rem; font-weight: 700; text-align: center; }
+.editor-palette .palette-badge { padding: 0 .3rem; border: 1px solid var(--control-border); border-radius: 999px; color: var(--text); font-size: .62rem; font-weight: 700; white-space: nowrap; }
+.editor-palette .palette-badge[data-badge="Start here"] { border-color: var(--focus); background: var(--hover); }
+.editor-palette .palette-details { padding: .3rem .5rem .45rem; border-top: 1px solid var(--control-border); background: var(--capability-tint); color: var(--text); font-size: .72rem; line-height: 1.35; }
+.editor-palette .palette-details p { margin: .15rem 0; }
+.editor-palette .palette-details-label { font-weight: 700; }
+.editor-palette .palette-details-output { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
+/* Addable route rows inside an expanded capability. */
+.editor-palette .palette-entry { display: grid; gap: .15rem; margin: .25rem 0 0; padding: .3rem .4rem; border: 1px solid var(--control-border); border-radius: .35rem; background: var(--panel); color: var(--text); text-align: left; font-size: .72rem; overflow-wrap: anywhere; cursor: grab; user-select: none; }
+.editor-palette .palette-entry-route { font-weight: 600; }
+.editor-palette .palette-chips { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem; }
+.editor-palette .palette-chip { display: inline-flex; align-items: center; gap: .25rem; padding: 0 .35rem; border: 1px solid var(--control-border); border-radius: 999px; background: var(--panel); color: var(--text); font-size: .66rem; line-height: 1.5; }
+.editor-palette .palette-chip[data-contract] { border-color: var(--contract-colour); }
+.palette-arrow { color: var(--text); font-weight: 700; }
+.editor-palette .palette-entry:hover:not([aria-disabled="true"]) { border-color: var(--focus); box-shadow: 0 1px 6px #0002; }
 .editor-palette .palette-entry:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.editor-palette .palette-entry[aria-disabled="true"] { color: var(--muted); opacity: .6; cursor: not-allowed; }
+.editor-palette .palette-entry[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
+.editor-palette .palette-guide { margin: 0 0 .45rem; padding: .35rem .45rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--hover); color: var(--text); font-size: .74rem; line-height: 1.35; }
+.editor-palette .palette-guide.palette-guide-empty { border: 2px dashed var(--focus); font-weight: 600; }
+/* Hover/focus popover (appended to <body> so the rail's scroll box never clips it). */
+.palette-popover { position: fixed; z-index: 30; width: min(22rem, calc(100vw - 16px)); overflow: auto; box-sizing: border-box; padding: .55rem .7rem; border: 1px solid var(--control-border); border-radius: .5rem; background: var(--panel); color: var(--text); box-shadow: 0 6px 20px #0004; font-size: .76rem; line-height: 1.4; }
+.palette-popover .capability-heading { grid-template-columns: 24px minmax(0, 1fr); grid-template-rows: auto; }
+.palette-popover .capability-heading svg { grid-row: 1; width: 22px; height: 22px; }
+.palette-popover h4 { margin: .45rem 0 .15rem; font-size: .74rem; }
+.palette-popover p { margin: .25rem 0; }
+.palette-popover ul { margin: 0; padding-left: 0; list-style: none; }
+.palette-popover li, .palette-popover .palette-popover-output { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; margin: .15rem 0; }
+.palette-popover .palette-from-external { font-style: italic; }
+.palette-popover .palette-popover-hint { color: var(--text); font-size: .7rem; }
+/* Ports already on the canvas that the hovered entry could read from or feed. */
+.circuit-port.palette-compatible { outline: 2px dashed var(--focus); outline-offset: -3px; }
+.circuit-port.palette-compatible .circuit-socket { box-shadow: 0 0 0 4px var(--focus); }
 .editor-palette .palette-note, .editor-palette .palette-empty { margin: .3rem 0 0; color: var(--muted); font-size: .75rem; }
 .editor-palette .palette-cancel { margin-top: .4rem; }
 @media (max-width: 900px) {
