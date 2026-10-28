@@ -166,10 +166,11 @@ CUSTOM_EMITTABLE = frozenset(
 
 
 def _context_item_rules(prefix: str) -> tuple[ProtectedField, ...]:
-    """`ExpertContextItem`: framework-stamped producer, never human-attributed."""
+    """`ExpertContextItem`: framework-stamped producer; never human or chain-mode findings."""
     return (
         ProtectedField(f"{prefix}source", "stamp-source"),
         ProtectedField(f"{prefix}kind", "forbid-value", "human"),
+        ProtectedField(f"{prefix}kind", "forbid-value", "findings"),
     )
 
 
@@ -200,6 +201,8 @@ PROTECTED_FIELDS = MappingProxyType(
         ),
         "literature.output": (
             ProtectedField("agent_card.agent_name", "stamp-source"),
+            ProtectedField("agent_card.trust_level", "forbid-value", "hard_limit"),
+            ProtectedField("run_name", "stamp-source"),
             *_context_item_rules("findings[]."),
             *_vocab_entry_rules("new_vocab_candidates[]."),
             ProtectedField("search_decisions", "unset"),

@@ -6,9 +6,10 @@
 
 ``inspect`` validates the manifest and captures members without executing
 them. ``self-test`` runs every fixture twice in supervised children. ``admit``
-self-tests, then writes ``DIR/.siderius/adaptors/<id>/<identity>.admission.json``.
-Each prints one JSON document on stdout. Exit 0 on success, 2 with a
-``[<reason>]`` diagnostic on stderr otherwise.
+self-tests, then writes ``DIR/.siderius/adaptors/<id>/<identity>.admission.json``
+once (``--replace`` supersedes a different record for the same identity).
+Success prints exactly one JSON document on stdout and exits 0; any refusal
+exits 2 with a ``[<reason>]`` diagnostic on stderr and nothing on stdout.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from core.local_code import LocalCodeError
 from workflows.custom_adaptors.admission import admission_path, write_admission
 from workflows.custom_adaptors.errors import CustomAdaptorError
 from workflows.custom_adaptors.manifest import LoadedAdaptor, load_adaptor
@@ -43,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--manifest", type=Path, required=True)
         if name == "admit":
             command.add_argument("--project", type=Path, required=True)
+            command.add_argument(
+                "--replace",
+                action="store_true",
+                help="supersede a different existing record for the same identity",
+            )
     return parser
 
 
@@ -75,7 +82,7 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
     report = _self_test(loaded)
     if args.command == "self-test":
         return report.model_dump(mode="json")
-    path = write_admission(args.project, loaded, report)
+    path = write_admission(args.project, loaded, report, replace=args.replace)
     return {"admission": str(path), **report.model_dump(mode="json")}
 
 
@@ -85,6 +92,12 @@ def main(argv: list[str] | None = None) -> int:
         payload = _run(args)
     except CustomAdaptorError as exc:
         print(str(exc), file=sys.stderr)
+        return EXIT_DIAGNOSTIC
+    except LocalCodeError as exc:
+        print(f"[package_unreadable] {exc}", file=sys.stderr)
+        return EXIT_DIAGNOSTIC
+    except OSError as exc:
+        print(f"[io_error] {exc}", file=sys.stderr)
         return EXIT_DIAGNOSTIC
     print(json.dumps(payload, indent=2, sort_keys=True))
     return EXIT_OK

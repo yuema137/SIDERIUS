@@ -71,9 +71,9 @@ Types in `interface.py`. `inputs` is a read-only mapping port name →
 and `.value` the validated native model (or `str` for `optional.text`, a list
 of `ExpertContextItem` for `optional.expert-context`). `params` is the
 validated `parameters_model` instance or `None`. `AdaptorContext` exposes
-`adaptor_id`, `llm=None` and `log(str)` (child stderr). There is no path,
-workspace, environment, clock or seed; the child runs with
-`PYTHONHASHSEED=0` from `core.subprocess_env.subprocess_env`.
+`adaptor_id`, `llm=None` and `log(str)` (child log). The framework passes no
+workspace or run path, clock or seed; the process environment is the
+allowlist under "Supervised execution", not the caller's environment.
 
 Return values by role (JSON-compatible; Pydantic models are serialized):
 
@@ -86,7 +86,8 @@ Return values by role (JSON-compatible; Pydantic models are serialized):
 ## Protected fields (`catalog.PROTECTED_FIELDS`)
 
 Applied by `protected.stamp_protected` to the JSON dump of validated combine
-values. Paths are dotted; `[]` addresses every list element.
+values. Paths are dotted; `[]` addresses every list element. One path may carry
+several rules.
 
 | rule | meaning |
 |---|---|
@@ -94,12 +95,13 @@ values. Paths are dotted; `[]` addresses every list element.
 | `stamp-source` | as `unset`, then the framework writes `adaptor:<id>@<identity[:12]>` |
 | `forbid-value` | the named value is refused |
 
-Current table: `optional.expert-context` `[].source` (stamp), `[].kind` ≠
-`human`; `proposal.output` `candidate_id`, `observed_prediction_reference`,
-`preflight_estimated_minutes`, `preflight_factor` unset, and
-`proposed_discoveries[]` vocabulary rules; `literature.output`
-`agent_card.agent_name` and `findings[].source` (stamp), `findings[].kind` ≠
-`human`, `new_vocab_candidates[]` vocabulary rules, `search_decisions` unset.
+| contract | protected fields |
+|---|---|
+| `optional.expert-context` | `[].source` stamp; `[].kind` ≠ `human`, ≠ `findings` (chain-mode union only) |
+| `proposal.output` | `candidate_id`, `observed_prediction_reference`, `preflight_estimated_minutes`, `preflight_factor` unset; `proposed_discoveries[]` vocabulary rules |
+| `literature.output` | `agent_card.agent_name` and `run_name` stamp; `agent_card.trust_level` ≠ `hard_limit` (constraint authority); `findings[]` as expert-context items; `new_vocab_candidates[]` vocabulary rules; `search_decisions` unset |
+| `optional.text`, `optional.expert-advice` | none (no field can carry provenance; see B6-6 acceptance below) |
+
 Vocabulary rules: `origin` stamp, `proposed_by_run` and `seen_in_runs` unset,
 `tier` ≠ `canonical`. A test checks that every path names a real native field.
 
@@ -110,38 +112,64 @@ unset here; minting a framework candidate identity for a custom
 `proposal.output` belongs to workflow execution (B6-6), and such a proposal must
 still pass implementation and validation before training.
 
-## Supervised execution (`runner.py`, `child.py`)
+## Supervised execution (`runner.py`, `process.py`, `child.py`)
 
 1. `admit_inputs`: exact declared port set, item counts within bounds, every
    value validated against its contract (`custom_invalid_input`).
 2. Canonical input size ≤ `max_input_bytes`; parameters require
-   `parameters_model`.
+   `parameters_model`. The control directory must not exist yet (no stale
+   markers or outputs).
 3. `core.local_code.transport.publish_transport` writes the immutable carrier
    under `<control_dir>/task_code/`; `invocation.json` (`CustomInvocation`)
-   carries absolute locators, JSON inputs and parameters.
-4. `supervise_subprocess([python, -m, workflows.custom_adaptors.child, ...])`
-   with the manifest timeout as deadline, its own process group, captured
-   stdout/stderr. Inherited `SIDERIUS_TASK_CODE_*` transport is removed from the
-   child environment; the child receives only its explicit carrier.
-5. The child calls `bootstrap_code_package(carrier, digest)`, which verifies
-   every member pin before any adaptor code runs, imports the entry and
-   parameters model from captured bytes, calls the function once and writes
-   `output.json`.
-6. The parent checks `max_output_bytes`, parses JSON and applies the role rules.
+   carries absolute locators, JSON inputs, parameters and `max_output_bytes`.
+4. `process.launch` runs `python -P -s -m workflows.custom_adaptors.child`
+   under `supervise_subprocess` in its own process group. `-P` keeps the
+   working directory off `sys.path` (a module in the caller's directory cannot
+   shadow framework imports before pin verification); `-s` drops user site.
+   Environment allowlist (`process.child_env`): `PATH`, `VIRTUAL_ENV`, `LANG`,
+   `LANGUAGE`, `LC_*`, `PYTHONHASHSEED` (from `core.subprocess_env`, `0` unless
+   the operator set it), `PYTHONNOUSERSITE=1`, and private `HOME` and `TMPDIR`
+   under the control directory. No provider credentials, plugin directories or
+   inherited `SIDERIUS_TASK_CODE_*` transport reach the child; it needs none.
+   The supervisor's watchdog notice is redirected to stderr.
+5. The child routes its fd 1 and 2 through a pipe into `child.log`, keeping the
+   first `MAX_LOG_BYTES` (64 KiB) and discarding the rest, so the supervisor's
+   in-memory capture stays small. It calls `bootstrap_code_package(carrier,
+   digest)`, which verifies every member pin before any adaptor code runs,
+   imports the entry and parameters model from captured bytes, validates
+   parameters and inputs, writes the `ready` marker, calls the function once,
+   and writes `output.json` only if it fits `max_output_bytes`.
+6. Deadline (`process.ReadyDeadline`): before `ready`, a bounded startup
+   allowance (`STARTUP_ALLOWANCE_SECONDS` = 120 s; interpreter and framework
+   import, about 2 s with `torch`); after `ready` is observed, the author's
+   `timeout_seconds`. Observation granularity is the 0.05 s poll.
+7. The parent checks `max_output_bytes` again, parses JSON and applies the
+   role rules.
 
-Failure reasons (`errors.CustomAdaptorReason`), never retried, no fallback:
+Failure reporting: on any failure the child writes `failure.json`
+(`ChildFailure`: `stage` ∈ `identity`, `input`, `parameters`, `adaptor`,
+`output`) and exits 1. The parent trusts `identity`/`input`/`parameters` only
+when the `ready` marker is absent, because once adaptor code has run it could
+forge the file; exit codes carry no meaning beyond zero/non-zero.
 
 | reason | cause |
 |---|---|
-| `custom_timeout` | deadline exceeded; the process group is terminated |
-| `custom_exception` | adaptor code raised (including `SystemExit`): child exit 1 |
-| `custom_identity_mismatch` | member bytes differ from the captured pins: child exit 78 |
-| `custom_invalid_output` | oversized/unreadable output, contract, protected-field, index or count violation |
-| `custom_invalid_input` | ports, counts, contracts, size or parameters refused before launch |
+| `custom_timeout` | startup allowance or author timeout exceeded; the process group is terminated; the message says which phase |
+| `custom_exception` | adaptor code raised (including `SystemExit`/`os._exit`), import of a member failed, or the child exited non-zero without a trusted typed failure |
+| `custom_identity_mismatch` | member bytes differ from the captured pins (pre-ready `identity` failure) |
+| `custom_invalid_output` | output not JSON-compatible or over `max_output_bytes` (child or parent), or contract, protected-field, index or count violation |
+| `custom_invalid_input` | ports, counts, contracts, size refused before launch, or parameters/inputs refused by the child before `ready` |
 
-This is reproducibility machinery, not a security sandbox
-(`core/local_code/README.md`). The run's sandbox policy and resource-ceiling
-cap apply when workflow execution lands (B6-6).
+Parameters are validated in the child before `ready`, not in the parent:
+the parameters model is user code, and the parent never executes user code.
+
+This is not a network or filesystem sandbox: `network: "none"` is declared, not
+enforced, and the child can read files the operator can read. Reusing
+`agent/data_analysis/analysis_code_sandbox.py` (bubblewrap + `unshare --net`) is
+an open decision; its `execute` contract is specific to one generated program
+file, its runner and `SkillPayload`, and it mounts the virtualenv but not the
+editable framework source this child imports. See `core/local_code/README.md`
+for the reproducibility (not security) scope.
 
 ## Self-test (`self_test.py`)
 
@@ -152,6 +180,8 @@ edit). Every fixture runs **twice** in separate children; the canonical raw
 outputs must be byte-equal (`custom_nondeterministic`), then the output and the
 expected value pass the same role validation and must be equal
 (`fixture_mismatch`; an invalid expected file is `fixture_invalid`).
+Determinism is established only under the child's fixed `PYTHONHASHSEED` and
+this host; it is evidence, not a proof across hosts or library versions.
 `SelfTestReport` records identity, manifest digest and per-fixture input,
 expected and output SHA-256.
 
@@ -161,35 +191,56 @@ expected and output SHA-256.
 `AdaptorAdmissionRecord` (`siderius.adaptor-admission/v1`): id, version, role,
 `deterministic`, manifest path relative to the project, manifest digest,
 identity and member pins, self-test fixture digests, and `framework_revision`
-(`resolve_git_sha`, `"unknown"` outside a git checkout). No timestamp, so
-re-admitting unchanged inputs produces identical bytes. The location is checked
-before any fixture runs: a project inside the framework checkout or installed
-packages, or a manifest outside the project, is refused (`admission_location`).
-Re-admitting the same identity atomically replaces the record.
+(`resolve_git_sha`, `"unknown"` outside a git checkout; dirty state is not
+recorded because no neutral provenance owner exposes it). No timestamp.
+
+The location is checked before any fixture runs: a project inside the
+framework checkout or installed packages, or a manifest outside the project,
+is refused (`admission_location`). Records are published through
+`core.durable_io`: `publish_bytes_write_once` by default (identical bytes are a
+no-op; different bytes for the same identity are refused,
+`admission_conflict`), `publish_bytes_atomically` with `--replace`. A consumer
+(B6-6) must match **both** `identity_sha256` and `manifest_sha256`: the same
+code under an edited manifest has the same identity but a different record.
 
 ## CLI
 
 ```text
-python -m tools.adaptors inspect   --manifest PATH                # no code execution
+python -m tools.adaptors inspect   --manifest PATH                     # no code execution
 python -m tools.adaptors self-test --manifest PATH
-python -m tools.adaptors admit     --manifest PATH --project DIR
+python -m tools.adaptors admit     --manifest PATH --project DIR [--replace]
 ```
 
-One JSON document on stdout; exit 0, or 2 with `[<reason>] <message>` on stderr.
-`self-test` and `admit` use a temporary control directory that is removed on exit.
+Success prints exactly one JSON document on stdout, exit 0. Any refusal exits 2
+with `[<reason>] <message>` on stderr and nothing on stdout; `OSError` maps to
+`[io_error]` and `LocalCodeError` to `[package_unreadable]`. `self-test` and
+`admit` use a temporary control directory that is removed on exit.
+
+## B6-6 acceptance items carried from this PR
+
+- Match both `identity_sha256` and `manifest_sha256` against the admission record.
+- Carry the adaptor provenance label (`adaptor:<id>@<identity[:12]>`) for
+  `optional.text` and `optional.expert-advice` outputs in the adaptor record and
+  wherever the value is rendered, since neither contract has a field for it.
+- Mint `ProposalOutput.candidate_id` for custom proposals; apply the run's
+  sandbox policy and resource-ceiling owner to the child.
 
 ## Validation evidence
 
 `tests/unit/workflows/test_custom_adaptor_manifest.py` (catalog paths vs native
 schemas, contract types vs catalog strings, helper-edit identity, manifest
-refusals, protected-field stamping/refusal, index/partition rules) and
+refusals, protected-field stamping/refusal through `validate_output`, literature
+authority fields, write-once admission, index/partition rules) and
 `tests/unit/tools/test_adaptors_cli.py` (real children: admission location,
-nondeterminism, timeout, post-capture edit). Synthetic plugin:
+nondeterminism with empty stdout, startup-independent timeout with a fast
+control, environment allowlist and cwd shadowing, forged failure report and
+parameter refusal, post-capture edit). Synthetic plugin:
 `tests/fixtures/custom_adaptors/sibling_digest/`.
 
 ## Limitations
 
 - No workflow reference, preparation pin, run lock, `CustomExecutionEvidence`
   or replay yet (B6-6a/b); no GUI (B6-7); no LLM adaptors (B6-8).
+- No network or filesystem isolation (see above).
 - The child imports native schema modules, which import `torch`; each child
-  start costs about 1.5 s on the development host.
+  start costs about 1.5–2 s on the development host.

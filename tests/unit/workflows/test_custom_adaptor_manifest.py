@@ -11,12 +11,14 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
+from workflows.custom_adaptors.admission import write_admission
 from workflows.custom_adaptors.contracts import READABLE_CONTRACT_TYPES
 from workflows.custom_adaptors.errors import CustomAdaptorError
 from workflows.custom_adaptors.invocation import PortValues
 from workflows.custom_adaptors.manifest import LoadedAdaptor, load_adaptor
 from workflows.custom_adaptors.protected import stamp_protected
 from workflows.custom_adaptors.runner import validate_output
+from workflows.custom_adaptors.self_test import FixtureResult, SelfTestReport
 from workflows.definition.catalog import CONTRACTS, CUSTOM_EMITTABLE, PROTECTED_FIELDS
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "custom_adaptors" / "sibling_digest"
@@ -120,6 +122,64 @@ def test_combine_stamps_source_and_refuses_author_set_protected_fields(tmp_path:
         with pytest.raises(CustomAdaptorError) as caught:
             validate_output(loaded, ports, [[bad]])
         assert caught.value.reason == "custom_invalid_output"
+
+
+def _review() -> dict[str, object]:
+    case = json.loads((FIXTURE / "fixtures" / "two_reviews.input.json").read_text())
+    review = case["inputs"]["reviews"][0]
+    review["run_name"] = ""
+    review["agent_card"]["agent_name"] = ""
+    for finding in review["findings"]:
+        finding["source"] = ""
+    return review
+
+
+def test_literature_output_cannot_claim_constraint_authority_or_chain_findings(
+    tmp_path: Path,
+) -> None:
+    # Defect: a custom literature.output could set trust_level="hard_limit"
+    # (constraint authority) or forge chain-mode findings and run attribution.
+    loaded = _loaded(tmp_path, output={"contract": "literature.output"})
+    ports = (PortValues(name="reviews", contract="literature.output", values=[]),)
+    stamped = validate_output(loaded, ports, [_review()]).stamped[0]
+    assert stamped["run_name"] == stamped["agent_card"]["agent_name"] == loaded.source_label
+    forged_trust = _review()
+    forged_trust["agent_card"]["trust_level"] = "hard_limit"
+    forged_run = {**_review(), "run_name": "iteration-7"}
+    forged_kind = _review()
+    forged_kind["findings"][0]["kind"] = "findings"
+    for bad in (forged_trust, forged_run, forged_kind):
+        with pytest.raises(CustomAdaptorError) as caught:
+            validate_output(loaded, ports, [bad])
+        assert caught.value.reason == "custom_invalid_output"
+
+
+def test_admission_record_is_write_once_unless_replaced(tmp_path: Path) -> None:
+    manifest = _copy(tmp_path)
+    project = tmp_path / "project"
+    loaded = load_adaptor(manifest)
+
+    def report(digest: str) -> SelfTestReport:
+        return SelfTestReport(
+            adaptor_id=loaded.manifest.id,
+            identity_sha256=loaded.identity_sha256,
+            manifest_sha256=loaded.manifest.digest,
+            fixtures=(
+                FixtureResult(
+                    input="i", input_sha256=digest, expected_sha256=digest, output_sha256=digest
+                ),
+            ),
+        )
+
+    path = write_admission(project, loaded, report("a" * 64))
+    first = path.read_bytes()
+    assert write_admission(project, loaded, report("a" * 64)) == path
+    with pytest.raises(CustomAdaptorError) as caught:
+        write_admission(project, loaded, report("b" * 64))
+    assert caught.value.reason == "admission_conflict"
+    assert path.read_bytes() == first
+    write_admission(project, loaded, report("b" * 64), replace=True)
+    assert path.read_bytes() != first
 
 
 def test_proposal_output_with_author_candidate_id_is_refused() -> None:

@@ -1,16 +1,13 @@
 """Parent side of one custom adaptor invocation: admit inputs, supervise, validate output.
 
-The child runs under ``supervise_subprocess`` with the manifest timeout and its
-own process group. Inputs and outputs travel as JSON files in a caller-owned
-control directory. This is reproducibility machinery, not a security sandbox
-(`core/local_code/README.md`).
+Process launch and failure classification belong to ``process.py``. Inputs and
+outputs travel as JSON files in a caller-owned control directory. This is
+reproducibility machinery, not a security sandbox (`core/local_code/README.md`).
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -18,10 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter, ValidationError
 
-from core.local_code.failure import FAILURE_ENV
-from core.local_code.transport import DIGEST_ENV, MANIFEST_ENV, publish_transport
-from core.runtime_control.observed_subprocess import supervise_subprocess
-from core.subprocess_env import subprocess_env
+from core.local_code.transport import publish_transport
 from workflows.custom_adaptors.contracts import (
     canonical_json,
     dump_values,
@@ -29,17 +23,11 @@ from workflows.custom_adaptors.contracts import (
     validate_values,
 )
 from workflows.custom_adaptors.errors import CustomAdaptorError
-from workflows.custom_adaptors.invocation import (
-    IDENTITY_MISMATCH_EXIT,
-    CustomInvocation,
-    PortValues,
-)
+from workflows.custom_adaptors.invocation import OUTPUT_FILE, CustomInvocation, PortValues
 from workflows.custom_adaptors.manifest import AdaptorManifest, LoadedAdaptor
+from workflows.custom_adaptors.process import launch
 from workflows.custom_adaptors.protected import stamp_protected
 
-_POLL_SECONDS = 0.05
-_GRACE_SECONDS = 1.0
-_STDERR_TAIL = 2000
 _INDICES = TypeAdapter(list[StrictInt])
 _PARTITION = TypeAdapter(list[list[StrictInt]])
 
@@ -136,17 +124,6 @@ def validate_output(
         raise _invalid(str(exc)) from exc
 
 
-def _child_env() -> dict[str, str]:
-    env = subprocess_env()
-    for key in (MANIFEST_ENV, DIGEST_ENV, FAILURE_ENV):
-        env.pop(key, None)  # The child receives its explicit carrier only.
-    return env
-
-
-def _tail(text: str | None) -> str:
-    return (text or "")[-_STDERR_TAIL:]
-
-
 def invoke(
     loaded: LoadedAdaptor,
     ports: tuple[PortValues, ...],
@@ -165,7 +142,7 @@ def invoke(
             "custom_invalid_input",
             f"inputs are {size} bytes; limit {manifest.limits.max_input_bytes}",
         )
-    control_dir.mkdir(parents=True, exist_ok=True)
+    control_dir.mkdir(parents=True, exist_ok=False)
     transport, transport_digest = publish_transport(loaded.package, control_dir / "task_code")
     root = loaded.package.locator_root
     parameters_path = parameters_class = None
@@ -183,32 +160,13 @@ def invoke(
         parameters_class=parameters_class,
         ports=ports,
         parameters=dict(parameters),
-        output_path=str(control_dir / "output.json"),
+        control_dir=str(control_dir),
+        max_output_bytes=manifest.limits.max_output_bytes,
     )
     request = control_dir / "invocation.json"
     request.write_text(invocation.model_dump_json(), encoding="utf-8")
-    timeout = manifest.limits.timeout_seconds
-    try:
-        observed = supervise_subprocess(
-            [sys.executable, "-m", "workflows.custom_adaptors.child", str(request)],
-            env=_child_env(),
-            preexec_fn=None,
-            capture_stdout=True,
-            deadline_provider=lambda: (timeout, "adaptor-manifest"),
-            grace_seconds=_GRACE_SECONDS,
-            poll_seconds=_POLL_SECONDS,
-            label=f"adaptor:{manifest.id}",
-        )
-    except subprocess.CalledProcessError as exc:  # The supervisor raises on non-zero exit.
-        reason = (
-            "custom_identity_mismatch"
-            if exc.returncode == IDENTITY_MISMATCH_EXIT
-            else "custom_exception"
-        )
-        raise CustomAdaptorError(reason, f"exit {exc.returncode}: {_tail(exc.stderr)}") from exc
-    if observed.timeout is not None or observed.completed is None:
-        raise CustomAdaptorError("custom_timeout", f"exceeded {timeout}s ({observed.timeout})")
-    return _read_output(manifest, Path(invocation.output_path))
+    launch(invocation, request, manifest.limits.timeout_seconds)
+    return _read_output(manifest, invocation.file(OUTPUT_FILE))
 
 
 def _read_output(manifest: AdaptorManifest, output: Path) -> object:

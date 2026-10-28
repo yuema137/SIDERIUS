@@ -2,19 +2,19 @@
 
 ``<project>/.siderius/adaptors/<id>/<identity>.admission.json`` is written only
 after a passing self-test and never inside the framework checkout or installed
-packages. Re-admitting the same identity atomically replaces its record; the
-record carries the manifest digest so a later consumer can detect manifest edits.
+packages. Records are write-once: an identical re-admission is a no-op and a
+different record for the same identity is refused unless ``replace`` is set.
+A consumer must match both ``identity_sha256`` and ``manifest_sha256``.
 """
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from core.durable_io import publish_bytes_atomically, publish_bytes_write_once
 from core.layout import checkout_root, package_root
 from core.local_code import PackageIdentity
 from core.runtime_control.gpu_milestone_trace import resolve_git_sha
@@ -66,13 +66,17 @@ def admission_path(project: Path, loaded: LoadedAdaptor) -> Path:
     )
 
 
-def write_admission(project: Path, loaded: LoadedAdaptor, report: SelfTestReport) -> Path:
+def write_admission(
+    project: Path, loaded: LoadedAdaptor, report: SelfTestReport, *, replace: bool = False
+) -> Path:
     """Write the record for a passing self-test of exactly this identity."""
     if (report.identity_sha256, report.manifest_sha256) != (
         loaded.identity_sha256,
         loaded.manifest.digest,
     ):
-        raise ValueError("self-test report belongs to a different identity or manifest")
+        raise CustomAdaptorError(
+            "admission_conflict", "self-test report belongs to a different identity or manifest"
+        )
     path = admission_path(project, loaded)
     record = AdaptorAdmissionRecord(
         adaptor_id=loaded.manifest.id,
@@ -86,10 +90,18 @@ def write_admission(project: Path, loaded: LoadedAdaptor, report: SelfTestReport
         self_test=report.fixtures,
         framework_revision=resolve_git_sha(),
     )
+    payload = (record.model_dump_json(indent=2) + "\n").encode()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", dir=path.parent, prefix=".admission-", delete=False, encoding="utf-8"
-    ) as handle:
-        handle.write(record.model_dump_json(indent=2) + "\n")
-    os.replace(handle.name, path)
+    if replace:
+        publish_bytes_atomically(str(path), payload, mode=0o644)
+        return path
+    try:
+        publish_bytes_write_once(str(path), payload)
+    except FileExistsError:
+        if path.read_bytes() != payload:
+            raise CustomAdaptorError(
+                "admission_conflict",
+                f"{path} already holds a different record for this identity; "
+                "re-run admit with --replace to supersede it",
+            ) from None
     return path

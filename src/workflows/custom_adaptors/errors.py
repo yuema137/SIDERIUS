@@ -16,6 +16,8 @@ CustomAdaptorReason = Literal[
     "custom_nondeterministic",
     "fixture_mismatch",
     "admission_location",
+    "admission_conflict",
+    "io_error",
 ]
 
 

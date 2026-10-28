@@ -1,15 +1,19 @@
-"""The parent-to-child request for one supervised custom adaptor invocation."""
+"""The parent-to-child request and the child's typed failure report."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-#: Child exit status meaning the captured package failed its pin verification.
-IDENTITY_MISMATCH_EXIT = 78
-#: Child exit status for an exception (or exit request) raised by adaptor code.
-ADAPTOR_EXCEPTION_EXIT = 1
+#: Files the child writes in its control directory.
+READY_FILE = "ready"
+FAILURE_FILE = "failure.json"
+OUTPUT_FILE = "output.json"
+LOG_FILE = "child.log"
+#: Bytes of child stdout+stderr kept in ``LOG_FILE``; the rest is discarded.
+MAX_LOG_BYTES = 64 * 1024
 
 
 class PortValues(BaseModel):
@@ -33,4 +37,21 @@ class CustomInvocation(BaseModel):
     parameters_class: str | None
     ports: tuple[PortValues, ...]
     parameters: dict[str, Any]
-    output_path: str
+    control_dir: str
+    max_output_bytes: int = Field(gt=0)
+
+    def file(self, name: str) -> Path:
+        return Path(self.control_dir) / name
+
+
+class ChildFailure(BaseModel):
+    """Written by the child before exiting non-zero.
+
+    ``identity``, ``input`` and ``parameters`` are only meaningful before the
+    ready marker exists: once adaptor code has run, it could forge this file, so
+    the parent then classifies every failure as ``custom_exception``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    stage: Literal["identity", "input", "parameters", "adaptor", "output"]
+    detail: str = Field(max_length=4000)

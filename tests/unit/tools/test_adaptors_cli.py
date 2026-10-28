@@ -72,14 +72,33 @@ def test_self_test_catches_nondeterministic_output(tmp_path: Path, capsys) -> No
         " 'source_ref': 'x'}]]\n",
     )
     assert main(["self-test", "--manifest", str(manifest)]) == EXIT_DIAGNOSTIC
-    assert "[custom_nondeterministic]" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "[custom_nondeterministic]" in captured.err
+    assert captured.out == ""
 
 
-def test_timeout_is_a_typed_failure(tmp_path: Path) -> None:
-    _, manifest = _project(tmp_path)
+def _set_timeout(manifest: Path, seconds: float) -> None:
     data = json.loads(manifest.read_text())
-    data["limits"]["timeout_seconds"] = 0.5
+    data["limits"]["timeout_seconds"] = seconds
     manifest.write_text(json.dumps(data))
+
+
+def _run_fixture(manifest: Path, control: Path, **parameters: object):
+    case = _fixture_inputs(manifest)
+    return run_once(
+        load_adaptor(manifest), case["inputs"], {**case["parameters"], **parameters}, control
+    )
+
+
+def test_author_timeout_starts_after_child_startup(tmp_path: Path) -> None:
+    # Defect: counting the ~2 s framework import against the author's timeout
+    # made every fast adaptor with a sub-startup timeout fail.
+    _, manifest = _project(tmp_path)
+    _set_timeout(manifest, 0.5)
+    output, _ = _run_fixture(manifest, tmp_path / "fast")
+    assert output.author[0][0]["source_ref"] == "sd0"
+
+    _set_timeout(manifest, 5)
     _replace_entry(
         manifest,
         "import time\n"
@@ -87,11 +106,59 @@ def test_timeout_is_a_typed_failure(tmp_path: Path) -> None:
         "class Params(BaseModel):\n    max_items: int = 1\n"
         "def adapt(inputs, params, ctx):\n    time.sleep(60)\n",
     )
-    loaded = load_adaptor(manifest)
-    case = _fixture_inputs(manifest)
     with pytest.raises(CustomAdaptorError) as caught:
-        run_once(loaded, case["inputs"], case["parameters"], tmp_path / "control")
+        _run_fixture(manifest, tmp_path / "slow")
     assert caught.value.reason == "custom_timeout"
+    assert "after ready" in str(caught.value)
+
+
+def test_child_sees_no_caller_secrets_or_cwd_modules(tmp_path: Path, monkeypatch) -> None:
+    _, manifest = _project(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sentinel-not-for-adaptors")
+    shadow = tmp_path / "cwd"
+    (shadow / "workflows").mkdir(parents=True)
+    (shadow / "workflows" / "__init__.py").write_text("raise SystemExit('shadowed')\n")
+    monkeypatch.chdir(shadow)
+    _replace_entry(
+        manifest,
+        "import json, os\n"
+        "from pydantic import BaseModel\n"
+        "class Params(BaseModel):\n    max_items: int = 1\n"
+        "def adapt(inputs, params, ctx):\n"
+        "    return [[{'source': '', 'kind': 'literature', 'source_ref': 'env',"
+        " 'content': json.dumps(sorted(os.environ))}]]\n",
+    )
+    output, _ = _run_fixture(manifest, tmp_path / "control")
+    visible = json.loads(output.author[0][0]["content"])
+    assert "OPENAI_API_KEY" not in visible
+    allowed = {"PATH", "VIRTUAL_ENV", "LANG", "LANGUAGE", "HOME", "TMPDIR"}
+    allowed |= {"PYTHONHASHSEED", "PYTHONNOUSERSITE"}
+    assert all(key in allowed or key.startswith("LC_") for key in visible), visible
+
+
+def test_adaptor_cannot_pose_as_identity_mismatch_or_skip_parameter_checks(
+    tmp_path: Path,
+) -> None:
+    _, manifest = _project(tmp_path)
+    with pytest.raises(CustomAdaptorError) as caught:
+        _run_fixture(manifest, tmp_path / "params", max_items=0)
+    assert caught.value.reason == "custom_invalid_input"
+
+    _replace_entry(
+        manifest,
+        "import os, sys, json\n"
+        "from pathlib import Path\n"
+        "from pydantic import BaseModel\n"
+        "class Params(BaseModel):\n    max_items: int = 1\n"
+        "def adapt(inputs, params, ctx):\n"
+        "    control = Path(json.loads(Path(sys.argv[1]).read_text())['control_dir'])\n"
+        "    (control / 'failure.json').write_text(json.dumps("
+        "{'stage': 'identity', 'detail': 'forged'}))\n"
+        "    os._exit(78)\n",
+    )
+    with pytest.raises(CustomAdaptorError) as caught:
+        _run_fixture(manifest, tmp_path / "forged")
+    assert caught.value.reason == "custom_exception"
 
 
 def test_child_refuses_member_edited_after_capture(tmp_path: Path) -> None:
