@@ -26,6 +26,9 @@
   let handoffGeneration = -1;
   let tasksRevision = null, cursor = null, busy = false, intent = null, terminal = false, refusedInitial = false, storageProblem = false;
   const status = message => { $('status').textContent = message; };
+  // The reason a project cannot run outlives later task/list refreshes, which never apply to it.
+  const notEnabled = () => !!editor.projectId && !editor.candidateEnabled;
+  const NOT_ENABLED = 'This project is editable but not enabled for candidate runs.';
   const api = (suffix, body, project = editor.projectId) => session.request(`editor/${encodeURIComponent(project)}/reusable-captures${suffix}`, body);
   const current = (version, revision) => generation === version && session.revision === revision;
   const option = (value, text) => { const el = document.createElement('option'); el.value = value; el.textContent = text; return el; };
@@ -121,7 +124,8 @@
       $('task').replaceChildren(option('', 'Choose task and resources'), ...tasks.filter(task => task.reusable_runs_root).map(task => option(task.task_id, task.label)));
       if ([...$('task').options].some(item => item.value === previous)) $('task').value = previous;
       if ($('task').value !== previous) invalidate();
-      if (!$('task').value) status(tasks.some(task => task.reusable_runs_root)
+      if (notEnabled()) status(NOT_ENABLED);
+      else if (!$('task').value) status(tasks.some(task => task.reusable_runs_root)
         ? 'Choose a task to list prepared runs.' : 'Reusable captures are not configured for any task.');
       else if (editor.candidateEnabled && !selected) await list();
     } catch (error) { if (!error.stale) { tasksRevision = null; status(error.message); } }
@@ -134,7 +138,7 @@
       if (session.connected && editor.sourceAvailable && !editor.saving && !selected) void list();
     }
     if (previous.projectId !== editor.projectId) { invalidate(); $('run').replaceChildren(option('', 'Choose a prepared run')); if (session.connected) void list(); }
-    if (!editor.candidateEnabled && editor.projectId) status('This project is editable but not enabled for candidate runs.');
+    if (notEnabled()) status(NOT_ENABLED);
     controls();
   });
   session.subscribe(() => { if (!session.connected) { generation++; review = null; $('summary').replaceChildren(); $('details').textContent = ''; } controls(); if (session.connected && ['workflow', 'run'].includes(window.consoleNavigation?.view)) void loadTasks(); });

@@ -61,6 +61,87 @@ Undeclared entries are ignored and never logged. Parse refusals are raised
 outside the parser's exception handler, so neither message nor chained cause
 quotes bytes or values; missing declared names are reported by name only.
 
+### Workspace layout and `init`
+
+Owners: `settings_models.py` (file schema), `workspace.py` (derivation,
+readiness, `init`), `config.load_console`, `__main__` (`check`, `serve`, `init`).
+
+**File schema.** `ConsoleFile`/`TaskEntry` are generated from `ConsoleConfig`/`TaskChoice`
+with `pydantic.create_model`; every field keeps its owner's annotation and
+constraints. Differences: `ConsoleFile` adds `workspace_root: str | None` and makes
+`operation_store`/`auth_token_file` optional; `TaskEntry` makes `data_root`,
+`preparation_root`, `candidate_root`, `reusable_runs_root` and `llm_config_file`
+optional. `ConsoleConfig` and `TaskChoice` gain no field, so native requests built
+from `TaskChoice` (`service.preparation_request`) are unchanged.
+
+**Resolution.** `resolve_console(bytes)` validates `ConsoleFile`, dumps it with
+`exclude_unset=True`, fills only keys the file omits, then validates the result as
+`ConsoleConfig`. `load_console(path) -> ResolvedConsole(config, settings)` applies
+the unchanged `validate_config`; `load_config(path)` keeps its signature and result.
+`SettingsContext` carries `workspace_root` and the `(task_id | None, field)` pairs the
+layout filled; it is presentation/readiness input only, never native input.
+When `workspace_root` (canonical, no symlinks) is set and a field is omitted:
+
+| Field | Derived value under `<workspace_root>` |
+| --- | --- |
+| `operation_store` | `state_root=operations`, `preparation_roots=[preparations, runs]`, `candidate_roots=[candidates, runs]` |
+| `auth_token_file` | `settings/console-token` |
+| `TaskChoice.data_root` | `data/<task_id>` |
+| `TaskChoice.preparation_root` | `preparations/<task_id>` |
+| `TaskChoice.candidate_root` | `candidates/<task_id>` |
+| `TaskChoice.reusable_runs_root` | `runs/<task_id>` (an explicit `null` keeps reusable runs disabled) |
+
+`runs` is in both root lists so the derived reusable runs root satisfies the
+`validate_config` scope rule. `llm_config_file`, `task_manifest`, resources and
+credential names are content choices and are never derived. An explicit value
+always wins (parity: an explicit file resolves to exactly
+`ConsoleConfig.model_validate_json(bytes)`). A field with no source raises
+`workspace.MissingSetting`; `check`/`serve` exit 2 and print only the task ID and
+field name, for example `task my-task needs llm_config_file (set it in console.json)`.
+
+**`init --workspace <parent>`.** `<parent>` is explicit (no default) and must be
+an existing canonical directory. The command walks from `/` with
+`O_DIRECTORY|O_NOFOLLOW` descriptors and requires `<parent>` and every existing or
+created workspace directory to satisfy the ownership predicate: a directory,
+`st_uid == os.getuid()`, no group/other write bit. It creates only missing
+children with `mkdir(name, 0o700, dir_fd=…)` and `fchmod 0700`:
+`operations`, `preparations`, `candidates`, `runs`, `projects`, `library`,
+`library/llm`, `library/advice`, `settings`, `data` (`exported_configs` is created
+lazily by its writer). It creates `settings/console-token` with
+`O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0600, 32 random bytes URL-safe encoded;
+an existing token is left untouched and validated by `files.token`. It publishes
+`library/llm/default-<sha12>.json` write-once with the `WorkflowLLMConfig.default()`
+export expression of [LLM defaults](../../../docs/reference/llm-defaults.md)
+(bytes equal `configs/llm/default.json`; no checkout read); existing different
+bytes are refused. It writes `settings/console.json` write-once only when absent:
+`workspace_root`, `port` (default 8740, `--port`), `browser_origin`, `tasks: []`.
+When `console.json` exists and names this workspace, `init` also creates the missing
+derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
+them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
+Under any umask it creates folders as 0700 and the token as 0600 (it sets umask
+077 for its own duration and `fchmod`s created folders). It never deletes, overwrites
+or follows a symlink. Refusals exit 2 and say which item failed:
+`WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
+or the library default profile, when it is a symlink, unreadable or has different
+bytes); `MissingSetting` from an existing console.json names the task field; an
+unusable `--workspace` gets its own message. Residual race: `core.durable_io` publishes by path, so after the no-follow
+parent check only a same-user process, which already owns the workspace, can swap
+a parent.
+
+**`WorkspaceReadiness`** (`readiness_models.py`, beside `CredentialReadiness`) is an
+ephemeral, name-only projection: `workspace_status` and one `WorkspaceEntry(name,
+status, created_by)` per fixed child, per derived task output root and per derived
+`data/<task_id>`. `status` is `present|missing|not_directory|symlink|not_owner|unreadable`
+(`missing` only for not-found; other open/stat refusals map to `symlink`,
+`not_directory` or `unreadable`),
+computed with no-follow `stat` relative to a root descriptor opened by
+`files.open_directory` (the same no-follow walk as private reads); task data
+(`created_by="operator"`) reports presence only. `created_by="writer"` entries do
+not affect `ready`. `init_command` is set when `init` could fix a missing item. No
+`os.access` probe and no creation. `check`/`serve` print non-present entries and
+the command to stderr when a workspace is not ready, including when
+`validate_config` refuses.
+
 `recorded_examples` is an optional allowlist for read-only candidate-validation
 records. Each entry has a unique `example_id`, readable `label`, canonical
 `workspace` strictly below an existing `candidate_roots` directory, and the
@@ -512,7 +593,9 @@ in the authoring contract); `editor-versions.js` renders the Save name field and
 Version history panel and owns no record policy. Save error `version_record`
 means nothing was written (the reviewed proposal is retained); the distinct
 `version_record_not_updated` means the source was saved but its record was not, so
-`editor.js` adopts the returned saved `current` view. The existing console
+`editor.js` adopts the returned saved `current` view. `GET /api/editor/node-catalog`
+and `POST /api/editor/{project_id}/node-draft` serve the node palette (a project
+named `node-catalog`, like `projects`, is shadowed by the fixed route). The existing console
 Bearer token, origin, host and 256 KiB wire-body admission apply to every API
 route. Browser requests select project IDs and never filesystem destinations.
 The [authoring contract](../workflow_authoring/authoring-contract.md) owns source
@@ -559,8 +642,41 @@ over an input binds exactly as output-then-input clicks do. A refused or dimmed
 input states `<input> expects <socket contract> (<name>), but <source> provides
 <output contract> (<name>)`, or that the server does not offer the source although
 both contracts match.
-External source chips remain inspector bindings. Omitted optional ports, argument
-creation/deletion and new nodes are not graphical controls in this slice.
+External source chips remain inspector bindings. Omitted optional ports and argument
+creation/deletion are not graphical controls in this slice.
+
+The node palette (`editor-palette.js`, `editor-palette.css`; presentation only,
+`editor.js` owns the draft) is a sticky side rail left of the canvas
+(`.editor-canvas-layout`; own scroll, at most the viewport height) so a drag
+source and the canvas share the screen; under 900px it collapses to a drawer opened
+by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
+Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
+drag payload. It lists
+`GET /api/editor/node-catalog` entries (fetched once per connection, only while the
+Workflow view is shown; other pages never request it) grouped by capability with a text search,
+and adds one by click (placed right of the existing cards) or by dragging an entry
+onto the canvas (dropped at that world position). It proposes an unused instance
+id (`<capability>`, `<capability>2`, ...). The pending node is the unified
+draft's `node` field (AddNodeProposal fields without `source`; `editorDraft.proposal`
+turns it into `add_node` on `anchor.source`), so it is part of the dirty flag,
+undo/redo and Discard. The canvas and Selection draw it from the proposal plus the
+server's `node-draft` ports (`editor.js` caches each inspected view by proposal, so
+undo/redo redraw without a request), its required inputs show as unbound, and
+binding them goes through the same canvas/inspector gestures, each one draft
+operation (other nodes cannot be rewired or moved, and inspector, reference and
+loop edits are disabled, until it is reviewed, cancelled, undone or discarded).
+Review is disabled until `node-draft` reports `complete`; "Cancel new node" is an
+undoable draft operation and sends no request. Adding or removing requires a draft
+with no structured edits over its anchor (Review/save or discard them first); the
+anchor may be a reviewed, unsaved Source edit or an earlier reviewed node add/remove.
+A successful `add_node`/`remove_node` review becomes the draft's new anchor (one
+undo step, like a reviewed Source edit), so several node edits can be reviewed in
+sequence and saved together.
+Removal is offered by Delete/Backspace on a focused capability heading, its
+context menu and "Remove capability" in Selection; it sends a `remove_node` review
+directly (Review is the explanation: refusal text or `node_edit.message` plus the
+exact diff). Removing several nodes at once asks for confirmation; the canvas has
+no multi-selection yet, so current gestures remove one node without a prompt.
 Required and bound inputs always render as card rows; optional unbound inputs fold
 into one `.circuit-optional` disclosure per card ("N optional inputs"), expandable
 and remembered across re-renders of the same graph. While an output is pending,
@@ -631,16 +747,17 @@ list never enables Review: Review remains disabled for an incomplete draft.
 Witness: `tests/browser/required_defaults.mjs`.
 
 Unified draft (`editor-draft.js`, `window.editorDraft`; `editor.js` delegates).
-Wiring, disconnection, layout moves, inspector, training and research-loop edits
-are operations on one draft state `{document, bindings, anchor, training,
-loopTemplate}`: `document` is the edited authored document, `bindings` are
+Wiring, disconnection, layout moves, inspector, training, research-loop edits and
+a pending palette node are operations on one draft state `{document, bindings,
+anchor, node, training, loopTemplate}`: `document` is the edited authored document, `bindings` are
 `BindingPatch` values relative to `anchor.inventory`, and `anchor` is the last
 server projection the draft starts from (`{source, document, inventory}` of the
 loaded source, or of a reviewed Source/task-reference update). There is no edit
 mode: any mix accumulates, with one dirty flag (`workflowEditor.state.dirty`,
-true while the draft identity `{document, bindings, anchor.source}` differs from
+true while the draft identity `{document, bindings, anchor.source, node}` differs from
 the loaded state, or while Source text is dirty). Review selects the existing
-typed proposal from the draft: patches present → `DraftProposal` whose
+typed proposal from the draft: a pending node → `AddNodeProposal` on
+`anchor.source` (see the node palette below); patches present → `DraftProposal` whose
 `base_document` is the edited document (layout and inspector edits travel with
 the patches); otherwise document changes outside the loop → `DocumentProposal`;
 loop-only changes → `LoopProposal` on `anchor.source`; no change →
@@ -736,6 +853,13 @@ eight-node families fixture and checks one distinct colour+shape token and reada
 pill name per contract, filled/hollow sockets, wire colour, the legend, hover
 preview (highlight/dim without selecting), the two-contract refusal, the mapping
 chip's field rows and drag-to-connect, without writing the source.
+`tests/browser/node_palette.mjs` (same variables; unit owner
+`tests/unit/tools/test_workflow_node_edits.py`) checks palette categories/search,
+click and drag add, the incomplete-draft Review gate with no disk write, binding the
+new node, review/save keeping author comments, drag source and canvas centre both
+in view before the drag, refused removal of a node others
+read (Delete key), the context menu, byte-identical inspector removal of the added
+node, Discard and Undo of a pending dragged node, and cancelling it.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
@@ -876,7 +1000,8 @@ ready to run.` or the first closing reason (not connected, no project, source no
 open, project not runnable, not a reusable declaration, conflict, saving, unsaved
 edits). Those reasons explain a closed gate and never open it. The New run and
 Prepared run controllers keep their element IDs and behavior; their task loaders run
-on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
+on Workflow or Run entry. For a project that is not enabled for candidate runs,
+`#capture-status` keeps that reason; a task load finishing later does not replace it. `reusableCandidate.openPrepared` routes to `#run` instead of
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
 

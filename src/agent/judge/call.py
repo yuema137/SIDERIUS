@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -22,6 +23,8 @@ class JudgeBridge(Protocol):
     ) -> None: ...
 
     def generate(self, system_prompt: str, user_prompt: str, *, label: str) -> Any: ...
+
+    def emit_marker(self, *, label: str, extra: dict[str, Any] | None = None) -> None: ...
 
 
 class JudgeRunContext(JudgeModel):
@@ -129,6 +132,37 @@ def _call(
     if refusal is not None:
         return _failure("inadmissible_choice", refusal)
     return {"status": "decided", "payload": payload, "failure_code": None, "failure_message": None}
+
+
+def emit_judge_marker(
+    route: JudgeRoute,
+    context: JudgeRunContext,
+    *,
+    label: str,
+    extra: dict[str, Any],
+    bridge_factory: Callable[[JudgeRoute], JudgeBridge] = bridge_for_route,
+) -> bool:
+    """Best-effort usage marker row for a skipped judge call (no provider call, no evidence).
+
+    The marker owner is ``LLMBridge.emit_marker``, which only exists on a bridge bound
+    to the run's usage context, and building a provider bridge can fail (for example a
+    missing credential). A marker is telemetry, so this never checks the execution
+    deadline and never raises an ``Exception``: a failure is reported on stderr and
+    ``False`` is returned, leaving the caller's run outcome unchanged.
+    """
+    try:
+        bridge = bridge_factory(route)
+        bridge.set_run_context(
+            workspace=context.workspace,
+            iter=context.iteration,
+            run_name=context.run_name,
+            run_id=context.run_id,
+        )
+        bridge.emit_marker(label=label, extra=extra)
+    except Exception as exc:
+        print(f"[judge] marker {label!r} not recorded: {_described(exc)}", file=sys.stderr)
+        return False
+    return True
 
 
 def run_judge_call(

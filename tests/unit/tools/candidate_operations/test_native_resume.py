@@ -226,6 +226,23 @@ def test_reserved_without_adoption_never_authorizes_new_science(history):
     assert snapshot.native_chain.terminal.evidence.checkpoints[1].integrity == "missing"
 
 
+def _seeded_lock(workspace, run_seed, source):
+    from core.run_invariants import RunInvariants, run_seed_lock_fields, write_run_invariants
+
+    workspace.mkdir(exist_ok=True)
+    write_run_invariants(
+        str(workspace),
+        RunInvariants(
+            resolved_data_scope=[0],
+            health_gate_enabled=False,
+            health_config_sha256=None,
+            runtime_estimator_identity="estimator-v1",
+            runtime_policy_identity="policy-v1",
+            **run_seed_lock_fields(run_seed, source),
+        ),
+    )
+
+
 def test_adopted_suffix_is_current_but_old_terminal_and_prefix_are_immutable(history):
     root, path, record, child_path, current = history
     original = (path / "native-chain-terminal.json").read_bytes()
@@ -245,6 +262,14 @@ def test_adopted_suffix_is_current_but_old_terminal_and_prefix_are_immutable(his
     assert snapshot.native_chain.terminal.evidence.checkpoints[1].integrity == "missing"
     assert snapshot.native_chain.continuation.head_operation_id == record.submission.request_id
     assert (path / "native-chain-terminal.json").read_bytes() == original
+    # Issue #983: the resume snapshot reads the chain's lock seed back too.
+    assert snapshot.native_chain.run_seed is None
+    _seeded_lock(Path(admitted.root_admission.workspace), 11, "generated")
+    snapshot = read_operation(root.config, root.submission.request_id)
+    assert (snapshot.native_chain.run_seed, snapshot.native_chain.run_seed_source) == (
+        11,
+        "generated",
+    )
     current[0] = current[0].model_copy(update={"token_sidecar_sha256": "e" * 64})
     assert (
         read_operation(root.config, root.submission.request_id).native_chain.evidence.availability

@@ -197,6 +197,7 @@ def _review_native_chain_operation(
         git_common_directory=_git_directory(checkout, "--git-common-dir"),
         required_environment_names=policy.required_names,
         input_files=files,
+        run_seed=run.run_seed,
     )
     profile = sandbox_profile(request, admission)
     state = canonical(config.state_root)
