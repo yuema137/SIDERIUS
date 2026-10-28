@@ -342,11 +342,11 @@ task; choose an installed planner strategy explicitly in the external LLM profil
 budgets and diagnostic settings are demonstration choices, not scientific defaults.
 
 Select **fit / tuning** in Workflow Editor. The small inspector edits trial/formal
-budget minutes, epoch ceilings, portions, sampling seed, training base seed and
-retention flags. **Use native default** removes the key; **None** explicitly stores
-null where supported. Empty numbers block review; zero is validated by the native
-owner. Sampling and training seeds are independent. Epoch ceilings constrain native
-planning rather than specifying final epochs. Outer candidate timeout remains seconds.
+budget minutes, epoch ceilings, portions and retention flags. **Use native default**
+removes the key; **None** explicitly stores null where supported. Empty numbers block
+review; zero is validated by the native owner. There is no seed setting here: each
+run gets one recorded seed at launch. Epoch ceilings constrain native planning
+rather than specifying final epochs. Outer candidate timeout remains seconds.
 
 Review shows inherited values and supplied parameter rules. Edit advanced controls
 and rules in Source; unrelated inspector changes preserve them. Review and Save,

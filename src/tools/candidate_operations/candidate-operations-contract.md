@@ -130,13 +130,19 @@ Owners: `seed_admission.py` (`admission_seed`, `require_root_seed`,
 - **Loop resume** copies its root record's binding into its own record and never
   generates. A root admitted before this contract (an S3b-era record without a
   seed; its workspace lock does record one) is refused at Resume admission with
-  `loop_resume` ("predates recorded run seeds"). It is neither adopted from the
-  lock nor re-minted; its records stay readable.
+  `loop_resume`. The message states the cause (the record has no `run_seed`, so
+  a segment could not prove it continues the same seed) and the remedy (start
+  a fresh candidate run, optionally with `--run-seed N`). The seed is neither
+  adopted from the lock nor re-minted; the old records stay readable.
 - **Reusable preparation provenance.** A candidate submitted with a
   `reusable_preparation` records the verified preparation receipt's seed as
   `OperationRecord.preparation_run_seed`. It is provenance only: the candidate
   keeps its own `run_seed`, and an explicit candidate `run_seed` is the one field
-  its request may add to the prepared request.
+  its request may add to the prepared request. A candidate built from a plain
+  `prepare` operation (console prepared or edited flow) records no
+  `preparation_run_seed`: operations hold no verified link from such a
+  candidate to its preparation (`ReviewedContext` is console metadata, not an
+  admission input), so the field stays `None` rather than being inferred.
 - **Readback.** `read_operation` returns `OperationSnapshot.run_seed` from the
   record (omitted when `None`) and refuses with `integrity` a native receipt
   (preparation, reusable top receipt, candidate `launch.json`, loop root) whose

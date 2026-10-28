@@ -118,8 +118,13 @@ def test_child_without_an_admitted_seed_never_dispatches(admitted, monkeypatch):
 def test_s3b_era_loop_root_is_refused_not_adopted(admitted):
     """S4 obligation: a root record without a seed cannot be continued (no second seed)."""
     _, _, record = admitted
-    with pytest.raises(OperationFailure, match="predates recorded run seeds"):
+    with pytest.raises(OperationFailure, match="predates recorded run seeds") as refused:
         require_root_seed(record.model_copy(update={"run_seed": None}))
+    # The operator learns why and what to do.
+    assert refused.value.detail.code == "loop_resume"
+    assert "no run_seed" in str(refused.value) and "Start a fresh candidate run" in str(
+        refused.value
+    )
 
 
 def test_seedless_reusable_prepare_digest_is_unchanged():

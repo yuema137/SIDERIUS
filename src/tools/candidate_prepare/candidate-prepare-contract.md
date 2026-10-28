@@ -439,12 +439,14 @@ returns unchanged `REUSABLE_FILES` for three-stage mode and adds only that setti
 file for four-stage mode. Child and parent use the same census; parent independently
 regenerates settings bytes and expected proposal facts from retained source.
 
-Native-owned `proposal_training_values` projects budgets, rules, sampling seed,
+Native-owned `proposal_training_values` projects budgets, rules,
 trial identity, output types, baseline isolation, supplied/default data scope,
 portions, structured Health feedback and active VRAM. Managed seeds explicitly
 serialize these, including null, while omitting runtime hardware and constraint
 context. Worker reconciliation remains authoritative and rejects explicit v1
-conflicts. Training base seed stays in settings and reaches the native tuner.
+conflicts. Settings carry no seed: the retired `sampling_seed` /
+`train_base_seed` pins are refused (seeding.md "Retired seed pins"), and every
+tuner and trainer seed derives from the candidate's own `run_seed`.
 Retained selection repeats these checks without needing current source. Child
 hash repair cannot legitimize substituted settings/seed facts. Terminal operation
 reads verify the native output digest and identity, not every checkpoint or

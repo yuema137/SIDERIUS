@@ -35,8 +35,10 @@ def require_root_seed(root: OperationRecord) -> RunSeedBinding:
     if root.run_seed is None:
         raise OperationFailure(
             "loop_resume",
-            "this loop predates recorded run seeds and cannot be continued on this "
-            "build; start a fresh candidate (its records stay readable)",
+            "this loop predates recorded run seeds: its operation record has no "
+            "run_seed, so a resumed segment could not prove it continues the same "
+            "seed. Start a fresh candidate run (a new operation and workspace, "
+            "optionally with --run-seed N); the old records stay readable",
         )
     return root.run_seed
 

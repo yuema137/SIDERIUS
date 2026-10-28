@@ -89,7 +89,8 @@ ingress projection own values; the inspector only names supported presentation
 controls. `document.training_settings` remains sparse. Unset removes a key, null
 is explicit, and a supplied value remains authored. Numeric blanks block review
 without becoming zero/null. Epoch controls are ceilings, independent of parameter
-rules and native planning. Sampling and training base seeds have separate controls.
+rules and native planning. There is no seed control: the retired `sampling_seed` /
+`train_base_seed` pins are refused, and the run seed is chosen at launch.
 Nested workflow parameter rules are read-only in the inspector and editable in
 Source; untouched rules and advanced fields survive edits. Task rules are resolved
 later by native owners. All controls participate in the existing source-dirty,
