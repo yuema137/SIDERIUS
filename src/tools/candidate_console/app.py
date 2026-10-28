@@ -277,6 +277,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "reusable-run.js": "text/javascript",
             "reusable-intents.js": "text/javascript",
             "new-run.js": "text/javascript",
+            "seed-input.js": "text/javascript",
             "page-guidance.js": "text/javascript",
             "page-guidance.css": "text/css",
             "editor.css": "text/css",

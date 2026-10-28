@@ -1053,11 +1053,12 @@ training, API access or GPU execution.
 
 The same saved-source New run / retained-capture controllers accept reusable
 four-stage declarations. Settings are edited in the tuning inspector or source,
-then reviewed and saved; neither NewRunSelection nor launch payloads add overrides.
+then reviewed and saved; neither NewRunSelection nor launch payloads add setting
+overrides (their only addition is the optional `run_seed`, [Run seed](#run-seed-issue-983)).
 The source hash binds sparse authored presence. Preparation resolves settings and
 seed through native owners; launch invokes the existing native tuner. Old three-stage
-source is never automatically upgraded. The inspector labels epoch ceilings and
-separate sampling/training seeds, exposes omission/null/value, preserves advanced
+source is never automatically upgraded. The inspector labels epoch ceilings
+and has no seed control (per-purpose seed pins are retired), exposes omission/null/value, preserves advanced
 rules and disables numeric/checkbox/default/null controls while source is dirty.
 Invalid numeric drafts survive node navigation and block Review/Save until repaired
 or explicitly replaced by default/null. Read-only rule summaries disclose task
@@ -1068,6 +1069,38 @@ Offline browser and code witnesses exercise detached operations, native admissio
 protocol/staging and terminal output verification with provider, measurement and
 tuner effects substituted. They establish transport and artifact integrity, not
 real scientific training, historical replay, API access or GPU qualification.
+
+## Run seed (issue #983)
+
+The console shows and accepts only the 53-bit `run_seed`
+([seeding](../../../docs/agent-reference/mechanisms/seeding.md)); derived 63-bit
+seeds stay in record files. `seed_labels.py` owns every seed sentence.
+
+- **Input.** New run (`new-run.js`) and Prepared run (`reusable-run.js`) have an
+  optional **Seed** field; `seed-input.js` accepts blank or a whole number in
+  `[0, 2**53 - 1]` before sending, and Pydantic (`RunSeed`) validates again.
+  New run sends it as `NewRunSelection.run_seed`, which becomes
+  `ReusableCandidatePreparationRequest.run_seed`; a retained intent whose seed
+  differs from the admitted request is refused like any other changed run
+  metadata. Prepared run sends it as `ReusableCaptureSelection.run_seed`, and
+  review/launch build the candidate with
+  `build_reusable_operation(..., run_seed)`, so the reviewed
+  `request_digest` binds the seed and a changed seed requires a new review.
+  Blank omits the key: selection bytes and request digests are the pre-seed ones.
+  Configured native chains take the seed only from the capture declaration
+  (`run.run_seed`); the browser cannot add one.
+- **Review.** `NewRunReview.seed`, `ReusableCaptureReview.seed` and
+  `NativeChainReviewView.seed` carry `review_label`: `Seed: N (you set)` or
+  `Seed: generated at launch`.
+- **Readback.** `StatusView.run_seed` is the operation record's
+  `RunSeedBinding` (omitted when absent); `StatusView.seed` and
+  `OperationListItemView.seed` carry `readback_label`: `Seed: N (you set)`,
+  `Seed: N (generated)` or `Seed: unrecorded (pre-seed run)`. Native chains use
+  the lock readback checked against the declaration
+  (`NativeChainObservation.run_seed`): before the lock exists the line says it is
+  not recorded yet, and `run_seed_anomaly` shows `Seed: not shown (the run lock
+  contradicts the reviewed declaration)`, never the value. Status shows the line
+  in its facts list; the operation list appends it to each row.
 
 ## Configured native chains
 

@@ -37,7 +37,7 @@
       link.textContent = name || KINDS[item.kind] || item.kind;
       const state = item.native_status ? `${item.state} (native: ${item.native_status})` : item.state;
       meta.className = 'muted operation-meta';
-      meta.textContent = [KINDS[item.kind] || item.kind, state, 'admitted ' + when(item.admitted_at), progress(item.loop)].filter(Boolean).join(' · ');
+      meta.textContent = [KINDS[item.kind] || item.kind, state, 'admitted ' + when(item.admitted_at), progress(item.loop), item.seed].filter(Boolean).join(' · ');
       link.title = 'Operation UUID ' + id;
       entry.append(link, meta); list.append(entry);
     }

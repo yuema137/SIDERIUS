@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 
 from agent.schemas.output_types import OutputTypeName
+from core.seeding import RunSeedBinding
 from execute_tools.run_report import MetricView, RunHeadline
 from tools.candidate_operations import OperationStoreConfig
 from tools.candidate_operations.models import OperationKind, ProcessObservation
@@ -285,6 +286,11 @@ class StatusView(PreviewModel):
     )
     loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
     reason: str
+    #: The operation record's admitted seed (issue #983); omitted for a pre-seed
+    #: record and for native chains, whose seed is read from the chain's lock.
+    run_seed: RunSeedBinding | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: Display wording from ``seed_labels.readback_label``.
+    seed: str
 
 
 class GraphRunSummary(PreviewModel):
@@ -338,6 +344,8 @@ class OperationListItemView(PreviewModel):
     state: Literal["active", "completed", "operation_failed", "unknown"]
     native_status: str | None
     loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: Display wording from ``seed_labels.readback_label`` (issue #983).
+    seed: str
 
 
 class OperationListView(PreviewModel):

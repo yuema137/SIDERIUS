@@ -132,8 +132,11 @@
   session.subscribe(() => { invalidate(); tasksRevision = null; if (session.connected) void tasks(); });
   window.addEventListener('console-view', event => { if (['workflow', 'run'].includes(event.detail.view)) void tasks(); });
   $('task').addEventListener('change', invalidate); $('name').addEventListener('input', invalidate);
+  $('seed').addEventListener('input', invalidate);
   $('review').addEventListener('click', async () => {
     if (!ready() || busy || !$('task').value || !$('name').value) return;
+    const seed = window.consoleSeed.parse($('seed').value);
+    if (!seed.ok) { status(window.consoleSeed.message); return; }
     ids ||= {run_id: crypto.randomUUID(), preparation_operation_id: crypto.randomUUID()};
     invalidate();
     const version = generation;
@@ -141,7 +144,8 @@
     const project = editor.projectId;
     const selection = {
       task_id: $('task').value, run_name: $('name').value, ...ids,
-      expected_source_sha256: editor.savedSha256
+      expected_source_sha256: editor.savedSha256,
+      ...(seed.value === undefined ? {} : {run_seed: seed.value})
     };
     try {
       const value = await api('review', selection, project);
@@ -152,6 +156,7 @@
         `Source: ${value.source_path}`,
         `Saved source version verified: ${value.source_version_name ? `"${value.source_version_name}"` : 'unnamed'} (${value.selection.expected_source_sha256.slice(0, 12)}).`,
         `Task: ${value.task_label}`,
+        value.seed,
         `Manifest: ${value.task_manifest}`,
         `Data: ${value.data_root}`,
         `LLM config: ${value.llm_config_file}`,

@@ -36,6 +36,7 @@
   <script src="/recorded-example.js" defer></script>
   <script src="/reusable-intents.js" defer></script>
   <script src="/reusable-run.js" defer></script>
+  <script src="/seed-input.js" defer></script>
   <script src="/new-run.js" defer></script>
   <script src="/native-chain.js" defer></script>
   <script src="/page-guidance.js" defer></script>
@@ -194,6 +195,8 @@
     <p id="new-run-prerequisites">Select a runnable project and save source edits.</p>
     <label for="new-run-task">Configured task and resources</label><select id="new-run-task"><option value="">Choose task and resources</option></select>
     <label for="new-run-name">Run name</label><input id="new-run-name" type="text" value="candidate" maxlength="128">
+    <label for="new-run-seed">Seed (optional)</label><input id="new-run-seed" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-describedby="new-run-seed-help">
+    <p id="new-run-seed-help" class="muted">Leave Seed blank; SIDERIUS picks one and records it.</p>
     <button id="new-run-review" class="secondary" disabled>Review preparation</button>
     <p id="new-run-status" role="status"></p><details open><summary>Selected source, inputs and resource limits</summary><pre id="new-run-details"></pre></details>
     <button id="new-run-prepare" disabled>Prepare saved source</button>
@@ -212,6 +215,8 @@
     <button id="capture-open" class="secondary" disabled>Open prepared run</button>
     <p id="capture-status" role="status">Connect and select a runnable project.</p>
     <p id="capture-source"></p>
+    <label for="capture-seed">Seed (optional)</label><input id="capture-seed" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-describedby="capture-seed-help">
+    <p id="capture-seed-help" class="muted">Leave Seed blank; SIDERIUS picks one and records it.</p>
     <button id="capture-review" class="secondary" disabled>Review capture</button>
     <div id="capture-summary"></div>
     <details><summary>Captured resources and version</summary><pre id="capture-details"></pre></details>

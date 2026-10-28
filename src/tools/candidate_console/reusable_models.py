@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import Field, JsonValue
 
 from agent.schemas.output_types import OutputTypeName
+from core.seeding import RunSeed
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare import ReusablePreparedSelection
 from tools.workflow_preview.models import PreviewModel
@@ -21,6 +22,10 @@ class ReusableCaptureChoice(PreviewModel):
 
 class ReusableCaptureSelection(ReusableCaptureChoice):
     preparation: ReusablePreparedSelection
+    #: Optional operator seed for the candidate run (issue #983); omitted means
+    #: the operation generates and records one at admission. The reviewed
+    #: request digest binds it.
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ReusableCaptureLaunch(PreviewModel):
@@ -83,6 +88,8 @@ class ReusableCaptureReview(PreviewModel):
     environment_names: tuple[str, ...]
     read_only: tuple[str, ...]
     credential_readiness: CredentialReadiness
+    #: ``seed_labels.review_label`` wording of the selection's seed.
+    seed: str
 
 
 class ReusableAdmissionNotAttempted(OperationFailure):
