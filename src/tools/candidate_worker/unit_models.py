@@ -11,7 +11,7 @@ reconciliation read `model_fields_set`.
 """
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
@@ -36,7 +36,7 @@ from workflows.task_composition import RunTaskComposition
 from .inputs import NativeInputs
 from .invocation import NativePhase
 from .models import CandidateRunReceipt, CandidateRunRequest
-from .training_admission import TrainingAdmission, admitted_run_bindings
+from .training_admission import AdmittedRunFacts, TrainingAdmission, admitted_run_bindings
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid")
 
@@ -91,21 +91,21 @@ class AdmittedTraining(BaseModel):
     def restore(
         self, composition: RunTaskComposition, config: WorkflowLLMConfig
     ) -> TrainingAdmission:
-        values = {name: getattr(self, name) for name in _binding_fields()}
+        # Keys come from the typed owner; a missing field fails here, loudly.
+        facts = cast(
+            AdmittedRunFacts,
+            {name: getattr(self, name) for name in AdmittedRunFacts.__annotations__},
+        )
         return TrainingAdmission(
             self.settings,
-            admitted_run_bindings(composition, config, **values),
+            admitted_run_bindings(composition, config, **facts),
             self.constraints,
             self.node_id,
         )
 
 
 def _binding_fields() -> tuple[str, ...]:
-    return tuple(
-        name
-        for name in AdmittedTraining.model_fields
-        if name not in ("settings", "constraints", "node_id")
-    )
+    return tuple(AdmittedRunFacts.__annotations__)
 
 
 def admission_from(
