@@ -321,7 +321,7 @@ class JudgeLLMConfig(BaseModel):
     """
     Routes for the three LLM-judge families. Each slot is optional and independent.
 
-    - ``stop``: JudgeStop boundary decisions (consumer lands with B2-4).
+    - ``stop``: JudgeStop boundary decisions (``tools/candidate_worker/loop_judge``).
     - ``aggregate``: LLM combine/select strategies inside adaptors (B2-6 onward).
     - ``debate``: debate-judge strategy calls (B2-7 onward).
 

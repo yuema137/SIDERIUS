@@ -18,6 +18,7 @@ from .loop_stop import (
     StopReason,
     captured_metric,
     evaluate_stop,
+    needs_stop_judge,
     project_body_score,
     stop_input,
 )
@@ -120,7 +121,7 @@ def verify_loop(
         require_unused_next(request, initial, trace.attempted_iterations)
     _, bodies, scores = replay_completed(request, initial, trace.attempted_iterations)
     last = bodies[-1] if bodies else None
-    derived = derive_stop(request, initial, scores)
+    derived = derive_stop(request, initial, bodies, scores)
     if trace.stop_reason != derived:
         raise ValueError("loop stop reason disagrees with re-derived stop conditions")
     expected = (
@@ -145,22 +146,34 @@ def verify_loop(
 def derive_stop(
     request: CandidateRunRequest,
     initial: CandidateRunReceipt,
+    bodies: tuple[CandidateRunReceipt, ...],
     scores: tuple[BodyScore, ...],
 ) -> StopReason | None:
     """Re-run the stateless evaluator at every completed boundary; trust no recorded value.
 
+    A boundary ``needs_stop_judge`` names must hold judge evidence that replays from the
+    re-projected request (``replay_stop_judge``); any other boundary must hold none.
     Returns the reason that must end the loop at its last completed body, if any.
     """
+    from .loop_judge import replay_stop_judge, stop_evidence_path
+
     loop = request.preview.document.definition.loop
     assert loop is not None
     if not loop.stop_conditions:
         return None
     seed = captured_metric(request, initial)
+    completed = tuple(body for body in bodies if body.status == "completed")
     reason = None
     for count in range(1, len(scores) + 1):
         if reason is not None:
             raise ValueError("loop continued past a met stop condition")
-        reason = evaluate_stop(stop_input(loop, seed, scores[:count])).reason
+        value = stop_input(loop, seed, scores[:count])
+        if needs_stop_judge(value):
+            verdict = replay_stop_judge(request, initial, completed[:count], value)
+            value = value.model_copy(update={"judge_verdict": verdict})
+        elif stop_evidence_path(Path(initial.workspace), count).exists():
+            raise ValueError(f"judge evidence at body {count}, which is never judged")
+        reason = evaluate_stop(value).reason
     return reason
 
 

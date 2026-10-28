@@ -167,3 +167,85 @@ def test_evaluator_module_never_imports_native_history_carriers():
     assert imported and not [
         name for name in imported if "chain_state" in name or "research_history" in name
     ]
+
+
+DIGEST_A, DIGEST_B = "a" * 64, "b" * 64
+
+
+def judged_input(scores, conditions, *, final=10, decision="absent"):
+    from tools.candidate_worker.loop_stop import JudgeBoundaryVerdict
+
+    bodies = tuple(
+        BodyScore(iteration=i, valid_formal=value, metric_spec=None)
+        for i, value in enumerate(scores, start=1)
+    )
+    verdict = (
+        None
+        if decision == "absent"
+        else JudgeBoundaryVerdict(
+            iteration=len(bodies),
+            decision=decision,
+            evidence_path="candidate_run/iteration_002/judge/stop.json",
+            evidence_sha256=DIGEST_A,
+            request_sha256=DIGEST_B,
+        )
+    )
+    return StopEvaluationInput(
+        iteration=len(bodies),
+        final_iteration=final,
+        conditions=tuple(conditions),
+        bodies=bodies,
+        metric=spec(),
+        judge_verdict=verdict,
+    )
+
+
+def test_judge_is_consulted_only_where_no_deterministic_bound_decides():
+    """Each case would spend a provider call (or veto a metric stop) if the predicate drifted."""
+    from tools.candidate_worker.loop_stop import needs_stop_judge
+    from workflows.definition import JudgeStop
+
+    judge = JudgeStop(criterion="plateau", min_completed_bodies=2)
+    threshold = MetricThresholdStop(metric_id="score", threshold=0.8)
+    # Declared first, still evaluated after the deterministic threshold that fires.
+    assert not needs_stop_judge(judged_input((0.5, 0.9), [judge, threshold]))
+    assert decide((0.5, 0.9), [judge, threshold]).reason.kind == "metric_threshold"
+    # Below min_completed_bodies, and at the final boundary: never judged.
+    assert not needs_stop_judge(judged_input((0.5,), [judge, threshold]))
+    assert not needs_stop_judge(judged_input((0.5, 0.6), [judge], final=2))
+    assert needs_stop_judge(judged_input((0.5, 0.6), [judge, threshold]))
+
+
+def test_recorded_verdict_decides_and_an_unrecorded_one_fails_closed():
+    """Fails if a stop verdict loses its evidence anchor, an abstention stops the loop,
+    or a missing verdict is read as continue instead of refusing."""
+    from tools.candidate_worker.loop_stop import JudgeStopReason
+    from workflows.definition import JudgeStop
+
+    conditions = [NoImprovementStop(completed_bodies=5), JudgeStop(criterion="plateau")]
+    stopped = evaluate_stop(judged_input((0.5, 0.6), conditions, decision="stop"))
+    assert stopped.reason == JudgeStopReason(
+        condition_index=1,
+        iteration=2,
+        evidence_path="candidate_run/iteration_002/judge/stop.json",
+        evidence_sha256=DIGEST_A,
+        request_sha256=DIGEST_B,
+    )
+    for decision in ("continue", None):
+        output = evaluate_stop(judged_input((0.5, 0.6), conditions, decision=decision))
+        assert output.decision == "continue" and output.reason is None
+    with pytest.raises(StopConditionError, match=r"condition 1 \(judge\) has no recorded verdict"):
+        evaluate_stop(judged_input((0.5, 0.6), conditions))
+
+
+def test_evaluator_module_never_imports_a_provider_or_the_judge_effect():
+    import tools.candidate_worker.loop_stop as module
+
+    tree = ast.parse(Path(module.__file__).read_text())
+    imported = [
+        getattr(node, "module", None) or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    ]
+    assert not [name for name in imported if name.startswith(("agent.llm_bridge", "agent.judge"))]

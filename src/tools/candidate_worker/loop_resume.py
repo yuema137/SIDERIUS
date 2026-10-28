@@ -127,11 +127,13 @@ def has_successor(initial: CandidateRunReceipt, receipt: CandidateRunReceipt) ->
 
 def resume_history(
     request: CandidateRunRequest, initial: CandidateRunReceipt, binding: LoopContinuation
-) -> tuple["ChainState", CandidateRunReceipt, tuple["BodyScore", ...]]:
+) -> tuple["ChainState", tuple[CandidateRunReceipt, ...], tuple["BodyScore", ...]]:
     """Run under the native lease: recheck the binding, then rebuild history by replay.
 
-    The stop-score carrier is rebuilt from the same whole-run replay, so conditions span
-    segments.
+    Returns the history, every completed body receipt (the last one feeds the next
+    body) and the stop-score carrier, all from the same whole-run replay, so conditions
+    and judge requests span segments. A paused boundary already holds its judge
+    evidence; the continuation starts at the next boundary, so none is judged twice.
     """
     from .loop import stop_requested
     from .loop_evidence import replay_completed, require_unused_next, verify_loop
@@ -147,7 +149,7 @@ def resume_history(
     last = bodies[-1] if bodies else None
     if last is None or last.status != "completed":
         raise ValueError("resume requires completed required feedback")
-    return state, last, scores
+    return state, bodies, scores
 
 
 def launch_continuation(

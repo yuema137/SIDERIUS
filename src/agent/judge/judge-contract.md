@@ -1,9 +1,10 @@
 # `agent/judge/` — LLM judge call and evidence core
 
 Technical contract for the judge call/evidence core (advanced design B2, PR
-B2-1). Source and tests determine current behavior. Consumers (JudgeStop,
-LLM combine/select strategies) are separate changes; this package has no
-production caller yet.
+B2-1). Source and tests determine current behavior. The first production
+consumer is JudgeStop (`tools/candidate_worker/loop_judge.py`, candidate-worker
+contract "Judge stop condition"); LLM combine/select strategies are separate
+changes.
 
 ## Scope and owners
 
@@ -168,7 +169,10 @@ with a mocked client; AST guard that readback modules import no bridge.
   (advocate, critic, scorer, …) gain content kinds, payload kinds and
   templates with their strategy changes. Until then the multi-call chain
   verifier is exercised with copied stop evidence.
-- Task judge guidance (`task_guidance_sha256`) is carried as a digest only;
-  rendering its text belongs to the task `judge_blocks` change.
-- Run-level judge-call budgets and route resolution from workflow LLM
-  configuration belong to the consumers and the judge routing slot.
+- Route resolution: `workflows.llm_config.judge_route` / `locked_judge_routes`
+  convert `WorkflowLLMConfig.judge` into `JudgeRoute`/`JudgeRoutes`, which the run
+  lock records canonically (`RunInvariants.judge_routes`). Run-level judge-call
+  budgets belong to the consumers.
+- Task judge guidance text is not rendered by `judge.stop/v1`; JudgeStop therefore
+  records `task_guidance_sha256=None`. Rendering guidance needs a new template
+  version.

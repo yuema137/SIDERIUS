@@ -14,9 +14,11 @@ from .layout import candidate_control_dir
 from .loop_models import LoopContinuation, LoopPause, LoopStop, LoopTrace, admit_loop
 from .loop_stop import (
     BodyScore,
+    StopReason,
     admit_stop_conditions,
     captured_metric,
     evaluate_stop,
+    needs_stop_judge,
     project_body_score,
     stop_input,
 )
@@ -70,19 +72,25 @@ def execute_loop(
     loop = request.preview.document.definition.loop
     assert loop is not None
     if loop.stop_conditions:
+        from .loop_judge import admit_judge_route
+
         # Before any dispatch: a mismatch found after body 1 would orphan its records.
         admit_stop_conditions(loop, captured_metric(request, initial), composition.metric.spec)
+        admit_judge_route(loop, config)
     history = initial_history(request, initial)
     attempted = 0
     segment_id = None
     # Last body of the whole run, so a segment that dispatches none keeps its validation.
     last: CandidateRunReceipt | None = None
-    # Immutable verified-score carrier for the stateless stop evaluator (never history).
+    # Immutable verified-score carrier for the stateless stop evaluator (never history),
+    # and the completed body receipts a judge request is projected from.
     scores: tuple[BodyScore, ...] = ()
+    completed: tuple[CandidateRunReceipt, ...] = ()
     if continuation is not None:
         from .loop_resume import resume_history
 
-        history, last, scores = resume_history(request, initial, continuation)
+        history, completed, scores = resume_history(request, initial, continuation)
+        last = completed[-1]
         attempted = continuation.completed_iterations
         segment_id = continuation.operation_id
     resumed_at = attempted
@@ -116,9 +124,8 @@ def execute_loop(
         if loop.stop_conditions:
             # A met condition completes the loop before any pending Stop/Pause is read.
             scores = (*scores, project_body_score(request, last, iteration))
-            reason = evaluate_stop(
-                stop_input(loop, captured_metric(request, initial), scores)
-            ).reason
+            completed = (*completed, last)
+            reason = _boundary_reason(request, initial, completed, scores)
             if reason is not None:
                 break
     return initial.model_copy(
@@ -130,3 +137,21 @@ def execute_loop(
             "validation_passed": None if last is None else last.validation_passed,
         }
     )
+
+
+def _boundary_reason(
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    completed: tuple[CandidateRunReceipt, ...],
+    scores: tuple[BodyScore, ...],
+) -> StopReason | None:
+    """Deterministic conditions first; the judge is called only when the boundary needs it."""
+    loop = request.preview.document.definition.loop
+    assert loop is not None
+    value = stop_input(loop, captured_metric(request, initial), scores)
+    if needs_stop_judge(value):
+        from .loop_judge import call_stop_judge
+
+        verdict = call_stop_judge(request, initial, completed, value)
+        value = value.model_copy(update={"judge_verdict": verdict})
+    return evaluate_stop(value).reason
