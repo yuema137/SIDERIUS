@@ -412,7 +412,10 @@ node can act. `execute_fanout` dispatches from this decision, and
 `verify_graph_trace` replays the recorded terminal states through the same
 function and refuses a trace whose `blocked` states differ from it. The
 per-node rule `_close_reason` is the extension point for additional node
-classes; this profile has only capability nodes.
+classes; this profile has only capability nodes. If no node can act while some remain
+undecided (unreachable for a validated acyclic declaration), `execute_fanout`
+raises `RuntimeError("graph readiness found no dispatchable node")` and
+`verify_graph_trace` raises `ValueError` (formerly an uncaught `StopIteration`).
 
 The final optional `graph_trace` contains every declared node exactly once: its
 capability, predecessor IDs, managed storage, terminal state, fixed reason code and

@@ -71,6 +71,9 @@ BLOCKED = "dependency_not_successful"
         ),
         # Every node decided: the graph is complete.
         ((("a", (), "succeeded"), ("b", ("a",), "rejected")), False, (None, ())),
+        # A cycle has no node whose inputs are terminal: no action rather than a guess,
+        # which both call sites turn into an error.
+        ((("a", ("b",), "pending"), ("b", ("a",), "pending")), False, (None, ())),
     ],
 )
 def test_next_dispatch_orders_dispatch_block_and_abort(nodes, aborted, expected):
@@ -83,10 +86,20 @@ def test_undeclared_predecessor_refuses_instead_of_guessing_readiness():
         decide(("b", ("ghost",), "pending"))
 
 
+def test_duplicate_node_id_refuses_instead_of_shadowing_a_state():
+    # Without the check the later "pending" entry would shadow the "failed" one.
+    with pytest.raises(ValueError, match="unique"):
+        decide(("a", (), "failed"), ("a", (), "pending"))
+
+
 def test_dispatch_and_replay_both_consume_the_single_readiness_owner(
     prepared, native_runner, monkeypatch
 ):
-    """Fails if either call site re-derives readiness inline instead of using the owner."""
+    """Fails if either call site re-derives readiness inline instead of using the owner.
+
+    The spy patches `readiness.next_dispatch`, so it requires both call sites to call
+    it as a module attribute (`readiness.next_dispatch`), not a from-imported name.
+    """
     from tools.candidate_worker import phases
 
     def failed(*args, **kwargs):
