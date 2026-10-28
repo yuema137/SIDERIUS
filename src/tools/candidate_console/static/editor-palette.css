@@ -32,10 +32,13 @@
 .editor-palette .palette-row .capability-name { flex: 1; min-width: 0; font-size: .82rem; font-weight: 650; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; word-break: normal; }
 .editor-palette .palette-step { flex: none; min-width: 1.1rem; padding: 0 .25rem; border: 1px solid var(--control-border); border-radius: 999px; color: var(--text); font-size: .64rem; font-weight: 700; text-align: center; }
 /* Start here / Optional context marker: a dot with accessible text and a tooltip. */
-.editor-palette .palette-badge { flex: none; width: .55rem; height: .55rem; box-sizing: border-box; border: 2px solid var(--focus); border-radius: 50%; color: var(--text); }
+/* The dot is drawn by ::before so the marker itself keeps a transparent background and
+ * its (visually hidden) text reads against the row: text contrast stays the row's. */
+.editor-palette .palette-badge { flex: none; display: inline-flex; color: var(--text); }
+.editor-palette .palette-badge::before { content: ""; width: .55rem; height: .55rem; box-sizing: border-box; border: 2px solid var(--focus); border-radius: 50%; }
 .editor-palette .palette-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .editor-palette .palette-details-badge { font-weight: 700; }
-.editor-palette .palette-badge[data-badge="Start here"] { background: var(--focus); }
+.editor-palette .palette-badge[data-badge="Start here"]::before { background: var(--focus); }
 .editor-palette .palette-details { padding: .3rem .5rem .45rem; border-top: 1px solid var(--control-border); background: var(--capability-tint); color: var(--text); font-size: .72rem; line-height: 1.35; }
 .editor-palette .palette-details p { margin: .15rem 0; }
 .editor-palette .palette-details-label { font-weight: 700; }
