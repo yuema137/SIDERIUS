@@ -2,7 +2,9 @@
 
 A task composition manifest may declare scientific guidance for LLM judges
 (``judge_blocks:``) and rubric files (``rubrics:``). Both are optional; when
-absent, nothing is rendered and the composition fingerprint is unchanged.
+absent, nothing is rendered and no fingerprint key is added (the full
+fingerprint still moves with the preflight estimation assembly on any
+framework revision that edits a file it hashes).
 
 A rubric is a declared scoring scheme for LLM judges, never a task metric. It
 names integer criteria; the weighted total is computed by framework code from
@@ -25,6 +27,12 @@ from agent.schemas.data_analysis.common import canonical_sha256
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 Identifier = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$", max_length=100)]
 Version = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$", max_length=40)]
+
+
+#: Bounds keep judge payloads and rubric arithmetic small and reviewable.
+MAX_RUBRIC_CRITERIA = 32
+MAX_RUBRIC_WEIGHT = 100.0
+MAX_RUBRIC_SCALE_SPAN = 100
 
 
 class _StrictModel(BaseModel):
@@ -58,7 +66,7 @@ def judge_guidance_sha256(blocks: JudgeTaskBlocks) -> str:
 class RubricCriterion(_StrictModel):
     name: Identifier
     description: str = Field(min_length=1, max_length=1000)
-    weight: float = Field(gt=0)
+    weight: float = Field(gt=0, le=MAX_RUBRIC_WEIGHT)
 
 
 class RubricSpec(_StrictModel):
@@ -68,7 +76,9 @@ class RubricSpec(_StrictModel):
     id: Identifier
     version: Version
     # Declarations are YAML lists; only the list-to-tuple coercion is relaxed.
-    criteria: tuple[RubricCriterion, ...] = Field(min_length=1, strict=False)
+    criteria: tuple[RubricCriterion, ...] = Field(
+        min_length=1, max_length=MAX_RUBRIC_CRITERIA, strict=False
+    )
     scale_min: int
     scale_max: int
 
@@ -81,6 +91,11 @@ class RubricSpec(_StrictModel):
         if self.scale_max <= self.scale_min:
             raise ValueError(
                 f"rubric scale_max ({self.scale_max}) must exceed scale_min ({self.scale_min})"
+            )
+        if self.scale_max - self.scale_min > MAX_RUBRIC_SCALE_SPAN:
+            raise ValueError(
+                f"rubric scale span {self.scale_max - self.scale_min} exceeds "
+                f"{MAX_RUBRIC_SCALE_SPAN}"
             )
         return self
 

@@ -33,8 +33,9 @@ only to its broader execution vocabulary; plugins cannot declare `hybrid`.
 manifest's optional `judge_blocks:` and `rubrics:` sections
 ([task composition](../../../docs/reference/task-composition.md#judge-guidance-and-rubrics)):
 `JudgeTaskBlocks` (prose guidance; identity `judge_guidance_sha256`),
-`RubricSpec` / `RubricCriterion` (`siderius.rubric/v1`; unique criterion names,
-integer `scale_min < scale_max`, weights `> 0`), `RubricRef` (`id`, `version`,
+`RubricSpec` / `RubricCriterion` (`siderius.rubric/v1`; 1–32 criteria with
+unique names, integer `scale_min < scale_max` with span `<= 100`,
+`0 < weight <= 100`), `RubricRef` (`id`, `version`,
 `sha256`), `rubric_sha256` (canonical-JSON digest of the validated spec) and
 `resolve_rubric_ref`, which raises `RubricRefError` with `reason`
 `unknown_rubric` or `digest_mismatch`. A rubric is not a metric: it carries no

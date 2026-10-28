@@ -191,3 +191,19 @@ def test_reviewed_launch_binding_pins_judge_declaration_files(tmp_path, monkeypa
     binding = capture_binding(args, 1 << 20, source_paths=composition.provenance.source_paths)
     pinned = {pin.path for pin in binding.files}
     assert {str(guidance.absolute()), str(rubric_path.absolute())} <= pinned
+
+
+def test_rubric_declaration_order_is_not_semantic(tmp_path):
+    """Rubrics are addressed by (id, version); a positional payload would split one task in two."""
+    first, second = tmp_path / "r1.yaml", tmp_path / "r2.yaml"
+    _write(first, RUBRIC)
+    _write(second, {**RUBRIC, "id": "rigor"})
+    forward = _pack(tmp_path / "a", rubrics=[{"config": str(first)}, {"config": str(second)}])
+    reverse = _pack(tmp_path / "b", rubrics=[{"config": str(second)}, {"config": str(first)}])
+    assert _compose(forward).semantic_fingerprint == _compose(reverse).semantic_fingerprint
+
+
+def test_rubric_scale_span_is_bounded(tmp_path):
+    manifest, _ = _rubric_pack(tmp_path, {**RUBRIC, "scale_min": 0, "scale_max": 101})
+    with pytest.raises(TaskCompositionError, match="scale span 101 exceeds 100"):
+        _compose(manifest)

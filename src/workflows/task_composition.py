@@ -293,7 +293,7 @@ class RunTaskComposition:
 
     Composed from the optional ``judge_blocks:`` and ``rubrics:`` sections by
     :mod:`workflows.judge_task_composition`. ``None`` is the un-declared state:
-    no judge guidance, no task rubric, and an unchanged semantic fingerprint.
+    no judge guidance, no task rubric, and no added fingerprint key.
     """
 
     model_plugins: Any = None
@@ -1963,6 +1963,26 @@ def _compose_implementor_blocks(raw: dict[str, Any], manifest_dir: str) -> tuple
     return blocks, config_path
 
 
+def _compose_judge_task(
+    raw: dict[str, Any], manifest_dir: str
+) -> tuple[JudgeTaskDeclarations | None, dict[str, str]]:
+    """Optional ``judge_blocks:`` / ``rubrics:``; absent ⇒ ``None`` and no paths.
+
+    Section shapes are owned by :mod:`workflows.judge_task_composition`; this
+    wrapper resolves refs against the manifest and fails closed like its
+    ``*_blocks`` siblings.
+    """
+    from workflows.judge_task_composition import compose_judge_task
+
+    try:
+        composed = compose_judge_task(raw, lambda ref: _resolve_path(ref, manifest_dir))
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"judge_blocks/rubrics could not be composed: {type(exc).__name__}: {exc}"
+        ) from exc
+    return composed.declarations, composed.source_paths
+
+
 def _compose_proposal_blocks(raw: dict[str, Any], manifest_dir: str) -> tuple[Any, str | None]:
     """Optional by design: an absent declaration renders NOTHING (D-12a-6).
 
@@ -2199,7 +2219,9 @@ def compute_semantic_fingerprint(
         payload["implementor_blocks"] = implementor_blocks.model_dump(mode="json")
     # Declared judge guidance and rubric references change what judges are
     # asked and how they score, so they join identity. ADDITIVE WHEN DECLARED
-    # (keys ``judge_blocks`` / ``rubrics``): undeclared fingerprints are unchanged.
+    # (keys ``judge_blocks`` / ``rubrics``): absent sections add no key. The
+    # full fingerprint still moves with the preflight estimation assembly on
+    # any framework revision that edits a file it hashes.
     if judge_task is not None:
         payload.update(judge_task.canonical_identity())
     # A framework-provided objective has no plugin file whose content digest
@@ -2748,15 +2770,8 @@ def _compose_resolved_task_bindings(
     implementor_blocks, implementor_path = _compose_implementor_blocks(raw, manifest_dir)
     if implementor_path is not None:
         source_paths["implementor_blocks"] = implementor_path
-    from workflows.judge_task_composition import compose_judge_task
-
-    try:
-        composed_judge = compose_judge_task(raw, lambda ref: _resolve_path(ref, manifest_dir))
-    except Exception as exc:
-        raise TaskCompositionError(
-            f"judge_blocks/rubrics could not be composed: {type(exc).__name__}: {exc}"
-        ) from exc
-    source_paths.update(composed_judge.source_paths)
+    judge_task, judge_paths = _compose_judge_task(raw, manifest_dir)
+    source_paths.update(judge_paths)
 
     from workflows.data_analysis_composition import compose_workflow_data_analysis
 
@@ -2856,7 +2871,7 @@ def _compose_resolved_task_bindings(
         ),
         proposal_blocks=proposal_blocks,
         implementor_blocks=implementor_blocks,
-        judge_task=composed_judge.declarations,
+        judge_task=judge_task,
         task_data_path_config=task_data_path_config,
         task_data_path_content_identity=impl_content_identity,
         observable_declarations=observable_declarations,
@@ -2884,7 +2899,7 @@ def _compose_resolved_task_bindings(
         interpretation_blocks=interpretation_blocks,
         proposal_blocks=proposal_blocks,
         implementor_blocks=implementor_blocks,
-        judge_task=composed_judge.declarations,
+        judge_task=judge_task,
         task_description=description,
         forward_contract=contract,
         semantic_fingerprint=fingerprint,

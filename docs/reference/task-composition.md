@@ -38,8 +38,8 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `proposal_blocks` | — | task science for the proposer's prompts | the proposer gets **no** task science |
 | `implementor_blocks` | — | task science for the implementor's prompts | the implementor renders nothing |
 | `interpretation_blocks` | — | task science for the interpreter's prompts | the interpreter renders no task blocks |
-| `judge_blocks` | — | task guidance for LLM judges (see [Judge guidance and rubrics](#judge-guidance-and-rubrics)) | judges receive no task guidance; fingerprint unchanged |
-| `rubrics` | — | task-owned, versioned judge rubric files | the task offers no rubric; fingerprint unchanged |
+| `judge_blocks` | — | task guidance for LLM judges (see [Judge guidance and rubrics](#judge-guidance-and-rubrics)) | judges receive no task guidance; no fingerprint key added |
+| `rubrics` | — | task-owned, versioned judge rubric files | the task offers no rubric; no fingerprint key added |
 | `model_plugins` | — | the pack's model-plugin root + the model types it must produce | nothing bound; legacy discovery only |
 | `loss_plugins` | — | the pack's loss-plugin root | nothing bound; legacy loss discovery only |
 | `objective` | — | the task's **authoritative** training objective (overrides the planner) | no override; the planner's choice governs |
@@ -617,8 +617,12 @@ Both sections are optional and independent. Owner:
 `agent/schemas/judge_task.py`. The composed value is
 `RunTaskComposition.judge_task: JudgeTaskDeclarations | None`; it is `None`
 when `judge_blocks` is absent or `none: true` **and** `rubrics` is absent or
-`[]`. Consumers (judge prompts, rubric strategies) are separate changes; this
-section only declares and identifies the inputs.
+`[]`. `judge_blocks: {none: true}` is accepted only when `none` is the sole
+key; `none: true` beside `config` (or any other key) is refused. Consumers
+(judge prompts, rubric strategies) are separate changes; this section only
+declares and identifies the inputs. `judge_guidance_sha256(blocks)` is the
+identity of declared guidance that judge requests carry as
+`task_guidance_sha256`.
 
 `judge_blocks.config` names a YAML mapping validated by `JudgeTaskBlocks`
 (`extra="forbid"`, every key optional):
@@ -637,12 +641,12 @@ Each `rubrics[i].config` names a YAML (or JSON) mapping validated by
 schema_version: siderius.rubric/v1
 id: plausibility                 # ^[a-zA-Z][a-zA-Z0-9_-]*$
 version: "1"
-scale_min: 1                     # integer scale; scale_max must exceed scale_min
+scale_min: 1                     # integers; scale_min < scale_max, span <= 100
 scale_max: 5
-criteria:                        # at least one; names unique within the rubric
+criteria:                        # 1..32 entries; names unique within the rubric
   - name: physical_consistency
     description: Respects conservation laws stated by the task.
-    weight: 2.0                  # > 0
+    weight: 2.0                  # 0 < weight <= 100
   - name: novelty
     description: Differs materially from earlier candidates.
     weight: 1.0
@@ -658,8 +662,10 @@ Identity and refusal rules:
   unknown key, a missing file, a non-mapping file or a schema violation fails
   composition with `TaskCompositionError` (`judge_blocks/rubrics could not be
   composed: ...`).
-- Duplicate criterion names within a rubric are refused, as is the same
-  `(id, version)` declared by two rubric files.
+- Bounds (`RubricSpec`): 1–32 criteria, `0 < weight <= 100`,
+  `0 < scale_max - scale_min <= 100`. Duplicate criterion names within a
+  rubric are refused, as is the same `(id, version)` declared by two rubric
+  files.
 - `rubric_sha256(spec)` is the sha256 of the validated spec's canonical JSON
   (sorted keys, compact separators). A consumer binds a rubric by
   `RubricRef(id, version, sha256)`; `resolve_rubric_ref` raises
@@ -670,9 +676,12 @@ Identity and refusal rules:
   keep the digest.
 - Fingerprint: when declared, the semantic payload gains `judge_blocks` (the
   validated guidance) and/or `rubrics` (each rubric's `RubricRef`, sorted by
-  `(id, version)`). When neither is declared no key is added, so the semantic
-  payload is byte-identical to a manifest written before these sections
-  existed.
+  `(id, version)`, so reordering `rubrics` does not change it). When neither
+  is declared no key is added. The full fingerprint still moves with the
+  estimation assembly on any framework revision that edits a file it hashes
+  (see [Structural preflight estimation](#structural-preflight-estimation)), so
+  "unchanged" holds for the semantic payload excluding `preflight_estimator`,
+  not for the full fingerprint across revisions.
 - Launch binding: the declaration files are pinned as roles `judge_blocks` and
   `rubric[<index>]` (`workflows/reviewed_launch_binding.py`).
 
