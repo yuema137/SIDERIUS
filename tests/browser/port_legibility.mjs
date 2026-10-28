@@ -156,6 +156,9 @@ try {
 
   // C1 drag: press an output, drag over a compatible input (highlighted), release to bind.
   await page.locator('#circuit-fit').click();
+  // As a user would: bring the canvas (and the drop target) into the window before dragging.
+  await page.locator('.circuit-viewport').scrollIntoViewIfNeeded();
+  await input('build_left', 'output').scrollIntoViewIfNeeded();
   const from = await output('alternate').boundingBox(), to = await input('build_left', 'output').boundingBox();
   // A drop outside the window hits nothing (elementFromPoint is null): fail clearly instead of timing out.
   const windowSize = await page.evaluate(() => ({width: innerWidth, height: innerHeight}));
