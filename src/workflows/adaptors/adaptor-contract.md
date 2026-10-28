@@ -17,7 +17,7 @@ B6 PRs (format: B6-1; execution: B6-3). LLM COMBINE kinds belong to B2
 | `combine.py` | `combine`, `Unit`, `Combined`, `Ranking`, `RankEntry`, `CollectedItems` |
 | `select.py` | `select` (unit indices), `chosen_units` |
 | `run.py` | `run_deterministic_adaptor`, `AdaptorOutcome`, `AdaptorOutput` |
-| `record.py` | `AdaptorRecord`, `AdaptorContribution`, `build_adaptor_record`, `canonical_sha256` |
+| `record.py` | `AdaptorRecord`, `AdaptorContribution`, `build_adaptor_record` (digests via `core.canonical_json.canonical_sha256`) |
 | `MetricOrder` / `reconcile_metric_specs` | The only direction and metric-identity authorities used here |
 
 ## Interface
@@ -117,7 +117,7 @@ every admission, the ranking, metric id/direction, one contribution per emitted
 output and `OutputDigest(port, index, status, sha256)` where `sha256` is
 `canonical_sha256(value)` (sorted-key, compact, ASCII JSON of
 `model_dump(mode="json")`, the encoding of `WorkflowDefinition.declaration_digest`;
-no package-neutral owner exists). The record test pins a literal digest.
+owner `core/canonical_json.py`, shared with custom adaptors). The record test pins a literal digest.
 Fields for implementation identity, B2 strategy evidence and custom execution
 are added by the PRs that produce them.
 

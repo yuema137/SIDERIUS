@@ -103,17 +103,26 @@ def _write_once(path: Path, payload: bytes) -> None:
             temporary.unlink()
 
 
+def publish_transport(package: CapturedCodePackage, directory: Path) -> tuple[Path, str]:
+    """Write the immutable ``<digest>.json`` carrier under ``directory`` from captured pins.
+
+    Returns ``(path, digest)``, the explicit carrier ``bootstrap_code_package`` accepts.
+    """
+    transport = CodeTransport(
+        root=package.root, locator_root=package.locator_root, identity=package.identity
+    )
+    payload = canonical_bytes(transport.model_dump(mode="json"))
+    digest = sha256(payload)
+    path = directory / f"{digest}.json"
+    _write_once(path, payload)
+    return path, digest
+
+
 def write_transport(package: CapturedCodePackage, environ: MutableMapping[str, str]) -> None:
     """Use only captured pins; edits after acquisition cannot re-pin at spawn."""
     try:
         workspace = verified_chain_workspace(environ=environ)
-        transport = CodeTransport(
-            root=package.root, locator_root=package.locator_root, identity=package.identity
-        )
-        payload = canonical_bytes(transport.model_dump(mode="json"))
-        digest = sha256(payload)
-        path = Path(workspace) / "task_code" / f"{digest}.json"
-        _write_once(path, payload)
+        path, digest = publish_transport(package, Path(workspace) / "task_code")
     except OSError as exc:
         raise LocalCodeError(f"code_package cannot materialize captured transport: {exc}") from exc
     except ValueError as exc:

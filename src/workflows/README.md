@@ -12,6 +12,7 @@ The caller chooses settings and order; individual nodes own their reasoning.
 | Run a chain | [Launch scripts](../../scripts/launch/README.md) |
 | Build another workflow | [Custom workflow reference](../../docs/guides/custom-workflow.md) |
 | Check a workflow declaration offline (not execute it) | [Declaration foundation](definition/README.md) |
+| Check and admit your own adaptor code (not run it in a workflow yet) | [Custom adaptor contract](custom_adaptors/custom-adaptor-contract.md) |
 | Declare a task | [Task composition](../../docs/reference/task-composition.md) |
 | Inspect startup settings | [Launch resolution](../../docs/agent-reference/standard-launch-resolution.md) |
 

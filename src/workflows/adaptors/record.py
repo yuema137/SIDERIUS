@@ -4,12 +4,11 @@ Built purely from a decided ``AdaptorOutcome``; publication (path, write-once)
 belongs to the executor.
 """
 
-import hashlib
-import json
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from core.canonical_json import canonical_sha256
 from execute_tools.evaluation_metric import MetricDirection
 from workflows.definition.adaptor_strategies import (
     DeterministicCombine,
@@ -53,18 +52,6 @@ class AdaptorRecord(AdaptorModel):
     contributions: tuple[AdaptorContribution, ...]
     outputs: tuple[OutputDigest, ...]
     fallback: str | None = None  # Fallback.combine kind actually run (B2 status "fallback")
-
-
-def canonical_sha256(value: object) -> str:
-    """SHA-256 of canonical JSON (sorted keys, compact) of a model or JSON value.
-
-    No package-neutral canonical-JSON owner exists; this matches the encoding of
-    ``WorkflowDefinition.declaration_digest`` (sorted keys, compact, ASCII).
-    """
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def build_adaptor_record(
