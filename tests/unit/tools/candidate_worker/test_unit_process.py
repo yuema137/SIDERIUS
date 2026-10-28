@@ -4,14 +4,15 @@ Every other graph test runs units through the in-process seam installed by
 `native_runner`. Here the real `spawn_unit` supervises real unit children; a
 generated harness replaces only provider construction (and, per case, one
 native phase) inside each child before running the actual `unit_child` entry.
-The harness puts this checkout's `src` first on the child's `sys.path`, so a
-copied checkout's children import that copy, and every child reports which
-`unit_child` it imported.
+The harness puts this checkout's `src` first on the child's `sys.path` (the
+child environment drops `PYTHONPATH`), so a copied checkout's children import
+that copy, and every child reports which `unit_child` it imported.
 """
 
 import inspect
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,20 +20,18 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from tests.helpers.candidate_fanout import fanout_request
+from tests.helpers.candidate_fanout import UNROUTED_TRACE_SHA256, fanout_request, trace_projection
 from tools.candidate_worker import launch_candidate
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.candidate_worker.unit_runner import spawn_unit as real_spawn_unit
 
-from .conftest import REPO
-from .test_branch_isolation import another_prepared, stable
+from .conftest import REPO, _prepare_request
 from .test_graph import initial
 from .test_native import Provider, native_runner
-from .test_readiness import UNROUTED_TRACE_SHA256, trace_sha256
 
 PROBE = "b33_registry_probe"
 HARNESS = """import json, os, runpy, subprocess, sys
-sys.path[:0] = [{src!r}, {repo!r}]
+sys.path.insert(0, {src!r})
 from pathlib import Path
 from typing import ClassVar
 {provider}
@@ -85,6 +84,44 @@ runpy.run_module("tools.candidate_worker.unit_child", run_name="__main__")
 """
 
 
+def trace_sha256(receipt):
+    import hashlib
+
+    return hashlib.sha256(trace_projection(receipt).encode()).hexdigest()
+
+
+def separate_request(tmp_path, name):
+    """A second synthetic project and workspace for the in-process reference run."""
+    from agent.schemas.proposal import ProposalInput
+    from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
+    from workflows.task_composition import build_task_composition_ref, compose_run_task_bindings
+
+    root = tmp_path / name
+    (root / "project" / "data").mkdir(parents=True)
+    return _prepare_request(
+        root / "project",
+        root / "workspace",
+        compose_run_task_bindings,
+        build_task_composition_ref,
+        ProposalInput,
+        ProposerInterpretationEvidence,
+    )
+
+
+def stable(value, normalized):
+    """Drop per-run noise (identities, timings, absolute paths) from a native record."""
+    volatile = {"candidate_id", "test_output", "created_at", "timestamp"}
+    if isinstance(value, dict):
+        return {
+            key: stable(item, normalized)
+            for key, item in value.items()
+            if key not in volatile and not key.endswith(("_path", "_dir", "_seconds"))
+        }
+    if isinstance(value, list):
+        return [stable(item, normalized) for item in value]
+    return normalized(value) if isinstance(value, str) else value
+
+
 def run_real_units(request, monkeypatch, tmp_path, fail):
     """Launch through the worker with every graph unit in a real child process."""
     from tools.candidate_worker import unit_runner
@@ -96,7 +133,6 @@ def run_real_units(request, monkeypatch, tmp_path, fail):
     harness.write_text(
         HARNESS.format(
             src=str(REPO / "src"),
-            repo=str(REPO),
             provider=inspect.getsource(Provider),
             config=str(config),
             probe=PROBE,
@@ -135,7 +171,7 @@ def test_real_unit_processes_reproduce_the_in_process_body(
     process registry between units, or drops a unit's subprocess lifecycle evidence."""
     from ml_models import models_sandbox
 
-    reference = fanout_request(another_prepared(tmp_path, "in_process"))
+    reference = fanout_request(separate_request(tmp_path, "in_process"))
     prompts = []
     generate, generate_text = Provider.generate, Provider.generate_text
 
@@ -219,3 +255,53 @@ def test_unit_transport_preserves_set_fields_and_refuses_drift():
     assert decoded.items[0].model_fields_set == {"explicit"}
     with pytest.raises(ValueError, match="round-trip"):
         encode_transport(Opaque(payload=Carrier()))
+
+
+def test_unit_transport_keeps_nonfinite_floats_and_validator_filled_fields_set():
+    """Fails if a -inf scoring sentinel or a -inf launch knob cannot cross the
+    boundary (the node would fail), or if a nested validator-filled field (the
+    metric's scoreability contract) changes its `model_fields_set`."""
+    from tests.unit.workflows.test_model_exploration import _make_tuning_output
+    from tools.candidate_worker.unit_transport import decode_transport, encode_transport
+    from workflows.candidate_training_settings import CandidateTrainingSettings
+
+    output = _make_tuning_output(score=float("-inf"))
+    decoded = decode_transport(type(output), encode_transport(output))
+    assert decoded.best_denoising_score == float("-inf")
+    assert output.metric_spec is not None and decoded.metric_spec is not None
+    nested = output.metric_spec.scoreability
+    assert decoded.metric_spec.scoreability.model_fields_set == nested.model_fields_set
+    assert decoded.metric_spec.scoreability == nested
+    settings = CandidateTrainingSettings.model_validate_json(
+        '{"launch": {"skip_formal_min_delta": -Infinity}}'
+    )
+    restored = decode_transport(type(settings), encode_transport(settings))
+    assert restored.launch.skip_formal_min_delta == float("-inf")
+
+
+def test_unit_child_never_imports_workspace_shadows(tmp_path, monkeypatch, capfd):
+    """Fails if a unit started with `-m` from the writable workspace imports a
+    planted `tools` package or `json` module instead of the framework/stdlib."""
+    from core.generated_library import bind_generated_library_to_workspace
+
+    workspace = tmp_path / "workspace"
+    marker = tmp_path / "shadow_imported"
+    (workspace / "tools/candidate_worker").mkdir(parents=True)
+    shadow = f"open({str(marker)!r}, 'a').write(__name__ + '\\n')\n"
+    for name in (
+        "json.py",
+        "tools/__init__.py",
+        "tools/candidate_worker/__init__.py",
+        "tools/candidate_worker/unit_child.py",
+    ):
+        (workspace / name).write_text(shadow)
+    environment: dict[str, str] = {}
+    bind_generated_library_to_workspace(str(workspace), environ=environment)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(workspace)
+    with pytest.raises(subprocess.CalledProcessError):
+        # The real entry runs and refuses the absent invocation.
+        real_spawn_unit(str(workspace / "candidate_run/units/node/invocation.json"))
+    assert not marker.exists(), marker.read_text()
+    assert "FileNotFoundError" in capfd.readouterr().out

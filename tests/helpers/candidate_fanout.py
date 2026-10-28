@@ -1,6 +1,7 @@
 """Explicit graph declarations over the existing synthetic candidate fixture."""
 
 import json
+import re
 from pathlib import Path
 
 from tools.workflow_preview import preview_workflow
@@ -154,3 +155,21 @@ def families_request(request, families=2):
             "selected_constructor_routes": observed.selected_constructor_routes,
         }
     )
+
+
+# Pinned on base 14d03254 (before skip semantics): sha256 of the receipt's trace,
+# status, validation flag and output index, with the workspace and native record
+# digests (which embed tmp paths) masked. New enum values must not move these bytes.
+UNROUTED_TRACE_SHA256 = {
+    "accepted": "3b0b62a412e76632c6a9ad1929afa94d24df5a271a35d6e70fba3764af1ac36e",
+    "rejected": "cbab7a78fe3a41f46a643bafddce480def9db486500874fde8334353f4fd2da6",
+    "failed": "77752ff7436e08173a39c3e2d82ffa09f5780538d97f4d014ad846a23ffba105",
+}
+
+
+def trace_projection(receipt) -> str:
+    """The pinned projection, with tmp workspace and record digests masked."""
+    payload = receipt.model_dump_json(
+        include={"status", "validation_passed", "graph_trace", "native_output_paths"}
+    ).replace(receipt.workspace, "<ws>")
+    return re.sub(r'"record_sha256":"[0-9a-f]{64}"', '"record_sha256":"<sha>"', payload)

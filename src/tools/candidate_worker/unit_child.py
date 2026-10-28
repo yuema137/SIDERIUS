@@ -14,6 +14,13 @@ from typing import TYPE_CHECKING, Any
 
 from core.generated_library import generated_library_is_workspace_bound, verified_chain_workspace
 
+#: `-m` would otherwise put the unit's cwd (the writable workspace, where an
+#: earlier unit's generated code can write) first on `sys.path`.
+SAFE_PATH_ENV = "PYTHONSAFEPATH"
+#: Set by the runner when it added the safe-path flag; the child then drops the
+#: flag so its own subprocesses see the worker's environment unchanged.
+SAFE_PATH_ADDED_ENV = "SIDERIUS_UNIT_SAFE_PATH_ADDED"
+
 if TYPE_CHECKING:
     from workflows.task_composition import RunTaskComposition
 
@@ -109,10 +116,11 @@ def run_invocation_file(path: Path) -> None:
     from core.runtime_control.observed_subprocess import ProcessLifecycle, observe_process_lifecycle
     from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
+    from .graph_evidence import read_graph_control
     from .unit_models import NodeInvocation, NodeUnitResult
     from .unit_transport import decode_transport, encode_transport
 
-    invocation = decode_transport(NodeInvocation, path.read_bytes())
+    invocation = decode_transport(NodeInvocation, read_graph_control(path))
     if os.path.abspath(verified_chain_workspace()) != os.path.abspath(invocation.initial.workspace):
         raise ValueError("unit child workspace binding disagrees with its invocation")
 
@@ -153,6 +161,8 @@ if __name__ == "__main__":
     # One worker log: stderr joins the inherited stdout (the worker's log file),
     # because the process supervisor pipes stderr.
     os.dup2(1, 2)
+    if os.environ.pop(SAFE_PATH_ADDED_ENV, None) is not None:
+        os.environ.pop(SAFE_PATH_ENV, None)  # this interpreter already started safe
     if not generated_library_is_workspace_bound():
         raise SystemExit("unit child requires the worker's workspace generated-library binding")
     run_invocation_file(Path(sys.argv[1]))

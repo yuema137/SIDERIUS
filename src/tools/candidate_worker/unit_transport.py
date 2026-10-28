@@ -1,11 +1,12 @@
 """Exact model transport across the unit process boundary (B3-3).
 
 A payload is two JSON lines: the `model_fields_set` tree of every model in the
-value, then the value's complete JSON. Decoding validates the JSON and restores
+value, then the value's complete JSON (inf/NaN as JSON constants), bounded by
+the 4 MiB control envelope. Decoding validates the JSON and restores
 each model's set fields, because protocol mappings, LLM-config defaults and
 reconciliation read `model_fields_set` (an `exclude_unset` dump cannot carry
-fields that validators fill). Encoding refuses any value whose decoding would
-differ in value or in set fields.
+fields that validators fill). Encoding refuses any value that is not a byte
+fixpoint of decode/re-encode.
 """
 
 import json
@@ -13,6 +14,9 @@ from dataclasses import fields, is_dataclass
 from typing import Any
 
 from pydantic import BaseModel
+from pydantic_core import to_json
+
+from core.control_json import JSON_LIMIT, ControlOverflow
 
 
 def _set_tree(value: Any) -> Any:
@@ -69,15 +73,27 @@ def decode_transport[Transported: BaseModel](
     return value
 
 
+def _encoded(value: BaseModel) -> bytes:
+    tree = json.dumps(_set_tree(value), separators=(",", ":")).encode()
+    # Keep inf/NaN as JSON constants: scoring sentinels and launch knobs use them.
+    document = to_json(value.model_dump(), inf_nan_mode="constants")
+    payload = tree + b"\n" + document
+    if len(payload) > JSON_LIMIT:
+        raise ControlOverflow(f"{type(value).__name__} unit transport exceeds 4 MiB")
+    return payload
+
+
 def encode_transport(value: BaseModel) -> bytes:
-    """Serialize `value`, refusing any value the decoder would not reproduce."""
-    tree = _set_tree(value)
-    payload = json.dumps(tree, separators=(",", ":")).encode() + b"\n"
-    payload += value.model_dump_json().encode()
+    """Serialize `value`, refusing any value the decoder would not reproduce.
+
+    The check is a byte fixpoint (decode, re-encode, compare), which is NaN-safe
+    and covers both the value and every model's set fields.
+    """
+    payload = _encoded(value)
     try:
         decoded = decode_transport(type(value), payload)
     except ValueError:
         decoded = None
-    if decoded is None or decoded != value or _set_tree(decoded) != tree:
+    if decoded is None or type(decoded) is not type(value) or _encoded(decoded) != payload:
         raise ValueError(f"{type(value).__name__} does not round-trip through unit transport")
     return payload

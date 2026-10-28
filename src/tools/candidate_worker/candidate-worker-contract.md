@@ -403,7 +403,8 @@ are not supported by this profile.
 #### Per-unit processes (B3-3)
 
 Every graph profile (`execution_profile` set, including loop bodies) runs each
-dispatched node in its own child process, still one at a time. Readiness,
+dispatched node, except adaptors (B6 runs those in the worker), in its
+own child process, still one at a time. Readiness,
 input materialization, predecessor-result selection, terminal classification
 and the trace stay in the worker (`graph.execute_fanout`). The fixed
 three/four-stage path is unchanged and runs in the worker.
@@ -426,14 +427,25 @@ three/four-stage path is unchanged and runs in the worker.
   `python -m tools.candidate_worker.unit_child <invocation>` through
   `core.runtime_control.observed_subprocess.supervise_subprocess` with
   `core.subprocess_env.subprocess_env()` (no device selector, so the worker's
-  GPUs) and reads the write-once `result.json` beside it.
+  GPUs) and reads the write-once `result.json` beside it. Both files are
+  bounded by the 4 MiB control envelope (`core.control_json.JSON_LIMIT`) on
+  write and read through `graph_evidence.read_graph_control`; an oversized
+  invocation fails its node before the child starts.
+- The unit runs with `PYTHONSAFEPATH=1` (added only when the worker lacks it,
+  flagged by `SIDERIUS_UNIT_SAFE_PATH_ADDED`), because `-m` would otherwise put
+  its cwd, the writable workspace where earlier generated code can write,
+  first on `sys.path`. The child removes both variables at entry, so its own
+  subprocesses see the worker's environment.
 - Transport (`unit_transport.encode_transport`/`decode_transport`) writes two
   JSON lines: the `model_fields_set` tree of every nested model, then the
-  value's complete JSON. Decoding validates the JSON and restores each model's
+  value's complete JSON with inf/NaN kept as JSON constants (`-inf` scoring
+  sentinels and launch knobs are valid values). Decoding validates the JSON and restores each model's
   set fields, because LLM-config defaults, protocol mappings and
   reconciliation read `model_fields_set` (an `exclude_unset` dump cannot carry
   validator-filled fields such as a tuning output's metric contract). Encoding
-  refuses a value whose decoding differs in value or set fields; a refused
+  refuses a value that is not a byte fixpoint of decode and re-encode
+  (NaN-safe; covers value and set fields) or that decodes with a different
+  set-field shape; a refused
   invocation fails its node (`failed`/`native_failure`) before any child
   starts. The child's `NodeUnitResult` and phase output cross back under the
   same rule.
@@ -458,7 +470,16 @@ the sandbox wall-time deadline and terminal signals reach it as before.
 Subprocess lifecycles the unit observed (for example tuner children) are
 returned in `NodeUnitResult.lifecycles` and replayed in order through
 `replay_process_lifecycle` to the worker's observer, so a loop body's
-`iteration_owner` lease still sees uncertain cleanup.
+`iteration_owner` lease still sees uncertain cleanup. Replay happens before
+the result's identity check, so a refused result cannot hide that evidence.
+Grandchildren left by a killed unit stay in the worker's process group; the
+sandbox's group cleanup (and bubblewrap's PID namespace) reaps them when the
+worker exits, as for any descendant of the in-process dispatch.
+
+Each unit pays its own interpreter start, native imports and task
+recomposition, measured in review at about 2.5–2.8 s and 680 MB peak RSS per
+unit on CPU. That time is charged against the run's `timeout_seconds`; the
+memory is released before the next unit starts.
 
 Parity limits, all outside recorded scientific outputs:
 
@@ -474,6 +495,10 @@ Parity limits, all outside recorded scientific outputs:
 - `units/<node_id>/` adds two control files per dispatched node; the trace,
   records and receipt bytes are unchanged
   (`test_unrouted_graph_trace_bytes_are_unchanged`).
+- `core/runtime_control/observed_subprocess.py` gained
+  `replay_process_lifecycle`, so `gpu_protection.protection_mechanism_digest()`
+  (recorded on protection receipts) moves from `d3f8cf19…` to `b79dbdde…`. The
+  rendering, verifier and estimation assembly digests are unchanged.
 
 Tests run units through an in-process seam (`native_runner` replaces
 `unit_runner.spawn_unit` with `unit_child.run_invocation_file`), which keeps the
@@ -482,7 +507,9 @@ real unit processes with a generated provider harness: it requires the pinned
 accepted and failed trace digests, prompts and normalized records equal to the
 in-process run, a distinct process per unit importing this checkout, no
 registry write visible to a later unit or the worker, a crashed unit treated as
-a native failure, and replay of a unit's subprocess lifecycle.
+a native failure, replay of a unit's subprocess lifecycle, -inf values and a
+validator-filled nested field crossing the transport, and no import of
+`tools`/`json` shadows planted in the workspace.
 
 `tools.candidate_worker.readiness.next_dispatch` is the single readiness
 authority. It is pure: `ReadinessInput` carries every declared node in

@@ -17,6 +17,8 @@ from core.runtime_control.observed_subprocess import (
 )
 from core.subprocess_env import subprocess_env
 
+from .graph_evidence import read_graph_control
+from .unit_child import SAFE_PATH_ADDED_ENV, SAFE_PATH_ENV
 from .unit_models import (
     OUTPUT_TYPES,
     NodeInvocation,
@@ -41,10 +43,13 @@ def spawn_unit(invocation_path: str) -> None:
     """Supervise the unit child; a nonzero exit raises `CalledProcessError`."""
     sys.stdout.flush()
     sys.stderr.flush()
+    env = subprocess_env()
+    if SAFE_PATH_ENV not in env:
+        env[SAFE_PATH_ENV] = env[SAFE_PATH_ADDED_ENV] = "1"
     try:
         observed = supervise_subprocess(
             unit_command(invocation_path),
-            env=subprocess_env(),
+            env=env,
             preexec_fn=None,
             capture_stdout=False,
             label="graph unit",
@@ -64,11 +69,12 @@ def run_unit(invocation: NodeInvocation) -> NodeUnitResult:
     path.parent.mkdir(parents=True)
     publish_bytes_write_once(str(path), encode_transport(invocation))
     spawn_unit(str(path))
-    result = decode_transport(NodeUnitResult, result_path.read_bytes())
-    if (result.node_id, result.phase) != (invocation.node_id, invocation.unit.phase):
-        raise ValueError("unit result identity disagrees with its invocation")
+    result = decode_transport(NodeUnitResult, read_graph_control(result_path))
+    # Cleanup evidence first: a later refusal must not hide an uncertain child.
     for lifecycle in result.lifecycles:
         replay_process_lifecycle(lifecycle)
+    if (result.node_id, result.phase) != (invocation.node_id, invocation.unit.phase):
+        raise ValueError("unit result identity disagrees with its invocation")
     return result
 
 
