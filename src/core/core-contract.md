@@ -25,6 +25,7 @@ what a task means — task semantics live in
 | [`local_code/`](local_code/README.md) | finite captured package imports, whole-set identity, verified child transport and named integrity refusal |
 | `runtime_control/` | measurement, admission, watchdog, calibration registry, `launch_guard.run_launch_self_test`, estimator/policy identity |
 | `server_configs/` | per-server calibration registry (`_base.py` schema; one module per host) |
+| `seeding.py` | `RunSeed` · `RunSeedBinding` · `resolve_run_seed` / `generate_run_seed` · `derive_seed` (`siderius-seed/v1`); see the [seeding mechanism](../../docs/agent-reference/mechanisms/seeding.md) |
 | `campaign_identity.py` | validates campaign ids, binds campaign state to its identity stamp, and admits campaign homes |
 | `runtime_control/campaign.py` | typed C12 validation-campaign matrix, measured cell records, pairwise plans, and campaign verdicts |
 | `committed_digests.py` · `memory_probe.py` · `inference_defaults.py` · `scientific_authority.py` | single-purpose authorities (read their docstrings) |

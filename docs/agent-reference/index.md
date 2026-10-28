@@ -63,6 +63,7 @@ Cross-node concepts, documented by **semantic owner** rather than by file.
 | [execution](mechanisms/execution.md) | the three child subprocesses, argv transport, deliverables, resource ceilings |
 | [plugins](mechanisms/plugins.md) | every plugin family, how each is loaded, identity and provenance |
 | [persistence-and-resume](mechanisms/persistence-and-resume.md) | records, the invariants lock, carried state, auto-resume |
+| [seeding](mechanisms/seeding.md) | `RunSeed`, `RunSeedBinding`, `SeedPurpose`, `SeedCoordinates`, the `siderius-seed/v1` derivation |
 
 ## Nodes
 
