@@ -140,7 +140,8 @@ def _render_revision(request: CallRequest) -> str:
 
 
 def _check_revision(request: CallRequest, payload: BaseModel) -> str | None:
-    """Each draft cites the primary and only listed items, and is a valid output value.
+    """Each draft's parents start with the primary (lineage names it: ``parents[0]``),
+    cite only listed items, and its value is a valid output value.
 
     The count is checked by ``fold`` (``cardinality_mismatch``), as for every
     combining kind.
@@ -155,7 +156,7 @@ def _check_revision(request: CallRequest, payload: BaseModel) -> str | None:
             contract=content.output_contract,
             listed=listed,
             min_parents=1,
-            required_parents=(primary,),
+            first_parent=primary,
         )
         if refusal is not None:
             return f"revised value {index}: {refusal}"

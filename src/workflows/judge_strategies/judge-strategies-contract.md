@@ -198,9 +198,12 @@ advisors said. Planners receive the earlier decided payloads for this
 (`StrategyKind.plan_call(invocation, earlier)`).
 
 The reviser returns a `SynthesisVerdict`. `check_payload` requires, per draft,
-distinct listed parents (primary or advisors) that include the primary, and a
-contract-valid value with framework-owned fields unset. Parents other than the
-primary are the advisors whose advice was adopted. The fold requires exactly one
+distinct listed parents (primary or advisors) whose first entry is the primary,
+and a contract-valid value with framework-owned fields unset. Lineage contract
+for B6: `CombinedItem.parents[0]` is the primary; the remaining parents are the
+advisors whose advice was adopted. `RevisionRequest.advisors` and `notes` hold at
+most `MAX_SCORED_ITEMS_PER_CALL − 1` entries (the reviser lists every item), and
+admission refuses a larger capacity (`batch_too_large`). The fold requires exactly one
 value (`cardinality_mismatch` otherwise) and stamps
 `adaptor:<adaptor_id>/primary-advisors-llm/v1`. No score arithmetic is involved.
 
@@ -289,7 +292,10 @@ stamped lineage and replay; a declared primary is used, not the first item;
 re-anchored evidence revising another primary refused on replay; per_advisor
 consults advisors in order and the reviser sees every note (N calls); a note
 naming another advisor and a revision dropping the primary refused; an
-inadmissible declared primary → `primary_unavailable` with no call; `metric_best`
+inadmissible declared primary → `primary_unavailable` with no call; a fully
+re-recorded forgery naming another primary (prompt identity and outcome rewritten)
+refused on replay; parents not starting with the primary refused; more items than
+one call may hold refused; `metric_best`
 never runs; admission bounds and one row per refusal; pinned `judge.advice/v1`
 and `judge.revision/v1` digests.
 

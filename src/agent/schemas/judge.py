@@ -232,8 +232,9 @@ class RevisionRequest(JudgeModel):
     criterion: str = Field(min_length=1, max_length=2000)
     output_contract: str = Field(min_length=1)
     primary: JudgedItem
-    advisors: tuple[JudgedItem, ...] = Field(min_length=1)
-    notes: tuple[AdvisoryNote, ...]
+    # The primary and its advisors share the per-call item cap.
+    advisors: tuple[JudgedItem, ...] = Field(min_length=1, max_length=MAX_SCORED_ITEMS_PER_CALL - 1)
+    notes: tuple[AdvisoryNote, ...] = Field(max_length=MAX_SCORED_ITEMS_PER_CALL - 1)
     guidance: JudgeTaskBlocks | None
 
     @model_validator(mode="after")
