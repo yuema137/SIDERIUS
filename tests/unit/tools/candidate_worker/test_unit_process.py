@@ -11,6 +11,7 @@ that copy, and every child reports which `unit_child` it imported.
 
 import inspect
 import json
+import math
 import os
 import subprocess
 import sys
@@ -277,6 +278,12 @@ def test_unit_transport_keeps_nonfinite_floats_and_validator_filled_fields_set()
     )
     restored = decode_transport(type(settings), encode_transport(settings))
     assert restored.launch.skip_formal_min_delta == float("-inf")
+    # NaN is not equal to itself; the round-trip check must still accept it.
+    nan = decode_transport(
+        type(output),
+        encode_transport(output.model_copy(update={"best_denoising_score": float("nan")})),
+    )
+    assert math.isnan(nan.best_denoising_score)
 
 
 def test_unit_child_never_imports_workspace_shadows(tmp_path, monkeypatch, capfd):

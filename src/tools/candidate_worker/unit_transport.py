@@ -5,11 +5,12 @@ value, then the value's complete JSON (inf/NaN as JSON constants), bounded by
 the 4 MiB control envelope. Decoding validates the JSON and restores
 each model's set fields, because protocol mappings, LLM-config defaults and
 reconciliation read `model_fields_set` (an `exclude_unset` dump cannot carry
-fields that validators fill). Encoding refuses any value that is not a byte
-fixpoint of decode/re-encode.
+fields that validators fill). Encoding refuses any value whose decoded Python
+dump differs (NaN-aware) or that is not a byte fixpoint of decode/re-encode.
 """
 
 import json
+import math
 from dataclasses import fields, is_dataclass
 from typing import Any
 
@@ -83,17 +84,39 @@ def _encoded(value: BaseModel) -> bytes:
     return payload
 
 
+def _same(left: Any, right: Any) -> bool:
+    """Structural equality where NaN equals NaN and +/-inf compare exactly."""
+    if isinstance(left, float) and isinstance(right, float):
+        return left == right or (math.isnan(left) and math.isnan(right))
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(_same(left[k], right[k]) for k in left)
+    if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+        return (
+            type(left) is type(right)
+            and len(left) == len(right)
+            and all(_same(a, b) for a, b in zip(left, right, strict=True))
+        )
+    return type(left) is type(right) and left == right
+
+
 def encode_transport(value: BaseModel) -> bytes:
     """Serialize `value`, refusing any value the decoder would not reproduce.
 
-    The check is a byte fixpoint (decode, re-encode, compare), which is NaN-safe
-    and covers both the value and every model's set fields.
+    Two checks: the decoded value's Python dump must equal the original's
+    (NaN-aware, so a stable lossy encoding such as -inf -> null is refused),
+    and re-encoding must reproduce the payload bytes, which also covers every
+    model's set fields.
     """
     payload = _encoded(value)
     try:
         decoded = decode_transport(type(value), payload)
     except ValueError:
         decoded = None
-    if decoded is None or type(decoded) is not type(value) or _encoded(decoded) != payload:
+    if (
+        decoded is None
+        or type(decoded) is not type(value)
+        or not _same(value.model_dump(mode="python"), decoded.model_dump(mode="python"))
+        or _encoded(decoded) != payload
+    ):
         raise ValueError(f"{type(value).__name__} does not round-trip through unit transport")
     return payload

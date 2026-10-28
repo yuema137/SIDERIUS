@@ -443,9 +443,11 @@ three/four-stage path is unchanged and runs in the worker.
   set fields, because LLM-config defaults, protocol mappings and
   reconciliation read `model_fields_set` (an `exclude_unset` dump cannot carry
   validator-filled fields such as a tuning output's metric contract). Encoding
-  refuses a value that is not a byte fixpoint of decode and re-encode
-  (NaN-safe; covers value and set fields) or that decodes with a different
-  set-field shape; a refused
+  refuses a value whose decoded `model_dump(mode="python")` differs from the
+  original's under NaN-aware structural equality (NaN equals NaN, +/-inf
+  compare exactly, so a stable lossy encoding such as -inf -> null is
+  refused), that is not a byte fixpoint of decode and re-encode (covers set
+  fields), or that decodes with a different set-field shape; a refused
   invocation fails its node (`failed`/`native_failure`) before any child
   starts. The child's `NodeUnitResult` and phase output cross back under the
   same rule.
