@@ -442,6 +442,59 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     assert "formal_max_epochs" not in saved.training_settings["launch"]
 
 
+def test_training_help_reads_nullable_schema_branches(monkeypatch):
+    """Fails if help drops constraints that Pydantic emits inside a nullable
+    ``anyOf`` branch, or reports a value the schema does not declare."""
+    from tools.workflow_authoring import training
+
+    schema = {
+        "trial_portion": {
+            "anyOf": [{"type": "number", "exclusiveMinimum": 0, "maximum": 1}, {"type": "null"}],
+            "default": None,
+            "description": "Share of rows used by trial rounds.",
+        },
+        "formal_portion": {"type": "number", "default": 0.1},
+    }
+    monkeypatch.setattr(training, "_launch_schema", lambda: schema)
+    nullable = training.control_help("trial_portion")
+    assert (nullable.exclusive_minimum, nullable.maximum) == (0, 1)
+    assert nullable.description == "Share of rows used by trial rounds."
+    plain = training.control_help("formal_portion")
+    assert plain.schema_default == 0.1
+    assert (plain.description, plain.unit, plain.minimum, plain.maximum) == (None,) * 4
+
+
+def test_training_help_distinguishes_null_default_from_absent_default(monkeypatch):
+    """Fails if a field without a schema default is reported as defaulting to null.
+
+    Both cases leave ``schema_default`` as ``None``; only ``has_schema_default`` tells
+    the editor whether to render "Schema default: null" or no default line at all.
+    """
+    from tools.workflow_authoring import training
+
+    schema = {
+        "declared_null": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": None},
+        "required_field": {"type": "integer"},
+    }
+    monkeypatch.setattr(training, "_launch_schema", lambda: schema)
+    declared = training.control_help("declared_null")
+    absent = training.control_help("required_field")
+    assert (declared.has_schema_default, declared.schema_default) == (True, None)
+    assert (absent.has_schema_default, absent.schema_default) == (False, None)
+
+
+def test_training_help_default_is_the_launch_config_default():
+    """Fails if inline help shows a default other than the native launch-config field's."""
+    from dataclasses import fields
+
+    from tools.workflow_authoring.training import CONTROLS, control_help
+    from workflows.run_config import WorkflowLaunchConfig
+
+    defaults = {item.name: item.default for item in fields(WorkflowLaunchConfig)}
+    for name, _, _ in CONTROLS:
+        assert control_help(name).schema_default == defaults[name], name
+
+
 @pytest.mark.parametrize(
     "current_bound,proposed_bound", [(False, True), (True, False), (True, True)]
 )
