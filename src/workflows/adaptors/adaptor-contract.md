@@ -4,14 +4,16 @@
 
 `workflows.adaptors` is the pure deterministic core of an adaptor node:
 admit → COMBINE → SELECT → DISTRIBUTE over typed items. It has no I/O, no
-global state, no LLM and no execution wiring. Declaration format, readiness,
-record publication, graph trace and verifier recomputation belong to later
-B6 PRs (format: B6-1; execution: B6-3). LLM COMBINE kinds belong to B2
+global state, no LLM and no execution wiring. The declaration format and its
+validation table belong to `workflows.definition` (B6-1, see
+[definition contract](../definition/definition-contract.md#adaptor-declarations-inert));
+readiness, record publication, graph trace and verifier recomputation belong to
+B6-3. LLM COMBINE kinds belong to B2
 (`admit_/run_/replay_llm_strategy`); their rankings re-enter through `select`.
 
 | Owner | Responsibility |
 | --- | --- |
-| `workflows/definition/adaptor_strategies.py` | Closed, versioned strategy declarations; shared B6 types `SelectStrategy`, `CardinalityBound`, `Fallback`, `derive_cardinality` (imported by B2) |
+| `workflows/definition/adaptor_strategies.py` | Closed, versioned strategy declarations; shared B6 types `SelectStrategy`, `CardinalityBound`, `Fallback`, `derive_cardinality` (imported by B2); `incompatible_pair`, the one owner of the COMBINE/DISTRIBUTE pair rule (declaration validation and `run_deterministic_adaptor` both call it) |
 | `workflows/definition/catalog.py` | `SPLITTABLE_ITEMS` (contract → list field), `RANKABLE_FIELDS` (contract → `RankableField(list_field, item_field, provenance)`) |
 | `items.py` | `AdaptorInputRef`, `AdaptorItem`, `admit` / `admit_items`, `AdaptorStrategyError` |
 | `combine.py` | `combine`, `Unit`, `Combined`, `Ranking`, `RankEntry`, `CollectedItems` |
@@ -91,13 +93,18 @@ an input.
 → `(1, 1)`; `per-item(M, skip)` → `(1, M)`; `per-item(M, fail)` → `(M, M)`;
 `top-k(k)` caps max at `k`; `first-admissible` caps it at 1. An unsatisfiable
 pair (min > max) raises `ValidationError`. The bound excludes the source count:
-`all/v1` and `threshold/v1` keep up to every admissible item, so B6-1 must
-refuse a declaration unless the bound ports' `max_items` (summed) is
-`<= bound.max` for those selects; at run time an excess raises.
+`all/v1` and `threshold/v1` keep up to every admissible item, so declaration
+validation refuses them unless the number of bound sources (static topology,
+B6-D6) is `<= bound.max`; at run time an excess raises.
 
-Declaration errors refused before admission (B6-1 validation-table rows):
-`per-item/v1` after `collect/v1`, `concat-items/v1` or `field-rank/v1` (each
-yields exactly one value); `split-items/v1` after `collect/v1`.
+Declaration errors refused before admission (`incompatible_pair`, also a
+B6-1 validation-table row): `per-item/v1` after `collect/v1`,
+`concat-items/v1` or `field-rank/v1` (each yields exactly one value);
+`split-items/v1` after `collect/v1`.
+
+`Unit.entry_refs`, when set, must name one owner per entry of the value's
+catalogued list (`SPLITTABLE_ITEMS[element_contract]`); a misaligned owner tuple
+is refused at construction, so split provenance cannot shift.
 
 | Condition | Outcome |
 | --- | --- |
@@ -133,7 +140,8 @@ direction iff metric, rankable-field guard, record literal digest.
 
 ## Limitations
 
-- Not reachable from any workflow until B6-3 wires execution; no paper or
+- Declarable since B6-1 but not reachable from any workflow until B6-3 wires
+  execution (execution admission refuses adaptor documents); no paper or
   existing digest is affected.
 - Decided (review of B6-2): shortfall is monotonic; under `on_short="fail"`
   any shortfall fails, otherwise an empty result is `rejected`.

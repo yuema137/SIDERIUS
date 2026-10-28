@@ -878,7 +878,7 @@ byte-identical to those before this feature.
 
 `tools.candidate_worker.route_eval` decides one declared `Branch` (definition
 contract, "Route declarations (inert)") from one native record. It has no execution
-caller yet: routed documents are still refused by `candidate.refuse_routes`, and skip
+caller yet: routed documents are still refused by `candidate.refuse_declaration_only`, and skip
 semantics, decision evidence and a routed profile are later readiness/worker work.
 
 - `project_observation(branch, capability, record_path, *, iteration)` reads the
