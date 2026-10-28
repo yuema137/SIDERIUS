@@ -11,6 +11,8 @@ from collections.abc import Iterator
 
 from .catalog import CAPABILITIES, ROUTE_OBSERVABLES
 from .models import (
+    AdaptorRequest,
+    AdaptorSource,
     AllOf,
     AnyOf,
     AuthoredLoop,
@@ -25,6 +27,7 @@ from .models import (
     ReusableWorkflowDefinition,
     RoutePredicate,
     SelectedSource,
+    Source,
     WorkflowDefinition,
 )
 
@@ -53,7 +56,7 @@ def validate_routes(
     if len(branches) != len(definition.routes):
         raise ValueError("Branch IDs must be unique")
     capabilities = {node.id: node.capability for node in definition.nodes}
-    children: dict[str, set[str]] = {node: set() for node in capabilities}
+    children: dict[str, set[str]] = {vertex: set() for vertex, _ in facts}
     for node, sources in facts:
         for source in sources:
             children[source].add(node)
@@ -115,14 +118,28 @@ def _arm(source: str, entry: tuple[str, ...], children: dict[str, set[str]]) -> 
     )
 
 
-def _selected_sources(
+def bound_sources(
     definition: WorkflowDefinition | ReusableWorkflowDefinition,
-) -> Iterator[tuple[str, SelectedSource]]:
+) -> Iterator[tuple[str, Source]]:
+    """Every ``(consumer, source)`` data binding of nodes and adaptors, in declared order."""
     for node in definition.nodes:
         if isinstance(node.request, ProtocolRequest):
             for argument in node.request.arguments:
-                if isinstance(argument.source, SelectedSource):
-                    yield node.id, argument.source
+                yield node.id, argument.source
+        elif isinstance(node.request, AdaptorRequest):
+            yield node.id, node.request.source
+    for adaptor in definition.adaptors:
+        for binding in adaptor.bindings:
+            for source in binding.sources:
+                yield adaptor.id, source
+
+
+def _selected_sources(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> Iterator[tuple[str, SelectedSource]]:
+    for consumer, source in bound_sources(definition):
+        if isinstance(source, SelectedSource):
+            yield consumer, source
 
 
 def _check_merges(
@@ -160,15 +177,15 @@ def _check_arm_dependencies(
     order: tuple[str, ...],
 ) -> None:
     """Refuse a node depending on two exclusive arms of one branch except through a merge."""
-    plain: dict[str, set[str]] = {node.id: set() for node in definition.nodes}
-    merged: dict[str, list[SelectedSource]] = {node.id: [] for node in definition.nodes}
-    for node in definition.nodes:
-        if isinstance(node.request, ProtocolRequest):
-            for argument in node.request.arguments:
-                if isinstance(argument.source, ResultSource):
-                    plain[node.id].add(argument.source.node)
-                elif isinstance(argument.source, SelectedSource):
-                    merged[node.id].append(argument.source)
+    plain: dict[str, set[str]] = {vertex: set() for vertex in order}
+    merged: dict[str, list[SelectedSource]] = {vertex: [] for vertex in order}
+    for consumer, source in bound_sources(definition):
+        if isinstance(source, ResultSource):
+            plain[consumer].add(source.node)
+        elif isinstance(source, AdaptorSource):
+            plain[consumer].add(source.adaptor)
+        elif isinstance(source, SelectedSource):
+            merged[consumer].append(source)
     for branch in definition.routes:
         for entry in route_entries(branch):
             for target in entry:

@@ -1,22 +1,35 @@
 """Check declarations without loading referenced objects or executing protocols."""
 
 from collections.abc import Mapping, Set
-from typing import TYPE_CHECKING
 
+from .adaptor_validation import (
+    Resolve,
+    check_adaptor,
+    check_adaptor_format,
+    check_adaptor_source,
+    output_contract,
+)
 from .catalog import CAPABILITIES, CONTRACTS, PROTOCOLS
+from .models import (
+    AdaptorRequest,
+    AdaptorSource,
+    AuthoredLoop,
+    ExternalRequest,
+    ExternalSource,
+    NodeInstance,
+    NodePosition,
+    NoImprovementStop,
+    ProtocolRequest,
+    ReusableWorkflowDefinition,
+    SelectedSource,
+    Source,
+    WorkflowDefinition,
+)
 from .routes import route_entries, validate_routes
 
-if TYPE_CHECKING:
-    from .models import (
-        AuthoredLoop,
-        NodeInstance,
-        NodePosition,
-        ReusableWorkflowDefinition,
-        WorkflowDefinition,
-    )
 
-
-def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefinition") -> None:
+def validate_definition(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> None:
+    check_adaptor_format(definition)
     facts, order = dependency_graph(definition)
     if definition.loop is not None:
         nodes = {node.id: node for node in definition.nodes}
@@ -34,10 +47,8 @@ def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefini
     validate_routes(definition, facts, order)
 
 
-def validate_stop_conditions(loop: "AuthoredLoop") -> None:
+def validate_stop_conditions(loop: AuthoredLoop) -> None:
     """At most one condition per kind; each must be reachable before the final limit."""
-    from .models import NoImprovementStop
-
     kinds = [condition.kind for condition in loop.stop_conditions]
     if len(set(kinds)) != len(kinds):
         raise ValueError("loop declares more than one stop condition of the same kind")
@@ -50,22 +61,26 @@ def validate_stop_conditions(loop: "AuthoredLoop") -> None:
 
 
 def predecessor_facts(
-    definition: "WorkflowDefinition | ReusableWorkflowDefinition",
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
 ) -> tuple[tuple[str, frozenset[str]], ...]:
     """Validate every argument and return immutable scheduling dependencies."""
     return dependency_graph(definition)[0]
 
 
 def dependency_graph(
-    definition: "WorkflowDefinition | ReusableWorkflowDefinition",
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
 ) -> tuple[tuple[tuple[str, frozenset[str]], ...], tuple[str, ...]]:
-    """Validated dependencies (data and route control edges) and one topological order."""
-    from .models import ExternalRequest, ExternalSource, SelectedSource
+    """Validated dependencies (data and route control edges) and one topological order.
 
+    Adaptors share the node namespace and join the same dependency graph.
+    """
     externals = {item.id: item for item in definition.externals}
     nodes = {node.id: node for node in definition.nodes}
+    adaptors = {adaptor.id: adaptor for adaptor in definition.adaptors}
     if len(externals) != len(definition.externals) or len(nodes) != len(definition.nodes):
         raise ValueError("External and node IDs must each be unique")
+    if len(adaptors) != len(definition.adaptors) or adaptors.keys() & nodes.keys():
+        raise ValueError("Adaptor IDs must be unique and distinct from node IDs")
     for external in externals.values():
         if external.contract not in CONTRACTS:
             raise ValueError(f"Unsupported external contract: {external.contract}")
@@ -73,62 +88,13 @@ def dependency_graph(
         if node.capability not in CAPABILITIES:
             raise ValueError(f"Unsupported capability: {node.capability}")
 
-    dependencies: dict[str, set[str]] = {key: set() for key in nodes}
-
-    def external_contract(binding: str, context: str) -> str:
-        if binding not in externals:
-            raise ValueError(f"{context}: Unknown external binding: {binding}")
-        return externals[binding].contract
-
+    dependencies: dict[str, set[str]] = {key: set() for key in (*nodes, *adaptors)}
+    contracts = _SourceContracts(definition)
+    # Adaptors first, so a consumer never reports a symptom of an invalid adaptor.
+    for adaptor in adaptors.values():
+        check_adaptor(adaptor, contracts.resolver(dependencies[adaptor.id]))
     for node in nodes.values():
-        expected = CAPABILITIES[node.capability].input
-        request = node.request
-        if isinstance(request, ExternalRequest):
-            actual = external_contract(request.binding, node.id)
-            if actual != expected:
-                raise ValueError(f"{node.id}: request requires {expected}, got {actual}")
-            continue
-        if request.protocol not in PROTOCOLS:
-            raise ValueError(f"{node.id}: Unsupported protocol: {request.protocol}")
-        protocol = PROTOCOLS[request.protocol]
-        if protocol.output != expected:
-            raise ValueError(f"{node.id}: protocol does not produce {expected}")
-        arguments = {arg.name: arg for arg in request.arguments}
-        declared = {arg.name: arg for arg in protocol.arguments}
-        if len(arguments) != len(request.arguments):
-            raise ValueError(f"{node.id}: duplicate protocol arguments")
-        if unknown := arguments.keys() - declared.keys():
-            raise ValueError(f"{node.id}: unknown protocol arguments: {sorted(unknown)}")
-        missing = [
-            arg.name for arg in protocol.arguments if arg.required and arg.name not in arguments
-        ]
-        if missing:
-            raise ValueError(f"{node.id}: missing protocol arguments: {missing}")
-        for name, argument in arguments.items():
-            source = argument.source
-            if isinstance(source, ExternalSource):
-                actual = external_contract(source.binding, f"{node.id}.{name}")
-            elif isinstance(source, SelectedSource):
-                if unknown := {item.node for item in source.candidates} - nodes.keys():
-                    raise ValueError(
-                        f"{node.id}.{name}: Unknown merge candidates: {sorted(unknown)}"
-                    )
-                outputs = {
-                    CAPABILITIES[nodes[item.node].capability].output for item in source.candidates
-                }
-                if len(outputs) != 1:
-                    raise ValueError(f"{node.id}.{name}: merge candidates differ in contract")
-                actual = outputs.pop()
-                dependencies[node.id].update(item.node for item in source.candidates)
-            else:
-                if source.node not in nodes:
-                    raise ValueError(f"{node.id}.{name}: Unknown source node: {source.node}")
-                actual = CAPABILITIES[nodes[source.node].capability].output
-                dependencies[node.id].add(source.node)
-            if actual != declared[name].contract:
-                raise ValueError(
-                    f"{node.id}.{name}: requires {declared[name].contract}, got {actual}"
-                )
+        _check_request(node, contracts.resolver(dependencies[node.id]))
 
     # A route target waits for its branch source's decision: a control edge, so a
     # route can never create a cycle or target an ancestor of its own source.
@@ -140,6 +106,80 @@ def dependency_graph(
 
     order = topological_order(dependencies)
     return tuple((node, frozenset(sources)) for node, sources in dependencies.items()), order
+
+
+class _SourceContracts:
+    """Resolve bound sources to exact contracts, recording each consumer's dependencies."""
+
+    def __init__(self, definition: WorkflowDefinition | ReusableWorkflowDefinition) -> None:
+        self.externals = {item.id: item.contract for item in definition.externals}
+        self.outputs = {node.id: CAPABILITIES[node.capability].output for node in definition.nodes}
+        self.adaptors = {adaptor.id: adaptor for adaptor in definition.adaptors}
+
+    def resolver(self, dependencies: set[str]) -> Resolve:
+        return lambda source, context: self.resolve(source, context, dependencies)
+
+    def resolve(self, source: Source, context: str, dependencies: set[str]) -> str:
+        if isinstance(source, ExternalSource):
+            if source.binding not in self.externals:
+                raise ValueError(f"{context}: Unknown external binding: {source.binding}")
+            return self.externals[source.binding]
+        if isinstance(source, AdaptorSource):
+            adaptor = self.adaptors.get(source.adaptor)
+            if adaptor is None:
+                raise ValueError(f"{context}: Unknown adaptor: {source.adaptor}")
+            check_adaptor_source(adaptor, source, context)
+            dependencies.add(adaptor.id)
+            return output_contract(adaptor)
+        if isinstance(source, SelectedSource):
+            if unknown := {item.node for item in source.candidates} - self.outputs.keys():
+                raise ValueError(f"{context}: Unknown merge candidates: {sorted(unknown)}")
+            outputs = {self.outputs[item.node] for item in source.candidates}
+            if len(outputs) != 1:
+                raise ValueError(f"{context}: merge candidates differ in contract")
+            dependencies.update(item.node for item in source.candidates)
+            return outputs.pop()
+        if source.node not in self.outputs:
+            raise ValueError(f"{context}: Unknown source node: {source.node}")
+        dependencies.add(source.node)
+        return self.outputs[source.node]
+
+
+def _check_request(node: NodeInstance, resolve: Resolve) -> None:
+    expected = CAPABILITIES[node.capability].input
+    request = node.request
+    if isinstance(request, ExternalRequest):
+        actual = resolve(ExternalSource(binding=request.binding), node.id)
+    elif isinstance(request, AdaptorRequest):
+        actual = resolve(request.source, node.id)
+    else:
+        _check_protocol_arguments(node.id, expected, request, resolve)
+        return
+    if actual != expected:
+        raise ValueError(f"{node.id}: request requires {expected}, got {actual}")
+
+
+def _check_protocol_arguments(
+    node_id: str, expected: str, request: ProtocolRequest, resolve: Resolve
+) -> None:
+    if request.protocol not in PROTOCOLS:
+        raise ValueError(f"{node_id}: Unsupported protocol: {request.protocol}")
+    protocol = PROTOCOLS[request.protocol]
+    if protocol.output != expected:
+        raise ValueError(f"{node_id}: protocol does not produce {expected}")
+    arguments = {arg.name: arg for arg in request.arguments}
+    declared = {arg.name: arg for arg in protocol.arguments}
+    if len(arguments) != len(request.arguments):
+        raise ValueError(f"{node_id}: duplicate protocol arguments")
+    if unknown := arguments.keys() - declared.keys():
+        raise ValueError(f"{node_id}: unknown protocol arguments: {sorted(unknown)}")
+    missing = [arg.name for arg in protocol.arguments if arg.required and arg.name not in arguments]
+    if missing:
+        raise ValueError(f"{node_id}: missing protocol arguments: {missing}")
+    for name, argument in arguments.items():
+        actual = resolve(argument.source, f"{node_id}.{name}")
+        if actual != declared[name].contract:
+            raise ValueError(f"{node_id}.{name}: requires {declared[name].contract}, got {actual}")
 
 
 def topological_order(dependencies: Mapping[str, Set[str]]) -> tuple[str, ...]:
@@ -157,7 +197,7 @@ def topological_order(dependencies: Mapping[str, Set[str]]) -> tuple[str, ...]:
 
 
 def validate_positions(
-    nodes: tuple["NodeInstance", ...], positions: tuple["NodePosition", ...]
+    nodes: tuple[NodeInstance, ...], positions: tuple[NodePosition, ...]
 ) -> None:
     """One layout-reference check for both declaration formats."""
     node_ids = {node.id for node in nodes}

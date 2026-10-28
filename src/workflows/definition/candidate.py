@@ -4,6 +4,7 @@ from .models import (
     ExternalRequest,
     ExternalSource,
     ProtocolRequest,
+    Request,
     ResultSource,
     ReusableWorkflowDefinition,
     WorkflowDefinition,
@@ -14,14 +15,22 @@ ROUTING_NOT_ADMITTED = (
 )
 
 
-def refuse_routes(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> None:
-    """Routes are declaration-only: no execution profile admits them yet."""
+ADAPTORS_NOT_ADMITTED = "adaptors are declared but this execution profile does not admit them"
+
+
+def refuse_declaration_only(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> None:
+    """Routes and adaptors are declaration-only: no execution profile admits them yet.
+
+    The adaptor format gate guarantees ``adaptor_format`` is set iff an adaptor is used.
+    """
     if definition.routes:
         raise ValueError(ROUTING_NOT_ADMITTED)
+    if definition.adaptor_format is not None:
+        raise ValueError(ADAPTORS_NOT_ADMITTED)
 
 
 def candidate_nodes(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> dict[str, str]:
-    refuse_routes(definition)
+    refuse_declaration_only(definition)
     nodes = {node.capability: node for node in definition.nodes}
     expected = {"proposal", "implementation", "validation"}
     if set(nodes) not in (expected, expected | {"tuning"}) or len(nodes) != len(definition.nodes):
@@ -46,9 +55,7 @@ def candidate_nodes(definition: WorkflowDefinition | ReusableWorkflowDefinition)
     return {role: node.id for role, node in nodes.items()}
 
 
-def check_tuning_edge(
-    request: ExternalRequest | ProtocolRequest, proposal: str, validation: str
-) -> None:
+def check_tuning_edge(request: Request, proposal: str, validation: str) -> None:
     """One tuner consumes the selected candidate lineage and explicit native settings."""
     if (
         not isinstance(request, ProtocolRequest)

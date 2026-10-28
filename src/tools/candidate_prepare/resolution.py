@@ -15,6 +15,7 @@ from workflows.definition import (
     ExternalRequest,
     ExternalSource,
     ManagedCandidateBinding,
+    ProtocolRequest,
     ReusableWorkflowDocument,
     TaskReferences,
     WorkflowDefinition,
@@ -111,6 +112,8 @@ def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[
                 raise ValueError("Reusable proposal requires a managed proposal binding")
             used.add(external.id)
             continue
+        # Adaptor requests never get here: the shape checks refuse adaptor documents.
+        assert isinstance(request, ProtocolRequest)
         for argument in request.arguments:
             if not isinstance(argument.source, ExternalSource):
                 if argument.name not in result_roles:

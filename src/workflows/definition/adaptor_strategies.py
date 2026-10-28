@@ -10,7 +10,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
-from .models import DeclarationModel
+from .base import DeclarationModel
 
 
 class PassCombine(DeclarationModel):
@@ -170,3 +170,17 @@ def derive_cardinality(select: SelectStrategy, distribute: DistributeStrategy) -
         case AllSelect() | ThresholdSelect():
             pass
     return CardinalityBound(min=low, max=high)
+
+
+def incompatible_pair(combine: DeterministicCombine, distribute: DistributeStrategy) -> str | None:
+    """Why ``distribute`` cannot follow ``combine``, or ``None``.
+
+    The one owner of this rule: declaration validation refuses the pair, and the
+    strategy core refuses it again before admission.
+    """
+    single_value = isinstance(combine, CollectCombine | ConcatItemsCombine | FieldRankCombine)
+    if single_value and isinstance(distribute, PerItemDistribute):
+        return f"per-item/v1 cannot follow {combine.kind}: it yields one value"
+    if isinstance(combine, CollectCombine) and isinstance(distribute, SplitItemsDistribute):
+        return "split-items/v1 cannot split a collect/v1 collection"
+    return None

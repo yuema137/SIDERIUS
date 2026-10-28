@@ -10,17 +10,15 @@ from pydantic import BaseModel, SerializeAsAny, model_validator
 
 from execute_tools.evaluation_metric import MetricSpec
 from workflows.definition.adaptor_strategies import (
-    CollectCombine,
-    ConcatItemsCombine,
     DeterministicCombine,
     DistributeStrategy,
-    FieldRankCombine,
     PerItemDistribute,
     ReplicateDistribute,
     SelectStrategy,
     SingleDistribute,
     SplitItemsDistribute,
     derive_cardinality,
+    incompatible_pair,
 )
 from workflows.definition.catalog import SPLITTABLE_ITEMS
 
@@ -75,7 +73,8 @@ def run_deterministic_adaptor(
     metric: MetricSpec | None,
 ) -> AdaptorOutcome:
     """Decide one adaptor's outputs; ``items`` must already be in declared order."""
-    _refuse_incompatible(combine_strategy, distribute_strategy)
+    if (incompatible := incompatible_pair(combine_strategy, distribute_strategy)) is not None:
+        raise AdaptorStrategyError(incompatible)
     bound = derive_cardinality(select_strategy, distribute_strategy)
     admissions = admit_items(items)
     admissible = tuple(
@@ -110,15 +109,6 @@ def run_deterministic_adaptor(
 _Decision = tuple[
     Literal["succeeded", "rejected", "failed"], AdaptorReason | None, tuple[AdaptorOutput, ...]
 ]
-
-
-def _refuse_incompatible(combine: DeterministicCombine, distribute: DistributeStrategy) -> None:
-    """Declaration errors, refused before admission (B6-1 validation-table rows)."""
-    single_value = isinstance(combine, CollectCombine | ConcatItemsCombine | FieldRankCombine)
-    if single_value and isinstance(distribute, PerItemDistribute):
-        raise AdaptorStrategyError(f"per-item/v1 cannot follow {combine.kind}: it yields one value")
-    if isinstance(combine, CollectCombine) and isinstance(distribute, SplitItemsDistribute):
-        raise AdaptorStrategyError("split-items/v1 cannot split a collect/v1 collection")
 
 
 def _short(strategy: DistributeStrategy) -> _Decision:

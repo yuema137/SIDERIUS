@@ -11,7 +11,25 @@ from typing import Literal, NoReturn
 from pydantic import BaseModel, ConfigDict, ValidationError
 from pydantic_core import PydanticSerializationError
 
+from .adaptor_strategies import (
+    AllSelect,
+    CollectCombine,
+    ConcatItemsCombine,
+    FieldRankCombine,
+    FirstAdmissibleSelect,
+    MetricRankCombine,
+    PassCombine,
+    PerItemDistribute,
+    ReplicateDistribute,
+    SingleDistribute,
+    SplitItemsDistribute,
+    ThresholdSelect,
+    TopKSelect,
+)
 from .models import (
+    AdaptorInstance,
+    AdaptorRequest,
+    AdaptorSource,
     AllOf,
     AnyOf,
     ArgumentBinding,
@@ -25,6 +43,7 @@ from .models import (
     ExternalBinding,
     ExternalRequest,
     ExternalSource,
+    InputPort,
     IsMissing,
     JudgeStop,
     LoopFeedback,
@@ -35,6 +54,7 @@ from .models import (
     NodePosition,
     NoImprovementStop,
     Not,
+    PortBinding,
     ProtocolRequest,
     ResultSource,
     ReusableTaskReferences,
@@ -89,6 +109,24 @@ _CONSTRUCTORS: dict[str, type[DeclarationModel]] = {
         AnyOf,
         Not,
         SelectedSource,
+        AdaptorInstance,
+        InputPort,
+        PortBinding,
+        AdaptorSource,
+        AdaptorRequest,
+        PassCombine,
+        CollectCombine,
+        ConcatItemsCombine,
+        MetricRankCombine,
+        FieldRankCombine,
+        AllSelect,
+        FirstAdmissibleSelect,
+        TopKSelect,
+        ThresholdSelect,
+        SingleDistribute,
+        PerItemDistribute,
+        SplitItemsDistribute,
+        ReplicateDistribute,
     )
 }
 # Imported only when used, so declarations without them keep their canonical bytes.
@@ -109,6 +147,24 @@ _OPTIONAL_CONSTRUCTORS = frozenset(
         "AnyOf",
         "Not",
         "SelectedSource",
+        "AdaptorInstance",
+        "InputPort",
+        "PortBinding",
+        "AdaptorSource",
+        "AdaptorRequest",
+        "PassCombine",
+        "CollectCombine",
+        "ConcatItemsCombine",
+        "MetricRankCombine",
+        "FieldRankCombine",
+        "AllSelect",
+        "FirstAdmissibleSelect",
+        "TopKSelect",
+        "ThresholdSelect",
+        "SingleDistribute",
+        "PerItemDistribute",
+        "SplitItemsDistribute",
+        "ReplicateDistribute",
     }
 )
 # Fields omitted from canonical source when None or empty, matching serialization.
@@ -122,6 +178,10 @@ _OMITTED_WHEN_NONE = frozenset(
         (WorkflowDefinition, "loop"),
         (ReusableWorkflowDefinition, "loop"),
         (Branch, "default"),
+        (WorkflowDefinition, "adaptor_format"),
+        (ReusableWorkflowDefinition, "adaptor_format"),
+        (AdaptorSource, "index"),
+        (InputPort, "max_items"),
     }
 )
 _OMITTED_WHEN_EMPTY = frozenset(
@@ -129,6 +189,8 @@ _OMITTED_WHEN_EMPTY = frozenset(
         (AuthoredLoop, "stop_conditions"),
         (WorkflowDefinition, "routes"),
         (ReusableWorkflowDefinition, "routes"),
+        (WorkflowDefinition, "adaptors"),
+        (ReusableWorkflowDefinition, "adaptors"),
     }
 )
 _FIELD_NAMES = frozenset(name for model in _CONSTRUCTORS.values() for name in model.model_fields)
