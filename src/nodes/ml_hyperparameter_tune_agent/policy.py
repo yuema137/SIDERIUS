@@ -397,8 +397,9 @@ def _resolve_formal_comparison_thresholds(
     # units (§3.3 row 1) and are coordinates on the better-direction axis:
     # positive tightens the threshold, negative loosens it, under BOTH
     # directions. They are finite here: `validate_formal_launch` refuses
-    # nonfinite deltas while the gates are on, and the only supported way to
-    # switch the gates off is `--no-enable_chain_incumbent_formal_gates`.
+    # nonfinite deltas while the gates are on. The gates are off by default;
+    # to keep them off, omit `--enable_chain_incumbent_formal_gates` (or set
+    # `enable_chain_incumbent_formal_gates=false`).
     return (
         reference_score,
         order.toward_better(reference_score, skip_min_delta),

@@ -344,32 +344,35 @@ class TestBypassFormalTimeBudgetGate:
         assert _bypass([_valid_trial(6.5)], threshold=bypass_t)
 
 
-class TestDisableGatesViaInfinity:
-    """Both gates can still be turned off via boundary deltas; the
-    disable semantics moved INSIDE the helpers with the resolved-value
-    signature."""
+class TestSentinelThresholdsAreInert:
+    """Defensive sentinel behaviour, not an operator setting.
 
-    def test_skip_gate_disabled_at_negative_infinity(self):
+    Operators cannot configure an infinite delta while the gates are on
+    (``validate_formal_launch`` refuses it, issue #1012). The helpers still
+    must treat a threshold equal to the order's worst/best sentinel as
+    inert, because the worst-value bootstrap produces exactly such a
+    threshold and a direction-blind helper would fire on it."""
+
+    def test_skip_gate_inert_at_worst_sentinel(self):
         _, skip_t, _, _ = _resolve(6.0, skip_delta=float("-inf"))
         assert skip_t == float("-inf")
         assert not _skip([_valid_trial(-99.0)], threshold=skip_t)
 
-    def test_bypass_gate_disabled_at_positive_infinity(self):
+    def test_bypass_gate_inert_at_best_sentinel(self):
         _, _, bypass_t, _ = _resolve(6.0, bypass_delta=float("inf"))
         assert bypass_t == float("inf")
         assert not _bypass([_valid_trial(99.0)], threshold=bypass_t)
 
     @pytest.mark.parametrize("direction", ["higher", "lower"], ids=["higher", "lower"])
-    def test_the_disable_deltas_keep_disabling_under_either_direction(self, direction):
-        """Step 07 PR 07b — the operator's documented disable values are
-        ``skip_delta=-inf`` / ``bypass_delta=+inf``, and they must not acquire
-        a second form when a campaign binds a lower-is-better metric.
+    def test_sentinel_thresholds_stay_inert_under_either_direction(self, direction):
+        """Step 07 PR 07b — sentinel thresholds stay inert under either direction.
 
-        Under ``lower`` the resolver produces ``+inf`` for skip and ``-inf``
-        for bypass, which are that metric's worst and best values — so the
-        gates stay off. Left as raw addition, the skip threshold would resolve
-        to ``-inf``, which under ``lower`` is the BEST possible score, and the
-        gate would skip every formal round in the campaign.
+        Under ``lower`` infinite deltas resolve to ``+inf`` for skip and
+        ``-inf`` for bypass, that metric's worst and best values, so neither
+        gate fires. Left as raw addition, the skip threshold would resolve to
+        ``-inf``, the BEST possible score under ``lower``, and the gate would
+        skip every formal round. Launch refuses such deltas; this guards the
+        arithmetic itself.
         """
         order = ORDERS[direction]
         _, skip_t, bypass_t, _ = _resolve(

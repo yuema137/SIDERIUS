@@ -2053,9 +2053,11 @@ class HyperparamTuningInput(BaseModel):
             "1.0 unit worse than the current best formal score. Set to "
             "``0.0`` to skip formal whenever trial does not beat current "
             "best. Must be finite while ``enable_chain_incumbent_formal_gates`` "
-            "is on (``validate_formal_launch`` refuses inf/NaN). To switch both "
-            "formal gates off, pass ``--no-enable_chain_incumbent_formal_gates``; "
-            "there is no per-gate disable value."
+            "is on (``validate_formal_launch`` refuses inf/NaN); there is no "
+            "per-gate disable value. The chain-incumbent formal gates are off "
+            "by default; to keep them off, omit "
+            "``--enable_chain_incumbent_formal_gates`` (or set "
+            "``enable_chain_incumbent_formal_gates=false``)."
         ),
     )
     bypass_formal_time_budget_min_delta: float = Field(
@@ -2071,8 +2073,9 @@ class HyperparamTuningInput(BaseModel):
             "bypass the time gate whenever trial sets a new run best. "
             "Set to ``0.5`` to only bypass when trial beats current "
             "best by >= 0.5 units. Must be finite while the chain-incumbent "
-            "gates are on; switch both gates off with "
-            "``--no-enable_chain_incumbent_formal_gates``."
+            "gates are on. The gates are off by default; to keep them off, "
+            "omit ``--enable_chain_incumbent_formal_gates`` (or set "
+            "``enable_chain_incumbent_formal_gates=false``)."
         ),
     )
 
