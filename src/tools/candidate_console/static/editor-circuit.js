@@ -417,7 +417,13 @@
     });
     const input = holding.find(element => element.classList.contains('compatible')) || holding[0] ||
       document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-input]');
-    if (input && host.contains(input)) input.click();
+    if (!input || !host.contains(input)) return;
+    input.click();
+    // The release ends the drag: the browser's own click that follows (on the common ancestor
+    // of press and release) must not act on the canvas again.
+    const swallow = click => { click.stopPropagation(); click.preventDefault(); };
+    document.addEventListener('click', swallow, {capture: true, once: true});
+    setTimeout(() => document.removeEventListener('click', swallow, {capture: true}), 0);
   });
   document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Connection selection cancelled.'); } });
   document.addEventListener('pointermove', event => {

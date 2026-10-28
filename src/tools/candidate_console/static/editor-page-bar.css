@@ -79,8 +79,14 @@ button[data-icon] { justify-content: center; }
   .editor-workspace > .workflow-canvas-panel > h2 { position: static; }
   .workflow-canvas-panel > #editor-graph { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto auto minmax(0, 1fr) auto auto; column-gap: var(--space-3); }
-  #editor-graph > .circuit-message { grid-column: 1 / -1; grid-row: 1; }
-  #editor-graph > .circuit-disconnect { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  /* The rows above the viewport never change height while you work: a status message is
+   * always two lines (longer text is clipped; the full text stays in the DOM for assistive
+   * tech), and Disconnect shares that row. Otherwise a new message would move every port
+   * under the pointer in the middle of a drag. */
+  #editor-graph > .circuit-message { grid-column: 1 / -1; grid-row: 1; box-sizing: content-box; height: 2.8em; margin: 0 0 var(--space-2); line-height: 1.4; overflow: hidden;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  #editor-graph > .circuit-disconnect { grid-column: 1 / -1; grid-row: 1; justify-self: end; align-self: start; margin: 0; min-height: 32px; padding: 0 var(--space-3); }
+  #editor-graph:has(> .circuit-disconnect:not([hidden])) > .circuit-message { padding-right: 260px; }
   #editor-graph > .circuit-viewport { grid-column: 1 / -1; grid-row: 3; height: auto; min-height: 0; max-height: none; }
   /* Canvas controls bottom-right, the connector legend bottom-left (canvas-study V2, K14). */
   #editor-graph > .circuit-contract-legend { grid-column: 1; grid-row: 4; margin: var(--space-2) 0 0; min-width: 0; }

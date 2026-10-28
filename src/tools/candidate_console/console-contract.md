@@ -1067,7 +1067,10 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   a toolbar icon) with `pointer-events: none`; only `.circuit-wire-target` strokes take
   pointer hits, so cards and ports stay hoverable and wires stay clickable. A drag
   released over an input binds the input whose own box holds the release point,
-  preferring a highlighted (compatible) one; contract pills are clipped to their port. Below 900 px the panels keep
+  preferring a highlighted (compatible) one, then swallows the browser's own click that
+  follows the release; contract pills are clipped to their port. Rows above the viewport
+  have a fixed height (the status message is always two clipped lines and Disconnect
+  shares its row), so a new message never moves the ports under the pointer mid-drag. Below 900 px the panels keep
   their natural height (no `--workspace-height`). **Tidy up** (`#circuit-tidy`,
   `layout-grid`) places every module with `editorCircuitGeometry.tidy`: columns by
   longest result-input path from a source, rows by the mean row of the sources (ties
