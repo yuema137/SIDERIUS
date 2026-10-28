@@ -76,7 +76,9 @@ def test_template_keeps_project_task_and_passes_preparation_roles(template_id):
 @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
 def test_template_shapes_carry_no_scientific_values(template_id):
     """Fails if a template ships advice, output-type restrictions or training values,
-    which would become an implicit scientific default for every task."""
+    which would become an implicit scientific default for every task. The one declared
+    pair is the launch policy (record-only, diagnostic): without it every template run
+    fails at training admission (L-1), and it claims no scientific standing."""
     shape = template_document(template_id)
     options = shape.preparation_options
     assert (options.proposal_advice, options.implementation_advice, options.validation_advice) == (
@@ -85,7 +87,9 @@ def test_template_shapes_carry_no_scientific_values(template_id):
         None,
     )
     assert options.allowed_output_types is None
-    assert shape.training_settings == {}
+    assert shape.training_settings == {
+        "launch": {"healthgate_mode": "observe_only", "result_authority": "diagnostic"}
+    }
     assert shape.task_binding is None
 
 
@@ -122,7 +126,13 @@ def test_advice_targets_render_into_their_owning_fields():
     )
     assert isinstance(rendered, ReusableWorkflowDocument)
     assert rendered.preparation_options.proposal_advice == "advice for proposal"
-    assert rendered.training_settings == {"launch": {"human_advice_tune": "advice for tuning"}}
+    assert rendered.training_settings == {
+        "launch": {
+            "healthgate_mode": "observe_only",
+            "result_authority": "diagnostic",
+            "human_advice_tune": "advice for tuning",
+        }
+    }
 
 
 @pytest.fixture

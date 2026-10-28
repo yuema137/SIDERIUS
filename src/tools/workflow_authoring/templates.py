@@ -41,6 +41,16 @@ from workflows.definition import (
 )
 
 TemplateId = Literal["single-research-loop", "single-loop-with-advice", "single-step"]
+
+# Every template contains Train & tune, whose launch policy has no default
+# (execute_tools.health_checks.launch_policy). Templates declare it visibly in the
+# authored source as record-only Health checks with diagnostic standing: the same pair
+# as examples/workflow_declarations/reusable_training.py. This claims no scientific
+# standing; the author may change both in the Train & tune inspector.
+DECLARED_LAUNCH_POLICY: dict[str, str] = {
+    "healthgate_mode": "observe_only",
+    "result_authority": "diagnostic",
+}
 # The smallest valid loop bound, as for a one-click added loop (loop.py): an
 # imported loop costs no more than one body until the author raises it.
 TEMPLATE_FINAL_ITERATION = 1
@@ -232,8 +242,9 @@ def _research_loop(with_advice: bool) -> ReusableWorkflowDocument:
         ),
         positions=_positions("interpret", "propose", "implement", "validate", "train"),
         execution_profile="native-interpretation-candidate/v1",
-        # Native launch defaults apply until the author edits a training control.
-        training_settings={},
+        # Native launch defaults apply until the author edits a training control; only the
+        # launch policy pair is declared, because training admission has no default for it.
+        training_settings={"launch": dict(DECLARED_LAUNCH_POLICY)},
     )
 
 
@@ -277,7 +288,7 @@ def _single_step() -> ReusableWorkflowDocument:
             ),
         ),
         positions=_positions("propose", "implement", "validate", "train"),
-        training_settings={},
+        training_settings={"launch": dict(DECLARED_LAUNCH_POLICY)},
     )
 
 

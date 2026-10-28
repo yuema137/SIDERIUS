@@ -315,7 +315,13 @@ endpoints and `final_iteration`, all derived from the template document);
 unsaved `source`); `GET /api/editor/advice-targets` -> `AdviceTargets`.
 
 Templates are reusable v2 shapes with no task, data, advice, output-type or
-training values (`training_settings={}`: native launch defaults apply):
+training values except the launch policy pair, which training admission requires
+and has no default for: `training_settings={"launch": DECLARED_LAUNCH_POLICY}` =
+`healthgate_mode="observe_only"`, `result_authority="diagnostic"` (record-only Health
+checks, diagnostic standing, the pair in `examples/workflow_declarations/
+reusable_training.py`). It is written visibly in the rendered source, claims no
+scientific standing and is editable in the Train & tune inspector; all other launch
+values stay native defaults:
 
 | id | Shape | Profile |
 | --- | --- | --- |
