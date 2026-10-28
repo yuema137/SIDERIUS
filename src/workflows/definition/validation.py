@@ -17,8 +17,7 @@ if TYPE_CHECKING:
 
 
 def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefinition") -> None:
-    facts = predecessor_facts(definition)
-    validate_routes(definition, facts, topological_order(dict(facts)))
+    facts, order = dependency_graph(definition)
     if definition.loop is not None:
         nodes = {node.id: node for node in definition.nodes}
         feedback = definition.loop.feedback
@@ -31,6 +30,8 @@ def validate_definition(definition: "WorkflowDefinition | ReusableWorkflowDefini
         ):
             raise ValueError("loop feedback requires declared tuning and interpretation nodes")
         validate_stop_conditions(definition.loop)
+    # Routes are checked after loop node existence, so their errors never mask it.
+    validate_routes(definition, facts, order)
 
 
 def validate_stop_conditions(loop: "AuthoredLoop") -> None:
@@ -52,6 +53,13 @@ def predecessor_facts(
     definition: "WorkflowDefinition | ReusableWorkflowDefinition",
 ) -> tuple[tuple[str, frozenset[str]], ...]:
     """Validate every argument and return immutable scheduling dependencies."""
+    return dependency_graph(definition)[0]
+
+
+def dependency_graph(
+    definition: "WorkflowDefinition | ReusableWorkflowDefinition",
+) -> tuple[tuple[tuple[str, frozenset[str]], ...], tuple[str, ...]]:
+    """Validated dependencies (data and route control edges) and one topological order."""
     from .models import ExternalRequest, ExternalSource, SelectedSource
 
     externals = {item.id: item for item in definition.externals}
@@ -130,8 +138,8 @@ def predecessor_facts(
                 raise ValueError(f"route {branch.id}: Unknown route node")
             dependencies[target].add(branch.source.node)
 
-    topological_order(dependencies)
-    return tuple((node, frozenset(sources)) for node, sources in dependencies.items())
+    order = topological_order(dependencies)
+    return tuple((node, frozenset(sources)) for node, sources in dependencies.items()), order
 
 
 def topological_order(dependencies: Mapping[str, Set[str]]) -> tuple[str, ...]:

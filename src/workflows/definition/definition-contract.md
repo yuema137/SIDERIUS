@@ -210,9 +210,12 @@ the source passes through one of that entry's targets. Validation refuses:
   a branch whose source lies inside an arm);
 - a node that depends on two arms of one branch except through a merge;
 - a `SelectedSource(branch, candidates=(ResultSource, ...))` merge argument whose branch
-  is unknown, whose candidates (at least 2) do not share the argument's output contract,
-  do not lie one in each arm that can run (every case plus the default when present), or
-  whose consumer lies inside one of that branch's arms;
+  is unknown or has no `default` (otherwise no arm might run and the merge would starve),
+  whose candidates (at least 2) do not share the argument's output contract, or do not lie
+  one in each arm (every case plus the default). Full coverage places the consumer outside
+  every arm;
+- a merge consumer that also depends on an arm of the branch it merges through another
+  data or control edge;
 - with a `loop`, any arm containing the loop feedback source or any of its predecessors,
   including merge candidates (decision Q5(a); conservative in v1).
 

@@ -244,6 +244,21 @@ def _both_arms_without_merge(payload) -> None:
     )
 
 
+def _merge_consumer_guarded_by_arm(payload) -> None:
+    payload["routes"].append(
+        {
+            "id": "inner",
+            "source": {"kind": "result", "node": "vx", "port": "result"},
+            "cases": [
+                {
+                    "when": {"kind": "bool_is", "observable": "validation.passed", "value": True},
+                    "targets": ["tune"],
+                }
+            ],
+        }
+    )
+
+
 @pytest.mark.parametrize(
     "change,match",
     [
@@ -286,8 +301,10 @@ def _both_arms_without_merge(payload) -> None:
         (lambda p: _merge(p)["candidates"][1].update(node="v"), "every branch arm"),
         (lambda p: _merge(p)["candidates"][1].update(node="ix"), "differ in contract"),
         (lambda p: _merge(p)["candidates"].append(_merge(p)["candidates"][0]), "every branch arm"),
-        # Without the default, tune is reached only through arm x: it cannot merge it.
-        (lambda p: p["routes"][0].pop("default"), "outside its branch arms"),
+        # Without a default no arm may run, starving the merge.
+        (lambda p: p["routes"][0].pop("default"), "requires a default arm"),
+        # The merge consumer is also guarded from inside arm x.
+        (_merge_consumer_guarded_by_arm, "also depends on one arm it merges"),
         # A plain (non-merge) dependency on both arms of one branch.
         (_both_arms_without_merge, "two exclusive arms without a merge"),
     ],
@@ -339,6 +356,29 @@ def loop_definition(target: str) -> WorkflowDefinition:
             ),
         ),
     )
+
+
+def test_unrouted_loop_with_unknown_feedback_source_keeps_its_validation_error():
+    """Route checks must not run first and turn the declared loop error into a KeyError."""
+    from workflows.definition import WorkflowSourceError
+
+    payload = loop_definition("audit").model_dump(mode="json")
+    del payload["routes"]
+    payload["loop"]["feedback"]["source"]["node"] = "ghost"
+    with pytest.raises(ValidationError, match="loop feedback requires declared tuning"):
+        WorkflowDefinition.model_validate_json(json.dumps(payload))
+    source = render_workflow_source(
+        WorkflowDocument(
+            definition=WorkflowDefinition.model_validate_json(
+                json.dumps(
+                    dict(payload, loop=loop_definition("audit").loop.model_dump(mode="json"))
+                )
+            )
+        )
+    )
+    with pytest.raises(WorkflowSourceError) as caught:
+        parse_workflow_source(source.replace("node='train'", "node='ghost'"))
+    assert caught.value.diagnostics[0].code == "validation"
 
 
 def test_routes_may_not_skip_the_loop_feedback_path():

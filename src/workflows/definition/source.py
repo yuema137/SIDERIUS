@@ -112,17 +112,25 @@ _OPTIONAL_CONSTRUCTORS = frozenset(
     }
 )
 # Fields omitted from canonical source when None or empty, matching serialization.
+# Keyed by (model, field) so a new model reusing a field name is never omitted by accident.
 _OMITTED_WHEN_NONE = frozenset(
     {
-        "training_settings",
-        "task_binding",
-        "execution_profile",
-        "literature_settings",
-        "loop",
-        "default",
+        (ReusableWorkflowDocument, "training_settings"),
+        (ReusableWorkflowDocument, "task_binding"),
+        (ReusableWorkflowDocument, "execution_profile"),
+        (ManagedCandidateBinding, "literature_settings"),
+        (WorkflowDefinition, "loop"),
+        (ReusableWorkflowDefinition, "loop"),
+        (Branch, "default"),
     }
 )
-_OMITTED_WHEN_EMPTY = frozenset({"stop_conditions", "routes"})
+_OMITTED_WHEN_EMPTY = frozenset(
+    {
+        (AuthoredLoop, "stop_conditions"),
+        (WorkflowDefinition, "routes"),
+        (ReusableWorkflowDefinition, "routes"),
+    }
+)
 _FIELD_NAMES = frozenset(name for model in _CONSTRUCTORS.values() for name in model.model_fields)
 
 
@@ -377,8 +385,8 @@ def _render_value(value: object, depth: int) -> str:
         fields = [
             f"{child_indent}{name}={_render_value(getattr(value, name), depth + 1)},"
             for name in type(value).model_fields
-            if not (name in _OMITTED_WHEN_NONE and getattr(value, name) is None)
-            and not (name in _OMITTED_WHEN_EMPTY and not getattr(value, name))
+            if not ((type(value), name) in _OMITTED_WHEN_NONE and getattr(value, name) is None)
+            and not ((type(value), name) in _OMITTED_WHEN_EMPTY and not getattr(value, name))
         ]
         return f"{type(value).__name__}(\n" + "\n".join(fields) + f"\n{indentation})"
     if isinstance(value, tuple):

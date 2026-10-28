@@ -69,7 +69,9 @@ def validate_routes(
             raise ValueError(f"route {branch.id}: a node may be one target of one branch")
         targeted |= flat
         arms[branch.id] = tuple(_arm(branch.source.node, entry, children) for entry in entries)
-    _check_merges(definition, arms)
+    _check_merges(definition, branches, arms)
+    if not definition.routes:
+        return
     _check_arm_dependencies(definition, arms, order)
     if definition.loop is not None:
         _check_loop(definition.loop, arms, dict(facts))
@@ -123,14 +125,22 @@ def _selected_sources(
                     yield node.id, argument.source
 
 
-def _check_merges(definition: WorkflowDefinition | ReusableWorkflowDefinition, arms: Arms) -> None:
-    """Each merge takes one candidate from every arm that can run, so it is never starved."""
+def _check_merges(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+    branches: dict[str, Branch],
+    arms: Arms,
+) -> None:
+    """A merged branch always runs one arm, and the merge takes one candidate from each.
+
+    Full coverage also places the consumer outside every arm: each candidate's arm
+    reaches it on a path that avoids the other arms' targets.
+    """
     for consumer, merge in _selected_sources(definition):
         branch_arms = arms.get(merge.branch)
         if branch_arms is None:
             raise ValueError(f"{consumer}: merge names an unknown branch")
-        if any(consumer in arm for arm in branch_arms):
-            raise ValueError(f"{consumer}: a merge consumer must lie outside its branch arms")
+        if branches[merge.branch].default is None:
+            raise ValueError(f"{consumer}: a merged branch requires a default arm")
         covered = [
             index
             for item in merge.candidates
@@ -172,6 +182,8 @@ def _check_arm_dependencies(
         }
         for source in plain[node]:
             current |= labels[source]
+        if {merge.branch for merge in merged[node]} & {branch for branch, _ in current}:
+            raise ValueError(f"{node}: a merge consumer also depends on one arm it merges")
         for merge in merged[node]:
             for item in merge.candidates:
                 current |= {label for label in labels[item.node] if label[0] != merge.branch}
@@ -186,7 +198,7 @@ def _check_loop(loop: AuthoredLoop, arms: Arms, dependencies: dict[str, frozense
     required = {loop.feedback.source.node}
     pending = [loop.feedback.source.node]
     while pending:
-        for source in dependencies[pending.pop()]:
+        for source in dependencies.get(pending.pop(), ()):
             if source not in required:
                 required.add(source)
                 pending.append(source)
