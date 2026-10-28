@@ -21,7 +21,9 @@ Per-node contracts (one module each): `interpretation.py`, `proposal.py` (+
 (`ModelIOContract` — the normalized forward contract), `training_diagnosis.py`,
 `score_table.py`, `storage.py` (`LocalStorageConfig` — the workspace/run_name
 namespace every node writes under), `ordering.py`, `vocab.py`,
-`health_feedback.py`, `run_metadata.py`, `telemetry/`.
+`health_feedback.py`, `run_metadata.py`, `telemetry/`, `judge.py` (LLM judge
+request/verdict/evidence records; see the
+[judge contract](../judge/judge-contract.md)).
 
 `output_types.py` owns the lightweight `OutputTypeName` vocabulary used by
 proposal/implementor schemas, launch config, CLI and plugin loading.
