@@ -205,7 +205,7 @@ try {
     let body;
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(path)) body = [];
     else if (path === '/api/operations') body = {operations: [], unreadable: 0, examined: 0, incomplete: false};
-    else if (path === '/api/choices') body = [{task_id: 'synthetic', label: 'Synthetic theme fixture', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300}];
+    else if (path === '/api/choices') body = {operations_store_id: '0123456789abcdef0123456789abcdef', tasks: [{task_id: 'synthetic', label: 'Synthetic theme fixture', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300}]};
     else if (path.endsWith('/tokens')) {
       if (tokenError) return route.fulfill({status: 409, json: {error: {code: 'integrity', message: 'Synthetic token read error'}}});
       body = {run_id: operation, availability: 'available', reason: 'reported_responses', quality: {partial: true}, observed_at: 'fixture', groups: [{provider: 'fixture', requested_model: 'offline', served_model: null, response_rows: 1, reported_input_tokens: 12, reported_output_tokens: null, reported_total_tokens: null, missing_input_rows: 0, missing_output_rows: 1, missing_total_rows: 1}]};

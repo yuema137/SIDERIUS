@@ -50,7 +50,8 @@ try {
       if (failEditor) return reply({error: {message: 'Fixture project unavailable'}}, 409);
       return route.continue();
     }
-    if (['/api/choices', '/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     assert.ok(url.pathname.startsWith('/api/operations/' + operation), 'URL UUID wins over remembered ID');
     if (unavailable) return reply({error: {message: 'Fixture unavailable operation'}}, 404);
@@ -61,7 +62,7 @@ try {
       offsets.push(offset); logReads.push({kind, offset});
       return reply({text: offset === 0 ? `${kind} stream\n` : '', next_offset: 73, observed_size: 73, truncated: false, missing: false});
     }
-    return reply({operation_id: operation, kind: 'candidate', state: 'running', observed_at: 'fixture observation', process: {status: 'alive'}, receipt_available: false});
+    return reply({operation_id: operation, kind: 'candidate', state: 'active', observed_at: 'fixture observation', process: {status: 'alive'}, receipt_available: false});
   });
   const connect = async () => {
     // Connected pages collapse the token form; reconnecting reopens it explicitly.
@@ -87,7 +88,7 @@ try {
   assert.equal(requests.some(item => item.path.startsWith('/api/editor') || item.path === '/api/choices'), false);
   assert.match(await page.locator('#monitor-status').textContent(), /unavailable/);
   unavailable = false;
-  await page.locator('#monitor-status').filter({hasText: 'State: running'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Run in progress.'}).waitFor();
   await waitUntil(() => offsets.includes(73));
   await page.getByText('Activity and logs', {exact: true}).click();
   assert.equal(await page.locator('#log').textContent(), 'native stream\n');
@@ -121,7 +122,9 @@ try {
   assert.equal(await page.locator('#log-kind').inputValue(), 'operation');
   assert.equal(await page.locator('#log').textContent(), 'operation stream\n');
   assert.equal(await page.evaluate(() => window.documentId), documentId);
-  assert.equal(await page.evaluate(() => window.pollTimers), 1);
+  // Monitor status poll, operation-list refresh, Run preparation and launch polls (each idle
+  // unless its condition holds); no reachability probe since the server stayed reachable.
+  assert.equal(await page.evaluate(() => window.pollTimers), 4);
   assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Monitor');
   assert.equal(await page.locator('#view-workflow').isHidden(), true);
   assert.equal(await page.evaluate(secret => document.body.textContent.includes(secret) || location.href.includes(secret) || JSON.stringify({...localStorage, ...sessionStorage}).includes(secret), metadata.token), false);
@@ -146,7 +149,7 @@ try {
   console.log('PASS: direct monitor, history, isolation, invalid route and reconnect witnesses');
   await page.locator('#operation-id').fill(operation);
   await page.locator('#monitor-button').click();
-  await page.locator('#monitor-status').filter({hasText: 'State: running'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Run in progress.'}).waitFor();
   assert.equal(new URL(page.url()).hash, '#monitor/' + operation, 'Valid form repairs an invalid route');
   // Initial editor project list in flight across reconnect: old 401 cannot revoke
   // the new session, and the new connection must load without another view change.

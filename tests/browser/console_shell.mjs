@@ -42,14 +42,18 @@ try {
   const page = await context.newPage(), faults = [], requests = [];
   page.on('pageerror', error => faults.push(error.message));
   const headline = score => ({best_exp_id: 'exp-1', best_score: score, best_formal_score: score, best_valid_exp_id: 'exp-1', best_valid_score: score, best_valid_formal_score: score});
+  let fault = null;
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url());
+    if (fault === 'down') return route.abort('connectionrefused');
+    if (fault === 'text500') return route.fulfill({status: 500, contentType: 'text/plain', body: 'Internal Server Error'});
     requests.push({path: url.pathname, search: url.search, method: request.method()});
     assert.equal(request.method(), 'GET', 'The shell never mutates');
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
     const reply = (json, status = 200) => route.fulfill({status, json});
     if (url.pathname.startsWith('/api/editor/')) return reply({error: {message: 'Fixture project unavailable'}}, 409);
-    if (['/api/choices', '/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') {
       assert.equal(url.searchParams.get('limit'), '50');
       return reply({operations: [
@@ -106,7 +110,7 @@ try {
   assert.ok(Math.abs((await left('#view-monitor .operations-panel')) - (await left('nav.actions a'))) <= 2, 'Monitor content aligns with nav');
   await items.nth(0).locator('a').click();
   assert.equal(new URL(page.url()).hash, '#monitor/' + loopRun);
-  await page.locator('#monitor-status').filter({hasText: 'State: completed · Native: completed'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Finished: the candidate passed validation.'}).waitFor();
   assert.equal(await page.locator('#operation-id').inputValue(), loopRun);
   assert.equal(await items.nth(0).locator('a').getAttribute('aria-current'), 'true');
 
@@ -119,6 +123,22 @@ try {
   assert.match(await score.getAttribute('title'), /0\.7999999999999999/);
   assert.ok(!(await panel.textContent()).includes('0.7999999999999999'), 'No unrounded score is displayed');
 
+  // E-6: a failed fetch turns the header chip to "Server unreachable"; the next success restores it.
+  fault = 'down';
+  // The selected operation is finished, so Monitor no longer polls it (M-5); any request
+  // that fails to reach the server flips the chip.
+  await page.evaluate(() => window.consoleSession.request('choices').catch(() => {}));
+  await page.locator('#access-status').filter({hasText: 'Server unreachable'}).waitFor();
+  assert.equal(await page.locator('#access-section').evaluate(el => el.classList.contains('access-unreachable')), true);
+  assert.equal(await page.locator('#token').isHidden(), true, 'Unreachable keeps the token and drafts; it is not a disconnect');
+  fault = null;
+  await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor({timeout: 8000});
+  // S-3/E-5: a non-JSON server error is a plain sentence, never a JavaScript parse error.
+  fault = 'text500';
+  const message = await page.evaluate(() => window.consoleSession.request('choices').catch(error => error.message));
+  fault = null;
+  assert.equal(message, 'Server error (500).');
+
   // Change token reopens the form; Disconnect returns to the full card.
   await page.locator('#access-change').click();
   assert.equal(await page.locator('#token').isVisible(), true);
@@ -128,10 +148,26 @@ try {
   assert.equal(await page.locator('#access-connected').isHidden(), true);
   assert.equal(await page.locator('#monitor-button').isDisabled(), true);
 
-  assert.equal(await page.evaluate(() => window.pollTimers), 1, 'No polling loop beyond the existing status poll');
+  assert.equal(await page.evaluate(() => window.pollTimers), 5, 'Monitor status poll, operation-list refresh, Run preparation and launch polls (idle without their condition), and one reachability probe');
   assert.equal(requests.filter(item => item.path === '/api/operations').length >= 1, true);
   assert.deepEqual(faults, []);
-  console.log('PASS: compact connection, operation list opens Status and logs, rounded scores, journey-first Home, aligned shell');
+  // SEC-4: "Forget this browser's console data" removes preferences and remembered ids,
+  // and keeps records that may belong to a still-running operation of another store.
+  const foreign = 'siderius.reusable-preparation.v2/ffffffffffffffffffffffffffffffff/other';
+  await page.evaluate(name => {
+    localStorage.setItem('siderius.console.theme', 'dark'); localStorage.setItem('siderius.operation_id', '12121212-1212-4212-8212-121212121212');
+    localStorage.setItem(name, '{}'); localStorage.setItem('siderius.loop-resume.v2/ffffffffffffffffffffffffffffffff/abc', '{}');
+  }, foreign);
+  await page.locator('nav a[href="#home"]').click(); // Monitor routes re-remember their UUID.
+  await page.locator('#settings-toggle').click();
+  assert.equal(await page.locator('#forget-browser-data').isEnabled(), true);
+  page.once('dialog', dialog => { assert.match(dialog.message(), /2 records that may belong to a still-running operation are kept/); void dialog.accept(); });
+  await Promise.all([page.waitForEvent('load'), page.locator('#forget-browser-data').click()]);
+  // The harness init script re-enables the view flags on every load; ignore those.
+  const remaining = await page.evaluate(() => Object.keys(localStorage).filter(name => name.startsWith('siderius.') && !name.startsWith('siderius.console.ui.')).sort());
+  assert.deepEqual(remaining, ['siderius.loop-resume.v2/ffffffffffffffffffffffffffffffff/abc', foreign].sort());
+  assert.deepEqual(faults, []);
+  console.log('PASS: compact connection, operation list opens Status and logs, rounded scores, journey-first Home, aligned shell, forget browser data');
 } finally {
   await browser?.close();
   server.kill();

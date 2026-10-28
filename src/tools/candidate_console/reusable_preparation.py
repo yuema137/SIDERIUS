@@ -21,7 +21,10 @@ from tools.candidate_prepare import (
 )
 from tools.workflow_authoring.versions import recorded_name
 from tools.workflow_preview.models import PreviewModel
+from workflows.definition import ReusableWorkflowDocument
 
+from .readiness import named_credential_readiness
+from .readiness_models import CredentialReadiness
 from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_policy import check_request_policy, configured_capture
 from .service import CandidateConsole
@@ -59,9 +62,40 @@ class NewRunReview(NewRunIntent):
     devices: tuple[str, ...]
     environment_names: tuple[str, ...]
     read_only: tuple[str, ...]
+    # Name-only precheck of the task's configured candidate environment names, read in
+    # this server process before Prepare. Provider-derived requirements are known only
+    # after preparation and are rechecked at capture review and again at launch.
+    credential_readiness: CredentialReadiness
     # Display-only Save name of expected_source_sha256; the SHA-256 stays the bound identity.
     source_version_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
     effects: str = "Prepare captures saved source and creates inputs; candidate launch is separate."
+
+
+def check_declared_launch_policy(document: ReusableWorkflowDocument) -> None:
+    """Refuse at review what training admission would refuse after launch (L-1).
+
+    Reads the declared ``healthgate_mode``/``result_authority`` from the same sparse
+    training payload preparation captures (``settings_payload``) and calls the launch
+    policy owner's declaration check. A workflow without authored training settings
+    has nothing to check here. Config-dependent refusals (4-6) stay at launch.
+    """
+    from execute_tools.health_checks.launch_policy import (
+        FormalLaunchPolicyError,
+        validate_declared_policy,
+    )
+    from tools.candidate_prepare.reusable_training import settings_payload
+    from workflows.candidate_training_settings import parse_training_settings
+
+    payload = settings_payload(document)
+    if payload is None:
+        return
+    launch = parse_training_settings(payload).launch
+    try:
+        validate_declared_policy(
+            healthgate_mode=launch.healthgate_mode, result_authority=launch.result_authority
+        )
+    except FormalLaunchPolicyError as error:
+        raise OperationFailure("launch_policy", str(error)) from error
 
 
 class ReusablePreparation:
@@ -94,6 +128,7 @@ class ReusablePreparation:
             check_request_policy(task, inspected.request)
             plan = preflight_reusable_candidate(request)
             check_request_policy(task, plan.binding.request)
+            check_declared_launch_policy(plan.document)
         except OperationFailure:
             raise
         except (ValueError, OSError) as error:
@@ -123,6 +158,9 @@ class ReusablePreparation:
             devices=native.candidate_devices,
             environment_names=native.candidate_environment_names,
             read_only=native.task_read_only,
+            credential_readiness=named_credential_readiness(
+                (), native.candidate_environment_names, self.console.config.credential_file
+            ),
             source_version_name=recorded_name(
                 project.source_file, selection.expected_source_sha256
             ),

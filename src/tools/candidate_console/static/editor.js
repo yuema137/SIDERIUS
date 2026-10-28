@@ -662,7 +662,8 @@
       if (!current(id, version)) return;
       if (hasSourceConflict(error) && error.value?.current) {
         showConflict(error.value.current);
-        diagnostic(error.value?.diagnostics); status(error.message); return;
+        // N-4: plain sentence; the conflict card below carries the detail.
+        diagnostic(error.value?.diagnostics); status('The file changed on disk since you opened it. Choose how to continue below.'); return;
       }
       const refused = error.value?.proposal;
       if (refused && ['source', 'task_references'].includes(proposal.kind)) fold(refused, label || foldLabel(proposal));

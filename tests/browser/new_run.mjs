@@ -131,7 +131,7 @@ try {
   assert.equal(await page.locator('#new-run-prepare').isDisabled(), true);
   await page.unroute('**/reusable-preparations/review');
   await page.locator('#new-run-task').selectOption('synthetic');
-  await page.locator('#new-run-review').click(); await page.locator('#new-run-status').filter({hasText: 'Preparation reviewed'}).waitFor();
+  await page.locator('#new-run-review').click(); await page.locator('#new-run-status').filter({hasText: 'Inputs checked'}).waitFor();
   // Saved-source and connection revisions independently fence delayed reviews.
   for (const change of ['source', 'session']) {
     let releaseDelayed, delayed = false;
@@ -155,12 +155,17 @@ try {
     assert.equal(await page.locator('#new-run-prepare').isDisabled(), true, change + ' must invalidate old review');
     await page.unroute('**/reusable-preparations/review');
     await page.locator('#new-run-review').click();
-    await page.locator('#new-run-status').filter({hasText: 'Preparation reviewed'}).waitFor();
+    await page.locator('#new-run-status').filter({hasText: 'Inputs checked'}).waitFor();
   }
   const previewText = await page.locator('#new-run-details').textContent();
   assert.ok(previewText.includes('Saved source version verified'));
+  // R-5: the name-only credential precheck is shown before Prepare, read by the server.
+  assert.equal(await page.locator('#new-run-credentials').isVisible(), true);
+  assert.match(await page.locator('#new-run-credentials').textContent(), /Credentials|No credentials/);
   // An unrelated unresolved candidate survives editing and blocks preparation.
-  const candidateKey = 'siderius.reusable-candidate.v1';
+  // Intents are keyed by operations store and project (R-3), never per origin.
+  const candidateKey = await page.evaluate(() => window.reusableIntents.key('candidate'));
+  assert.match(candidateKey, /^siderius\.reusable-candidate\.v2\/[0-9a-f]{32}\/capture$/);
   const syntheticCandidate = {version: 1, origin, project: 'capture', payload: {
     selection: {task_id: 'synthetic', run_id: '11111111-1111-4111-8111-111111111111', preparation: {envelope: '/retained/capture', expected_receipt_sha256: 'a'.repeat(64)}},
     expected_request_digest: 'b'.repeat(64), candidate_operation_id: '22222222-2222-4222-8222-222222222222'
@@ -174,7 +179,7 @@ try {
   assert.deepEqual(await page.evaluate(key => JSON.parse(localStorage.getItem(key)), candidateKey), syntheticCandidate);
   await page.evaluate(key => {localStorage.removeItem(key); window.dispatchEvent(new StorageEvent('storage', {key}));}, candidateKey);
   await page.locator('#new-run-review').click();
-  await page.locator('#new-run-status').filter({hasText: 'Preparation reviewed'}).waitFor();
+  await page.locator('#new-run-status').filter({hasText: 'Inputs checked'}).waitFor();
   // A live pre-submit refusal can be explicitly discarded, without a native effect.
   await page.route('**/reusable-preparations/prepare', route => route.fulfill({status: 409, json: {error: {code: 'task_policy', message: 'fixture initial refusal', admission_not_attempted: true}}}));
   await page.locator('#new-run-prepare').click();
@@ -183,49 +188,82 @@ try {
   await page.locator('#new-run-dismiss').click();
   await page.unroute('**/reusable-preparations/prepare');
   await page.locator('#new-run-review').click();
-  await page.locator('#new-run-status').filter({hasText: 'Preparation reviewed'}).waitFor();
+  await page.locator('#new-run-status').filter({hasText: 'Inputs checked'}).waitFor();
   // Storage failure cannot send preparation, and does not affect the candidate key.
-  await page.evaluate(() => {window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {if (key === 'siderius.reusable-preparation.v1') throw Error('fixture storage failure'); return window.originalSetItem.call(this, key, value);};});
+  await page.evaluate(() => {window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {if (key.startsWith('siderius.reusable-preparation.v2/')) throw Error('fixture storage failure'); return window.originalSetItem.call(this, key, value);};});
   const before = requests.length; await page.locator('#new-run-prepare').click();
   await page.locator('#new-run-status').filter({hasText: 'Prepare not sent'}).waitFor(); assert.equal(requests.length, before);
   await page.evaluate(() => {Storage.prototype.setItem = window.originalSetItem;});
   let admitted, dropped = false;
   await page.route('**/reusable-preparations/prepare', async route => {
-    const retained = await page.evaluate(() => JSON.parse(localStorage.getItem('siderius.reusable-preparation.v1')));
+    const retained = await page.evaluate(() => JSON.parse(localStorage.getItem(window.reusableIntents.key('preparation'))));
     assert.deepEqual(JSON.parse(route.request().postData()), retained.payload);
     const response = await route.fetch(); assert.equal(response.status(), 202); admitted = await response.json(); dropped = true; await route.abort('failed');
   });
   await page.locator('#new-run-prepare').click(); await until(() => dropped);
-  const retained = await page.evaluate(() => localStorage.getItem('siderius.reusable-preparation.v1'));
+  const retained = await page.evaluate(() => localStorage.getItem(window.reusableIntents.key('preparation')));
   const selection = JSON.parse(retained).payload.selection;
   await page.unroute('**/reusable-preparations/prepare');
+  // Status reads are stubbed across the reload so the restored-intent rules are exercised
+  // deterministically; the page itself checks status without any click.
+  let statusFixture = {status: 404, json: {error: {code: 'not_found', message: 'fixture missing'}}};
+  await page.route('**/api/operations/' + admitted.operation_id, route => statusFixture ? route.fulfill(statusFixture) : route.continue());
   await page.reload(); await connect();
-  await page.locator('#new-run-check').waitFor();
-  // A restored request cannot become discardable through a later refusal or 404.
+  await page.locator('#new-run-operation-status').filter({hasText: 'Keep it'}).waitFor();
+  // B8-2: the store's `unknown` state before the worker records its outcome is not a
+  // finished preparation; it reads as preparing or checking, never "start over".
+  const unknownStatus = reason => ({status: 200, json: {operation_id: admitted.operation_id, kind: 'prepare_reusable',
+    request_digest: JSON.parse(retained).payload.expectation.request_digest, observed_at: 'fixture', state: 'unknown',
+    process: {status: 'unknown', reason}, finishing: false, receipt_available: false, native_status: null, native_id: null,
+    validation_passed: null, reason: 'outcome_unresolved'}});
+  statusFixture = unknownStatus('missing_identity');
+  await page.locator('#new-run-operation-status').filter({hasText: 'Preparing…'}).waitFor();
+  statusFixture = unknownStatus('process_gone');
+  await page.locator('#new-run-operation-status').filter({hasText: 'Checking status…'}).waitFor();
+  assert.doesNotMatch(await page.locator('#new-run-operation-status').textContent(), /finished without|start over/i);
+  statusFixture = {status: 404, json: {error: {code: 'not_found', message: 'fixture missing'}}};
+  await page.locator('#new-run-operation-status').filter({hasText: 'Keep it'}).waitFor();
+  // A restored request cannot become discardable through a later refusal or plain 404.
   await page.route('**/reusable-preparations/prepare', route => route.fulfill({status: 409, json: {error: {message: 'fixture restored refusal', admission_not_attempted: true}}}));
   await page.locator('#new-run-retry').click();
-  await page.locator('#new-run-operation-status').filter({hasText: 'Outcome unresolved'}).waitFor();
+  await page.locator('#new-run-operation-status').filter({hasText: 'outcome is unconfirmed'}).waitFor();
   assert.equal(await page.locator('#new-run-dismiss').isDisabled(), true);
   await page.unroute('**/reusable-preparations/prepare');
-  await page.route('**/api/operations/' + admitted.operation_id, route => route.fulfill({status: 404, json: {error: {message: 'fixture missing'}}}));
-  await page.locator('#new-run-check').click();
-  await page.locator('#new-run-operation-status').filter({hasText: 'absence does not'}).waitFor();
-  assert.equal(await page.locator('#new-run-dismiss').isDisabled(), true);
-  await page.unroute('**/api/operations/' + admitted.operation_id);
-
-  await until(async () => {await page.locator('#new-run-check').click(); return (await page.locator('#new-run-operation-status').textContent()).includes('Native prepared');}, 90000);
-  const envelope = join(root, 'runs', selection.run_id);
-  assert.deepEqual(await readFile(join(envelope, 'workflow.py.snapshot')), saved);
-  const {access, readdir} = await import('node:fs/promises');
-  await assert.rejects(access(join(envelope, 'workspace')), 'Preparation must not launch candidate');
-  assert.equal((await readdir(join(metadata.state, 'operations'))).length, 1);
+  await page.locator('#new-run-operation-status').filter({hasText: 'Keep it'}).waitFor();
+  assert.equal(await page.locator('#new-run-dismiss').isDisabled(), true, 'not_found never proves absence');
+  // SEC-4: browser data cannot be forgotten while this project's run is unconfirmed.
+  assert.equal(await page.locator('#forget-browser-data').isDisabled(), true);
+  // A typed unknown_operation after this page's Retry offers Forget (R-3), and stops polling.
+  statusFixture = {status: 404, json: {error: {code: 'unknown_operation', message: 'fixture unknown'}}};
+  // L-5: one unknown read is not enough; a second read at least 5 s later is required.
+  await page.locator('#new-run-operation-status').filter({hasText: 'Checking once more'}).waitFor();
+  assert.equal(await page.locator('#new-run-dismiss').isHidden(), true, 'No Forget after a single unknown read');
+  await page.locator('#new-run-operation-status').filter({hasText: 'still has no record'}).waitFor();
+  assert.equal(await page.locator('#new-run-dismiss').textContent(), 'Forget this operation');
+  assert.equal(await page.locator('#new-run-dismiss').isEnabled(), true);
+  assert.equal(await page.locator('#new-run-retry').isVisible(), true, 'Retry stays offered beside Forget');
+  statusFixture = null;
   // Exact recovery after live removal of original source and credential; no second operation.
+  const {access, readdir} = await import('node:fs/promises');
   await rename(metadata.source, metadata.source + '.saved'); await rename(metadata.credential, metadata.credential + '.saved');
-  await page.locator('#new-run-retry').click(); await page.locator('#new-run-operation-status').filter({hasText: 'existing'}).waitFor();
+  await page.locator('#new-run-retry').click(); await page.locator('#new-run-operation-status').filter({hasText: 'already exists'}).waitFor();
   assert.equal((await readdir(join(metadata.state, 'operations'))).length, 1);
   await rename(metadata.source + '.saved', metadata.source); await rename(metadata.credential + '.saved', metadata.credential);
-  await page.locator('#new-run-check').click(); await page.locator('#new-run-open').waitFor();
+  // R-1: the status advances by itself; no "Check status" click anywhere below.
+  await page.locator('#new-run-operation-status').filter({hasText: 'Prepared.'}).waitFor({timeout: 90000});
+  assert.equal(await page.locator('#new-run-dismiss').isVisible(), true);
+  assert.equal(await page.locator('#new-run-dismiss').textContent(), 'Start over', 'Forget is never offered for a known, finished operation');
+  const envelope = join(root, 'runs', selection.run_id);
+  assert.deepEqual(await readFile(join(envelope, 'workflow.py.snapshot')), saved);
+  await assert.rejects(access(join(envelope, 'workspace')), 'Preparation must not launch candidate');
+  assert.equal((await readdir(join(metadata.state, 'operations'))).length, 1);
+  // R-2 (and the red team's restart observation): after a reload the finished preparation
+  // is observed without a click, so Open is enabled and no stale "starting" text remains.
+  await page.reload(); await connect(); await view('run');
   await until(() => page.locator('#new-run-open').isEnabled());
+  assert.doesNotMatch(await page.locator('#new-run-operation-status').textContent(), /starting|Checking/);
+  await page.screenshot({path: join(evidence, 'run-prepared-after-reload.png'), fullPage: true});
+  await page.locator('#capture-earlier').evaluate(el => {el.open = true;});
   // A delayed old capture-list reply cannot reset the explicit handoff selection.
   await page.locator('#capture-task').selectOption('synthetic');
   await page.locator('#capture-run option[value="' + selection.run_id + '"]').waitFor({state: 'attached'});
@@ -276,17 +314,22 @@ try {
   assert.equal(await page.locator('#capture-run').inputValue(), selection.run_id);
   await rename(metadata.credential, metadata.credential + '.saved');
   await page.locator('#capture-review').click();
-  await page.locator('#capture-status').filter({hasText: 'Capture reviewed'}).waitFor();
+  await page.locator('#capture-status').filter({hasText: 'Cannot launch yet'}).waitFor();
   assert.equal(await page.locator('#capture-launch').isDisabled(), true, 'Preparation does not imply credential readiness');
+  // R-5: a missing file is named as missing, with the missing names (never values).
+  assert.match(await page.locator('#capture-credentials').textContent(), /missing .*does not exist/);
+  assert.match(await page.locator('#capture-launch-reason').textContent(), /Cannot launch: credentials/);
   await rename(metadata.credential + '.saved', metadata.credential);
-  await page.locator('#capture-review').click(); await page.locator('#capture-status').filter({hasText: 'Capture reviewed'}).waitFor();
-  await until(async () => { await page.locator('#new-run-check').click(); return page.locator('#capture-launch').isEnabled(); });
+  await page.locator('#capture-review').click(); await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
+  await until(() => page.locator('#capture-launch').isEnabled());
   await page.locator('#capture-launch').click();
   await delay(500);
   assert.ok(!(await page.locator('#capture-operation-status').textContent()).includes('admission'), await page.locator('#capture-operation-status').textContent());
-  await until(async () => {await page.locator('#capture-check').click(); return (await page.locator('#capture-operation-status').textContent()).includes(training ? 'Native completed' : 'Native accepted');}, 90000);
+  await page.locator('#capture-operation-status').filter({hasText: /Finished/}).waitFor({timeout: 90000});
+  assert.match(await page.locator('#capture-operation-status').textContent(), /passed validation/);
+  assert.equal(await page.locator('#run-stepper [aria-current="step"]').getAttribute('data-run-step'), 'follow');
   assert.equal((await readdir(join(metadata.state, 'operations'))).length, 2);
-  assert.equal(await page.evaluate(() => localStorage.getItem('siderius.reusable-preparation.v1')), retained);
+  assert.equal(await page.evaluate(() => localStorage.getItem(window.reusableIntents.key('preparation'))), retained);
   await page.screenshot({path: join(evidence, 'new-run-completed.png'), fullPage: true});
   if (training) {
     const observed = JSON.parse(await readFile(join(envelope, 'workspace/candidate_run/offline_training_observed.json')));
@@ -319,7 +362,7 @@ try {
       c.observe(kind, exact, {...status, state: 'operation_failed', reason: 'spawn_failed'}); results.push(c.dismissible(kind, exact));
       const replacement = structuredClone(exact);
       if (kind === 'candidate') replacement.payload.candidate_operation_id = crypto.randomUUID(); else replacement.payload.selection.preparation_operation_id = crypto.randomUUID();
-      const key = 'siderius.reusable-' + kind + '.v1';
+      const key = c.key(kind);
       localStorage.setItem(key, JSON.stringify(replacement));
       results.push(!c.same(kind, exact), !c.observe(kind, exact, {...status, process: {status: 'exited'}}));
       try {c.dismiss(kind, exact); results.push(false);} catch {results.push(localStorage.getItem(key) === JSON.stringify(replacement));}

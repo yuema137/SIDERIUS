@@ -329,6 +329,17 @@ class OperationFailure(ValueError):
         super().__init__(message)
 
 
+class UnknownOperation(OperationFailure):
+    """The store's operations directory was read and holds no entry for this UUID.
+
+    Distinct from a missing file inside an admitted operation (``FileNotFoundError``),
+    which never establishes that the operation is absent.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("unknown_operation", "this operation store has no operation with this ID")
+
+
 class PreparedCandidate(PreviewModel):
     prepare_operation_id: UUID
     preparation_request: CandidatePreparationRequest

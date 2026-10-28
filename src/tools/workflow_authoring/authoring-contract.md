@@ -285,6 +285,17 @@ declares a `default` key, so a declared `null` default (shown as "Schema default
 null") is distinct from an absent default (no default line). Other keys the schema
 does not declare stay `null` and are not shown.
 `effective` remains the resolved native value for the document.
+`TrainingInspector.policy` (`TrainingChoiceControl`, `policy_controls`) projects the two
+required launch choices training admission has no default for: **Health checks**
+(`healthgate_mode`: Record only = `observe_only`, Block on failure = `blocking`) and
+**Result standing** (`result_authority`: Diagnostic = `diagnostic`, Scientific =
+`scientific`), each with a one-line plain explanation. Option values come from the
+native `HealthGateMode`/`ResultAuthority` Literals; `value` is the authored key or
+`null` when unset or not a native value. The browser renders them as
+`#editor-training-policy` above the training settings: choosing writes the authored
+key, "Choose…" removes it, and an unset choice is marked on the field ("Required:
+choose one. A run cannot start without it."). Save stays allowed; the console's
+preparation review refuses the run with the launch-policy owner's message.
 Nested workflow parameter rules are read-only in the inspector and editable in
 Source; untouched rules and advanced fields survive edits. Task rules are resolved
 later by native owners. All controls participate in the existing source-dirty,
@@ -342,7 +353,13 @@ endpoints and `final_iteration`, all derived from the template document);
 unsaved `source`); `GET /api/editor/advice-targets` -> `AdviceTargets`.
 
 Templates are reusable v2 shapes with no task, data, advice, output-type or
-training values (`training_settings={}`: native launch defaults apply):
+training values except the launch policy pair, which training admission requires
+and has no default for: `training_settings={"launch": DECLARED_LAUNCH_POLICY}` =
+`healthgate_mode="observe_only"`, `result_authority="diagnostic"` (record-only Health
+checks, diagnostic standing, the pair in `examples/workflow_declarations/
+reusable_training.py`). It is written visibly in the rendered source, claims no
+scientific standing and is editable in the Train & tune inspector; all other launch
+values stay native defaults:
 
 | id | Shape | Profile |
 | --- | --- | --- |
