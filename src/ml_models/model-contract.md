@@ -90,6 +90,11 @@ prompts.
   read. Do not treat the 256 as a framework constant.
 - Which plugin dirs a run uses → the workflow / `core/subprocess_env.py`.
 - Training/inference execution → `execute_tools/` engines.
+- RNG seeding → the trainer. It seeds Python, NumPy and torch from the
+  run's `TrainingSeedPlan` before it constructs the model, so weight
+  initialization and dropout inside a model or plugin `__init__`/`forward`
+  draw from seeded process generators. A model must not reseed them
+  ([seeding mechanism](../../docs/agent-reference/mechanisms/seeding.md)).
 
 ## Extension points
 

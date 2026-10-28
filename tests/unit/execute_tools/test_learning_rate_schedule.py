@@ -5,6 +5,7 @@ import torch
 from pydantic import ValidationError
 from torch.utils.data import DataLoader
 
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.dataset_config import bind_dataset_profile
 from execute_tools.learning_rate_schedule import build_epoch_lr_controller
 from execute_tools.task_data_path import EvalMaterializationParams, bind_task_data_path
@@ -129,7 +130,7 @@ def test_actual_cpu_paths_record_completed_epoch_rates(
                 data_dir=fx.data_dir,
                 sandbox_dirs=_sandbox(tmp_path, "run"),
                 exp_id="run",
-                train_base_seed=123,
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=123)),
                 profile=fx.profile,
                 **data_path.scope_kwargs(fx.full_sample_set(), None),
             )
@@ -257,7 +258,7 @@ def test_scheduled_zero_step_attempt_does_not_publish_history(tmp_path, streamin
                 data_dir=str(tmp_path),
                 sandbox_dirs=dirs,
                 exp_id="empty",
-                train_base_seed=42,
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
                 profile=PAIR_PROFILE,
             )
         else:
