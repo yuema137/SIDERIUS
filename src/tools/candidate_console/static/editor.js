@@ -102,7 +102,7 @@
     cancelDraftButton.hidden = !bindingDraft || bindingDraftConflict;
     cancelDraftButton.disabled = !connected || saving;
     renderTaskControls();
-    window.editorCircuit?.setEnabled(canEditCircuit());
+    window.editorCircuit?.setEnabled(canEditCircuit(), canSelectNode());
     window.editorLoopControls?.setEnabled($('loop'), canEditLoop());
   }
   function invalidate() {
@@ -160,7 +160,8 @@
     $('inspect').hidden = !!graph;
     status(graph ? 'Opened supported declaration. References remain literal.' : 'Unsupported source is read-only. Repair externally, then refresh.');
   }
-  const canEditCircuit = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict && !draftsPending();
+  const canSelectNode = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict;
+  const canEditCircuit = () => canSelectNode() && !draftsPending();
   // An invalid limit draft must stay editable so the author can correct it.
   const canEditLoop = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict &&
     mode !== 'binding-draft' && trainingDrafts.size === 0;
@@ -236,7 +237,7 @@
     $('edges').replaceChildren();
     const id = project, document = graph;
     const live = () => project === id && graph === document;
-    window.editorCircuit.render($('graph'), {viewKey: id, document: graph, inventory, selected, enabled: canEditCircuit(),
+    window.editorCircuit.render($('graph'), {viewKey: id, document: graph, inventory, selected, enabled: canEditCircuit(), selectable: canSelectNode(),
       allowBindingChange: !pending || mode === 'binding-draft', allowMove: mode !== 'binding-draft'}, {
       select: value => { if (live()) { selected = value; render(); } },
       bind: (nodeId, argument, source) => { if (live()) updateBindingDraft(nodeId, argument, source); },
