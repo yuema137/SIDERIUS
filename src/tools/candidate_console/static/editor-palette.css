@@ -8,8 +8,9 @@
 .editor-palette .palette-search { width: 100%; margin-bottom: .4rem; box-sizing: border-box; }
 .editor-palette .palette-list { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--control-border); border-radius: .45rem; overflow: hidden; }
 /* Compact stack: one aligned row per capability (icon, name, step, badge); rows share
- * borders so the collapsed rail has no gaps. Expanding a row shows its details. */
-.editor-palette .palette-category { --capability-accent: var(--capability-generic); --capability-tint: var(--control); border-left: 4px solid var(--capability-accent); background: var(--panel); }
+ * dividers, not margins (margin 0 overrides the global details margin in styles.css),
+ * so the collapsed rail has no gaps. Expanding a row shows its details. */
+.editor-palette .palette-category { --capability-accent: var(--capability-generic); --capability-tint: var(--control); margin: 0; border-left: 4px solid var(--capability-accent); background: var(--panel); }
 .editor-palette .palette-category + .palette-category { border-top: 1px solid var(--control-border); }
 .editor-palette .palette-category[data-capability="interpretation"] { --capability-accent: var(--capability-interpretation); --capability-tint: var(--capability-interpretation-tint); }
 .editor-palette .palette-category[data-capability="literature"] { --capability-accent: var(--capability-literature); --capability-tint: var(--capability-literature-tint); }
