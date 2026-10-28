@@ -202,8 +202,8 @@ workspace library, so the browser never types a server path.
 2. Under **Models**, pick a profile. Tasks whose `console.json` entry sets
    `llm_config_file` keep their own; the page only fills values that
    `console.json` leaves out. A workflow's own values are used for that workflow.
-3. Under **Advice**, pick a file or **None**. This choice is recorded for new
-   workflows; it is not applied to runs from this page.
+3. Under **Advice**, pick a file or **None**. The choice is only saved for
+   now: no run uses it, and each workflow keeps the advice written in it.
 4. Under **Data folder**, choose a data root for a task, open subfolders, and
    select **Use <folder>**. Links are shown but cannot be selected. A task whose
    `console.json` sets `data_root` shows "Set in console.json" instead.
@@ -216,7 +216,10 @@ Saving needs `"global_settings": {"browser_writable": true}` in `console.json`
 (`init` writes it); otherwise the page is read-only. If someone else saved in
 the meantime, the page says so; select **Reload** and choose again. A choice
 that would fail `check`, such as a folder that no longer exists, is refused with
-the reason and nothing is written. **Workspace** lists missing workspace folders
+the reason and nothing is written. If `settings/global_settings.json` itself
+becomes unusable, the page says why: run `chmod 600` on it if its permissions
+changed, or fix or restore it; when it is readable but invalid, you can also
+choose values and **Save** to replace it. **Workspace** lists missing workspace folders
 and, when `init` can create them, the command to run on the server.
 
 ## Edit existing circuit connections

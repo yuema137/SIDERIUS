@@ -4,7 +4,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const session = () => window.consoleSession;
-  const ORIGINS = {server_config: 'Set in console.json', global_settings: 'This page', workspace_layout: 'Workspace folder'};
+  const ORIGINS = {server_config: 'Set in console.json', global_settings: 'This page', workspace_layout: 'Workspace folder', not_set: 'Not set'};
   const NAMES = {llm_profile: 'Model profile', advice: 'Advice file', data_root: 'Data folder', preparation_root: 'Preparation folder', candidate_root: 'Candidate folder', reusable_runs_root: 'Workflow runs folder'};
   let view = null, draft = null, loadedRevision = null, busy = false;
   const say = text => { $('settings-status').textContent = text; };
@@ -54,7 +54,7 @@
     let current = selected ? selected.subpath : '';
     const show = () => {
       const chosen = draft.data_folders[task.task_id];
-      where.textContent = chosen ? `Selected: ${root.selectedOptions[0]?.textContent || chosen.root_id} / ${chosen.subpath}` : `Selected: data/${task.task_id} in the workspace (default).`;
+      where.textContent = chosen ? `Selected: ${view.data_roots.find(card => card.id === chosen.root_id)?.label || chosen.root_id} / ${chosen.subpath}` : `Selected: data/${task.task_id} in the workspace (default).`;
     };
     async function browse(path) {
       current = path; list.replaceChildren();
@@ -104,6 +104,20 @@
     }
   }
 
+  // One plain sentence per problem, naming a fix that actually works for it.
+  function fix(entry) {
+    const name = entry.name, data = entry.created_by === 'operator';
+    switch (entry.status) {
+      case 'missing': return data ? `${name} is missing. Create this folder on the server and put the task's data in it.`
+        : `${name} is missing. Run the init command below on the server to create it.`;
+      case 'symlink': return `${name} is a link; the console never follows links. Move the link aside and ${data ? 'create a real folder there' : 'run init to create a real folder'}.`;
+      case 'not_directory': return `${name} is a file, not a folder. Move it aside and ${data ? 'create the folder' : 'run init'}.`;
+      case 'not_owner': return `${name} belongs to another user or others can write to it. Make it yours and run chmod 700 on it; init cannot fix this.`;
+      case 'unreadable': return `${name} cannot be read by the console. Check its permissions (chmod 700 on your own folders).`;
+      default: return `${name}: ${entry.status}.`;
+    }
+  }
+
   function renderWorkspace() {
     const facts = $('settings-workspace'); facts.replaceChildren();
     const problems = $('settings-workspace-problems'); problems.replaceChildren();
@@ -113,8 +127,7 @@
       facts.append(element('dt', 'Folders'), element('dd', readiness.ready ? 'All required folders are present.' : 'Some folders need attention.'));
       for (const entry of readiness.entries) {
         if (entry.status === 'present' || entry.created_by === 'writer') continue;
-        const who = entry.created_by === 'operator' ? 'put the task data here' : 'run init';
-        problems.append(element('li', `${entry.name}: ${entry.status.replace('_', ' ')} (${who})`));
+        problems.append(element('li', fix(entry)));
       }
     }
     $('settings-init').hidden = !readiness?.init_command;
@@ -130,7 +143,7 @@
       if (changed.length) notes.push('Saved but not yet active: ' + changed.map(key => ({llm_profile: 'model profile', advice: 'advice file', data_folders: 'data folders'})[key]).join(', ') + '.');
     }
     $('settings-pending').textContent = notes.join(' ');
-    $('settings-save').disabled = busy || !view.writable || same(draft, view.pending || empty());
+    $('settings-save').disabled = busy || !view.writable || (view.problem && !view.settings_sha256) || same(draft, view.pending || empty());
   }
 
   const empty = () => ({schema_version: 'siderius.console-global-settings/v1', llm_profile: null, advice: null, data_folders: {}});
@@ -145,6 +158,7 @@
     if (!view.tasks.length) data.append(element('p', 'No tasks are configured.', {class: 'muted'}));
     for (const task of view.tasks) data.append(folderPicker(task));
     renderRows(); renderWorkspace(); renderPending();
+    if (view.problem) { say(view.problem); return; }
     say(!view.enabled ? 'Global settings are not enabled in console.json; values below are fixed by the server.'
       : view.writable ? 'Choose values, then Save. Changes take effect after the server restarts.'
         : 'Read-only: console.json does not allow browser changes to global settings.');
