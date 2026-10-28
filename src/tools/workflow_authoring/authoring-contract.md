@@ -147,8 +147,10 @@ Each `TrainingControl.help` (`TrainingControlHelp`) projects the field's entry i
 `CandidateTrainingSettings.model_json_schema()` for `WorkflowLaunchConfig`:
 `description`, `unit`, `minimum`/`maximum`, `exclusive_minimum`/`exclusive_maximum`
 (read from the field or its nullable `anyOf` branch) and `schema_default` (the
-launch-config field default). Keys the schema does not declare stay `null` and are
-not shown; today only `schema_default` is declared for the presented controls.
+launch-config field default). `has_schema_default` is true only when the schema
+declares a `default` key, so a declared `null` default (shown as "Schema default:
+null") is distinct from an absent default (no default line). Other keys the schema
+does not declare stay `null` and are not shown.
 `effective` remains the resolved native value for the document.
 Nested workflow parameter rules are read-only in the inspector and editable in
 Source; untouched rules and advanced fields survive edits. Task rules are resolved

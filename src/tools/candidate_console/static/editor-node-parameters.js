@@ -22,7 +22,7 @@
       help.exclusive_maximum !== null && help.exclusive_maximum !== undefined ? `< ${help.exclusive_maximum}` : null,
     ].filter(Boolean);
     if (bounds.length) parts.push(`Range: ${bounds.join(', ')}`);
-    parts.push(`Schema default: ${show(help.schema_default ?? null)}`);
+    if (help.has_schema_default) parts.push(`Schema default: ${show(help.schema_default)}`);
     parts.push(`Native preview: ${show(control.effective)} (updated on review)`);
     return parts.join(' · ');
   }

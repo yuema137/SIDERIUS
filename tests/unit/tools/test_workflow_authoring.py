@@ -432,6 +432,25 @@ def test_training_help_reads_nullable_schema_branches(monkeypatch):
     assert (plain.description, plain.unit, plain.minimum, plain.maximum) == (None,) * 4
 
 
+def test_training_help_distinguishes_null_default_from_absent_default(monkeypatch):
+    """Fails if a field without a schema default is reported as defaulting to null.
+
+    Both cases leave ``schema_default`` as ``None``; only ``has_schema_default`` tells
+    the editor whether to render "Schema default: null" or no default line at all.
+    """
+    from tools.workflow_authoring import training
+
+    schema = {
+        "declared_null": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": None},
+        "required_field": {"type": "integer"},
+    }
+    monkeypatch.setattr(training, "_launch_schema", lambda: schema)
+    declared = training.control_help("declared_null")
+    absent = training.control_help("required_field")
+    assert (declared.has_schema_default, declared.schema_default) == (True, None)
+    assert (absent.has_schema_default, absent.schema_default) == (False, None)
+
+
 def test_training_help_default_is_the_launch_config_default():
     """Fails if inline help shows a default other than the native launch-config field's."""
     from dataclasses import fields
