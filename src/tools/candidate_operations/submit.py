@@ -4,6 +4,7 @@ import hashlib
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Literal
 from uuid import UUID, uuid4
 
 from tools.candidate_prepare import preflight_reusable_candidate
@@ -156,7 +157,12 @@ def _admit_new(
     launch_environment: Mapping[str, str],
     expected_reusable_inputs: ReusablePreparationExpectation | None,
 ) -> OperationHandle:
-    """Native admission of a new ID; the slot already overlays any placed selector."""
+    """Native admission of a new ID; the slot already overlays any placed selector.
+
+    A queued GPU child receives its selector only once placed (``host_queue``), so
+    the slot's deferred names are neither checked here nor passed to the child.
+    """
+    deferred = slot.deferred_names()
     preparation_run_seed = None
     if submission.kind == "candidate":
         verified = verify_reusable_operation(config, submission)
@@ -170,7 +176,7 @@ def _admit_new(
         try:
             require_credentials(
                 observed.selected_constructor_routes,
-                submission.request.environment_names,
+                _without(submission.request.environment_names, deferred),
                 launch_environment,
             )
         except ValueError as error:
@@ -180,7 +186,7 @@ def _admit_new(
     if submission.kind == "candidate_loop_resume":
         from .loop_resume import admit
 
-        loop_names = admit(config, submission, launch_environment)
+        loop_names = admit(config, submission, launch_environment, deferred=deferred)
     chain_admission = None
     resume_admission = None
     if submission.kind == "native_chain_resume":
@@ -217,7 +223,7 @@ def _admit_new(
     )
     if loop_names is not None:
         names = loop_names
-    env = environment(names, launch_environment)
+    env = environment(_without(names, deferred), launch_environment)
     return _claim_and_spawn(
         root,
         config,
@@ -229,6 +235,10 @@ def _admit_new(
         resume_admission,
         preparation_run_seed,
     )
+
+
+def _without(names: tuple[str, ...], deferred: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(name for name in names if name not in deferred)
 
 
 def _claim_and_spawn(
@@ -270,7 +280,7 @@ def _claim_and_spawn(
 
         reserve(record)
     slot.reserve(path, record)
-    observation = "starting"
+    observation: Literal["starting", "queued", "operation_failed"] = slot.observation
     try:
         child = spawn(path, env)
     except OSError:

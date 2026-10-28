@@ -20,7 +20,7 @@ from tools.candidate_worker.loop_resume import (
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.candidate_worker.preflight import require_credentials
 from tools.candidate_worker.records import verify_candidate_records
-from tools.workspace_sandbox.runner import CancelProbe
+from tools.workspace_sandbox.runner import CancelProbe, SpawnObserver
 
 from .files import directory, read_bytes, read_model
 from .models import (
@@ -226,8 +226,14 @@ def admit(
     config: OperationStoreConfig,
     submission: CandidateLoopResumeOperation,
     launch_environment: Mapping[str, str],
+    *,
+    deferred: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
-    """Admit one Resume under the store lock; return the root's credential environment names."""
+    """Admit one Resume under the store lock; return the root's credential environment names.
+
+    ``deferred`` names (a queued GPU segment's device selector) are not required
+    from ``launch_environment``: the waiting child sets them once placed.
+    """
     review = review_locked(config, submission.request.predecessor_operation_id)
     if review.receipt_digest != submission.request.expected_receipt_digest:
         raise OperationFailure("loop_resume", "reviewed paused receipt changed")
@@ -246,7 +252,7 @@ def admit(
     try:
         require_credentials(
             root.submission.request.selected_constructor_routes,
-            root.submission.request.environment_names,
+            tuple(n for n in root.submission.request.environment_names if n not in deferred),
             launch_environment,
         )
     except ValueError as error:
@@ -289,12 +295,24 @@ def reserve(record: OperationRecord) -> None:
         )
 
 
-def execute_resume(record: OperationRecord, *, cancel_requested: CancelProbe) -> None:
+def execute_resume(
+    record: OperationRecord,
+    *,
+    cancel_requested: CancelProbe,
+    on_sandbox_spawn: SpawnObserver | None = None,
+) -> None:
+    """``on_sandbox_spawn``: a placed (host-ledger) segment publishes its sandbox."""
     # Read the selected binding against the admitted operation before native dispatch.
     read_segment(record)
     _, request, initial = root_inputs(record)
     binding = read_continuation(initial, record.submission.request_id)
-    launch_continuation(request, initial, binding, cancel_requested=cancel_requested)
+    launch_continuation(
+        request,
+        initial,
+        binding,
+        cancel_requested=cancel_requested,
+        on_sandbox_spawn=on_sandbox_spawn,
+    )
 
 
 def request_loop_pause(config: OperationStoreConfig, operation_id: UUID) -> LoopPause:

@@ -152,10 +152,16 @@ def _reservations(host: HostScheduling):
         return read_state(root).reservations
 
 
+def _held(host: HostScheduling, operation: CandidateOperation) -> bool:
+    """Whether the sweep a submission would run keeps this operation's reservation."""
+    with locked_ledger(host.ledger_root) as root:
+        return any(r.operation_id == operation.request_id for r in sweep(root).reservations)
+
+
 def test_two_stores_share_one_budget_and_the_child_gets_its_placement(prepared, tmp_path, children):
     """A per-store ledger would place both 3 GiB operations on one 4 GiB slot.
 
-    The second is refused before any claim; the first child sees only its slot,
+    The second is queued, not placed (B3-5b); the first child sees only its slot,
     replacing whatever device selector the launcher inherited.
     """
     host = _ledger(tmp_path)
@@ -172,14 +178,12 @@ def test_two_stores_share_one_budget_and_the_child_gets_its_placement(prepared, 
     assert reservation.process.pid == children.children[0].pid
 
     second = _gpu_operation(prepared, 3.0)
-    launch_second = lambda: submit_operation(  # noqa: E731
-        second_store, second, launch_environment=KEY, host=host
-    )
-    assert _code(launch_second) == "host_capacity"
-    assert _claims(second_store) == []
-
-    _end(children.children[0])
-    assert launch_second().observation == "starting"
+    handle = submit_operation(second_store, second, launch_environment=KEY, host=host)
+    assert handle.observation == "queued"
+    assert _claims(second_store) == [str(second.request_id)]
+    assert "CUDA_VISIBLE_DEVICES" not in children.envs[1]  # no device until placed
+    assert not (_operation_dir(second_store, second) / "placement.json").exists()
+    assert len(_reservations(host)) == 1
 
 
 def test_reservation_is_kept_while_the_sandbox_session_outlives_the_child(
@@ -203,14 +207,11 @@ def test_reservation_is_kept_while_the_sandbox_session_outlives_the_child(
     publish_sandbox(sandbox.pid)
     _end(children.children[0])
 
-    second = _gpu_operation(prepared, 3.0)
-    other = _store(tmp_path, "store-b")
-    launch = lambda: submit_operation(other, second, launch_environment=KEY, host=host)  # noqa: E731
-    assert _code(launch) == "host_capacity"
+    assert _held(host, first)
     assert _code(lambda: release_reservation(host.ledger_root, first.request_id)) == "session_live"
 
     _end(sandbox)
-    assert launch().observation == "starting"
+    assert not _held(host, first)
 
 
 def test_a_hidden_sandbox_leader_is_never_a_positive_exit(
@@ -232,12 +233,7 @@ def test_a_hidden_sandbox_leader_is_never_a_positive_exit(
     _end(children.children[0])
     _end(sandbox)  # now absent from /proc: indistinguishable from hidden
 
-    second = _gpu_operation(prepared, 3.0)
-    other = _store(tmp_path, "store-b")
-    assert (
-        _code(lambda: submit_operation(other, second, launch_environment=KEY, host=host))
-        == "host_capacity"
-    )
+    assert _held(host, first)
     released = release_reservation(host.ledger_root, first.request_id)  # operator's word
     assert released.evidence.sandbox is not None
     assert released.evidence.sandbox.leader == "unknown"
@@ -276,7 +272,7 @@ def test_crash_between_spawn_and_bind_recovers_only_on_published_evidence(
     """An unbound reservation is never dropped blindly, and never blocks forever."""
     monkeypatch.setattr("tools.candidate_operations.host_admission.bind", _crash)
     host = _ledger(tmp_path)
-    store, other = _store(tmp_path, "store-a"), _store(tmp_path, "store-b")
+    store = _store(tmp_path, "store-a")
     first = _gpu_operation(prepared, 3.0)
     with pytest.raises(RuntimeError):
         submit_operation(store, first, launch_environment=KEY, host=host)
@@ -287,17 +283,15 @@ def test_crash_between_spawn_and_bind_recovers_only_on_published_evidence(
     child = children.children[0]
     record = load_record(store, first.request_id)
     path = _operation_dir(store, first)
-    second = _gpu_operation(prepared, 3.0)
-    launch = lambda: submit_operation(other, second, launch_environment=KEY, host=host)  # noqa: E731
 
     forged = identity_of(record, child.pid).model_copy(update={"request_digest": "0" * 64})
     publish(path / "process.json", forged)
-    assert _code(launch) == "host_capacity"  # mismatched evidence keeps it, without raising
+    assert _held(host, first)  # mismatched evidence keeps it, without raising
     os.unlink(path / "process.json")
     publish(path / "process.json", identity_of(record, child.pid))  # the child's own record
-    assert _code(launch) == "host_capacity"  # still alive
+    assert _held(host, first)  # still alive
     _end(child)
-    assert launch().observation == "starting"
+    assert not _held(host, first)
 
 
 def test_unpublished_crash_needs_the_operator_release(prepared, tmp_path, children, monkeypatch):
@@ -384,8 +378,8 @@ def test_time_budgeted_run_shares_a_gpu_only_when_acknowledged(prepared, tmp_pat
     """Decision B3-Q6: contention changes measured-time admission of both runs.
 
     The rule is a ``plan_dispatch`` placement constraint (#1019): with the only
-    slot shared, the run cannot be placed now (``host_capacity``) and the reason
-    names the time-budget contention; the reservation records the flag.
+    slot shared, the run is queued (B3-5b) and its queued reason names the
+    time-budget contention; the reservation records the flag.
     """
     for acknowledge, ledger in ((False, "plain"), (True, "acknowledged")):
         host = _ledger(tmp_path, ledger, acknowledge=acknowledge)
@@ -405,10 +399,10 @@ def test_time_budgeted_run_shares_a_gpu_only_when_acknowledged(prepared, tmp_pat
                 flags = [r.placement.reserved.time_budgeted for r in read_state(root).reservations]
             assert flags == [False, True]
         else:
-            with pytest.raises(OperationFailure) as refused:
-                launch()
-            assert refused.value.detail.code == "host_capacity"
-            assert "time-budgeted unit would share it" in str(refused.value)
+            assert launch().observation == "queued"
+            with locked_ledger(host.ledger_root) as root:
+                (waiting,) = read_state(root).queued
+            assert "time-budgeted unit would share it" in waiting.placement.reasons[0]
 
 
 def test_spawn_failure_returns_the_reservation(prepared, tmp_path, monkeypatch):
@@ -472,3 +466,174 @@ def test_cli_passes_the_budget_and_refuses_either_flag_alone(
         assert cli.main() == 2
         assert json.loads(capsys.readouterr().err)["code"] == "usage"
     assert len(seen) == 1
+
+
+# --- B3-5b: queued operations -------------------------------------------------
+
+
+def _queue(host: HostScheduling):
+    with locked_ledger(host.ledger_root) as root:
+        return read_state(root).queued
+
+
+def test_a_waiting_child_is_placed_in_submission_order(prepared, tmp_path, children, monkeypatch):
+    """Strict FIFO across stores (decision B3-Q4) and the placed child's device.
+
+    ``late`` (1 GiB) would fit beside ``first`` now; planning it without the
+    earlier waiter would let it overtake ``middle``. When capacity returns, the
+    first poll places every waiter that fits in order, whichever child polls, so
+    ``late`` can never take capacity ``middle`` was given.
+    """
+    from tools.candidate_operations.host_queue import wait_for_placement
+
+    host = _ledger(tmp_path)
+    first, middle, late = (_gpu_operation(prepared, vram) for vram in (3.0, 3.0, 1.0))
+    stores = [_store(tmp_path, f"store-{name}") for name in "abc"]
+    observed = [
+        submit_operation(store, op, launch_environment=KEY, host=host).observation
+        for store, op in zip(stores, (first, middle, late), strict=True)
+    ]
+    assert observed == ["starting", "queued", "queued"]
+    assert [q.operation_id for q in _queue(host)] == [middle.request_id, late.request_id]
+
+    _end(children.children[0])
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "inherited")
+    placement = wait_for_placement(_operation_dir(stores[2], late), late.request_id, lambda: False)
+    assert placement is not None and placement.gpu_uuid == SLOT
+    assert os.environ["CUDA_VISIBLE_DEVICES"] == SLOT
+    assert [r.operation_id for r in _reservations(host)] == [middle.request_id, late.request_id]
+    assert _queue(host) == ()
+    published = json.loads((_operation_dir(stores[2], late) / "placement.json").read_text())
+    assert published["decision"] == "placed"
+    # ``middle``'s own child adopts the reservation it was given at its next poll.
+    adopted = wait_for_placement(
+        _operation_dir(stores[1], middle), middle.request_id, lambda: False
+    )
+    assert adopted is not None and adopted.unit_id == str(middle.request_id)
+
+
+def test_a_dead_waiter_does_not_hold_the_line(prepared, tmp_path, children, monkeypatch):
+    """A queued child that died never starts; keeping its entry would block every later one."""
+    from tools.candidate_operations.host_queue import wait_for_placement
+
+    host = _ledger(tmp_path)
+    first, dead, late = (_gpu_operation(prepared, 3.0) for _ in range(3))
+    stores = [_store(tmp_path, f"store-{name}") for name in "abc"]
+    for store, op in zip(stores, (first, dead, late), strict=True):
+        submit_operation(store, op, launch_environment=KEY, host=host)
+    _end(children.children[1])
+    _end(children.children[0])
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "inherited")
+    placement = wait_for_placement(_operation_dir(stores[2], late), late.request_id, lambda: False)
+    assert placement is not None
+    assert [r.operation_id for r in _reservations(host)] == [late.request_id]
+    assert _queue(host) == ()
+
+
+def test_cancel_removes_a_queued_operation_without_running_it(
+    prepared, tmp_path, children, monkeypatch
+):
+    """Decision B3-5 D2: Stop on a queued operation never claims its workspace.
+
+    The real operation child runs in this process; the test process stands in
+    for the live waiting child, so the snapshot is ``queued`` and cancellable.
+    """
+    import threading
+
+    from tools.candidate_operations import read_operation, request_cancel
+    from tools.candidate_operations.child import execute
+
+    monkeypatch.setattr("tools.candidate_operations.host_queue.QUEUE_POLL_SECONDS", 0.05)
+    host = _ledger(tmp_path)
+    store_a, store_b = _store(tmp_path, "store-a"), _store(tmp_path, "store-b")
+    first, waiting = _gpu_operation(prepared, 3.0), _gpu_operation(prepared, 3.0)
+    submit_operation(store_a, first, launch_environment=KEY, host=host)
+    assert submit_operation(store_b, waiting, launch_environment=KEY, host=host).observation == (
+        "queued"
+    )
+    path = _operation_dir(store_b, waiting)
+    codes: list[int] = []
+    worker = threading.Thread(target=lambda: codes.append(execute(path)))
+    worker.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not (path / "process.json").exists():
+            assert time.monotonic() < deadline, "operation child never published itself"
+            time.sleep(0.02)
+        snapshot = read_operation(store_b, waiting.request_id)
+        assert (snapshot.state, snapshot.reason, snapshot.cancellable) == (
+            "queued",
+            "host_queued",
+            True,
+        )
+        request_cancel(store_b, waiting.request_id)
+    finally:
+        worker.join(timeout=10)
+    assert codes == [1]
+    snapshot = read_operation(store_b, waiting.request_id)
+    assert (snapshot.state, snapshot.reason, snapshot.cancel_requested) == (
+        "operation_failed",
+        "cancelled_while_queued",
+        True,
+    )
+    assert _queue(host) == ()
+    assert [r.operation_id for r in _reservations(host)] == [first.request_id]
+    assert not (path / "placement.json").exists()
+    workspace = Path(prepared.preview.document.definition.task.workspace)
+    assert not (workspace / "candidate_run").exists()
+
+
+def test_loop_resume_reserves_with_its_root_declaration(prepared, tmp_path, monkeypatch):
+    """A budgeted Resume was refused ``resources_required``: it carries no declaration."""
+    from tools.candidate_operations.host_admission import _declared
+    from tools.candidate_operations.models import (
+        CandidateLoopResumeOperation,
+        CandidateLoopResumeRequest,
+    )
+
+    config = _store(tmp_path, "store-a")
+    root = _gpu_operation(prepared, 2.0)
+    resume = CandidateLoopResumeOperation(
+        request_id=uuid4(),
+        request=CandidateLoopResumeRequest(
+            predecessor_operation_id=root.request_id, expected_receipt_digest="a" * 64
+        ),
+    )
+    monkeypatch.setattr("tools.candidate_operations.host_admission.load_record", lambda c, i: i)
+    for declared in (root, root.model_copy(update={"resources": None})):
+        monkeypatch.setattr(
+            "tools.candidate_operations.loop_resume.root_record",
+            lambda _, op=declared: type("Root", (), {"submission": op})(),
+        )
+        if declared.resources is None:
+            assert _code(lambda: _declared(config, resume)) == "resources_required"
+        else:
+            assert _declared(config, resume) == (root, root.resources)
+
+
+def test_completion_records_the_host_placement_it_ran_under(prepared, tmp_path, children):
+    """Host placement is operation provenance: the receipt must name the published one."""
+    from tools.candidate_operations import read_operation
+    from tools.candidate_operations.child import host_placement_evidence
+    from tools.candidate_operations.models import Completion
+
+    host = _ledger(tmp_path)
+    store = _store(tmp_path, "store-a")
+    operation = _gpu_operation(prepared, 3.0)
+    submit_operation(store, operation, launch_environment=KEY, host=host)
+    record, path = load_record(store, operation.request_id), _operation_dir(store, operation)
+    publish(path / "process.json", identity_of(record, children.children[0].pid))
+    evidence = host_placement_evidence(record, path)
+    assert evidence is not None and evidence.placement.gpu_uuid == SLOT
+    assert evidence.sandbox is None  # no sandbox started
+
+    forged = evidence.placement.model_copy(update={"reasons": ("placed elsewhere",)})
+    completion = Completion(
+        operation_id=operation.request_id,
+        request_digest=record.request_digest,
+        outcome="pre_dispatch_failure",
+        reason="runtime_binding_failed",
+        host_placement=evidence.model_copy(update={"placement": forged}),
+    )
+    publish(path / "completion.json", completion)
+    assert read_operation(store, operation.request_id).reason == "integrity_failure"

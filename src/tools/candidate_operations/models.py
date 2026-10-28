@@ -6,7 +6,12 @@ from uuid import UUID
 from pydantic import Field, TypeAdapter, model_validator
 
 from core.runtime_control.pair_admission import PositiveGpuGiB
-from core.runtime_control.scheduling import PositiveCount, PositiveQuantity, ResourceRequest
+from core.runtime_control.scheduling import (
+    Placement,
+    PositiveCount,
+    PositiveQuantity,
+    ResourceRequest,
+)
 from core.seeding import RunSeed, RunSeedBinding, admitted_run_seed
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
 from tools.candidate_prepare.reusable_models import (
@@ -248,12 +253,30 @@ class CancelRequest(PreviewModel):
     requested_at: str
 
 
+class HostPlacementEvidence(PreviewModel):
+    """Operation provenance of a host-ledger placement (B3-5b).
+
+    ``placement`` is the published ``placement.json``; ``process`` the operation
+    child the reservation is bound to and ``sandbox`` the published
+    ``sandbox.json`` (``None`` when no sandbox started): the identities whose
+    ended sessions release the reservation.
+    """
+
+    placement: Placement
+    process: ProcessIdentity
+    sandbox: ProcessIdentity | None = None
+
+
 class Completion(PreviewModel):
     operation_id: UUID
     request_digest: str
     outcome: Literal["native", "native_chain", "pre_dispatch_failure", "unknown"]
     receipt_digest: str | None = None
     terminal_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    #: Omitted for operations without a host placement, so their bytes are unchanged.
+    host_placement: HostPlacementEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def terminal_kind(self):
@@ -272,7 +295,8 @@ class OperationHandle(PreviewModel):
     kind: OperationKind
     request_digest: str
     observed_at: str
-    observation: Literal["starting", "existing", "operation_failed"]
+    #: ``queued``: admitted and claimed; the child waits for a host-ledger place (B3-5b).
+    observation: Literal["starting", "queued", "existing", "operation_failed"]
 
 
 class OperationSnapshot(PreviewModel):
@@ -280,7 +304,7 @@ class OperationSnapshot(PreviewModel):
     kind: OperationKind
     request_digest: str
     observed_at: str
-    state: Literal["active", "completed", "operation_failed", "unknown"]
+    state: Literal["queued", "active", "completed", "operation_failed", "unknown"]
     process: ProcessObservation
     successor_operation_id: UUID | None = Field(
         default=None, exclude_if=lambda value: value is None
