@@ -289,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         "heaviest_shard_s": round(longest.duration_s, 2) if longest else None,
         "failed_shards": [s.index for s in result.failed],
         "invalid_shards": [s.index for s in result.invalid],
+        "checkout_mutations": result.checkout_mutations,
     }
     workdir.mkdir(parents=True, exist_ok=True)
     (workdir / "bulk_result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")

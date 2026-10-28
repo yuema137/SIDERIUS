@@ -195,6 +195,45 @@ must not be confused with absence.
 a broad `.gitignore` rule: an ignore rule makes future pollution invisible,
 which is the opposite of what this lane is for.
 
+### 4.2 No test mutates a tracked checkout file — #973
+
+Bulk shards run concurrently in one checkout. A test that edits a tracked file
+and restores it still races every sibling that reads the file: in #973 a resume
+test appended a newline to `configs/task_composition/quickstart.yaml` and an
+unrelated shard failed `selected input changed: task.manifest`. Rule: a test
+copies the file under `tmp_path` and mutates the copy.
+
+Two layers enforce it:
+
+| layer | owner | scope | failure |
+|---|---|---|---|
+| in-process audit hook | `tests/helpers/checkout_write_guard.py`, armed by `tests/conftest.py` | every pytest session loading `tests/conftest.py` (local and CI); setup, call and teardown of each test | `CheckoutWriteEscape` (a `BaseException`) raised in the writing thread, naming the node id and absolute path; the refusal is also recorded and `pytest_runtest_makereport` marks that phase (setup/call/teardown) failed, so a write from a worker thread or a swallowed escape still fails the owning test |
+| bulk-run digest | `tools.ci.execution.tracked_digests` / `changed_paths`, called by `run_bulk` | SHA-256 of every `git ls-files` path before and after the whole bulk run | `BulkResult.checkout_mutations` lists changed paths; `ok` is false; `render()` prints `CHECKOUT MUTATED`; the manifest records `totals.checkout_mutations` |
+
+The hook snapshots `git ls-files -z` from the repository root at
+`pytest_sessionstart` (both the absolute and the resolved root spelling). If git
+cannot list the checkout, the session fails with `RuntimeError`; the guard never
+disarms itself silently. While a test runs it refuses: `open` with any
+`w`/`a`/`x`/`+` mode or `O_WRONLY|O_RDWR|O_APPEND|O_CREAT|O_TRUNC` flag;
+`os.remove`/`os.unlink`; `os.rename`/`os.replace` with a tracked source or
+destination; `os.truncate` by path (for `open` and `os.truncate`, a symlink to
+a tracked file is resolved with `realpath` and refused); `shutil.rmtree` of a tracked file's
+directory or any ancestor. Reads, and writes to untracked paths, pass.
+
+Known limits: spawned subprocesses do not inherit the hook (a child `git` or
+shell redirection is caught only by the bulk-run digest, and only if the change
+survives to the end of the run); a relative path combined with `dir_fd` is not
+resolved; a thread still writing after its test's phases end is not attributed;
+the docs-only CI fast path runs with `--noconftest` and therefore
+without the hook.
+
+Opt-out: `@pytest.mark.allow_checkout_writes(reason="...")`, registered in
+`pyproject.toml`. A marker without a non-empty `reason` is ignored and the guard
+stays armed. Only the guard's own test
+(`tests/unit/helpers/test_checkout_write_guard.py`), which drains its deliberate
+refusals from the session guard, uses the opt-out; any other
+use must explain why mutating the shared checkout is the behaviour under test.
+
 ---
 
 ## 5. Preflight — refuse early, never mislead late

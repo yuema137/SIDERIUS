@@ -163,6 +163,9 @@ class TestEmptyShards:
             )
 
         monkeypatch.setattr(execution, "run_shard", fake_run_shard)
+        # The root here is not a git checkout; the tracked-file guard is
+        # covered by test_execution.py, not by this shard-launch test.
+        monkeypatch.setattr(execution, "tracked_digests", lambda root: {})
         plan = ShardPlan(
             shards=[
                 Shard(index=0, files=("tests/unit/a/test_a.py",), weight=1.0),
