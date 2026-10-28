@@ -25,14 +25,13 @@ from .admission import admit_input_paths
 from .layout import candidate_proposal_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .preflight import fresh_preview, require_credentials
+from .record_json import record_json
 
 
 def publish(
     path: Path, value: CandidateRunRequest | CandidateRunReceipt, *, bounded: bool = False
 ) -> None:
-    payload = (
-        encode_control(value) if bounded else (value.model_dump_json(indent=2) + "\n").encode()
-    )
+    payload = encode_control(value) if bounded else record_json(value, indent=2) + b"\n"
     publish_bytes_write_once(str(path), payload)
 
 

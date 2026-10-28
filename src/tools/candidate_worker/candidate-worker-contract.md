@@ -307,8 +307,10 @@ before its first call; resolved settings are saved to
 an accepted nonfinite float as the JSON string `"Infinity"`, `"-Infinity"` or
 `"NaN"` (`ser_json_inf_nan="strings"`), so admission's own JSON round trip and
 the saved document preserve it exactly; finite values are byte-identical. The
-graph tuning input that `graph_evidence` rereads is written with the same string
-encoding. Ingress may write such a value as a string (for example `"-inf"`).
+worker's other JSON persistence writes (node inputs, captured node records,
+proposal seeds, fan-out payloads, control documents and the graph tuning input)
+go through `record_json.record_json`, which uses the same string encoding, so a
+reread never turns an accepted inf/NaN into `null` (issue #1046). Ingress may write such a value as a string (for example `"-inf"`).
 Whether a value may be nonfinite stays with its owner (issue #1012).
 
 Passed validation returns typed in-memory outputs to training. Missing model

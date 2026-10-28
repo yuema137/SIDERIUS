@@ -12,6 +12,7 @@ from .artifacts import capture_record
 from .invocation import FixedInvocationContext
 from .layout import graph_instance_dir, literature_cache_dir, literature_input_path
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .record_json import record_json
 
 
 def run_literature(
@@ -42,7 +43,7 @@ def run_literature(
     )
     input_path = literature_input_path(Path(initial.workspace), review, iteration=context.iteration)
     input_path.parent.mkdir(parents=True, exist_ok=True)
-    publish_bytes_write_once(str(input_path), inputs.model_dump_json(indent=2).encode())
+    publish_bytes_write_once(str(input_path), record_json(inputs, indent=2))
     factory = contextual_bridge_factory(
         None,
         workspace=context.workspace,

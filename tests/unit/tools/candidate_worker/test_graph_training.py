@@ -566,3 +566,27 @@ def test_nonfinite_launch_values_survive_the_graph_tuning_input(prepared, traini
     verify_graph_trace(
         request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
     )
+
+
+def test_nonfinite_tuning_score_survives_the_captured_run_output(
+    prepared, training_runner, monkeypatch
+):
+    """#1046: capture_record wrote the tuner output with inf -> null, so the
+    persisted run output that loop evidence rereads said ``None`` while the
+    returned output said ``-inf``."""
+    from tools.candidate_worker import training
+
+    tuner = training.HyperparamTuningAgent
+    real = tuner.run
+    monkeypatch.setattr(
+        tuner,
+        "run",
+        lambda self, value: real(self, value).model_copy(
+            update={"best_denoising_score": float("-inf")}
+        ),
+    )
+    receipt = launch_candidate(graph_training_request(prepared))
+    assert receipt.status == "completed", receipt.error
+    (path,) = Path(receipt.workspace).rglob("run_output_*.json")
+    saved = training.HyperparamTuningOutput.model_validate_json(path.read_bytes())
+    assert saved.best_denoising_score == float("-inf")

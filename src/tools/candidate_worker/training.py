@@ -3,8 +3,6 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic_core import to_json
-
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTuningOutput
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.proposal import ProposalOutput
@@ -23,6 +21,7 @@ from workflows.tuner_preparation import prepare_native_tuner_input
 from .artifacts import capture_record
 from .invocation import FixedInvocationContext, invocation_from_storage
 from .models import CandidateRunReceipt
+from .record_json import record_json
 from .training_admission import TrainingAdmission
 from .training_evidence import capture_training_evidence
 
@@ -154,10 +153,7 @@ def run_training(
     )
     if input_path is not None:
         input_path.parent.mkdir(parents=True, exist_ok=True)
-        # Evidence rereads this file: keep accepted nonfinite values (#1012)
-        # instead of the default inf->null; finite documents are unchanged.
-        payload = to_json(tune_input.model_dump(mode="json"), indent=2, inf_nan_mode="strings")
-        publish_bytes_write_once(str(input_path), payload)
+        publish_bytes_write_once(str(input_path), record_json(tune_input, indent=2))
     agent = HyperparamTuningAgent()
     context.bind(agent)
     output = HyperparamTuningOutput.model_validate(agent.run(tune_input))
