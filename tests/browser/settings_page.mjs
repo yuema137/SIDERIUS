@@ -57,6 +57,14 @@ try {
       const entries = subpath === '' ? [{name: 'runs', kind: 'directory'}, {name: 'elsewhere', kind: 'link'}] : [{name: 'a', kind: 'directory'}];
       return route.fulfill({json: {entries, incomplete: false}});
     }
+    if (url.pathname === '/api/settings/exports') {
+      exports.push(JSON.parse(request.postData()));
+      return route.fulfill({json: {name: 'my-export', files: ['workflow.py', 'llm.json']}});
+    }
+    if (url.pathname.startsWith('/api/settings/exports/')) {
+      downloads.push(url.pathname);
+      return route.fulfill({body: 'exported bytes', contentType: 'application/octet-stream'});
+    }
     if (url.pathname === '/api/settings/library') {
       assert.equal(request.method(), 'POST');
       uploads.push(JSON.parse(request.postData()));
@@ -68,6 +76,11 @@ try {
       return route.fulfill(putReply());
     }
     return route.fulfill({json: view});
+  });
+  const exports = [], downloads = [];
+  await page.route(/\/api\/editor\/(projects|demo)$/, route => {
+    const path = new URL(route.request().url()).pathname;
+    return route.fulfill({json: path.endsWith('/projects') ? [{project_id: 'demo', candidate_run_enabled: true}] : {sha256: 'c'.repeat(64)}});
   });
   await page.goto(metadata.origin + '/#settings');
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
@@ -84,6 +97,15 @@ try {
   await page.locator('#settings-import-advice').setInputFiles({name: 'notes.json', mimeType: 'application/json', buffer: Buffer.from('{"propose": "x"}')});
   await page.locator('#settings-status').filter({hasText: 'Imported as notes-0123456789ab.json'}).waitFor();
   assert.deepEqual(uploads, [{kind: 'advice', label: 'notes', content: '{"propose": "x"}'}]);
+
+  // Export pins the saved source digest; downloads go through the bearer session as a Blob.
+  await page.locator('#settings-export-project option[value="demo"]').waitFor({state: 'attached'});
+  await page.locator('#settings-export').click();
+  await page.locator('#settings-export-status').filter({hasText: 'no advice.json was written'}).waitFor();
+  assert.deepEqual(exports, [{project_id: 'demo', task_id: 'synthetic', name: 'my-export', expected_source_sha256: 'c'.repeat(64)}]);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', {name: 'Download llm.json'}).click()]);
+  assert.equal(download.suggestedFilename(), 'llm.json');
+  assert.deepEqual(downloads, ['/api/settings/exports/my-export/llm.json']);
 
   // Choose an allowlisted model and a folder under an allowlisted root; links are not selectable.
   await page.getByLabel('Lab profile').check();
@@ -124,5 +146,5 @@ try {
   await page.setViewportSize({width: 390, height: 844});
   if (process.env.CONSOLE_SCREENSHOT_DIR) await page.screenshot({path: join(process.env.CONSOLE_SCREENSHOT_DIR, 'settings-mobile.png'), fullPage: true});
   assert.deepEqual(faults, []);
-  console.log('PASS: settings view, profile/advice cards, advice import, allowlist choice, no-follow folder picking, CAS PUT with refs only, restart notice, stale refusal and read-only mode.');
+  console.log('PASS: settings view, profile/advice cards, advice import, export and bearer download, allowlist choice, no-follow folder picking, CAS PUT with refs only, restart notice, stale refusal and read-only mode.');
 } finally { if (browser) await browser.close(); server.kill('SIGTERM'); lines.close(); }

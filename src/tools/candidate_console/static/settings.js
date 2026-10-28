@@ -206,7 +206,7 @@
     if (!session().connected || busy) return;
     const status = $('settings-status').textContent;
     busy = true; say('Reading settings…');
-    try { view = await session().request('settings'); loadedRevision = session().revision; render(); if (keepStatus) say(status); }
+    try { view = await session().request('settings'); loadedRevision = session().revision; render(); if (keepStatus) say(status); void loadProjects(); }
     catch (error) { if (!error.stale) say('Settings unavailable: ' + error.message); }
     finally { busy = false; if (view) renderPending(); }
   }
@@ -223,6 +223,52 @@
       say(error.code === 'stale' ? 'Settings changed elsewhere since this page loaded. Reload, then choose again.' : 'Not saved: ' + error.message);
     } finally { busy = false; if (view) renderPending(); }
   });
+  async function loadProjects() {
+    const select = $('settings-export-project'); select.replaceChildren();
+    try {
+      const projects = await session().request('editor/projects');
+      for (const project of projects) select.append(element('option', project.project_id, {value: project.project_id}));
+    } catch (error) { if (!error.stale) $('settings-export-status').textContent = 'Projects unavailable: ' + error.message; }
+    const tasks = $('settings-export-task'); tasks.replaceChildren();
+    for (const task of view?.tasks || []) tasks.append(element('option', task.label, {value: task.task_id}));
+    $('settings-export').disabled = !view?.writable || !select.value || !tasks.value;
+  }
+
+  async function downloadFile(name, file) {
+    try {
+      const blob = await session().download(`settings/exports/${encodeURIComponent(name)}/${encodeURIComponent(file)}`);
+      const link = element('a', undefined, {download: file}); link.href = URL.createObjectURL(blob);
+      document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
+    } catch (error) { if (!error.stale) $('settings-export-status').textContent = 'Download failed: ' + error.message; }
+  }
+
+  $('settings-export').addEventListener('click', async () => {
+    const project = $('settings-export-project').value, status = $('settings-export-status');
+    $('settings-export-files').replaceChildren();
+    try {
+      // Export exactly the saved version on disk now; the server refuses if it changes meanwhile.
+      const saved = await session().request('editor/' + encodeURIComponent(project));
+      const result = await session().request('settings/exports', {project_id: project, task_id: $('settings-export-task').value, name: $('settings-export-name').value, expected_source_sha256: saved.sha256});
+      status.textContent = `Exported to exported_configs/${result.name} on the server.` + (result.files.includes('advice.json') ? '' : ' The workflow has no advice of its own, so no advice.json was written.');
+      for (const file of result.files) {
+        const item = element('li'), button = element('button', 'Download ' + file, {type: 'button', class: 'secondary'});
+        button.addEventListener('click', () => { void downloadFile(result.name, file); });
+        item.append(button); $('settings-export-files').append(item);
+      }
+    } catch (error) { if (!error.stale) status.textContent = 'Not exported: ' + error.message; }
+  });
+
+  // New-run review: where each resolved value comes from (presentation only).
+  window.consoleSettings = Object.freeze({
+    async originLines(taskId, effective) {
+      try {
+        const current = await session().request('settings');
+        return current.rows.filter(row => row.task_id === taskId && row.name in effective && row.effective === effective[row.name])
+          .map(row => `${NAMES[row.name]} source: ${ORIGINS[row.origin] || row.origin}${row.label ? ` (${row.label})` : ''}`);
+      } catch { return []; }
+    }
+  });
+
   $('settings-reload').addEventListener('click', () => { void load(); });
   for (const kind of ['llm', 'advice']) $('settings-import-' + kind).addEventListener('change', event => { void importFile(kind, event.target); });
   const wanted = () => window.consoleNavigation.view === 'settings' && loadedRevision !== session().revision;
