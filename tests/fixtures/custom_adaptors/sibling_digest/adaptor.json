@@ -1,0 +1,19 @@
+{
+  "schema_version": "siderius.adaptor-manifest/v1",
+  "id": "example.sibling-digest",
+  "version": "0.1.0",
+  "role": "combine",
+  "inputs": [
+    {"name": "reviews", "contract": "literature.output", "cardinality": "many", "min_items": 1, "max_items": 8}
+  ],
+  "output": {"contract": "optional.expert-context", "count": 1},
+  "entry": "sibling_digest.py:adapt",
+  "members": ["sibling_digest.py", "ranking.py"],
+  "parameters_model": "sibling_digest.py:Params",
+  "deterministic": true,
+  "network": "none",
+  "limits": {"timeout_seconds": 30, "max_input_bytes": 4194304, "max_output_bytes": 262144},
+  "fixtures": [
+    {"input": "fixtures/two_reviews.input.json", "expected": "fixtures/two_reviews.expected.json"}
+  ]
+}

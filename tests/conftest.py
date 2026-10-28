@@ -16,6 +16,14 @@ from execute_tools.dataset_config import (
     bind_dataset_profile,
 )
 from execute_tools.evaluation_metric import bind_run_metric
+from tests.helpers.checkout_write_guard import (
+    GUARD_KEY,
+    CheckoutWriteGuard,
+    fail_report_on_violation,
+    register,
+    tracked_paths,
+    unregister,
+)
 from tests.helpers.metric_fixtures import accuracy_like_metric
 from tests.helpers.two_family_profile import make_two_family_profile
 from workflows.task_config import bind_task_config, load_task_config
@@ -58,6 +66,48 @@ def pytest_configure(config):
         "RecordingLLMBridge) and real-provider mode (uses real LLMBridge via "
         "--real-llm). Distinct from 'real_run' which is real-provider-only.",
     )
+
+
+def pytest_sessionstart(session):
+    """Snapshot tracked files and arm the checkout write guard (#973).
+
+    Fails the session when git cannot list the checkout: a guard that
+    disarmed itself silently would vouch for a suite it never watched.
+    """
+    guard = CheckoutWriteGuard(tracked_paths(_REPO_ROOT))
+    register(guard)
+    session.config.stash[GUARD_KEY] = guard
+
+
+def pytest_sessionfinish(session):
+    guard = session.config.stash.get(GUARD_KEY, None)
+    if guard is not None:
+        unregister(guard)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    """Watch setup, call and teardown of each test for tracked-file mutation.
+
+    ``@pytest.mark.allow_checkout_writes(reason=...)`` opts out; a marker
+    without a non-empty ``reason`` is ignored, so the guard stays armed.
+    """
+    guard = item.config.stash.get(GUARD_KEY, None)
+    marker = item.get_closest_marker("allow_checkout_writes")
+    if guard is None or (marker is not None and marker.kwargs.get("reason")):
+        return (yield)
+    with guard.watching(item.nodeid):
+        return (yield)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Fail the phase whose test mutated a tracked file from any thread."""
+    report = yield
+    guard = item.config.stash.get(GUARD_KEY, None)
+    if guard is not None:
+        fail_report_on_violation(guard, report)
+    return report
 
 
 def pytest_collection_modifyitems(config, items):
