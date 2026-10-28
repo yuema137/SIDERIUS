@@ -131,6 +131,9 @@ def observe_bindings(
                 | ({"lit_review"} if "literature" in nodes else set())
                 | ({"interpret"} if "interpretation" in nodes else set())
             )
+            # `judge` is not a node slot. Listing it only when declared keeps
+            # the inactive-role output of configs without it unchanged.
+            and (name != "judge" or config.judge is not None)
         ),
     )
 

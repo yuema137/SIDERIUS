@@ -692,7 +692,14 @@ class TestCensusDLegacyLockKeySet:
         declaration in the ``advice_sha256`` mould would refuse EVERY
         pre-existing workspace's resume. Omitted-at-1.0 in the serialized
         lock, so legacy and full-eval lock bytes are unchanged, and the new
-        refusal is confined to workspaces declaring a NON-DEFAULT portion."""
+        refusal is confined to workspaces declaring a NON-DEFAULT portion.
+
+        DECLARED DELTA (B3-2, decision B3-Q7): ``scheduling_mode`` joined —
+        ``serial`` or ``parallel-v1`` under a declared HostBudget. Parallel
+        drain semantics can change a failed body's trace, so a workspace
+        cannot switch mode on resume. Omitted at ``serial``, so every legacy
+        and every budget-less lock stays byte-identical and resumable; the
+        budget itself (``host_budget``) is ``_PROVENANCE``."""
         from core.run_invariants import RunInvariants
 
         assert RunInvariants._CANONICAL == (
@@ -753,4 +760,6 @@ class TestCensusDLegacyLockKeySet:
             # pre-seed locks keep their bytes, and refused for continuation.
             "run_seed",
             "seed_derivation",
+            # B3-2 — the declared delta documented above.
+            "scheduling_mode",
         )

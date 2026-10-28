@@ -22,6 +22,7 @@ in this repository:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import signal
 import subprocess
@@ -117,6 +118,8 @@ class BulkResult(BaseModel):
     shards: list[ShardResult] = Field(default_factory=list)
     started_at: float = 0.0
     finished_at: float = 0.0
+    #: Tracked files whose bytes differ after the run (see ``tracked_digests``).
+    checkout_mutations: list[str] = Field(default_factory=list)
 
     @property
     def wall_clock_s(self) -> float:
@@ -140,7 +143,7 @@ class BulkResult(BaseModel):
         evidence, and reporting green would be the exact confident-nonsense
         failure the preflight exists to prevent.
         """
-        return not self.failed and not self.invalid
+        return not self.failed and not self.invalid and not self.checkout_mutations
 
     def longest(self) -> ShardResult | None:
         return max(self.shards, key=lambda s: s.duration_s, default=None)
@@ -164,6 +167,9 @@ class BulkResult(BaseModel):
             lines.append(f"  shard {s.index:>2} {state:>7} {s.size_str()} {s.duration_s:7.1f}s")
             if s.invalid_reason:
                 lines.append(f"      INVALID_HARNESS_EVIDENCE: {s.invalid_reason}")
+        if self.checkout_mutations:
+            lines.append("CHECKOUT MUTATED during the run (tracked files changed):")
+            lines.extend(f"  {path}" for path in self.checkout_mutations)
         failing = [s for s in self.shards if not s.passed and s.invalid_reason is None]
         if failing:
             lines.append("")
@@ -323,6 +329,32 @@ def _reject_workdir_inside(root: Path, workdir: Path) -> None:
         )
 
 
+def tracked_digests(root: Path) -> dict[str, str]:
+    """SHA-256 of every git-tracked file under ``root``; ``"absent"`` if missing.
+
+    The in-process guard (``tests/helpers/checkout_write_guard.py``) cannot
+    see writes made by a test's subprocesses; comparing these digests before
+    and after the bulk run catches any mutation that survived to the end.
+    """
+    listing = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z"], check=True, capture_output=True
+    ).stdout
+    digests: dict[str, str] = {}
+    for name in filter(None, os.fsdecode(listing).split("\0")):
+        path = root / name
+        digests[name] = (
+            hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "absent"
+        )
+    return digests
+
+
+def changed_paths(before: Mapping[str, str], after: Mapping[str, str]) -> list[str]:
+    """Tracked paths added, removed or rewritten between two digest maps."""
+    return sorted(
+        name for name in before.keys() | after.keys() if before.get(name) != after.get(name)
+    )
+
+
 def run_bulk(
     root: Path,
     plan: ShardPlan,
@@ -342,7 +374,26 @@ def run_bulk(
     _reject_workdir_inside(root, workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     limit = concurrency or len(plan.shards)
+    before = tracked_digests(root)
     result = BulkResult(sha=sha, started_at=time.time())
+
+    # An EMPTY shard is never launched. ``pytest`` with no path arguments falls
+    # back to the configured ``testpaths`` and would run the whole tree,
+    # integration included — so a narrow selection planned over more shards
+    # than it has files (routine once the bulk lane is split across a CI
+    # matrix) must record an empty shard as trivially passed instead.
+    for shard in plan.shards:
+        if not shard.files:
+            result.shards.append(
+                ShardResult(
+                    index=shard.index,
+                    files=(),
+                    returncode=0,
+                    duration_s=0.0,
+                    tmpdir="",
+                )
+            )
+    runnable = [shard for shard in plan.shards if shard.files]
 
     # A thread pool is safe here: each worker only waits on its own child
     # process, so the GIL is released and nothing is shared but the result list.
@@ -357,7 +408,7 @@ def run_bulk(
                 threads=threads,
                 timeout_s=timeout_s,
             )
-            for shard in plan.shards
+            for shard in runnable
         ]
         # No early cancellation: a failing shard must not discard the evidence
         # its siblings are still producing.
@@ -366,4 +417,7 @@ def run_bulk(
 
     result.shards.sort(key=lambda s: s.index)
     result.finished_at = time.time()
+    # A shard that mutates the shared checkout corrupts its siblings' evidence
+    # (#973) even when every shard passes, so the run is RED on any change.
+    result.checkout_mutations = changed_paths(before, tracked_digests(root))
     return result

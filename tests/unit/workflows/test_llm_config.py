@@ -349,3 +349,90 @@ def test_proposer_transports_independent_stage_efforts():
     assert routed["reasoning_reasoning_effort"] == "high"
     assert routed["proposing_reasoning_effort"] == "medium"
     assert routed["comparison_max_retries"] is None
+
+
+# ---------------------------------------------------------------------------
+# WorkflowLLMConfig.judge — bounded LLM-judge routes (B2-2)
+# ---------------------------------------------------------------------------
+
+# Bytes of a fixed uniform config WITHOUT `judge`, captured from origin/master
+# (69a9d81a). Pins the serialized shape that run locks and launch expectations
+# compare; a stray `"judge": null` would change it for every existing workflow.
+UNIFORM_WITHOUT_JUDGE_JSON = (
+    '{"interpret":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
+    '"data_analysis":null,'
+    '"propose":{"comparison":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
+    '"reasoning":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
+    '"proposing":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null}},'
+    '"implement":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
+    '"validate":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
+    '"tune":{"planner_strategy":null,'
+    '"planner":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
+    '"reflector":{"provider":"openai","model_id":"gpt-4o","reasoning_effort":null}},'
+    '"lit_review":{"main":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
+    '"search":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null}}}'
+)
+
+
+def _uniform_without_judge() -> WorkflowLLMConfig:
+    return WorkflowLLMConfig.uniform(
+        "openai", "gpt-4o-mini", reflect_provider="openai", reflect_model_id="gpt-4o"
+    )
+
+
+class TestWorkflowLLMConfigJudge:
+    def test_config_without_judge_serializes_to_the_pinned_bytes(self):
+        dumped = _uniform_without_judge().model_dump_json(by_alias=True)
+        assert dumped == UNIFORM_WITHOUT_JUDGE_JSON
+        assert "judge" not in json.loads(dumped)
+
+    def test_judge_routes_round_trip_and_are_refused_through_get(self):
+        config = WorkflowLLMConfig.model_validate(
+            {
+                "judge": {
+                    "stop": {
+                        "provider": "openai",
+                        "model_id": "gpt-4o-mini",
+                        "max_output_tokens": 800,
+                        "max_retries": 3,
+                    }
+                }
+            }
+        )
+        dumped = json.loads(config.model_dump_json())
+        assert dumped["judge"]["stop"]["max_retries"] == 3
+        assert WorkflowLLMConfig.model_validate(dumped) == config
+        with pytest.raises(ValueError, match="not a node slot"):
+            config.get("judge")
+
+    def test_judge_route_requires_explicit_provider_and_model(self):
+        """The judge's model is audited evidence: no central default may fill it in."""
+        route = {"max_output_tokens": 800, "max_retries": 2}
+        for explicit in ({"provider": "openai"}, {"model_id": "gpt-4o-mini"}):
+            with pytest.raises(ValidationError):
+                WorkflowLLMConfig.model_validate({"judge": {"stop": {**route, **explicit}}})
+        with pytest.raises(ValidationError):
+            WorkflowLLMConfig.model_validate(
+                {"judge": {"stop": {**route, "provider": "openai", "model_id": ""}}}
+            )
+
+    def test_empty_judge_block_is_refused(self):
+        with pytest.raises(ValidationError, match="at least one"):
+            WorkflowLLMConfig.model_validate({"judge": {}})
+
+    def test_unbounded_retries_remain_valid_for_other_slots_beside_judge(self):
+        config = WorkflowLLMConfig.model_validate(
+            {
+                "interpret": {"provider": "openai", "model_id": "gpt-4o-mini"},
+                "judge": {
+                    "aggregate": {
+                        "provider": "openai",
+                        "model_id": "gpt-4o-mini",
+                        "max_output_tokens": 400,
+                        "max_retries": 2,
+                    }
+                },
+            }
+        )
+        assert config.interpret is not None and config.interpret.max_retries is None
+        assert config.get("interpret") == {"provider": "openai", "model_id": "gpt-4o-mini"}
