@@ -33,3 +33,9 @@ They use an explicit private local store and preserve native outcome semantics.
 The [local candidate console](candidate_console/README.md) adds an authenticated
 loopback page for configured preparation, review, explicit launch and known-ID
 monitoring of those operations.
+
+`python -m tools.adaptors` checks a custom adaptor that lives in your own
+project: `inspect` shows its identity, `self-test` runs its examples twice, and
+`admit` records a passing result under your project's `.siderius/adaptors/`.
+Workflows cannot run admitted adaptors yet. See the
+[custom adaptor contract](../workflows/custom_adaptors/custom-adaptor-contract.md).
