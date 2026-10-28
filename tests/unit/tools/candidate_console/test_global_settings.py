@@ -267,6 +267,36 @@ def test_a_data_root_holding_only_the_token_is_refused(console_config, tmp_path)
         validate_resolved(resolve_console(json.dumps(document).encode()))
 
 
+@pytest.mark.parametrize(
+    ("folder", "named"),
+    [
+        ({"root_id": "nope", "subpath": "x"}, "unknown data root ID 'nope'"),
+        ({"root_id": "workspace", "subpath": "../../etc"}, "relative path"),
+    ],
+)
+def test_overridden_folder_refs_still_fail_closed(folder, named, workspace, monkeypatch, capsys):
+    """Defect: a bad settings ref passes check because console.json sets data_root (OQ-4)."""
+    task = json.loads(_console(workspace).read_text())["tasks"][0] | {
+        "data_root": str(workspace / "data" / "synthetic")
+    }
+    _edit_console(workspace, tasks=[task])
+    _write_settings(
+        workspace, llm_profile=_library_default(workspace), data_folders={"synthetic": folder}
+    )
+    code, err = _main(monkeypatch, capsys, "check", "--config", str(_console(workspace)))
+    assert code == 2 and named in err
+
+
+def test_malformed_settings_name_the_field_not_the_value(workspace, monkeypatch, capsys):
+    """Defect: a schema error hides which field is wrong, or echoes its value."""
+    _write_settings(
+        workspace, llm_profile={"source": "library", "name": "DO-NOT-ECHO", "sha256": "x"}
+    )
+    code, err = _main(monkeypatch, capsys, "check", "--config", str(_console(workspace)))
+    assert code == 2 and "llm_profile.library.name" in err and "llm_profile.library.sha256" in err
+    assert "DO-NOT-ECHO" not in err
+
+
 def test_task_data_root_containing_the_workspace_is_refused(workspace, monkeypatch, capsys):
     """Defect: an explicit data_root that contains settings passes because only destinations are protected."""
     task = json.loads(_console(workspace).read_text())["tasks"][0] | {"data_root": str(workspace)}
@@ -276,7 +306,7 @@ def test_task_data_root_containing_the_workspace_is_refused(workspace, monkeypat
 
 
 def test_native_admission_refuses_protected_read_only_inputs(selection, tmp_path):
-    """Defect: admit(protected=...) is ignored on the in-process reusable path."""
+    """Defect: native admission ignores its ``protected`` argument (owner-level witness)."""
     from tools.candidate_prepare.admission import admit
 
     secret = Path(selection.data_root) / "token"

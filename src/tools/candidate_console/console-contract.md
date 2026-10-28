@@ -160,6 +160,11 @@ derived as `<workspace_root>/data`. Files are referenced in place, never copied.
 **Settings file.** `global_settings: {browser_writable: bool = false}` enables
 reading `<workspace_root>/settings/global_settings.json`; `global_settings` without
 `workspace_root` is refused, and without `global_settings` no settings file is read.
+`init` writes the block (`browser_writable: true`) only into a console.json it
+creates; it never rewrites an existing one, so an earlier workspace opts in by an
+operator edit. Every `data_folders` ref is resolved and exclusion-checked at
+`check`/startup even when console.json sets that task's `data_root`. A schema
+error names Pydantic `loc` paths only, never values.
 Schema `GlobalSettings`: `schema_version: "siderius.console-global-settings/v1"`,
 `llm_profile: FileRef | null`, `advice: FileRef | null`,
 `data_folders: {task_id: FolderRef}`. `FileRef` is
@@ -206,9 +211,10 @@ output and reusable runs root, and, with a workspace, `settings/` and `library/`
 `validate_config(config, workspace=…)` applies it to every task `data_root` and
 `task_read_only` entry; `validate_settings` applies it to every `data_roots` entry.
 `admit(request, *, protected=())` applies it to `(data_root, *task_read_only)`; the
-console passes `protected_paths(config)` through `preflight_reusable_candidate` on
-the in-process reusable path. Limitation: subprocess admission does not receive the
-console set; its `data_root` must equal the startup-validated `TaskChoice.data_root`
+console's `create_app(config, settings)` passes `protected_paths(config,
+settings.workspace_root)` to `ReusablePreparation`, which forwards it through
+`preflight_reusable_candidate` on the in-process reusable path. Limitation:
+subprocess admission does not receive the console set; its `data_root` must equal the startup-validated `TaskChoice.data_root`
 (`check_request_policy`).
 
 `recorded_examples` is an optional allowlist for read-only candidate-validation

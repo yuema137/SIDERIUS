@@ -82,6 +82,13 @@ even when using the default models.
    global settings select a model profile. Browser users can change
    the native run name and three advice fields.
 
+   `console.json` reads `settings/global_settings.json` only when it contains a
+   `global_settings` block. `init` writes `"global_settings": {"browser_writable":
+   true}` into a new `console.json`, which also lets the browser save settings.
+   `init` never rewrites an existing `console.json`, so a workspace created
+   before this block existed lacks it; add that line yourself (use `false` to
+   read the file but keep the browser from changing it) and run `check`.
+
    To offer other model profiles, advice files or data locations, list them in
    `console.json` under `llm_profiles`, `advice_files` and `data_roots` (see
    [Global settings](console-contract.md#global-settings)). The settings file
