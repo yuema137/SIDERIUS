@@ -35,6 +35,10 @@ build_adaptor_record(*, adaptor_id, iteration, combine, select, distribute,
 `items` must be in declared order (port order, then binding position). The
 caller supplies each succeeded value already validated against its catalogue
 contract; `AdaptorItem.value` is present iff `state == "succeeded"`.
+`AdaptorInputRef.record_sha256` is the native record digest of a succeeded or
+rejected input; for a route-skipped input it is the skip record digest the
+candidate worker cites (`route_phase.skip_citations`: the SHA-256 of the canonical
+`GraphRouteEvidence` that skipped it, B1-PR5).
 `admit_items` refuses (`AdaptorStrategyError`) any tuple not in declared order:
 each port's items must be contiguous and their positions strictly increasing.
 

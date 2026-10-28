@@ -41,6 +41,9 @@ class InterpretationEdge:
 
 # S1 (B6-3): fanout branches -> first passing validator -> one tuner.
 SELECTION_PROFILE = "native-proposal-fanout-selection/v1"
+# B1-PR5: the S1 node set plus declared routes, e.g. a fallback branch that runs
+# only when the first validator rejects (B1-Q1/Q2). The only profile admitting routes.
+ROUTED_PROFILE = "native-routed-candidate/v1"
 
 
 @dataclass(frozen=True)
@@ -85,8 +88,16 @@ def execution_families(
     definition: WorkflowDefinition | ReusableWorkflowDefinition, profile: str | None
 ) -> ProposalFamilies:
     """Select only an explicitly supported native graph profile."""
-    refuse_declaration_only(definition, admits_adaptors=profile == SELECTION_PROFILE)
+    refuse_declaration_only(
+        definition,
+        admits_adaptors=profile in (SELECTION_PROFILE, ROUTED_PROFILE),
+        admits_routes=profile == ROUTED_PROFILE,
+    )
     if profile == SELECTION_PROFILE:
+        return selection_candidate(definition)
+    if profile == ROUTED_PROFILE:
+        if not definition.routes:
+            raise ValueError("the routed profile requires at least one declared route")
         return selection_candidate(definition)
     if profile == "native-interpretation-candidate/v1":
         return interpretation_candidate(definition)

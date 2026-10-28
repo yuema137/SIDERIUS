@@ -20,15 +20,19 @@ ADAPTORS_NOT_ADMITTED = "adaptors are declared but this execution profile does n
 
 
 def refuse_declaration_only(
-    definition: WorkflowDefinition | ReusableWorkflowDefinition, *, admits_adaptors: bool = False
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+    *,
+    admits_adaptors: bool = False,
+    admits_routes: bool = False,
 ) -> None:
-    """Routes are declaration-only; adaptors only where a profile admits them.
+    """Routes and adaptors run only where a profile admits them.
 
-    Only the selection profile (``fanout.SELECTION_PROFILE``) passes
-    ``admits_adaptors=True``. The adaptor format gate guarantees
+    Only the selection and routed profiles (``fanout.SELECTION_PROFILE``,
+    ``fanout.ROUTED_PROFILE``) pass ``admits_adaptors=True``; only the routed
+    profile passes ``admits_routes=True``. The adaptor format gate guarantees
     ``adaptor_format`` is set iff an adaptor is used.
     """
-    if definition.routes:
+    if definition.routes and not admits_routes:
         raise ValueError(ROUTING_NOT_ADMITTED)
     if definition.adaptor_format is not None and not admits_adaptors:
         raise ValueError(ADAPTORS_NOT_ADMITTED)

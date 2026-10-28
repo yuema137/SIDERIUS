@@ -13,11 +13,11 @@ from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 from workflows.termination import infrastructure_abort_reason
 
-from . import readiness, unit_runner
+from . import readiness, route_phase, unit_runner
 from .adaptor_phase import body_outcome, execute_adaptor, expected_adaptors, tuning_branch
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
-from .graph_models import GraphNodeEvidence, GraphTrace
+from .graph_models import GraphNodeEvidence, GraphRouteEvidence, GraphTrace
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .training_admission import admit_training
 from .unit_dispatch import node_invocation
@@ -35,6 +35,10 @@ def execute_fanout(
 ) -> CandidateRunReceipt:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
+    # Before any effect: a route metric mismatch orphans no native record.
+    metric = route_phase.admit_route_metric(definition, composition.metric.spec)
+    routing = route_phase.node_routing(definition)
+    routes: list[GraphRouteEvidence] = []
     admitted = (
         admit_training(request, initial, composition, config, iteration=iteration)
         if shape.tuning
@@ -64,7 +68,13 @@ def execute_fanout(
     adaptors = {adaptor.id: adaptor for adaptor in definition.adaptors}
     while len(evidence) < len(slots):
         decision = readiness.next_dispatch(
-            readiness.readiness_input(slots.values(), evidence, aborted=aborted)
+            readiness.readiness_input(
+                slots.values(),
+                evidence,
+                aborted=aborted,
+                decisions=tuple(item.decision for item in routes),
+                routing=routing,
+            )
         )
         for node_id, state, reason in decision.terminal:
             evidence[node_id] = slots[node_id].model_copy(
@@ -82,6 +92,7 @@ def execute_fanout(
                 evidence,
                 workspace=Path(initial.workspace),
                 iteration=iteration,
+                skips=route_phase.skip_citations(evidence, routes, routing),
             )
             if outcome is not None:
                 outcomes[decision.next] = outcome
@@ -152,9 +163,14 @@ def execute_fanout(
             evidence[node.id] = item.model_copy(
                 update={"state": "failed", "reason": "native_failure"}
             )
+        # Outside the node's own failure handling: an unevaluable route fails the body.
+        routes += route_phase.decide_routes(
+            definition, evidence[node.id], metric, iteration=iteration
+        )
     trace = GraphTrace(
         nodes=tuple(evidence[node.id] for node in definition.nodes),
         adaptors=tuple(evidence[adaptor.id] for adaptor in definition.adaptors),
+        routes=route_phase.declared_order(definition, routes),
     )
     status, validation_passed = body_outcome(shape, definition, trace)
     return initial.model_copy(

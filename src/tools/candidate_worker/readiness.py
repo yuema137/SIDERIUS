@@ -23,6 +23,8 @@ _UNSUCCESSFUL: frozenset[GraphState] = frozenset(("failed", "rejected", "blocked
 # Source states that close an adaptor: a failure (which also aborts) or a blocked
 # source, whose absence is not an observed outcome the strategy could weigh.
 _ADAPTOR_CLOSING: frozenset[GraphState] = frozenset(("failed", "blocked"))
+# Control-only route sources that close their target: no record was produced.
+_CONTROL_CLOSING: frozenset[GraphState] = frozenset(("failed", "blocked"))
 # Reasons a node may be `skipped` with; a consumer of a skipped source inherits it.
 SKIP_REASONS: frozenset[GraphReason] = frozenset(("route_not_selected",))
 
@@ -46,7 +48,17 @@ class NodeRouting(StopModel):
     """Route facts of one node, projected from its declaration; empty when unrouted."""
 
     route: str | None = None  # branch whose entry target this node is
+    # The branch source when this target reads no data from it: a control-only edge
+    # needs the source finished with a record (succeeded or rejected), so a fallback
+    # arm can run after a rejection (B1-Q1). A data edge still needs success.
+    control: str | None = None
     merges: tuple[MergeReadiness, ...] = ()
+
+    @model_validator(mode="after")
+    def _control_is_routed(self) -> "NodeRouting":
+        if self.control is not None and self.route is None:
+            raise ValueError("a control-only source belongs to a route target")
+        return self
 
 
 class NodeReadiness(StopModel):
@@ -69,6 +81,8 @@ class NodeReadiness(StopModel):
             raise ValueError("a merge candidate is not also a required predecessor")
         if self.kind == "adaptor" and self.routing != NodeRouting():
             raise ValueError("an adaptor is neither a route target nor a merge consumer")
+        if self.routing.control is not None and self.routing.control not in self.predecessors:
+            raise ValueError("a control-only source is a required predecessor")
         return self
 
 
@@ -169,6 +183,8 @@ def _close_reason(
     run. AND over required sources: failure stop, then blocked (a failed, rejected
     or blocked source) beats skipped (a skipped source's reason is inherited, the
     generic propagation for any skip reason), then the node's own route decision.
+    A control-only route source blocks only when it failed or was blocked: a
+    rejected source still has the record its decision reads (B1-Q1 fallback).
     An adaptor accepts any terminal source (B6-D8): only a failed or blocked source
     closes it; a rejected or skipped one is merely inadmissible to its strategy.
     """
@@ -177,10 +193,15 @@ def _close_reason(
     if node.kind == "adaptor":
         closing = any(nodes[key].state in _ADAPTOR_CLOSING for key in node.predecessors)
         return ("blocked", "dependency_not_successful") if closing else None
-    sources = [nodes[key] for key in node.predecessors]
+    control = node.routing.control
+    sources = [nodes[key] for key in node.predecessors if key != control]
     sources += [_merge_input(node.node_id, item, nodes, decisions) for item in node.routing.merges]
-    if any(source.state in _UNSUCCESSFUL for source in sources):
+    if any(source.state in _UNSUCCESSFUL for source in sources) or (
+        control is not None and nodes[control].state in _CONTROL_CLOSING
+    ):
         return ("blocked", "dependency_not_successful")
+    if control is not None:
+        sources.append(nodes[control])
     skipped = next((source for source in sources if source.state == "skipped"), None)
     if skipped is not None:
         if skipped.reason is None:  # unreachable: NodeReadiness refuses a reasonless skip
@@ -201,6 +222,21 @@ def next_dispatch(value: ReadinessInput) -> ReadinessOutput:
             return ReadinessOutput(next=node.node_id, terminal=())
         return ReadinessOutput(next=None, terminal=((node.node_id, *closure),))
     return ReadinessOutput(next=None, terminal=())
+
+
+def may_run(node_id: str, value: ReadinessInput) -> bool:
+    """Whether a dispatched node's recorded sources permit it to have run (no abort).
+
+    The verifier's per-entry check, under the same per-node rule as ``next_dispatch``:
+    a merge consumer is checked against the selected candidate only, a control-only
+    route source may be rejected.
+    """
+    nodes = {node.node_id: node for node in value.nodes}
+    node = nodes[node_id]
+    if any(nodes[key].state in _OPEN for key in _sources(node)):
+        return False
+    decisions = {decision.branch_id: decision for decision in value.decisions}
+    return _close_reason(node, nodes, decisions, aborted=False) is None
 
 
 def body_status(states: Iterable[GraphState], *, tuning: bool) -> BodyStatus:

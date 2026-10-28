@@ -47,9 +47,10 @@ AdaptorDefinition = WorkflowDefinition | ReusableWorkflowDefinition
 class SkippedAdaptorInputError(ValueError):
     """A skipped source reached an adaptor, but no skip record exists to cite.
 
-    Admitted profiles have no routes, so this is unreachable today. Routed
-    execution (B1-PR5) must provide a record for a skipped source before an
-    adaptor may treat it as inadmissible.
+    Unreachable for route skips: routed execution (B1-PR5) cites the deciding
+    route evidence (``route_phase.skip_citations``). A skip with another reason
+    (B6-4 ``insufficient_items``) still needs its own record before it may reach
+    an adaptor.
     """
 
 
@@ -77,14 +78,18 @@ def expected_adaptors(
 
 
 def adaptor_items(
-    adaptor: AdaptorInstance, entries: Mapping[str, GraphNodeEvidence]
+    adaptor: AdaptorInstance,
+    entries: Mapping[str, GraphNodeEvidence],
+    skips: Mapping[str, str] | None = None,
 ) -> tuple[AdaptorItem, ...]:
     """Typed items in declared order (port order, then binding position).
 
     Completion order never enters: the tuple follows the declaration, and a
     succeeded value is re-read from its digest-checked native record, so the
-    worker and the verifier see the same bytes.
+    worker and the verifier see the same bytes. A route-skipped source cites its
+    skip record digest from ``skips`` (``route_phase.skip_citations``).
     """
+    citations = skips or {}
     bindings = {binding.port: binding for binding in adaptor.bindings}
     items = []
     for port in adaptor.inputs:
@@ -92,10 +97,25 @@ def adaptor_items(
             if not isinstance(source, ResultSource):
                 raise ValueError(f"adaptor {adaptor.id}: only result sources are executable")
             entry = entries[source.node]
+            if entry.state == "skipped" and source.node in citations:
+                items.append(
+                    AdaptorItem(
+                        ref=AdaptorInputRef(
+                            port=port.name,
+                            position=position,
+                            source=source,
+                            record_sha256=citations[source.node],
+                        ),
+                        contract=port.contract,
+                        state="skipped",
+                        value=None,
+                    )
+                )
+                continue
             if entry.state == "skipped":
                 raise SkippedAdaptorInputError(
                     f"adaptor {adaptor.id}: input {source.node} was skipped; skipped adaptor "
-                    "inputs need a skip record from routed execution (B1-PR5)"
+                    "inputs need a skip record to cite"
                 )
             if (
                 entry.state not in ("succeeded", "rejected")
@@ -147,11 +167,15 @@ def _rejected_by_record(contract: str, value: BaseModel) -> bool:
 
 
 def decide(
-    adaptor: AdaptorInstance, entries: Mapping[str, GraphNodeEvidence], *, iteration: int
+    adaptor: AdaptorInstance,
+    entries: Mapping[str, GraphNodeEvidence],
+    *,
+    iteration: int,
+    skips: Mapping[str, str] | None = None,
 ) -> tuple[AdaptorOutcome, AdaptorRecord]:
     """The pure deterministic decision and its record; no metric-ranking kind is admitted."""
     outcome = run_deterministic_adaptor(
-        adaptor_items(adaptor, entries),
+        adaptor_items(adaptor, entries, skips),
         combine_strategy=adaptor.combine,
         select_strategy=adaptor.select,
         distribute_strategy=adaptor.distribute,
@@ -188,15 +212,16 @@ def execute_adaptor(
     *,
     workspace: Path,
     iteration: int,
+    skips: Mapping[str, str] | None = None,
 ) -> tuple[GraphNodeEvidence, AdaptorOutcome | None]:
     """Decide, publish outputs then the record (write-once), and close the trace slot.
 
     Any exception is an uncertain failure: the slot fails without a record and
-    the caller stops later effects, as for a native node. A skipped input is a
-    contract gap (no skip record exists yet), never a run outcome, so it propagates.
+    the caller stops later effects, as for a native node. A skipped input without
+    a skip record is a contract gap, never a run outcome, so it propagates.
     """
     try:
-        outcome, record = decide(adaptor, entries, iteration=iteration)
+        outcome, record = decide(adaptor, entries, iteration=iteration, skips=skips)
         state, reason = graph_closure(outcome)
         adaptor_dir(workspace, iteration=iteration).mkdir(parents=True, exist_ok=True)
         for output in outcome.outputs:
@@ -233,6 +258,7 @@ def verify_adaptors(
     *,
     workspace: Path,
     iteration: int,
+    skips: Mapping[str, str] | None = None,
 ) -> dict[str, AdaptorOutcome]:
     """Recompute every recorded adaptor from the native records it names.
 
@@ -245,7 +271,7 @@ def verify_adaptors(
         entry = entries[adaptor.id]
         if entry.record_path is None:
             continue
-        outcome, record = decide(adaptor, entries, iteration=iteration)
+        outcome, record = decide(adaptor, entries, iteration=iteration, skips=skips)
         if read_graph_control(Path(entry.record_path)) != canonical_json_bytes(record):
             raise ValueError(f"adaptor {adaptor.id} record does not match its recomputation")
         if (entry.state, entry.reason) != graph_closure(outcome):

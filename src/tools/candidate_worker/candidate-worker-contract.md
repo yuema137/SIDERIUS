@@ -525,10 +525,12 @@ authority. It is pure: `ReadinessInput` carries every declared node in
 declaration order as `NodeReadiness(node_id, predecessors, state, reason,
 routing)` (`pending` for undecided nodes), `aborted`, and `decisions` (the
 recorded `RouteEvaluationOutput` values, at most one per branch; empty for
-every currently admitted profile). It refuses duplicate ids, undeclared
+every profile except `native-routed-candidate/v1`). It refuses duplicate ids, undeclared
 predecessors or merge candidates, two decisions for one branch, a `skipped`
 node without a reason in `SKIP_REASONS` (B1: `route_not_selected`), and a node
-whose merge candidate is also one of its `predecessors`. `predecessors` are the
+whose merge candidate is also one of its `predecessors`, or whose
+`NodeRouting.control` is set without `route` or is not one of its `predecessors`.
+`predecessors` are the
 required sources (including a route's control edge), excluding merge
 candidates: declared dependency facts list every candidate as a consumer
 dependency, so `readiness_input` removes a node's merge candidates from its slot
@@ -544,7 +546,12 @@ For a capability node, the per-node rule `_close_reason`, in precedence order:
 
 1. `aborted` (an earlier native failure) → `blocked/dependency_not_successful`.
 2. Any required source `failed`, `rejected` or `blocked` →
-   `blocked/dependency_not_successful`. Blocked beats skipped.
+   `blocked/dependency_not_successful`. Blocked beats skipped. Exception
+   (B1-PR5, B1-Q1 fallback): `NodeRouting.control` names the branch source when
+   the target binds no data from it (a control-only edge). That source blocks only
+   when `failed` or `blocked`; a `rejected` source still produced the record its
+   decision read, so rule 4 decides. A target that also reads the source's data
+   keeps rule 2 (pinned: `test_readiness.py` route rows).
 3. Any required source `skipped` → `skipped` with that source's reason (first
    skipped source in predecessor order). This generic propagation applies to any
    skip reason, so later reasons (B6 `insufficient_items`) need no second rule;
@@ -566,7 +573,12 @@ raises. `body_status(states, tuning=...)` is the one body aggregate: `failed` if
 any node failed, else `rejected` if any node was rejected, else
 `completed`/`accepted`; `skipped` and `blocked` are neutral (blocked only follows
 a failure or rejection). `validation_passed` is unchanged: with tuning it
-requires every validation node `succeeded`.
+requires every validation node `succeeded`. That rule is not reached by a routed
+run: the routed profile is the selection profile, whose `validation_passed` is
+the selection adaptor's outcome. `readiness.may_run(node_id, value)` applies the
+same per-node rule (without abort) to a fully recorded trace; the verifier uses
+it as its per-entry dependency check, so a merge consumer is checked against the
+selected candidate only and a control-only source may be `rejected`.
 
 `execute_fanout` dispatches from this decision, and `verify_graph_trace` replays
 the recorded terminal states through `graph_evidence.replay_readiness(nodes, *,
@@ -574,10 +586,10 @@ decisions=(), routing=None)`, which refuses a node readiness would dispatch but
 the trace closed, and a node readiness would close whose recorded `(state,
 reason)` differs (for example dispatched inside a non-selected arm, or `blocked`
 where readiness derives `skipped`). The verifier also accepts `skipped` without a
-record path/digest only with a `SKIP_REASONS` reason. Both call sites currently
-pass no decisions or routing, because routed documents remain refused by
-`candidate.refuse_declaration_only`; a `skipped` state in an unrouted trace is therefore
-refused by replay. Adding the `skipped` state and `route_not_selected` reason does
+record path/digest only with a `SKIP_REASONS` reason. Both call sites pass the
+recorded decisions and `route_phase.node_routing(definition)` (empty for an
+unrouted declaration), so a `skipped` state in an unrouted trace is refused by
+replay. Adding the `skipped` state and `route_not_selected` reason does
 not change existing trace bytes (pinned by
 `test_unrouted_graph_trace_bytes_are_unchanged`). If no node can act while some
 remain undecided (unreachable for a validated acyclic declaration),
@@ -733,9 +745,11 @@ against the trace) and parsed with the contract's native model
 (`workflows.custom_adaptors.contracts.native_type`). A rejected source must be
 rejected by its record (a `VALIDITY_GATED_CONTRACTS` value with `passed=False`),
 else `ValueError`; it becomes an item with state `rejected` and no value. A
-`skipped` source raises `SkippedAdaptorInputError` (routed execution, B1-PR5, must
-first provide a skip record to cite as provenance), which `execute_adaptor`
-re-raises instead of closing the slot; any other state raises `ValueError`. The pure
+route-skipped source becomes an item with state `skipped`, no value, and
+`AdaptorInputRef.record_sha256` = its skip record digest from
+`route_phase.skip_citations` (see "Routed execution"). A `skipped` source without
+a citation raises `SkippedAdaptorInputError`, which `execute_adaptor` re-raises
+instead of closing the slot; any other state raises `ValueError`. The pure
 `run_deterministic_adaptor` decides with `metric=None` (no metric-ranking kind is
 admitted), and `build_adaptor_record` builds the `AdaptorRecord`. Each emitted
 output value is published write-once as canonical JSON at
@@ -801,8 +815,81 @@ reuse; missing staged model; shape refusals).
 
 Not admitted: v2 reusable source, managed preparation and console for this profile;
 any other strategy triple, metric ranking, per-item/split distribution, routes,
-loops, custom and LLM strategies; a skipped adaptor input (`SkippedAdaptorInputError`
-until B1-PR5 provides skip records).
+loops, custom and LLM strategies. Routes run only under
+`native-routed-candidate/v1` (next section).
+
+### Routed execution profile (B1-PR5)
+
+`WorkflowPreviewRequest.execution_profile="native-routed-candidate/v1"`
+(`workflows.definition.fanout.ROUTED_PROFILE`) admits the S1 selection node set
+(same admission, `fanout.selection_candidate`) plus at least one declared route;
+it is the only profile whose `refuse_declaration_only` call passes
+`admits_routes=True`. Every other profile, the fixed candidate, v2 reusable
+sources, managed preparation and the console profile lists still refuse a routed
+document (`ROUTING_NOT_ADMITTED`). No loop is admitted (`admit_loop` admits only
+the interpretation profile; B1-Q5 leaves no admissible route target in the
+single-branch interpretation loop, so routed loops wait for a later design). First
+consumer (B1-Q1(a)): a fallback branch, e.g. `Branch(source=check0,
+cases=(RouteCase(when=BoolIs("validation.passed", False), targets=("build1",)),))`:
+`build1`/`check1` run only when `check0` rejects, and the first-admissible adaptor
+trains whichever validator passed (a passing fallback rescues the body; the
+absorbed `check0` rejection is neutral).
+
+**Run metric.** `route_phase.admit_route_metric(definition, composed)` derives the
+run metric once, before any effect in `execute_fanout`: the composed task metric
+(no loop, so no seed reconciliation). `route_eval.admit_route_metrics` refuses a
+`metric_at_least` naming another metric there (`RouteConditionError`; the child
+fails, no node is dispatched). The same object is passed to every
+`RouteEvaluationInput`. In the selection node set only a tuning record carries a
+metric observable and the tuner has no descendants, so a `metric_at_least` route
+is not declarable today; the admission is generic.
+
+**Decisions.** After each node closes, `route_phase.decide_routes` decides every
+branch whose source it is, provided it closed `succeeded` or `rejected` with a
+record: `project_observation` from the record path, a digest check against the
+trace's `record_sha256`, then `evaluate_route`. A `failed` source decides nothing
+and its targets are blocked. Any exception during projection or evaluation is a
+`RouteConditionError` raised out of `execute_fanout` (outside the node's own
+failure handling): the body fails as an uncertain child failure, never reading the
+route as false. Each decision is recorded as
+`GraphRouteEvidence(branch_id, source_node, source_record_sha256,
+evaluator="siderius.route/v1", decision, decided_by="predicate")` and fed to
+readiness. `GraphTrace.routes` lists them in branch declaration order and is
+omitted when empty (unrouted bytes unchanged). `route_phase.node_routing` builds
+each node's `NodeRouting` from the declaration through the public
+`workflows.definition.routes` helpers `route_targets` (entry target → branch,
+source, `control_only`) and `merge_arms` (merge candidate → its arm's entry
+targets, via `branch_arms`).
+
+**Skip records.** A route-skipped node's skip record is the `GraphRouteEvidence`
+that skipped it: directly (it is a `skipped_targets` entry of its own branch) or by
+propagation (the walk follows the first route-skipped predecessor to the deciding
+branch). `route_phase.skip_citations` maps each such node to
+`evidence_digest(evidence)` = SHA-256 of the evidence's canonical JSON; an
+adaptor cites it as `AdaptorInputRef.record_sha256` of the skipped input. The
+worker computes citations at adaptor dispatch, the verifier from the trace; both
+feed `adaptor_phase.decide`, so the adaptor record is recomputed byte for byte.
+The `routes.py` arm-label relaxation stands for this shape: the adaptor reads both
+arms (one outside, one inside the fallback arm) and runs either way (B6-D8), so its
+tuner consumer is not refused.
+
+**Verification.** `verify_graph_trace` additionally runs
+`route_phase.verify_routes`: for every node closed `succeeded`/`rejected` with a
+record it re-projects and re-evaluates each branch it sources and requires the
+recorded tuple to equal the re-derivation (a forged decision, source digest,
+missing or extra decision is refused: "graph route evidence does not match its
+re-derivation"). The verifier holds no composition, so it evaluates under the
+source record's own stamped metric, which the worker already reconciled with the
+run metric (a tuning record without a stamp would make a metric route
+unverifiable; not declarable today). Readiness replay then uses the recorded
+decisions, refusing a node dispatched in a non-selected arm and any terminal
+`(state, reason)` readiness would not produce.
+Witness: `tests/unit/tools/candidate_worker/test_routed_profile.py` (passing
+`check0` skips the fallback and the adaptor cites the skip record; rejected
+`check0` runs the fallback, trains `build1` and completes; both rejected; forged
+decision, source digest and dropped decision refused; metric admission before any
+dispatch; refusal by every other profile; unrouted selection trace bytes pinned on
+base 405d7aaf; console projection of skipped nodes).
 
 ### Opt-in native literature candidate
 
@@ -1152,13 +1239,12 @@ incumbent and the no-improvement window span segments. A condition-completed run
 `completed`, not a resumable checkpoint. Receipts and source without conditions are
 byte-identical to those before this feature.
 
-## Route evaluator (pure, not yet admitted)
+## Route evaluator (pure)
 
 `tools.candidate_worker.route_eval` decides one declared `Branch` (definition
-contract, "Route declarations (inert)") from one native record. It has no execution
-caller yet: routed documents are still refused by `candidate.refuse_declaration_only`.
-Readiness consumes its output (skip semantics above); decision evidence and a routed
-profile are later worker work.
+contract, "Route declarations") from one native record. Its execution caller is
+`route_phase.decide_routes` under `native-routed-candidate/v1` ("Routed execution
+profile" above); readiness consumes its output (skip semantics above).
 
 - `project_observation(branch, capability, record_path, *, iteration)` reads the
   branch source's committed record once (no-follow, 4 MiB bound), validates it with
@@ -1173,8 +1259,8 @@ profile are later worker work.
   `None` for validation records). An observable outside the source contract, or a
   contract without a projection owner, raises `RouteConditionError`. Reading or
   parsing may also raise `OSError`, `ValueError` (4 MiB bound, record changed) or
-  pydantic `ValidationError`: **every** projection exception fails the body, so the
-  routed worker (PR5) must not catch only `RouteConditionError`.
+  pydantic `ValidationError`: **every** projection exception fails the body
+  (`route_phase.decide_routes` re-raises each as `RouteConditionError`).
 - `evaluate_route(RouteEvaluationInput(branch, observation, metric))` is pure (no
   I/O). It returns `RouteEvaluationOutput(branch_id, selected_case, selected_targets,
   skipped_targets, case_results)`: cases are tested in declared order and the first

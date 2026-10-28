@@ -22,6 +22,7 @@ class WorkflowPreviewRequest(PreviewModel):
             "native-literature-candidate/v1",
             "native-interpretation-candidate/v1",
             "native-proposal-fanout-selection/v1",
+            "native-routed-candidate/v1",
         ]
         | None
     ) = Field(default=None, exclude_if=lambda value: value is None)

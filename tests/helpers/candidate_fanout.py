@@ -281,3 +281,42 @@ def selection_request(request, branches=2, *, bindings=None, node_order=None):
             "selected_constructor_routes": observed.selected_constructor_routes,
         }
     )
+
+
+# Pinned on base 405d7aaf (before routed execution), same projection as above, for
+# the S1 selection profile keyed by the rejected review ordinals.
+SELECTION_TRACE_SHA256 = {
+    (): "73305fcceb04633985819dab674bba8c69cde2599b770f43048fae6b39a8070c",
+    (0,): "8c16e12033ae0096cf656e88ce5569fe3af848e4f86fdc95a53fb5193baf619d",
+    (0, 1): "cbd7eb79176f94d47bca69115d8bd041a57a9cc6b104ac725d5c22dbb3c6607f",
+}
+
+ROUTED_PROFILE = "native-routed-candidate/v1"
+FALLBACK_ROUTE = {
+    "id": "fallback",
+    "source": {"kind": "result", "node": "check0"},
+    "cases": [
+        {
+            "when": {"kind": "bool_is", "observable": "validation.passed", "value": False},
+            "targets": ["build1"],
+        }
+    ],
+}
+
+
+def routed_request(request, *, routes=(FALLBACK_ROUTE,), profile=ROUTED_PROFILE):
+    """B1-Q1(a) over S1: branch 1 (build1/check1) runs only when check0 rejects."""
+    request = selection_request(request)
+    raw = request.preview.model_dump(mode="json")
+    raw["document"]["definition"]["routes"] = list(routes)
+    raw["execution_profile"] = profile
+    preview = WorkflowPreviewRequest.model_validate_json(json.dumps(raw))
+    observed = preview_workflow(preview)
+    return request.model_copy(
+        update={
+            "preview": preview,
+            "files": observed.files,
+            "declaration_digest": preview.document.definition.declaration_digest(),
+            "selected_constructor_routes": observed.selected_constructor_routes,
+        }
+    )

@@ -29,7 +29,13 @@ from tools.candidate_worker.loop_evidence import verify_loop
 from tools.candidate_worker.models import CandidateRunReceipt
 from workflows.definition.fanout import execution_families
 
-from .models import ConsoleConfig, GraphBodyResult, GraphResultsView, GraphRunSummary
+from .models import (
+    ConsoleConfig,
+    GraphBodyResult,
+    GraphResultsView,
+    GraphRunSummary,
+    GraphSkippedNode,
+)
 
 
 def _summary(output: HyperparamTuningOutput, output_path: Path) -> GraphRunSummary:
@@ -140,5 +146,10 @@ def read_graph_results(config: ConsoleConfig, operation_id: UUID) -> GraphResult
         tuning = next((item for item in nodes if item.node_id == tuning_id), None)
         if tuning is None:
             raise OperationFailure("integrity", "verified graph is missing its tuning node")
-        results.append(_body_result(iteration, tuning))
+        skipped = tuple(
+            GraphSkippedNode(node_id=item.node_id, reason=item.reason)
+            for item in nodes
+            if item.state == "skipped" and item.reason is not None
+        )
+        results.append(_body_result(iteration, tuning).model_copy(update={"skipped": skipped}))
     return GraphResultsView(operation_id=operation_id, available=True, bodies=tuple(results))
