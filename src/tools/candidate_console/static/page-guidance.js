@@ -20,9 +20,11 @@
   function render() {
     const state = window.workflowEditor.state, ready = window.newRunGate.ready;
     const opened = session.connected && !!state.projectId && state.sourceAvailable;
-    const message = ready
-      ? `Saved version ${state.savedSha256.slice(0, 12)} of ${state.projectId} is ready to run.`
-      : blocked(state);
+    // Only bytes a console Save recorded are a "saved version" (red-team A-6/A-7).
+    const name = ready ? window.editorVersions?.nameFor(state.savedSha256) : null;
+    const message = !ready ? blocked(state)
+      : name ? `Saved version "${name}" of project ${state.projectId} is ready to run.`
+      : `The current file of project ${state.projectId} (version ${state.savedSha256.slice(0, 12)}) is ready to run.`;
     $('workflow-next-run').disabled = !ready;
     $('workflow-next-run').title = ready ? message : `${message} Run is enabled only for a saved version.`;
     $('workflow-next-state').textContent = ready ? message : `${message} Run is enabled only for a saved version.`;
@@ -71,7 +73,7 @@
     if ($('editor-problems').classList.contains('open') && !$('editor-problems').contains(event.target) && !$('problems-chip').contains(event.target)) setProblemsOpen(false);
   });
   new MutationObserver(render).observe($('editor-problems'), {attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true});
-  for (const name of ['workflow-editor-state', 'new-run-gate', 'console-view', 'console-onboarding']) window.addEventListener(name, render);
+  for (const name of ['workflow-editor-state', 'new-run-gate', 'console-view', 'console-onboarding', 'editor-versions']) window.addEventListener(name, render);
   session.subscribe(render);
   render();
 })();

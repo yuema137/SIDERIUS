@@ -39,6 +39,7 @@
   <script src="/editor-inspector-rows.js" defer></script>
   <script src="/editor-problems.js" defer></script>
   <script src="/editor-node-parameters.js" defer></script>
+  <script src="/editor-save-outcome.js" defer></script>
   <script src="/editor-versions.js" defer></script>
   <script src="/editor-draft.js" defer></script>
   <script src="/editor-node-drafts.js" defer></script>
@@ -154,7 +155,7 @@
     <section id="editor-problems" class="problems-popover" aria-label="Problems" aria-live="polite" hidden></section>
     <div class="actions">
       <div id="editor-edit-actions" class="edit-actions" role="group" aria-label="Undo and redo"></div>
-      <button id="editor-refresh" class="secondary" data-ui-flag="advanced" disabled>Refresh from disk</button>
+      <button id="editor-refresh" class="secondary" data-ui-flag="advanced" disabled>Reload from disk</button>
       <span id="editor-save-reason" class="action-reason" role="status"></span>
       <button id="editor-review" disabled data-icon="save">Save</button>
     </div>
@@ -163,10 +164,11 @@
   <section id="editor-save-confirm" class="save-confirm" aria-labelledby="editor-save-confirm-heading" hidden>
     <h2 id="editor-save-confirm-heading">Save this version</h2>
     <p id="editor-save-summary" class="save-confirm-summary">The workflow is checked. Save writes exactly the checked file.</p>
+    <p id="editor-save-comments" class="warning save-confirm-comments" role="status" hidden></p>
     <label for="editor-version-name">Version name</label><input id="editor-version-name" type="text" maxlength="64" spellcheck="false" aria-describedby="editor-version-help">
     <button id="editor-save-cancel" type="button" class="secondary">Cancel</button>
     <button id="editor-save" disabled data-icon="save">Save version</button>
-    <p id="editor-version-help" class="muted">Each save records this name, the time and the file's SHA-256 beside the source.</p>
+    <p id="editor-version-help" class="muted">Each save is listed under this name in Version history.</p>
     <details id="editor-review-disclosure" data-ui-flag="advanced"><summary>Exact Python changes</summary>
       <pre id="editor-diff"></pre>
       <p class="muted">Every edit invalidates the check. Save writes exactly these bytes.</p>
@@ -175,16 +177,18 @@
   <div class="page-status">
     <p id="editor-status" role="status">Connect to open a configured project.</p>
     <p id="editor-pending">No pending edits.</p>
-    <p id="editor-hidden-source" class="hidden-source" role="status" hidden>You have unsaved Python edits from advanced mode. <button id="editor-hidden-source-show" type="button" class="link-button">Show</button> <button id="editor-hidden-source-discard" type="button" class="link-button">Discard</button></p>
+    <button id="editor-check-again" type="button" class="secondary" hidden>Check again</button>
+    <p id="editor-hidden-source" class="hidden-source" role="status" hidden>You have unsaved Python edits from advanced mode. <button id="editor-hidden-source-show" type="button" class="link-button">Show</button> <button id="editor-hidden-source-discard" type="button" class="link-button">Revert to saved</button></p>
     <p id="workflow-next-state" class="sr-only" role="status">Save the workflow first. Run is enabled only for a saved version.</p>
   </div>
   <div id="editor-conflict" class="card" hidden>
-    <h2>Source changed on disk</h2>
-    <p>Inspect current source and its difference from your proposal. Your pending edits are preserved.</p>
-    <details open><summary>Current source and conflict diff</summary><pre id="editor-current"></pre>
-    <pre id="editor-conflict-diff"></pre></details>
-    <button id="editor-discard">Discard my edits and reload</button>
-    <button id="editor-rebase">Edit my proposal against current source</button>
+    <h2>This workflow changed on disk</h2>
+    <p id="editor-conflict-summary">Your unsaved changes are kept.</p>
+    <details><summary>What changed on disk</summary><pre id="editor-conflict-diff"></pre></details>
+    <details><summary>Your unsaved changes</summary><pre id="editor-conflict-proposal"></pre></details>
+    <details data-ui-flag="advanced"><summary>Current file on disk</summary><pre id="editor-current"></pre></details>
+    <button id="editor-discard" class="secondary">Reload from disk</button>
+    <button id="editor-rebase">Reapply my changes onto latest</button>
   </div>
   <div class="editor-workspace">
     <section id="editor-palette" class="dock-panel editor-palette" aria-label="Add capability"></section>
@@ -218,7 +222,7 @@
     <textarea id="editor-source" rows="18" spellcheck="false" disabled aria-label="Python source"></textarea>
     <pre id="editor-diagnostics" role="status"></pre>
   </details>
-  <details class="card" id="editor-history" data-ui-flag="advanced"><summary>Version history</summary></details>
+  <details class="card" id="editor-history"><summary>Version history</summary></details>
   <details class="card" id="workflow-details" data-ui-flag="developer"><summary>Details</summary>
     <h2>Save behavior</h2><p class="muted">Saving updates source for future New run captures. It does not launch a run or change existing captures. Task-bound publication checks the explicitly selected native task identity.</p>
     <h2>Concurrent writers</h2><p class="muted">Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</p>

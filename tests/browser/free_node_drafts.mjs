@@ -35,7 +35,7 @@ try {
   await page.locator('#access-form button').click();
   const statusText = () => page.locator('#editor-status').textContent();
   const pendingText = () => page.locator('#editor-pending').textContent();
-  await waitUntil(async () => (await statusText()).includes('Opened supported'), 'open');
+  await waitUntil(async () => (await statusText()).includes('Opened '), 'open');
   const original = await readFile(metadata.source, 'utf8');
   assert.match(original, /# author note: keep me/);
   const palette = page.locator('#editor-palette');
@@ -110,7 +110,7 @@ try {
   assert.match(diff, /\+\s+id='implementation_storage'/);
   assert.match(diff, /location='inputs\/build_store\.json'/);
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await statusText()).includes('Saved reviewed'), 'save');
+  await waitUntil(async () => (await statusText()).includes('Saved as "'), 'save');
   const saved = await readFile(metadata.source, 'utf8');
   for (const pattern of [/# author note: keep me/, /# implement keeps its comment/, /# trailing comment/, /id='implementation'/, /id='validation'/]) assert.match(saved, pattern);
   assert.deepEqual(faults, []);

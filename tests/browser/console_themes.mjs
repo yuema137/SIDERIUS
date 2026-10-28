@@ -158,7 +158,7 @@ try {
 
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await page.getByText('Opened supported declaration.', {exact: false}).waitFor();
+  await page.locator('#editor-status').filter({hasText: /^Opened /}).waitFor();
   await page.locator('#editor-inspector select').selectOption({label: 'other'});
   // Selecting a binding starts an asynchronous draft check (POST editor/<project>/draft);
   // snapshot only the settled state, never the transient 'checking' label.
