@@ -71,10 +71,31 @@ class LockedRunSeed(PreviewModel):
 
     Both fields are absent before iteration 1 locks the seed and for a
     pre-seed workspace; ``run_seed_source`` is the lock's own provenance.
+    ``run_seed_anomaly`` replaces both when the lock contradicts the reviewed
+    declaration (see :func:`checked_against_declaration`).
     """
 
     run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
     run_seed_source: SeedSource | None = Field(default=None, exclude_if=lambda value: value is None)
+    run_seed_anomaly: Literal["lock_contradicts_declaration"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    def checked_against_declaration(self, declared: int | None) -> "LockedRunSeed":
+        """Show the lock's seed only if the reviewed declaration explains it.
+
+        ``declared`` is the declaration's ``run.run_seed``. A declared seed must
+        be locked as that value with source ``operator``; a seedless
+        declaration's seed must be locked with source ``generated``. Anything
+        else (a forged, rewritten or source-less lock) is reported as an
+        anomaly instead of a value.
+        """
+        if self.run_seed is None:
+            return self
+        expected = "generated" if declared is None else "operator"
+        if self.run_seed_source != expected or declared not in (None, self.run_seed):
+            return LockedRunSeed(run_seed_anomaly="lock_contradicts_declaration")
+        return self
 
 
 def read_locked_seed(workspace: Path, file_limit: int) -> LockedRunSeed:

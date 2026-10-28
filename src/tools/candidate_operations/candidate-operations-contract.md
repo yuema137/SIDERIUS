@@ -160,9 +160,12 @@ Owners: `seed_admission.py` (`admission_seed`, `require_root_seed`,
   seed here; their seed lives in the chain's run-invariants lock. An explicit
   seed is the capture declaration's `run.run_seed`
   ([native chain contract](../native_chain/native-chain-contract.md#run-seed-issue-983)).
-  Every native-chain snapshot reads the lock back into
+  `NativeChainAdmission.run_seed` records that declared seed (omitted when
+  seedless). Every native-chain snapshot reads the lock back into
   `NativeChainObservation.run_seed` / `run_seed_source` (omitted when the lock
-  is absent, pre-seed or unreadable). The readback sits outside
+  is absent, pre-seed or unreadable) and shows it only if the admission's
+  declared seed explains it; otherwise it reports `run_seed_anomaly`
+  ([native chain contract](../native_chain/native-chain-contract.md#run-seed-issue-983)). The readback sits outside
   `NativeChainEvidence`, so terminal and resume-prefix comparisons, including
   terminals recorded before the readback existed, are unchanged.
 

@@ -44,9 +44,10 @@ def chain_evidence(
 
 
 def chain_seed(record: OperationRecord) -> LockedRunSeed:
-    """The chain's run seed as its run-invariants lock records it (readback only)."""
+    """The lock's run seed, checked against the declaration seed the admission bound."""
     request, admission = chain_context(record)
-    return read_locked_seed(Path(admission.workspace), request.input_max_bytes)
+    locked = read_locked_seed(Path(admission.workspace), request.input_max_bytes)
+    return locked.checked_against_declaration(admission.run_seed)
 
 
 def chain_context(

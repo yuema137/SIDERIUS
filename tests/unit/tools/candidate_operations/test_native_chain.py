@@ -588,3 +588,27 @@ def test_locked_seed_is_read_back_without_disturbing_a_recorded_terminal(chain):
         4_503_599_627_370_497,
         "generated",
     )
+
+
+def test_lock_seed_the_reviewed_declaration_does_not_explain_is_not_shown(chain):
+    """Issue #983 S5 review: a seedless declaration's lock rewritten (or forged)
+    as an operator seed must not read back as the run's seed. Fails if the
+    snapshot echoes the lock without checking it against the admission."""
+    from core.run_invariants import RunInvariants, run_seed_lock_fields, write_run_invariants
+
+    record, _ = chain
+    workspace, _ = _saved_observation_terminal(chain, 2)
+    write_run_invariants(
+        str(workspace),
+        RunInvariants(
+            resolved_data_scope=[0],
+            health_gate_enabled=False,
+            health_config_sha256=None,
+            runtime_estimator_identity="estimator-v1",
+            runtime_policy_identity="policy-v1",
+            **run_seed_lock_fields(7, "operator"),
+        ),
+    )
+    observed = read_operation(record.config, record.submission.request_id).native_chain
+    assert observed.run_seed is None and observed.run_seed_source is None
+    assert observed.run_seed_anomaly == "lock_contradicts_declaration"

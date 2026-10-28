@@ -197,3 +197,32 @@ def test_locked_seed_readback_reports_the_lock_and_never_invents_one(tmp_path):
     (tmp_path / "corrupt").mkdir()
     (tmp_path / "corrupt/run_invariants_lock.json").write_text("{broken")
     assert read_locked_seed(tmp_path / "corrupt", 65536).run_seed is None
+
+
+@pytest.mark.parametrize(
+    ("declared", "locked", "source", "shown"),
+    [
+        (None, SEED, "generated", True),
+        (None, SEED, "operator", False),
+        (SEED, SEED, "operator", True),
+        (SEED, SEED, "generated", False),
+        (SEED, SEED - 1, "operator", False),
+        (None, SEED, None, False),
+    ],
+)
+def test_locked_seed_is_shown_only_when_the_declaration_explains_it(
+    declared, locked, source, shown
+):
+    """Fails if a lock seed contradicting the reviewed declaration (wrong value,
+    wrong provenance or none) is displayed as the run's seed."""
+    from tools.native_chain.observation import LockedRunSeed
+
+    checked = LockedRunSeed(run_seed=locked, run_seed_source=source).checked_against_declaration(
+        declared
+    )
+    if shown:
+        assert (checked.run_seed, checked.run_seed_anomaly) == (locked, None)
+    else:
+        assert checked.run_seed is None and checked.run_seed_source is None
+        assert checked.run_seed_anomaly == "lock_contradicts_declaration"
+    assert LockedRunSeed().checked_against_declaration(declared) == LockedRunSeed()
