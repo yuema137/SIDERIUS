@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import OrderStrategy
-from agent.schemas.proposal import ProposalInput
 from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 from core.runtime_control.validation_limits import validate_phase_deadline
 from execute_tools.dataset_config import DataScope
@@ -190,10 +189,6 @@ class CandidateTrainingSettings(BaseModel):
                 TypeAdapter(
                     HyperparamTuningInput.model_fields[name].rebuild_annotation()
                 ).validate_python(value)
-        for value in (self.launch.trial_vram_budget_gb, self.launch.formal_vram_budget_gb):
-            TypeAdapter(
-                ProposalInput.model_fields["vram_budget_gb"].rebuild_annotation()
-            ).validate_python(value)
         validate_launch_admission(self.launch)
         validate_phase_deadline(
             self.launch.validation_max_phase_seconds,

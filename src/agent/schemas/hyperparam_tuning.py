@@ -103,6 +103,14 @@ OperatorTimeBudgetMinutes = Annotated[
     float, Field(gt=0.0, allow_inf_nan=False), AfterValidator(_finite_in_seconds)
 ]
 
+#: An operator-configured VRAM ceiling in GB: finite and positive. ``None``
+#: (on the fields that use it) means "no operator ceiling" and leaves the
+#: physical cap in charge; zero, negative and non-finite values are malformed
+#: and refused at launch (issue #1044). Zero is not a disable value: the VRAM
+#: gate read it as "reject every model" while planner feedback read it as
+#: "no budget".
+OperatorVramBudgetGb = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+
 
 #: What a HealthGate verdict DOES in this run: enforce, or only record.
 #:
@@ -2524,7 +2532,7 @@ class HyperparamTuningInput(BaseModel):
             "The declared host quota independently constrains the result."
         ),
     )
-    trial_vram_budget_gb: float | None = Field(
+    trial_vram_budget_gb: OperatorVramBudgetGb | None = Field(
         default=None,
         description=(
             "VRAM budget in GB against which evaluate_vram_skill gates rounds "
@@ -2535,7 +2543,7 @@ class HyperparamTuningInput(BaseModel):
             "models that exceed it even when raw free-VRAM is plentiful."
         ),
     )
-    formal_vram_budget_gb: float | None = Field(
+    formal_vram_budget_gb: OperatorVramBudgetGb | None = Field(
         default=None,
         description=(
             "VRAM budget in GB against which evaluate_vram_skill gates rounds "
