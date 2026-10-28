@@ -886,7 +886,15 @@ link fallback and no credential form.
 
 `session.js` exclusively owns the Bearer token in closure memory. It exposes
 same-origin API requests and connection/revision notifications, never a token
-getter. The single `access-form` captures and immediately clears the password
+getter. Responses are parsed as JSON only when `content-type` is JSON; a non-JSON
+error becomes `Server error (<status>).` and a non-JSON success is refused. A
+failed fetch or a non-JSON 502/503/504 marks the console **unreachable** without
+disconnecting (token, drafts and intents stay): the collapsed status reads
+`Server unreachable. Retrying…` (`.access-unreachable`), a 5 s read-only
+`GET /api/choices` probe runs while the page is visible, and the next response of
+any kind restores `Connected.`; `console-reachability` events carry
+`{reachable}`. `consoleSession.choices()` is the one reader of `/api/choices` and
+retains `operationsStoreId`. The single `access-form` captures and immediately clears the password
 input. Requests use Authorization, cache no-store and credentials omit; POST
 payloads retain their existing owners. No cookie, storage, URL, history payload,
 event, cross-tab channel or document-transfer mechanism carries credentials.

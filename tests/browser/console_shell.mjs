@@ -42,8 +42,11 @@ try {
   const page = await context.newPage(), faults = [], requests = [];
   page.on('pageerror', error => faults.push(error.message));
   const headline = score => ({best_exp_id: 'exp-1', best_score: score, best_formal_score: score, best_valid_exp_id: 'exp-1', best_valid_score: score, best_valid_formal_score: score});
+  let fault = null;
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url());
+    if (fault === 'down') return route.abort('connectionrefused');
+    if (fault === 'text500') return route.fulfill({status: 500, contentType: 'text/plain', body: 'Internal Server Error'});
     requests.push({path: url.pathname, search: url.search, method: request.method()});
     assert.equal(request.method(), 'GET', 'The shell never mutates');
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
@@ -120,6 +123,19 @@ try {
   assert.match(await score.getAttribute('title'), /0\.7999999999999999/);
   assert.ok(!(await panel.textContent()).includes('0.7999999999999999'), 'No unrounded score is displayed');
 
+  // E-6: a failed fetch turns the header chip to "Server unreachable"; the next success restores it.
+  fault = 'down';
+  await page.locator('#access-status').filter({hasText: 'Server unreachable'}).waitFor();
+  assert.equal(await page.locator('#access-section').evaluate(el => el.classList.contains('access-unreachable')), true);
+  assert.equal(await page.locator('#token').isHidden(), true, 'Unreachable keeps the token and drafts; it is not a disconnect');
+  fault = null;
+  await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor({timeout: 8000});
+  // S-3/E-5: a non-JSON server error is a plain sentence, never a JavaScript parse error.
+  fault = 'text500';
+  const message = await page.evaluate(() => window.consoleSession.request('choices').catch(error => error.message));
+  fault = null;
+  assert.equal(message, 'Server error (500).');
+
   // Change token reopens the form; Disconnect returns to the full card.
   await page.locator('#access-change').click();
   assert.equal(await page.locator('#token').isVisible(), true);
@@ -129,7 +145,7 @@ try {
   assert.equal(await page.locator('#access-connected').isHidden(), true);
   assert.equal(await page.locator('#monitor-button').isDisabled(), true);
 
-  assert.equal(await page.evaluate(() => window.pollTimers), 1, 'No polling loop beyond the existing status poll');
+  assert.equal(await page.evaluate(() => window.pollTimers), 2, 'Only the status poll and one reachability probe (started while unreachable)');
   assert.equal(requests.filter(item => item.path === '/api/operations').length >= 1, true);
   assert.deepEqual(faults, []);
   console.log('PASS: compact connection, operation list opens Status and logs, rounded scores, journey-first Home, aligned shell');

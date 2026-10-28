@@ -431,3 +431,7 @@ header.console-header { position: relative; min-height: var(--bar-height); }
 .entry-card > .button-link { justify-self: start; }
 .home-advanced { display: grid; gap: var(--space-4); }
 @media (max-width: 800px) { .entry-cards { grid-template-columns: minmax(0, 1fr); } }
+
+/* Header chip: authenticated but the last request could not reach the console (E-6). */
+#access-section.access-collapsed.access-unreachable #access-status { color: var(--warning-text, var(--text)); }
+#access-section.access-collapsed.access-unreachable #access-status::before { background: var(--warning); }
