@@ -22,7 +22,7 @@ from core.run_invariants import (
     load_run_invariants,
     pre_seed_lock_violation,
 )
-from core.seeding import RunSeed, resolve_run_seed
+from core.seeding import RunSeed, format_seed_line, resolve_run_seed
 
 SeedOrigin = Literal["operator", "generated", "locked"]
 
@@ -37,7 +37,7 @@ class WorkspaceRunSeed(BaseModel):
 
     def log_line(self) -> str:
         """The operator-visible startup line, printed before any node runs."""
-        return f"[seed] run_seed={self.value} source={self.origin}"
+        return format_seed_line(self.value, self.origin)
 
 
 def _locked_seed(workspace: str, explicit: int | None) -> int | None:

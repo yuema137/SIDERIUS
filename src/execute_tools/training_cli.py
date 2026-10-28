@@ -137,8 +137,17 @@ def build_training_parser() -> argparse.ArgumentParser:
         "--train_base_seed",
         type=int,
         default=None,
-        help="Base seed for per-epoch subsampling. Epoch n uses seed = base + n. "
-        "When None, derived from exp_id hash.",
+        help="Interim tuner transport (#983 S2): pins only the per-epoch subsample "
+        "seed to base + n; the init, order and shuffle seeds derive from a run seed "
+        "the trainer generates. Refused together with --seed_context_json.",
+    )
+    parser.add_argument(
+        "--seed_context_json",
+        type=str,
+        default=None,
+        help="Path to a SeedContext JSON (run_seed + coordinates) from which every "
+        "trainer seed derives. When absent, the trainer generates a run seed and "
+        "records seed_source='generated' in its results JSON.",
     )
     parser.add_argument(
         "--order_strategy",
