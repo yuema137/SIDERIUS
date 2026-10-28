@@ -1,6 +1,7 @@
 """Static admission of a declared LLM strategy (pure, no I/O). B6 calls it at
 declaration validation and launch admission and refuses on any refusal."""
 
+from agent.schemas.judge import MAX_SCORED_ITEMS_PER_CALL
 from workflows.definition.adaptor_strategies import (
     AllSelect,
     CardinalityBound,
@@ -9,7 +10,7 @@ from workflows.definition.adaptor_strategies import (
     TopKSelect,
 )
 from workflows.definition.catalog import CUSTOM_EMITTABLE, METRIC_SCORED_CONTRACTS
-from workflows.definition.llm_strategies import LLMStrategy
+from workflows.definition.llm_strategies import LLMStrategy, RubricRankStrategy
 from workflows.definition.models import InputPort
 
 from .kinds import IMPLEMENTED_KINDS
@@ -123,6 +124,13 @@ def admit_llm_strategy(
         return StrategyAdmission(
             static_call_bound=None, required_route_slot=slot, refusals=(refusal,)
         )
+    if not inputs:
+        refusal = StrategyRefusal(
+            code="no_input_ports", message="an adaptor declares no input port"
+        )
+        return StrategyAdmission(
+            static_call_bound=None, required_route_slot=slot, refusals=(refusal,)
+        )
     refusals: list[StrategyRefusal] = []
     contracts = sorted({port.contract for port in inputs})
     if len(contracts) != 1:
@@ -167,6 +175,18 @@ def admit_llm_strategy(
                 "insufficient_capacity",
                 f"{strategy.kind} needs at least {kind.min_items(strategy)} items; "
                 f"the ports hold at most {capacity}",
+            )
+        )
+    elif (
+        isinstance(strategy, RubricRankStrategy)
+        and strategy.scoring == "batch"
+        and capacity > MAX_SCORED_ITEMS_PER_CALL
+    ):
+        refusals.append(
+            StrategyRefusal(
+                code="batch_too_large",
+                message=f"batch scoring of up to {capacity} items exceeds "
+                f"{MAX_SCORED_ITEMS_PER_CALL} items per call; use per_item scoring",
             )
         )
     if bound is not None and bound > strategy.max_calls:

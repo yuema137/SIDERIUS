@@ -118,6 +118,8 @@ class StopJudgeRequest(JudgeModel):
 #: Deterministic projection bounds: one item never dominates a prompt.
 MAX_PROJECTED_FIELDS = 64
 MAX_PROJECTED_CHARS = 4000
+#: Items one scoring call may list, so a batch prompt has a fixed size bound.
+MAX_SCORED_ITEMS_PER_CALL = 16
 
 
 class ProjectedField(JudgeModel):
@@ -150,7 +152,7 @@ class RubricScoringRequest(JudgeModel):
     rubric: RubricSpec
     criterion: str = Field(min_length=1, max_length=2000)
     repeat: int = Field(ge=0)
-    items: tuple[JudgedItem, ...] = Field(min_length=1)
+    items: tuple[JudgedItem, ...] = Field(min_length=1, max_length=MAX_SCORED_ITEMS_PER_CALL)
     guidance: JudgeTaskBlocks | None
 
     @model_validator(mode="after")

@@ -23,6 +23,7 @@ rankings re-enter through `select`.
 | `select.py` | `select` (unit indices), `chosen_units` |
 | `run.py` | `run_deterministic_adaptor`, `AdaptorOutcome`, `AdaptorOutput` |
 | `record.py` | `AdaptorRecord`, `AdaptorContribution`, `build_adaptor_record` (digests via `core.canonical_json.canonical_sha256`) |
+| `exact.py` | `ExactRational` (canonical `str(Fraction)`) and `decimal_fraction` (a declared float as its written decimal) for exact rubric values |
 | `MetricOrder` / `reconcile_metric_specs` | The only direction and metric-identity authorities used here |
 
 ## Interface
@@ -83,8 +84,10 @@ SELECT returns unit indices: `all/v1` (declared order); `first-admissible/v1`
 (requires `pass/v1`); `top-k/v1(k)` (ranking order, requires a ranking;
 `k=1` is best-1); `threshold/v1(basis, metric_id, at_least)` (declared order;
 `metric`: `MetricOrder.is_at_least`, `metric_id` must equal the run metric
-and the ranking metric; `rubric`: total `>= at_least`, rubric scale is
-higher-is-better by type). `top-k` over a `rubric`/`judge` ranking of
+and the ranking metric; `rubric`: exact comparison
+`Fraction(RankEntry.exact) >= Fraction(repr(at_least))`, rubric scale is
+higher-is-better by type; a `rubric` ranking must carry `RankEntry.exact`, the
+canonical `str(Fraction)` whose float is `RankEntry.value`, see `exact.py`). `top-k` over a `rubric`/`judge` ranking of
 `METRIC_SCORED_CONTRACTS` items is refused (Q-B2-2: an LLM may filter, never
 reorder, metric-scored items). A list-entry selection rebuilds the one parent
 value with the kept entries in selection order; its inputs are the parent ref
