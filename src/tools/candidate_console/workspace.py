@@ -433,7 +433,15 @@ def _init(base: Path, workspace: Path, port: int) -> Path:
                 console, (json.dumps(skeleton, indent=2) + "\n").encode(), label="console.json"
             )
         else:
-            resolved = resolve_console(_existing_file(console, label="settings/console.json"))
+            payload = _existing_file(console, label="settings/console.json")
+            try:
+                resolved = resolve_console(payload)
+            except SettingsInvalid:
+                raise  # names its own field or predicate (MissingSetting included)
+            except ValueError:
+                raise WorkspaceRefused(
+                    "settings/console.json is not a valid console configuration; left unchanged"
+                ) from None
             if resolved.settings.workspace_root == workspace:
                 for task_id, field in resolved.settings.derived_task_fields():
                     if field in TASK_OUTPUT_PARENTS:

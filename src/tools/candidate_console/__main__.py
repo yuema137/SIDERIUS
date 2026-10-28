@@ -72,6 +72,13 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 2
+        except SettingsInvalid as error:
+            print(
+                f"Workspace init stopped: console settings are invalid: {error}. "
+                "Nothing was deleted.",
+                file=sys.stderr,
+            )
+            return 2
         except (OSError, ValueError):
             print(
                 "Workspace init failed: a filesystem operation was refused. Nothing was deleted.",

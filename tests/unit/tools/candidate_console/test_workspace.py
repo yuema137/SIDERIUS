@@ -225,10 +225,22 @@ def test_init_rerun_names_a_task_field_without_source(
     config = init_workspace(str(tmp_path))
     skeleton = json.loads(config.read_text())
     skeleton["tasks"] = [_task_without_locations(console_config, "llm_config_file")]
+    skeleton["global_settings"] = None  # no settings layer supplies the default profile
     config.write_text(json.dumps(skeleton))
     code, _, err = _main(monkeypatch, capsys, "init", "--workspace", str(tmp_path))
     assert code == 2 and "task synthetic needs llm_config_file" in err
     assert "--workspace must be" not in err
+
+
+@pytest.mark.parametrize("content", ["not json", '{"port": "x"}', '{"workspace_root": "rel"}'])
+def test_init_rerun_names_an_invalid_console_json(content, tmp_path, monkeypatch, capsys):
+    """Defect: a malformed, schema-invalid or non-canonical console.json is a generic refusal."""
+    config = init_workspace(str(tmp_path))
+    config.write_text(content)
+    code, _, err = _main(monkeypatch, capsys, "init", "--workspace", str(tmp_path))
+    assert code == 2
+    assert "settings/console.json is not a valid console configuration; left unchanged" in err
+    assert config.read_text() == content
 
 
 def test_umask_does_not_weaken_or_disable_init(tmp_path):
