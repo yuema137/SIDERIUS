@@ -116,13 +116,14 @@ def capture_binding(
         "interpretation_blocks",
         "proposal_blocks",
         "implementor_blocks",
+        "judge_blocks",
         "data_analysis",
     }
     paths = set(declared_input_paths(args))
     paths.update(
         path
         for role, path in source_paths.items()
-        if role in roles or re.fullmatch(r"secondary_metric_declaration\[\d+\]", role)
+        if role in roles or re.fullmatch(r"(secondary_metric_declaration|rubric)\[\d+\]", role)
     )
     return LaunchInputBinding(
         installation=installation_pin(),

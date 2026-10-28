@@ -106,6 +106,8 @@ def materialize_fanout(
             seed_binding = None
         elif shape.literature is not None:
             seed_binding = shape.literature.seed_binding
+        elif shape.literature_adaptor is not None:
+            seed_binding = shape.literature_adaptor.proposal(family.proposal).seed_binding
         else:
             assert isinstance(proposal_request, ExternalRequest)
             seed_binding = proposal_request.binding
@@ -176,6 +178,34 @@ def materialize_fanout(
             iteration=iteration,
         )
         used.add(edge.review_binding)
+    if shape.literature_adaptor is not None:
+        edges = shape.literature_adaptor
+        for proposal in edges.proposals:
+            candidate = result[proposal.node]
+            assert isinstance(candidate, NativeInputs)
+            # The declared edge is the only literature source, as in reusable preparation;
+            # refused here, before any review or proposer effect.
+            if candidate.proposal.literature_review_evidence:
+                raise ValueError(
+                    "literature-fed proposal seed must not contain literature evidence"
+                )
+        for review in edges.reviews:
+            # The review must agree with every proposal seed it feeds (task, constraints).
+            # The build is pure and its inputs do not depend on the seed, so every
+            # iteration yields the same value; keeping the last one is equivalent.
+            for proposal in edges.proposals:
+                candidate = result[proposal.node]
+                assert isinstance(candidate, NativeInputs)
+                result[review.node] = materialize_literature(
+                    contents[f"external.{review.binding}"],
+                    request=request,
+                    workspace=workspace,
+                    node_id=review.node,
+                    seed=candidate.proposal,
+                    config=config,
+                    iteration=iteration,
+                )
+            used.add(review.binding)
     if used != set(externals):
         raise ValueError("unused external inputs are unsupported by the candidate worker")
     return result

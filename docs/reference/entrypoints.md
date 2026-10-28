@@ -170,7 +170,8 @@ bash scripts/launch/run_chain.sh \
 | `--task_composition FILE` | the required task manifest; omission is refused |
 | `--data_dir DIR` | physical data root. required; a run without it fails closed before any LLM or GPU work |
 | `--num_iterations N` | default `2` |
-| `--seed_paths P [P…]` | prior run outputs to seed from. **Optional** — an empty list is a valid cold start |
+| `--seed_paths P [P…]` | prior run outputs to seed from. **Optional** — an empty list is a valid cold start. Imported history never supplies the new run's `run_seed` |
+| `--run_seed N` | the run seed (issue #983), an integer in `[0, 2**53 - 1]`; forwarded to every iteration only when set. Omitted: iteration 1 generates one and later iterations adopt the locked value. See the runner table below |
 | `--auto_resume` / `--no_auto_resume` | default **ON**: pick up where a partial chain stopped. The inspector's captured value is VALIDATED (F-SCANB-4): only the exit-0 capture's last line, and only a bare non-negative integer, becomes `START_ITER`; anything else (e.g. plugin-loader stdout chatter with no trailing value line) refuses loudly and names the workaround below — never a silent default |
 | `--start_iter N` | manual override of auto-resume (also the refusal's named workaround) |
 | `--dry-run` | walk the chain, print exact commands, no side effects |
@@ -266,11 +267,12 @@ Other flags that define a run:
 | `--retain_model_outputs` | off: retire exact per-sample outputs after scoring/Health and after Data Analysis consumes historical predictions. On retains them; certified models and bounded evidence remain in either case. The value is pinned for resume. See [model-output retention](model-output-retention.md). |
 | `--retain_training_checkpoints` | off: retire each exact training-original checkpoint after the tuner iteration and its output finish; every certified model blob remains. On retains the originals too. The value is pinned for resume. See [training-checkpoint retention](training-checkpoint-retention.md). |
 | `--cleanup_denoised` / chain-only `--no-cleanup_denoised` | Legacy spellings. Cleanup already applies by default; the negative chain spelling is translated to `--retain_model_outputs` so existing explicit-retention campaigns keep their treatment. A conflicting cleanup/retention pair is refused. |
-| `--llm_config` | `None`: with no legacy `--llm_model`, selects the complete economical profile from `WorkflowLLMConfig.default()`. Explicit JSON takes priority and preserves partial-config inheritance. Explicit `--llm_model` retains legacy Gemini routing. Save an explicit config with scientific experiments. See [default routing](llm-defaults.md). |
+| `--llm_config` | `None`: with no legacy `--llm_model`, selects the complete economical profile from `WorkflowLLMConfig.default()`. Explicit JSON takes priority and preserves partial-config inheritance; any key the config does not declare, at any route depth, is refused (a key starting with `_` is an inert annotation and is ignored). Explicit `--llm_model` retains legacy Gemini routing. Save an explicit config with scientific experiments. See [default routing](llm-defaults.md). |
 | `--required_runtime_profile_path` | `None`. The **ABSOLUTE** path of the profile artifact this launch requires. Part of the declaration and never derived — this is the clause that closes `finding_1_invisible_default`: while the artifact was located by the ordinary discovery rule (`$SIDERIUS_CALIBRATION_DIR/runtime_profiles_<gpu_slug>.json`), a binding certified *what was found* but never *that the right file was consulted*, so an overlay was used because the directory happened to hold a file of that name. When declared, resolution reads THIS file and never consults discovery — a missing declared artifact REFUSES even when discovery would have certified successfully. A relative path is refused at declaration, because the consuming subprocess runs with a different working directory (`run_chain.sh` cd's before exec) |
 | `--runtime_watchdog_deadline_policy` | `budget-ceiling-v1`. Enabled watchdogs use the minimum declared phase ceilings, independently of forecast admission; missing reachable-phase ceilings refuse before tuner setup/LLM calls. Explicit `forecast-tightening-v1` retains the old forecast-based deadline and floor. Standard workflow, multi-round chain and tuner CLI all transport the selection. See [watchdog deadlines](watchdog-deadlines.md). |
 | `--required_runtime_profile` | `None` (undeclared → the legacy ladder: measured overlay > shipped > uncalibrated). Declares the runtime profile this launch REQUIRES, as `<gpu_slug>/<regime>` (e.g. `nvidia_h100_80gb_hbm3/single`), copied from a qualification run's recorded provenance. Must be declared together with `--required_runtime_profile_path` and `--required_runtime_profile_sha256`; any proper subset is refused, because half a binding is NO binding and resolving it as undeclared would leave the requirement silently unenforced. When declared, resolution is FAIL-CLOSED: a discovered device/regime that differs, a missing overlay, a digest mismatch, or a verified overlay lacking the row all REFUSE the launch instead of falling back (F-PROFILE-WIRE-1, mechanism F-H100-WD-1-PRETAG). Combining it with an explicit `--runtime_watchdog`/`--no-runtime_watchdog` also refuses — OPERATOR MODE never consults the profile, so the requirement would be unenforced |
 | `--required_runtime_profile_sha256` | `None`. The 64-char lowercase-hex sha256 of the DECLARED artifact's bytes, certified for this run (`sha256sum "${SIDERIUS_CALIBRATION_DIR:-$HOME/.siderius}/runtime_profiles_<gpu_slug>.json"`). Hashed over the exact bytes parsed — a single read, never re-opened — so the profile consumed is provably the one that was qualified. Consumption is observable: `runtime_watchdog_provenance` reads `bound:<path>#sha256=<hex>` exactly when certification ran, and the digest it records is the one OBSERVED from the bytes read — never an echo of the declared value |
+| `--run_seed` | `None`. The run's one seed, an integer in `[0, 2**53 - 1]` (out of range or non-integer exits `2` at parse). Precedence at workflow startup: the workspace lock's `run_seed`, then this flag, then generation. The value and `seed_derivation` are pinned in `run_invariants_lock.json` and `run_config_{run_name}.json` before any node runs, and stdout shows `[seed] run_seed=N source=operator\|generated\|locked`. A value different from the locked seed, or any continuation of a workspace whose lock predates the seed contract, halts with exit `3` (`run_contract_failure`); the old workspace stays readable. The retired `--sampling_seed` is refused with `seeds derive from run_seed; set --run_seed`. See [persistence and resume](../agent-reference/mechanisms/persistence-and-resume.md#run-seed-in-the-lock-issue-983) |
 | `--experiment_arm` | `None` (unlabelled; an empty string is refused). Opaque label pinned in the lock and stamped on records / outputs / manifests (arXiv U1) |
 | `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` | `None` → the YAML's `enabled` decides (shipped: `false`). The resolved flag and the config's sha256 are pinned in the lock; an enabled but unreadable config refuses the launch |
 | `--ml_lit_review_config PATH` | literature-review YAML resolved by the iteration runner; composed tasks should supply their own task-specific framing |
@@ -305,6 +307,8 @@ The workflow itself, runnable directly. Accepts `--task_composition`,
 `--run_name`, `--max_iterations` (default `1`), `--max_rounds` (default `10`),
 `--max_proposal_attempts` (default `3`), `--target_score`, LLM routing flags and
 advice flags.
+It has no `--run_seed`: `run_workflow` adopts the workspace lock's `run_seed`
+or generates and locks a new one.
 
 ## Task-specific baseline comparison — external consumer
 
@@ -352,8 +356,9 @@ different one fails at startup.
 ### Permanent run-contract failures
 
 The iteration runner preserves a failed manifest, writes `.chain_halted` and
-exits **3** when prior-state restoration refuses the run or metric/interpretation
-declarations conflict. The foreground chain propagates this permanent halt;
+exits **3** when the run-invariants pre-flight or prior-state restoration refuses
+the run (including a `run_seed` conflict or a pre-seed workspace), or
+metric/interpretation declarations conflict. The foreground chain propagates this permanent halt;
 queued iterations refuse before starting work. Ordinary candidate exceptions
 retain the existing failure policy. An external supervisor must preserve the
 permanent status and suppress service-level retries; stopping only the inner

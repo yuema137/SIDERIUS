@@ -10,6 +10,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.durable_io import publish_bytes_write_once
 from core.sandbox_executor import get_loss_dir, get_plugin_dir
+from core.seeding import SeedCoordinates
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from workflows.candidate_training_settings import CandidateTrainingSettings
 from workflows.construction_admission import admit_generated_model_construction
@@ -50,6 +51,8 @@ def prepare_tuning_request(
         run_invariants=invariants,
         constraint_context=admitted.constraints,
         chain_formal_incumbent_reference=chain_formal_incumbent_reference,
+        # Issue #983 S4 supplies the global loop iteration and node_id.
+        seed_coordinates=SeedCoordinates(),
     )
 
 

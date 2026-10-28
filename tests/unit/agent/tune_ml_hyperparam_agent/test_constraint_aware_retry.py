@@ -40,6 +40,7 @@ from agent.skills.evaluate_vram_skill.wrapper import (
 )
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
+from tests.helpers.run_seed import TEST_RUN_SEED
 
 
 def _synth_reference() -> ReferenceScores:
@@ -284,6 +285,7 @@ def _make_input(
     # tests run a deterministic, small number of attempts regardless of the
     # default budget knobs (which the design may tune over time).
     return HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,

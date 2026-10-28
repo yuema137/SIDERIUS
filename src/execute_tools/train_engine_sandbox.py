@@ -31,6 +31,14 @@ from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificati
 from core.runtime_control.workload import ResolvedPhaseWorkload
 from core.sandbox_layout import training_checkpoint_path
 from core.target_standardization import TargetStandardizationReceipt
+from core.training_seeds import (
+    SeedContext,
+    TrainingSeedPlan,
+    require_seed_plan,
+    resolve_trainer_seed_plan,
+    seed_log_line,
+    trainer_seed_record,
+)
 from execute_tools.checkpoint_selection import CheckpointSelector
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 from execute_tools.dataset_config import (
@@ -50,6 +58,7 @@ from execute_tools.observables import (
     active_observation_session,
     child_observables_binding,
 )
+from execute_tools.process_seeding import dataloader_worker_init, seed_process, torch_generator
 from execute_tools.scope_artifact import load_transported_scope
 from execute_tools.target_standardization import prepare_training_target_standardization
 
@@ -1324,7 +1333,7 @@ def run_experiment_streaming(
     exp_id: str,
     train_portion: float | None = None,
     freeze_subsample: bool = False,
-    train_base_seed: int | None = None,
+    seed_plan: TrainingSeedPlan | None = None,
     runtime_session: RuntimeVerificationSession | None = None,
     order_strategy: str = "shuffle",
     file_order: list[int] | None = None,
@@ -1362,12 +1371,12 @@ def run_experiment_streaming(
         exp_id:            Experiment identifier for file naming.
         train_portion:     Fraction of each file's segments to use per epoch (0.01-1.0).
                            When None or 1.0, all segments in the scope are used.
-        freeze_subsample:  When True, every epoch uses the same subsample (same seed).
+        freeze_subsample:  When True, every epoch uses the epoch-0 subsample seed.
                            When False (default), each epoch draws a different subsample.
-        train_base_seed:   Base seed for per-epoch subsampling. Epoch n uses
-                           ``train_base_seed + n`` (or just ``train_base_seed`` if
-                           ``freeze_subsample=True``). When None, derived from
-                           ``hash(exp_id)``.
+        seed_plan:         Required ``TrainingSeedPlan``: process seeds (applied
+                           before model construction) and the per-epoch
+                           subsample / order / shuffle seeds. ``None`` raises
+                           ``MissingRunSeed`` (docs/agent-reference/mechanisms/seeding.md).
         runtime_session:   Optional in-subprocess runtime-verification session
                            (RT2-B, design §2.1). When provided, the epoch-0
                            dataset/DataLoader construction closes the measured
@@ -1487,6 +1496,10 @@ def run_experiment_streaming(
             "Training requires a task-owned scope from the active task composition."
         )
 
+    # Every process RNG is seeded before its first consumer, model construction.
+    seed_plan = require_seed_plan(seed_plan)
+    seed_process(seed_plan)
+
     # Model initialization (once)
     model_class = MODEL_REGISTRY.get(model_cfg.model_type)
     if model_class is None:
@@ -1509,9 +1522,6 @@ def run_experiment_streaming(
     lr_controller = build_epoch_lr_controller(optimizer, train_cfg.lr_schedule)
     learning_rates: list[list[float]] | None = [] if lr_controller is not None else None
 
-    # Deterministic base seed for reproducible per-epoch subsampling
-    base_seed = train_base_seed if train_base_seed is not None else hash(exp_id) % (2**31)
-
     # VALIDATION POSTURE, None in every production campaign. The Gate's
     # workload envelope, applied where the epoch is BUILT: the dataset
     # reads fewer segments and the loader yields fewer batches, so the
@@ -1531,7 +1541,7 @@ def run_experiment_streaming(
         scope=task_scope,
         sampling=EpochSamplingParams(
             data_dir=data_dir,
-            epoch_seed=base_seed,
+            epoch_seed=seed_plan.epoch(0).subsample,
             train_portion=1.0,
             max_samples=max_train_samples,
         ),
@@ -1720,18 +1730,16 @@ def run_experiment_streaming(
 
             # Build a fresh dataset each epoch — subsamples train_portion from the
             # scope, loads via HDF5 slicing, enables cross-file shuffling.
-            # Reproducible: base_seed from exp_id, +ep for diversity across epochs.
-            epoch_seed = base_seed if freeze_subsample else base_seed + ep
+            # Independent subsample / order / shuffle streams from the seed plan.
+            epoch_seeds = seed_plan.epoch(ep, freeze_subsample=freeze_subsample)
             t_dataset = time.perf_counter()
             # D14-1 C3: seam call. The implementation reconstructs
-            # ``random.Random(epoch_seed)`` internally — stream-identical to the
-            # pre-relocation call site (pinned per grid cell by the committed
-            # parity manifest).
+            # ``random.Random(epoch_seed)`` internally.
             dataset = data_path.training_dataset(
                 task_scope,
                 EpochSamplingParams(
                     data_dir=data_dir,
-                    epoch_seed=epoch_seed,
+                    epoch_seed=epoch_seeds.subsample,
                     train_portion=train_portion,
                     max_samples=max_train_samples,
                 ),
@@ -1747,13 +1755,9 @@ def run_experiment_streaming(
                     flush=True,
                 )
             if order_strategy == "sequential":
-                # Independent RNG stream, seeded from the same epoch seed: the
-                # dataset above consumes a variable number of draws depending on
-                # train_portion and file count, so sharing its generator would
-                # couple visit order to subsampling internals. The "order:" prefix
-                # keeps epoch N's ordering stream from colliding with epoch N+1's
-                # subsampling stream.
-                order_rng = random.Random(f"order:{epoch_seed}")
+                # Separate purpose from the subsample: the dataset above consumes a
+                # data-size-dependent number of draws, which must not shift order.
+                order_rng = random.Random(epoch_seeds.order)
                 # Sequential ordering is an optional dataset capability. Tasks
                 # that select it must expose the declared row groups.
                 epoch_indices = build_sequential_indices(
@@ -1768,6 +1772,8 @@ def run_experiment_streaming(
                     batch_size=train_cfg.batch_size,
                     sampler=epoch_indices,
                     drop_last=train_cfg.drop_last,
+                    generator=torch_generator(epoch_seeds.shuffle),
+                    worker_init_fn=dataloader_worker_init,
                 )
             else:
                 loader = DataLoader(
@@ -1775,11 +1781,13 @@ def run_experiment_streaming(
                     batch_size=train_cfg.batch_size,
                     shuffle=True,
                     drop_last=train_cfg.drop_last,
+                    generator=torch_generator(epoch_seeds.shuffle),
+                    worker_init_fn=dataloader_worker_init,
                 )
             print(
                 f"[data_order] resolved={order_strategy} "
                 f"file_order={'none' if file_order is None else file_order} "
-                f"epoch={ep} epoch_seed={epoch_seed}"
+                f"epoch={ep} epoch_seed={epoch_seeds.subsample}"
             )
             if ep == 0:
                 epoch0_dataset_seconds = time.perf_counter() - t_dataset
@@ -2203,6 +2211,14 @@ def _load_eval_sample_set_arg(path: str | None) -> dict | None:
     return payload
 
 
+def _load_seed_context_arg(path: str | None) -> SeedContext | None:
+    """Decode ``--seed_context_json``; absent means the trainer CLI generates."""
+    if path is None:
+        return None
+    with open(path, encoding="utf-8") as handle:
+        return SeedContext.model_validate_json(handle.read())
+
+
 def _cross_check_model_io(model_io, dataset_profile: DatasetProfile) -> None:
     """The Step-03 contract-vs-dataset cross-check, at the child's boundary.
 
@@ -2297,6 +2313,11 @@ def main():
     # embedding index error thousands of steps into a forward pass — the
     # difference Checkpoint C(iii) surfaced.
     _cross_check_model_io(model_io, dataset_profile)
+    seed_plan, seed_source = resolve_trainer_seed_plan(
+        _load_seed_context_arg(args.seed_context_json)
+    )
+    # Pre-execution record: a crash, OOM or timeout never loses the seed.
+    print(seed_log_line(seed_plan, seed_source), flush=True)
 
     # RT2-B: create the verification session FIRST so the measured setup
     # window covers config load and everything after — main() entry is the
@@ -2422,7 +2443,7 @@ def main():
                 exp_id=args.exp_id,
                 train_portion=args.train_portion,
                 freeze_subsample=args.freeze_subsample,
-                train_base_seed=args.train_base_seed,
+                seed_plan=seed_plan,
                 runtime_session=runtime_session,
                 order_strategy=args.order_strategy,
                 file_order=file_order,
@@ -2445,6 +2466,7 @@ def main():
         # Legacy single-file mode: pre-load entire file into TIDMADDataset
         if args.validation_executor_json is not None:
             raise ValueError("A validation deployment requires task-owned streaming scopes")
+        seed_process(seed_plan)
         dataset = TIDMADDataset(
             args.data_dir,
             [tidmad_topology(dataset_profile).dataset.training_file_name(args.file_index)],
@@ -2452,7 +2474,12 @@ def main():
             profile=dataset_profile,
         )
         loader = DataLoader(
-            dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=train_cfg.drop_last
+            dataset,
+            batch_size=train_cfg.batch_size,
+            shuffle=True,
+            drop_last=train_cfg.drop_last,
+            generator=torch_generator(seed_plan.epoch(0).shuffle),
+            worker_init_fn=dataloader_worker_init,
         )
         results = run_experiment(
             model_cfg,
@@ -2483,7 +2510,7 @@ def main():
         target_standardization_enabled=train_cfg.target_standardization != "none",
     )
     with open(res_path, "w") as f:
-        json.dump(results, f, indent=4)
+        json.dump({**results, **trainer_seed_record(seed_plan, seed_source)}, f, indent=4)
     print(f"Results saved to: {res_path}")
 
 

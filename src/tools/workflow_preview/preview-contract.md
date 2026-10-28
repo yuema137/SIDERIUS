@@ -55,13 +55,17 @@ These checks do not create, reserve, clean or make a workspace safe for executio
 
 Omitting `llm_config_file` selects `WorkflowLLMConfig.default()`. An explicit file is JSON,
 validated by the native `WorkflowLLMConfig`; omitted blocks retain native
-constructor fallback behavior. `config.py` adds bounded unknown-key and duplicate
-name/alias checks at the top level, active `implement`/`validate` leaf models,
-`propose`, and its three stage leaves. Accepted keys derive from native fields
-and aliases. Both `validate` and `validate_model` are accepted separately;
-supplying both is refused. Native models own shapes, values and retry intent.
-Known inactive role blocks retain native validation; they are not recursively
-subjected to the active-role typo policy. No native model's extra-field policy changes.
+constructor fallback behavior. `config.py` only forwards to
+`workflows.llm_config.parse_llm_config_bytes`, the single strict loader that the
+CLI `--llm_config` path also uses (`WorkflowLLMConfig.from_json`). That loader
+refuses any key the model does not declare, at the top level and at every nested
+route depth (roles, tuner planner/reflector, proposal stages, lit-review main/search,
+judge routes), and reports duplicate name/alias pairs. Keys starting with `_` are
+inert annotations, accepted and discarded at any depth. Accepted keys derive from
+native fields and aliases. Both `validate` and `validate_model` are accepted
+separately; supplying both is refused. Native models own shapes, values and retry
+intent. Direct Python construction (`WorkflowLLMConfig(...)`, `model_validate`)
+remains lenient about undeclared keys; no native model's extra-field policy changes.
 
 `tools.setup_review.routes.node_llm_routes` projects one role without projecting
 unrelated transports. It reuses `nodes.llm_settings`, `nodes.proposer_routing`
@@ -77,7 +81,8 @@ are unchanged. All routes are conditional possibilities, not invocation counts,
 stage activation, costs or reconciled native request values.
 
 `inactive_roles` lists every native workflow role outside these three roles,
-including unconfigured ones. No tuner, literature, interpretation or analysis
+including unconfigured ones. The `judge` entry appears only when the config declares a
+`judge` block; an undeclared `judge` is not listed. No tuner, literature, interpretation or analysis
 transport is projected. Transport resolvers are pure: preview does not read
 credentials or SDK environment. `base_url=None` leaves endpoint selection to
 later SDK/environment behavior; reported routes do not certify an effective

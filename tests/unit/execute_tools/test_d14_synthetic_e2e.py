@@ -34,6 +34,7 @@ from agent.schemas.model_io_contract import (
     TensorContract,
 )
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.dataset_config import DatasetProfile
 from execute_tools.scope_artifact import load_transported_scope, write_scope_artifact
 from execute_tools.task_data_path import (
@@ -167,7 +168,7 @@ class TestSyntheticEndToEnd:
                 data_dir=str(tmp_path),
                 sandbox_dirs=sandbox_dirs,
                 exp_id="synth_e2e_1",
-                train_base_seed=7,
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=7)),
                 model_io=_synthetic_contract(),
                 task_scope=list(SCOPE_IDS),
                 profile=SYNTHETIC_PROFILE,
@@ -234,7 +235,7 @@ class TestSyntheticEndToEnd:
                 data_dir=str(tmp_path),
                 sandbox_dirs=sandbox_dirs,
                 exp_id="synth_r3_1",
-                train_base_seed=7,
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=7)),
                 model_io=_synthetic_contract(),
                 task_scope=list(SCOPE_IDS),
                 task_eval_scope=list(eval_ids),
@@ -260,7 +261,7 @@ class TestSyntheticEndToEnd:
                     data_dir=str(tmp_path),
                     sandbox_dirs=sandbox_dirs,
                     exp_id="synth_r3_neg",
-                    train_base_seed=7,
+                    seed_plan=TrainingSeedPlan(SeedContext(run_seed=7)),
                     model_io=_synthetic_contract(),
                     task_scope=list(SCOPE_IDS),
                     task_eval_scope=["va"],
@@ -282,7 +283,7 @@ class TestSyntheticEndToEnd:
                     data_dir=str(tmp_path),
                     sandbox_dirs=sandbox_dirs,
                     exp_id=exp,
-                    train_base_seed=7,
+                    seed_plan=TrainingSeedPlan(SeedContext(run_seed=7)),
                     model_io=_synthetic_contract(),
                     task_scope=list(SCOPE_IDS),
                     profile=SYNTHETIC_PROFILE,
@@ -303,7 +304,7 @@ class TestSyntheticEndToEnd:
                 data_dir=str(tmp_path),
                 sandbox_dirs=sandbox_dirs,
                 exp_id="neg_1",
-                train_base_seed=7,
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=7)),
                 task_scope=list(SCOPE_IDS),
                 profile=SYNTHETIC_PROFILE,
             )
@@ -398,7 +399,7 @@ def test_transported_scope_storage_reaches_setup_observation(
             data_dir=str(tmp_path),
             sandbox_dirs=sandbox_dirs,
             exp_id="scoped_storage_setup",
-            train_base_seed=7,
+            seed_plan=TrainingSeedPlan(SeedContext(run_seed=7)),
             model_io=_synthetic_contract(),
             task_scope=transported,
             profile=SYNTHETIC_PROFILE,

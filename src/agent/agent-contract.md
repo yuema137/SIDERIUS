@@ -18,8 +18,10 @@ executes training, inference or scoring.
 |---|---|
 | `llm_bridge.py` | `LLMBridge` — default OpenAI-compatible transport plus optional Pydantic AI Direct API adapters. Known providers `openai` / `gemini` / `deepseek` resolve `base_url` + key env var automatically; **any OpenAI-compatible endpoint** works via explicit `base_url`/`api_key`. Also the `reflect_provider` split (route the reflector to a second provider/model) and the stub-mode bridge for $0 pseudo runs |
 | `llm_transport/` | Optional provider adapters; [transport contract](llm_transport/transport-contract.md) owns selection, protocol translation, limitations and validation |
+| `credential_environment.py` | `load_compatibility_dotenv` (python-dotenv default search, `override=False`; logs the loaded path once per process at INFO and warns when it is outside the checkout or group/other-accessible) and `warn_if_blank_credential` (warns by name for a set-but-blank key). Logs paths, modes and names only, never values |
 | `llm_settings.py` | Pure provider/model/timeout and reflector-inheritance resolution used by the bridge and offline inspection; no credentials or client construction |
 | `prompts.py` + `prompt_templates/` | per-node prompt rendering (`proposal/`, `implementor/`, `interpretation/`, `tuner/`, `literature_review/`). Task science enters ONLY as caller-supplied task-blocks values parsed by `prompt_templates/_task_blocks_loader.py` — the shared mechanics of the three adapters (proposal / implementor / interpretation) |
+| `judge/` | LLM judge call/evidence core: one bounded `run_judge_call` through `LLMBridge`, write-once `JudgeCallEvidence`, provider-free replay; see the [judge contract](judge/judge-contract.md) |
 | `schemas/` | node input/output contracts and the typed edge protocols — see [`schemas/README.md`](schemas/README.md) |
 | `skills/` | atomic tools invoked by agents: `training_skill`, `inference_skill`, `denoising_score_skill`, `evaluate_time_skill` (+ the `~/.siderius` calibration store), `evaluate_vram_skill`, `check_config_format_skill`, `model_io_probe_skill.py`, `forbidden_pattern_skill.py`, `paper_resolver_skill` |
 | `tools_schema.py` | `load_skills_from_library` — scans `skills/` for `skill_config.json` declarations |
@@ -46,8 +48,8 @@ explicitly when selecting a different provider.
 ## Inputs
 
 API keys from the environment (`OPENAI_API_KEY` / `GEMINI_API_KEY` /
-`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / `MOONSHOT_API_KEY` / `ZAI_API_KEY`; `LLMBridge` calls `load_dotenv()`, so a repo-root `.env`
-works); per-stage routing from `configs/llm/*.json`
+`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / `MOONSHOT_API_KEY` / `ZAI_API_KEY`; `LLMBridge` calls `load_compatibility_dotenv()`, so a repo-root `.env`
+works; see [compatibility `.env` loading](../../docs/getting-started/installation.md#compatibility-env-loading)); per-stage routing from `configs/llm/*.json`
 (`workflows/llm_config.py` loads them); task-block YAML paths supplied by the
 caller, never discovered.
 

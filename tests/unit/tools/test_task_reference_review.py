@@ -1,5 +1,6 @@
 """Actual authoring/HTTP dispatch with typed owner observations, never scientific compatibility guesses."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -205,3 +206,31 @@ def test_source_changed_during_explicit_inspection_preserves_draft(configured, m
     assert failure.value.proposal.task_reference_update is not None
     assert "agent edit" in failure.value.current.source
     assert not tuple(project.recovery_directory.iterdir())
+
+
+def test_observation_refuses_misspelled_llm_config_key_before_inspection(tmp_path, monkeypatch):
+    """Observation parses the explicit profile with the strict loader: a typo fails before any inspection."""
+    from tools.workflow_authoring import task_observation
+    from tools.workflow_authoring.task_models import TaskReferenceTarget
+
+    profile = tmp_path / "agents.json"
+    profile.write_text(
+        json.dumps({"interpet": {"provider": "openai", "model_id": "gpt-4o-mini"}}),
+        encoding="utf-8",
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("inspection reached before the profile was refused")
+
+    monkeypatch.setattr(task_observation, "observe_composition", forbidden)
+    monkeypatch.setattr(task_observation, "manifest_digest", forbidden)
+    target = TaskReferenceTarget.model_construct(
+        manifest=tmp_path / "manifest.yaml",
+        data_root=tmp_path / "data",
+        llm_config_file=profile,
+        inspection_root=tmp_path,
+        read_only=(),
+        settings=None,
+    )
+    with pytest.raises(ValueError, match=r"unknown configuration keys: \['interpet'\]"):
+        task_observation.observe_target(target)

@@ -21,13 +21,28 @@ Per-node contracts (one module each): `interpretation.py`, `proposal.py` (+
 (`ModelIOContract` — the normalized forward contract), `training_diagnosis.py`,
 `score_table.py`, `storage.py` (`LocalStorageConfig` — the workspace/run_name
 namespace every node writes under), `ordering.py`, `vocab.py`,
-`health_feedback.py`, `run_metadata.py`, `telemetry/`.
+`health_feedback.py`, `run_metadata.py`, `telemetry/`, `judge.py` (LLM judge
+request/verdict/evidence records; see the
+[judge contract](../judge/judge-contract.md)).
 
 `output_types.py` owns the lightweight `OutputTypeName` vocabulary used by
 proposal/implementor schemas, launch config, CLI and plugin loading.
 `proposal.OutputTypeName` remains an explicit public re-export. The loader
 derives its legal plugin tuple from this alias and adds builtin-only `hybrid`
 only to its broader execution vocabulary; plugins cannot declare `hybrid`.
+
+`judge_task.py` owns the task-declared judge inputs composed from the
+manifest's optional `judge_blocks:` and `rubrics:` sections
+([task composition](../../../docs/reference/task-composition.md#judge-guidance-and-rubrics)):
+`JudgeTaskBlocks` (prose guidance; identity `judge_guidance_sha256`),
+`RubricSpec` / `RubricCriterion` (`siderius.rubric/v1`; 1–32 criteria with
+unique names, integer `scale_min < scale_max` with span `<= 100`,
+`0 < weight <= 100`), `RubricRef` (`id`, `version`,
+`sha256`), `rubric_sha256` (canonical-JSON digest of the validated spec) and
+`resolve_rubric_ref`, which raises `RubricRefError` with `reason`
+`unknown_rubric` or `digest_mismatch`. A rubric is not a metric: it carries no
+total and no direction, and never enters `MetricOrder`. Totals are computed by
+framework code from validated per-criterion integers, never by the LLM.
 
 `protocols/` — one module per directed edge, named
 `{source_code}_to_{target_code}.py` (e.g.

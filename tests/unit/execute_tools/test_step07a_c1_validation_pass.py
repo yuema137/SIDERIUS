@@ -42,6 +42,7 @@ from torch.utils.data import DataLoader
 
 import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.session import RuntimeVerificationSession
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.dataset_config import bind_dataset_profile
 from execute_tools.task_data_path import EvalMaterializationParams, bind_task_data_path
 from execute_tools.training_history import (
@@ -129,7 +130,7 @@ def _run(
             data_dir=fx.data_dir,
             sandbox_dirs=_sandbox(tmp_path, name),
             exp_id=name,
-            train_base_seed=123,
+            seed_plan=TrainingSeedPlan(SeedContext(run_seed=123)),
             profile=fx.profile,
             runtime_session=runtime_session,
             **data_path.scope_kwargs(sample_set or fx.full_sample_set(), eval_sample_set),
@@ -316,17 +317,17 @@ class TestTwoArmTrajectoryOracle:
 
 
 class _StochasticForward(torch.nn.Module):
-    """Wraps the real wavenet; consumes ONE torch global-RNG draw per forward
-    (a dropout-like model). The draw is discarded — only the RNG advance
-    matters."""
+    """Wraps the real wavenet; ONE torch global-RNG draw per forward scales
+    the output (a dropout-like model), so a shifted global RNG changes the
+    training trajectory. Loader shuffles use their own seeded generators and
+    cannot reveal a shift."""
 
     def __init__(self, cfg, *args, **kwargs):
         super().__init__()
         self.inner = _REAL_WAVENET(cfg, *args, **kwargs)
 
     def forward(self, x):
-        torch.rand(1)
-        return self.inner(x)
+        return self.inner(x) * (1.0 + 1e-3 * torch.rand(1))
 
 
 @pytest.fixture
@@ -348,8 +349,8 @@ class TestRngIsolationMutation:
         self, two_family, tmp_path, stochastic_wavenet, monkeypatch
     ):
         """MUTATION: remove `torch.random.fork_rng` from the pass. The
-        validation forwards then advance the global RNG, epoch-1's shuffle
-        permutation changes, and the trajectory diverges → this proves the
+        validation forwards then advance the global RNG, epoch-1's stochastic
+        training forwards draw different values, and the trajectory diverges → this proves the
         fork is what isolates, not luck."""
 
         @contextlib.contextmanager
@@ -404,8 +405,11 @@ class TestComparabilityUnequalLastBatch:
                 batch_means.append(criterion(model(x.to(torch.long)), y.to(torch.long)).item())
         reference = sum(per_sample) / len(per_sample)
         mutation = float(np.mean(batch_means))  # unweighted mean of batch means (2, 2, 1)
-        assert r3 == pytest.approx(reference, abs=1e-12)
-        assert abs(r3 - mutation) > 1e-9, "the fixture must separate the two estimators"
+        # R3 sums float32 batch means; the reference sums float32 per-sample
+        # losses. They agree to float32 rounding, which depends on the weights
+        # and on BLAS/thread count; the wrong estimator differs by ~1e-4.
+        assert r3 == pytest.approx(reference, rel=1e-6)
+        assert abs(r3 - mutation) > 1e-5, "the fixture must separate the two estimators"
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ from uuid import UUID
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
 from tools.workspace_sandbox.profile import SandboxProfile
-from tools.workspace_sandbox.runner import ObservedExecutionResult, run_observed
+from tools.workspace_sandbox.runner import CancelProbe, ObservedExecutionResult, run_observed
 
 from .graph_evidence import read_graph_control
 from .loop_models import LoopContinuation
@@ -151,9 +151,16 @@ def resume_history(
 
 
 def launch_continuation(
-    request: CandidateRunRequest, initial: CandidateRunReceipt, binding: LoopContinuation
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    binding: LoopContinuation,
+    *,
+    cancel_requested: CancelProbe | None = None,
 ) -> CandidateRunReceipt:
-    """Only operation admission publishes the binding; no fresh-workspace bypass."""
+    """Only operation admission publishes the binding; no fresh-workspace bypass.
+
+    ``cancel_requested`` has the ``launch_candidate`` meaning for this segment.
+    """
     from .launch import bounded_terminal, publish, reconcile
 
     control = segment_control(initial, binding.operation_id)
@@ -169,7 +176,9 @@ def launch_continuation(
     )
     try:
         observed = run_observed(
-            profile, [sys.executable, "-m", __name__, str(control / "continuation.json")]
+            profile,
+            [sys.executable, "-m", __name__, str(control / "continuation.json")],
+            cancel_requested=cancel_requested,
         )
         publish_bytes_write_once(str(control / "supervision.json"), encode_control(observed))
         terminal = reconcile(
@@ -193,12 +202,14 @@ def launch_continuation(
 def execute_continuation(path: Path) -> CandidateRunReceipt:
     from core.generated_library import bind_generated_library_to_workspace
 
+    from .budget import WorkerBudget
     from .child import verify_inputs
     from .launch import bounded_terminal, publish
 
     binding = LoopContinuation.model_validate_json(read_graph_control(path))
     root = path.parent.parent.parent
     request = CandidateRunRequest.model_validate_json(read_graph_control(root / "request.json"))
+    budget = WorkerBudget.start(request.timeout_seconds)
     initial = CandidateRunReceipt.model_validate_json(read_graph_control(root / "launch.json"))
     if path != segment_control(initial, binding.operation_id) / "continuation.json":
         raise ValueError("continuation path disagrees with root")
@@ -206,7 +217,9 @@ def execute_continuation(path: Path) -> CandidateRunReceipt:
     bind_generated_library_to_workspace(initial.workspace)
     from .native import execute_native
 
-    receipt = bounded_terminal(initial, execute_native(request, initial, continuation=binding))
+    receipt = bounded_terminal(
+        initial, execute_native(request, initial, continuation=binding, budget=budget)
+    )
     publish(path.parent / "child.json", receipt, bounded=True)
     return receipt
 

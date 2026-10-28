@@ -53,7 +53,8 @@ preview. See the [complete example](preview-contract.md#example-document).
    example, `task.yaml` resolves to `/projects/my-task/task.yaml` even if Python
    starts elsewhere. Route names combine your node ID with its stage, such as
    `candidate.reasoning` or `coder.main`. `inactive_roles` lists the native roles
-   outside this preview, whether or not your config supplies them.
+   outside this preview, whether or not your config supplies them. `judge` is listed only
+   when your `llm.json` declares a `judge` block.
 
 Edit `llm.json` to select the three roles' models. Omitting `llm_config_file`
 selects the framework's first-run configuration; an explicit partial file keeps

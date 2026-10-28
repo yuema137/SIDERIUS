@@ -43,6 +43,7 @@ from nodes.ml_hyperparameter_tune_agent import (
     _serialize_expert_advice,
 )
 from nodes.scoring_reference import ReferenceScores
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.scoring_stubs import stub_scoring
 
 # ---------------------------------------------------------------------------
@@ -219,6 +220,7 @@ def _make_input(tmp_path, max_rounds=1, expert_advice="", model_type="punet"):
     # fail-rounds). Tests that need different budgets should construct
     # ``HyperparamTuningInput`` directly.
     return HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type=model_type,
         file_index=6,
@@ -684,6 +686,7 @@ FAKE_PLAN_WITH_TRIAL = {
 
 def _make_trial_input(tmp_path, max_rounds=1, is_trial=True):
     return HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
@@ -1048,6 +1051,7 @@ def _make_input_with_budget(
     here AND override ``mock_brain.plan.return_value`` to include
     ``"is_trial": True``."""
     return HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
