@@ -10,7 +10,9 @@ validation table belong to `workflows.definition` (B6-1, see
 readiness, record publication, graph trace and verifier recomputation belong to
 the candidate worker (B6-3: `readiness.NodeReadiness.kind="adaptor"`,
 `adaptor_phase.py`). LLM COMBINE kinds belong to B2
-(`admit_/run_/replay_llm_strategy`); their rankings re-enter through `select`.
+(`admit_/run_/replay_llm_strategy` in `workflows.judge_strategies`,
+[strategy contract](../judge_strategies/judge-strategies-contract.md)); their
+rankings re-enter through `select`.
 
 | Owner | Responsibility |
 | --- | --- |

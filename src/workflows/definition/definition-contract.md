@@ -304,7 +304,10 @@ Strategy constructors are the B6-2 models (`PassCombine`, `CollectCombine`,
 `AdaptorStrategyContract(stage, declaration, owner)` (inert strings, like
 `PROTOCOLS`); a test keeps it equal to the three discriminated unions. LLM kinds
 (B2) and `custom/v1` (B6-5/B6-6) are not declarable yet; they join the unions and
-the catalogue with their owners.
+the catalogue with their owners. The LLM kinds' declaration models already exist
+in `llm_strategies.py` (`LLMStrategy`, B2-6,
+[strategy contract](../judge_strategies/judge-strategies-contract.md)); B6-8 adds
+them to `AdaptorInstance.combine` and the catalogue.
 
 A port source may be `ExternalSource`, `ResultSource`, `AdaptorSource` or a route
 merge `SelectedSource` (decision 2026-10-28): the merge resolves at run time to the one
