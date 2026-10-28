@@ -43,7 +43,8 @@ from workflows.definition.adaptor_strategies import (
     TopKSelect,
     derive_cardinality,
 )
-from workflows.definition.models import ResultSource
+from workflows.definition.catalog import METRIC_SCORED_CONTRACTS, RANKABLE_FIELDS
+from workflows.definition.models import ExternalSource, ResultSource
 
 HIGHER = accuracy_like_spec("fixture_metric")
 LOWER = error_like_spec("fixture_metric")
@@ -256,6 +257,20 @@ def test_empty_admissible_set_and_empty_selection_are_rejected_without_outputs()
     )
 
 
+def test_shortfall_is_monotonic_under_a_fail_policy():
+    # Defect: zero kept under on_short="fail" reported as a softer rejection than one
+    # short of the count, inverting the declared policy.
+    keep = ThresholdSelect(basis="metric", metric_id="fixture_metric", at_least=1.0)
+    items = [tuning(0, 0.2), tuning(1, 0.3)]
+    strict = decide(items, METRIC_RANK, keep, PerItemDistribute(count=2, on_short="fail"))
+    assert (strict.status, strict.reason) == ("failed", "insufficient_items")
+    lenient = decide(items, METRIC_RANK, keep, PerItemDistribute(count=2, on_short="skip"))
+    assert (lenient.status, lenient.reason) == ("rejected", "insufficient_items")
+    empty = literature(0)
+    split_fail = SplitItemsDistribute(field="findings", count=2, on_short="fail")
+    assert decide([empty], PassCombine(), AllSelect(), split_fail, None).status == "failed"
+
+
 def test_first_admissible_skips_a_rejected_branch_and_requires_pass():
     # Defect: "first" read as the first bound source rather than the first admissible one.
     items = [validation(0, False), validation(1, True), validation(2, True)]
@@ -318,10 +333,10 @@ def test_field_rank_top_k_then_split_keeps_strongest_self_reported_findings():
     assert outcome.ranking.provenance == "self-reported"
     assert [e.value for e in outcome.ranking.entries] == [0.9, 0.7, 0.4, 0.4]
     assert [o.value.findings[0].content for o in outcome.outputs] == ["r0f2", "r0f4", "r0f0"]
-    assert [o.inputs[0].item_path for o in outcome.outputs] == [
-        "findings[2]",
-        "findings[4]",
-        "findings[0]",
+    assert [o.inputs for o in outcome.outputs] == [
+        (ref(0), ref(0).entry("findings", 2)),
+        (ref(0), ref(0).entry("findings", 4)),
+        (ref(0), ref(0).entry("findings", 0)),
     ]
     original = review.value.model_dump(mode="json", exclude={"findings"})
     for output in outcome.outputs:
@@ -351,6 +366,80 @@ def test_split_refuses_more_entries_than_outputs_and_fails_or_skips_on_shortfall
         "emitted",
         "skipped",
     ]
+
+
+def test_concat_then_split_attributes_each_entry_to_its_owning_input():
+    # Defect: split after concat attributing every output to all concatenated inputs.
+    reviews = [literature(0, 0.1), literature(1, 0.2, 0.3)]
+    outcome = decide(
+        reviews,
+        ConcatItemsCombine(field="findings"),
+        AllSelect(),
+        SplitItemsDistribute(field="findings", count=3, on_short="fail"),
+        metric=None,
+    )
+    assert [o.inputs for o in outcome.outputs] == [
+        (ref(0), ref(0).entry("findings", 0)),
+        (ref(0), ref(1).entry("findings", 0)),
+        (ref(0), ref(1).entry("findings", 1)),
+    ]
+    assert [o.value.findings[0].content for o in outcome.outputs] == ["r0f0", "r1f0", "r1f1"]
+
+
+def test_items_out_of_declared_order_are_refused():
+    # Defect: a completion-ordered tuple silently changing tie-breaks and "first".
+    a, b = validation(0, True), validation(1, True)
+    with pytest.raises(AdaptorStrategyError, match="not declared order"):
+        decide([b, a], PassCombine(), FirstAdmissibleSelect(), SingleDistribute())
+    other = a.model_copy(update={"ref": ref(0, port="extra")})
+    with pytest.raises(AdaptorStrategyError, match="not contiguous"):
+        decide(
+            [a, other, b], PassCombine(), AllSelect(), PerItemDistribute(count=3, on_short="fail")
+        )
+
+
+def test_per_item_after_a_one_value_combine_is_a_declaration_error():
+    # Defect: per-item(M) after collect/concat/field-rank reported as a data shortfall.
+    skip = PerItemDistribute(count=2, on_short="skip")
+    for strategy in (
+        CollectCombine(),
+        ConcatItemsCombine(field="findings"),
+        FieldRankCombine(field="confidence", order="descending"),
+    ):
+        with pytest.raises(AdaptorStrategyError, match="yields one value"):
+            decide([literature(0, 0.1)], strategy, AllSelect(), skip, metric=None)
+
+
+def test_ranking_carries_direction_only_on_a_metric_basis():
+    # Defect: a field or rubric ranking recorded with a metric direction it never used.
+    with pytest.raises(ValidationError, match="direction"):
+        Ranking(basis="field", entries=(), direction="lower")
+    with pytest.raises(ValidationError, match="direction"):
+        Ranking(basis="metric", entries=(), metric_id="fixture_metric")
+
+
+def test_no_rankable_field_is_on_a_metric_scored_contract():
+    # Defect: field-rank becoming a second, non-MetricOrder ranking of metric-scored items.
+    assert not set(RANKABLE_FIELDS) & METRIC_SCORED_CONTRACTS
+
+
+def test_concat_refuses_mixed_contracts_and_collect_names_external_bindings():
+    # Defect: concatenating lists of different contracts; attributing an external seed
+    # to a node id that does not exist.
+    with pytest.raises(AdaptorStrategyError, match="one input contract"):
+        decide(
+            [literature(0, 0.1), validation(1, True)],
+            ConcatItemsCombine(field="findings"),
+            AllSelect(),
+            SingleDistribute(),
+            metric=None,
+        )
+    seed = literature(0, 0.1)
+    seed = seed.model_copy(
+        update={"ref": seed.ref.model_copy(update={"source": ExternalSource(binding="seed")})}
+    )
+    collected = decide([seed], CollectCombine(), AllSelect(), SingleDistribute(), metric=None)
+    assert collected.outputs[0].value.entries[0].contribution_id == "seed"
 
 
 def test_collect_and_concat_preserve_declared_order_and_attribution():
@@ -386,3 +475,7 @@ def test_record_maps_every_emitted_output_to_its_inputs_and_digest():
     assert {c.role for c in record.contributions} == {"replicated"}
     assert [o.sha256 for o in record.outputs] == [canonical_sha256(items[1].value)] * 2
     assert record.strategies == ("pass/v1", "all/v1", "replicate/v1")
+    # Literal witness, computed independently (sha256sum over the canonical JSON text).
+    assert record.parameters_sha256 == (
+        "6a21434c04c761108a692d14547ccddd4f22cd9efaa15a71e4da66b8bd240c28"
+    )

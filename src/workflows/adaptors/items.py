@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
+from workflows.definition.catalog import METRIC_SCORED_CONTRACTS, VALIDITY_GATED_CONTRACTS
 from workflows.definition.models import Identifier, Source
 
 if TYPE_CHECKING:
@@ -72,13 +73,13 @@ def admit(item: AdaptorItem) -> Admission:
     """The B6/B2 admissibility rule for one item (B6 §2 rule 3)."""
     if item.state != "succeeded":
         return item.state
-    if item.contract == "validation.output":
+    if item.contract in VALIDITY_GATED_CONTRACTS:
         from agent.schemas.validator import ValidatorOutput
 
         if not isinstance(item.value, ValidatorOutput):
             raise AdaptorStrategyError(f"{_label(item)} is not a validation.output value")
         return "admissible" if item.value.passed else "rejected"
-    if item.contract == "tuning.output":
+    if item.contract in METRIC_SCORED_CONTRACTS:
         output = tuning_output(item)
         if output.best_valid_formal_denoising_score is not None:
             return "admissible"
@@ -88,13 +89,25 @@ def admit(item: AdaptorItem) -> Admission:
 
 
 def admit_items(items: tuple[AdaptorItem, ...]) -> tuple[ItemAdmission, ...]:
-    """Admission of every item, in the declared order the caller passed."""
-    seen: set[tuple[str, int]] = set()
+    """Admission of every item; refuses items not in declared order.
+
+    Declared order means each port's items are contiguous and their positions
+    strictly increase, so a permuted or completion-ordered tuple cannot pass.
+    """
+    finished: set[str] = set()
+    previous: AdaptorItem | None = None
     for item in items:
-        key = (item.ref.port, item.ref.position)
-        if key in seen:
-            raise AdaptorStrategyError(f"duplicate adaptor input {_label(item)}")
-        seen.add(key)
+        port = item.ref.port
+        if previous is not None and previous.ref.port == port:
+            if item.ref.position <= previous.ref.position:
+                raise AdaptorStrategyError(
+                    f"adaptor input {_label(item)} follows {_label(previous)}: not declared order"
+                )
+        elif port in finished:
+            raise AdaptorStrategyError(f"adaptor port {port!r} items are not contiguous")
+        if previous is not None and previous.ref.port != port:
+            finished.add(previous.ref.port)
+        previous = item
     return tuple(ItemAdmission(ref=item.ref, admission=admit(item)) for item in items)
 
 

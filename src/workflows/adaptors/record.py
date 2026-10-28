@@ -56,10 +56,14 @@ class AdaptorRecord(AdaptorModel):
 
 
 def canonical_sha256(value: object) -> str:
-    """SHA-256 of canonical JSON (sorted keys, compact) of a model or JSON value."""
+    """SHA-256 of canonical JSON (sorted keys, compact) of a model or JSON value.
+
+    No package-neutral canonical-JSON owner exists; this matches the encoding of
+    ``WorkflowDefinition.declaration_digest`` (sorted keys, compact, ASCII).
+    """
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="json")
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 

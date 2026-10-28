@@ -13,6 +13,7 @@ from workflows.definition.adaptor_strategies import (
     ThresholdSelect,
     TopKSelect,
 )
+from workflows.definition.catalog import METRIC_SCORED_CONTRACTS
 
 from .combine import Combined, Ranking, Unit, with_list
 from .items import AdaptorStrategyError
@@ -34,11 +35,11 @@ def select(
         case TopKSelect(k=k):
             ranking = _ranking(combined, strategy.kind)
             if ranking.basis in ("rubric", "judge") and any(
-                unit.element_contract == "tuning.output" for unit in combined.units
+                unit.element_contract in METRIC_SCORED_CONTRACTS for unit in combined.units
             ):
                 # Q-B2-2: an LLM may filter metric-scored items, never reorder them.
                 raise AdaptorStrategyError(
-                    f"top-k/v1 over a {ranking.basis} ranking of tuning.output is refused"
+                    f"top-k/v1 over a {ranking.basis} ranking of metric-scored items is refused"
                 )
             return tuple(entry.unit for entry in ranking.entries[:k])
         case ThresholdSelect():
@@ -51,12 +52,18 @@ def chosen_units(combined: Combined, indices: tuple[int, ...]) -> tuple[Unit, ..
         return tuple(combined.units[index] for index in indices)
     if not indices:
         return ()
-    assert combined.list_field is not None
+    if combined.list_field is None:
+        raise AdaptorStrategyError(f"{combined.combine_kind} names a parent without a list field")
     picked = [combined.units[index] for index in indices]
     value = with_list(combined.parent.value, combined.list_field, [unit.value for unit in picked])
+    entry_refs = tuple(unit.inputs[0] for unit in picked)
     return (
-        combined.parent.model_copy(
-            update={"value": value, "inputs": tuple(unit.inputs[0] for unit in picked)}
+        Unit(
+            value=value,
+            element_contract=combined.parent.element_contract,
+            inputs=(combined.parent.inputs[0], *entry_refs),
+            role="selected",
+            entry_refs=entry_refs,
         ),
     )
 

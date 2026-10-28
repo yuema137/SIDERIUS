@@ -10,8 +10,11 @@ from pydantic import BaseModel, SerializeAsAny, model_validator
 
 from execute_tools.evaluation_metric import MetricSpec
 from workflows.definition.adaptor_strategies import (
+    CollectCombine,
+    ConcatItemsCombine,
     DeterministicCombine,
     DistributeStrategy,
+    FieldRankCombine,
     PerItemDistribute,
     ReplicateDistribute,
     SelectStrategy,
@@ -72,6 +75,7 @@ def run_deterministic_adaptor(
     metric: MetricSpec | None,
 ) -> AdaptorOutcome:
     """Decide one adaptor's outputs; ``items`` must already be in declared order."""
+    _refuse_incompatible(combine_strategy, distribute_strategy)
     bound = derive_cardinality(select_strategy, distribute_strategy)
     admissions = admit_items(items)
     admissible = tuple(
@@ -90,12 +94,8 @@ def run_deterministic_adaptor(
             f"{select_strategy.kind} kept {len(chosen)} values; {distribute_strategy.kind} "
             f"accepts at most {bound.max}"
         )
-    if not chosen:
-        reason: AdaptorReason | None = "insufficient_items"
-        status: Literal["succeeded", "rejected", "failed"] = "rejected"
-        outputs: tuple[AdaptorOutput, ...] = ()
-    elif len(chosen) < bound.min:
-        status, reason, outputs = "failed", "insufficient_items", ()
+    if len(chosen) < bound.min:  # bound.min >= 1, so this includes an empty selection
+        status, reason, outputs = _short(distribute_strategy)
     else:
         status, reason, outputs = _distribute(distribute_strategy, chosen)
     return AdaptorOutcome(
@@ -110,6 +110,23 @@ def run_deterministic_adaptor(
 _Decision = tuple[
     Literal["succeeded", "rejected", "failed"], AdaptorReason | None, tuple[AdaptorOutput, ...]
 ]
+
+
+def _refuse_incompatible(combine: DeterministicCombine, distribute: DistributeStrategy) -> None:
+    """Declaration errors, refused before admission (B6-1 validation-table rows)."""
+    single_value = isinstance(combine, CollectCombine | ConcatItemsCombine | FieldRankCombine)
+    if single_value and isinstance(distribute, PerItemDistribute):
+        raise AdaptorStrategyError(f"per-item/v1 cannot follow {combine.kind}: it yields one value")
+    if isinstance(combine, CollectCombine) and isinstance(distribute, SplitItemsDistribute):
+        raise AdaptorStrategyError("split-items/v1 cannot split a collect/v1 collection")
+
+
+def _short(strategy: DistributeStrategy) -> _Decision:
+    """Shortfall is monotonic: under ``on_short="fail"`` any shortfall fails."""
+    fails = isinstance(strategy, PerItemDistribute | SplitItemsDistribute) and (
+        strategy.on_short == "fail"
+    )
+    return ("failed" if fails else "rejected"), "insufficient_items", ()
 
 
 def _distribute(strategy: DistributeStrategy, chosen: tuple[Unit, ...]) -> _Decision:
@@ -146,17 +163,16 @@ def _split(unit: Unit, strategy: SplitItemsDistribute) -> _Decision:
             f"split-items/v1 field {strategy.field!r} is not catalogued for {unit.element_contract!r}"
         )
     entries = list(getattr(unit.value, strategy.field))
-    if not entries:
-        return "rejected", "insufficient_items", ()
     if len(entries) > strategy.count:
         return "failed", "too_many_items", ()
-    if len(entries) < strategy.count and strategy.on_short == "fail":
-        return "failed", "insufficient_items", ()
+    if not entries or (len(entries) < strategy.count and strategy.on_short == "fail"):
+        return _short(strategy)
     pieces = tuple(
         unit.model_copy(
             update={
                 "value": with_list(unit.value, strategy.field, [entry]),
-                "inputs": _entry_refs(unit, strategy.field, index),
+                "inputs": _split_refs(unit, strategy.field, index),
+                "entry_refs": None,
             }
         )
         for index, entry in enumerate(entries)
@@ -164,11 +180,8 @@ def _split(unit: Unit, strategy: SplitItemsDistribute) -> _Decision:
     return "succeeded", None, _indexed(pieces, strategy.count)
 
 
-def _entry_refs(unit: Unit, field: str, index: int) -> tuple[AdaptorInputRef, ...]:
-    """The input that owns list entry ``index`` (an already entry-addressed ref is kept)."""
-    if all(ref.item_path is not None for ref in unit.inputs):
-        return (unit.inputs[index],)
-    if len(unit.inputs) == 1:
-        return (unit.inputs[0].entry(field, index),)
-    # A concatenation: entry provenance is the concatenated inputs as a whole.
-    return unit.inputs
+def _split_refs(unit: Unit, field: str, index: int) -> tuple[AdaptorInputRef, AdaptorInputRef]:
+    """Owner of the non-list fields, then the owner of list entry ``index``."""
+    owner = unit.inputs[0]
+    entry = unit.entry_refs[index] if unit.entry_refs is not None else owner.entry(field, index)
+    return owner, entry

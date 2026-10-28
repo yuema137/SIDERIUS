@@ -25,7 +25,10 @@ from workflows.definition.adaptor_strategies import (
     MetricRankCombine,
     PassCombine,
 )
-from workflows.definition.catalog import RANKABLE_FIELDS, SPLITTABLE_ITEMS
+from workflows.definition.catalog import (
+    RANKABLE_FIELDS,
+    SPLITTABLE_ITEMS,
+)
 from workflows.definition.models import ResultSource
 
 from .items import AdaptorInputRef, AdaptorItem, AdaptorModel, AdaptorStrategyError, tuning_output
@@ -35,12 +38,19 @@ RankBasis = Literal["metric", "field", "rubric", "judge"]
 
 
 class Unit(AdaptorModel):
-    """One candidate SELECT can keep: a whole value, or one list entry of a value."""
+    """One candidate SELECT can keep: a whole value, or one list entry of a value.
+
+    ``element_contract`` is the catalogue contract of a whole value, or
+    ``"<contract>:<list_field>"`` for a list entry. ``inputs[0]`` owns a list-bearing
+    value's non-list fields; ``entry_refs`` (when set) names the owner of each list
+    entry, aligned with the list.
+    """
 
     value: SerializeAsAny[BaseModel]
     element_contract: str
     inputs: tuple[AdaptorInputRef, ...] = Field(min_length=1)
     role: Role
+    entry_refs: tuple[AdaptorInputRef, ...] | None = None
 
 
 class CollectedEntry(AdaptorModel):
@@ -74,8 +84,11 @@ class Ranking(AdaptorModel):
     def distinct_units(self) -> Self:
         if len({entry.unit for entry in self.entries}) != len(self.entries):
             raise ValueError("a ranking lists each unit at most once")
-        if (self.basis == "metric") != (self.metric_id is not None):
-            raise ValueError("a ranking names metric_id if and only if its basis is 'metric'")
+        is_metric = self.basis == "metric"
+        if is_metric != (self.metric_id is not None) or is_metric != (self.direction is not None):
+            raise ValueError(
+                "a ranking names metric_id and direction if and only if its basis is 'metric'"
+            )
         return self
 
 
@@ -143,12 +156,17 @@ def _collect(items: tuple[AdaptorItem, ...]) -> Unit:
 def _concat(items: tuple[AdaptorItem, ...], field: str) -> Unit:
     contract = _one_contract(items, "concat-items/v1")
     _require_catalogued(SPLITTABLE_ITEMS.get(contract), field, "concat-items/v1", contract)
-    entries = [entry for item in items for entry in getattr(_value(item), field)]
+    owned = [
+        (item.ref.entry(field, index), entry)
+        for item in items
+        for index, entry in enumerate(getattr(_value(item), field))
+    ]
     return Unit(
-        value=with_list(_value(items[0]), field, entries),
+        value=with_list(_value(items[0]), field, [entry for _, entry in owned]),
         element_contract=contract,
         inputs=tuple(item.ref for item in items),
         role="concatenated",
+        entry_refs=tuple(ref for ref, _ in owned),
     )
 
 
@@ -189,16 +207,16 @@ def _field_rank(strategy: FieldRankCombine, items: tuple[AdaptorItem, ...]) -> C
         )
     (item,) = items
     field = RANKABLE_FIELDS.get(item.contract)
-    _require_catalogued(
-        field.item_field if field else None, strategy.field, "field-rank/v1", item.contract
-    )
-    assert field is not None
+    if field is None or field.item_field != strategy.field:
+        raise AdaptorStrategyError(
+            f"field-rank/v1 field {strategy.field!r} is not catalogued for {item.contract!r}"
+        )
     parent = _whole_units(items)[0]
     entries = list(getattr(parent.value, field.list_field))
     units = tuple(
         Unit(
             value=entry,
-            element_contract=item.contract,
+            element_contract=f"{item.contract}:{field.list_field}",
             inputs=(item.ref.entry(field.list_field, index),),
             role="selected",
         )
@@ -240,7 +258,10 @@ def _stable_rank(
 
 
 def _value(item: AdaptorItem) -> BaseModel:
-    assert item.value is not None  # admissible items always succeeded
+    if item.value is None:
+        raise AdaptorStrategyError(
+            f"adaptor input {item.ref.port}:{item.ref.position} has no value"
+        )
     return item.value
 
 

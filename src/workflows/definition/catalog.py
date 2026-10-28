@@ -155,3 +155,10 @@ SPLITTABLE_ITEMS = MappingProxyType({"literature.output": "findings"})
 RANKABLE_FIELDS = MappingProxyType(
     {"literature.output": RankableField("findings", "confidence", "self-reported")}
 )
+
+# Contracts whose succeeded values carry formal metric results (Health-qualified
+# admission; an LLM ranking may filter them, never reorder them).
+METRIC_SCORED_CONTRACTS = frozenset({"tuning.output"})
+
+# Contracts whose succeeded values carry a deterministic pass/fail validity flag.
+VALIDITY_GATED_CONTRACTS = frozenset({"validation.output"})
