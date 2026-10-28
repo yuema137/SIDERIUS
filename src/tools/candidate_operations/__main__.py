@@ -73,17 +73,15 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def host_scheduling(args: argparse.Namespace) -> HostScheduling | None:
-    """``--host-budget`` needs ``--host-ledger``; neither keeps the serial default."""
+    """The two flags go together; neither keeps the serial default."""
+    if (args.host_ledger is None) != (args.host_budget is None):
+        raise OperationFailure("usage", "--host-ledger and --host-budget must be given together")
     if args.host_ledger is None:
-        if args.host_budget is not None:
-            raise OperationFailure("usage", "--host-budget requires --host-ledger")
         return None
-    budget = None
-    if args.host_budget is not None:
-        try:
-            budget = load_host_budget_file(Path(args.host_budget).absolute())
-        except HostBudgetFileError as error:
-            raise OperationFailure("host_budget", str(error)) from error
+    try:
+        budget = load_host_budget_file(Path(args.host_budget).absolute())
+    except HostBudgetFileError as error:
+        raise OperationFailure("host_budget", str(error)) from error
     return HostScheduling(ledger_root=args.host_ledger, budget=budget)
 
 

@@ -3,12 +3,14 @@
 One private directory, serialized by ``flock``, records which candidate operations
 hold part of an operator-declared ``HostBudget``. Placement arithmetic is
 ``plan_dispatch``; this module only persists its placements, binds each one to the
-operation child's process identity and releases it on evidence. Contract:
-candidate-operations-contract.md, "Host reservation ledger".
+operation child's process identity and releases it on evidence
+(``host_liveness``). Contract: candidate-operations-contract.md, "Host
+reservation ledger".
 """
 
 import fcntl
 import os
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -22,18 +24,21 @@ from tools.workflow_preview.models import PreviewModel
 from tools.workspace_sandbox.profile import runtime_roots
 
 from .files import canonical, directory, overlap, private, private_directory, publish, read_model
+from .host_liveness import ReservationEvidence, reservation_evidence
 from .models import OperationFailure, ProcessIdentity
-from .process import observe, session_members
 
 LEDGER_FILE = "ledger.json"
 LOCK_FILE = "ledger.lock"
+#: Longest a caller waits for another submission's admission/spawn to finish.
+LEDGER_LOCK_WAIT_SECONDS = 30.0
+_LOCK_POLL_SECONDS = 0.05
 
 
 class HostScheduling(PreviewModel):
-    """Caller selection: a ledger directory and, for budgeted launches, its budget."""
+    """Caller selection: an existing ledger directory and the budget it enforces."""
 
     ledger_root: str
-    budget: HostBudget | None = None
+    budget: HostBudget
 
 
 class HostReservation(PreviewModel):
@@ -58,6 +63,11 @@ class HostReservation(PreviewModel):
             raise ValueError("reservation process identity names another operation")
         return self
 
+    def evidence(self) -> ReservationEvidence:
+        return reservation_evidence(
+            self.state_root, self.operation_id, self.request_digest, self.process
+        )
+
 
 class HostLedgerState(PreviewModel):
     """Live reservations against one budget digest, plus the next submission ordinal."""
@@ -80,56 +90,56 @@ class HostLedgerState(PreviewModel):
     def budget_digest(self) -> str | None:
         return self.reservations[0].placement.budget_digest if self.reservations else None
 
-
-class SessionEvidence(PreviewModel):
-    """Liveness of a reservation's operation child and of its whole session."""
-
-    leader: Literal["alive", "exited", "unknown"]
-    members: int | None = Field(ge=0)
-
-    @property
-    def ended(self) -> bool:
-        """Positive exit and no surviving session member: safe to release automatically."""
-        return self.leader == "exited" and self.members == 0
-
-    @property
-    def appears_live(self) -> bool:
-        return self.leader == "alive" or bool(self.members)
+    def replacing(self, reservations: tuple[HostReservation, ...]) -> "HostLedgerState":
+        return HostLedgerState(next_ordinal=self.next_ordinal, reservations=reservations)
 
 
 class ReservationRelease(PreviewModel):
     operation_id: UUID
-    evidence: SessionEvidence | None
+    evidence: ReservationEvidence
     released: Literal[True] = True
 
 
-def session_evidence(identity: ProcessIdentity) -> SessionEvidence:
-    observation = observe(identity)
-    if observation.reason == "different_boot":
-        return SessionEvidence(leader="exited", members=0)
-    # The child is a session leader (start_new_session), so its PID is the session ID.
-    return SessionEvidence(leader=observation.status, members=session_members(identity.pid))
-
-
 def ledger_directory(ledger_root: str) -> Path:
+    """The canonical, already existing private ledger directory; never created here."""
     root = canonical(ledger_root)
     if any(overlap(root, runtime) for runtime in runtime_roots()):
         raise OperationFailure("path", "host ledger overlaps runtime/source")
+    try:
+        private_directory(root)
+    except FileNotFoundError as error:
+        raise OperationFailure(
+            "path", "host ledger directory must already exist with owned mode 0700"
+        ) from error
     return root
 
 
 @contextmanager
-def locked_ledger(ledger_root: str, *, create: bool = True) -> Iterator[Path]:
+def locked_ledger(ledger_root: str) -> Iterator[Path]:
     root = ledger_directory(ledger_root)
-    private_directory(root, create=create)
     with directory(root) as descriptor:
         lock = os.open(LOCK_FILE, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=descriptor)
     try:
         private(os.fstat(lock), directory=False)
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        _acquire(lock)
         yield root
     finally:
         os.close(lock)
+
+
+def _acquire(lock: int) -> None:
+    deadline = time.monotonic() + LEDGER_LOCK_WAIT_SECONDS
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise OperationFailure(
+                    "ledger_busy",
+                    f"host ledger stayed locked for {LEDGER_LOCK_WAIT_SECONDS:g} s; retry later",
+                ) from None
+            time.sleep(_LOCK_POLL_SECONDS)
 
 
 def read_state(root: Path) -> HostLedgerState:
@@ -143,22 +153,30 @@ def write_state(root: Path, state: HostLedgerState) -> None:
     publish(root / LEDGER_FILE, state, replace=True)
 
 
+def _releasable(reservation: HostReservation) -> bool:
+    """Only positive evidence releases; any unreadable or mismatched record keeps it."""
+    try:
+        return reservation.evidence().ended
+    except (OSError, ValueError):
+        return False
+
+
 def sweep(root: Path) -> HostLedgerState:
-    """Drop reservations whose child exited and whose session ended; keep everything else."""
+    """Drop reservations whose child and sandbox sessions have ended; keep the rest."""
     state = read_state(root)
-    live = tuple(
-        r for r in state.reservations if r.process is None or not session_evidence(r.process).ended
-    )
+    live = tuple(r for r in state.reservations if not _releasable(r))
     if live != state.reservations:
-        state = state.model_copy(update={"reservations": live})
+        state = state.replacing(live)
         write_state(root, state)
     return state
 
 
 def without(root: Path, operation_id: UUID) -> None:
     state = read_state(root)
-    kept = tuple(r for r in state.reservations if r.operation_id != operation_id)
-    write_state(root, state.model_copy(update={"reservations": kept}))
+    write_state(
+        root,
+        state.replacing(tuple(r for r in state.reservations if r.operation_id != operation_id)),
+    )
 
 
 def bind(root: Path, operation_id: UUID, identity: ProcessIdentity) -> None:
@@ -167,41 +185,29 @@ def bind(root: Path, operation_id: UUID, identity: ProcessIdentity) -> None:
         r.model_copy(update={"process": identity}) if r.operation_id == operation_id else r
         for r in state.reservations
     )
-    write_state(root, HostLedgerState(next_ordinal=state.next_ordinal, reservations=bound))
-
-
-def published_identity(reservation: HostReservation) -> ProcessIdentity | None:
-    """An unbound reservation's identity as the child published it, if it did."""
-    path = Path(reservation.state_root) / "operations" / str(reservation.operation_id)
-    try:
-        identity = read_model(path / "process.json", ProcessIdentity, private_file=True)
-    except FileNotFoundError:
-        return None
-    if (
-        identity.operation_id != reservation.operation_id
-        or identity.request_digest != reservation.request_digest
-    ):
-        raise OperationFailure("integrity", "published process identity names another operation")
-    return identity
+    write_state(root, state.replacing(bound))
 
 
 def release_reservation(ledger_root: str, operation_id: UUID) -> ReservationRelease:
-    """Operator release of a stuck reservation; refuses while its session appears live.
+    """Operator release of a stuck reservation; refuses while anything appears live.
 
     Unlike the automatic sweep, this does not require a positive exit: an
-    unobservable leader with no visible session member, or an unbound reservation
-    whose child never published an identity, is released on the operator's word.
+    unbound reservation whose child never published an identity is released on
+    the operator's word, as is an unknown leader with no visible session member.
     """
-    with locked_ledger(ledger_root, create=False) as root:
+    with locked_ledger(ledger_root) as root:
         state = read_state(root)
         match = [r for r in state.reservations if r.operation_id == operation_id]
         if not match:
             raise OperationFailure("not_reserved", "operation holds no host reservation")
-        identity = match[0].process or published_identity(match[0])
-        evidence = None if identity is None else session_evidence(identity)
-        if evidence is not None and evidence.appears_live:
-            raise OperationFailure("session_live", "operation session still appears live")
-        if evidence is not None and evidence.leader == "unknown" and evidence.members is None:
-            raise OperationFailure("liveness_unobservable", "cannot observe the operation session")
+        evidence = match[0].evidence()
+        if evidence.appears_live:
+            raise OperationFailure(
+                "session_live", "operation child or sandbox session still appears live"
+            )
+        if evidence.unobservable:
+            raise OperationFailure(
+                "liveness_unobservable", "cannot observe the operation child or sandbox"
+            )
         without(root, operation_id)
         return ReservationRelease(operation_id=operation_id, evidence=evidence)

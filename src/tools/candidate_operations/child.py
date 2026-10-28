@@ -1,6 +1,8 @@
 """One operation process: publish identity, invoke native owner, record references."""
 
+import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID
 
@@ -9,10 +11,11 @@ from tools.candidate_prepare.reusable_models import ReusablePreparationObservati
 from tools.candidate_worker import launch_candidate
 
 from .files import canonical, publish, read_model
+from .host_liveness import PLACEMENT_FILE, SANDBOX_FILE
 from .models import Completion, OperationRecord
 from .native_chain import execute_native_chain
 from .native_resume_execute import execute_native_resume
-from .process import current_identity, runtime_identity
+from .process import current_identity, identity_of, runtime_identity
 from .read import native_receipt
 from .reusable import verify_reusable_operation
 from .store import load_record
@@ -60,7 +63,11 @@ def execute(path: Path) -> int:
 
             execute_resume(record)
         else:
-            launch_candidate(record.submission.request, invocation_id=record.native_id)
+            launch_candidate(
+                record.submission.request,
+                invocation_id=record.native_id,
+                **sandbox_observer(record, path),
+            )
         native = native_receipt(record)
         if native is None:
             raise ValueError("native invocation returned without final receipt")
@@ -81,6 +88,22 @@ def execute(path: Path) -> int:
         )
     publish(path / "completion.json", completion)
     return 0 if completion.outcome == "native" else 1
+
+
+def sandbox_observer(record: OperationRecord, path: Path) -> dict[str, Callable[[int], None]]:
+    """A placed (host-ledger) operation publishes its sandbox identity for release.
+
+    The sandbox runs in its own session, outside this process's, so the ledger
+    must observe it separately. Serial operations have no ``placement.json`` and
+    launch exactly as before.
+    """
+    if not os.path.lexists(path / PLACEMENT_FILE):
+        return {}
+
+    def publish_sandbox(pid: int) -> None:
+        publish(path / SANDBOX_FILE, identity_of(record, pid))
+
+    return {"on_sandbox_spawn": publish_sandbox}
 
 
 def main() -> int:

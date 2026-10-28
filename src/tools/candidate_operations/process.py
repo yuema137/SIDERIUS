@@ -109,17 +109,35 @@ def session_members(session_id: int) -> int | None:
     for name in names:
         if not name.isdigit():
             continue
-        try:
-            fields = Path(f"/proc/{name}/stat").read_text().rsplit(")", 1)[1].split()
-        except (FileNotFoundError, ProcessLookupError):
-            continue  # exited while scanning
-        except (OSError, IndexError):
+        fields = _scan_fields(name)
+        if fields is _UNREADABLE:
             return None
-        if len(fields) < 4:
-            return None
-        if fields[0] not in {"Z", "X", "x"} and int(fields[3]) == session_id:
+        if fields is not None and fields[0] not in {"Z", "X", "x"} and int(fields[3]) == session_id:
             count += 1
     return count
+
+
+_UNREADABLE: list[str] = []
+
+
+def _scan_fields(name: str) -> list[str] | None:
+    """Stat fields after the command name; ``None`` to skip, ``_UNREADABLE`` to give up.
+
+    An entry that vanished, or that belongs to another user and cannot be read,
+    cannot be a member of this user's operation session and is skipped. An
+    unreadable entry owned by this user makes the count unobservable.
+    """
+    try:
+        fields = Path(f"/proc/{name}/stat").read_text().rsplit(")", 1)[1].split()
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    except (OSError, IndexError):
+        try:
+            foreign = os.stat(f"/proc/{name}").st_uid != os.getuid()
+        except OSError:
+            return None  # vanished
+        return None if foreign else _UNREADABLE
+    return fields if len(fields) >= 4 else _UNREADABLE
 
 
 def observe(identity: ProcessIdentity) -> ProcessObservation:

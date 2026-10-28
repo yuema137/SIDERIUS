@@ -12,7 +12,7 @@ from core.durable_io import publish_bytes_write_once
 from execute_tools.impl_attempts import impl_attempt_dir
 from tools.workflow_preview.files import observe_file
 from tools.workspace_sandbox.profile import SandboxProfile
-from tools.workspace_sandbox.runner import ExecutionResult, run, run_observed
+from tools.workspace_sandbox.runner import ExecutionResult, SpawnObserver, run, run_observed
 
 from .admission import admit_input_paths
 from .layout import candidate_proposal_dir
@@ -104,9 +104,16 @@ def reconcile(
 
 
 def launch_candidate(
-    request: CandidateRunRequest, *, invocation_id: UUID | None = None
+    request: CandidateRunRequest,
+    *,
+    invocation_id: UUID | None = None,
+    on_sandbox_spawn: SpawnObserver | None = None,
 ) -> CandidateRunReceipt:
-    """Run precisely one chain; failures preserve the claimed workspace."""
+    """Run precisely one chain; failures preserve the claimed workspace.
+
+    ``on_sandbox_spawn`` receives the sandbox PID before the chain is awaited (the
+    host reservation ledger binds it); omitted, the launch is unchanged.
+    """
     request = CandidateRunRequest.model_validate_json(request.model_dump_json())
     identity = (
         uuid4()
@@ -168,14 +175,15 @@ def launch_candidate(
             request.read_only,
         )
         argv = [sys.executable, "-m", "tools.candidate_worker.child", str(control / "request.json")]
+        observer = {} if on_sandbox_spawn is None else {"on_spawn": on_sandbox_spawn}
         if definition.loop is not None:
-            observed_result = run_observed(profile, argv)
+            observed_result = run_observed(profile, argv, **observer)
             publish_bytes_write_once(
                 str(control / "supervision.json"), encode_control(observed_result)
             )
             result = observed_result.execution
         else:
-            result = run(profile, argv)
+            result = run(profile, argv, **observer)
         terminal = reconcile(
             initial,
             result,

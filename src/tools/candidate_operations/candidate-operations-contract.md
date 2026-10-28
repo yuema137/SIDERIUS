@@ -28,7 +28,7 @@ FILE --operation-id UUID`, and `log --store-config FILE --operation-id UUID
 `tokens` (native chains, below) and the authored-loop controls `stop-loop`,
 `pause-loop`, `review-loop-resume` and `write-loop-resume`
 ([authored-loop CLI](#control-an-authored-loop-from-code-or-the-cli)), and the
-host-ledger options `submit --host-ledger DIR [--host-budget FILE]` and
+host-ledger options `submit --host-ledger DIR --host-budget FILE` and
 `release-reservation --host-ledger DIR --operation-id UUID`
 ([host reservation ledger](#host-reservation-ledger)). Outputs are schema JSON. Submit
 exit zero establishes admission/existing identity, not native success. Status
@@ -138,25 +138,28 @@ are not promised. Missing usage evidence is unknown, never zero billing.
 
 ## Host reservation ledger
 
-Owners: `host_ledger.py` (state, lock, session evidence, release),
-`host_admission.py` (per-submission admission around claim and spawn). Design:
-B3-5a (decisions B3-5 D1-D6, B3-Q4, B3-Q6). Placement arithmetic is
+Owners: `host_ledger.py` (state, lock, sweep, release), `host_liveness.py`
+(child and sandbox session evidence), `host_admission.py` (per-submission
+admission around claim and spawn). Design: B3-5a (decisions B3-5 D1-D6, B3-Q4,
+B3-Q6). Placement arithmetic is
 `core.runtime_control.scheduling.plan_dispatch` with `on_refusal="continue"`;
 this layer adds no second resource authority. The budget is the operator's
 `HostBudget` file (`budget_intake.load_host_budget_file`); nothing is
 discovered, defaulted or read from the environment.
 
-Selection. `submit_operation(..., host=HostScheduling(ledger_root, budget))`;
-CLI `submit --host-ledger DIR [--host-budget FILE]`. `--host-budget` without
-`--host-ledger` refuses `usage`; an invalid budget file refuses `host_budget`.
-Without `host` no ledger is opened and admission, environment, records and
-digests are exactly the serial default. An existing request ID returns before
-the ledger is consulted.
+Selection. `submit_operation(..., host=HostScheduling(ledger_root, budget))`
+(both required); CLI `submit --host-ledger DIR --host-budget FILE`. Either flag
+alone refuses `usage`; an invalid budget file refuses `host_budget`. Without
+`host` no ledger is opened and admission, environment, records and digests are
+exactly the serial default. An existing request ID returns before the ledger is
+consulted.
 
-Ledger directory `DIR`: canonical absolute path, no symlink components, owned
-mode 0700 (created if its parent exists; wrong permissions refuse, never
-chmod), disjoint from active runtime/source roots. It may be shared by any
-number of operation stores on the host:
+Ledger directory `DIR`: must already exist (it is never created, so a refused
+launch leaves no directory), canonical absolute path, no symlink components,
+owned mode 0700, disjoint from active runtime/source roots, and disjoint from
+(neither inside nor containing) the submitting store's `state_root`, the
+candidate workspace and every `request.read_only` path; violations refuse
+`path`. It may be shared by any number of operation stores on the host:
 
 ```
 DIR/
@@ -164,76 +167,112 @@ DIR/
   ledger.json    HostLedgerState: version=1, next_ordinal, reservations[]
 ```
 
+The lock is taken with `LOCK_NB` and retried every 50 ms for at most
+`LEDGER_LOCK_WAIT_SECONDS` (30 s); then the submission refuses `ledger_busy`
+with no claim. The lock is held during native admission checks (preview,
+credentials), which may take seconds. Lock order is store lock, then ledger
+lock; the ledger never takes a store lock.
+
 `HostReservation`: `operation_id`, `request_digest`, `state_root`, `placement`
 (the placed `Placement`; `unit_id` = operation UUID), `time_budgeted`, and
 `process` (`ProcessIdentity`, bound after spawn). All live reservations share
 one budget digest; `dispatch_ordinal` is the host-level submission order
-(`next_ordinal`, incremented per reservation). Lock order is store lock, then
-ledger lock; the ledger never takes a store lock. The ledger lock is held
-during native admission checks (preview, credentials), which may take seconds.
+(`next_ordinal`, incremented per reservation).
 
 Resource declaration. `CandidateOperation.resources: OperationResources | None`
 (omitted when absent, so existing request bytes and digests are unchanged;
 included in the request digest when present): `gpu_count` (0/1), `vram_gib`
 and `vram_source` (exactly for a GPU unit), `host_memory_gib`, `cpu_slots`,
 `time_budgeted`. `ResourceRequest` owns the field rules; `wall_seconds` is the
-request's `timeout_seconds`. The declaration is the operator's statement and is
-not yet cross-checked against the run's resolved VRAM or time budget.
+request's `timeout_seconds`. VRAM is enforced in-run (below). `time_budgeted`
+is the operator's statement and is not yet cross-checked against the run's
+resolved time admission (#1018).
 
-Admission, under both locks, before the claim (each refusal is an
-`OperationFailure` with this code and leaves no claim, reservation or child):
+Admission, before the claim (each refusal is an `OperationFailure` with this
+code and leaves no claim, reservation or child):
 
-1. sweep: drop reservations whose `process` is bound, whose leader is
-   positively `exited` (or from another boot) and whose session has no live
-   member; keep everything else, including unbound reservations;
-2. ledger without budget: `host_reserved` if any reservation is live,
-   otherwise the launch proceeds serially and records nothing;
-3. budget without a candidate `resources` declaration (every other kind,
-   including `candidate_loop_resume` and native chains): `resources_required`;
+1. not a `candidate` submission with `resources` (every other kind, including
+   `candidate_loop_resume` and native chains): `resources_required`;
+2. ledger location (above): `path`; then the lock (`ledger_busy`);
+3. sweep (see Release);
 4. live reservations under another budget digest: `budget_mismatch`;
-5. the child could not receive the placement: a GPU declaration without
-   `CUDA_VISIBLE_DEVICES` in `request.environment_names`, or a CPU-only
-   declaration that binds device nodes (`request.devices`):
+5. the child could not receive the placement: a GPU declaration without both
+   `CUDA_VISIBLE_DEVICES` and `SIDERIUS_GPU_VRAM_QUOTA_MIB` in
+   `request.environment_names` (the sandbox passes declared names only), or a
+   CPU-only declaration that binds device nodes (`request.devices`):
    `placement_unreachable`;
 6. `plan_dispatch` refusal (cannot fit even an idle budget):
-   `resource_refused` with its `escalated to operator` reasons;
-   queued (fits the budget, not the current ledger): `host_capacity` with the
-   ledger shortfall. B3-5a has no `queued` operation state; queued dispatch is
-   B3-5b;
+   `resource_refused` with its `escalated to operator` reasons; queued (fits
+   the budget, not the current ledger): `host_capacity` with the ledger
+   shortfall. B3-5a has no `queued` operation state; queued dispatch is B3-5b;
 7. decision B3-Q6: a placed GPU unit whose slot already holds a reservation,
    where either side is `time_budgeted`, refuses `shared_gpu_time_budget`
    unless the budget sets `acknowledge_shared_gpu_time_budget`. The check uses
-   the `plan_dispatch` slot; it does not search another slot.
+   the `plan_dispatch` slot and does not search another slot (moving it into
+   `plan_dispatch` is #1019, before B3-4).
 
 Placement and spawn. After the claim the reservation is written (process
 unbound, so a crash fails closed) and the `Placement` is published write-once
-as `operations/<UUID>/placement.json`. For a GPU unit the slot UUID replaces
-any inherited `CUDA_VISIBLE_DEVICES` in the launch mapping, so the operation
-child and the candidate sandbox (which passes declared names only) see the
-slot as logical device 0; a CPU-only unit binds no device node. After `Popen`
-returns, the child's identity is read from `/proc` while it is unreaped (its
-PID cannot be reused) and bound. A `Popen` `OSError` removes the reservation;
-any other failure after the write keeps it. The candidate's run invariants
-still record `scheduling_mode: serial`: in-run graph dispatch is unchanged.
+as `operations/<UUID>/placement.json`. For a GPU unit the launch mapping is
+overlaid before every later name check and the child environment: the slot UUID
+replaces any inherited `CUDA_VISIBLE_DEVICES` (the sandbox sees the slot as
+logical device 0), and `SIDERIUS_GPU_VRAM_QUOTA_MIB` becomes the minimum of the
+inherited quota (a malformed value refuses `host_quota`) and the reserved
+`vram_gib`, in MiB. That variable is read by the run's own ceiling owner
+(`pair_admission.host_quota_gib` via `resolve_gpu_ceiling`), so in-run GPU
+admission refuses a model whose requirement exceeds the reservation. A
+CPU-only unit binds no device node. After `Popen` returns, the child's
+identity is read from `/proc` while it is unreaped (its PID cannot be reused)
+and bound. A `Popen` `OSError` removes the reservation and publishes
+`spawn_failure.json` as before, so a failed operation directory may hold both
+`placement.json` and `spawn_failure.json`; the placement then names a
+reservation that no longer exists. Any other failure after the write keeps the
+reservation unbound.
 
-Release. Automatic only by the sweep (positive exit AND session ended).
-The child is a session leader (`start_new_session`), so its PID is the
-session ID; `process.session_members` counts non-zombie `/proc` entries in that
-session (a zombie leader is not a member). A surviving member, such as an
-orphaned training process, keeps the reservation. `release_reservation`
-(CLI `release-reservation`) is the operator's override for a stuck reservation.
-It uses the bound identity or, for an unbound reservation, the child's own
-`process.json`. It refuses `not_reserved`, `session_live` (leader alive or any
-member), or `liveness_unobservable` (leader unknown and `/proc` unreadable).
-Otherwise it releases, including a reservation whose child never published an
-identity, on the operator's word.
+Sandbox identity. A placed operation's child (it sees `placement.json`) passes
+`on_sandbox_spawn` to `launch_candidate`, which publishes the bwrap process
+identity (`ProcessIdentity`) write-once as `operations/<UUID>/sandbox.json`
+right after the sandbox `Popen`. Serial operations publish nothing and launch
+exactly as before.
 
-Limits. The ledger governs only launches that name it: a launch without
-`--host-ledger` is invisible to it, and an unbudgeted launch admitted while the
-ledger was empty is not recorded. A reservation sum within the ceiling is
+Release. Both recorded processes are session leaders, so each PID is its
+session ID; `process.session_members` counts non-zombie `/proc` entries in a
+session, skipping vanished entries and unreadable entries owned by another
+user, and is unobservable (`None`) only when `/proc` or one of this user's
+entries cannot be read. The layout is: operation child (session A) spawns
+bwrap with `start_new_session` (session B); bwrap's forked PID-namespace init
+stays in B, and `--new-session` puts the payload in session C inside that
+namespace. The kernel kills every process in a PID namespace when its init
+exits, so B having no live member covers C and all training. Session A alone
+never sees the sandbox.
+
+- Automatic, by the sweep at the start of every ledger submission: a
+  reservation is dropped only when the child identity (bound, or else the
+  child's own `process.json`) shows a positive exit (or another boot) with no
+  live member in A, AND, if `sandbox.json` exists, the same for B. A missing
+  `sandbox.json` is accepted only after the child ended: the sandbox runs with
+  `--die-with-parent` and cannot outlive a child that died before publishing
+  it. No identity at all, a mismatched published identity, or any unreadable
+  record keeps the reservation (no exception).
+- Operator, `release_reservation` (CLI `release-reservation --host-ledger DIR
+  --operation-id UUID`), for a stuck reservation. It refuses `not_reserved`,
+  `session_live` (the child or sandbox leader alive, or any member in A or B),
+  `liveness_unobservable` (a leader unknown with its session unreadable), or
+  `integrity` (a published identity names another operation). Otherwise it
+  releases, including an unbound reservation whose child never published an
+  identity, on the operator's word.
+
+Scheduling mode. `scheduling_mode` in run invariants describes in-run (graph)
+dispatch only. Host placement is operation provenance (`placement.json`,
+`sandbox.json`, the ledger); a placed candidate's run lock still records
+`serial`, and `LockLaunchIdentity.host_budget` is not set.
+
+Limits. The ledger governs only launches that name it; a launch without
+`--host-ledger` is invisible to it. A reservation sum within the ceiling is
 admission evidence, not a guarantee against other host users
 ([GPU ceilings](../../core/runtime_control/gpu-ceilings.md)). Focused tests:
-`tests/unit/tools/candidate_operations/test_operation_scheduler.py`.
+`tests/unit/tools/candidate_operations/test_operation_scheduler.py` (real
+setsid session leaders; bwrap itself is not exercised).
 
 ## Outcome and process projection
 

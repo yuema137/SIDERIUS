@@ -179,18 +179,26 @@ means using several stores. On their own, separate stores do not know about each
 other: two of them could start training on the same GPU and exceed its memory. A
 shared host ledger fixes that. You declare the host budget once. Every candidate
 submitted with that ledger reserves part of the budget before it starts, and gives
-the reservation back when its process has ended.
+the reservation back when its processes, including training, have ended.
 
-1. Write a budget file for this host: each GPU's UUID, hardware and memory
+1. Create the ledger directory once, private to you, outside every store,
+   workspace and input: `mkdir -m 700 /path/to/host-ledger`. Submissions never
+   create it.
+2. Write a budget file for this host: each GPU's UUID, hardware and memory
    ceiling, plus host memory, CPU slots and the maximum number of concurrent
    operations. The [budget format](../../core/runtime_control/scheduling.md#budget-intake-run-invariants-and-child-environment)
    lists every field. Nothing in it is guessed for you.
-2. Add a `resources` object to each candidate submission saying what that run
+3. Add a `resources` object to each candidate submission saying what that run
    needs, for example
    `{"gpu_count": 1, "vram_gib": 3.0, "vram_source": "configured_cap", "host_memory_gib": 8.0, "cpu_slots": 2, "time_budgeted": false}`.
-   A GPU run must also list `CUDA_VISIBLE_DEVICES` in `request.environment_names`.
-   That is how the run receives the GPU it was given.
-3. Submit every candidate with the same ledger directory and budget file:
+   Set `time_budgeted` to `true` when the run uses a training time budget. A GPU
+   run must also list `CUDA_VISIBLE_DEVICES` and `SIDERIUS_GPU_VRAM_QUOTA_MIB` in
+   `request.environment_names`. That is how the run receives its GPU, and a
+   memory quota no larger than `vram_gib`, so the run itself refuses a model
+   that would need more than it reserved. Only `candidate` submissions are
+   accepted with a budget; other kinds are refused with `resources_required`.
+4. Submit every candidate with the same ledger directory and budget file. The
+   two flags always go together:
 
    ```sh
    .venv/bin/python -m tools.candidate_operations submit \
@@ -202,19 +210,27 @@ A placed submission returns `starting`, the same as before, and its operation
 directory gains `placement.json`, which names the GPU it was given. If the budget
 is currently full, the submission is refused with `host_capacity` and nothing
 starts. Submit it again after a running operation ends. A run that could never
-fit is refused with `resource_refused`.
+fit is refused with `resource_refused`. Two runs sharing one GPU slow each other
+down, which can change what a time budget admits. So a `time_budgeted` run is not
+placed on a GPU another run is using; it is refused with
+`shared_gpu_time_budget`. If you accept that contention, set
+`"acknowledge_shared_gpu_time_budget": true` in the budget file before the first
+submission. Changing the budget file while runs hold reservations is refused with
+`budget_mismatch`.
 
-If a crash leaves a reservation behind, release it explicitly:
+Nothing polls in the background. A finished run's reservation is returned the
+next time any submission uses the ledger. If a crash leaves a reservation behind,
+release it explicitly:
 
 ```sh
 .venv/bin/python -m tools.candidate_operations release-reservation \
   --host-ledger /path/to/host-ledger --operation-id OPERATION_UUID
 ```
 
-If the operation's processes still appear to be running, the release is refused
-with `session_live`. The ledger only protects launches that name it. The
-[ledger contract](candidate-operations-contract.md#host-reservation-ledger) lists
-every refusal and its limits.
+If the operation's processes or its sandbox still appear to be running, the
+release is refused with `session_live`. The ledger only protects launches that
+name it. The [ledger contract](candidate-operations-contract.md#host-reservation-ledger)
+lists every refusal and its limits.
 
 ## Run a captured native chain
 

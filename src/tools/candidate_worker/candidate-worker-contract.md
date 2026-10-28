@@ -1,7 +1,7 @@
 # Native candidate execution contract
 
-`CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None)`
-are the common JSON/Python boundary.
+`CandidateRunRequest` and `launch_candidate(request, *, invocation_id=None,
+on_sandbox_spawn=None)` are the common JSON/Python boundary.
 The CLI decodes the same request and calls that function. The parent imports
 inert declaration/preview/routing schemas and public pure evidence projections;
 it never composes tasks, executes task/generated plugins or constructs agents/providers. `child` verifies captured inputs, binds generated
@@ -13,6 +13,14 @@ filesystem effects. The native launch uses its hex form as the existing `run_id`
 for artifacts and accounting. Omission preserves native `uuid4().hex` generation.
 Request/receipt schemas, CLI behavior and exclusive claim ownership are unchanged;
 only the claim winner can publish records with that invocation identity.
+
+`on_sandbox_spawn(pid)` is forwarded to `workspace_sandbox.runner.run` /
+`run_observed` as `on_spawn`. It is called once with the bwrap PID right after
+`Popen`, before the chain is awaited and while the PID is unreaped, inside the
+runner's cleanup `try` (an observer exception still terminates and reaps the
+sandbox). The host reservation ledger uses it to publish the sandbox identity
+(candidate operations contract, "Host reservation ledger"). Omitted, the runner
+is called exactly as before.
 
 ## Selected inputs and task authority
 

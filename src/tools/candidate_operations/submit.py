@@ -136,7 +136,7 @@ def submit_operation(
                 observation="existing",
             )
         require_available(root, lambda operation_id: releasable(config, operation_id))
-        with host_slot(host, submission) as slot:
+        with host_slot(host, config, submission) as slot:
             return _admit_new(
                 root,
                 config,
