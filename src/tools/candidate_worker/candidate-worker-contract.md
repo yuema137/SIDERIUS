@@ -873,3 +873,45 @@ A resumed segment rebuilds its score carrier from the same whole-run replay, so 
 incumbent and the no-improvement window span segments. A condition-completed run is
 `completed`, not a resumable checkpoint. Receipts and source without conditions are
 byte-identical to those before this feature.
+
+## Route evaluator (pure, not yet admitted)
+
+`tools.candidate_worker.route_eval` decides one declared `Branch` (definition
+contract, "Route declarations (inert)") from one native record. It has no execution
+caller yet: routed documents are still refused by `candidate.refuse_routes`, and skip
+semantics, decision evidence and a routed profile are later readiness/worker work.
+
+- `project_observation(branch, capability, record_path, *, iteration)` reads the
+  branch source's committed record once (no-follow, 4 MiB bound), validates it with
+  the native output schema of `CAPABILITIES[capability].output`
+  (`ValidatorOutput` for `validation.output`, `HyperparamTuningOutput` for
+  `tuning.output`), and returns `RouteObservation(source_node, iteration,
+  record_sha256, values, metric_spec)`. `record_sha256` hashes exactly the parsed
+  bytes; `values` holds only the observables the branch reads, in first-read order,
+  each taken from the native attribute named by the last segment of its
+  `ROUTE_OBSERVABLES` field; `metric_spec` is the record's own stamp (`None` for
+  validation records). An observable outside the source contract, or a contract
+  without a projection owner, raises `RouteConditionError`.
+- `evaluate_route(RouteEvaluationInput(branch, observation, metric))` is pure (no
+  I/O). It returns `RouteEvaluationOutput(branch_id, selected_case, selected_targets,
+  skipped_targets, leaf_results)`: cases are tested in declared order and the first
+  match wins; `leaf_results` has one predicate outcome per case up to and including
+  the match. With no match, `selected_case` is `None` and `selected_targets` is the
+  default (or empty when `default` is `None`). `skipped_targets` lists every other
+  entry target in declared order; arm expansion belongs to readiness.
+- Leaves: `bool_is` and `enum_in` compare the projected value; `metric_at_least` is
+  `MetricOrder(metric).is_at_least(value, threshold)` (ties hold; direction only from
+  the run `MetricSpec`); an absent metric value makes `metric_at_least` false and
+  `is_missing` true (decision B1-Q4). `any_of` evaluates every leaf so an
+  unevaluable later leaf is never masked.
+- Fail closed (`RouteConditionError`, a `ValueError`; the body fails, never "false"):
+  an observable missing from the observation, a value of the wrong kind (for example
+  `None` for a bool), a `metric_at_least` without a bound run metric or naming another
+  metric id, and a record `metric_spec` stamp that does not reconcile with the run
+  metric (`reconcile_metric_specs`).
+- Metric admission: `admit_route_metrics(branches, metric)` is the one identity check
+  and runs over every case of every branch, so an earlier matching case cannot hide a
+  mismatched later one. Execution admission must call it before any dispatch;
+  `evaluate_route` repeats it as its own precondition for replay.
+
+Tests: `tests/unit/tools/candidate_worker/test_route_eval.py`.

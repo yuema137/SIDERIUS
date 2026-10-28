@@ -167,7 +167,11 @@ VALIDITY_GATED_CONTRACTS = frozenset({"validation.output"})
 
 @dataclass(frozen=True)
 class RouteObservable:
-    """One readable native output field; ``field`` is documentation, never a lookup path."""
+    """One readable native output field, named ``module.Class.field``.
+
+    This package never imports it; the runtime route projection reads only the
+    final attribute name from the verified native record of ``contract``.
+    """
 
     contract: str
     field: str
