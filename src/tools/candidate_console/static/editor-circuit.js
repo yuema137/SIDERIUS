@@ -1,13 +1,14 @@
 /* Presentation and ephemeral gestures only; editor.js owns every document mutation. */
 (() => {
   'use strict';
-  let projection = null, actions = null, host = null, pending = null, drag = null, selectedWire = null;
+  let projection = null, actions = null, host = null, pending = null, drag = null, selectedWire = null, connecting = false;
   // View-only state (zoom, scroll, arranged view, expanded optional inputs). It is
   // kept per opened graph and never reaches a document, so viewing never changes source.
-  let view = {key: null, scale: 1, fitPending: false, arranged: false, scroll: null, expanded: new Set()};
+  let view = {key: null, scale: 1, fitPending: false, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
   const CARD_GAP = {x: 135, y: 90};
   const geometry = window.editorCircuitGeometry;
   const presentation = window.editorCapabilityPresentation;
+  const contracts = window.editorContractPresentation;
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const element = (tag, text, parent, className) => {
     const value = document.createElement(tag); value.textContent = text;
@@ -25,14 +26,19 @@
   function choice(node, argument) {
     return projection.inventory.find(value => value.node === node && value.argument === argument);
   }
-  function highlight() {
+  // Refusal reason naming both server-sent contracts (presentation only).
+  const refusal = (source, node, argument) => contracts.refusal(`${source.node}.result`,
+    projection.inventory.find(value => value.node === source.node)?.node_output_contract.id,
+    `${node}.${argument || 'request'}`, choice(node, argument)?.socket_contract.id);
+  // `source` is the pending output, or a hovered output for a preview without selecting it.
+  function highlight(source = pending) {
     if (!host) return;
     for (const input of host.querySelectorAll('[data-input]')) {
       const option = choice(input.dataset.node, input.dataset.argument || null);
-      const compatible = pending && option?.choices.some(value => same(value.source, pending));
+      const compatible = source && option?.choices.some(value => same(value.source, source));
       input.classList.toggle('compatible', !!compatible);
-      input.classList.toggle('incompatible', !!pending && !compatible);
-      input.title = pending ? (compatible ? 'Type-compatible source. Click to rebind; review before saving.' : 'This source is not offered for this input by the server.') : 'Select an output socket first.';
+      input.classList.toggle('incompatible', !!source && !compatible);
+      input.title = source ? (compatible ? 'Type-compatible source. Click to rebind; review before saving.' : refusal(source, input.dataset.node, option?.argument)) : 'Select an output socket first.';
     }
     for (const output of host.querySelectorAll('[data-output]')) output.setAttribute('aria-pressed', String(output.dataset.node === pending?.node));
     for (const group of host.querySelectorAll('.circuit-optional')) {
@@ -142,6 +148,7 @@
       if (!route) { say('Some wires could not be routed around overlapping or crowded cards. Use Arrange view (display only) or Fit to view, or move cards; the connection list retains every binding.'); continue; }
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', geometry.path(route)); path.classList.add('circuit-wire');
+      if (output.dataset.contract) contracts.decorate(path, output.dataset.contract);
       path.dataset.from = source.node; path.dataset.to = input.dataset.node; path.dataset.argument = option.argument;
       svg.append(path);
       const target = document.createElementNS(svg.namespaceURI, 'path');
@@ -174,13 +181,14 @@
       button.title = detail;
       button.setAttribute('aria-label', detail);
       element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
-      const type = element('span', contract.id, button, 'circuit-port-contract');
+      const type = element('span', contracts.describe(contract.id).name, button, 'circuit-port-contract');
       type.setAttribute('aria-hidden', 'true');
       element('span', metadata.bound ? (metadata.required ? 'required' : 'optional') : `${metadata.required ? 'Required' : 'Optional'} · unbound`, button,
         `circuit-port-requirement${metadata.bound ? '' : ' circuit-port-unbound-label'}`);
       button.classList.toggle('is-unbound', !metadata.bound);
       button.dataset.contract = contract.id;
       button.dataset.required = String(metadata.required);
+      contracts.decorate(button, contract.id, metadata.required);
     } else {
       const contract = projection.inventory.find(value => value.node === node.id)?.node_output_contract;
       const detail = `${node.id}.result output${contract ? `; contract ${contract.id}: ${contract.native_type}` : ''}`;
@@ -188,9 +196,10 @@
       button.setAttribute('aria-label', detail);
       element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
       if (contract) {
-        const type = element('span', contract.id, button, 'circuit-port-contract');
+        const type = element('span', contracts.describe(contract.id).name, button, 'circuit-port-contract');
         type.setAttribute('aria-hidden', 'true');
         button.dataset.contract = contract.id;
+        contracts.decorate(button, contract.id);
       }
     }
     if (output) { button.dataset.output = ''; button.setAttribute('aria-pressed', 'false'); }
@@ -202,9 +211,16 @@
       if (output) { pending = {kind: 'result', node: node.id, port: 'result'}; highlight(); say(`Selected ${node.id}.result. Choose a highlighted input, or press Escape to cancel.`); return; }
       if (!pending) { say('Select a result output socket first. External bindings remain available in the inspector.'); return; }
       const selected = choice(node.id, argument)?.choices.find(value => same(value.source, pending));
-      if (!selected) { say('Connection refused: the server does not offer this source for this input.'); return; }
+      if (!selected) { say(refusal(pending, node.id, argument)); return; }
       cancel(); actions.bind(node.id, argument, selected.source);
     });
+    if (output) {
+      // Hover previews compatible inputs; pressing starts a drag that drops on an input.
+      const preview = {kind: 'result', node: node.id, port: 'result'};
+      button.addEventListener('pointerenter', () => { if (!pending && projection === snapshot && projection.enabled) highlight(preview); });
+      button.addEventListener('pointerleave', () => { if (!pending && projection === snapshot) highlight(); });
+      button.addEventListener('pointerdown', event => { if (event.button === 0) { connecting = true; button.click(); } });
+    }
     return button;
   }
   const button = (parent, text, id, onClick) => {
@@ -233,12 +249,13 @@
     const focus = container.contains(document.activeElement) ? document.activeElement.id : null;
     const key = `${value.viewKey ?? ''}|${(value.document?.definition.nodes || []).map(node => node.id).join(',')}`;
     const previous = container.querySelector('.circuit-viewport');
-    if (view.key !== key) view = {key, scale: 1, fitPending: true, arranged: false, scroll: null, expanded: new Set()};
+    if (view.key !== key) view = {key, scale: 1, fitPending: true, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
     else if (previous && !view.fitPending) view.scroll = {left: previous.scrollLeft, top: previous.scrollTop};
     host = container; projection = value; actions = callbacks; cancel(false); selectedWire = null; host.replaceChildren();
     const message = element('p', 'Select a capability to inspect it. Choose an output, then a highlighted input to rebind.', host, 'circuit-message');
     message.setAttribute('role', 'status');
     toolbar(host, value);
+    if (value.document) contracts.legend(host, value.inventory);
     const disconnect = element('button', 'Disconnect selected connection', host, 'circuit-disconnect');
     disconnect.type = 'button'; disconnect.hidden = true; disconnect.addEventListener('click', disconnectSelectedWire);
     const viewport = element('div', '', host, 'circuit-viewport'), sizer = element('div', '', viewport, 'circuit-sizer');
@@ -320,6 +337,8 @@
       }
       if (group) card.append(group);
       const output = port(card, node, null, true); output.id = `circuit-output-${node.id}`;
+      // Below the output row: port tooltips open upward and never cover the chip.
+      contracts.adapter(card, node.id, value.inventory, view.adapters, () => { if (projection === value) draw(); });
       cards.push(card);
     }
     // Card size comes from the rendered cards (editor.css owns it), never a copied constant.
@@ -359,6 +378,13 @@
     if (event.key !== 'Escape') return;
     if (pending || drag) { cancel(); say('Circuit gesture cancelled.'); }
     if (selectedWire) { selectedWire = null; highlight(); say('Wire selection cancelled.'); }
+  });
+  // Drag-to-connect: a press on an output released over an input clicks that input.
+  document.addEventListener('pointerup', event => {
+    if (!connecting) return;
+    connecting = false;
+    const input = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-input]');
+    if (pending && input && host?.contains(input)) input.click();
   });
   document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Connection selection cancelled.'); } });
   document.addEventListener('pointermove', event => {

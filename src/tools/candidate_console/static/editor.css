@@ -25,6 +25,8 @@
 .circuit-port-requirement { float: right; color: var(--muted); font-size: .65rem; font-weight: 500; }
 .circuit-port-tooltip { display: none; position: absolute; z-index: 8; top: auto; bottom: calc(100% - 2px); left: .5rem; width: max-content; max-width: min(360px, 72vw); padding: .45rem .6rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--panel); color: var(--text); box-shadow: 0 4px 14px #0003; font-size: .7rem; font-weight: 500; line-height: 1.35; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .circuit-port:hover .circuit-port-tooltip, .circuit-port:focus-visible .circuit-port-tooltip { display: block; }
+/* A tooltip is read-only: it never takes pointer events from the controls it overlaps. */
+.circuit-port-tooltip { pointer-events: none; }
 .circuit-port.is-unbound { color: var(--muted); }
 .circuit-port[data-contract] .circuit-socket { border-radius: 50%; }
 .circuit-port[data-contract^="optional."] .circuit-socket { border-radius: 2px; transform: rotate(45deg); }

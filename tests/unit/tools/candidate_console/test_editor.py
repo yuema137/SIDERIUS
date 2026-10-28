@@ -246,6 +246,98 @@ def test_every_catalog_capability_has_its_paper_label_and_theme_role():
         assert theme.count(f"--capability-{role}-tint:") == 2, role
 
 
+def contract_presentation_entries() -> dict[str, tuple[str, str, str]]:
+    """Parse ``{contract: (name, colour, shape)}`` from the browser's contract table."""
+    script = (STATIC / "editor-contract-presentation.js").read_text()
+    block = re.search(r"const entries = Object\.freeze\(\{\n(.*?)\n  \}\);", script, re.S)
+    assert block, "contract presentation table not found"
+    rows = block.group(1).splitlines()
+    pattern = r"    '([^']+)': \{name: '([^']+)', colour: '([^']+)', shape: '([^']+)'\},"
+    parsed = [re.fullmatch(pattern, row) for row in rows]
+    assert all(parsed), f"unparsed contract rows: {rows}"
+    return {match[1]: (match[2], match[3], match[4]) for match in parsed if match}
+
+
+def test_every_catalog_contract_has_a_distinct_port_token_in_both_themes():
+    """Fails if a catalog contract falls back to a hash token (which can collide), two
+    contracts share a colour+shape or a readable name, or a colour lacks a CSS token."""
+    from workflows.definition.catalog import CONTRACTS
+
+    entries = contract_presentation_entries()
+    assert set(entries) == set(CONTRACTS)
+    tokens = [(colour, shape) for _, colour, shape in entries.values()]
+    assert len(set(tokens)) == len(tokens)
+    names = [name for name, _, _ in entries.values()]
+    assert len(set(names)) == len(names)
+    css = (STATIC / "editor-contract-presentation.css").read_text()
+    for colour in {colour for colour, _ in tokens}:
+        assert f"--contract-{colour}:" in css, colour
+    for shape in {shape for _, shape in tokens}:
+        assert f'.circuit-port[data-contract-shape="{shape}"] .circuit-socket' in css, shape
+    # Literal colours (not theme aliases) need a dark-theme declaration too.
+    light, dark = css.split(':root[data-theme="dark"]', 1)
+    for literal in re.findall(r"(--contract-[\w-]+): #", light):
+        assert f"{literal}:" in dark, literal
+
+
+def _relative_luminance(hex_colour: str) -> float:
+    channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _theme_values(css: str) -> tuple[dict[str, str], dict[str, str]]:
+    light, dark = css.split(':root[data-theme="dark"]', 1)
+    declaration = r"(--[\w-]+):\s*([^;]+);"
+    return dict(re.findall(declaration, light)), dict(
+        re.findall(declaration, dark.split("}", 1)[0])
+    )
+
+
+def test_every_contract_token_meets_non_text_contrast_on_every_port_background():
+    """Fails if a contract socket/wire colour drops below WCAG 1.4.11's 3:1 against a
+    background ports render on (any capability card tint, --panel, --bg, --control) in
+    either theme; the light proposal amber and implementation teal once did (2.67:1)."""
+    theme_light, theme_dark = _theme_values((STATIC / "theme.css").read_text())
+    own_light, own_dark = _theme_values((STATIC / "editor-contract-presentation.css").read_text())
+    for theme, env in (
+        ("light", {**theme_light, **own_light}),
+        ("dark", {**theme_light, **theme_dark, **own_light, **own_dark}),
+    ):
+
+        def resolve(value: str, env: dict[str, str] = env) -> str:
+            alias = re.fullmatch(r"var\((--[\w-]+)\)", value.strip())
+            return resolve(env[alias[1]]) if alias else value.strip()
+
+        backgrounds = {
+            name: resolve(value)
+            for name, value in env.items()
+            if name.endswith("-tint") or name in ("--panel", "--bg", "--control")
+        }
+        assert len(backgrounds) >= 10, backgrounds
+        tokens = {
+            name: resolve(value) for name, value in env.items() if name.startswith("--contract-")
+        }
+        for token, colour in tokens.items():
+            for background, fill in backgrounds.items():
+                lighter, darker = sorted(
+                    (_relative_luminance(colour), _relative_luminance(fill)), reverse=True
+                )
+                ratio = (lighter + 0.05) / (darker + 0.05)
+                assert ratio >= 3, f"{theme} {token} {colour} on {background} {fill}: {ratio:.2f}"
+
+
+def test_every_index_asset_is_served(console_config):
+    """Fails if index.html references a static script or stylesheet the asset allowlist
+    does not serve (the editor would load without it and break at runtime)."""
+    index = (STATIC / "index.html").read_text()
+    assets = re.findall(r'(?:src|href)="/([\w.-]+\.(?:js|css))"', index)
+    assert "editor-contract-presentation.js" in assets
+    with TestClient(create_app(console_config), base_url=console_config.browser_origin) as client:
+        for asset in assets:
+            assert client.get("/" + asset).status_code == 200, asset
+
+
 def test_five_node_browser_fixture_saves_every_node_position():
     """Fails if the layout witness fixture stops parsing as the five-node authored loop
     or leaves a node to fallback placement instead of its saved coordinates."""
