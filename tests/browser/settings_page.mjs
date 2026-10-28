@@ -87,8 +87,15 @@ try {
   await page.locator('#settings-status').filter({hasText: 'Choose values'}).waitFor();
   assert.match(await page.locator('#settings-host').textContent(), /fixture-host/);
   assert.equal(await page.locator('#settings-save').isDisabled(), true, 'Nothing to save before a change');
-  assert.match(await page.locator('#settings-workspace-problems').textContent(), /data\/synthetic: missing \(put the task data here\)/);
+  // Readiness problems read as one plain sentence with the fix that applies (task data: the operator creates it).
+  assert.equal(await page.locator('#settings-workspace-problems').textContent(), "data/synthetic is missing. Create this folder on the server and put the task's data in it.");
+  assert.equal(await page.locator('#settings-init').isHidden(), true, 'init cannot create task data');
   assert.match(await page.locator('#settings-rows').textContent(), /Workspace folder/);
+
+  // Run-page origin lines: only this task's rows whose server path equals the reviewed value.
+  const lines = await page.evaluate(name => window.consoleSettings.originLines('synthetic', {llm_profile: '/srv/ws/library/llm/' + name, data_root: '/elsewhere'}), DEFAULT.name);
+  assert.deepEqual(lines, [`Model profile source: Settings page (${DEFAULT.name})`]);
+  assert.deepEqual(await page.evaluate(() => window.consoleSettings.originLines('other-task', {llm_profile: 'x'})), []);
 
   // Cards show owner-derived key names and routes; unusable advice keys are marked.
   assert.match(await page.locator('#settings-models').textContent(), /Needs keys: OPENAI_API_KEY/);

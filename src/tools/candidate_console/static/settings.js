@@ -4,7 +4,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const session = () => window.consoleSession;
-  const ORIGINS = {server_config: 'Set in console.json', global_settings: 'This page', workspace_layout: 'Workspace folder', not_set: 'Not set'};
+  const ORIGINS = {server_config: 'Set in console.json', global_settings: 'Settings page', workspace_layout: 'Workspace folder', not_set: 'Not set'};
   const NAMES = {llm_profile: 'Model profile', advice: 'Advice file', data_root: 'Data folder', preparation_root: 'Preparation folder', candidate_root: 'Candidate folder', reusable_runs_root: 'Workflow runs folder'};
   let view = null, draft = null, loadedRevision = null, busy = false;
   const say = text => { $('settings-status').textContent = text; };
@@ -264,7 +264,10 @@
       try {
         const current = await session().request('settings');
         return current.rows.filter(row => row.task_id === taskId && row.name in effective && row.effective === effective[row.name])
-          .map(row => `${NAMES[row.name]} source: ${ORIGINS[row.origin] || row.origin}${row.label ? ` (${row.label})` : ''}`);
+          .map(row => {
+            const origin = ORIGINS[row.origin] || row.origin;
+            return `${NAMES[row.name]} source: ${origin}${row.label && row.label !== origin ? ` (${row.label})` : ''}`;
+          });
       } catch { return []; }
     }
   });

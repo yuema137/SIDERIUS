@@ -95,13 +95,15 @@ def _write_once(directory: int, name: str, payload: bytes) -> None:
 
 
 def _free_name(exports: int, name: str) -> str:
+    """First unused ``<name>-N``; the base is shortened so the result stays a valid name."""
     for index in range(2, 1000):
-        candidate = f"{name}-{index}"[:80]
+        suffix = f"-{index}"
+        candidate = name[: 80 - len(suffix)] + suffix
         try:
             os.stat(candidate, dir_fd=exports, follow_symlinks=False)
         except FileNotFoundError:
             return candidate
-    return f"{name}-new"
+    return name[:76] + "-new"
 
 
 def export(config: ConsoleConfig, workspace: Path, request: ExportRequest) -> ExportResult:
@@ -123,10 +125,27 @@ def export(config: ConsoleConfig, workspace: Path, request: ExportRequest) -> Ex
         hashlib.sha256(source).hexdigest() != request.expected_source_sha256
     ):
         raise ExportRefused(409, "stale", "the saved workflow changed; reload it and export again")
+    if view.document is None:
+        raise ExportRefused(
+            422,
+            "invalid_workflow",
+            "the saved workflow does not parse, so its advice cannot be read; fix it in "
+            "Workflow Editor, save, and export again",
+        )
+    from workflows.llm_config import parse_llm_config_bytes
+
     try:
         profile = config_bytes(task.llm_config_file)
     except (OSError, ValueError):
         raise ExportRefused(409, "unavailable", "the task's LLM profile is unavailable") from None
+    try:
+        parse_llm_config_bytes(profile)  # what --llm_config will accept
+    except ValueError as error:
+        raise ExportRefused(
+            422,
+            "invalid_profile",
+            f"the task's LLM profile is not usable with --llm_config: {error}",
+        ) from None
     files: dict[ExportFile, bytes] = {"workflow.py": source, "llm.json": profile}
     advice = inline_advice(view.document)
     if advice is not None:
