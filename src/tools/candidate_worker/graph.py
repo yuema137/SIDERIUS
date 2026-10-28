@@ -20,6 +20,7 @@ from workflows.task_composition import RunTaskComposition
 from workflows.termination import infrastructure_abort_reason
 
 from . import phases
+from .budget import WorkerBudget
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
 from .graph_models import GraphNodeEvidence, GraphTrace
@@ -41,6 +42,7 @@ def execute_fanout(
     *,
     iteration: int = 1,
     history: ChainState | None = None,
+    budget: WorkerBudget | None = None,
 ) -> CandidateRunReceipt:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
@@ -189,6 +191,7 @@ def execute_fanout(
                             config,
                             proposal,
                             implemented,
+                            budget=budget,
                         )
                 rejected = isinstance(output, ValidatorOutput) and not output.passed
                 failed = (

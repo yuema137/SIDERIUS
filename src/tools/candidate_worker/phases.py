@@ -16,6 +16,7 @@ from workflows.candidate_requests import enrich_implementation_request, enrich_v
 from workflows.llm_config import WorkflowLLMConfig
 
 from .artifacts import capture_record, verify_artifacts
+from .budget import WorkerBudget
 from .inputs import NativeInputs
 from .invocation import FixedInvocationContext
 from .layout import proposal_input_path
@@ -118,8 +119,14 @@ def run_validation(
     config: WorkflowLLMConfig,
     proposal: ProposalOutput,
     implemented: ImplementorOutput,
+    *,
+    budget: WorkerBudget | None = None,
 ) -> tuple[ValidatorOutput, Path]:
-    """Map implementation and lineage; invoke and reconcile native validation."""
+    """Map implementation and lineage; invoke and reconcile native validation.
+
+    The validator's pytest child is bounded by what remains of ``budget``
+    (issue #984); without one it stays group-supervised but undeadlined.
+    """
     context.require_binding(request, initial, inputs, "validation")
     seed, attempt = inputs.proposal, inputs.attempt
     if request.preview.execution_profile is not None:
@@ -151,7 +158,10 @@ def run_validation(
         )
     validator = MLCodeValidatorAgent(**config.get("validate"))
     context.bind(validator)
-    validated = validator.run(validation)
+    validated = validator.run(
+        validation,
+        test_timeout_seconds=budget.remaining_seconds() if budget is not None else None,
+    )
     validation_path = Path(attempt.impl_dir) / f"validation_{context.run_name}.json"
     capture_record(validation_path, validated)
     return validated, validation_path

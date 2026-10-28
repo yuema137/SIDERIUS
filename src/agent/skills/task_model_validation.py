@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -77,29 +75,24 @@ def raise_child_setup_failure(path: Path) -> None:
         raise ModelProbeSetupError(failure.message)
 
 
-def run_task_model_tests(test_file_path: str) -> tuple[bool, str]:
-    """Preserve task setup failures across pytest without parsing its prose."""
-    from core.local_code.child import prepare_child
+def run_task_model_tests(
+    test_file_path: str, *, timeout_seconds: float | None = None
+) -> tuple[bool, str]:
+    """Preserve task setup failures across pytest without parsing its prose.
+
+    ``timeout_seconds`` is the caller's declared limit; ``None`` runs the
+    group-supervised child without a deadline (see ``generated_pytest``).
+    """
+    from agent.skills.generated_pytest import run_generated_pytest
     from core.subprocess_env import subprocess_env
 
     with tempfile.TemporaryDirectory(prefix="siderius-model-probe-") as directory:
         failure_path = Path(directory) / "setup-failure.json"
         env = subprocess_env()
         env[FAILURE_PATH_ENV] = str(failure_path)
-        invocation = prepare_child(
-            [sys.executable, "-m", "pytest", test_file_path, "-v", "--tb=short"],
-            env,
-        )
-        try:
-            result = subprocess.run(
-                invocation.argv, capture_output=True, text=True, env=invocation.env
-            )
-        except Exception as exc:
-            invocation.check(getattr(exc, "returncode", None))
-            raise
-        invocation.check(result.returncode)
+        passed, output = run_generated_pytest(test_file_path, env, timeout_seconds=timeout_seconds)
         raise_child_setup_failure(failure_path)
-        return result.returncode == 0, result.stdout + result.stderr
+        return passed, output
 
 
 def render_task_model_test(

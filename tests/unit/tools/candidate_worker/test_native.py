@@ -475,3 +475,25 @@ def test_join_protocol_optional_arguments_preserve_existing_defaults(prepared, n
         proposed_implementation_to_validation(
             proposal, implemented.model_copy(update={"candidate_id": None}), storage
         )
+
+
+@pytest.mark.parametrize("graph", [False, True])
+def test_validator_pytest_is_bounded_by_the_remaining_worker_budget(
+    prepared, native_runner, monkeypatch, graph
+):
+    """Fails if a worker path drops the declared budget before validation (issue #984)."""
+    from tests.helpers.candidate_fanout import fanout_request
+
+    validator = importlib.import_module("nodes.ml_code_validator_agent.ml_code_validator_agent")
+    limits: list[float | None] = []
+
+    def launched(test_file_path, env, *, timeout_seconds=None):
+        limits.append(timeout_seconds)
+        return True, "1 passed"
+
+    monkeypatch.setattr(validator, "run_generated_pytest", launched)
+    request = fanout_request(prepared) if graph else refresh(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.status in ("accepted", "completed"), receipt.error
+    assert len(limits) >= 1
+    assert all(limit is not None and 0 < limit <= request.timeout_seconds for limit in limits)

@@ -298,6 +298,16 @@ An infrastructure abort returns `failed` while retaining its native output.
 Rejected validation still returns three records and `rejected`. Parent timeout,
 interruption or process failure overrides a child's reported completion.
 
+Each worker process entry (`child.execute`, `loop_resume.execute_continuation`)
+anchors one `budget.WorkerBudget` from `CandidateRunRequest.timeout_seconds` and
+passes it explicitly through `execute_native`/`execute_loop`/`execute_fanout`/
+`run_candidate_phases` to `phases.run_validation`, which bounds the validator's
+pytest child by `remaining_seconds()` (issue #984). The anchor follows sandbox
+launch, so the value is an upper bound; the sandbox limit still governs. A spent
+budget yields a minimal positive limit, failing the pytest check at its first
+deadline poll. Direct callers that pass no budget run pytest group-supervised
+without a deadline.
+
 The optional `training_output` receipt field contains the model name and native
 output SHA-256. It is omitted entirely for legacy receipts. Reconcile and later
 `candidate_operations` reads reach the same inert fixed-path/identity/digest
