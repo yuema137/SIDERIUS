@@ -83,6 +83,10 @@ Owner: `core/run_seed_lock.py` (resolution) over `core/run_invariants.py`
 - Both fields are `_CANONICAL` and are omitted from the lock when `None`, so a
   seedless lock keeps its pre-seed bytes. They are set together or not at all
   (`run_seed_lock_fields`).
+- `run_seed_source` (`operator` | `generated`) records how the creating
+  execution obtained the seed. It is `_PROVENANCE` (recorded, never compared),
+  omitted when `None`, and absent from locks written by an execution that adopted
+  an existing seed (the tuner sub-workspace lock, for example).
 - History import (`--seed_paths`, `source_run_name`) reads only the target
   workspace lock, so a new workspace never inherits a source run's seed.
 - `WorkflowLaunchConfig.run_seed` projects only when set (`omit_if_none`), so a

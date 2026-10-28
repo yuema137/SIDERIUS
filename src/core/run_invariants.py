@@ -54,7 +54,7 @@ from core.runtime_control.completion import RuntimeCompletionPolicy
 from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.verifier_provider import RuntimeVerifierIdentity
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
-from core.seeding import SEED_DERIVATION, RunSeed
+from core.seeding import SEED_DERIVATION, RunSeed, SeedSource
 
 RUN_INVARIANTS_BASENAME = "run_invariants_lock.json"
 
@@ -62,26 +62,35 @@ SeedDerivation = Literal["siderius-seed/v1"]
 
 
 class RunSeedLockFields(TypedDict):
-    """The two lock fields one run seed contributes, always set together."""
+    """The lock fields one run seed contributes."""
 
     run_seed: int | None
     seed_derivation: SeedDerivation | None
+    run_seed_source: SeedSource | None
 
 
-def run_seed_lock_fields(run_seed: int | None) -> RunSeedLockFields:
-    """Lock fields for ``run_seed``; ``None`` keeps the seedless (pre-seed) shape."""
+def run_seed_lock_fields(
+    run_seed: int | None, source: SeedSource | None = None
+) -> RunSeedLockFields:
+    """Lock fields for ``run_seed``; ``None`` keeps the seedless (pre-seed) shape.
+
+    ``source`` is how the creating execution obtained the seed; a later
+    execution that adopts the lock passes ``None`` (provenance, never compared).
+    """
     return {
         "run_seed": run_seed,
         "seed_derivation": None if run_seed is None else SEED_DERIVATION,
+        "run_seed_source": source,
     }
 
 
-def _require_seed_pair(run_seed: int | None, derivation: str | None) -> None:
+def _require_seed_pair(run_seed: int | None, derivation: str | None, source: str | None) -> None:
     """A locked seed is meaningless without the derivation that consumes it."""
-    if (run_seed is None) != (derivation is None):
+    if (run_seed is None) != (derivation is None) or (run_seed is None and source is not None):
         raise ValueError(
-            "run_seed and seed_derivation are set together or not at all; "
-            f"got run_seed={run_seed!r}, seed_derivation={derivation!r}"
+            "run_seed and seed_derivation are set together or not at all, and "
+            f"run_seed_source requires run_seed; got run_seed={run_seed!r}, "
+            f"seed_derivation={derivation!r}, run_seed_source={source!r}"
         )
 
 
@@ -385,6 +394,9 @@ class RunInvariants(BaseModel):
     seed_derivation: SeedDerivation | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # Issue #983 — how the creating execution obtained the seed. RECORDED,
+    # never compared: a continuation adopts the lock whatever its source.
+    run_seed_source: SeedSource | None = Field(default=None, exclude_if=lambda value: value is None)
     created_at: str | None = None
     # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
     # run executed under, plus their provenance. RECORDED, never compared.
@@ -515,6 +527,7 @@ class RunInvariants(BaseModel):
         # and never compared: staging the same advice at a different
         # absolute path is not a different treatment (the Q-P1-2 rule).
         "advice_path",
+        "run_seed_source",
     )
 
     #: C9d fields that a legacy lock cannot supply. Their absence is a
@@ -631,7 +644,7 @@ class RunInvariants(BaseModel):
 
     @model_validator(mode="after")
     def _seed_and_derivation_travel_together(self) -> RunInvariants:
-        _require_seed_pair(self.run_seed, self.seed_derivation)
+        _require_seed_pair(self.run_seed, self.seed_derivation, self.run_seed_source)
         return self
 
     @model_validator(mode="after")
@@ -1020,10 +1033,11 @@ class LockLaunchIdentity(BaseModel):
     #: is threaded explicitly. ``None`` is the seedless candidate-graph state.
     run_seed: RunSeed | None = None
     seed_derivation: SeedDerivation | None = None
+    run_seed_source: SeedSource | None = None
 
     @model_validator(mode="after")
     def _seed_and_derivation_travel_together(self) -> LockLaunchIdentity:
-        _require_seed_pair(self.run_seed, self.seed_derivation)
+        _require_seed_pair(self.run_seed, self.seed_derivation, self.run_seed_source)
         return self
 
 
@@ -1225,6 +1239,7 @@ def build_run_invariants(
             planner_strategy_identity=_launch_identity.planner_strategy_identity,
             run_seed=_launch_identity.run_seed,
             seed_derivation=_launch_identity.seed_derivation,
+            run_seed_source=_launch_identity.run_seed_source,
             # Step 11 C3 (R-11-6) — stamped at the SAME shared builder, for
             # the same reason C9d is: every entry point then records the
             # ceilings its children actually ran under. Provenance, never

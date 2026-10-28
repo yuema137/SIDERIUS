@@ -20,8 +20,10 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from core.run_invariants import (
     RunInvariantsViolation,
+    RunSeedLockFields,
     load_run_invariants,
     pre_seed_lock_violation,
+    run_seed_lock_fields,
 )
 from core.seeding import RUN_SEED_MAX, RunSeed, format_seed_line, resolve_run_seed
 
@@ -46,6 +48,10 @@ class WorkspaceRunSeed(BaseModel):
 
     value: RunSeed
     origin: SeedOrigin
+
+    def lock_fields(self) -> RunSeedLockFields:
+        """Lock fields; an adopted seed records no new source (the lock keeps its own)."""
+        return run_seed_lock_fields(self.value, None if self.origin == "locked" else self.origin)
 
     def log_line(self) -> str:
         """The operator-visible startup line, printed before any node runs."""
