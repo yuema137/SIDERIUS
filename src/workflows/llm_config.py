@@ -690,7 +690,9 @@ class WorkflowLLMConfig(BaseModel):
 
         Export this value for the downloadable default JSON. Explicit user
         files are parsed separately, preserving partial-config inheritance.
-        Model defaults live in agent.llm_settings; no historical strategy is
+        Model defaults live in agent.llm_settings. The profile selects the
+        framework's native planner explicitly, so it runs on a clean install
+        without an installed planner default; no historical strategy is
         selected here. One transport attempt is not a campaign cost ceiling.
         """
 
@@ -703,7 +705,9 @@ class WorkflowLLMConfig(BaseModel):
             implement=leaf(),
             validate=leaf(),
             propose=ProposalLLMConfig(comparison=leaf(), reasoning=leaf(), proposing=leaf()),
-            tune=TunerLLMConfig(planner=leaf(), reflector=leaf()),
+            tune=TunerLLMConfig(
+                planner_strategy="native-timing-v1", planner=leaf(), reflector=leaf()
+            ),
             lit_review=LitReviewLLMConfig(main=leaf(), search=leaf()),
         )
 

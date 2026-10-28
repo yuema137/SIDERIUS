@@ -5,6 +5,9 @@ import subprocess
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
+from agent import planner_strategy as strategies
 from core.layout import checkout_root
 from tools.setup_review.routes import standard_llm_routes
 from workflows.llm_config import WorkflowLLMConfig, resolve_standard_llm_config
@@ -37,10 +40,34 @@ def test_default_all_eleven_actual_routes_and_export():
         assert route.transport.max_retries == 1
     exported = json.loads((checkout_root() / "configs/llm/default.json").read_text())
     assert exported == config.model_dump(mode="json", by_alias=True, exclude_none=True)
-    assert config.tune.planner_strategy is None
     config.tune.planner.model_id = "explicit-change"
     assert config.tune.reflector.model_id == "gpt-5.6-luna"
     assert config.interpret.model_id == "gpt-5.6-luna"
+
+
+@pytest.mark.parametrize(
+    "profile",
+    ["automatic", *sorted(p.name for p in (checkout_root() / "configs/llm").glob("*.json"))],
+)
+def test_shipped_profile_resolves_one_planner_on_clean_install(profile, monkeypatch):
+    """Issue #1034: a shipped profile omitting the planner refused on a clean install.
+
+    A clean install declares no ``siderius.planner_strategy_defaults`` entry point,
+    so an omitted selection finds zero providers and the run refuses before planning.
+    """
+
+    def clean_install(**kwargs):
+        return []
+
+    monkeypatch.setattr(strategies, "entry_points", clean_install)
+    config = (
+        WorkflowLLMConfig.default()
+        if profile == "automatic"
+        else WorkflowLLMConfig.from_json(str(checkout_root() / "configs/llm" / profile))
+    )
+    assert config.tune is not None
+    selected = strategies.resolve_planner_strategy(config.tune.planner_strategy)
+    assert selected.identity.name == "native-timing-v1"
 
 
 def test_explicit_file_precedes_legacy_and_preserves_inheritance(tmp_path):
