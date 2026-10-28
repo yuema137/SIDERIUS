@@ -3,8 +3,10 @@
 import json
 import math
 import re
+from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import (
     EpochCapResolution,
@@ -326,3 +328,25 @@ def test_non_finite_rule_values_are_refused_naming_the_path(rule: dict, message:
     path = "train_config.lr"
     with pytest.raises(ValueError, match=rf"rules\.`{re.escape(path)}`[\s\S]*{message}"):
         ParameterRules.model_validate({path: rule})
+
+
+def test_cyclic_or_unbounded_rule_values_are_validation_errors() -> None:
+    """Catches a YAML-anchor cycle escaping as RecursionError past ValidationError handlers."""
+    cyclic: list = []
+    cyclic.append(cyclic)
+    deep: list = [1.0]
+    for _ in range(5000):
+        deep = [deep]
+    for value, message in ((cyclic, "a cyclic reference"), (deep, "nesting deeper than")):
+        with pytest.raises(ValidationError, match=message):
+            ParameterRules.model_validate({"train_config.lr": {"exact": value}})
+
+
+def test_shared_finite_containers_and_non_float_reals_are_judged_by_value() -> None:
+    """Catches an id-based cycle check refusing a YAML alias reused twice, or missed Decimal inf."""
+    shared = [1.0, 2]
+    ParameterRules.model_validate({"train_config.lr": {"exact": {"a": shared, "b": shared}}})
+    with pytest.raises(ValidationError, match="non-finite"):
+        ParameterRules.model_validate({"train_config.lr": {"exact": [Decimal("Infinity")]}})
+    with pytest.raises(ValidationError, match="non-finite"):
+        ParameterRules.model_validate({"train_config.lr": {"allowed": [{math.inf: 1}]}})

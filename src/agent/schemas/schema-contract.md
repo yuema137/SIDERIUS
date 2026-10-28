@@ -73,7 +73,10 @@ no hidden contracts, no silent defaults.
   accepts null; a null `range` / `allowed` / `predicate` is refused instead
   of falling back to an exact-null kind, and `NumericRange` bounds are strict
   numbers (no bool or string coercion). `exact` / `allowed` values may not
-  contain a non-finite float at any nesting depth; range bounds are finite.
+  contain a non-finite real number (float, Decimal, numpy scalar) at any
+  nesting depth, including mapping keys, and may not be cyclic or nested more
+  than 64 levels; each is a validation error naming the rule path. Range
+  bounds are finite.
 - `ParameterRules` checks fixed `train_config` and `loss_config` paths against
   the consuming `TrainConfig` / `LossConfig` `model_fields` and nested model
   annotations, including optional unions. The shared document resolver
