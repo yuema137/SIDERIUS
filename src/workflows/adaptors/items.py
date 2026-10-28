@@ -6,10 +6,10 @@ committed; it never computes or rewrites them.
 
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, field_validator, model_validator
 
 from workflows.definition.catalog import METRIC_SCORED_CONTRACTS, VALIDITY_GATED_CONTRACTS
-from workflows.definition.models import Identifier, Source
+from workflows.definition.models import ExternalSource, Identifier, ResultSource, SelectedSource
 
 if TYPE_CHECKING:
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 ItemState = Literal["succeeded", "rejected", "skipped"]
 Admission = Literal["admissible", "rejected", "skipped", "not_scoreable", "health_invalid"]
+# The concrete origin of one value. A route merge (``SelectedSource``) is not an origin:
+# it resolves to the selected candidate's result, which is what provenance records.
+InputOrigin = Annotated[ExternalSource | ResultSource, Field(discriminator="kind")]
 
 
 class AdaptorStrategyError(ValueError):
@@ -32,9 +35,21 @@ class AdaptorInputRef(AdaptorModel):
 
     port: Identifier
     position: int = Field(ge=0)
-    source: Source
+    source: InputOrigin
     record_sha256: Digest
     item_path: str | None = None  # e.g. "findings[2]" for one list entry
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def refuse_route_merge(cls, value: object) -> object:
+        if isinstance(value, SelectedSource) or (
+            isinstance(value, dict) and value.get("kind") == "selected"
+        ):
+            raise ValueError(
+                "adaptor input provenance records the selected candidate's result, "
+                "never a route merge"
+            )
+        return value
 
     def entry(self, list_field: str, index: int) -> "AdaptorInputRef":
         return self.model_copy(update={"item_path": f"{list_field}[{index}]"})
