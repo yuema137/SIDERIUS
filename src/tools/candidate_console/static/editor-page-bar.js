@@ -114,7 +114,20 @@
   window.addEventListener('ui-settings-change', fitWorkspace);
   new ResizeObserver(fitWorkspace).observe(document.querySelector('#view-workflow .page-bar'));
 
-  function sync() { syncStrip(); syncChip(); fitWorkspace(); }
+  // Why Save / Next: Run are disabled, inline beside them (spec §9).
+  function syncReasons() {
+    const current = state(), connected = window.consoleSession.connected, opened = connected && current.sourceAvailable;
+    const problems = document.querySelectorAll('#editor-problems .editor-problem').length;
+    const checking = /checking/.test($('editor-pending').textContent);
+    $('editor-save-reason').textContent = !opened || !$('editor-review').disabled ? ''
+      : problems ? `Fix ${problems} problem${problems === 1 ? '' : 's'} to save` : current.saving ? 'Saving…' : checking ? 'Checking…' : '';
+    $('workflow-next-reason').textContent = !opened || !$('workflow-next-run').disabled ? ''
+      : !current.candidateEnabled ? 'Not set up for runs' : 'Save a version to run';
+  }
+  // controls() announces its state before it sets the buttons' disabled flags: read them after.
+  function sync() { syncStrip(); syncChip(); queueMicrotask(syncReasons); fitWorkspace(); }
+  new MutationObserver(syncReasons).observe($('editor-problems'), {childList: true, subtree: true, attributes: true});
+  window.addEventListener('new-run-gate', syncReasons);
   window.addEventListener('workflow-editor-state', sync);
   window.consoleSession.subscribe(sync);
   sync();

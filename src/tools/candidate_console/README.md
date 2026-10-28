@@ -134,14 +134,16 @@ independently.
 ## Edit existing circuit connections
 
 In Workflow builder, select a node to open its inspector. To change a connection,
-select a **result** output socket, then a highlighted named input. Press Escape
+select an output socket (right side of a card), then a highlighted input. Sockets are
+labelled with the kind of data they carry, for example *Model plan*; hover one to see
+what it connects with. Press Escape
 or right-click to cancel. The inspector offers the same binding choices, including
 external inputs such as storage. Only existing inputs can be rewired here.
 
-A large workflow opens zoomed out so every node is visible; **Fit to view**, the
-zoom buttons and **Actual size** change only the view. Optional inputs that are
-not connected are folded into an "N optional inputs" row on each card; expand it
-to connect one. If saved cards overlap, **Arrange view** shows a non-overlapping
+A large workflow opens zoomed out (never below 75%, so text stays readable; scroll the
+canvas for the rest). The controls at the bottom right of the canvas (zoom, **Actual
+size**, **Fit to view**) change only the view. Optional inputs that no wire feeds are
+folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, **Arrange view** shows a non-overlapping
 layout without changing the file.
 
 Drag a node heading to move it, or focus the heading and use Alt + arrow keys.
@@ -154,8 +156,9 @@ the findings. Prepare a new run on the Run page to check its supported execution
 To add nodes, click or drag entries from **Add capability**, or hover a card and
 press the **+** beside an output that is not connected yet: pick a module and it is
 added to the right, already connected. You can add several nodes, move any card and
-wire them in any order. A node with a missing required input shows it in red, and
-**Save** stays disabled until every required input is connected.
+wire them in any order. A node with a missing required input shows it in red, the
+**N problems** chip in the bar above lists every missing input (click a row to jump to
+it), and **Save** stays disabled with the reason beside it until all are connected.
 
 When a required input such as `storage` has nothing to connect, select the node.
 Under that input, Selection explains what the input is. Open **Create external

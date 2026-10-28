@@ -280,6 +280,9 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "editor-advice.js": "text/javascript",
             "editor-page-bar.js": "text/javascript",
             "editor-canvas-add.js": "text/javascript",
+            "editor-canvas-ui.css": "text/css",
+            "editor-circuit-tooltip.js": "text/javascript",
+            "editor-inspector-rows.js": "text/javascript",
             "editor-page-bar.css": "text/css",
             "icons.js": "text/javascript",
             # Vendored Lucide sprite (shapes only; licence in icons-LICENSE.txt), fetched by icons.js.

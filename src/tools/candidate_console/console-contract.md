@@ -1087,6 +1087,38 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   `{kind: 'result', node, port: 'result'}` as ONE draft edit (`Add capability <id>`);
   the server node inspection decides completeness as for palette adds. Esc closes.
 - Research loop is a section of the Selection panel (`#editor-loop.inspector-section`).
+- Sockets (tour review batch 1): the visible socket label is the connector (schema) name
+  from the server catalog in 12px label style (`.circuit-port-contract`), followed by
+  `Required`/`Optional` and ` · Not connected` when unbound; protocol field names appear
+  only in the advanced Mapping details and as an advanced `code` chip in inspector rows,
+  which read `[swatch] <connector name> · Required` (`editor-inspector-rows.js`). Sockets
+  carry no `title`; `editor-circuit-tooltip.js` shows the §6.3 socket tooltip (swatch +
+  name, the server description, "Connects with: <module names>" from the server-offered
+  choices, "Required." when unbound) after 300 ms or on keyboard focus, hides on leave
+  (150 ms), blur, Esc, scroll or re-render, and never takes pointer events. A refused
+  connection's reason is kept as `data-refusal` on the dimmed input. Icon-only canvas
+  controls get a one-line tooltip from `data-tip-label`.
+- Cards fold every optional input that is not fed by a wire (not connected, or fed by an
+  external input) into one `+N optional` row. Fit to view never zooms below 75%; a larger
+  graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
+  zoom out still reaches 40%.
+- Canvas controls are one icon cluster bottom-right (zoom out, zoom %, zoom in, Actual
+  size, Fit, Arrange view, Tidy up); the connector legend is a bottom-left chip whose
+  content opens as a popover above it.
+- Problems (spec §9): `#problems-chip` (`circle-alert` + "N problems") toggles the 320px
+  `#editor-problems` popover under it; it never takes space in the page. Each row is one
+  sentence `<module name>: <connector name> is not connected` (other codes:
+  `<module name>: <server message>`; source diagnostics `Python source line N: …`), with
+  the raw located diagnostic as an advanced `code`. Row click closes the popover and
+  selects the node and field. Esc or an outside click closes it. Status lines are one
+  plain sentence and never repeat the problem list. After undo, redo and Discard the
+  problems are recomputed from the restored state's cached server inspection (or
+  re-inspected).
+- Disabled Save shows `#editor-save-reason` inline ("Fix N problems to save",
+  "Checking…", "Saving…"); disabled Next: Run shows `#workflow-next-reason` ("Save a
+  version to run" or "Not set up for runs").
+- 900–1279 px: the module rail is a 48 px column with one icon button; it opens the full
+  272 px rail as an overlay over the canvas.
 - Templates are complete fixed shapes. Every template renders a reusable document whose
   execution profile admits no extra module (the interpretation loop requires "one
   interpreter and complete candidate"; the single step "exactly one proposal,

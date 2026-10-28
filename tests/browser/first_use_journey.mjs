@@ -207,7 +207,10 @@ try {
   assert.deepEqual(await overlaps(), [], 'Tidy up leaves the template cards disjoint');
   await page.locator('#circuit-fit').click();
   await bounded('template after fit');
-  assert.equal(await page.locator('.circuit-viewport').getAttribute('data-outside-cards'), '0', 'Fit shows every module inside the visible viewport');
+  // Fit keeps text legible (>= 75%); anything still outside is reachable by scrolling the canvas.
+  const zoomText = await page.locator('.circuit-zoom').textContent(), outside = await page.locator('.circuit-viewport').getAttribute('data-outside-cards');
+  assert.ok(Number.parseInt(zoomText, 10) >= 75, `Fit zoom ${zoomText}`);
+  if (outside !== '0') assert.match(await page.locator('.circuit-view-note').textContent(), /Scroll the canvas/);
   await saveVersion('first-loop');
   assert.ok((await readFile(metadata.reusable_source, 'utf8')).includes(advice), 'Saved file holds the advice');
 

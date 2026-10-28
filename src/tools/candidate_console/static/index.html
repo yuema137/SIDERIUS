@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="/editor-templates.css">
   <link rel="stylesheet" href="/onboarding.css">
   <link rel="stylesheet" href="/editor-page-bar.css">
+  <link rel="stylesheet" href="/editor-canvas-ui.css">
   <script src="/number-format.js" defer></script>
   <script src="/session.js" defer></script>
   <script src="/icons.js" defer></script>
@@ -33,6 +34,8 @@
   <script src="/editor-contract-presentation.js" defer></script>
   <script src="/editor-circuit-geometry.js" defer></script>
   <script src="/editor-circuit.js" defer></script>
+  <script src="/editor-circuit-tooltip.js" defer></script>
+  <script src="/editor-inspector-rows.js" defer></script>
   <script src="/editor-problems.js" defer></script>
   <script src="/editor-node-parameters.js" defer></script>
   <script src="/editor-versions.js" defer></script>
@@ -144,13 +147,15 @@
       <button id="editor-task-chip" type="button" class="status-chip" aria-controls="editor-task-panel" data-icon="flask-conical"><span class="chip-label">Task</span></button>
       <button id="editor-inspect" type="button" class="secondary" hidden>Inspect source</button>
     </div>
-    <button id="problems-chip" type="button" class="secondary problems-chip" hidden aria-controls="editor-problems"></button>
+    <button id="problems-chip" type="button" class="secondary problems-chip" hidden aria-controls="editor-problems" aria-expanded="false"></button>
+    <section id="editor-problems" class="problems-popover" aria-label="Problems" aria-live="polite" hidden></section>
     <div class="actions">
       <div id="editor-edit-actions" class="edit-actions" role="group" aria-label="Undo and redo"></div>
       <button id="editor-refresh" class="secondary" data-ui-flag="advanced" disabled>Refresh from disk</button>
-      <button id="editor-review" disabled data-icon="save" title="Check the workflow, then confirm the save">Save</button>
+      <span id="editor-save-reason" class="action-reason" role="status"></span>
+      <button id="editor-review" disabled data-icon="save">Save</button>
     </div>
-    <div class="workflow-next"><button id="workflow-next-run" type="button" class="secondary" disabled data-icon="play" aria-describedby="workflow-next-state">Next: Run</button></div>
+    <div class="workflow-next"><span id="workflow-next-reason" class="action-reason"></span><button id="workflow-next-run" type="button" class="secondary" disabled data-icon="play" aria-describedby="workflow-next-state">Next: Run</button></div>
   </div>
   <section id="editor-save-confirm" class="save-confirm" aria-labelledby="editor-save-confirm-heading" hidden>
     <h2 id="editor-save-confirm-heading">Save this version</h2>
@@ -169,7 +174,6 @@
     <p id="editor-pending">No pending edits.</p>
     <p id="workflow-next-state" class="sr-only" role="status">Save the workflow first. Run is enabled only for a saved version.</p>
   </div>
-  <section id="editor-problems" aria-label="Problems" aria-live="polite" hidden></section>
   <div id="editor-conflict" class="card" hidden>
     <h2>Source changed on disk</h2>
     <p>Inspect current source and its difference from your proposal. Your pending edits are preserved.</p>

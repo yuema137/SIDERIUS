@@ -85,9 +85,9 @@
   // "node a", "nodes a, b and input s": pending-line and undo-label text.
   const summary = state => [plural('node', (state.nodes || []).map(item => item.node)),
     plural('input', (state.externals || []).map(item => item.id))].filter(Boolean).join(' and ');
-  const message = view => view.status === 'complete'
-    ? 'New nodes and inputs are complete. Review the exact Python change, then save.'
-    : `Draft ${view.status}: ${view.diagnostics.join(' ')} Connect the red inputs on the canvas or in Selection; Review stays blocked until then.`;
+  // One plain sentence; the located problems are listed by the page-bar problems chip.
+  const message = view => view.status === 'complete' ? 'New modules are complete. Save when ready.'
+    : 'Connect the inputs marked in red. The problems chip in the bar above lists them.';
 
   window.editorNodeDrafts = Object.freeze({active, key, project, bind, cancel, moves, summary, message});
 })();

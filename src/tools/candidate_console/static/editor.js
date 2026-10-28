@@ -147,9 +147,16 @@
   function diagnostic(items = []) {
     $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}${item.field_path ? ` at ${item.field_path.join('.')}` : ''}`).join('\n');
     // Server diagnostics only; draft problems carry node/field, source ones a line.
-    window.editorProblems.render($('problems'), items, {source: window.editorProblems.focusSource,
+    window.editorProblems.render($('problems'), items, {source: window.editorProblems.focusSource, describe: problemLabels,
       select: (nodeId, field) => { if (display?.definition.nodes.some(n => n.id === nodeId)) { selected = nodeId; render(); } window.editorProblems.focusField(nodeId, field); }});
   }
+  // Plain names for a located problem: the module's display name and the socket's connector name.
+  const problemLabels = (nodeId, field) => {
+    const item = display?.definition.nodes.find(value => value.id === nodeId);
+    const option = inventory.find(value => value.node === nodeId && (value.argument || 'request') === field);
+    return {module: item ? window.editorCapabilityPresentation.label(item.capability) : null,
+      connector: option ? window.editorContractPresentation.describe(option.socket_contract).name : null};
+  };
   function showConflict(value) {
     conflict = value; reviewed = null; controls();
     $('conflict').hidden = false; $('rebase').disabled = bindingConflict() || !value.document;
@@ -248,13 +255,13 @@
     try {
       const value = await api(`${encodeURIComponent(id)}/draft`, {expected_sha256: sha, draft: {base_document: clone(graph), bindings: clone(bindings)}});
       if (!live()) return;
-      inspection = {key, status: value.inspection.status, diagnostics: value.inspection.diagnostics};
+      inspection = {key, status: value.inspection.status, diagnostics: value.inspection.diagnostics,
+        problems: value.inspection.problems || value.inspection.diagnostics.map(message => ({code: value.inspection.status, message}))};
       $('pending').textContent = pendingText();
       diagnostic(value.inspection.problems || value.inspection.diagnostics.map(message => ({code: value.inspection.status, message})));
       controls(); render();
-      status(value.inspection.status === 'complete'
-        ? 'Declaration valid; execution readiness is not checked. Review the exact Python changes before saving.'
-        : `${value.inspection.status}: ${value.inspection.diagnostics.join(' ')}`);
+      status(value.inspection.status === 'complete' ? 'Connections are complete. Save when ready.'
+        : 'Some required inputs are not connected. See the problems in the bar above.');
     } catch (error) {
       if (error.stale || !live()) return;
       if (hasSourceConflict(error) && error.value?.current) showConflict(error.value.current);
@@ -264,7 +271,15 @@
   function adoptDraftState(state, message) {
     // Undoing a Discard of typed Source text restores that text as dirty Source text.
     restore(state); sourceDirty = typeof state.sourceText === 'string'; $('source').value = sourceDirty ? state.sourceText : anchor.source;
-    diagnostic(); invalidate(); render(); inspectIfNeeded(); status(message);
+    invalidate(); render(); inspectIfNeeded(); rediagnose(); status(message);
+  }
+  // Problems of the restored state from its cached server inspection (undo/redo/discard);
+  // an uncached state is re-inspected by inspectIfNeeded and diagnosed on its response.
+  function rediagnose() {
+    const view = hasNodeDraft() && !sourceDirty ? nodeView() : null;
+    if (view) diagnostic(view.problems.length ? view.problems : view.diagnostics.map(message => ({code: view.status, message})));
+    else if (hasBindings() && !sourceDirty && inspection?.key === bindingKey()) diagnostic(inspection.problems || []);
+    else diagnostic();
   }
   function step(direction) {
     if (draft && draftsPending()) { status('Correct or reset the invalid field first; undo and redo would drop its typed text.'); return; }
@@ -374,8 +389,9 @@
         (mutate, label) => { if (graph === capturedGraph) { mutate(graph); changed(label, `advice:${item.id}`); } });
       node('h3', 'Inputs', $('inspector'));
       for (const option of inventory.filter(entry => entry.node === item.id)) {
-        const state = option.bound ? 'bound' : option.required ? 'Required · unbound' : 'Optional · unbound';
-        const label = node('label', `${option.argument || 'Request'} · ${window.editorContractPresentation.describe(option.socket_contract).name} · ${state}`, $('inspector'));
+        // "[swatch] Connector name · Required" (spec §8.2); the field name is advanced detail.
+        const state = `${option.required ? 'Required' : 'Optional'}${option.bound ? '' : ' · Not connected'}`;
+        const label = window.editorInspectorRows.label($('inspector'), option, state);
         const select = document.createElement('select'); label.append(select);
         label.classList.toggle('field-problem', option.required && !option.bound);
         if (!option.bound) {

@@ -120,6 +120,7 @@
     element('h3', 'Add capability', host);
     const toggle = element('button', 'Add capability', host, 'palette-toggle');
     toggle.type = 'button'; toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', 'editor-palette-body');
+    toggle.prepend(window.consoleIcons?.make('plus', 20) || '');
     toggle.addEventListener('click', () => toggle.setAttribute('aria-expanded', String(host.classList.toggle('open'))));
     const body = element('div', '', host, 'palette-body'); body.id = 'editor-palette-body';
     const search = element('input', '', body, 'palette-search');

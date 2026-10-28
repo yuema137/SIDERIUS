@@ -6,6 +6,9 @@
   // kept per opened graph and never reaches a document, so viewing never changes source.
   let view = {key: null, scale: 1, fitPending: false, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
   const CARD_GAP = {x: 135, y: 90};
+  // Fit to view never goes below this zoom (text stays >= ~9px at the 12px label size); larger
+  // graphs scroll inside the viewport. Manual zoom out still reaches 40%.
+  const FIT_MIN = 0.75;
   const geometry = window.editorCircuitGeometry;
   const presentation = window.editorCapabilityPresentation;
   const contracts = window.editorContractPresentation;
@@ -39,14 +42,14 @@
       const compatible = source && option?.choices.some(value => same(value.source, source));
       input.classList.toggle('compatible', !!compatible);
       input.classList.toggle('incompatible', !!source && !compatible);
-      input.title = source ? (compatible ? 'Type-compatible source. Click to rebind; review before saving.' : refusal(source, input.dataset.node, option?.argument)) : 'Select an output socket first.';
+      if (source && !compatible) input.dataset.refusal = refusal(source, input.dataset.node, option?.argument); else delete input.dataset.refusal;
     }
     for (const output of host.querySelectorAll('[data-output]')) output.setAttribute('aria-pressed', String(output.dataset.node === pending?.node));
     for (const group of host.querySelectorAll('.circuit-optional')) {
       const compatible = [...group.querySelectorAll('[data-input]')].filter(input => input.classList.contains('compatible')).length;
       const summary = group.querySelector('summary');
       summary.classList.toggle('compatible', compatible > 0);
-      summary.title = compatible ? `${compatible} compatible optional input${compatible === 1 ? '' : 's'}; expand to connect.` : '';
+      summary.dataset.compatible = String(compatible);
     }
     const disconnect = host.querySelector('.circuit-disconnect');
     if (disconnect) { disconnect.hidden = !selectedWire; disconnect.disabled = !projection.enabled || projection.allowBindingChange === false; }
@@ -128,7 +131,7 @@
     view.fitPending = false;
     const content = sizeWorld(), max = parseFloat(getComputedStyle(viewport).maxHeight);
     const available = {width: viewport.clientWidth - 2, height: (Number.isFinite(max) ? max : viewport.clientHeight) - 2};
-    applyScale(geometry.fitScale(content, available));
+    applyScale(geometry.fitScale(content, available, FIT_MIN));
     viewport.scrollLeft = 0; viewport.scrollTop = 0; updateVisibility();
   }
   function draw() {
@@ -169,41 +172,34 @@
     }
     highlight(); updateVisibility();
   }
+  // "Connects with" for the socket tooltip: capability names of the server-offered sources
+  // (an input) or of the inputs that offer this result (an output). Server data only.
+  const capabilityOf = id => presentation.label(projection.document?.definition.nodes.find(item => item.id === id)?.capability);
+  function connectsWith(nodeId, metadata) {
+    const names = metadata
+      ? metadata.choices.map(choice => choice.source.kind === 'result' ? capabilityOf(choice.source.node) : 'an external input')
+      : projection.inventory.filter(item => item.choices.some(choice => choice.source.kind === 'result' && choice.source.node === nodeId)).map(item => capabilityOf(item.node));
+    return [...new Set(names)].join(', ');
+  }
   function port(parent, node, argument, output, metadata = null) {
     const snapshot = projection;
-    const label = output ? 'result' : argument || 'request';
-    const button = element('button', label, parent, `circuit-port ${output ? 'circuit-output' : 'circuit-input'}`);
-    button.type = 'button'; button.dataset.node = node.id;
-    if (metadata) {
-      const state = metadata.bound ? 'bound' : metadata.required ? 'required, unbound' : 'optional, unbound';
-      const contract = metadata.socket_contract;
-      const mapping = metadata.protocol_mapping ? `; mapped by ${metadata.protocol_mapping.owner} (${metadata.protocol_mapping.id}) to ${metadata.protocol_mapping.output_contract.id}` : '';
-      const offered = metadata.choices.length ? metadata.choices.map(value => `${value.label} [${value.contract.id}]`).join('; ') : 'no connections offered by the server';
-      const detail = `${node.id}.${label} input; ${state}; contract ${contract.id}: ${contract.native_type}${mapping}; server-offered connections: ${offered}`;
-      button.title = detail;
-      button.setAttribute('aria-label', detail);
-      element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
-      const type = element('span', contracts.describe(contract).name, button, 'circuit-port-contract');
-      type.setAttribute('aria-hidden', 'true');
-      element('span', metadata.bound ? (metadata.required ? 'required' : 'optional') : `${metadata.required ? 'Required' : 'Optional'} · unbound`, button,
-        `circuit-port-requirement${metadata.bound ? '' : ' circuit-port-unbound-label'}`);
-      button.classList.toggle('is-unbound', !metadata.bound);
+    // The visible label is the connector (schema) name; field names live in the advanced Mapping details.
+    const button = element('button', '', parent, `circuit-port ${output ? 'circuit-output' : 'circuit-input'}`);
+    button.type = 'button'; button.dataset.node = node.id; button.dataset.tip = 'port';
+    const contract = metadata ? metadata.socket_contract : projection.inventory.find(value => value.node === node.id)?.node_output_contract;
+    button.dataset.tipConnects = connectsWith(node.id, metadata);
+    if (contract) {
+      element('span', contracts.describe(contract).name, button, 'circuit-port-contract').setAttribute('aria-hidden', 'true');
       button.dataset.contract = contract.id;
-      button.dataset.required = String(metadata.required);
-      contracts.decorate(button, contract, metadata.required);
-    } else {
-      const contract = projection.inventory.find(value => value.node === node.id)?.node_output_contract;
-      const detail = `${node.id}.result output${contract ? `; contract ${contract.id}: ${contract.native_type}` : ''}`;
-      button.title = detail;
-      button.setAttribute('aria-label', detail);
-      element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
-      if (contract) {
-        const type = element('span', contracts.describe(contract).name, button, 'circuit-port-contract');
-        type.setAttribute('aria-hidden', 'true');
-        button.dataset.contract = contract.id;
-        contracts.decorate(button, contract);
-      }
+      contracts.decorate(button, contract, metadata ? metadata.required : true);
     }
+    if (metadata) {
+      const state = metadata.bound ? (metadata.required ? 'Required' : 'Optional') : `${metadata.required ? 'Required' : 'Optional'} · Not connected`;
+      element('span', state, button, `circuit-port-requirement${metadata.bound ? '' : ' circuit-port-unbound-label'}`);
+      button.setAttribute('aria-label', `${state.replace(' · ', ', ')}.`);
+      button.classList.toggle('is-unbound', !metadata.bound);
+      button.dataset.required = String(metadata.required);
+    } else button.setAttribute('aria-label', 'Output.');
     if (output) { button.dataset.output = ''; button.setAttribute('aria-pressed', 'false'); }
     else { button.dataset.input = ''; button.dataset.argument = argument || ''; }
     if (button.dataset.contract) contracts.direction(button, button.dataset.contract, output);
@@ -231,6 +227,13 @@
     if (icon && window.consoleIcons) value.prepend(window.consoleIcons.make(icon));
     value.addEventListener('click', onClick); return value;
   };
+  // Icon-only canvas control (canvas-study V2): the name is the accessible label and a
+  // visually hidden text; the shared tooltip shows it on hover/focus.
+  const iconButton = (parent, label, id, onClick, icon) => {
+    const value = button(parent, '', id, onClick, icon);
+    value.classList.add('icon-button'); value.setAttribute('aria-label', label); value.dataset.tipLabel = label;
+    element('span', label, value, 'sr-only'); return value;
+  };
   // Tidy up: one undoable layout edit (editor.js move) on the 16px grid; the view refits.
   function tidyUp() {
     if (!projection?.document || !projection.enabled || projection.allowMove === false) return;
@@ -245,19 +248,17 @@
   function toolbar(parent, value) {
     const bar = element('div', '', parent, 'circuit-toolbar');
     bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Canvas view');
-    button(bar, 'Fit to view', 'circuit-fit', fit, 'scan').title = 'Scale the view so every capability is visible. Saved positions are unchanged.';
-    button(bar, '−', 'circuit-zoom-out', () => applyScale(Math.max(0.4, Math.round((view.scale - 0.1) * 10) / 10))).setAttribute('aria-label', 'Zoom out');
+    iconButton(bar, 'Zoom out', 'circuit-zoom-out', () => applyScale(Math.max(0.4, Math.round((view.scale - 0.1) * 10) / 10)), 'zoom-out');
     const zoom = element('span', `${Math.round(view.scale * 100)} %`, bar, 'circuit-zoom'); zoom.setAttribute('aria-label', 'Canvas zoom');
-    button(bar, '+', 'circuit-zoom-in', () => applyScale(Math.min(1, Math.round((view.scale + 0.1) * 10) / 10))).setAttribute('aria-label', 'Zoom in');
-    button(bar, 'Actual size', 'circuit-zoom-reset', () => applyScale(1));
-    const arrange = button(bar, view.arranged ? 'Show saved layout' : 'Arrange view', 'circuit-arrange', () => {
+    iconButton(bar, 'Zoom in', 'circuit-zoom-in', () => applyScale(Math.min(1, Math.round((view.scale + 0.1) * 10) / 10)), 'zoom-in');
+    iconButton(bar, 'Actual size', 'circuit-zoom-reset', () => applyScale(1), 'maximize');
+    iconButton(bar, 'Fit to view', 'circuit-fit', fit, 'scan');
+    const arrange = iconButton(bar, view.arranged ? 'Show saved layout' : 'Arrange view (display only)', 'circuit-arrange', () => {
       view.arranged = !view.arranged; view.fitPending = true; view.scroll = null; rerender();
-    });
+    }, 'workflow');
     arrange.setAttribute('aria-pressed', String(view.arranged));
-    arrange.title = 'Display a non-overlapping layout derived from the connections. Display only: saved positions change only if you then move a card, review and save.';
     arrange.disabled = !value.document;
-    const tidy = button(bar, 'Tidy up', 'circuit-tidy', tidyUp, 'layout-grid');
-    tidy.title = 'Line the modules up left to right in pipeline order. One undoable edit; save to keep it.';
+    const tidy = iconButton(bar, 'Tidy up', 'circuit-tidy', tidyUp, 'layout-grid');
     tidy.disabled = !value.document || !value.enabled || value.allowMove === false;
     const note = element('p', '', parent, 'circuit-view-note'); note.setAttribute('aria-live', 'polite');
   }
@@ -341,12 +342,13 @@
         element('dt', 'Mapped input contract', mappingList); element('dd', protocolMapping.output_contract.id, mappingList);
       }
       const options = value.inventory.filter(item => item.node === node.id);
-      // Required and bound inputs always show; optional unbound ones fold into one expandable row.
-      const folded = options.filter(option => !option.required && !option.bound);
+      // Required inputs and optional inputs fed by a wire always show; every other optional
+      // input (not connected, or fed by an external input) folds into one "+N optional" row.
+      const folded = options.filter(option => !option.required && option.source?.kind !== 'result');
       let group = null;
       if (folded.length) {
         group = document.createElement('details'); group.className = 'circuit-optional'; group.dataset.node = node.id;
-        const summary = element('summary', `${folded.length} optional input${folded.length === 1 ? '' : 's'}`, group);
+        const summary = element('summary', `+${folded.length} optional`, group);
         summary.id = `circuit-optional-${node.id}`;
         group.open = view.expanded.has(node.id);
         group.addEventListener('toggle', () => {

@@ -35,7 +35,8 @@
     // Problems chip in the page bar mirrors the count editor-problems.js renders.
     const problems = $('editor-problems'), count = problems.hidden ? 0 : problems.querySelectorAll('.editor-problem').length;
     $('problems-chip').hidden = !count;
-    $('problems-chip').textContent = `${count} problem${count === 1 ? '' : 's'}`;
+    $('problems-chip').replaceChildren(window.consoleIcons?.make('circle-alert', 16) || '', `${count} problem${count === 1 ? '' : 's'}`);
+    if (!count) setProblemsOpen(false);
     const view = window.consoleNavigation.view;
     const current = {workflow: opened ? 'workflow' : 'task', run: 'run', monitor: 'results'}[view] || null;
     const done = {task: opened, workflow: ready};
@@ -55,8 +56,19 @@
     window.addEventListener('console-view', () => requestAnimationFrame(() => window.editorTemplates.open()), {once: true});
     location.hash = 'workflow';
   });
+  // Problems popover (spec §9): opens under the chip, never reflows the canvas.
+  function setProblemsOpen(open) {
+    const chip = $('problems-chip'), box = $('editor-problems');
+    box.classList.toggle('open', open); chip.setAttribute('aria-expanded', String(open));
+    if (open) box.style.left = Math.max(0, chip.offsetLeft) + 'px';
+  }
   $('problems-chip').addEventListener('click', () => {
-    $('editor-problems').scrollIntoView({block: 'nearest'}); $('editor-problems').querySelector('.editor-problem')?.focus();
+    const open = !$('editor-problems').classList.contains('open'); setProblemsOpen(open);
+    if (open) $('editor-problems').querySelector('.editor-problem')?.focus();
+  });
+  $('editor-problems').addEventListener('keydown', event => { if (event.key === 'Escape') { setProblemsOpen(false); $('problems-chip').focus(); } });
+  document.addEventListener('pointerdown', event => {
+    if ($('editor-problems').classList.contains('open') && !$('editor-problems').contains(event.target) && !$('problems-chip').contains(event.target)) setProblemsOpen(false);
   });
   new MutationObserver(render).observe($('editor-problems'), {attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true});
   for (const name of ['workflow-editor-state', 'new-run-gate', 'console-view', 'console-onboarding']) window.addEventListener(name, render);

@@ -54,7 +54,7 @@ try {
   await entry.click();
   await page.locator('#circuit-node-validation').waitFor();
   await waitUntil(async () => (await pendingText()).includes('Pending new node validation · incomplete'), 'incomplete draft');
-  assert.match(await page.locator('#circuit-input-validation-output').textContent(), /Required · unbound/);
+  assert.match(await page.locator('#circuit-input-validation-output').textContent(), /Required · Not connected/);
   assert.equal(await entry.getAttribute('aria-disabled'), 'false', 'Palette stays active while a new node is pending');
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
   assert.equal(await page.locator('#editor-save').isDisabled(), true);

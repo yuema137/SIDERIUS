@@ -67,7 +67,7 @@ try {
   assert.ok(await page.locator('.circuit-wire.selected').count());
   await page.locator('.circuit-disconnect').click();
   await waitUntil(async () => (await page.locator('#editor-pending').textContent()).includes('incomplete'));
-  assert.match(await input.textContent(), /Required · unbound/);
+  assert.match(await input.textContent(), /Required · Not connected/);
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
   assert.equal(await page.evaluate(() => window.workflowEditor.state.dirty), true);
@@ -123,7 +123,7 @@ try {
   assert.doesNotMatch(await readFile(metadata.source, 'utf8'), /llm_provider/);
   await page.locator('#editor-refresh').click();
   await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
-  assert.match(await page.locator('#editor-inspector').textContent(), /llm_provider.*Optional · unbound/);
+  assert.match(await page.locator('#editor-inspector .inspector-input', {has: page.locator('code', {hasText: /^llm_provider$/})}).textContent(), /Optional · Not connected/);
   assert.deepEqual(faults, []);
   console.log('PASS SVG pointer selection/button disconnect, keyboard Delete, required incomplete gate, stale-base refusal/discard, optional disconnect, valid review/save and disk reload.');
 } finally {

@@ -117,6 +117,7 @@ try {
   assert.equal(await legend.locator('.circuit-contract-legend-direction .circuit-port-direction').count(), 2, 'legend explains both arrows');
   assert.match(await legend.locator('li[data-contract="proposal.output"]').getAttribute('title'), /model specification/, 'server description is the row tooltip');
   assert.ok(await legend.locator('li[data-contract="proposal.output"] .circuit-contract-swatch[data-contract-shape="square"]').count());
+  await legend.locator('summary').click(); // the legend is a popover; close it as a user would
 
   // C1 hover preview: compatible inputs highlight, incompatible ones dim, nothing is selected.
   await page.locator('#circuit-fit').click();
@@ -132,7 +133,8 @@ try {
   assert.ok(Number(dim.socket) < 0.5, 'incompatible input dims its socket');
   assert.equal(dim.pill, 'dashed', 'incompatible input dashes its contract pill');
   assert.equal(dim.port, '1', 'incompatible label text is not faded below 4.5:1 (port stays clickable)');
-  assert.match(await dimmed.getAttribute('title'), /expects implementation\.output .*provides proposal\.output/);
+  assert.match(await dimmed.getAttribute('data-refusal'), /expects implementation\.output .*provides proposal\.output/);
+  assert.equal(await dimmed.getAttribute('title'), null, 'No native title tooltip on sockets (spec §6.2)');
   assert.equal(await output('alternate').getAttribute('aria-pressed'), 'false', 'hover does not select');
   await page.mouse.move(2, 2);
   assert.equal(await page.locator('.circuit-port.compatible, .circuit-port.incompatible').count(), 0, 'leaving the output clears the preview');
@@ -161,6 +163,18 @@ try {
   // As a user would: bring the canvas (and the drop target) into the window before dragging.
   await page.locator('.circuit-viewport').scrollIntoViewIfNeeded();
   await input('build_left', 'output').scrollIntoViewIfNeeded();
+  // Fit stops at 75%; zoom out (as a user would) until both drag ends are inside the canvas.
+  const bothInside = () => page.evaluate(() => {
+    const frame = document.querySelector('.circuit-viewport').getBoundingClientRect();
+    return ['#circuit-output-alternate', '#circuit-input-build_left-output'].every(selector => {
+      const box = document.querySelector(selector).getBoundingClientRect(), x = box.left + box.width / 2, y = box.top + box.height / 2;
+      return x > frame.left && x < frame.right && y > frame.top && y < frame.bottom;
+    });
+  });
+  for (let i = 0; i < 6 && !(await bothInside()); i++) {
+    await page.locator('#circuit-zoom-out').click();
+    await page.locator('.circuit-viewport').evaluate(viewport => { viewport.scrollTop = 0; viewport.scrollLeft = 0; });
+  }
   const from = await output('alternate').boundingBox(), to = await input('build_left', 'output').boundingBox();
   // A drop outside the window hits nothing (elementFromPoint is null): fail clearly instead of timing out.
   const windowSize = await page.evaluate(() => ({width: innerWidth, height: innerHeight}));

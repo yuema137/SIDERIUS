@@ -66,7 +66,7 @@ try {
   assert.equal(await page.locator('#editor-advanced > summary').textContent(), 'Advanced source');
   assert.equal(await page.locator('#workflow-details > summary').textContent(), 'Details');
   assert.equal(await page.locator('#workflow-details').getByText('Cooperating API writers', {exact: false}).isVisible(), false);
-  assert.deepEqual(await page.locator('.workflow-actions button:not(.secondary):not(.status-chip)').evaluateAll(items => items.map(item => item.id)), ['editor-review']);
+  assert.deepEqual(await page.locator('.workflow-actions button:not(.secondary):not(.status-chip):not(.editor-problem)').evaluateAll(items => items.map(item => item.id)), ['editor-review']);
   assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'The save confirmation step opens only after Save');
 
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();

@@ -89,10 +89,9 @@
     if (sends) port.append(mark); else port.prepend(mark);
     port.dataset.contractDirection = word;
     const phrase = `${word.charAt(0).toUpperCase() + word.slice(1)} ${describe(contract).name}`;
-    for (const attribute of ['aria-label', 'title']) {
-      const current = port.getAttribute(attribute);
-      port.setAttribute(attribute, current ? `${phrase}. ${current}` : phrase);
-    }
+    // Accessible name only: no `title` (spec §6.2); the socket tooltip is editor-circuit-tooltip.js.
+    const current = port.getAttribute('aria-label');
+    port.setAttribute('aria-label', current ? `${phrase}. ${current}` : phrase);
     return word;
   }
   // Legend of the contracts present in the opened graph (input sockets and results).
@@ -101,14 +100,16 @@
     for (const item of inventory) { ids.add(learn(item.socket_contract)); ids.add(learn(item.node_output_contract)); }
     const box = document.createElement('details'); box.className = 'circuit-contract-legend';
     text('summary', `Port types (${ids.size})`, box);
-    const note = text('p', 'Colour, shape and name identify the data type (schema) a socket carries; the same type has the same name everywhere. A wire can join only an output and an input with the same contract; the server decides which connections are offered. Filled socket: output or required input. Hollow socket: optional input. ', box, 'circuit-contract-legend-note');
+    // Opened, the legend is a popover above its bottom-left chip (spec K14): it never pushes the canvas.
+    const pop = text('div', '', box, 'circuit-contract-legend-popover');
+    const note = text('p', 'Colour, shape and name identify the data type (schema) a socket carries; the same type has the same name everywhere. A wire can join only an output and an input with the same contract; the server decides which connections are offered. Filled socket: output or required input. Hollow socket: optional input. ', pop, 'circuit-contract-legend-note');
     // Direction key inline in the note, so the open legend stays as short as before.
     const key = text('span', '', note, 'circuit-contract-legend-direction');
     text('span', '→', key, 'circuit-port-direction').setAttribute('aria-hidden', 'true');
     text('span', ' before a label: the module receives that type; ', key);
     text('span', '→', key, 'circuit-port-direction').setAttribute('aria-hidden', 'true');
     text('span', ' after a label: the module sends it.', key);
-    const list = text('ul', '', box, 'circuit-contract-legend-list');
+    const list = text('ul', '', pop, 'circuit-contract-legend-list');
     for (const id of [...ids].sort()) {
       const row = text('li', '', list); row.dataset.contract = id;
       // The description is the row tooltip: rows stay one compact line each.
