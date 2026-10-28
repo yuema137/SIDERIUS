@@ -1,5 +1,6 @@
 """Fixed ``siderius_workspace`` layout: derivation parity, missing sources and ``init`` safety."""
 
+import hashlib
 import json
 import os
 import re
@@ -9,13 +10,17 @@ from pathlib import Path
 
 import pytest
 
-from tools.candidate_console import ConsoleConfig
+from tests.unit.tools.candidate_console.test_editor import editor_config
+from tests.unit.tools.candidate_console.test_native_chain import chain, native_config
+from tools.candidate_console import ConsoleConfig, RecordedExampleChoice
 from tools.candidate_console.config import load_config, load_console
 from tools.candidate_console.workspace import (
+    WorkspaceRefused,
     init_workspace,
     resolve_console,
     workspace_readiness,
 )
+from workflows.definition import TaskBinding
 
 REPO = Path(__file__).resolve().parents[4]
 CONTRACT = REPO / "src/tools/candidate_console/console-contract.md"
@@ -60,6 +65,39 @@ def test_explicit_console_files_resolve_unchanged(source, console_config, tmp_pa
         path = tmp_path / "console.json"
         path.write_bytes(payload)
         assert load_console(str(path)).config == load_config(str(path)) == console_config
+
+
+def _variant(name: str, request, console_config, tmp_path) -> ConsoleConfig:
+    task = console_config.tasks[0]
+    if name == "editor":
+        return request.getfixturevalue("editor_config")
+    if name == "pinned_task":
+        pin = TaskBinding(
+            package_id="synthetic",
+            revision="snapshot-one",
+            task_data_path_id="synthetic-path",
+            semantic_fingerprint="a" * 64,
+        )
+        update = {"task_revision": pin, "reusable_runs_root": task.preparation_root}
+        return console_config.model_copy(update={"tasks": (task.model_copy(update=update),)})
+    if name == "credential_and_recorded":
+        example = RecordedExampleChoice(
+            example_id="x", label="X", workspace=str(tmp_path / "w"), expected_run_id="a" * 32
+        )
+        return console_config.model_copy(
+            update={"credential_file": str(tmp_path / "cred"), "recorded_examples": (example,)}
+        )
+    record, _ = request.getfixturevalue("chain")
+    return native_config(console_config, record)
+
+
+@pytest.mark.parametrize("name", ["editor", "pinned_task", "credential_and_recorded", "native"])
+def test_other_console_shapes_resolve_unchanged(name, request, console_config, tmp_path):
+    """Defect: the generated file schema drops or rewrites a nested model or optional field (P1)."""
+    config = _variant(name, request, console_config, tmp_path)
+    payload = config.model_dump_json().encode()
+    expected = ConsoleConfig.model_validate_json(payload)
+    assert resolve_console(payload).config.model_dump_json() == expected.model_dump_json()
 
 
 def test_explicit_fields_win_over_the_workspace_layout(console_config, tmp_path):
@@ -128,7 +166,10 @@ def test_init_output_passes_check_with_owner_only_folders(tmp_path, monkeypatch,
     assert not (workspace / "exported_configs").exists()  # created lazily by its writer
     assert _mode(workspace / "settings" / "console-token") == 0o600
     (profile,) = (workspace / "library" / "llm").iterdir()
-    assert profile.read_bytes() == (REPO / "configs/llm/default.json").read_bytes()
+    default = (REPO / "configs/llm/default.json").read_bytes()
+    assert profile.read_bytes() == default
+    assert profile.name == f"default-{hashlib.sha256(default).hexdigest()[:12]}.json"
+    assert _mode(profile) == 0o600
     assert _main(monkeypatch, capsys, "check", "--config", str(config))[0] == 0
     resolved = load_console(str(config))
     readiness = workspace_readiness(resolved)
@@ -146,9 +187,62 @@ def test_init_rerun_never_overwrites_console_json_token_or_library(tmp_path):
     config.write_text(json.dumps(edited))
     token = workspace / "settings" / "console-token"
     before = token.read_bytes()
+    (profile,) = (workspace / "library" / "llm").iterdir()
+    library = profile.stat()
     init_workspace(str(tmp_path))
     assert json.loads(config.read_text())["port"] == 8741
     assert token.read_bytes() == before
+    after = profile.stat()
+    assert (after.st_ino, after.st_mtime_ns) == (library.st_ino, library.st_mtime_ns)
+
+    profile.write_text("{}")  # a library file is write-once: different bytes are refused
+    with pytest.raises(WorkspaceRefused, match="library default LLM profile exists"):
+        init_workspace(str(tmp_path))
+    assert profile.read_text() == "{}"
+
+
+@pytest.mark.parametrize("target", ["console", "library"])
+def test_init_names_a_symlinked_file_it_refuses(target, tmp_path, monkeypatch, capsys):
+    """Defect: a refused file is reported as a bad --workspace, or is followed."""
+    config = init_workspace(str(tmp_path))
+    workspace = config.parent.parent
+    (profile,) = (workspace / "library" / "llm").iterdir()
+    victim = config if target == "console" else profile
+    real = tmp_path / "real"
+    victim.rename(real)
+    victim.symlink_to(real)
+    code, _, err = _main(monkeypatch, capsys, "init", "--workspace", str(tmp_path))
+    named = "settings/console.json" if target == "console" else "library default LLM profile"
+    assert code == 2 and named in err and "not a symlink" in err
+    assert "--workspace must be" not in err
+    assert victim.is_symlink()
+
+
+def test_init_rerun_names_a_task_field_without_source(
+    console_config, tmp_path, monkeypatch, capsys
+):
+    """Defect: an incomplete console.json on re-run is misreported as a bad --workspace."""
+    config = init_workspace(str(tmp_path))
+    skeleton = json.loads(config.read_text())
+    skeleton["tasks"] = [_task_without_locations(console_config, "llm_config_file")]
+    config.write_text(json.dumps(skeleton))
+    code, _, err = _main(monkeypatch, capsys, "init", "--workspace", str(tmp_path))
+    assert code == 2 and "task synthetic needs llm_config_file" in err
+    assert "--workspace must be" not in err
+
+
+def test_umask_does_not_weaken_or_disable_init(tmp_path):
+    """Defect: a 0777 umask leaves mode-000 folders that init itself cannot open."""
+    previous = os.umask(0o777)
+    try:
+        config = init_workspace(str(tmp_path))
+    finally:
+        os.umask(previous)
+    workspace = config.parent.parent
+    for name in ("", "settings", "library/llm", "data"):
+        assert _mode(workspace / name) == 0o700
+    assert _mode(workspace / "settings" / "console-token") == 0o600
+    assert load_console(str(config)).config.port == 8740
 
 
 @pytest.mark.parametrize("target", ["parent", "child"])
@@ -222,7 +316,10 @@ def test_derived_task_roots_come_from_init_and_satisfy_store_scopes(
     assert code == 2
     assert "preparations/synthetic: missing" in err and "init --workspace" in err
 
-    init_workspace(str(parent))  # creates output roots for configured tasks
+    # Re-running init creates output roots for configured tasks, then reports the
+    # task data it never creates (README step 2: expected status 2).
+    code, _, err = _main(monkeypatch, capsys, "init", "--workspace", str(parent))
+    assert code == 2 and "Workspace data/synthetic: missing" in err
     for name in ("preparations", "candidates", "runs"):
         assert _mode(workspace / name / "synthetic") == 0o700
     assert not (workspace / "data" / "synthetic").exists()  # task data is never created
@@ -251,6 +348,14 @@ def test_readiness_reports_symlink_and_file_children_by_name(tmp_path):
     status = {entry.name: entry.status for entry in readiness.entries}
     assert status["projects"] == "symlink"
     assert status["exported_configs"] == "not_directory"
+
+    (workspace / "library").chmod(0o000)  # refused, not absent
+    try:
+        refused = workspace_readiness(resolved)
+    finally:
+        (workspace / "library").chmod(0o700)
+    assert refused is not None
+    assert {e.name: e.status for e in refused.entries}["library/llm"] == "unreadable"
     assert all(str(tmp_path) not in entry.name for entry in readiness.entries)
 
 

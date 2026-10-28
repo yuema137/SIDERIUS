@@ -38,17 +38,28 @@ even when using the default models.
    | `settings/` | `console.json`, the access token file `console-token` |
    | `data/` | one folder per task, `data/<task_id>/`, that you fill with task data |
    | `operations/`, `preparations/`, `candidates/`, `runs/` | console state and run outputs |
-   | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile here |
+   | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile as `library/llm/default-<12 hex digits>.json` |
    | `projects/` | a conventional place for workflow editor projects |
 
-   It prints the `console.json` path on success. The token unlocks the console;
+   On success it prints two lines, the configuration file and the browser
+   address with the token file:
+
+   ```text
+   Workspace configuration: /absolute/project/siderius_workspace/settings/console.json
+   Console: http://127.0.0.1:8740; access token file: /absolute/project/siderius_workspace/settings/console-token
+   ```
+
+   The token unlocks the console;
    it is separate from any model provider API key. Follow [Credentials](#credentials)
    below to bind provider keys before Launch.
 
    `init` is safe to run again. It only creates what is missing; it never
    deletes, replaces or follows a symlink. It refuses a folder that is a symlink,
    belongs to another user, or is writable by your group or by others (for
-   example a folder someone else made in `/tmp`), and says which one.
+   example a folder someone else made in `/tmp`). It also refuses a
+   `settings/console.json` or library file that is a symlink or has unexpected
+   content. Each refusal names the folder or file, exits with status 2 and
+   changes nothing that already exists.
 2. Add your task to `siderius_workspace/settings/console.json`. A task needs its
    `task_id`, `label`, `task_manifest`, `llm_config_file`, resource policy and time
    limits; the [configuration example](console-contract.md#configuration) shows
@@ -58,7 +69,11 @@ even when using the default models.
    value you write yourself is used instead. Save an explicit LLM profile; the
    standard one is in `library/llm/`. Then run `init` again with the same
    `--workspace`: it creates the task's output folders, but never
-   `data/<task_id>/`. Put the task data there yourself. Browser users can change
+   `data/<task_id>/`. Until you put the task data there, this run ends with
+   status 2 and lists `Workspace data/<task_id>: missing`; that is expected.
+   Create `data/<task_id>/`, add the data, and run `check` (step 3). If
+   `console.json` is missing a required field, `init` names it instead, for
+   example `task my-task needs llm_config_file`. Browser users can change
    the native run name and three advice fields.
 
    A `console.json` without `workspace_root` still works as before: write every

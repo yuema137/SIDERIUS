@@ -19,7 +19,9 @@ class CredentialReadiness(PreviewModel):
 
 
 # Task data (created_by="operator") reports presence only, never ownership.
-WorkspaceStatus = Literal["present", "missing", "not_directory", "symlink", "not_owner"]
+WorkspaceStatus = Literal[
+    "present", "missing", "not_directory", "symlink", "not_owner", "unreadable"
+]
 
 
 class WorkspaceEntry(PreviewModel):
