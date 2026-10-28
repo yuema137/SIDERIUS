@@ -41,7 +41,7 @@ try {
   page.on('pageerror', error => faults.push(error.message));
   await page.goto(origin + '/#workflow');
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
-  await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
   assert.equal(await page.locator('.editor-node').count(), 8);
   await page.locator('[data-node="alternate"].editor-node').click();
   assert.match(await page.locator('#editor-edges').textContent(), /alternate.result → build_other.output/);
@@ -50,14 +50,14 @@ try {
   assert.match(before, /native-proposal-families\/v1/);
   await page.locator('#editor-source').fill(before.replace('Prefer a small interpretable baseline', 'Preserve the explicit family advice'));
   await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
-  await page.locator('#editor-status').filter({hasText: 'Saved reviewed bytes'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Saved as "'}).waitFor();
   const inspect = () => JSON.parse(execFileSync(process.env.EDITOR_PYTHON, ['-c', 'import sys; from pathlib import Path; from workflows.definition import parse_workflow_source; print(parse_workflow_source(Path(sys.argv[1]).read_text()).model_dump_json())', metadata.source], {cwd: checkout, encoding: 'utf8'}));
   const saved = inspect();
   assert.equal(saved.execution_profile, 'native-proposal-families/v1');
   assert.equal(saved.definition.nodes.length, 8);
   assert.equal(saved.preparation_options.proposal_advice, 'Preserve the explicit family advice');
   await page.locator('#editor-refresh').click();
-  await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
   assert.equal(await page.locator('.editor-node').count(), 8);
   assert.match(await page.locator('#editor-source').inputValue(), /native-proposal-families\/v1/);
   await page.locator('#workflow-next-run').click(); await page.locator('#view-run').waitFor(); // Saved version hands off to Run.

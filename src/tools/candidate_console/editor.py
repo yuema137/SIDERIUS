@@ -74,7 +74,9 @@ def editor_router(
             raise HTTPException(404)
         return services[project_id]
 
-    def perform(action: Callable[[], BaseModel]) -> BaseModel | JSONResponse:
+    def perform(
+        action: Callable[[], BaseModel], *, writing: bool = False
+    ) -> BaseModel | JSONResponse:
         try:
             return action()
         except AuthoringError as error:
@@ -98,14 +100,15 @@ def editor_router(
                 },
             )
         except OSError:
+            # A read never claims anything about a proposal; a failed write says nothing was saved.
+            message = (
+                "Not saved: the project folder or its recovery copies could not be written"
+                if writing
+                else "The workflow file or its project folder is unavailable on disk"
+            )
             return JSONResponse(
                 status_code=409,
-                content={
-                    "error": {
-                        "code": "filesystem",
-                        "message": "configured source/recovery is unavailable; proposal remains unsaved",
-                    }
-                },
+                content={"error": {"code": "filesystem", "message": message}},
             )
 
     @router.get("/projects")
@@ -183,6 +186,8 @@ def editor_router(
     async def save(project_id: str, request: Request):
         service = selected(project_id)
         proposal = SaveRequest.model_validate_json(await request.body())
-        return await run_in_threadpool(perform, lambda: service.save(proposal))
+        return await run_in_threadpool(
+            lambda: perform(lambda: service.save(proposal), writing=True)
+        )
 
     return router

@@ -179,7 +179,7 @@
     return {state: {...clone(loaded), document}, conflicts};
   }
 
-  /** Undo/Redo/Discard buttons (secondary: Save stays the one primary action), dirty badge, page-title mark and keyboard shortcuts. */
+  /** Undo/Redo/Revert-to-saved buttons (secondary: Save stays the one primary action), dirty badge, page-title mark and keyboard shortcuts. */
   function mount({header, actions, undo, redo, discard, active}) {
     const button = (id, text) => {
       const element = document.createElement('button');
@@ -187,7 +187,9 @@
       actions.append(element); return element;
     };
     const undoButton = button('editor-undo', 'Undo'), redoButton = button('editor-redo', 'Redo');
-    const discardButton = button('editor-discard-draft', 'Discard changes');
+    // "Revert to saved" (red-team A-5): restores the saved version locally; "Reload from disk"
+    // (conflict card, advanced toolbar) is the only action that re-reads the file.
+    const discardButton = button('editor-discard-draft', 'Revert to saved');
     undoButton.setAttribute('aria-keyshortcuts', 'Control+Z');
     redoButton.setAttribute('aria-keyshortcuts', 'Control+Shift+Z Control+Y');
     undoButton.addEventListener('click', undo); redoButton.addEventListener('click', redo);

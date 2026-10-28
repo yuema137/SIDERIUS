@@ -53,7 +53,7 @@ try {
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => {if (request.method() === 'POST') requests.push(request.url());});
   await page.goto(origin + '/#workflow'); await connect();
-  await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
   assert.equal(requests.length, 0, 'Opening workflow must not prepare/review/launch');
   await page.locator('#editor-project').selectOption('disabled');
   // Prepared runs live on the Run page; the project is chosen on Workflow.

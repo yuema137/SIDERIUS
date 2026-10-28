@@ -37,7 +37,7 @@ try {
   await page.locator('#access-form button').click();
   const statusText = () => page.locator('#editor-status').textContent();
   const pendingText = () => page.locator('#editor-pending').textContent();
-  await waitUntil(async () => (await statusText()).includes('Opened supported'), 'open');
+  await waitUntil(async () => (await statusText()).includes('Opened '), 'open');
   const original = await readFile(metadata.source, 'utf8');
   assert.match(original, /# author note: keep me/);
 
@@ -74,7 +74,7 @@ try {
   assert.doesNotMatch(diff, /^-(?!--)/m, 'Adding a node only inserts lines');
   assert.match(await statusText(), /Adds 1 node\(s\) \(validation\)/);
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await statusText()).includes('Saved reviewed'), 'save add');
+  await waitUntil(async () => (await statusText()).includes('Saved as "'), 'save add');
   const added = await readFile(metadata.source, 'utf8');
   assert.match(added, /# author note: keep me/);
   assert.match(added, /# implement keeps its comment/);
@@ -108,7 +108,7 @@ try {
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()), 'review removal');
   assert.match(await statusText(), /Removes 1 node\(s\) \(validation\); all other source bytes are unchanged/);
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await statusText()).includes('Saved reviewed'), 'save removal');
+  await waitUntil(async () => (await statusText()).includes('Saved as "'), 'save removal');
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'add then remove is byte-identical');
 
   // Drag a palette entry onto the canvas, then cancel the draft without a request to review.

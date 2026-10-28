@@ -126,3 +126,17 @@ button[data-icon] { justify-content: center; }
 .circuit-port-contract { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Typed Python hidden with advanced tools off (red-team A-2). */
 .hidden-source { color: var(--warning); }
+
+/* Workflow identity (tour #18): version tag of the saved bytes and a dirty dot beside the name. */
+.version-tag { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 28px; max-width: 200px; padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--bg); color: var(--text); font-size: var(--font-label); font-weight: 600; white-space: nowrap; }
+.version-tag[hidden] { display: none; }
+.version-tag .version-tag-name { overflow: hidden; text-overflow: ellipsis; }
+.version-tag.unrecorded { color: var(--muted, var(--text)); font-weight: 500; }
+.dirty-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--warning); }
+.dirty-dot[hidden] { display: none; }
+/* Revert to saved keeps its visible label (never a second Undo icon). */
+.edit-actions .revert-button { min-height: 32px; padding: 0 var(--space-2); }
+.save-confirm .save-confirm-comments { flex: 1 0 100%; font-size: var(--font-help); }
+#editor-version-problem { flex: 1 0 100%; margin: 0; font-size: var(--font-help); }
+#editor-check-again { min-height: 28px; }
+#editor-conflict pre { max-height: 18rem; overflow: auto; }

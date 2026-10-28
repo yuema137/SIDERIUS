@@ -55,7 +55,7 @@ try {
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => {if (request.method() === 'POST') requests.push(request.url());});
   await page.goto(origin + '/#workflow'); await connect();
-  await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
   await page.locator('#new-run-task option[value="synthetic"]').waitFor({state: 'attached'});
   assert.equal(await page.locator('#new-run-task').inputValue(), '', 'No implicit first task');
   assert.equal(requests.length, 0);
@@ -96,11 +96,11 @@ try {
       assert.equal(typeof value === 'boolean' ? await input.isChecked() : Number(await input.inputValue()), value, name);
     }
     await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
-    await page.locator('#editor-status').filter({hasText: 'Saved reviewed bytes'}).waitFor();
+    await page.locator('#editor-status').filter({hasText: 'Saved as "'}).waitFor();
     const coded = (await readFile(metadata.source, 'utf8')).replace("'train_base_seed': 23", "'train_base_seed': 29");
     await writeFile(metadata.source, coded);
     await page.locator('#editor-refresh').click();
-    await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
+    await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
     assert.equal(await page.locator('[data-training="train_base_seed"]').inputValue(), '29');
     for (const [name, value] of Object.entries(editedTraining)) {
       const input = page.locator(`[data-training="${name}"]`);
@@ -118,7 +118,7 @@ try {
   assert.equal(await page.locator('#new-run-review').isDisabled(), true);
   await view('workflow');
   await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
-  await page.locator('#editor-status').filter({hasText: 'Saved reviewed bytes'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Saved as "'}).waitFor();
   await page.locator('#workflow-next-run').click(); await page.locator('#view-run').waitFor();
   assert.match(await page.locator('#run-source-state').textContent(), /ready to run/);
   let saved = await readFile(metadata.source);
@@ -145,7 +145,7 @@ try {
       await view('workflow');
       await page.locator('#editor-source').fill(saved.toString() + '\n# changed while reviewing\n');
       await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
-      await page.locator('#editor-status').filter({hasText: 'Saved reviewed bytes'}).waitFor();
+      await page.locator('#editor-status').filter({hasText: 'Saved as "'}).waitFor();
       saved = await readFile(metadata.source);
       await view('run');
     } else {
