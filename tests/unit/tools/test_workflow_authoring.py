@@ -352,6 +352,38 @@ def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
     assert reviewed.document.definition.externals[1].location == "edited-storage.json"
 
 
+def test_saving_a_set_seed_pin_is_refused_but_an_old_source_reads(tmp_path):
+    """Issue #983 T13. Fails if the editor publishes a training source that
+    sets a retired pin, or if an already-saved old source stops being readable."""
+    from tests.unit.workflows.test_reusable_training import training_document
+    from tools.workflow_authoring.models import DocumentProposal
+    from workflows.definition import render_workflow_source
+
+    source = tmp_path / "workflow.py"
+    source.write_text(render_workflow_source(training_document({"launch": {"sampling_seed": 17}})))
+    recovery = tmp_path / "recovery"
+    recovery.mkdir(mode=0o700)
+    author = WorkflowAuthoring(
+        Project(
+            project_id="training",
+            project_root=tmp_path,
+            source_file=source,
+            recovery_directory=recovery,
+        )
+    )
+    view = author.read()
+    assert view.document.training_settings == {"launch": {"sampling_seed": 17}}
+    with pytest.raises(AuthoringError) as refused:
+        author.review(
+            ReviewRequest(
+                expected_sha256=view.sha256,
+                proposal=DocumentProposal(kind="document", document=view.document),
+            )
+        )
+    assert refused.value.code == "retired_seed_pin"
+    assert "seeds derive from run_seed; set --run_seed" in str(refused.value)
+
+
 def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path):
     """Losing sparse read/review/save transport corrupts independent rule/null controls."""
     from tests.unit.workflows.test_reusable_training import training_document
@@ -386,10 +418,10 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     controls = {c.name: c for c in view.training.controls}
     assert controls["formal_time_budget_minutes"].state == "null"
     assert controls["formal_time_budget_minutes"].nullable
-    assert controls["sampling_seed"].state == "unset"
+    assert controls["trial_max_epochs"].state == "unset"
     assert view.document.training_settings == supplied
     document = view.document.model_copy(deep=True)
-    document.training_settings["launch"]["sampling_seed"] = 31
+    document.training_settings["launch"]["trial_max_epochs"] = 3
     review = author.review(
         ReviewRequest(
             expected_sha256=view.sha256,
@@ -399,15 +431,15 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     assert (
         review.training.workflow_parameter_rules == supplied["launch"]["workflow_parameter_rules"]
     )
-    assert next(c for c in review.training.controls if c.name == "sampling_seed").effective == 31
+    assert next(c for c in review.training.controls if c.name == "trial_max_epochs").effective == 3
     author.save(
         SaveRequest(
             expected_sha256=view.sha256, proposal_sha256=review.sha256, source=review.source
         )
     )
     saved = parse_workflow_source(source.read_text())
-    assert saved.training_settings == {"launch": {**supplied["launch"], "sampling_seed": 31}}
-    assert "train_base_seed" not in saved.training_settings["launch"]
+    assert saved.training_settings == {"launch": {**supplied["launch"], "trial_max_epochs": 3}}
+    assert "formal_max_epochs" not in saved.training_settings["launch"]
 
 
 @pytest.mark.parametrize(

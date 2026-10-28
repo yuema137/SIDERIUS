@@ -139,7 +139,8 @@ CONTRACT_FLAGS = [
     "trial_max_epochs",
     "formal_max_epochs",
     "target_files",
-    "sampling_seed",
+    # Issue #983 — the run seed; shell "" ≡ Python None (lock or generate).
+    "run_seed",
     "trial_time_budget_minutes",
     "formal_time_budget_minutes",
     "data_dir",

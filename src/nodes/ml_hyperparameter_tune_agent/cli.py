@@ -20,6 +20,7 @@ from typing import get_args
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import parse_file_order_cli
+from core.run_seed_lock import run_seed_argument
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from execute_tools.dataset_config import DataScope
 
@@ -127,6 +128,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="./siderius_workspace",
         help="Root directory for all agent-generated outputs.",
+    )
+    parser.add_argument(
+        "--run_seed",
+        type=run_seed_argument,
+        default=None,
+        help=(
+            "The run seed (issue #983), an integer in [0, 2**53 - 1]. Omitted: the "
+            "workspace lock's seed, else a generated one, recorded before round 1."
+        ),
     )
     parser.add_argument(
         "--progress_bar",
@@ -626,7 +636,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_agent_input(
-    args: argparse.Namespace, parser: argparse.ArgumentParser, run_composition: object = None
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    run_composition: object = None,
+    *,
+    run_seed: int | None = None,
 ) -> HyperparamTuningInput:
     """Translate parsed CLI arguments into the validated node input.
 
@@ -693,6 +707,8 @@ def build_agent_input(
             "local": {"workspace": args.workspace, "run_name": args.run_name},
         },
         "progress_bar": args.progress_bar,
+        # Issue #983 — resolved by main(), the standalone entry boundary.
+        "run_seed": run_seed,
         "cleanup_denoised": args.cleanup_denoised,
         "retain_model_outputs": getattr(args, "retain_model_outputs", False),
         "retain_training_checkpoints": getattr(args, "retain_training_checkpoints", False),

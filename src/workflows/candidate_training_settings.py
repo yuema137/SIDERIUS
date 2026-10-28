@@ -8,7 +8,7 @@ instructions to execute omitted history, retries or analysis phases.
 import json
 import math
 from dataclasses import fields
-from typing import Self
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
@@ -16,6 +16,7 @@ from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ProposalInput
+from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 from core.runtime_control.decision_policy import RuntimeBudget
 from core.runtime_control.validation_limits import validate_phase_deadline
 from execute_tools.dataset_config import DataScope
@@ -75,9 +76,7 @@ SUPPORTED_LAUNCH_FIELDS = frozenset(
         "runtime_watchdog_enabled",
         "runtime_watchdog_floor_seconds",
         "runtime_watchdog_safety_factor",
-        "sampling_seed",
         "skip_formal_min_delta",
-        "train_base_seed",
         "train_portion",
         "train_validation_align",
         "training_validation_portion",
@@ -121,6 +120,8 @@ INACTIVE_LAUNCH_FIELDS = frozenset(
         "model_types",
         "n_candidates",
         "plan_overrides",
+        # Issue #983 (M3): a candidate graph's seed authority is its run request.
+        "run_seed",
         "scientific_evidence_order",
         "source_paths",
         "source_run_name",
@@ -164,6 +165,22 @@ class CandidateTrainingSettings(BaseModel):
     order_strategy_override: OrderStrategy | None = None
     file_order_override: list[int] | None = None
     enable_structured_health_feedback: bool = False
+    # Issue #983 — readback only: set pins of a pre-retirement settings
+    # document, kept as provenance; training admission refuses to execute them.
+    retired_seed_pins: RetiredSeedPins | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_retired_seed_pins(cls, data: Any) -> Any:
+        """Readback: lift retired launch pins out of ``launch`` (null pins drop)."""
+        if not isinstance(data, dict) or not isinstance(data.get("launch"), dict):
+            return data
+        launch = split_retired_seed_pins(data["launch"])
+        assert isinstance(launch, dict)
+        pins = launch.pop("retired_seed_pins", None)
+        return {**data, "launch": launch, **({"retired_seed_pins": pins} if pins else {})}
 
     @model_validator(mode="after")
     def validate_admitted_controls(self) -> Self:
@@ -233,7 +250,6 @@ def proposal_training_values(settings: CandidateTrainingSettings) -> dict[str, o
             "trial_time_budget_minutes",
             "formal_time_budget_minutes",
             "workflow_parameter_rules",
-            "sampling_seed",
             "is_trial",
             "allowed_output_types",
             "baseline_isolation",

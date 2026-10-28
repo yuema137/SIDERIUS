@@ -21,6 +21,7 @@ from .adaptor_phase import (
     skipped_inputs,
     tuning_branch,
 )
+from .budget import WorkerBudget
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
 from .graph_models import GraphNodeEvidence, GraphRouteEvidence, GraphTrace
@@ -38,6 +39,7 @@ def execute_fanout(
     *,
     iteration: int = 1,
     history: ChainState | None = None,
+    budget: WorkerBudget | None = None,
 ) -> CandidateRunReceipt:
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
@@ -143,6 +145,7 @@ def execute_fanout(
                     if node.id == shape.tuning
                     else None,
                     incumbent=None if history is None else history.chain_formal_incumbent_reference,
+                    budget=budget,
                 )
             )
             rejected = isinstance(output, ValidatorOutput) and not output.passed

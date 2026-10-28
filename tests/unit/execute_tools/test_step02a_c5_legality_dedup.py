@@ -161,7 +161,7 @@ class TestInvalidSegmentationSizeStillRejected:
                     "trial_portion": 0.1,
                     "train_sampling_seed": 1,
                     "eval_sampling_seed": 1,
-                    "train_base_seed": 1,
+                    "seed_context": {"run_seed": 1},
                 }
             ),
             dataset_config=TIDMAD,

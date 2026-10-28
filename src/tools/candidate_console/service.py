@@ -14,6 +14,7 @@ from tools.candidate_operations import (
     OperationStoreConfig,
     PreparedCandidate,
     PrepareOperation,
+    list_operations,
     loop_root_operation,
     read_operation,
     read_operation_log,
@@ -46,6 +47,8 @@ from .models import (
     LoopStatusView,
     LoopStopAcknowledgement,
     OperationCancelAcknowledgement,
+    OperationListItemView,
+    OperationListView,
     PreparedReview,
     PreparedSelection,
     PrepareSelection,
@@ -237,6 +240,36 @@ class CandidateConsole:
         """Record cancel for a live candidate; acknowledgement is not termination."""
         request_cancel(self.config.operation_store, operation_id)
         return OperationCancelAcknowledgement(operation_id=operation_id)
+
+    def operations(self, limit: int = 50) -> OperationListView:
+        """Read-only list of this store's verified records; receipts and paths stay out."""
+        store = self.config.operation_store
+        listing = list_operations(store, limit)
+        items = []
+        for entry in listing.entries:
+            snapshot = entry.snapshot
+            try:
+                loop = loop_status(store, snapshot)
+            except (OSError, ValueError):
+                loop = None
+            items.append(
+                OperationListItemView(
+                    operation_id=snapshot.operation_id,
+                    kind=snapshot.kind,
+                    run_name=entry.run_name,
+                    project_id=entry.project_id,
+                    admitted_at=entry.admitted_at,
+                    state=snapshot.state,
+                    native_status=snapshot.receipt.status if snapshot.receipt else None,
+                    loop=loop,
+                )
+            )
+        return OperationListView(
+            operations=tuple(items),
+            unreadable=listing.unreadable,
+            examined=listing.examined,
+            incomplete=listing.incomplete,
+        )
 
     def request_loop_stop(self, operation_id: UUID) -> LoopStopAcknowledgement:
         """Record graceful Stop; acknowledgement is not termination (read status for that)."""

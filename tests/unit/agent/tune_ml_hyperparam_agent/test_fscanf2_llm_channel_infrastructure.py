@@ -47,6 +47,7 @@ from nodes.ml_hyperparameter_tune_agent.records import (
     classify_attempt_failure_disposition,
 )
 from nodes.scoring_reference import ReferenceScores
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.tuner_source import tuner_node_source
 
 _REQUEST = httpx.Request("POST", "https://provider.invalid/v1/chat/completions")
@@ -74,6 +75,7 @@ def _drive_one_attempt(tmp_path, planning_error: BaseException) -> list[dict]:
     planning stage, and the records the sandbox is asked to save.
     """
     agent_input = HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,

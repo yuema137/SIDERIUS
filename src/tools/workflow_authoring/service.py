@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.durable_io import publish_bytes_atomically, publish_bytes_write_once
+from core.retired_seed_pins import RetiredSeedPin, refuse_pinned_settings
 from workflows.definition import AuthoredWorkflowDocument, ReusableWorkflowDocument
 from workflows.definition.draft import inspect_draft
 from workflows.definition.source import (
@@ -55,6 +56,7 @@ def reviewed_source(
     if len(payload) > MAX_SOURCE_BYTES:
         raise AuthoringError("limit", "rendered editor source exceeds 32 KiB UTF-8")
     document = parse_workflow_source(source)
+    _refuse_pinned_training(document)
     diff = "".join(
         difflib.unified_diff(
             base.source.splitlines(True),
@@ -75,6 +77,17 @@ def reviewed_source(
         loop_template=loop_template(document),
         task_reference_update=task_review,
     )
+
+
+def _refuse_pinned_training(document: object) -> None:
+    """Issue #983 — a new or edited source may not set a retired seed pin."""
+    settings = getattr(document, "training_settings", None)
+    if settings is None:
+        return
+    try:
+        refuse_pinned_settings(settings, "workflow training_settings")
+    except RetiredSeedPin as error:
+        raise AuthoringError("retired_seed_pin", str(error)) from error
 
 
 class AuthoringError(ValueError):

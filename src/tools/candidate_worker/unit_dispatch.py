@@ -20,6 +20,7 @@ from workflows.definition.fanout import ProposalFamilies
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 
+from .budget import WorkerBudget
 from .inputs import NativeInputs
 from .literature_edges import proposal_input
 from .models import CandidateRunReceipt, CandidateRunRequest
@@ -51,6 +52,7 @@ def phase_unit(
     admission: AdmittedTraining | None,
     tuning_branch: tuple[str, str] | None,
     incumbent: float | None,
+    budget: WorkerBudget | None,
 ) -> PhaseUnit:
     if capability == "tuning":
         # The adaptor-selected (implementation, validation) pair, chosen in the worker.
@@ -89,7 +91,12 @@ def phase_unit(
     implemented = results[parent]
     assert isinstance(implemented, ImplementorOutput)
     return ValidationUnit(
-        phase="validation", inputs=selected, proposal=proposal, implementation=implemented
+        phase="validation",
+        inputs=selected,
+        proposal=proposal,
+        implementation=implemented,
+        # Issue #984: the worker budget's remainder at dispatch; the unit re-anchors it.
+        worker_budget_seconds=None if budget is None else budget.remaining_seconds(),
     )
 
 
@@ -110,6 +117,7 @@ def node_invocation(
     admitted: TrainingAdmission | None,
     tuning_branch: tuple[str, str] | None,
     incumbent: float | None,
+    budget: WorkerBudget | None,
 ) -> NodeInvocation:
     if capability == "tuning":
         storage = StorageConfig(
@@ -149,5 +157,6 @@ def node_invocation(
             admission,
             tuning_branch,
             incumbent,
+            budget,
         ),
     )

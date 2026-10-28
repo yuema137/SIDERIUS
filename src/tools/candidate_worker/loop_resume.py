@@ -202,12 +202,14 @@ def launch_continuation(
 def execute_continuation(path: Path) -> CandidateRunReceipt:
     from core.generated_library import bind_generated_library_to_workspace
 
+    from .budget import WorkerBudget
     from .child import verify_inputs
     from .launch import bounded_terminal, publish
 
     binding = LoopContinuation.model_validate_json(read_graph_control(path))
     root = path.parent.parent.parent
     request = CandidateRunRequest.model_validate_json(read_graph_control(root / "request.json"))
+    budget = WorkerBudget.start(request.timeout_seconds)
     initial = CandidateRunReceipt.model_validate_json(read_graph_control(root / "launch.json"))
     if path != segment_control(initial, binding.operation_id) / "continuation.json":
         raise ValueError("continuation path disagrees with root")
@@ -215,7 +217,9 @@ def execute_continuation(path: Path) -> CandidateRunReceipt:
     bind_generated_library_to_workspace(initial.workspace)
     from .native import execute_native
 
-    receipt = bounded_terminal(initial, execute_native(request, initial, continuation=binding))
+    receipt = bounded_terminal(
+        initial, execute_native(request, initial, continuation=binding, budget=budget)
+    )
     publish(path.parent / "child.json", receipt, bounded=True)
     return receipt
 

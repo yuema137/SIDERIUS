@@ -3,7 +3,16 @@
   'use strict';
   let token = '', revision = 0, connected = false;
   const listeners = new Set();
-  const publish = () => { for (const listener of listeners) listener({connected, revision}); };
+  let changing = false;
+  // Connected pages show one compact line; the token form returns only on request or disconnect.
+  function present() {
+    const collapsed = connected && !changing;
+    for (const id of ['access-heading', 'access-help', 'access-form']) document.getElementById(id).hidden = collapsed;
+    document.getElementById('access-connected').hidden = !connected;
+    document.getElementById('access-change').hidden = !collapsed;
+    document.getElementById('access-section').classList.toggle('access-collapsed', collapsed);
+  }
+  const publish = () => { if (!connected) changing = false; present(); for (const listener of listeners) listener({connected, revision}); };
   const status = message => { document.getElementById('access-status').textContent = message; };
   async function request(path, body) {
     const version = revision;
@@ -37,7 +46,16 @@
       try { await request(selected ? 'operations/' + selected : 'choices'); }
       catch (error) { if (!selected || ![404, 409].includes(error.status)) throw error; }
       if (version !== revision) return;
-      connected = true; status('Connected. Observations refresh every 2 seconds while this page is visible.'); publish();
+      connected = true; changing = false; status('Connected. Observations refresh every 2 seconds while this page is visible.'); publish();
     } catch (error) { if (version === revision && !error.stale) status('Connection failed: ' + error.message); }
   });
+  document.getElementById('access-change').addEventListener('click', () => {
+    changing = true; present(); document.getElementById('token').focus();
+  });
+  document.getElementById('access-disconnect').addEventListener('click', () => {
+    token = ''; revision++; connected = false; publish();
+    status('Disconnected. Enter the console token to reconnect; drafts and the selected operation are retained.');
+    document.getElementById('token').focus();
+  });
+  present();
 })();

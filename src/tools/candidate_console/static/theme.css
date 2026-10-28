@@ -86,7 +86,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 16px;
+  margin: 0 0 0 auto;
 }
 .theme-control label { margin: 0; }
-.theme-control select { width: auto; min-height: 44px; }
+.theme-control select { width: auto; min-height: 36px; padding: 5px 9px; }

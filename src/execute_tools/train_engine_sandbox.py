@@ -2314,7 +2314,7 @@ def main():
     # difference Checkpoint C(iii) surfaced.
     _cross_check_model_io(model_io, dataset_profile)
     seed_plan, seed_source = resolve_trainer_seed_plan(
-        _load_seed_context_arg(args.seed_context_json), args.train_base_seed
+        _load_seed_context_arg(args.seed_context_json)
     )
     # Pre-execution record: a crash, OOM or timeout never loses the seed.
     print(seed_log_line(seed_plan, seed_source), flush=True)

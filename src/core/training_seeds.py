@@ -16,6 +16,7 @@ from typing import Final, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.durable_io import publish_bytes_write_once
 from core.seeding import (
     SEED_DERIVATION,
     MissingRunSeed,
@@ -23,6 +24,7 @@ from core.seeding import (
     SeedCoordinates,
     SeedPurpose,
     derive_seed,
+    format_seed_line,
     resolve_run_seed,
 )
 
@@ -70,16 +72,9 @@ class ProcessSeedRecord(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class TrainingSeedPlan:
-    """Every trainer seed, as a pure function of a :class:`SeedContext`.
-
-    ``pinned_subsample_base`` is the interim tuner transport (issue #983
-    S2→S3b): while the tuner still passes only ``--train_base_seed``, epoch
-    ``k`` subsamples with ``base + k`` exactly as before, and only the
-    subsample stream is pinned. S3b removes the field.
-    """
+    """Every trainer seed, as a pure function of a :class:`SeedContext`."""
 
     context: SeedContext
-    pinned_subsample_base: int | None = None
 
     def _derive(self, purpose: SeedPurpose, epoch: int | None = None) -> int:
         at = self.context.at
@@ -107,15 +102,22 @@ class TrainingSeedPlan:
     def epoch(self, k: int, *, freeze_subsample: bool = False) -> EpochSeeds:
         """Seeds for epoch ``k``; ``freeze_subsample`` pins only the subsample to epoch 0."""
         subsample_epoch = 0 if freeze_subsample else k
-        if self.pinned_subsample_base is not None:
-            subsample = self.pinned_subsample_base + subsample_epoch
-        else:
-            subsample = self._derive("trainer.epoch_subsample", subsample_epoch)
         return EpochSeeds(
-            subsample=subsample,
+            subsample=self._derive("trainer.epoch_subsample", subsample_epoch),
             order=self._derive("trainer.epoch_order", k),
             shuffle=self._derive("trainer.epoch_shuffle", k),
         )
+
+
+def publish_seed_context(path: str, context: SeedContext) -> None:
+    """Write the trainer handoff once; a retry of the same attempt must match it."""
+    payload = context.model_dump_json().encode()
+    try:
+        publish_bytes_write_once(path, payload)
+    except FileExistsError:
+        with open(path, "rb") as existing:
+            if existing.read() != payload:
+                raise ValueError(f"{path} already holds a different SeedContext") from None
 
 
 def require_seed_plan(plan: TrainingSeedPlan | None) -> TrainingSeedPlan:
@@ -129,34 +131,28 @@ def require_seed_plan(plan: TrainingSeedPlan | None) -> TrainingSeedPlan:
 
 
 def resolve_trainer_seed_plan(
-    context: SeedContext | None, train_base_seed: int | None
+    context: SeedContext | None,
 ) -> tuple[TrainingSeedPlan, TrainerSeedSource]:
     """The trainer CLI entry boundary: use the supplied context or generate one.
 
-    A supplied context and an interim ``train_base_seed`` together are two
-    subsample authorities and are refused.
+    Inside a run the tuner always supplies a context; generation serves only a
+    direct trainer invocation.
     """
     if context is not None:
-        if train_base_seed is not None:
-            raise ValueError("--seed_context_json and --train_base_seed are mutually exclusive")
         return TrainingSeedPlan(context), "supplied"
-    generated = SeedContext(run_seed=resolve_run_seed(None).value)
-    return TrainingSeedPlan(generated, pinned_subsample_base=train_base_seed), "generated"
+    return TrainingSeedPlan(SeedContext(run_seed=resolve_run_seed(None).value)), "generated"
 
 
 def seed_log_line(plan: TrainingSeedPlan, source: TrainerSeedSource) -> str:
     """The stdout line the trainer prints before any training work starts."""
-    return f"[seed] run_seed={plan.context.run_seed} source={source}"
+    return format_seed_line(plan.context.run_seed, source)
 
 
 def trainer_seed_record(plan: TrainingSeedPlan, source: TrainerSeedSource) -> dict[str, object]:
     """The seed fields a trainer adds to its results JSON (never LLM-visible)."""
-    record: dict[str, object] = {
+    return {
         "seed_context": plan.context.model_dump(mode="json"),
         "seed_derivation": SEED_DERIVATION,
         "seed_source": source,
         "process_seeds": plan.process_seeds().model_dump(mode="json"),
     }
-    if plan.pinned_subsample_base is not None:
-        record["pinned_subsample_base"] = plan.pinned_subsample_base
-    return record

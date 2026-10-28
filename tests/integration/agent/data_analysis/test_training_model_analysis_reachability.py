@@ -39,7 +39,9 @@ from agent.schemas.data_analysis.trained_model import TrainedModelArtifact
 from agent.schemas.hyperparam_tuning import ExperimentRecord
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.sandbox_executor import TidmadSandbox
+from core.seeding import SeedCoordinates
 from core.training_execution_bindings import TrainingExecutionBindings
+from core.training_seeds import SeedContext
 from execute_tools.historical_model_inference import (
     ApprovedModelPluginResolver,
     HistoricalModelArtifactExporter,
@@ -302,7 +304,7 @@ def test_two_real_training_iterations_retire_originals_and_keep_records(tmp_path
                     "device": "cpu",
                 },
                 {"loss_type": "custom", "loss_name": "synthetic_masked_mse"},
-                train_base_seed=17 + iteration,
+                seed_context=SeedContext(run_seed=17, at=SeedCoordinates(iteration=iteration)),
                 execution_bindings=TrainingExecutionBindings(task_scopes=scopes),
             )
             assert trained["status"] == "success"
@@ -425,7 +427,7 @@ def test_new_training_record_refuses_target_dependent_analysis(tmp_path: Path) -
                 "device": "cpu",
             },
             {"loss_type": "custom", "loss_name": "synthetic_masked_mse"},
-            train_base_seed=17,
+            seed_context=SeedContext(run_seed=17),
             execution_bindings=TrainingExecutionBindings(task_scopes=scopes),
         )
         assert trained["status"] == "success"

@@ -46,7 +46,9 @@ Pins, per workspace:
 - the resolved data scope,
 - whether health gates are enabled,
 - the sha256 of the effective health configuration,
-- the formal evaluation fraction (`formal_eval_portion`).
+- the formal evaluation fraction (`formal_eval_portion`),
+- the run seed (`run_seed`) and its derivation (`seed_derivation`,
+  `"siderius-seed/v1"`).
 
 A resume, seed or reuse with any of these different **fails at startup**.
 
@@ -71,6 +73,39 @@ Owner: [scheduling contract](../../../src/core/runtime_control/scheduling.md).
 
 Ordering at startup is load-bearing: materialize + hash the effective health
 config → validate ingress evidence → create-or-validate the lock.
+
+### Run seed in the lock (issue #983)
+
+Owner: `core/run_seed_lock.py` (resolution) over `core/run_invariants.py`
+(storage and comparison). The value contract is [seeding.md](seeding.md).
+
+- `run_workflow` resolves the seed once, before `prepare_training_run`, with
+  `resolve_workspace_run_seed(workspace, launch.run_seed)`. Precedence: an
+  existing lock's `run_seed`, then the explicit `WorkflowLaunchConfig.run_seed`
+  (`--run_seed`), then `resolve_run_seed` generation. It prints
+  `[seed] run_seed=N source=operator|generated|locked` and the lock records the
+  value before any node runs.
+- The chain pre-flight (`run_one_iteration.compute_expected_invariants`) uses
+  `continuation_run_seed`: the locked seed, else the flag. It never generates,
+  so iteration 1 without `--run_seed` leaves generation to `run_workflow`.
+- Both fields are `_CANONICAL` and are omitted from the lock when `None`, so a
+  seedless lock keeps its pre-seed bytes. They are set together or not at all
+  (`run_seed_lock_fields`).
+- `run_seed_source` (`operator` | `generated`) records how the creating
+  execution obtained the seed. It is `_PROVENANCE` (recorded, never compared),
+  omitted when `None`, and absent from locks written by an execution that adopted
+  an existing seed (the tuner sub-workspace lock, for example).
+- History import (`--seed_paths`, `source_run_name`) reads only the target
+  workspace lock, so a new workspace never inherits a source run's seed.
+- `WorkflowLaunchConfig.run_seed` projects only when set (`omit_if_none`), so a
+  seedless reviewed capture keeps its bytes. Candidate settings refuse it
+  (`INACTIVE_LAUNCH_FIELDS`). Until S4 admits the seed with the operation,
+  candidate training admission resolves its workspace seed the same way (lock,
+  then generation) and prints the `[seed]` line.
+- The standalone tuner CLI (`ml_hyperparameter_tune_agent.py main`) is an entry
+  boundary too: lock, then `--run_seed`, then generation, before round 1.
+- The tuner receives the locked value as `HyperparamTuningInput.run_seed`, locks
+  it in its sub-workspace and writes it to `run_config_{run_name}.json`.
 
 ## Carried state across iterations
 
@@ -123,6 +158,8 @@ see it.
 | resume with a different data scope | startup failure |
 | resume with different health-gate enablement | startup failure |
 | resume after editing a health plugin or task health config | startup failure (the digest moved) |
+| resume with a `--run_seed` different from the locked `run_seed` | startup failure naming `run_seed` |
+| continuing a workspace whose lock has no `run_seed` (created before the seed contract) | refused (`pre_seed_lock_violation`); the chain halts. The workspace stays readable and is not modified. A seedless comparison (old tooling reading the lock) still validates against it. |
 | malformed carried confirmations | raises |
 | inspector cannot compute the next iteration | launcher halts with both signals shown |
 
@@ -134,6 +171,7 @@ start.
 | concern | location |
 |---|---|
 | invariants + partitioning | `core/run_invariants.py` |
+| run-seed resolution against the lock | `core/run_seed_lock.py` |
 | findings union authority | `core/resume.py::union_key_findings` |
 | lock construction ordering | `workflows/model_exploration.py:2196` (`build_run_invariants`) → `:2281` (`ensure_run_invariants`) |
 | chain state carry | `workflows/model_exploration.py` (`ChainState`) |

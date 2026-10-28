@@ -306,3 +306,19 @@ class PreparedCandidate(PreviewModel):
     preparation_id: UUID
     receipt_sha256: str | None
     composition_fingerprint: str
+
+
+class OperationListEntry(PreviewModel):
+    """One verified record: admission time, generated names and its read snapshot."""
+
+    admitted_at: str
+    run_name: str | None
+    project_id: str | None
+    snapshot: OperationSnapshot
+
+
+class OperationListing(PreviewModel):
+    entries: tuple[OperationListEntry, ...]
+    unreadable: int = Field(ge=0)
+    examined: int = Field(ge=0)
+    incomplete: bool

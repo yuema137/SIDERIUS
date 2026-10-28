@@ -8,6 +8,7 @@ from core.durable_io import publish_bytes_write_once
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 
+from .budget import WorkerBudget
 from .graph_evidence import read_graph_control
 from .layout import candidate_control_dir
 from .loop_models import LoopContinuation, LoopPause, LoopStop, LoopTrace, admit_loop
@@ -59,6 +60,7 @@ def execute_loop(
     config: WorkflowLLMConfig,
     *,
     continuation: LoopContinuation | None = None,
+    budget: WorkerBudget | None = None,
 ) -> CandidateRunReceipt:
     from .graph import execute_fanout
     from .graph_evidence import verify_graph_trace
@@ -96,7 +98,13 @@ def execute_loop(
         control = candidate_control_dir(Path(initial.workspace), iteration=iteration)
         control.mkdir(parents=True, exist_ok=iteration == 1)
         last = execute_fanout(
-            request, initial, composition, config, iteration=iteration, history=history
+            request,
+            initial,
+            composition,
+            config,
+            iteration=iteration,
+            history=history,
+            budget=budget,
         )
         verify_graph_trace(request, initial, last, iteration=iteration, history=history)
         publish_bytes_write_once(str(control / "body.json"), encode_control(last))

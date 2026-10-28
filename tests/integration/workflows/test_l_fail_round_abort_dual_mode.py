@@ -54,6 +54,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.tuner_composed_effects import synthetic_cuda_context
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
@@ -135,6 +136,7 @@ def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkey
     run_name = "l_fail_round_abort"
 
     agent_input = HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type=_PLUGIN_MODEL_TYPE,
         # Phase L choreography for L.8: round 1 success + 3 fail-rounds

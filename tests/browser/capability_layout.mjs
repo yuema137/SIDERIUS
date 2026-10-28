@@ -120,6 +120,8 @@ try {
       await page.keyboard.press('Alt+ArrowDown');
       moved = {...shown, hypothesis: {x: shown.hypothesis.x, y: shown.hypothesis.y + 20}};
     } else {
+      // Screen-pixel drag deltas equal document deltas at 100 % (fit-on-open may have zoomed out).
+      await page.locator('#circuit-zoom-reset').click();
       const heading = page.locator('#circuit-node-interpret');
       await heading.scrollIntoViewIfNeeded();
       const box = await heading.boundingBox();
