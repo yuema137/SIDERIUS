@@ -421,7 +421,9 @@ def test_console_preview_refuses_malformed_time_budget(setup, value):
     Non-finite values are already refused earlier by the inspection JSON owner.
     """
     operation, _ = setup[0](f"--formal_time_budget_minutes={value}")
-    with pytest.raises(ValueError, match="is refused by HyperparamTuningInput.formal_time_budget_minutes"):
+    with pytest.raises(
+        ValueError, match=r"is refused by HyperparamTuningInput\.formal_time_budget_minutes"
+    ):
         inspect_environment(operation)
     assert not operation.output.exists()
 
