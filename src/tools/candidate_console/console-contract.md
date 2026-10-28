@@ -125,10 +125,12 @@ verified configured/prepared association (edited review also verifies saved sour
 and bindings). This ephemeral projection reuses worker `credential_requirements`
 and the strict selected private JSON reader. It returns required/omitted provider
 names, unresolved route node names, present/missing required or declared names,
-`file_status` (`not_needed`, `not_selected`, `readable`, `unavailable`), a `ready`
+`file_status` (`not_needed`, `not_selected`, `readable`, `missing` for a configured
+file that does not exist, `unavailable` for one that exists but cannot be read or
+parsed), a `ready`
 boolean and bounded repair instructions. No file is read when there are no names
 to check. Missing/empty extra declared names also block readiness. Invalid or
-removed files after startup remain reviewable with unavailable status; startup
+removed files after startup remain reviewable with `unavailable`/`missing` status; startup
 `check` still validates configured credential file shape (JSON or dotenv) and
 permissions.
 
@@ -1356,7 +1358,12 @@ flow. The New run adapter below consumes this monitor without adding job persist
 POST `/api/editor/{project_id}/reusable-preparations/review` returns `NewRunReview`;
 POST `/prepare` returns existing `OperationHandle` with HTTP 202. `NewRunReview.source_version_name`
 (omitted when absent) is the recorded Save name of `expected_source_sha256`,
-display-only and outside the expectation and native request; the browser keeps it
+display-only and outside the expectation and native request. `NewRunReview.credential_readiness`
+is a name-only precheck read in the server process before Prepare: it checks only the
+task's configured `candidate_environment_names` against `credential_file`
+(`named_credential_readiness((), names, path)`); provider-derived requirements exist
+only after preparation, so capture review and launch recheck them. It is outside the
+expectation and never blocks Prepare. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the
 same authentication/origin/body boundary and threadpool transport as capture APIs.
 Selection accepts only task_id, run_name, run_id, preparation_operation_id and

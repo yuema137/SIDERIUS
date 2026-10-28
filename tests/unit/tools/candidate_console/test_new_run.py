@@ -241,3 +241,26 @@ def test_review_shows_recorded_version_name_without_changing_identity(fresh):
     assert named.source_version_name == "baseline"
     assert named.expectation == unnamed.expectation
     assert "source_version_name" not in intent(named).model_dump()
+
+
+def test_preparation_review_prechecks_configured_credential_names(fresh, tmp_path):
+    """R-5: before Prepare the server reports which configured names are absent, and a
+    missing file is distinguished from an unreadable one; values never leave the process."""
+    adapter, selection, _ = fresh
+    task = adapter.console.config.tasks[0].model_copy(
+        update={"candidate_environment_names": ("OPENAI_API_KEY",)}
+    )
+    path = tmp_path / "keys.env"
+    adapter.console.config = adapter.console.config.model_copy(
+        update={"tasks": (task,), "credential_file": str(path)}
+    )
+    missing = adapter.review("fresh", selection).credential_readiness
+    assert (missing.file_status, missing.ready) == ("missing", False)
+    assert missing.missing_names == ("OPENAI_API_KEY",)
+    path.write_text("OPENAI_API_KEY=SECRET-MARKER\n")
+    path.chmod(0o644)
+    assert adapter.review("fresh", selection).credential_readiness.file_status == "unavailable"
+    path.chmod(0o600)
+    ready = adapter.review("fresh", selection)
+    assert ready.credential_readiness.ready
+    assert "SECRET-MARKER" not in ready.model_dump_json()
