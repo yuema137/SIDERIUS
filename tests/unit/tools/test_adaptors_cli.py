@@ -169,6 +169,60 @@ def test_adaptor_code_cannot_forge_an_identity_mismatch(tmp_path: Path, body: st
     assert caught.value.reason == "custom_exception"
 
 
+def test_identity_hint_after_entered_is_not_trusted_even_with_changed_pins(
+    tmp_path: Path,
+) -> None:
+    # Defect: ignoring the parent's own `entered` observation would let adaptor
+    # code edit a member on disk and then forge an identity mismatch; the pin
+    # re-check alone cannot tell, because the bytes really changed.
+    _, manifest = _project(tmp_path)
+    _replace_entry(
+        manifest,
+        _FORGE + _PARAMS + "def adapt(inputs, params, ctx):\n"
+        "    helper = Path(__file__).with_name('ranking.py')\n"
+        "    helper.write_text(helper.read_text() + '# edited by adaptor\\n')\n"
+        "    forge()\n",
+    )
+    with pytest.raises(CustomAdaptorError) as caught:
+        _run_fixture(manifest, tmp_path / "control")
+    assert caught.value.reason == "custom_exception"
+
+
+@pytest.mark.parametrize(
+    ("entered_seen", "pins_changed", "expected"),
+    [
+        (False, True, "custom_identity_mismatch"),
+        (False, False, "custom_exception"),
+        (True, True, "custom_exception"),
+    ],
+)
+def test_identity_mismatch_needs_unseen_entry_and_changed_pins(
+    tmp_path: Path, entered_seen: bool, pins_changed: bool, expected: str
+) -> None:
+    # Deterministic witness for both guards: the end-to-end forge tests can be
+    # decided by whichever guard fires first, depending on poll timing.
+    from workflows.custom_adaptors.invocation import FAILURE_FILE, CustomInvocation
+    from workflows.custom_adaptors.process import _failure_reason
+
+    invocation = CustomInvocation(
+        adaptor_id="example.x",
+        role="combine",
+        transport_manifest="/t",
+        transport_sha256="0" * 64,
+        entry_path="/e.py",
+        entry_function="adapt",
+        parameters_path=None,
+        parameters_class=None,
+        ports=(),
+        parameters={},
+        control_dir=str(tmp_path),
+        max_output_bytes=1,
+    )
+    (tmp_path / FAILURE_FILE).write_text(json.dumps({"stage": "identity", "detail": "x"}))
+    error = _failure_reason(invocation, 1, entered_seen, lambda: pins_changed)
+    assert error.reason == expected
+
+
 def test_invalid_parameters_fail_without_running_adapt(tmp_path: Path) -> None:
     # Parameters are validated by the author's model after import, so a refusal
     # is a custom_exception that names the parameters stage, not an input refusal.
