@@ -25,6 +25,7 @@ from tools.workflow_preview.models import PreviewModel
 from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_policy import check_request_policy, configured_capture
 from .service import CandidateConsole
+from .settings_file import protected_paths
 
 
 class NewRunSelection(PreviewModel):
@@ -92,7 +93,9 @@ class ReusablePreparation:
         try:
             inspected = inspect_reusable_source(request)
             check_request_policy(task, inspected.request)
-            plan = preflight_reusable_candidate(request)
+            plan = preflight_reusable_candidate(
+                request, protected=protected_paths(self.console.config)
+            )
             check_request_policy(task, plan.binding.request)
         except OperationFailure:
             raise
