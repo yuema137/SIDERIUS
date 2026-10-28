@@ -166,7 +166,12 @@ Removal deletes each node, its own request bindings and its layout position.
 It refuses (`node_dependants`, nothing written) when a remaining node reads a
 removed result through any argument, when the research-loop feedback names a removed
 node, or when no capability would remain; it never rewires or disconnects other
-nodes implicitly. Removing a dependent chain together is allowed.
+nodes implicitly. Removing a dependent chain together is allowed. The edited source
+is then re-parsed and validated before it is returned: a removal that leaves another
+reference dangling (a route source or target, a `SelectedSource` merge candidate, an
+adaptor input) is refused as `node_dependants` with the validator's diagnostics
+("Cannot remove <ids>: ..."), never returned as source. Those consumers are not yet
+named individually like ResultSource readers are.
 
 A node with unbound required inputs is a draft-only state. `POST
 /api/editor/{project_id}/node-draft` accepts `NodeDraftRequest(expected_sha256,
