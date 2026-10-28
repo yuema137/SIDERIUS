@@ -97,7 +97,8 @@ credential names are content choices and are never derived. An explicit value
 always wins (parity: an explicit file resolves to exactly
 `ConsoleConfig.model_validate_json(bytes)`). A field with no source raises
 `workspace.MissingSetting`; `check`/`serve` exit 2 and print only the task ID and
-field name, for example `task my-task needs llm_config_file (set it in console.json)`.
+field name, for example
+`task my-task needs llm_config_file (set it in console.json or global settings)`.
 
 **`init --workspace <parent>`.** `<parent>` is explicit (no default) and must be
 an existing canonical directory. The command walks from `/` with
@@ -113,8 +114,10 @@ an existing token is left untouched and validated by `files.token`. It publishes
 `library/llm/default-<sha12>.json` write-once with the `WorkflowLLMConfig.default()`
 export expression of [LLM defaults](../../../docs/reference/llm-defaults.md)
 (bytes equal `configs/llm/default.json`; no checkout read); existing different
-bytes are refused. It writes `settings/console.json` write-once only when absent:
-`workspace_root`, `port` (default 8740, `--port`), `browser_origin`, `tasks: []`.
+bytes are refused. It writes `settings/global_settings.json` write-once only when
+absent, selecting that library profile as `llm_profile`, and `settings/console.json`
+write-once only when absent: `workspace_root`, `port` (default 8740, `--port`),
+`browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`.
 When `console.json` exists and names this workspace, `init` also creates the missing
 derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
 them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
@@ -141,6 +144,78 @@ not affect `ready`. `init_command` is set when `init` could fix a missing item. 
 `os.access` probe and no creation. `check`/`serve` print non-present entries and
 the command to stderr when a workspace is not ready, including when
 `validate_config` refuses.
+
+### Global settings
+
+Owners: `settings_models.py` (schemas), `settings_file.py` (refs, folder resolution,
+certification, protected paths), `workspace.resolve_console` (precedence),
+`config.validate_resolved` (`validate_config` + `validate_settings`).
+
+**Allowlists in console.json** (allowed with or without `workspace_root`):
+`llm_profiles: [{id, label, file}]`, `advice_files: [{id, label, file}]`,
+`data_roots: [{id, label, path}]`. IDs match `^[a-zA-Z0-9_-]{1,80}$` and are unique
+per list. The `data_roots` ID `workspace` is reserved; with `workspace_root` it is
+derived as `<workspace_root>/data`. Files are referenced in place, never copied.
+
+**Settings file.** `global_settings: {browser_writable: bool = false}` enables
+reading `<workspace_root>/settings/global_settings.json`; `global_settings` without
+`workspace_root` is refused, and without `global_settings` no settings file is read.
+`init` writes the block (`browser_writable: true`) only into a console.json it
+creates; it never rewrites an existing one, so an earlier workspace opts in by an
+operator edit. Every `data_folders` ref is resolved and exclusion-checked at
+`check`/startup even when console.json sets that task's `data_root`. A schema
+error names Pydantic `loc` paths only, never values.
+Schema `GlobalSettings`: `schema_version: "siderius.console-global-settings/v1"`,
+`llm_profile: FileRef | null`, `advice: FileRef | null`,
+`data_folders: {task_id: FolderRef}`. `FileRef` is
+`{"source": "allowlist", "id"}` or `{"source": "library", "name", "sha256"}`;
+`name` matches `<slug>-<sha12>.json`, the 12 hex digits equal the start of
+`sha256`, and it resolves to `<workspace_root>/library/{llm|advice}/<name>`.
+`FolderRef` is `{root_id, subpath}`. The file holds no path; its sha256 is its
+revision. It is read with `files.private_bytes` (owner-only 0600, no-follow,
+256 KiB); an absent file means no values.
+
+**Precedence (OQ-1).** console.json > global settings > workspace layout, per
+field: the settings fill `TaskChoice.llm_config_file` (from `llm_profile`) and
+`TaskChoice.data_root` (from `data_folders[task_id]`) only when console.json omits
+them; the layout then fills remaining locations. `llm_config_file` has no layout
+value. `SettingsContext.origin(task_id, field)` reports `server_config`,
+`global_settings` or `workspace_layout` for presentation only; origins never enter
+native requests, records or digests. A task resolved through settings produces the
+same `TaskChoice`, hence the same `preparation_request`, as the equivalent explicit
+console.json (P2).
+
+**Folder resolution.** `subpath` is refused when it starts with `/`, contains NUL,
+an empty, `.` or `..` segment, or exceeds 512 bytes. The joined path must pass
+`files.canonical` (no symlink in any component, `resolve()` identity), be a
+directory and lie under the root.
+
+**Certification at `check`/`serve` (OQ-4: fail closed).** Every `llm_profiles`
+file is read with `files.config_bytes` and parsed with
+`workflows.llm_config.parse_llm_config_bytes`; every `advice_files` file is read
+with `candidate_prepare.reusable_admission.safe_bytes` and parsed with
+`workflows.advice.parse_advice_bytes` (one reader and one parser owner); every
+`data_roots` path must be a canonical directory. The settings refs must name a
+known allowlist ID, a configured task and an existing root; a library ref's bytes
+must hash to its `sha256`. Refusals raise `settings_file.SettingsInvalid`;
+`check`/`serve` exit 2 with `Console settings are invalid: <predicate>`, naming
+fields, IDs or task IDs only. The global `advice` is validated but never applied
+to a run.
+
+**Read-only exclusion.** `candidate_prepare.admission.validate_read_only_exclusion(
+inputs, protected)` refuses an input that contains or lies inside a protected
+path (`overlap`, beside `validate_destination_overlap`). `settings_file.
+protected_paths(config, workspace)` is `auth_token_file`, `credential_file`,
+`operation_store.state_root`, every preparation and candidate root, every task
+output and reusable runs root, and, with a workspace, `settings/` and `library/`.
+`validate_config(config, workspace=…)` applies it to every task `data_root` and
+`task_read_only` entry; `validate_settings` applies it to every `data_roots` entry.
+`admit(request, *, protected=())` applies it to `(data_root, *task_read_only)`; the
+console's `create_app(config, settings)` passes `protected_paths(config,
+settings.workspace_root)` to `ReusablePreparation`, which forwards it through
+`preflight_reusable_candidate` on the in-process reusable path. Limitation:
+subprocess admission does not receive the console set; its `data_root` must equal the startup-validated `TaskChoice.data_root`
+(`check_request_policy`).
 
 `recorded_examples` is an optional allowlist for read-only candidate-validation
 records. Each entry has a unique `example_id`, readable `label`, canonical

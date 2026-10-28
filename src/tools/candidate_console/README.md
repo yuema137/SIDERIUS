@@ -61,20 +61,40 @@ even when using the default models.
    content. Each refusal names the folder or file, exits with status 2 and
    changes nothing that already exists.
 2. Add your task to `siderius_workspace/settings/console.json`. A task needs its
-   `task_id`, `label`, `task_manifest`, `llm_config_file`, resource policy and time
-   limits; the [configuration example](console-contract.md#configuration) shows
-   every field. Leave out `data_root`, `preparation_root`, `candidate_root` and
-   `reusable_runs_root` to use the workspace folders `data/<task_id>/`,
-   `preparations/<task_id>/`, `candidates/<task_id>/` and `runs/<task_id>/`. Any
-   value you write yourself is used instead. Save an explicit LLM profile; the
-   standard one is in `library/llm/`. Then run `init` again with the same
-   `--workspace`: it creates the task's output folders, but never
+   `task_id`, `label`, `task_manifest`, resource policy and time limits; the
+   [configuration example](console-contract.md#configuration) shows every field.
+   You can leave out:
+
+   | Field | Used when left out |
+   | --- | --- |
+   | `llm_config_file` | the model profile selected in `settings/global_settings.json`; `init` selects the standard profile in `library/llm/` |
+   | `data_root` | the data folder selected for this task in `global_settings.json`, otherwise `data/<task_id>/` |
+   | `preparation_root`, `candidate_root`, `reusable_runs_root` | `preparations/<task_id>/`, `candidates/<task_id>/`, `runs/<task_id>/` |
+
+   Any value you write in `console.json` is used instead; the global settings
+   only fill fields that `console.json` leaves out. Then run `init` again with
+   the same `--workspace`: it creates the task's output folders, but never
    `data/<task_id>/`. Until you put the task data there, this run ends with
    status 2 and lists `Workspace data/<task_id>: missing`; that is expected.
-   Create `data/<task_id>/`, add the data, and run `check` (step 3). If
-   `console.json` is missing a required field, `init` names it instead, for
-   example `task my-task needs llm_config_file`. Browser users can change
+   Create `data/<task_id>/`, add the data, and run `check` (step 3). If no
+   source gives a required field, `init` names it instead, for example
+   `task my-task needs llm_config_file` when neither `console.json` nor the
+   global settings select a model profile. Browser users can change
    the native run name and three advice fields.
+
+   `console.json` reads `settings/global_settings.json` only when it contains a
+   `global_settings` block. `init` writes `"global_settings": {"browser_writable":
+   true}` into a new `console.json`, which also lets the browser save settings.
+   `init` never rewrites an existing `console.json`, so a workspace created
+   before this block existed lacks it; add that line yourself (use `false` to
+   read the file but keep the browser from changing it) and run `check`.
+
+   To offer other model profiles, advice files or data locations, list them in
+   `console.json` under `llm_profiles`, `advice_files` and `data_roots` (see
+   [Global settings](console-contract.md#global-settings)). The settings file
+   selects among those entries by ID; it never contains a file path. A data
+   location may not contain the token, credential file, `settings/`, `library/`
+   or any output folder; `check` refuses it and names the entry.
 
    A `console.json` without `workspace_root` still works as before: write every
    path yourself as an absolute, canonical path without symlinks, create the
