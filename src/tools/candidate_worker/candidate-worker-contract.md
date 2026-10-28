@@ -399,6 +399,24 @@ exception aborts further effects; remaining instances become blocked. Training,
 routing, loops, human pauses, buffers, cross-branch aggregation and graph resume
 are not supported by this profile.
 
+`tools.candidate_worker.readiness.next_dispatch` is the single readiness
+authority. It is pure: `ReadinessInput` carries every declared node in
+declaration order as `NodeReadiness(node_id, predecessors, state)` (`pending`
+for undecided nodes) plus `aborted`; it refuses duplicate ids and undeclared
+predecessors. It inspects the first `pending` node whose predecessors are all
+terminal (neither `pending` nor `running`) and returns one action as
+`ReadinessOutput`: `next=<node_id>` to dispatch it, or
+`terminal=((node_id, "blocked", "dependency_not_successful"),)` when `aborted`
+is true or any predecessor is not `succeeded`; `next=None, terminal=()` means no
+node can act. `execute_fanout` dispatches from this decision, and
+`verify_graph_trace` replays the recorded terminal states through the same
+function and refuses a trace whose `blocked` states differ from it. The
+per-node rule `_close_reason` is the extension point for additional node
+classes; this profile has only capability nodes. If no node can act while some remain
+undecided (unreachable for a validated acyclic declaration), `execute_fanout`
+raises `RuntimeError("graph readiness found no dispatchable node")` and
+`verify_graph_trace` raises `ValueError` (formerly an uncaught `StopIteration`).
+
 The final optional `graph_trace` contains every declared node exactly once: its
 capability, predecessor IDs, managed storage, terminal state, fixed reason code and
 native record path/digest. Native records remain scientific authority. The existing
@@ -453,6 +471,54 @@ recovery is not supported. Candidate IDs are native outputs, never dispatch keys
 The family profile generates N independent instances, not N outputs from one
 proposer call; no scientific diversity, ranking, aggregation, parallel execution,
 training, conditional routing, buffers, human gates or graph resume is implied.
+
+Branch isolation within one body (audited for B3 parallel scheduling): no
+family or branch reads a file or plugin registry an independent sibling wrote.
+Family inputs are materialized from the captured snapshots before the first node
+runs; the interpretation candidate re-materializes its proposal input after the
+interpretation node, inside its single chain, which has no sibling. Each
+implementation writes its plugin, `description.md`, tests and losses only below
+its own `graph_instances/<implementation-id>/.../impl_001/`. The worker never
+registers into the workspace `generated_library` (capability index, models,
+losses) and never writes `<workspace>/plugins/`. These are the shared locations
+that the proposer, implementor and model-description readers consult. The
+validator loads a generated plugin with a plain `exec_module` that does not
+enter `sys.modules`, and it does not populate the process model/loss registries.
+Only a tuning node mutates those registries (`stage_native_plugins`). The only
+profile admitting tuning (interpretation candidate) has one branch, so tuning is
+the body's last node; the next loop body is sequential by design.
+
+One process-global state is shared: the torch default RNG. The implementor
+self-check and the validator probes draw unseeded probe inputs, and their probe
+models draw initial weights from it. A family-1 node's probe tensors and weights
+therefore depend on how many draws earlier nodes made. Recorded outputs are
+unaffected (pass/fail, shapes, gradient checks and records compare equal across
+declaration orders). The stream is not reproducible even serially: an unseeded
+process starts from a nondeterministic torch default seed. Running each unit in
+its own process (B3-3) gives each unit a fresh stream instead of a shared one.
+Seeding the probes is a behaviour change outside B3-0.
+
+The shared `token_usage.jsonl` is append-only. By source reading (the witness
+below replaces `LLMBridge`), the only in-run read is `LLMBridge`'s first-row
+`run_id` identity check. Every aggregating reader (token read projection,
+iteration rollup, campaign spend, baseline report) groups by run, iteration,
+label or provider, never by row position. `validate_token_usage_jsonl` checks
+order only against iteration-flush markers, and warns without failing on
+non-monotonic timestamps. Rows carry no unit identity; optional unit attribution
+is deferred to parallel dispatch, so serial ledgers are unchanged.
+
+The B3-0 audit therefore found nothing to snapshot per body. Witness:
+`tests/unit/tools/candidate_worker/test_branch_isolation.py` runs real native
+node bodies with a scripted provider in three declaration orders. Its two
+families propose distinct models. It requires the actual dispatch sequence to
+equal the declaration order, and no node to leave a process-registry write
+behind. It requires an empty workspace `generated_library` and no
+`<workspace>/plugins/`. Finally it requires byte-identical family-1 proposal
+input, prompts, debug dump and normalized proposal, implementation and
+validation records. A future profile that promotes into the workspace library,
+writes `<workspace>/plugins/`, or admits several tuning nodes in one body must
+snapshot those reads per unit, or run each unit in its own process, before
+independent units may run concurrently.
 
 Reusable version-2 source and managed preparation also support this profile through
 [the reusable family contract](../candidate_prepare/candidate-prepare-contract.md#reusable-independent-proposal-families).
@@ -807,3 +873,54 @@ A resumed segment rebuilds its score carrier from the same whole-run replay, so 
 incumbent and the no-improvement window span segments. A condition-completed run is
 `completed`, not a resumable checkpoint. Receipts and source without conditions are
 byte-identical to those before this feature.
+
+## Route evaluator (pure, not yet admitted)
+
+`tools.candidate_worker.route_eval` decides one declared `Branch` (definition
+contract, "Route declarations (inert)") from one native record. It has no execution
+caller yet: routed documents are still refused by `candidate.refuse_declaration_only`, and skip
+semantics, decision evidence and a routed profile are later readiness/worker work.
+
+- `project_observation(branch, capability, record_path, *, iteration)` reads the
+  branch source's committed record once (no-follow, 4 MiB bound), validates it with
+  the native output schema of `CAPABILITIES[capability].output`
+  (`ValidatorOutput` for `validation.output`, `HyperparamTuningOutput` for
+  `tuning.output`), and returns `RouteObservation(source_node, iteration,
+  record_sha256, values, metric_spec)`. `record_sha256` hashes exactly the parsed
+  bytes; `values` holds only the observables the branch reads, in first-read order,
+  each taken from the native attribute `RouteObservable.attribute` (the last segment
+  of its `ROUTE_OBSERVABLES` field, the same name the catalog drift test checks);
+  `metric_spec` is chosen explicitly per contract (the tuning record's `metric_spec`;
+  `None` for validation records). An observable outside the source contract, or a
+  contract without a projection owner, raises `RouteConditionError`. Reading or
+  parsing may also raise `OSError`, `ValueError` (4 MiB bound, record changed) or
+  pydantic `ValidationError`: **every** projection exception fails the body, so the
+  routed worker (PR5) must not catch only `RouteConditionError`.
+- `evaluate_route(RouteEvaluationInput(branch, observation, metric))` is pure (no
+  I/O). It returns `RouteEvaluationOutput(branch_id, selected_case, selected_targets,
+  skipped_targets, case_results)`: cases are tested in declared order and the first
+  match wins; `case_results` has one predicate outcome per case up to and including
+  the match. With no match, `selected_case` is `None` and `selected_targets` is the
+  default (or empty when `default` is `None`). `skipped_targets` lists every other
+  entry target in declared order; arm expansion belongs to readiness.
+- Leaves: `bool_is` and `enum_in` compare the projected value; `metric_at_least` is
+  `MetricOrder(metric).is_at_least(value, threshold)` (ties hold; direction only from
+  the run `MetricSpec`); an absent metric value makes `metric_at_least` false and
+  `is_missing` true (decision B1-Q4).
+- Before any case is evaluated, `evaluate_route` checks every leaf of every case:
+  its observable is catalogued with the leaf's kind, present in the observation, and
+  of the catalogued kind (bool; str within the catalog values; float or `None` for a
+  metric). Neither an earlier matching case nor a short-circuiting `all_of`/`any_of`
+  can therefore hide an unevaluable leaf.
+- Fail closed (`RouteConditionError`, a `ValueError`; the body fails, never "false"):
+  an observable missing from the observation, a value of the wrong kind (for example
+  `None` for a bool), a `metric_at_least` without a bound run metric or naming another
+  metric id, and a record `metric_spec` stamp that does not reconcile with the run
+  metric (`reconcile_metric_specs`, always called; with no run metric a stamp alone is
+  accepted and only `metric_at_least` needs a metric).
+- Metric admission: `admit_route_metrics(branches, metric)` is the one identity check
+  and runs over every case of every branch, so an earlier matching case cannot hide a
+  mismatched later one. Execution admission must call it before any dispatch;
+  `evaluate_route` repeats it as its own precondition for replay.
+
+Tests: `tests/unit/tools/candidate_worker/test_route_eval.py`.

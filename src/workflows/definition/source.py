@@ -11,27 +11,57 @@ from typing import Literal, NoReturn
 from pydantic import BaseModel, ConfigDict, ValidationError
 from pydantic_core import PydanticSerializationError
 
+from .adaptor_strategies import (
+    AllSelect,
+    CollectCombine,
+    ConcatItemsCombine,
+    FieldRankCombine,
+    FirstAdmissibleSelect,
+    MetricRankCombine,
+    PassCombine,
+    PerItemDistribute,
+    ReplicateDistribute,
+    SingleDistribute,
+    SplitItemsDistribute,
+    ThresholdSelect,
+    TopKSelect,
+)
 from .models import (
+    AdaptorInstance,
+    AdaptorRequest,
+    AdaptorSource,
+    AllOf,
+    AnyOf,
     ArgumentBinding,
     AuthoredLoop,
     AuthoredWorkflowDocument,
+    BoolIs,
+    Branch,
     CandidatePreparationOptions,
     DeclarationModel,
+    EnumIn,
     ExternalBinding,
     ExternalRequest,
     ExternalSource,
+    InputPort,
+    IsMissing,
     JudgeStop,
     LoopFeedback,
     ManagedCandidateBinding,
+    MetricAtLeast,
     MetricThresholdStop,
     NodeInstance,
     NodePosition,
     NoImprovementStop,
+    Not,
+    PortBinding,
     ProtocolRequest,
     ResultSource,
     ReusableTaskReferences,
     ReusableWorkflowDefinition,
     ReusableWorkflowDocument,
+    RouteCase,
+    SelectedSource,
     TaskBinding,
     TaskReferences,
     WorkflowDefinition,
@@ -69,8 +99,100 @@ _CONSTRUCTORS: dict[str, type[DeclarationModel]] = {
         NodePosition,
         WorkflowDocument,
         TaskBinding,
+        Branch,
+        RouteCase,
+        BoolIs,
+        EnumIn,
+        MetricAtLeast,
+        IsMissing,
+        AllOf,
+        AnyOf,
+        Not,
+        SelectedSource,
+        AdaptorInstance,
+        InputPort,
+        PortBinding,
+        AdaptorSource,
+        AdaptorRequest,
+        PassCombine,
+        CollectCombine,
+        ConcatItemsCombine,
+        MetricRankCombine,
+        FieldRankCombine,
+        AllSelect,
+        FirstAdmissibleSelect,
+        TopKSelect,
+        ThresholdSelect,
+        SingleDistribute,
+        PerItemDistribute,
+        SplitItemsDistribute,
+        ReplicateDistribute,
     )
 }
+# Imported only when used, so declarations without them keep their canonical bytes.
+_OPTIONAL_CONSTRUCTORS = frozenset(
+    {
+        "AuthoredLoop",
+        "LoopFeedback",
+        "MetricThresholdStop",
+        "NoImprovementStop",
+        "JudgeStop",
+        "Branch",
+        "RouteCase",
+        "BoolIs",
+        "EnumIn",
+        "MetricAtLeast",
+        "IsMissing",
+        "AllOf",
+        "AnyOf",
+        "Not",
+        "SelectedSource",
+        "AdaptorInstance",
+        "InputPort",
+        "PortBinding",
+        "AdaptorSource",
+        "AdaptorRequest",
+        "PassCombine",
+        "CollectCombine",
+        "ConcatItemsCombine",
+        "MetricRankCombine",
+        "FieldRankCombine",
+        "AllSelect",
+        "FirstAdmissibleSelect",
+        "TopKSelect",
+        "ThresholdSelect",
+        "SingleDistribute",
+        "PerItemDistribute",
+        "SplitItemsDistribute",
+        "ReplicateDistribute",
+    }
+)
+# Fields omitted from canonical source when None or empty, matching serialization.
+# Keyed by (model, field) so a new model reusing a field name is never omitted by accident.
+_OMITTED_WHEN_NONE = frozenset(
+    {
+        (ReusableWorkflowDocument, "training_settings"),
+        (ReusableWorkflowDocument, "task_binding"),
+        (ReusableWorkflowDocument, "execution_profile"),
+        (ManagedCandidateBinding, "literature_settings"),
+        (WorkflowDefinition, "loop"),
+        (ReusableWorkflowDefinition, "loop"),
+        (Branch, "default"),
+        (WorkflowDefinition, "adaptor_format"),
+        (ReusableWorkflowDefinition, "adaptor_format"),
+        (AdaptorSource, "index"),
+        (InputPort, "max_items"),
+    }
+)
+_OMITTED_WHEN_EMPTY = frozenset(
+    {
+        (AuthoredLoop, "stop_conditions"),
+        (WorkflowDefinition, "routes"),
+        (ReusableWorkflowDefinition, "routes"),
+        (WorkflowDefinition, "adaptors"),
+        (ReusableWorkflowDefinition, "adaptors"),
+    }
+)
 _FIELD_NAMES = frozenset(name for model in _CONSTRUCTORS.values() for name in model.model_fields)
 
 
@@ -325,18 +447,8 @@ def _render_value(value: object, depth: int) -> str:
         fields = [
             f"{child_indent}{name}={_render_value(getattr(value, name), depth + 1)},"
             for name in type(value).model_fields
-            if not (
-                name
-                in {
-                    "training_settings",
-                    "task_binding",
-                    "execution_profile",
-                    "literature_settings",
-                    "loop",
-                }
-                and getattr(value, name) is None
-            )
-            and not (name == "stop_conditions" and not getattr(value, name))
+            if not ((type(value), name) in _OMITTED_WHEN_NONE and getattr(value, name) is None)
+            and not ((type(value), name) in _OMITTED_WHEN_EMPTY and not getattr(value, name))
         ]
         return f"{type(value).__name__}(\n" + "\n".join(fields) + f"\n{indentation})"
     if isinstance(value, tuple):
@@ -359,6 +471,20 @@ def _render_value(value: object, depth: int) -> str:
     raise AssertionError("Renderer requires a revalidated declaration")
 
 
+def _used_constructors(value: object) -> set[str]:
+    """Names of every declaration model in a validated document tree."""
+    used: set[str] = set()
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, DeclarationModel):
+            used.add(type(item).__name__)
+            pending.extend(getattr(item, name) for name in type(item).model_fields)
+        elif isinstance(item, tuple):
+            pending.extend(item)
+    return used
+
+
 def render_workflow_source(document: AuthoredWorkflowDocument) -> str:
     """Return canonical complete source, revalidating unchecked model instances."""
     try:
@@ -367,17 +493,8 @@ def render_workflow_source(document: AuthoredWorkflowDocument) -> str:
         _validation_error(error)
     except PydanticSerializationError:
         _fail("validation", "Declaration cannot be serialized for revalidation")
-    loop = validated.definition.loop
-    # Unused loop constructors stay out of the import block to keep existing bytes stable.
-    used = set() if loop is None else {type(item).__name__ for item in loop.stop_conditions}
-    if loop is not None:
-        used |= {"AuthoredLoop", "LoopFeedback"}
-    loop_names = {"AuthoredLoop", "LoopFeedback", "MetricThresholdStop", "NoImprovementStop"}
-    constructors = {
-        name: model
-        for name, model in _CONSTRUCTORS.items()
-        if name not in loop_names - used and name != "JudgeStop"
-    }
+    unused = _OPTIONAL_CONSTRUCTORS - _used_constructors(validated)
+    constructors = {name: model for name, model in _CONSTRUCTORS.items() if name not in unused}
     if not isinstance(validated, ReusableWorkflowDocument) or validated.task_binding is None:
         constructors = {
             name: model for name, model in constructors.items() if name != "TaskBinding"

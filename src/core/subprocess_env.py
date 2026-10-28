@@ -46,11 +46,16 @@ LOSS_DIRS_ENV_VAR = "SIDERIUS_LOSS_DIRS"
 #: (stated limitation in seeding.md).
 HASH_SEED_ENV_VAR = "PYTHONHASHSEED"
 CHILD_HASH_SEED = "0"
+#: The child's device selector. Set only from an explicit scheduler
+#: placement (``Placement.cuda_visible_devices``); otherwise inherited.
+CUDA_VISIBLE_DEVICES_ENV_VAR = "CUDA_VISIBLE_DEVICES"
 
 
 def subprocess_env(
     plugin_dir: str | None = None,
     loss_dir: str | None = None,
+    *,
+    cuda_visible_devices: str | None = None,
 ) -> dict[str, str]:
     """Env for any subprocess that must resolve SIDERIUS models or losses.
 
@@ -97,6 +102,11 @@ def subprocess_env(
             here: `_resolve_loss_dirs` already unions the env var with the
             global losses directory on the READ side, so the loss family has
             no equivalent hole.
+        cuda_visible_devices: the child's device selector from a scheduler
+            placement (``Placement.cuda_visible_devices``): a slot UUID, or
+            ``""`` for a placed CPU-only unit, which hides every GPU. It
+            replaces any inherited value. `None` (no placement) leaves the
+            environment exactly as it was before placement existed.
 
     Returns:
         A copy of the current environment with the above applied. Never
@@ -133,4 +143,7 @@ def subprocess_env(
     )
     if loss_roots:
         env[LOSS_DIRS_ENV_VAR] = os.pathsep.join(loss_roots)
+    # B3-2 — `is not None`, never truthiness: "" is the CPU unit's selector.
+    if cuda_visible_devices is not None:
+        env[CUDA_VISIBLE_DEVICES_ENV_VAR] = cuda_visible_devices
     return env
