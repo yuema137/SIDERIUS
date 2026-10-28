@@ -55,3 +55,18 @@ def test_path_loader_keeps_digest_certification_and_missing_file_refusals(tmp_pa
     path.write_bytes(b"{not json")  # certification precedes parsing
     with pytest.raises(AdviceArtifactError, match="identity cannot be certified"):
         load_advice_artifact(str(path), declared_sha256="0" * 64)
+
+
+def test_invalid_utf8_is_an_advice_refusal_without_the_byte(tmp_path):
+    """Defect: a bare UnicodeDecodeError escapes (a console route turns it into a 500).
+
+    Both entrypoints refuse with the owner's error, naming only the position.
+    """
+    data = b'{"propose": "\xff"}'
+    path = tmp_path / "advice.json"
+    path.write_bytes(data)
+    with pytest.raises(AdviceArtifactError, match="not valid UTF-8 JSON") as from_bytes:
+        parse_advice_bytes(data, label="upload")
+    assert "position 13" in str(from_bytes.value) and "0xff" not in str(from_bytes.value)
+    with pytest.raises(AdviceArtifactError, match="not valid UTF-8 JSON"):
+        load_advice_artifact(str(path))

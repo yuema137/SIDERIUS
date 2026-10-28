@@ -33,6 +33,8 @@ allowlisted or uploaded file, use `workflows.advice.parse_advice_bytes(data,
 label=...)`. It opens no file. `load_advice_artifact` delegates to it after its
 single read and digest check, so both give the same verdict and the same message
 text, with `label` in place of the path.
+`parse_advice_bytes` applies no size limit; its caller bounds the bytes (the
+console's 256 KiB request limit for uploads, `safe_bytes` for file reads).
 
 ## The key set is closed
 
