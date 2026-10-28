@@ -681,3 +681,35 @@ def test_rubric_fold_cannot_reach_metric_owners_and_replay_cannot_reach_a_provid
     ):
         imported = _imports(package / module)
         assert not {m for m in imported if "llm_bridge" in m or m == "agent.judge.call"}, module
+
+
+def test_rubric_per_item_scoring_is_not_capped_by_the_per_call_item_limit():
+    """Defect: the per-call item cap also refuses per_item scoring, which lists one item
+    per call (lists_every_item wrongly True)."""
+    wide = InputPort(
+        name="reviews", contract="literature.output", cardinality="many", max_items=200
+    )
+    admission = admit(value=strategy(max_calls=200), inputs=(wide,), select=AllSelect())
+    assert admission.admitted, admission.refusals
+
+
+def test_a_later_call_over_the_prompt_budget_ends_the_chain_as_recorded_evidence(
+    tmp_path, monkeypatch
+):
+    """Defect: a chain whose later call would exceed the budget sends it anyway (or loses
+    the earlier evidence), or replay cannot re-derive the early stop."""
+    item = literature(1)
+    assert item.value is not None
+    big = item.value.model_copy(
+        update={"findings": [item.value.findings[0].model_copy(update={"content": "x" * 4000})]}
+    )
+    items = strategy_items((literature(0), item.model_copy(update={"value": big})))
+    value = invocation(tmp_path, items=items)
+    small = 3000  # between the first (small) and the second (4000-char finding) prompt
+    for module in ("run", "plan"):
+        monkeypatch.setattr(f"workflows.judge_strategies.{module}.MAX_JUDGE_PROMPT_CHARS", small)
+    bridge = StubBridge()
+    result = run(value, bridge, tmp_path)
+    assert len(bridge.calls) == 1
+    assert (result.outcome.status, result.outcome.failure_code) == ("failed", "prompt_too_large")
+    assert replay_llm_strategy(value, ROUTES, expected_sha256=result.evidence_sha256) == result

@@ -13,7 +13,6 @@ from pydantic import Field, JsonValue, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.judge import (
-    MAX_SCORED_ITEMS_PER_CALL,
     Digest,
     FailureCode,
     ItemProjection,
@@ -38,6 +37,10 @@ CALLS_DIR = "calls"
 
 class StrategyError(ValueError):
     """An LLM strategy cannot run or replay; raised before any provider contact on run."""
+
+
+class PromptBudgetExceeded(StrategyError):
+    """The first call's rendered prompt exceeds ``MAX_JUDGE_PROMPT_CHARS``; nothing was sent."""
 
 
 class StrategyItem(JudgeModel):
@@ -96,11 +99,6 @@ class StrategyInvocation(JudgeModel):
             assert self.rubric is not None
             if rubric_ref(self.rubric) != self.strategy.rubric:
                 raise ValueError("the supplied rubric is not the one the strategy references")
-        if lists_every_item(self.strategy) and len(self.items) > MAX_SCORED_ITEMS_PER_CALL:
-            raise ValueError(
-                f"{self.strategy.kind} lists every item in one call; at most "
-                f"{MAX_SCORED_ITEMS_PER_CALL} items per call"
-            )
         if (self.strategy.guidance == "task_blocks") != (self.task_guidance is not None):
             raise ValueError("task guidance is supplied iff the strategy declares task_blocks")
         return self
@@ -185,8 +183,11 @@ class CombinedItems(JudgeModel):
 
 # Strategy-level failures (no single call failed). Pre-call: too few admissible items
 # to run the kind, or a declared primary item that is not admissible. After a decided
-# chain: an output count that differs from the declared one.
-StrategyFailureCode = Literal["insufficient_items", "primary_unavailable", "cardinality_mismatch"]
+# chain: an output count that differs from the declared one, or a later call whose
+# rendered prompt exceeds MAX_JUDGE_PROMPT_CHARS.
+StrategyFailureCode = Literal[
+    "insufficient_items", "primary_unavailable", "cardinality_mismatch", "prompt_too_large"
+]
 PRECALL_FAILURES: frozenset[str] = frozenset({"insufficient_items", "primary_unavailable"})
 
 

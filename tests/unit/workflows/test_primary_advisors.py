@@ -180,8 +180,10 @@ def test_primary_advisors_over_more_items_than_one_call_may_hold_is_refused(tmp_
         name="reviews", contract="literature.output", cardinality="many", max_items=200
     )
     assert "batch_too_large" in {r.code for r in admit(inputs=(wide,)).refusals}
-    with pytest.raises(ValidationError, match="at most 16 items per call"):
-        invocation(tmp_path, positions=tuple(range(17)))
+    bridge = AdvisorsBridge()
+    with pytest.raises(StrategyError, match="17 items exceed 16 items per call"):
+        run(invocation(tmp_path, positions=tuple(range(17))), bridge, tmp_path)
+    assert bridge.calls == []
 
 
 def test_per_advisor_consults_each_advisor_then_revises_with_every_note(tmp_path):

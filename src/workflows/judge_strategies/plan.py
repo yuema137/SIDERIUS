@@ -13,6 +13,8 @@ from typing import Any
 from agent.judge.evidence import chain_prior_turns
 from agent.judge.template import JudgeTemplate
 from agent.schemas.judge import (
+    MAX_JUDGE_PROMPT_CHARS,
+    MAX_SCORED_ITEMS_PER_CALL,
     CallContent,
     CallRequest,
     CallRole,
@@ -29,11 +31,14 @@ from .models import (
     CALLS_DIR,
     CombinedItems,
     ItemRanking,
+    PromptBudgetExceeded,
     StrategyError,
     StrategyFailureCode,
     StrategyInvocation,
     StrategyOutcome,
     StrategyRefusal,
+    invocation_sha256,
+    lists_every_item,
 )
 
 
@@ -94,6 +99,32 @@ def next_call(
     if precall_failure(kind, invocation) is not None:
         return None
     return kind.plan_call(invocation, tuple(call.payload for call in calls))
+
+
+def require_call_capacity(invocation: StrategyInvocation) -> None:
+    """Refuse (``StrategyError``) more items than one call may list, before any call."""
+    strategy = invocation.strategy
+    if lists_every_item(strategy) and len(invocation.items) > MAX_SCORED_ITEMS_PER_CALL:
+        raise StrategyError(
+            f"{strategy.kind} lists every item in one call; {len(invocation.items)} items "
+            f"exceed {MAX_SCORED_ITEMS_PER_CALL} items per call"
+        )
+
+
+def prompt_chars(planned: PlannedCall, request: CallRequest) -> int:
+    """Rendered size (system + user characters) of one planned call."""
+    system, user = planned.template.render(request)
+    return len(system) + len(user)
+
+
+def budget_refusal(invocation: StrategyInvocation, index: int, size: int) -> PromptBudgetExceeded:
+    strategy = invocation.strategy
+    per_item = " or scoring='per_item'" if getattr(strategy, "scoring", None) == "batch" else ""
+    return PromptBudgetExceeded(
+        f"{strategy.kind} call {index} renders {size} prompt characters; the judge prompt "
+        f"budget MAX_JUDGE_PROMPT_CHARS is {MAX_JUDGE_PROMPT_CHARS}. Use fewer items, shorter "
+        f"task judge guidance{per_item}"
+    )
 
 
 def judged_items(invocation: StrategyInvocation) -> tuple[JudgedItem, ...]:
@@ -166,6 +197,13 @@ def decide(
             raise StrategyError(f"a strategy that fails before any call ({precall}) recorded one")
         return _failed(invocation, precall)
     failed = next((call for call in calls if call.status != "decided"), None)
+    pending = None if failed is not None else next_call(kind, invocation, calls)
+    if pending is not None:
+        # A decided chain stops early only where its next call would exceed the budget.
+        request = call_request(invocation_sha256(invocation), pending, calls)
+        if not calls or prompt_chars(pending, request) <= MAX_JUDGE_PROMPT_CHARS:
+            raise StrategyError("strategy evidence ends before the planned call chain is complete")
+        return _failed(invocation, "prompt_too_large")
     if failed is None:
         try:
             return _decided(kind.fold(invocation, tuple(call.payload for call in calls)))
