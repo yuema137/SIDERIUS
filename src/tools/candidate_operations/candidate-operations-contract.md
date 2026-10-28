@@ -259,7 +259,12 @@ code and leaves no claim, reservation or child):
 
 1. not a `candidate` submission with `resources` (every other kind, including
    `candidate_loop_resume` and native chains): `resources_required`;
-2. ledger location (above): `path`; then the lock (`ledger_busy`);
+2. ledger location (above): `path`; then the lock (`ledger_busy`); then
+   `ledger.json` must parse as this revision's `HostLedgerState`, else
+   `ledger_format` (for example a ledger written by B3-5a, whose reservations
+   carried `time_budgeted`). `read_state` owns this refusal, so the sweep and
+   `release_reservation` report it identically, and the file is never
+   rewritten: once its runs have ended, the operator moves it aside;
 3. sweep (see Release);
 4. live reservations under another budget digest: `budget_mismatch`;
 5. the child could not receive the placement: a GPU declaration without
