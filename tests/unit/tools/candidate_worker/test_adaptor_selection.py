@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from tests.helpers.candidate_fanout import selection_request
-from tools.candidate_worker import graph, launch_candidate
+from tools.candidate_worker import launch_candidate, training
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.candidate_worker.layout import adaptor_output_path, adaptor_record_path
 from workflows.definition import WorkflowDefinition
@@ -49,13 +49,14 @@ def rejecting(native_runner, monkeypatch):
 def trained(monkeypatch):
     """The implementation each tuner dispatch actually received."""
     seen = []
-    real = graph.run_training
+    real = training.run_training
 
     def observe(context, proposal, implementation, validation, *args, **kwargs):
         seen.append((implementation, validation))
         return real(context, proposal, implementation, validation, *args, **kwargs)
 
-    monkeypatch.setattr(graph, "run_training", observe)
+    # The tuning unit resolves the native call at dispatch (B3-3 unit_child).
+    monkeypatch.setattr(training, "run_training", observe)
     return seen
 
 

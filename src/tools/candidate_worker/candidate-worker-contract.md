@@ -393,11 +393,132 @@ The proposal seed is still published once under `candidate_run/proposal_input.js
 
 The existing child dispatches ready nodes serially in declaration order. All
 required predecessor results must have succeeded before constructing the consumer.
-Values move through typed in-memory results, never peer-file communication.
+Values move through typed results held by the dispatching worker, never
+peer-file communication; each dispatched node runs as one unit process (below).
 Validation rejection is retained and independent siblings can continue. A native
 exception aborts further effects; remaining instances become blocked. Training,
 routing, loops, human pauses, buffers, cross-branch aggregation and graph resume
 are not supported by this profile.
+
+#### Per-unit processes (B3-3)
+
+Every graph profile (`execution_profile` set, including loop bodies) runs each
+dispatched node, except adaptors (`adaptor_phase.execute_adaptor` runs those in the worker), in its
+own child process, still one at a time. Readiness,
+input materialization, predecessor-result selection, terminal classification
+and the trace stay in the worker (`graph.execute_fanout`). The fixed
+three/four-stage path is unchanged and runs in the worker.
+
+- `unit_dispatch.node_invocation` builds a frozen `unit_models.NodeInvocation`:
+  the `execute_fanout` arguments (`request`, `initial`, `config`), the bound
+  composition's `manifest_path`, `composition_fingerprint` and
+  `physical_data_root`, `node_id`, `iteration`, the selected native `storage`,
+  and a phase payload discriminated by `phase` (`ProposalUnit`,
+  `ImplementationUnit`, `ValidationUnit`, `LiteratureUnit`,
+  `InterpretationUnit`, `TuningUnit`). A proposal after a literature review
+  carries the review evidence already applied. `TuningUnit` carries the
+  predecessor outputs of the branch `adaptor_phase.tuning_branch` selected in
+  the worker (the selection adaptor's contribution, else the only branch), `chain_formal_incumbent_reference` and
+  `AdmittedTraining`: the `TrainingAdmission` without its task composition and
+  LLM config, which `admission_from` refuses to build if restoring it would not
+  equal the admitted value.
+- `unit_runner.run_unit` publishes the invocation write-once at
+  `candidate_control_dir(workspace, iteration)/units/<node_id>/invocation.json`
+  (the directory must not exist), runs
+  `python -m tools.candidate_worker.unit_child <invocation>` through
+  `core.runtime_control.observed_subprocess.supervise_subprocess` with
+  `core.subprocess_env.subprocess_env()` (no device selector, so the worker's
+  GPUs) and reads the write-once `result.json` beside it. Both files are
+  bounded by the 4 MiB control envelope (`core.control_json.JSON_LIMIT`) on
+  write and read through `graph_evidence.read_graph_control`; an oversized
+  invocation fails its node before the child starts. A result over the bound
+  (in practice only a tuning output; the largest real `run_output` today is
+  about 1.1 MB) becomes `failed`/`native_failure` after training has run
+  (sizing this bound from the tuner's limits is tracked in #1015).
+- The unit runs with `PYTHONSAFEPATH=1` (added only when the worker lacks it,
+  flagged by `SIDERIUS_UNIT_SAFE_PATH_ADDED`), because `-m` would otherwise put
+  its cwd, the writable workspace where earlier generated code can write,
+  first on `sys.path`. The child removes both variables at entry, so its own
+  subprocesses see the worker's environment.
+- Transport (`unit_transport.encode_transport`/`decode_transport`) writes two
+  JSON lines: the `model_fields_set` tree of every nested model, then the
+  value's complete JSON with inf/NaN kept as JSON constants (`-inf` scoring
+  sentinels and launch knobs are valid values). Decoding validates the JSON and restores each model's
+  set fields, because LLM-config defaults, protocol mappings and
+  reconciliation read `model_fields_set` (an `exclude_unset` dump cannot carry
+  validator-filled fields such as a tuning output's metric contract). Encoding
+  refuses a value whose decoded `model_dump(mode="python")` differs from the
+  original's under NaN-aware structural equality (NaN equals NaN, +/-inf
+  compare exactly, so a stable lossy encoding such as -inf -> null is
+  refused), that is not a byte fixpoint of decode and re-encode (covers set
+  fields), or that decodes with a different set-field shape; a refused
+  invocation fails its node (`failed`/`native_failure`) before any child
+  starts. The child's `NodeUnitResult` and phase output cross back under the
+  same rule.
+- `unit_child` requires the generated-library binding the worker placed in its
+  environment, recomposes the task from `manifest_path`, refuses a different
+  `semantic_fingerprint`, binds the composition with the transported data root
+  and calls the same native phase function the worker called before B3-3
+  (`phases.run_*`, `run_literature`, `run_interpretation`, `run_training`).
+  Its stderr joins the inherited stdout, so `worker.log` still holds the unit's
+  output and tracebacks in order.
+
+`NodeUnitResult.outcome` keeps the in-process failure semantics: `returned`
+yields the output and record path; `raised` (native exception, traceback
+logged by the child) becomes `failed`/`native_failure` with remaining nodes
+blocked; `exited` re-raises `SystemExit(exit_code)` and `interrupted`
+re-raises `KeyboardInterrupt` in the worker, as the in-process call propagated
+them. A unit process that exits nonzero without a result (crash, kill) is also
+`failed`/`native_failure` after the worker logs the supervision error; an
+in-process crash instead ended the whole worker without a trace. The unit
+shares the worker's session and process group (a plain supervised call), so
+the sandbox wall-time deadline and terminal signals reach it as before.
+Subprocess lifecycles the unit observed (for example tuner children) are
+returned in `NodeUnitResult.lifecycles` and replayed in order through
+`replay_process_lifecycle` to the worker's observer, so a loop body's
+`iteration_owner` lease still sees uncertain cleanup. Replay happens before
+the result's identity check, so a refused result cannot hide that evidence.
+Grandchildren left by a killed unit that stay in the worker's process group
+are reaped by the sandbox's group cleanup when the worker exits; supervised
+grandchildren that created their own session (owned-group supervision) are
+reaped only when the bubblewrap PID namespace is torn down.
+
+Each unit pays its own interpreter start, native imports and task
+recomposition, measured in review at about 2.5–2.8 s and 680 MB peak RSS per
+unit on CPU. That time is charged against the run's `timeout_seconds`; the
+memory is released before the next unit starts.
+
+Parity limits, all outside recorded scientific outputs:
+
+- The torch default RNG is process-global. Before B3-3 the implementor
+  self-check and validator probes of one body drew unseeded inputs and probe
+  weights from one shared stream; each unit now starts its own fresh,
+  nondeterministic stream. Neither was reproducible. Probes stay unseeded;
+  seeding them is a separate behaviour decision.
+- `subprocess_env` sets `PYTHONHASHSEED=0` unless the operator set it, so unit
+  string hashing is fixed where the worker's was per-process random.
+- Each unit imports native modules and process registries afresh; registry
+  writes (only tuning writes them) no longer outlive their unit.
+- `units/<node_id>/` adds two control files per dispatched node; the trace,
+  records and receipt bytes are unchanged
+  (`test_unrouted_graph_trace_bytes_are_unchanged`).
+- `core/runtime_control/observed_subprocess.py` gained
+  `replay_process_lifecycle`, so `gpu_protection.protection_mechanism_digest()`
+  (recorded on protection receipts) moves from `d3f8cf19…` to `b79dbdde…`. The
+  rendering, verifier and estimation assembly digests are unchanged.
+
+Tests run units through an in-process seam (`native_runner` replaces
+`unit_runner.spawn_unit` with `unit_child.run_invocation_file`), which keeps the
+file transport, recomposition and result mapping. `test_unit_process.py` runs
+real unit processes with a generated provider harness: it requires the pinned
+accepted and failed trace digests, prompts and normalized records equal to the
+in-process run, a distinct process per unit importing this checkout, no
+registry write visible to a later unit or the worker, a crashed unit treated as
+a native failure, an adaptor-selected branch (reversed bindings) reaching a
+real tuning unit with the verifier's verdict and staged-bytes checks passing,
+replay of a unit's subprocess lifecycle, -inf values and a
+validator-filled nested field crossing the transport, and no import of
+`tools`/`json` shadows planted in the workspace.
 
 `tools.candidate_worker.readiness.next_dispatch` is the single readiness
 authority. It is pure: `ReadinessInput` carries every declared node in
@@ -540,9 +661,9 @@ models draw initial weights from it. A family-1 node's probe tensors and weights
 therefore depend on how many draws earlier nodes made. Recorded outputs are
 unaffected (pass/fail, shapes, gradient checks and records compare equal across
 declaration orders). The stream is not reproducible even serially: an unseeded
-process starts from a nondeterministic torch default seed. Running each unit in
-its own process (B3-3) gives each unit a fresh stream instead of a shared one.
-Seeding the probes is a behaviour change outside B3-0.
+process starts from a nondeterministic torch default seed. Since B3-3 each unit
+runs in its own process and draws from a fresh stream instead of a shared one
+(see Per-unit processes). Seeding the probes is a behaviour change outside B3.
 
 The shared `token_usage.jsonl` is append-only. By source reading (the witness
 below replaces `LLMBridge`), the only in-run read is `LLMBridge`'s first-row

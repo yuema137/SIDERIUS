@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from tests.helpers.candidate_fanout import fanout_request
+from tests.helpers.candidate_fanout import UNROUTED_TRACE_SHA256, fanout_request, trace_projection
 from tools.candidate_worker import launch_candidate, readiness
 from tools.candidate_worker.graph_evidence import replay_readiness, verify_graph_trace
 from tools.candidate_worker.graph_models import GraphNodeEvidence
@@ -370,16 +370,6 @@ def test_replay_accepts_the_skip_readiness_produces():
         replay_readiness(trace, routing=ROUTED)
 
 
-# Pinned on base 14d03254 (before skip semantics): sha256 of the receipt's trace,
-# status, validation flag and output index, with the workspace and native record
-# digests (which embed tmp paths) masked. New enum values must not move these bytes.
-UNROUTED_TRACE_SHA256 = {
-    "accepted": "3b0b62a412e76632c6a9ad1929afa94d24df5a271a35d6e70fba3764af1ac36e",
-    "rejected": "cbab7a78fe3a41f46a643bafddce480def9db486500874fde8334353f4fd2da6",
-    "failed": "77752ff7436e08173a39c3e2d82ffa09f5780538d97f4d014ad846a23ffba105",
-}
-
-
 @pytest.mark.parametrize("outcome", sorted(UNROUTED_TRACE_SHA256))
 def test_unrouted_graph_trace_bytes_are_unchanged(prepared, native_runner, monkeypatch, outcome):
     """Fails if skip semantics alter serialization or outcome of an existing graph run."""
@@ -396,10 +386,7 @@ def test_unrouted_graph_trace_bytes_are_unchanged(prepared, native_runner, monke
         monkeypatch.setattr(phases, "run_implementation", failed)
     request = fanout_request(prepared)
     receipt = launch_candidate(request)
-    payload = receipt.model_dump_json(
-        include={"status", "validation_passed", "graph_trace", "native_output_paths"}
-    ).replace(receipt.workspace, "<ws>")
-    payload = re.sub(r'"record_sha256":"[0-9a-f]{64}"', '"record_sha256":"<sha>"', payload)
+    payload = trace_projection(receipt)
     assert hashlib.sha256(payload.encode()).hexdigest() == UNROUTED_TRACE_SHA256[outcome], payload
     verify_graph_trace(
         request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
