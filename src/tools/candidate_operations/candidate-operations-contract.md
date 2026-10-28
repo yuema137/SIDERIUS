@@ -157,7 +157,14 @@ Owners: `seed_admission.py` (`admission_seed`, `require_root_seed`,
   (preparation, reusable top receipt, candidate `launch.json`, loop root) whose
   `run_seed`/`run_seed_source` differ from the record's. A pre-seed record with
   a pre-seed receipt reads back unchanged. Native-chain operations record no
-  seed here; their seed lives in the chain's run-invariants lock.
+  seed here; their seed lives in the chain's run-invariants lock. An explicit
+  seed is the capture declaration's `run.run_seed`
+  ([native chain contract](../native_chain/native-chain-contract.md#run-seed-issue-983)).
+  Every native-chain snapshot reads the lock back into
+  `NativeChainObservation.run_seed` / `run_seed_source` (omitted when the lock
+  is absent, pre-seed or unreadable). The readback sits outside
+  `NativeChainEvidence`, so terminal and resume-prefix comparisons, including
+  terminals recorded before the readback existed, are unchanged.
 
 ## Detached process and environment
 

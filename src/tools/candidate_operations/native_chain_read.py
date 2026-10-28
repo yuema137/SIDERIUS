@@ -7,10 +7,12 @@ from typing import Literal
 
 from core.native_observation import observation_policy
 from tools.native_chain.observation import (
+    LockedRunSeed,
     NativeChainEvidence,
     ObservationBounds,
     ObservationPolicy,
     observe_native_chain,
+    read_locked_seed,
 )
 
 from .files import encode, read_bytes
@@ -39,6 +41,12 @@ def chain_evidence(
         ),
         policy=policy,
     )
+
+
+def chain_seed(record: OperationRecord) -> LockedRunSeed:
+    """The chain's run seed as its run-invariants lock records it (readback only)."""
+    request, admission = chain_context(record)
+    return read_locked_seed(Path(admission.workspace), request.input_max_bytes)
 
 
 def chain_context(
@@ -135,6 +143,9 @@ def read_native_chain_operation(
         reason=reason,
         finishing=state == "completed" and process.status == "alive",
         native_chain=NativeChainObservation(
-            admission=admission, terminal=terminal, evidence=evidence
+            admission=admission,
+            terminal=terminal,
+            evidence=evidence,
+            **chain_seed(record).model_dump(),
         ),
     )

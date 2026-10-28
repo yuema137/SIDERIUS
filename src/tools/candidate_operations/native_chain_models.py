@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import Field
 
 from core.native_observation import EvidenceReadBytes
+from core.seeding import RunSeed, SeedSource
 from tools.native_chain.observation import NativeChainEvidence, ObservationPolicy
 from tools.workflow_preview.models import FileObservation, PreviewModel
 from tools.workspace_sandbox.runner import ObservedExecutionResult
@@ -87,3 +88,7 @@ class NativeChainObservation(PreviewModel):
     evidence: NativeChainEvidence = Field(
         default_factory=lambda: NativeChainEvidence(availability="unavailable")
     )
+    #: Read back from the chain's run-invariants lock at each snapshot (issue
+    #: #983), outside the terminal evidence so recorded terminals compare unchanged.
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
+    run_seed_source: SeedSource | None = Field(default=None, exclude_if=lambda value: value is None)
