@@ -132,9 +132,10 @@ def test_observable_catalog_matches_native_output_schemas():
     assert {item.contract for item in ROUTE_OBSERVABLES.values()} <= natives.keys()
     for observable in ROUTE_OBSERVABLES.values():
         model = natives[observable.contract]
-        owner, _, field = observable.field.rpartition(".")
+        owner = observable.field.removesuffix(f".{observable.attribute}")
         assert CONTRACTS[observable.contract] == owner == f"{model.__module__}.{model.__name__}"
-        annotation = model.model_fields[field].annotation
+        # The projection reads `attribute`; it must name the native field checked here.
+        annotation = model.model_fields[observable.attribute].annotation
         if observable.kind == "bool":
             assert annotation is bool and observable.values == ()
         elif observable.kind == "enum":

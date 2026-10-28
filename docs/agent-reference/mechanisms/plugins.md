@@ -28,6 +28,18 @@ provenance names exactly what produced it.
 | **Loss plugin** | attribute contract | manifest `loss_plugins` (`dir`) *or* env var | directory scan; resolved by `loss_name` at training time | ✅ |
 | **Objective (authoritative loss)** | the loss plugin's own self-declaration symbol | manifest `objective.implementation` | `_load_symbol` returns the declared loss name → a validated `LossConfig` | ✅ via `file:` |
 | **DeliverableNaming** | `BaseModel` — a *declaration*, not code | manifest `deliverable` | direct Pydantic construction | ❌ no `module:`/`file:` form |
+| **Custom adaptor** | `adapt(inputs, params, ctx)` + `AdaptorManifest` | external project `adaptor.json` | captured `core.local_code` package, supervised child; admitted by `python -m tools.adaptors` | ✅ (never in framework source) |
+
+### Custom adaptors
+
+A custom adaptor is declared by its own manifest (`siderius.adaptor-manifest/v1`),
+not by the task composition manifest. Its identity is the captured member
+package digest; it runs only in a supervised child that verifies member pins
+before executing; admission writes
+`<project>/.siderius/adaptors/<id>/<identity>.admission.json`. A COMBINE may emit
+only `CUSTOM_EMITTABLE` contracts with framework-stamped `PROTECTED_FIELDS`.
+Workflow execution is not available yet. Contract:
+[custom adaptor contract](../../../src/workflows/custom_adaptors/custom-adaptor-contract.md).
 
 ### The two directory-scanned families
 
@@ -224,6 +236,7 @@ plugins next to a scanned directory without them being picked up implicitly.
 | loss plugin loader | `ml_models/loss_plugin_loader.py` |
 | health plugin binding | `execute_tools/health_checks/_plugin_binding.py:34-37, 86-91` |
 | health plugin refs | `_task_health_config.py:171-191` |
+| custom adaptor manifest, runner, admission | `workflows/custom_adaptors/`, CLI `tools/adaptors/cli.py` |
 
 ## Related
 
