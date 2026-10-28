@@ -35,6 +35,7 @@ from pydantic import (
     JsonValue,
     SerializerFunctionWrapHandler,
     TypeAdapter,
+    ValidationError,
     model_serializer,
     model_validator,
 )
@@ -54,17 +55,38 @@ ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 def parse_llm_config_bytes(content: bytes) -> WorkflowLLMConfig:
     """Strictly parse captured ``--llm_config`` JSON: the one loader for explicit profiles.
 
-    Every explicit profile reaches this function (``WorkflowLLMConfig.from_json``,
-    and through it the CLI, run and preview paths). It refuses any key that the
+    Every explicit profile file reaches this function: ``WorkflowLLMConfig.from_json``
+    serves the CLI and run paths, ``tools.workflow_preview.config.parse_config``
+    serves the preview and candidate paths, and task observation calls it directly.
+    It refuses any key that the
     model does not declare, at every route depth, so a typo such as ``interpet``
     or a misspelled nested route key cannot silently select node defaults. A key
     starting with ``INERT_KEY_PREFIX`` (``"_"``, the advice-artifact convention)
     is an inert annotation: it is accepted at any depth and discarded before
     validation. Native models stay lenient for direct Python construction.
+
+    Errors are ``ValueError`` and never carry input values: pydantic echoes the
+    raw bytes or field value in its own messages, and a profile may hold an API
+    key. Malformed JSON reports only the parser position; validation failures
+    report only the field locations and error types.
     """
-    value = _drop_inert_keys(TypeAdapter(JsonValue).validate_json(content))
+    try:
+        raw = TypeAdapter(JsonValue).validate_json(content)
+    except ValidationError as error:
+        # pydantic's json_invalid context names the position, not the input bytes.
+        first = error.errors()[0]
+        reason = first.get("ctx", {}).get("error", first["type"])
+        raise ValueError(f"llm_config is not valid JSON: {reason}") from None
+    value = _drop_inert_keys(raw)
     _refuse_unknown_keys(value, WorkflowLLMConfig, "llm_config")
-    return WorkflowLLMConfig.model_validate(value)
+    try:
+        return WorkflowLLMConfig.model_validate(value)
+    except ValidationError as error:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in item['loc']) or 'llm_config'}: {item['type']}"
+            for item in error.errors()
+        )
+        raise ValueError(f"llm_config failed validation: {problems}") from None
 
 
 def _drop_inert_keys(value: JsonValue) -> JsonValue:

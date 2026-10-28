@@ -20,6 +20,7 @@ from workflows.llm_config import (
     NodeLLMConfig,
     TunerLLMConfig,
     WorkflowLLMConfig,
+    parse_llm_config_bytes,
     resolve_standard_llm_config,
 )
 
@@ -540,7 +541,31 @@ class TestStrictExplicitProfileLoading:
 
 def test_default_config_round_trips_through_its_serialized_form():
     dumped = WorkflowLLMConfig.default().model_dump(mode="json", by_alias=True, exclude_none=True)
-    again = WorkflowLLMConfig.model_validate(dumped).model_dump(
+    again = parse_llm_config_bytes(json.dumps(dumped).encode()).model_dump(
         mode="json", by_alias=True, exclude_none=True
     )
     assert again == dumped
+
+
+def test_malformed_profile_error_never_echoes_secret_bytes():
+    content = b'{"interpret": {"api_key": "sk-test-SECRET123"\n,\n}}'
+    with pytest.raises(ValueError, match="not valid JSON") as info:
+        parse_llm_config_bytes(content)
+    assert "SECRET123" not in str(info.value)
+    assert "line" in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "payload,location",
+    [
+        (
+            {"interpret": {"provider": "openai", "model_id": ["sk-test-SECRET123"]}},
+            "interpret.model_id",
+        ),
+        ({"interpret": {"provider": "sk-test-SECRET123"}}, "interpret.provider"),
+    ],
+)
+def test_wrong_typed_secret_value_error_never_echoes_the_value(payload, location):
+    with pytest.raises(ValueError, match=rf"{location}: ") as info:
+        parse_llm_config_bytes(json.dumps(payload).encode())
+    assert "SECRET123" not in str(info.value)
