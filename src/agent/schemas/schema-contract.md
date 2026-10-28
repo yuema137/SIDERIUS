@@ -77,8 +77,11 @@ no hidden contracts, no silent defaults.
   the consuming `TrainConfig` / `LossConfig` `model_fields` and nested model
   annotations, including optional unions. The shared document resolver
   repeats this check so a mutated rule dictionary cannot introduce a silently
-  ignored execution lock. Exact rules may insert omitted valid leaves; model
-  plugin paths remain extensible.
+  ignored execution lock. Exact rules may insert omitted valid leaves. The
+  resolver also checks `model_config` paths against the selected model's
+  config class (`get_config_class` of the locked or authored `model_type`);
+  unregistered model types are not checked, and `extra="allow"` configs
+  accept unknown keys.
   See the [parameter-rule contract](../../../docs/reference/task-composition.md)
   for sampling ownership, composition conflicts and value-validation boundaries.
 

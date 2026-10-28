@@ -535,8 +535,17 @@ Notes:
   built. Custom-loss plugin hyperparameters are not transported through
   `loss_config` (the plugin executes its `PLUGIN_LOSS_CONFIG_CLASS`
   defaults), so a rule naming one, such as `loss_config.snr_threshold`, is
-  refused. Model-specific `model_config` paths remain extensible;
-  this fixed-field validation does not close the model plugin's configuration.
+  refused. `model_config` targets are checked at effective-rule resolution
+  against the configuration class of the selected model: the exact
+  `model_config.model_type` lock when declared, else the plan's `model_type`
+  (a built-in config class or the plugin's `PLUGIN_CONFIG_CLASS`). Plugin
+  configs keep Pydantic's default of ignoring unknown keys, so a misspelled
+  lock such as `model_config.segmentaton_size` is refused there instead of
+  being dropped; a config declared with `extra="allow"` keeps unknown keys and
+  accepts them. A lock on a field the selected model does not declare refuses
+  that plan. `model_config.model_type` is always a valid target. A model type
+  without a registered config class yet (a proposed generated model before
+  implementation) cannot be checked; execution refuses an unknown model type.
 - A workflow may add a second rule set through
   `--workflow_parameter_rules '<json>'`, using the same shape. Task and
   workflow rules are enforced together: the workflow may narrow a task rule

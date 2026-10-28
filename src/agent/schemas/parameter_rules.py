@@ -37,7 +37,10 @@ class ParameterRuleError(ValueError):
 
 
 def _model_path_exists(annotation: Any, parts: list[str]) -> bool:
-    """Recognize fields from their consuming models, including optional unions."""
+    """Recognize fields from their consuming models, including optional unions.
+
+    A model with ``extra="allow"`` keeps unknown keys, so they are consumed.
+    """
     origin = get_origin(annotation)
     if origin is Annotated:
         return _model_path_exists(get_args(annotation)[0], parts)
@@ -47,34 +50,71 @@ def _model_path_exists(annotation: Any, parts: list[str]) -> bool:
         return False
     field = annotation.model_fields.get(parts[0])
     if field is None:
-        return False
+        return annotation.model_config.get("extra") == "allow"
     return len(parts) == 1 or _model_path_exists(field.annotation, parts[1:])
 
 
 def _fixed_rule_schemas() -> dict[str, type[BaseModel]]:
     """Consuming execution schema for each closed rule root.
 
-    ``model_config`` is absent on purpose: model plugins own an extensible
-    configuration, so its leaves cannot be checked against a fixed schema.
-    Custom-loss plugin hyperparameters are not transported through
-    ``loss_config``; ``LossConfig`` is the complete loss-routing surface.
+    ``model_config`` is absent: its consuming schema is the selected model's
+    configuration class, known only from the resolved ``model_type`` (see
+    :func:`_validate_model_rule_paths`). Custom-loss plugin hyperparameters
+    are not transported through ``loss_config``; ``LossConfig`` is the
+    complete loss-routing surface.
     """
     from ml_models.models_format_sandbox import LossConfig, TrainConfig
 
     return {"train_config": TrainConfig, "loss_config": LossConfig}
 
 
-def _validate_fixed_rule_path(path: str, parts: list[str]) -> None:
-    """Keep fixed training and loss targets aligned with their execution schema."""
-    schema = _fixed_rule_schemas().get(parts[0])
-    if schema is None:
-        return
+def _validate_rule_target(path: str, parts: list[str], schema: type[BaseModel]) -> None:
+    """Refuse a rule whose target the consuming schema would silently drop."""
     if not _model_path_exists(schema, parts[1:]):
         raise ParameterRuleError(
             f"unsupported {parts[0]} parameter path {path!r}: target must exist in "
             f"{schema.__name__} or one of its nested configuration models; check the "
             f"{parts[0]} fields in the task-composition parameter-rule contract"
         )
+
+
+def _validate_fixed_rule_path(path: str, parts: list[str]) -> None:
+    """Keep fixed training and loss targets aligned with their execution schema."""
+    schema = _fixed_rule_schemas().get(parts[0])
+    if schema is not None:
+        _validate_rule_target(path, parts, schema)
+
+
+def _validate_model_rule_paths(
+    document: Mapping[str, Any], paths: set[str], locked_model_type: Any
+) -> None:
+    """Check ``model_config`` targets against the selected model's config class.
+
+    The selected model is an exact ``model_config.model_type`` lock when one
+    is declared, else the document's own ``model_type``. That path routes the
+    registry lookup and is always a valid target. When the selected
+    ``model_type`` has no registered config class yet (a generated model
+    before implementation) there is no consuming schema to check; execution
+    itself refuses an unknown model type.
+    """
+    model_paths = [
+        path
+        for path in sorted(paths)
+        if path.startswith("model_config.") and path != "model_config.model_type"
+    ]
+    model_config = document.get("model_config")
+    model_type = locked_model_type
+    if model_type is None and isinstance(model_config, Mapping):
+        model_type = model_config.get("model_type")
+    if not model_paths or not isinstance(model_type, str):
+        return
+    from ml_models.models_format_sandbox import get_config_class
+
+    schema = get_config_class(model_type)
+    if schema is None:
+        return
+    for path in model_paths:
+        _validate_rule_target(path, path.split("."), schema)
 
 
 def _validate_parameter_path(path: str) -> None:
@@ -329,6 +369,13 @@ def resolve_parameter_rule_document(
     paths = {path for _, rules in declarations for path in rules.rules}
     for path in paths:
         _validate_parameter_path(path)
+    model_type_locks = [
+        rule.exact
+        for _, rules in declarations
+        for rule_path, rule in rules.rules.items()
+        if rule_path == "model_config.model_type" and rule.kind == "exact"
+    ]
+    _validate_model_rule_paths(resolved, paths, model_type_locks[0] if model_type_locks else None)
     for path in sorted(paths):
         exact_values = [
             rule.exact
