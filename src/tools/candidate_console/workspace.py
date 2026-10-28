@@ -226,7 +226,7 @@ def _status(directory: int, name: str, *, owned: bool = True) -> WorkspaceStatus
     return "present"
 
 
-def _ensure_directory(directory: int, name: str, label: str) -> int:
+def ensure_owned_directory(directory: int, name: str, label: str) -> int:
     """Create ``name`` (0700) when missing, open it no-follow and enforce ownership."""
     try:
         os.mkdir(name, 0o700, dir_fd=directory)
@@ -396,12 +396,14 @@ def _init(base: Path, workspace: Path, port: int) -> Path:
             raise WorkspaceRefused(
                 "workspace parent must be owned by you without group/other write"
             )
-        root = _ensure_directory(directory, WORKSPACE_DIRECTORY, WORKSPACE_DIRECTORY)
+        root = ensure_owned_directory(directory, WORKSPACE_DIRECTORY, WORKSPACE_DIRECTORY)
     opened = {"": root}
     try:
         for name in INIT_CHILDREN:
             above, _, leaf = name.rpartition("/")
-            opened[name] = _ensure_directory(opened[above], leaf, f"{WORKSPACE_DIRECTORY}/{name}")
+            opened[name] = ensure_owned_directory(
+                opened[above], leaf, f"{WORKSPACE_DIRECTORY}/{name}"
+            )
         _create_token(opened[SETTINGS])
         profile = _default_llm_profile()
         digest = hashlib.sha256(profile).hexdigest()[:12]
@@ -447,7 +449,7 @@ def _init(base: Path, workspace: Path, port: int) -> Path:
                     if field in TASK_OUTPUT_PARENTS:
                         parent_name = TASK_OUTPUT_PARENTS[field]
                         os.close(
-                            _ensure_directory(
+                            ensure_owned_directory(
                                 opened[parent_name],
                                 task_id,
                                 f"{WORKSPACE_DIRECTORY}/{parent_name}/{task_id}",
