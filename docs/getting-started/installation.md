@@ -154,7 +154,9 @@ single map; the linked procedures own the details.
 | Entry point | Where keys are read from | Procedure |
 | --- | --- | --- |
 | Command-line chain and node CLIs (`scripts/launch/run_chain.sh`, `src/workflows/run_one_iteration.py`, node `main()`s) | Environment of the launching process. Recommended: a trusted external mode-`600` credential file sourced in that shell, or managed secret injection. Compatibility only: a gitignored `.env` in the checkout (see [Compatibility `.env` loading](#compatibility-env-loading)) | This section, below |
-| Browser candidate console (`candidate_console`) | Only the JSON `credential_file` named in the console configuration (mode `600`), limited to the task's `candidate_environment_names`. Shell exports and a project `.env` do not satisfy its readiness or Launch check | [Console credentials](../../src/tools/candidate_console/README.md#credentials), [configuration contract](../../src/tools/candidate_console/console-contract.md#configuration) |
+| Browser candidate console (`candidate_console`) | Only the `credential_file` named in the console configuration (owner-only mode `600`; a JSON object or a dotenv file, which may be the checkout `.env`), limited to the task's `candidate_environment_names`. Shell exports and a `.env` that `credential_file` does not name do not satisfy its readiness or Launch check | [Console credentials](../../src/tools/candidate_console/README.md#credentials), [configuration contract](../../src/tools/candidate_console/console-contract.md#configuration) |
+| Detached candidate operations from code or CLI (`submit_operation`, `python -m tools.candidate_operations submit`) | Python: the `launch_environment` mapping the caller passes. CLI: the environment of the launching process. Only the request's declared provider names are checked and forwarded to the new process; an existing operation ID replays without reading values | [Operations contract](../../src/tools/candidate_operations/candidate-operations-contract.md#store-and-admission) |
+| Resume of a paused research loop | The same source as its submit route above (code/CLI), or the console's `credential_file` for **Resume loop**; either way the names are the original launch request's, rechecked at Resume | [Loop control recipe](../../src/tools/candidate_operations/candidate-operations-contract.md#control-an-authored-loop-from-code-or-the-cli), [console Pause and Resume](../../src/tools/candidate_console/console-contract.md#pause-and-resume) |
 | Paper resolver (Semantic Scholar) | `S2_API_KEY` in the calling process; source checkouts fall back to the checkout `.env` when the variable is absent | [Semantic Scholar key](#semantic-scholar-key) |
 
 Key names are declared in `src/agent/llm_settings.py` — `KNOWN_PROVIDERS`
@@ -249,7 +251,8 @@ for effectful runs:
   procedure avoids.
 
 The browser console does not accept this route: its readiness and Launch checks
-read only `credential_file`. Its operation contract records that downstream
+read only `credential_file`, which may name a mode-`600` dotenv file such as this
+`.env`. Its operation contract records that downstream
 native processes may still call the bridge's loader; see
 [candidate operations](../../src/tools/candidate_operations/candidate-operations-contract.md).
 

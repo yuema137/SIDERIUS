@@ -539,8 +539,10 @@ executes a concrete `WorkflowDocument` with exactly one externally supplied
 `interpretation.input`, one `interpretation-to-proposal` edge, and one complete
 proposal/implementation/validation branch. The existing declaration dependency
 check and serial AND readiness determine order, including declarations whose
-interpreter appears after its consumers in source. This profile does not support
-reusable managed-source preparation, feedback loops or resume. An optional fifth
+interpreter appears after its consumers in source. Reusable managed-source preparation uses the
+[reusable interpretation profile](../candidate_prepare/candidate-prepare-contract.md#reusable-native-interpretation-candidate);
+the authored feedback loop and its Pause/Resume are specified under
+[Declared finite research body](#declared-finite-research-body). An optional fifth
 node may tune that branch using `validated-candidate-to-tuning` with the same
 proposal/validation lineage and an explicit `native-training.settings` binding.
 
@@ -695,8 +697,10 @@ finishes that active body and reports
 `stopped` unless the finite limit or a native failure completes first. Repeating
 an identical request is idempotent. Queued/not-yet-claimed operations refuse with
 `not_ready`; this operation does not create their workspace. Stop is neither an
-immediate signal nor resumable Pause. GUI controller presentation is a separate
-closure; completed-boundary Pause/Resume follows below.
+immediate signal nor resumable Pause. The console's **Stop at next boundary**
+control and the `stop-loop` operation CLI call this same operation
+([console contract](../candidate_console/console-contract.md#authored-loop-stop-and-state));
+completed-boundary Pause/Resume follows below.
 
 Offline acceptance covers two actual native bodies with typed feedback and advice,
 source roundtrip, parent input-tamper refusal, operation-bound graceful Stop, and
