@@ -32,15 +32,15 @@ def credential_readiness(request: CandidateRunRequest, path: str | None) -> Cred
         instructions.append("Repair the selected model profile routes; Prepare and review again.")
     if status == "unavailable":
         instructions.append(
-            "Check credential_file JSON format, ownership and mode 600 permissions."
+            "Check credential_file JSON or dotenv format, ownership and mode 600 permissions."
         )
     elif missing and status == "not_selected":
         instructions.append(
-            "Set credential_file in console.json to a private JSON path; restart and review again."
+            "Set credential_file in console.json to a private JSON or dotenv path; restart and review again."
         )
     elif missing:
         instructions.append(
-            "Set nonempty values for missing names in credential_file (private JSON, mode 600)."
+            "Set nonempty values for missing names in credential_file (private JSON or dotenv, mode 600)."
         )
     return CredentialReadiness(
         **policy.model_dump(),
@@ -75,7 +75,7 @@ def named_credential_readiness(
         instructions.append("Add required names to this native choice's environment_names.")
     if missing or status == "unavailable":
         instructions.append(
-            "Supply nonempty named values in credential_file (private JSON, mode 600)."
+            "Supply nonempty named values in credential_file (private JSON or dotenv, mode 600)."
         )
     return CredentialReadiness(
         required_names=required_names,
