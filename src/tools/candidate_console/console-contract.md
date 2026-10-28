@@ -1103,7 +1103,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   no wire anywhere they form one row in stage order; steps = largest card + 80/32 px
   rounded up to 16 px, all on the 16 px grid. It is one draft edit through the
   ordinary `move` callback (label `Tidy up layout`, undoable, saved only with Save).
-- Check the loop (`#circuit-check`, `repeat-2`; `editor-circuit-walk.js`): `plan`
+- Check the workflow (`#circuit-check`, `repeat-2`; `editor-circuit-walk.js`): `plan`
   orders the displayed nodes sources-first and lists one step per result-fed input,
   then the loop feedback; the first required, non-framework-supplied, unbound input
   (or a loop whose endpoint is gone, or an empty canvas) is the break. `run` moves an
@@ -1150,7 +1150,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
   zoom out still reaches 40%.
 - Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
-  in, Actual size, Fit, Check the loop, Tidy up); the connector legend is a bottom-left
+  in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
   chip whose content opens as a two-column popover above it.
 - Problems (spec §9): `#problems-chip` (`circle-alert` + "N problems") toggles the 320px
   `#editor-problems` popover under it; it never takes space in the page. Each row is one
@@ -1256,7 +1256,7 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Workflow | Workflow project select and task chip (page bar) | Beginner | shown | Choose a task |
 | Workflow | Task package and version details (choose version, update references, findings) | Beginner | collapsed card below the frame; open by default with advanced tools | Opened from the task chip when a version must be chosen |
 | Workflow | Module rail (palette) | Beginner | shown | Add modules |
-| Workflow | Canvas, bottom-right controls (Fit, zoom, Check the loop, Tidy up), `+` add-handles, empty-canvas start state, Skip to canvas | Beginner | shown | Build and connect |
+| Workflow | Canvas, bottom-right controls (Fit, zoom, Check the workflow, Tidy up), `+` add-handles, empty-canvas start state, Skip to canvas | Beginner | shown | Build and connect |
 | Workflow | Canvas controls help (keyboard-move hints) | Advanced | gated | Long control reference; the tour covers first use |
 | Workflow | Connection mappings list | Advanced | gated | Protocol detail per binding |
 | Workflow | Templates button and gallery (Blank workflow first, Use template) | Beginner | shown | One-click start from a simple closed loop |

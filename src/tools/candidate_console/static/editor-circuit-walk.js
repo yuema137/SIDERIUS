@@ -1,4 +1,4 @@
-/* "Check the loop" walk-through (operator UX decision 2026-10-28), presentation only.
+/* "Check the workflow" walk-through (operator UX decision 2026-10-28), presentation only.
  *
  * On demand a token travels the drawn wires in execution order (sources first), then the
  * research loop's feedback wire. At the first break it stops: that socket gets a soft red
@@ -115,7 +115,7 @@
     const viewport = host.querySelector('.circuit-viewport');
     viewport.dataset.walkState = 'running';
     if (!reduced() && value.steps.length) {
-      labels.say('Checking the loop: following every connection in order…');
+      labels.say('Checking the workflow: following every connection in order…');
       const token = document.createElement('span');
       token.className = 'circuit-walk-token'; token.setAttribute('aria-hidden', 'true');
       host.querySelector('.circuit-world').append(token);

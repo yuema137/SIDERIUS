@@ -205,7 +205,7 @@
     path.setAttribute('aria-label', `Research loop: ${capabilityOf(loop.feedback.source.node)} feeds back to ${capabilityOf(loop.feedback.target)}`);
     svg.prepend(path);
   }
-  // "Check the loop": the token walk (editor-circuit-walk.js) over what this canvas shows.
+  // "Check the workflow": the token walk (editor-circuit-walk.js) over what this canvas shows.
   function checkLoop() {
     if (!projection?.document || !host) return;
     const walk = window.editorCircuitWalk, value = walk.plan(projection.document, projection.inventory);
@@ -298,7 +298,7 @@
     iconButton(bar, 'Zoom in', 'circuit-zoom-in', () => applyScale(Math.min(1, Math.round((view.scale + 0.1) * 10) / 10)), 'zoom-in');
     iconButton(bar, 'Actual size', 'circuit-zoom-reset', () => applyScale(1), 'maximize');
     iconButton(bar, 'Fit to view', 'circuit-fit', fit, 'scan');
-    const check = iconButton(bar, 'Check the loop', 'circuit-check', checkLoop, 'repeat-2');
+    const check = iconButton(bar, 'Check the workflow', 'circuit-check', checkLoop, 'repeat-2');
     check.disabled = !value.document;
     const tidy = iconButton(bar, 'Tidy up', 'circuit-tidy', tidyUp, 'layout-grid');
     tidy.disabled = !value.document || !value.enabled || value.allowMove === false;

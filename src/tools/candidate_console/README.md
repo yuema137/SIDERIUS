@@ -146,8 +146,8 @@ size**, **Fit to view**) change only the view. Optional inputs that no wire feed
 folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, the canvas says so;
 **Tidy up** arranges them (one edit you can undo).
 
-**Check the loop** (bottom right) sends a small dot along every connection in the
-order the modules run, then along the research loop's dashed feedback wire. If
+**Check the workflow** (bottom right) sends a small dot along every connection in the
+order the modules run, then along the research loop's dashed feedback wire (when there is a loop). If
 something is missing, the dot stops there: that socket glows soft red and one sentence
 under the card says what is not connected. With reduced motion turned on in your
 system settings, the glow appears without the moving dot.

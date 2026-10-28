@@ -133,7 +133,7 @@ try {
   assert.ok(Number(dim.socket) < 0.5, 'incompatible input dims its socket');
   assert.equal(dim.pill, 'dashed', 'incompatible input dashes its contract pill');
   assert.equal(dim.port, '1', 'incompatible label text is not faded below 4.5:1 (port stays clickable)');
-  assert.match(await dimmed.getAttribute('data-refusal'), /expects implementation\.output .*provides proposal\.output/);
+  assert.equal(await dimmed.getAttribute('data-refusal'), "Can't connect: Propose model sends Model plan; this input receives Model code.", 'K10 sentence names both connector types');
   assert.equal(await dimmed.getAttribute('title'), null, 'No native title tooltip on sockets (spec §6.2)');
   assert.equal(await output('alternate').getAttribute('aria-pressed'), 'false', 'hover does not select');
   await page.mouse.move(2, 2);

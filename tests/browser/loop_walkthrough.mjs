@@ -1,4 +1,4 @@
-/** "Check the loop" walk-through (operator UX decision 2026-10-28) on the five-node loop.
+/** "Check the workflow" walk-through (operator UX decision 2026-10-28) on the five-node loop.
  * Fails if the token never travels the wires, if a complete loop is not reported complete
  * after following its feedback wire, if a break stops anywhere but the first unconnected
  * required socket, if that socket gets no soft red halo (or a halo larger than its card),
