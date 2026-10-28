@@ -14,7 +14,15 @@ from __future__ import annotations
 import math
 from typing import Annotated, Any, Literal, NamedTuple
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
@@ -77,12 +85,22 @@ from ml_models.models_format_sandbox import LossConfig
 
 TrainingValidationPortion = Annotated[float, Field(gt=0, le=1)]
 
+
 #: An operator-configured wall-time budget in minutes: finite and positive.
 #: ``None`` (on the fields that use it) is the only way to disable a budget;
 #: zero and non-finite values are malformed configuration, refused by every
 #: launch entry path before model execution (``validate_launch_admission``)
 #: rather than reinterpreted by forecast or measured admission.
-OperatorTimeBudgetMinutes = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+def _finite_in_seconds(minutes: float) -> float:
+    """Consumers multiply by 60; a finite minute count must stay finite there."""
+    if not math.isfinite(minutes * 60.0):
+        raise ValueError("time budget is too large to express in seconds")
+    return minutes
+
+
+OperatorTimeBudgetMinutes = Annotated[
+    float, Field(gt=0.0, allow_inf_nan=False), AfterValidator(_finite_in_seconds)
+]
 
 
 #: What a HealthGate verdict DOES in this run: enforce, or only record.

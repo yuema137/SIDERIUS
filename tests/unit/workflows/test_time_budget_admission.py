@@ -73,7 +73,8 @@ def test_iteration_cli_refuses_malformed_budget_before_workspace_binding(
 
 
 @pytest.mark.parametrize("field", BUDGETS)
-@pytest.mark.parametrize("value", [0.0, -5.0, float("inf"), float("nan")])
+# 1e308 minutes is finite but overflows to inf seconds once consumers multiply by 60.
+@pytest.mark.parametrize("value", [0.0, -5.0, float("inf"), float("nan"), 1e308])
 def test_direct_workflow_refuses_malformed_budget_before_composition(
     tmp_path, monkeypatch, field, value
 ):

@@ -247,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lane F3: ELEVATED wall-time ceiling (minutes) for a score-qualified "
         "bypass formal attempt — one value drives BOTH re-evaluated admission and "
         "the watchdog ceiling. Omitted (None) = a qualified bypass grants NO "
-        "extension. Campaign frozen value: 200.",
+        "extension. Must be finite and positive. Campaign frozen value: 200.",
     )
     parser.add_argument(
         "--order_strategy_override",
