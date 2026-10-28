@@ -55,6 +55,17 @@
     section.setAttribute('aria-label', 'Your advice to the agents');
     latest = {section, state, edit}; fill(latest);
   }
+  /** Select the first canvas module that takes advice and focus its advice field ("Use template"). */
+  async function focusFirst() {
+    load(); if (loading) await loading;
+    const card = targets && [...document.querySelectorAll('#editor-graph .circuit-card')].find(item => targets.some(value => value.capability === item.dataset.capability));
+    if (!card) return false;
+    const heading = card.querySelector('.editor-node');
+    if (heading.getAttribute('aria-pressed') !== 'true') heading.click();
+    const input = document.querySelector('#editor-inspector .advice-input');
+    input?.scrollIntoView({block: 'nearest'}); input?.focus();
+    return !!input;
+  }
   window.consoleSession?.subscribe(({connected}) => { if (!connected) { targets = null; loading = null; } });
-  window.editorAdvice = Object.freeze({render});
+  window.editorAdvice = Object.freeze({render, focusFirst});
 })();

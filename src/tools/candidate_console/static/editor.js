@@ -36,11 +36,14 @@
   };
   // An invalid training/loop field draft blocks undo/redo: restoring a state would drop its typed text.
   const draftOperable = () => !!draft && !sourceDirty && !saving && !conflict && !draftsPending();
-  const draftControls = Draft.mount({header: document.querySelector('#view-workflow h1'), actions: $('review').parentElement,
+  const draftControls = Draft.mount({header: document.querySelector('#view-workflow h1'), actions: $('edit-actions'),
     undo: () => step('undo'), redo: () => step('redo'), discard: discardChanges, active: () => window.consoleNavigation?.view === 'workflow'});
   const projection = () => Object.freeze({projectId: project, candidateEnabled,
     savedSha256: base?.sha256 || null, dirty: pending(), sourceDirty,
-    sourceAvailable, reusableSource: base?.document?.definition?.schema_version === 2, saving, conflict: !!conflict});
+    sourceAvailable, reusableSource: base?.document?.definition?.schema_version === 2, saving, conflict: !!conflict,
+    // Page-bar presentation (editor-page-bar.js): checked proposal, task chip and pending task findings.
+    reviewed: !!reviewed, taskReview: !!taskReview(), taskSelected: !!taskSelection,
+    taskBinding: base?.document?.task_binding ? {package_id: base.document.task_binding.package_id, revision: base.document.task_binding.revision} : null});
   // importSource: a template's unsaved source enters the ordinary source Review (editor-templates.js).
   window.workflowEditor = Object.freeze({get state() { return projection(); }, importSource: (source, label) => reviewProposal({kind: 'source', source}, label)});
   const bindingEqual = (a, b) => !!a && !!b && ['schema_version', 'package_id', 'revision', 'semantic_fingerprint', 'task_data_path_id'].every(key => a[key] === b[key]);
@@ -319,7 +322,7 @@
       select: value => { if (live()) { selected = value; render(); } },
       bind: (nodeId, argument, source) => { if (live()) updateBindingDraft(nodeId, argument, source); },
       disconnect: (nodeId, argument) => { if (live()) updateBindingDraft(nodeId, argument, null); },
-      move: layout => {
+      move: (layout, label = 'Move capability') => {
         if (!live() || !canEditCircuit()) return;
         for (const {node: nodeId, x, y} of NodeDrafts.moves(draftState(), layout)) {
           const item = pendingNodes.find(value => value.node === nodeId);
@@ -327,7 +330,7 @@
           const position = graph.positions.find(value => value.node === nodeId);
           if (position) { position.x = x; position.y = y; } else graph.positions.push({node: nodeId, x, y});
         }
-        reproject(); changed('Move capability'); render(); status('Node position changed locally. Review and save to keep the layout.');
+        reproject(); changed(label); render(); status('Node position changed locally. Save to keep the layout.');
       }
     });
     if (!display) return;

@@ -8,14 +8,14 @@
   const KEY = 'siderius.console.tour.v1';
   // Heading <= 4 words, body <= 120 characters (spec §7.3).
   const STEPS = [
-    {title: 'Choose a task', anchors: ['#editor-project', '.workflow-project'],
-      text: 'Pick a workflow project. Its task package and version appear beside it.'},
+    {title: 'Choose a task', anchors: ['#editor-project', '.page-bar-project'],
+      text: 'Pick a workflow project. The chip beside it shows its task package and version.'},
     {title: 'Pick a module', anchors: ['#editor-palette'],
       text: 'Each module in the list is one research step. Click it or drag it onto the canvas.'},
     {title: 'Match connector names', anchors: ['.circuit-viewport', '.workflow-canvas-panel'],
       text: 'Connect an output to an input with the same connector name and colour.'},
-    {title: 'Save a version', anchors: ['#editor-save', '.workflow-actions'],
-      text: 'Review the exact changes, then save. Run unlocks for saved versions.'},
+    {title: 'Save a version', anchors: ['#editor-review', '.workflow-actions'],
+      text: 'Save checks the workflow, then you confirm a named version. Run unlocks for saved versions.'},
   ];
   let outcome = null, step = -1, card = null, target = null, opener = null, frame = 0;
   try { outcome = localStorage.getItem(KEY); } catch { /* Storage denial keeps this page's outcome in memory. */ }

@@ -56,17 +56,18 @@ try {
   // First run, before Connect: the task-example guide and the Task step lead.
   assert.equal(await page.locator('#workflow-start-guide').isVisible(), true);
   assert.match(await page.locator('#start-guide-heading').textContent(), /Build your research loop/);
-  assert.equal(await page.locator('#workflow-start-guide button').count(), 1, 'The empty canvas offers one action');
+  assert.deepEqual(await page.locator('#workflow-start-guide button:not(.link-button)').evaluateAll(items => items.map(item => item.id)), ['workflow-start-template'], 'The empty canvas offers one primary action');
   assert.match(await page.locator('#workflow-start-state').textContent(), /Connect/);
   assert.equal(await current(), 'Task');
   assert.equal(await next.isDisabled(), true);
 
-  // Secondary detail is collapsed; Save is the only primary editor action.
+  // Secondary detail is collapsed; Save (check, then confirm) is the only primary editor action.
   for (const id of ['workflow-details', 'editor-advanced', 'editor-review-disclosure']) assert.equal(await page.locator('#' + id).getAttribute('open'), null, id);
   assert.equal(await page.locator('#editor-advanced > summary').textContent(), 'Advanced source');
   assert.equal(await page.locator('#workflow-details > summary').textContent(), 'Details');
   assert.equal(await page.locator('#workflow-details').getByText('Cooperating API writers', {exact: false}).isVisible(), false);
-  assert.deepEqual(await page.locator('.workflow-actions .actions button:not(.secondary)').evaluateAll(items => items.map(item => item.id)), ['editor-save']);
+  assert.deepEqual(await page.locator('.workflow-actions button:not(.secondary):not(.status-chip)').evaluateAll(items => items.map(item => item.id)), ['editor-review']);
+  assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'The save confirmation step opens only after Save');
 
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
   await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));

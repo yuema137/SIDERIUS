@@ -1,0 +1,88 @@
+/* Header connection chip, Workflow page bar, save confirmation step, canvas frame
+ * (editor-page-bar.js, ui-design-spec.md §1.2 L5/L6, canvas-study M1/V2). Tokens: theme.css. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.icon { flex: none; vertical-align: -3px; }
+[data-icon] { display: inline-flex; align-items: center; gap: var(--space-2); }
+button[data-icon] { justify-content: center; }
+.link-button { min-height: 32px; padding: 0 var(--space-2); border-color: transparent; background: transparent; color: var(--primary); font-weight: 600; text-decoration: underline; }
+.link-button:not(:disabled):hover { background: transparent; color: var(--primary-hover); }
+
+/* Connection (L6): a full-width banner under the header items until connected, then one chip. */
+.access-section { order: 99; flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); }
+.access-section #access-heading { margin: 0; font-size: var(--font-heading); white-space: nowrap; }
+.access-section .access-help { margin: 0; font-size: var(--font-label); }
+.access-section #access-form { flex: 1 1 420px; margin: 0; align-items: center; }
+.access-section #access-form label { margin: 0; font-size: var(--font-label); }
+.access-section #access-status { flex: 1 1 220px; margin: 0; font-size: var(--font-help); }
+#access-section.access-collapsed { order: 0; flex: 0 1 auto; margin-left: auto; padding: 0 0 0 var(--space-3); gap: var(--space-2); border-radius: var(--radius-pill); }
+#access-section.access-collapsed #access-status { flex: none; color: var(--text); font-weight: 600; white-space: nowrap; }
+#access-section.access-collapsed #access-status::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: var(--space-2); border-radius: 50%; background: var(--success, #2e7d32); }
+#access-section.access-collapsed .access-connected button { min-height: 28px; padding: 0 var(--space-2); font-size: var(--font-label); border-radius: var(--radius-pill); }
+
+/* Page bar: title, project + task chip, problems, then undo/redo, Save, Next: Run and ⋯. */
+.page-bar { position: relative; }
+.page-bar-project { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.page-bar-project select { width: auto; max-width: 240px; min-height: 32px; padding-block: 0; }
+.status-chip { min-height: 28px; max-width: 280px; padding: 0 var(--space-3); border-color: var(--border); border-radius: var(--radius-pill); background: var(--bg); color: var(--text); font-size: var(--font-label); font-weight: 600; }
+.status-chip .chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-chip.needs-attention { border-color: var(--warning); color: var(--text); background: var(--warning-bg); }
+.status-chip:not(:disabled):hover { background: var(--hover); }
+.page-bar .actions { justify-content: flex-end; }
+.edit-actions { display: flex; gap: var(--space-1); margin-right: auto; }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; }
+.page-bar .workflow-next { gap: var(--space-2); margin-left: 0; }
+.page-bar .actions > button, .page-bar .workflow-next > button { min-height: 32px; padding: 0 var(--space-3); }
+.overflow-menu { position: relative; margin: 0; }
+.overflow-menu > summary { list-style: none; border: 1px solid var(--control-border); border-radius: var(--radius-1); background: var(--panel); color: var(--text); }
+.overflow-menu > summary::-webkit-details-marker { display: none; }
+.overflow-list { position: absolute; z-index: 20; right: 0; top: calc(100% + var(--space-1)); display: grid; min-width: 220px; padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); box-shadow: var(--elev-2); }
+.overflow-list button { justify-content: flex-start; min-height: 32px; border: 0; text-align: left; font-weight: 500; }
+
+/* Save confirmation step: one in-flow row under the page bar (never covers the canvas). */
+.save-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--primary); border-radius: var(--radius-2); background: var(--panel); }
+.save-confirm h2 { margin: 0; font-size: var(--font-heading); }
+.save-confirm p { margin: 0; }
+.save-confirm-summary { flex: 1 1 320px; font-size: var(--font-help); }
+.save-confirm label { margin: 0; font-size: var(--font-label); }
+.save-confirm #editor-version-name { width: 14rem; min-height: 32px; }
+.save-confirm button { min-height: 32px; padding: 0 var(--space-3); }
+.save-confirm #editor-version-help { flex: 1 0 100%; font-size: var(--font-help); }
+.save-confirm details { flex: 1 0 100%; margin: 0; font-size: var(--font-help); }
+
+.page-status { align-items: baseline; }
+#editor-status { color: var(--text); }
+
+/* Docked frame fills the window below the page bar (editor-page-bar.js measures it). */
+.editor-workspace { height: var(--workspace-height, calc(100vh - 96px)); }
+.workflow-canvas-panel { position: relative; display: flex; flex-direction: column; overflow: hidden !important; }
+.canvas-header-actions { position: absolute; z-index: 3; top: var(--space-2); right: var(--space-4); }
+.canvas-header-actions button { min-height: 32px; padding: 0 var(--space-3); }
+.workflow-canvas-panel > #editor-graph { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto; column-gap: var(--space-3); }
+#editor-graph > .circuit-message { grid-column: 1 / -1; grid-row: 1; }
+#editor-graph > .circuit-disconnect { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+#editor-graph > .circuit-viewport { grid-column: 1 / -1; grid-row: 3; height: auto; min-height: 240px; max-height: none; }
+/* Canvas controls bottom-right, the connector legend bottom-left (canvas-study V2, K14). */
+#editor-graph > .circuit-contract-legend { grid-column: 1; grid-row: 4; margin: var(--space-2) 0 0; }
+#editor-graph > .circuit-toolbar { grid-column: 2; grid-row: 4; justify-self: end; align-self: start; margin: var(--space-2) 0 0; }
+#editor-graph > .circuit-view-note { grid-column: 1 / -1; grid-row: 5; margin: var(--space-1) 0 0; }
+.workflow-canvas-panel:has(.circuit-card) > .start-guide { display: none; }
+.start-guide { display: grid; justify-items: center; gap: var(--space-2); }
+.start-guide #onboarding-start { font-size: var(--font-help); }
+
+/* Research loop: a section of the Selection panel (L5), separated by a divider. */
+.workflow-inspector-panel .inspector-section { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.workflow-inspector-panel .inspector-section > h2 { margin: 0 0 var(--space-3); font-size: var(--font-heading); }
+.workflow-task-details .editor-task-controls > h2 { display: none; }
+
+@media (max-width: 899px) {
+  .workflow-canvas-panel { overflow: visible !important; }
+  .workflow-canvas-panel > #editor-graph { display: block; }
+  #editor-graph > .circuit-viewport { height: min(70vh, 620px); }
+  .canvas-header-actions { position: static; margin-bottom: var(--space-2); }
+  .page-bar-project select { max-width: 160px; }
+}
+/* Without cards the empty state leads; the (empty) viewport shrinks to the remaining room
+ * and stays the palette drop target. */
+.workflow-canvas-panel:not(:has(.circuit-card)) #editor-graph > .circuit-viewport { min-height: 0; }

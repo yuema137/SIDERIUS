@@ -24,11 +24,12 @@
       ? `Saved version ${state.savedSha256.slice(0, 12)} of ${state.projectId} is ready to run.`
       : blocked(state);
     $('workflow-next-run').disabled = !ready;
+    $('workflow-next-run').title = ready ? message : `${message} Run is enabled only for a saved version.`;
     $('workflow-next-state').textContent = ready ? message : `${message} Run is enabled only for a saved version.`;
     $('run-source-state').textContent = message;
     // Empty canvas (CSS hides it once a capability card is drawn): one sentence, one action.
-    $('workflow-start-state').textContent = !session.connected ? 'Connect with your console token above, then choose a workflow project.'
-      : !state.projectId ? 'Choose a workflow project above, or ask the console operator to configure one.'
+    $('workflow-start-state').textContent = !session.connected ? 'Connect with your console token at the top, then start from a template.'
+      : !state.projectId ? 'Choose a workflow project in the bar above, or ask the console operator to configure one.'
       : !opened ? 'This workflow source is not open.'
       : 'Add a module from the list on the left.';
     // Problems chip in the page bar mirrors the count editor-problems.js renders.
@@ -47,8 +48,13 @@
   }
   $('workflow-next-run').addEventListener('click', () => { if (window.newRunGate.ready) location.hash = 'run'; });
   $('onboarding-start').addEventListener('click', () => onboarding.open(0));
-  // Home "Start from a template": choosing a task example is the tour's first step.
-  $('home-start-template').addEventListener('click', event => { event.preventDefault(); onboarding.open(0); });
+  // Home "Start from a template" opens the template gallery on the Workflow page (not the tour).
+  $('home-start-template').addEventListener('click', event => {
+    event.preventDefault();
+    if (window.consoleNavigation.view === 'workflow') { window.editorTemplates.open(); return; }
+    window.addEventListener('console-view', () => requestAnimationFrame(() => window.editorTemplates.open()), {once: true});
+    location.hash = 'workflow';
+  });
   $('problems-chip').addEventListener('click', () => {
     $('editor-problems').scrollIntoView({block: 'nearest'}); $('editor-problems').querySelector('.editor-problem')?.focus();
   });

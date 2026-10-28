@@ -75,7 +75,8 @@ try {
   await page.locator('nav a[href="#workflow"]').click(); await page.locator('#view-workflow').waitFor();
   assert.equal(await page.locator('#workflow-start-guide').isVisible(), true, 'Empty canvas start state');
   assert.match(await page.locator('#workflow-start-state').textContent(), /Connect/);
-  assert.equal(await page.locator('#workflow-start-guide button:visible').count(), 1, 'One action');
+  assert.deepEqual(await page.locator('#workflow-start-guide button:visible:not(.link-button)').evaluateAll(items => items.map(item => item.id)), ['workflow-start-template'], 'One primary action: Start from a template');
+  assert.equal(await page.locator('#onboarding-start').isVisible(), true, 'The tour stays a secondary link');
   assert.equal(await tourOpen(), false, 'The tour never opens itself over the page');
   assert.equal(await page.locator('.inspector-empty').isVisible(), true, 'Selection explains what to do before anything is selected');
   await page.screenshot({path: join(evidence, 'first-run-1440-light.png')});
@@ -107,7 +108,7 @@ try {
   // 2. Tour: anchored steps, non-blocking, Back/Next/Done.
   const steps = [
     ['Choose a task', '#editor-project'], ['Pick a module', '#editor-palette'],
-    ['Match connector names', '.circuit-viewport'], ['Save a version', '#editor-save'],
+    ['Match connector names', '.circuit-viewport'], ['Save a version', '#editor-review'],
   ];
   const checkStep = async (index, theme) => {
     const [title, selector] = steps[index];
@@ -169,11 +170,12 @@ try {
   await page.locator('#onboarding-close').click();
   assert.equal(await tourOpen(), false);
   await page.locator('#theme-preference').selectOption('light');
-  // Home "Start from a template" opens the tour on Workflow.
+  // Home "Start from a template" opens the template gallery on Workflow (not the tour).
   await page.locator('nav a[href="#home"]').click();
   await page.locator('#home-start-template').click();
-  await waitUntil(async () => new URL(page.url()).hash === '#workflow' && await tourOpen(), 'tour from Home template');
-  await page.locator('#onboarding-close').click();
+  await waitUntil(async () => new URL(page.url()).hash === '#workflow' && await page.locator('#editor-template-gallery').evaluate(dialog => dialog.open), 'gallery from Home template');
+  assert.equal(await tourOpen(), false);
+  await page.locator('#editor-template-close').click();
   await page.reload();
   assert.equal(await tourOpen(), false, 'The tour does not reopen itself after reload');
   await connect();
@@ -202,7 +204,7 @@ try {
       .map(selector => document.querySelector('header ' + selector)).filter(element => element && shown(element));
     const logoOverlaps = logoBox ? headerItems.filter(element => { const r = element.getBoundingClientRect();
       return r.right > logoBox.left + .5 && logoBox.right > r.left + .5 && r.bottom > logoBox.top + .5 && logoBox.bottom > r.top + .5; }).map(element => element.id || element.className) : ['no logo'];
-    return {view: view.dataset.view, overlaps, blocks, logo: logoBox && {height: logoBox.height, theme: logo.classList.contains('logo-dark') ? 'dark' : 'light', loaded: logo.complete && logo.naturalWidth > 0}, logoOverlaps, viewBox: box(view), access: box(document.getElementById('access-section')),
+    return {view: view.dataset.view, overlaps, blocks, logo: logoBox && {height: logoBox.height, theme: logo.classList.contains('logo-dark') ? 'dark' : 'light', loaded: logo.complete && logo.naturalWidth > 0}, logoOverlaps, viewBox: box(view), access: box(document.getElementById('access-section')), accessCollapsed: document.getElementById('access-section').classList.contains('access-collapsed'),
       overflow: document.documentElement.scrollWidth - innerWidth,
       columns: workspace ? {workspace: box(workspace), palette: column('.editor-workspace > .editor-palette'), canvas: column('.workflow-canvas-panel'), inspector: column('.workflow-inspector-panel'),
         headers: [header('.editor-workspace > .editor-palette > h3'), header('.workflow-canvas-panel > h2'), header('.workflow-inspector-panel > h2')]} : null};
@@ -216,7 +218,7 @@ try {
     };
     const faded = element => { for (let node = element; node; node = node.parentElement) if (Number(getComputedStyle(node).opacity) < 1) return true; return false; };
     const failures = [];
-    const scope = [document.querySelector('header'), document.querySelector('nav.actions'), document.querySelector('main'), document.querySelector('footer')];
+    const scope = [document.querySelector('header'), document.querySelector('nav.actions'), document.querySelector('main')];
     for (const container of scope) for (const element of [container, ...container.querySelectorAll('*')]) {
       if (!element.getClientRects().length || getComputedStyle(element).visibility === 'hidden') continue;
       if (element.closest('[hidden], #editor-graph, #editor-palette, option') || element.matches(':disabled') || faded(element)) continue;
@@ -244,7 +246,8 @@ try {
         for (const block of result.blocks) {
           assert.ok(Math.abs(block.left - result.viewBox.left) <= 1 && Math.abs(block.right - result.viewBox.right) <= 1, `${label}: ${block.name} is off the page grid ${JSON.stringify(block)} vs ${JSON.stringify(result.viewBox)}`);
         }
-        assert.ok(Math.abs(result.access.left - result.viewBox.left) <= 1 && Math.abs(result.access.right - result.viewBox.right) <= 1, `${label}: connection card is off the page grid`);
+        // Connected: the connection is a header chip (spec L6); only the disconnected banner spans the grid.
+        if (!result.accessCollapsed) assert.ok(Math.abs(result.access.left - result.viewBox.left) <= 1 && Math.abs(result.access.right - result.viewBox.right) <= 1, `${label}: connection banner is off the page grid`);
         assert.ok(result.logo && result.logo.loaded && result.logo.theme === theme && result.logo.height >= 28 && result.logo.height <= 32,
           `${label}: header logo ${JSON.stringify(result.logo)}`);
         assert.deepEqual(result.logoOverlaps, [], `${label}: header logo overlaps header controls`);

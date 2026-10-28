@@ -32,7 +32,7 @@ const assets = join(dirname(fileURLToPath(import.meta.url)), '../../src/tools/ca
 const screenshots = process.env.CONSOLE_SCREENSHOT_DIR || await mkdtemp(join(tmpdir(), 'siderius-console-browser-'));
 await mkdir(screenshots, { recursive: true });
 const server = createServer(async (req, res) => {
-  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/theme.js': ['theme.js', 'text/javascript'], '/theme.css': ['theme.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
+  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/theme.js': ['theme.js', 'text/javascript'], '/theme.css': ['theme.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'], '/icons.svg': ['icons.svg', 'image/svg+xml'] };
   // Serve every static script/style index.html loads, as production does; a missing module
   // (for example editor-task-controls.js) breaks session listeners before Connect completes.
   const asset = /^\/([a-z0-9-]+)\.(js|css)$/.exec(req.url);
@@ -120,7 +120,7 @@ try {
   // Keyboard connect proves associated labels, native submit and focus navigation.
   await page.getByLabel('Console token', { exact: true }).focus();
   await page.keyboard.type('browser-fixture-token'); await page.keyboard.press('Tab'); await page.keyboard.press('Enter');
-  await page.getByText('Connected. Observations', { exact: false }).waitFor({state: 'attached'});
+  await page.locator('#access-status').filter({ hasText: 'Connected.' }).waitFor({state: 'attached'});
   await page.locator('#prepare-form').getByLabel('Run name', { exact: true }).fill('browser-offline');
   await page.getByText('Optional stage advice', { exact: true }).click();
   await page.getByLabel('Proposal advice', { exact: true }).fill(hostile);
@@ -134,7 +134,7 @@ try {
   await page.locator('#access-change').click(); // Connected pages collapse the token form.
   await page.locator('#token').fill('browser-fixture-token');
   await page.locator('#access-form button').click();
-  await page.getByText('Connected. Observations', {exact: false}).waitFor();
+  await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
   assert.equal(await page.locator('#prepare-id').textContent(), uncertainId);
   assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'Reconnect/navigation retain uncertain submission without retrying');
   await page.getByRole('button', { name: 'Retry same preparation', exact: true }).click();
@@ -229,7 +229,7 @@ try {
   assert.equal(new URL(page.url()).search, '');
   await page.getByLabel('Console token', { exact: true }).fill('browser-fixture-token');
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
-  await page.getByText('Connected. Observations', { exact: false }).waitFor({state: 'attached'});
+  await page.locator('#access-status').filter({ hasText: 'Connected.' }).waitFor({state: 'attached'});
   await page.getByRole('button', { name: 'Read operation', exact: true }).click();
   await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor({state: 'attached'});
   assert.equal(requests.filter(item => item.method === 'POST').length, mutations, 'Reconnect must be GET-only.');

@@ -214,7 +214,7 @@ try {
     await route.fulfill({json: body});
   });
   await page.locator('#token').fill('theme-fixture'); await page.locator('#access-form button').click();
-  await page.getByText('Connected. Observations', {exact: false}).waitFor();
+  await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
   await page.locator('#run-name').fill('unsaved-run-fixture');
   await page.locator('nav a[href="#monitor"]').click();
   await page.locator('details', {has: page.locator('#tokens-table')}).getByText('Reported token table', {exact: true}).click(); // Recorded example has its own table.

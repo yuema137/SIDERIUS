@@ -283,7 +283,9 @@ def test_navigation_assets_keep_exact_static_security_boundary(console_config):
     assert api.get("/session.js.map").status_code == 404
     # The header and Home logos are <img> assets: allowlisted by exact name and permitted by
     # img-src 'self' (default-src 'none' alone would block them).
-    for name in ("siderius-logo-light.svg", "siderius-logo-dark.svg"):
+    # icons.js fetches the vendored Lucide sprite at runtime (index.html never names it), so an
+    # allowlist omission would silently drop every icon.
+    for name in ("siderius-logo-light.svg", "siderius-logo-dark.svg", "icons.svg"):
         response = api.get("/" + name, headers={"Authorization": ""})
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/svg+xml"

@@ -278,6 +278,11 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "editor-templates.js": "text/javascript",
             "editor-templates.css": "text/css",
             "editor-advice.js": "text/javascript",
+            "editor-page-bar.js": "text/javascript",
+            "editor-page-bar.css": "text/css",
+            "icons.js": "text/javascript",
+            # Vendored Lucide sprite (shapes only; licence in icons-LICENSE.txt), fetched by icons.js.
+            "icons.svg": "image/svg+xml",
         }
         if asset not in types:
             raise HTTPException(404)
