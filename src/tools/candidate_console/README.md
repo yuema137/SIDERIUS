@@ -58,9 +58,12 @@ even when using the default models.
    Open `http://127.0.0.1:8740`. If the local forwarding port differs, configure
    `browser_origin` to that exact local address before starting the server.
 5. Open **Home**, paste the console token, and select **Connect**. The connection
-   stays available while you switch between Home, Workflow Editor and Slow control.
-   Reloading or opening a new tab requires Connect again; the password field clears
-   immediately and the token stays only in this document's memory.
+   stays available while you switch between Home, Workflow Editor and Slow control,
+   and the connect card shrinks to a **Connected** line with **Change token** and
+   **Disconnect console**. Reloading or opening a new tab requires Connect again;
+   the password field clears immediately and the token stays only in this
+   document's memory. Home's main path is **Open workflow**: edit and review the
+   workflow, prepare a new run, then launch and monitor it.
 6. To generate a candidate from the server's configured task, expand **Prepare
    configured task** on Home. Select a task, fill the run name and optional advice,
    and expand **Configured paths** to inspect the inputs and output parents.
@@ -69,12 +72,13 @@ even when using the default models.
    **Launch candidate**, which starts code execution and may call paid APIs.
    Native Prepare generates its configured candidate independently of the declaration
    selected in Workflow Editor. Preparation never launches automatically.
-7. To observe an existing operation, choose **Slow control** and enter its complete
-   operation UUID. You can also open a link such as
+7. To observe an existing operation, choose **Slow control** and select it under
+   **Recent operations** (operations this console admitted, newest first), or
+   enter its complete operation UUID. You can also open a link such as
    `http://127.0.0.1:8740/#slow-control/22222222-2222-4222-8222-222222222222`
    (replace the example UUID), then Connect. No task or editor project selection
    is needed. The optional remembered ID is labelled **Last opened on this browser**;
-   it is not a list of discovered operations. Expand Operation facts, Reported
+   it is separate from the Recent operations list. Expand Operation facts, Reported
    token table, or Activity and logs when needed. When a workflow run has
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.
@@ -83,6 +87,15 @@ even when using the default models.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
    resumed as a new segment of the same run, which shows its own results.
    A loop ended early by a declared stop condition says why, in plain words.
+   To stop a running candidate now, press **Stop run** and confirm. The run
+   ends within about 1.5 seconds (half a second to notice, then up to one second
+   before it is force-killed), including a model call in progress. It cannot be
+   resumed and produces no candidate result; files written so far stay in the run
+   folder. A call that was in flight may still be billed without appearing in the
+   token report. The page says "Stopping the run…" until the native receipt reads
+   `cancelled`, then "Run stopped." If the console loses contact with the server,
+   the line starts with "Last observed:". The Run page shows the same button for
+   a retained candidate whose last checked status is active.
    Configured **Recorded examples** appear in Slow control. They show verified
    proposal, implementation, validation and reported-token evidence only; they
    are not live operations, training results, scientific scores or billing
@@ -111,6 +124,12 @@ select a **result** output socket, then a highlighted named input. Press Escape
 or right-click to cancel. The inspector offers the same binding choices, including
 external inputs such as storage. Only existing inputs can be rewired here.
 
+A large workflow opens zoomed out so every node is visible; **Fit to view**, the
+zoom buttons and **Actual size** change only the view. Optional inputs that are
+not connected are folded into an "N optional inputs" row on each card; expand it
+to connect one. If saved cards overlap, **Arrange view** shows a non-overlapping
+layout without changing the file.
+
 Drag a node heading to move it, or focus the heading and use Alt + arrow keys.
 These edits stay local until **Review changes** and **Save reviewed source**.
 For a bound workflow, choose its matching configured task version and acknowledge
@@ -118,6 +137,10 @@ the findings. Prepare a new run separately to check its supported execution prof
 New nodes and optional input changes still use Advanced → Source.
 
 ## Bind a task version
+
+The **Task package and version** panel always states which task package and
+version the open workflow uses. Versions are offered only for configured tasks
+that declare `task_revision`; otherwise the panel says that none are configured.
 
 In Workflow builder, explicitly choose a configured task package/version and
 **Update workflow references**. Inspect the Python diff and task findings, confirm

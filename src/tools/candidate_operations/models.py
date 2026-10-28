@@ -207,6 +207,17 @@ class SpawnFailure(PreviewModel):
     reason: Literal["spawn_failed"] = "spawn_failed"
 
 
+class CancelRequest(PreviewModel):
+    """Durable, write-once operator intent to cancel one live candidate operation.
+
+    The operation child polls for it while the sandbox runs (``cancel.py``).
+    """
+
+    operation_id: UUID
+    request_digest: str
+    requested_at: str
+
+
 class Completion(PreviewModel):
     operation_id: UUID
     request_digest: str
@@ -245,6 +256,10 @@ class OperationSnapshot(PreviewModel):
         default=None, exclude_if=lambda value: value is None
     )
     finishing: bool = False
+    # Omitted unless a CancelRequest is recorded; existing snapshot bytes are unchanged.
+    cancel_requested: bool = Field(default=False, exclude_if=lambda value: not value)
+    # A new cancel would be recorded (cancel.cancellable); omitted when false.
+    cancellable: bool = Field(default=False, exclude_if=lambda value: not value)
     receipt_available: bool = False
     receipt_digest: str | None = None
     receipt: NativeReceipt | None = None
@@ -291,3 +306,19 @@ class PreparedCandidate(PreviewModel):
     preparation_id: UUID
     receipt_sha256: str | None
     composition_fingerprint: str
+
+
+class OperationListEntry(PreviewModel):
+    """One verified record: admission time, generated names and its read snapshot."""
+
+    admitted_at: str
+    run_name: str | None
+    project_id: str | None
+    snapshot: OperationSnapshot
+
+
+class OperationListing(PreviewModel):
+    entries: tuple[OperationListEntry, ...]
+    unreadable: int = Field(ge=0)
+    examined: int = Field(ge=0)
+    incomplete: bool

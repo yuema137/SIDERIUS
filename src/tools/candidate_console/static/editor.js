@@ -41,11 +41,12 @@
     let message = taskMessage;
     if (taskReview()) message = taskReview().save_supported ? 'Task references reviewed, not saved. Review the findings and confirm before saving.' : 'Task reference review is blocked. Keep your draft and inspect the findings.';
     else if (pending && !message) message = "Save existing edits first, then update workflow references. To review a bound draft, select its matching configured task version.";
-    else if (!taskChoices?.length && !message) message = 'No version-aware task choices configured. Ordinary unbound editing remains available.';
+    // The view explains an empty or unloaded choice list next to the saved task state.
+    else if (!taskChoices?.length && !message) message = '';
     else if (savedBinding && !matching.length && !taskSelection && !message) message = 'No configured choice matches the saved binding. Configure a matching choice before reviewing bound edits.';
     else if (!message) message = 'Choose a version, then explicitly update, review and save. Choosing alone does not change source. Switching checked versions requires a supported fresh candidate.';
     window.editorTaskControls.render($('task-controls'), {choices: taskChoices, selection: taskSelection, matching, savedBinding,
-      connected: window.consoleSession.connected, saving, canUpdate: canUpdateTask(), message, review: taskReview(),
+      connected: window.consoleSession.connected, projectOpen: !!base?.document, saving, canUpdate: canUpdateTask(), message, review: taskReview(),
       acknowledged: taskAcknowledged, adopted: taskAdopted}, {
       select: selectTask, update: updateTask, refresh: () => loadTaskChoices(),
       acknowledge: value => { taskAcknowledged = value; controls(); },
@@ -101,7 +102,7 @@
     cancelDraftButton.hidden = !bindingDraft || bindingDraftConflict;
     cancelDraftButton.disabled = !connected || saving;
     renderTaskControls();
-    window.editorCircuit?.setEnabled(canEditCircuit());
+    window.editorCircuit?.setEnabled(canEditCircuit(), canSelectNode());
     window.editorLoopControls?.setEnabled($('loop'), canEditLoop());
   }
   function invalidate() {
@@ -113,7 +114,12 @@
   }
   function changed() { pending = true; $('source').disabled = ['document', 'loop', 'binding-draft'].includes(mode); invalidate(); }
   const api = (path, body) => window.consoleSession.request('editor/' + path, body);
-  function diagnostic(items = []) { $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}${item.field_path ? ` at ${item.field_path.join('.')}` : ''}`).join('\n'); }
+  function diagnostic(items = []) {
+    $('diagnostics').textContent = items.map(item => `${item.code}: ${item.message}${item.line ? ` (line ${item.line})` : ''}${item.field_path ? ` at ${item.field_path.join('.')}` : ''}`).join('\n');
+    // Server diagnostics only; draft problems carry node/field, source ones a line.
+    window.editorProblems.render($('problems'), items, {source: window.editorProblems.focusSource,
+      select: (nodeId, field) => { if (graph?.definition.nodes.some(n => n.id === nodeId)) { selected = nodeId; render(); } window.editorProblems.focusField(nodeId, field); }});
+  }
   function showConflict(value, isBindingDraft = false) {
     bindingDraftConflict = isBindingDraft;
     conflict = value; reviewed = null; controls();
@@ -154,7 +160,8 @@
     $('inspect').hidden = !!graph;
     status(graph ? 'Opened supported declaration. References remain literal.' : 'Unsupported source is read-only. Repair externally, then refresh.');
   }
-  const canEditCircuit = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict && !draftsPending();
+  const canSelectNode = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict;
+  const canEditCircuit = () => canSelectNode() && !draftsPending();
   // An invalid limit draft must stay editable so the author can correct it.
   const canEditLoop = () => window.consoleSession.connected && sourceAvailable && !!graph && !sourceDirty && !saving && !conflict &&
     mode !== 'binding-draft' && trainingDrafts.size === 0;
@@ -204,7 +211,7 @@
       if (!current(id, version) || mode !== 'binding-draft') return;
       bindingDraft = {...value.draft, inspection: value.inspection}; projectBindingDraft();
       $('pending').textContent = `Pending binding draft · ${value.inspection.status}`;
-      diagnostic(value.inspection.diagnostics.map(message => ({code: value.inspection.status, message})));
+      diagnostic(value.inspection.problems || value.inspection.diagnostics.map(message => ({code: value.inspection.status, message})));
       controls(); render();
       status(value.inspection.status === 'complete'
         ? 'Declaration valid; execution readiness is not checked. Review the exact Python changes before saving.'
@@ -230,7 +237,7 @@
     $('edges').replaceChildren();
     const id = project, document = graph;
     const live = () => project === id && graph === document;
-    window.editorCircuit.render($('graph'), {document: graph, inventory, selected, enabled: canEditCircuit(),
+    window.editorCircuit.render($('graph'), {viewKey: id, document: graph, inventory, selected, enabled: canEditCircuit(), selectable: canSelectNode(),
       allowBindingChange: !pending || mode === 'binding-draft', allowMove: mode !== 'binding-draft'}, {
       select: value => { if (live()) { selected = value; render(); } },
       bind: (nodeId, argument, source) => { if (live()) updateBindingDraft(nodeId, argument, source); },
@@ -261,49 +268,15 @@
     input.addEventListener('input', () => { update(input.value); mode = 'document'; changed(); });
   }
   function renderTraining() {
-    const parent = node('fieldset', '', $('inspector'));
-    node('legend', 'Native training settings', parent);
-    node('p', 'Epochs are ceilings; native planning resolves epochs. Task-owned rules may further constrain this run.', parent);
-    node('p', `Preparation output restriction: ${JSON.stringify(training.allowed_output_types)}`, parent);
     const launch = () => (graph.training_settings.launch ||= {});
     const edit = () => { mode = 'document'; changed(); };
-    for (const control of training.controls) {
-      const wrapper = node('label', control.label, parent);
-      const modeSelect = node('select', '', wrapper);
-      modeSelect.dataset.trainingMode = control.name;
-      for (const [value, title] of [['unset', 'Use native default'], ['supplied', 'Set value'], ...(control.nullable ? [['null', 'None']] : [])]) {
-        const option = node('option', title, modeSelect); option.value = value;
-      }
-      const supplied = graph.training_settings.launch || {};
-      modeSelect.value = !Object.hasOwn(supplied, control.name) ? 'unset' : supplied[control.name] === null ? 'null' : 'supplied';
-      const input = node('input', '', wrapper); input.dataset.training = control.name;
-      input.type = control.kind === 'boolean' ? 'checkbox' : 'number';
-      if (input.type === 'number') input.step = control.kind === 'integer' ? '1' : 'any';
-      const value = modeSelect.value === 'supplied' ? supplied[control.name] : control.effective;
-      if (input.type === 'checkbox') input.checked = value === true; else input.value = value ?? '';
-      if (trainingDrafts.has(control.name)) { modeSelect.value = 'supplied'; input.value = trainingDrafts.get(control.name); input.setCustomValidity('Enter a valid number, or choose default / None.'); }
-      input.disabled = modeSelect.value !== 'supplied';
-      node('small', `Native preview: ${JSON.stringify(control.effective)} (updated on review)`, wrapper);
-      const setValue = () => {
-        input.setCustomValidity('');
-        if (input.type === 'checkbox') launch()[control.name] = input.checked;
-        else if (input.value.trim() !== '' && Number.isFinite(input.valueAsNumber) && input.checkValidity()) launch()[control.name] = input.valueAsNumber;
-        else { trainingDrafts.set(control.name, input.value); input.setCustomValidity('Enter a valid number, or choose default / None.'); status('Empty numbers are not saved. Enter a value or select default / None.'); return false; }
-        trainingDrafts.delete(control.name); return true;
-      };
-      modeSelect.addEventListener('change', () => {
-        input.disabled = modeSelect.value !== 'supplied'; input.setCustomValidity(''); trainingDrafts.delete(control.name);
-        if (modeSelect.value === 'unset') delete launch()[control.name];
-        else if (modeSelect.value === 'null') launch()[control.name] = null;
-        else setValue();
-        edit();
-      });
-      input.addEventListener('input', () => { setValue(); edit(); });
-    }
-    node('p', 'Workflow parameter rules (exact / range / allowed / predicate):', parent);
-    node('pre', JSON.stringify(graph.training_settings.launch?.workflow_parameter_rules ?? null, null, 2), parent);
-    const advanced = node('button', 'Edit advanced settings and rules in source', parent); advanced.type = 'button';
-    advanced.addEventListener('click', () => { $('advanced').open = true; $('source').focus(); if (mode === 'document' || mode === 'loop') status('Review inspector edits first to update the source.'); });
+    window.editorNodeParameters.training($('inspector'), {training, drafts: trainingDrafts,
+      launch: () => graph.training_settings.launch || {}, saved: base?.document?.training_settings?.launch || {}}, {
+      supply: (name, value) => { launch()[name] = value; trainingDrafts.delete(name); edit(); },
+      unset: (name, rerender) => { delete launch()[name]; trainingDrafts.delete(name); edit(); if (rerender) render(); },
+      invalid: (name, raw) => { trainingDrafts.set(name, raw); edit(); status('Empty numbers are not saved. Enter a value or select default / None.'); },
+      openSource: () => { $('advanced').open = true; $('source').focus(); if (mode === 'document' || mode === 'loop') status('Review inspector edits first to update the source.'); }
+    });
   }
   function renderInspector() {
     $('inspector').replaceChildren(); $('references').replaceChildren();
@@ -329,11 +302,12 @@
         node('dt', option.argument || 'Request', mappingList);
         node('dd', option.source ? (option.source.kind === 'external' ? `external:${option.source.binding}` : `${option.source.node}.${option.source.port}`) : 'unbound', mappingList);
       }
-      if (item.capability === 'tuning' && training) renderTraining();
+      node('h3', 'Inputs', $('inspector'));
       for (const option of inventory.filter(entry => entry.node === item.id)) {
         const state = option.bound ? 'bound' : option.required ? 'Required · unbound' : 'Optional · unbound';
         const label = node('label', `${option.argument || 'Request'} · ${option.socket_contract.id} · ${state}`, $('inspector'));
         const select = document.createElement('select'); label.append(select);
+        label.classList.toggle('field-problem', option.required && !option.bound);
         if (!option.bound) {
           const empty = node('option', option.required ? 'Required input is unbound' : 'Unbound (optional)', select);
           empty.value = ''; empty.disabled = true; empty.selected = true;
@@ -356,6 +330,10 @@
         disconnect.hidden = !option.bound;
         disconnect.addEventListener('click', () => { if (graph === capturedGraph) updateBindingDraft(item.id, option.argument, null); });
       }
+      if (item.capability === 'tuning' && training) renderTraining();
+      const loop = graph.definition.loop;
+      if (loop && [loop.feedback.source.node, loop.feedback.target].includes(item.id)) window.editorNodeParameters.loopPointer($('inspector'), loop, item.id, () => { $('loop').scrollIntoView({block: 'start'}); $('loop').querySelector('input, button')?.focus(); });
+      if (item.capability === 'tuning') window.editorNodeParameters.modelOwner($('inspector'), graph.definition.task, graph.task_binding);
     }
     for (const key of Object.keys(graph.definition.task)) field($('references'), `task.${key}`, graph.definition.task[key], value => { graph.definition.task[key] = value; });
     for (const external of graph.definition.externals) {

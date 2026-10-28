@@ -55,10 +55,27 @@ class WorkflowDraft(DeclarationModel):
         return self
 
 
+class DraftProblem(DeclarationModel):
+    """One located draft diagnostic for the editor's problems list.
+
+    ``node`` and ``field`` (an argument name, or ``request`` for an external
+    request) are set when the problem belongs to one socket. Native declaration
+    failures carry the validator location in ``field`` and no node.
+    """
+
+    code: Literal["required_unbound", "external_binding_required", "declaration_invalid"]
+    node: Identifier | None = None
+    field: str | None = None
+    message: str
+
+
 class DraftInspection(DeclarationModel):
+    """``diagnostics`` keeps the legacy strings; ``problems`` locates each one."""
+
     status: Literal["incomplete", "invalid", "complete"]
     document: AuthoredWorkflowDocument | None = None
     diagnostics: tuple[str, ...] = ()
+    problems: tuple[DraftProblem, ...] = ()
 
 
 def inspect_draft(draft: WorkflowDraft) -> DraftInspection:
@@ -70,17 +87,26 @@ def inspect_draft(draft: WorkflowDraft) -> DraftInspection:
     draft = WorkflowDraft.model_validate_json(draft.model_dump_json(warnings=False))
     payload = draft.base_document.model_dump(mode="json")
     nodes = {node["id"]: node for node in payload["definition"]["nodes"]}
-    incomplete = []
+    incomplete: list[DraftProblem] = []
     for patch in draft.bindings:
         request = nodes[patch.node]["request"]
         source = patch.source.model_dump(mode="json") if patch.source is not None else None
         if request["kind"] == "external":
             if source is None:
-                incomplete.append(f"{patch.node}.request: required input is unbound")
+                incomplete.append(_unbound(patch.node, "request"))
             elif source["kind"] != "external":
+                message = f"{patch.node}.request requires an external binding"
                 return DraftInspection(
                     status="invalid",
-                    diagnostics=(f"{patch.node}.request requires an external binding",),
+                    diagnostics=(message,),
+                    problems=(
+                        DraftProblem(
+                            code="external_binding_required",
+                            node=patch.node,
+                            field="request",
+                            message=message,
+                        ),
+                    ),
                 )
             else:
                 request["binding"] = source["binding"]
@@ -99,11 +125,39 @@ def inspect_draft(draft: WorkflowDraft) -> DraftInspection:
                 item.name == patch.argument and item.required
                 for item in PROTOCOLS[request["protocol"]].arguments
             ):
-                incomplete.append(f"{patch.node}.{patch.argument}: required input is unbound")
+                if patch.argument is None:
+                    raise ValueError(
+                        f"node {patch.node!r}: required argument patch has no argument name"
+                    )
+                incomplete.append(_unbound(patch.node, patch.argument))
     if incomplete:
-        return DraftInspection(status="incomplete", diagnostics=tuple(incomplete))
+        return DraftInspection(
+            status="incomplete",
+            diagnostics=tuple(item.message for item in incomplete),
+            problems=tuple(incomplete),
+        )
     try:
         document = type(draft.base_document).model_validate_json(json.dumps(payload))
     except ValidationError as error:
-        return DraftInspection(status="invalid", diagnostics=(str(error),))
+        return DraftInspection(
+            status="invalid",
+            diagnostics=(str(error),),
+            problems=tuple(
+                DraftProblem(
+                    code="declaration_invalid",
+                    field=".".join(str(part) for part in item["loc"]) or None,
+                    message=item["msg"],
+                )
+                for item in error.errors(include_url=False)
+            ),
+        )
     return DraftInspection(status="complete", document=document)
+
+
+def _unbound(node: str, field: str) -> DraftProblem:
+    return DraftProblem(
+        code="required_unbound",
+        node=node,
+        field=field,
+        message=f"{node}.{field}: required input is unbound",
+    )

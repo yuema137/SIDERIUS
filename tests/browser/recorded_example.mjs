@@ -82,7 +82,8 @@ try {
   assert.deepEqual(faults, []);
   assert.ok(calls.length >= 3);
   assert.ok(calls.every(call => call.method === 'GET'), 'recorded example uses GET only');
-  assert.ok(calls.every(call => ['/api/choices', '/api/native-chain/choices', '/api/recorded-examples', `/api/recorded-examples/${metadata.example_id}`, '/api/recorded-examples/tess-recorded-b', '/api/recorded-examples/tess-invalid-declaration'].includes(call.path)), 'no operation, preparation, launch, review, token, or log route is called');
+  // '/api/operations' is Slow control's read-only list (bare route); no single-operation route is read.
+  assert.ok(calls.every(call => ['/api/choices', '/api/native-chain/choices', '/api/operations', '/api/recorded-examples', `/api/recorded-examples/${metadata.example_id}`, '/api/recorded-examples/tess-recorded-b', '/api/recorded-examples/tess-invalid-declaration'].includes(call.path)), 'no operation, preparation, launch, review, token, or log route is called');
   assert.ok(responses.filter(response => response.path === '/api/recorded-examples/tess-invalid-declaration').every(response => response.status === 409));
   assert.ok(responses.filter(response => response.path !== '/api/recorded-examples/tess-invalid-declaration').every(response => response.status === 200));
   await page.screenshot({path: resolve(evidence, 'recorded-example.png'), fullPage: true});

@@ -107,7 +107,7 @@ def verify_loop(
     trace = receipt.loop_trace
     if trace is None:
         if (
-            receipt.status not in ("failed", "timed_out", "interrupted")
+            receipt.status not in ("failed", "timed_out", "interrupted", "cancelled")
             or receipt.validation_passed is not None
         ):
             raise ValueError("loop terminal lacks completed-body index")

@@ -10,7 +10,7 @@ from uuid import UUID
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
 from tools.workspace_sandbox.profile import SandboxProfile
-from tools.workspace_sandbox.runner import ObservedExecutionResult, run_observed
+from tools.workspace_sandbox.runner import CancelProbe, ObservedExecutionResult, run_observed
 
 from .graph_evidence import read_graph_control
 from .loop_models import LoopContinuation
@@ -160,9 +160,16 @@ def resume_history(
 
 
 def launch_continuation(
-    request: CandidateRunRequest, initial: CandidateRunReceipt, binding: LoopContinuation
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    binding: LoopContinuation,
+    *,
+    cancel_requested: CancelProbe | None = None,
 ) -> CandidateRunReceipt:
-    """Only operation admission publishes the binding; no fresh-workspace bypass."""
+    """Only operation admission publishes the binding; no fresh-workspace bypass.
+
+    ``cancel_requested`` has the ``launch_candidate`` meaning for this segment.
+    """
     from .launch import bounded_terminal, publish, reconcile
 
     control = segment_control(initial, binding.operation_id)
@@ -178,7 +185,9 @@ def launch_continuation(
     )
     try:
         observed = run_observed(
-            profile, [sys.executable, "-m", __name__, str(control / "continuation.json")]
+            profile,
+            [sys.executable, "-m", __name__, str(control / "continuation.json")],
+            cancel_requested=cancel_requested,
         )
         publish_bytes_write_once(str(control / "supervision.json"), encode_control(observed))
         terminal = reconcile(

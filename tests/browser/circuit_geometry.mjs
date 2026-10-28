@@ -54,3 +54,18 @@ disjoint(placedPartial, 'partial stored positions');
 const fanout = [{id: 'seed', request: {kind: 'external'}}, ...['a', 'b', 'c'].map(id => ({id, request: {kind: 'protocol', arguments: [{source: {kind: 'result', node: 'seed'}}]}}))];
 disjoint(place(fanout, new Map([['seed', {x: 0, y: 0}]]), size, gap), 'same-rank unsaved siblings');
 console.log('PASS fallback placement keeps stored positions exact and every card disjoint');
+
+// View fit (UX walkthrough 2026-10-27: 2 of 5 cards off-screen at 1440x900). Fails if
+// fitting ever enlarges past 100 %, overshoots the available box, ignores the
+// legibility floor, or returns a non-finite scale for an unmeasured (hidden) view.
+const {fitScale, overlaps} = globalThis.editorCircuitGeometry;
+assert.equal(fitScale({width: 600, height: 400}, {width: 800, height: 700}), 1, 'A graph that already fits is shown at 100 %');
+const scale = fitScale({width: 1635, height: 700}, {width: 800, height: 700});
+assert.ok(scale < 1 && 1635 * scale <= 800 && 700 * scale <= 700, `fit scale ${scale} shows the whole width`);
+assert.equal(fitScale({width: 4000, height: 4000}, {width: 800, height: 700}), 0.4, 'Fit never shrinks below the legibility floor; the view scrolls instead');
+assert.equal(fitScale({width: 0, height: 0}, {width: 0, height: 0}), 1, 'An unmeasured view keeps 100 %');
+// Saved-layout overlap detection drives the non-destructive Arrange view offer.
+assert.deepEqual(overlaps([{left: -80, right: 135, top: 20, bottom: 200}, {left: 120, right: 335, top: -30, bottom: 300}, {left: 520, right: 735, top: 20, bottom: 200}]), [[0, 1]],
+  'The interpretation fixture regression (interpret at x=-80 under build at x=120) is reported');
+assert.deepEqual(overlaps([{left: 0, right: 100, top: 0, bottom: 100}, {left: 100, right: 200, top: 0, bottom: 100}]), [], 'Touching edges are not an overlap');
+console.log('PASS view fit scale bounds and saved-layout overlap detection');

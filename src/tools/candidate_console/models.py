@@ -233,6 +233,17 @@ class LoopPauseAcknowledgement(PreviewModel):
     outcome: Literal["requested"] = "requested"
 
 
+class OperationCancelSelection(PreviewModel):
+    """Empty JSON body: the path UUID selects the candidate operation to cancel."""
+
+
+class OperationCancelAcknowledgement(PreviewModel):
+    """Cancel was recorded; the run is not yet stopped (read status for that)."""
+
+    operation_id: UUID
+    outcome: Literal["requested"] = "requested"
+
+
 class LoopResumeReview(PreviewModel):
     """Verified paused segment the operator may continue; names-only credential facts."""
 
@@ -262,6 +273,8 @@ class StatusView(PreviewModel):
         default=None, exclude_if=lambda value: value is None
     )
     finishing: bool
+    cancel_requested: bool = Field(default=False, exclude_if=lambda value: not value)
+    cancellable: bool = Field(default=False, exclude_if=lambda value: not value)
     receipt_available: bool
     native_status: str | None
     native_id: str | None
@@ -312,3 +325,25 @@ class GraphResultsView(PreviewModel):
     operation_id: UUID
     available: bool
     bodies: tuple[GraphBodyResult, ...] = ()
+
+
+class OperationListItemView(PreviewModel):
+    """Path-free list row; open the operation in Status and logs for its full facts."""
+
+    operation_id: UUID
+    kind: OperationKind
+    run_name: str | None
+    project_id: str | None
+    admitted_at: str
+    state: Literal["active", "completed", "operation_failed", "unknown"]
+    native_status: str | None
+    loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class OperationListView(PreviewModel):
+    """Most recent first. ``unreadable`` records were skipped, never guessed."""
+
+    operations: tuple[OperationListItemView, ...]
+    unreadable: int = Field(ge=0)
+    examined: int = Field(ge=0)
+    incomplete: bool

@@ -14,20 +14,36 @@ body {
   margin: 0;
 }
 
-header, main, footer {
-  max-width: 1240px;
-  margin: auto;
-  padding: 24px;
+/* One shell for every view: compact header, nav and content share one left edge and a
+ * desktop-wide column (the workflow view's editor.css widens the same edges further). */
+header, main, footer, nav.actions {
+  max-width: 1920px;
+  margin-inline: auto;
+  padding: 24px clamp(16px, 2vw, 32px);
 }
 
-header {
-  padding-bottom: 8px;
+header.console-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding-top: 4px;
+  padding-bottom: 0;
 }
 
 .brand {
   font-weight: 800;
   letter-spacing: .08em;
   font-size: 1.3rem;
+}
+
+.console-intro {
+  margin: 0;
+  font-size: .85rem;
+}
+
+.console-intro p {
+  margin: 8px 0;
 }
 
 .brand span {
@@ -229,8 +245,8 @@ footer {
 }
 
 @media (max-width: 1050px) {
-  header, main, footer {
-    padding: 20px;
+  main, footer {
+    padding-block: 20px;
   }
   .card {
     padding: 20px;
@@ -241,8 +257,8 @@ footer {
   .columns {
     grid-template-columns: 1fr;
   }
-  header, main, footer {
-    padding: 16px;
+  main, footer {
+    padding-block: 16px;
   }
   .card {
     padding: 18px;
@@ -271,7 +287,7 @@ footer {
 .graph-result-body {
   border-top: 1px solid var(--border);
   margin-top: 16px;
-  padding-top: 8px;
+  padding-top: 4px;
 }
 
 
@@ -303,12 +319,61 @@ footer {
 
 a { color: var(--primary); }
 button:not(:disabled):hover { background: var(--primary-hover); }
+/* Opaque hover: a translucent token cannot be measured or guaranteed against its backdrop. */
 button.secondary:not(:disabled):hover { background: var(--bg); }
 
 [hidden] { display: none !important; }
-nav { padding: 0 32px; }
-nav a { padding: 10px; }
+nav.actions { margin-top: 0; padding-block: 2px; gap: 4px 16px; align-items: center; }
+nav a { padding: 6px 0; }
 nav a[aria-current="page"] { font-weight: 700; text-decoration-thickness: 3px; }
 summary { cursor: pointer; padding: 8px 0; font-weight: 600; }
 [data-view] { min-width: 0; }
-@media (max-width: 800px) { nav { padding: 0 16px; } }
+main { padding-top: 12px; gap: 16px; }
+main > #route-status:empty { display: none; }
+
+/* Connection: full card until connected, then one compact status line. */
+#access-section.access-collapsed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 16px;
+}
+#access-section.access-collapsed #access-status { flex: 1 1 260px; margin: 0; font-size: .9rem; }
+.access-connected { display: flex; flex-wrap: wrap; gap: 8px; }
+.access-connected button { min-height: 36px; padding: 5px 12px; }
+
+/* Home: the workflow journey is the primary path; native chain and configured task are advanced. */
+#view-home, #view-slow-control { display: grid; gap: 16px; align-content: start; }
+#view-home > h1, #view-slow-control > h1 { margin: 0; }
+.journey-steps { margin: 8px 0 0; padding-left: 1.4em; display: grid; gap: 6px; }
+.section-heading { margin: 8px 0 0; font-size: 1.05rem; color: var(--muted); }
+#view-home > details { margin: 0; }
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 650;
+  text-decoration: none;
+}
+.button-link:hover { background: var(--primary-hover); }
+.actions a:not(.button-link) { align-self: center; }
+
+/* Slow control: operations list beside Status and logs on desktop widths. */
+.slow-control-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 1100px) {
+  .slow-control-layout { grid-template-columns: minmax(280px, 400px) minmax(0, 1fr); }
+}
+.operations-actions { margin-top: 0; }
+.operations-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 70vh; overflow-y: auto; }
+.operations-list li { border-top: 1px solid var(--border); padding: 8px 4px; min-width: 0; }
+.operation-link { display: block; font-weight: 650; overflow-wrap: anywhere; }
+.operation-link[aria-current] { color: var(--text); text-decoration-thickness: 3px; }
+.operations-list li:has(.operation-link[aria-current]) { background: var(--hover); box-shadow: inset 3px 0 var(--primary); padding-left: 10px; }
+.operation-meta { display: block; font-size: .85rem; overflow-wrap: anywhere; }
+.manual-operation { margin-top: 8px; }
+

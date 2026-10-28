@@ -113,6 +113,57 @@ def test_draft_optional_removal_and_external_disconnect_preserve_base():
     assert base.model_dump_json() == before
 
 
+def test_draft_problems_locate_each_legacy_diagnostic():
+    """Fails if a draft problem loses its node/socket, or drops the legacy string.
+
+    The editor's problems list selects ``node`` and focuses ``field``; the legacy
+    ``diagnostics`` strings stay the compatibility surface for the same problems.
+    """
+    from workflows.definition.draft import BindingPatch, WorkflowDraft, inspect_draft
+
+    base = WorkflowDocument(definition=definition())
+    incomplete = inspect_draft(
+        WorkflowDraft(
+            base_document=base,
+            bindings=(
+                BindingPatch(node="propose", argument=None, source=None),
+                BindingPatch(node="validate", argument="output", source=None),
+            ),
+        )
+    )
+    assert [(p.code, p.node, p.field) for p in incomplete.problems] == [
+        ("required_unbound", "propose", "request"),
+        ("required_unbound", "validate", "output"),
+    ]
+    assert incomplete.diagnostics == tuple(p.message for p in incomplete.problems)
+    wrong_kind = inspect_draft(
+        WorkflowDraft(
+            base_document=base,
+            bindings=(
+                BindingPatch(node="propose", argument=None, source=ResultSource(node="validate")),
+            ),
+        )
+    )
+    assert wrong_kind.status == "invalid"
+    assert [(p.code, p.node, p.field) for p in wrong_kind.problems] == [
+        ("external_binding_required", "propose", "request")
+    ]
+    # A cycle passes the socket checks and is refused by the native validator.
+    cycle = inspect_draft(
+        WorkflowDraft(
+            base_document=base,
+            bindings=(
+                BindingPatch(
+                    node="implement", argument="output", source=ResultSource(node="validate")
+                ),
+            ),
+        )
+    )
+    assert cycle.status == "invalid" and cycle.problems
+    assert all(p.code == "declaration_invalid" and p.node is None for p in cycle.problems)
+    assert all(p.message in cycle.diagnostics[0] for p in cycle.problems)
+
+
 @pytest.mark.parametrize(
     "change,match",
     [

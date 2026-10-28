@@ -12,7 +12,8 @@
 
 #editor-graph { min-width: 0; }
 .circuit-viewport { overflow: auto; max-height: 52rem; border: 1px solid var(--control-border); border-radius: .5rem; }
-.circuit-world { position: relative; background: var(--panel); }
+.circuit-sizer { position: relative; }
+.circuit-world { position: relative; background: var(--panel); transform-origin: 0 0; }
 .circuit-world svg { position: absolute; width: 100%; height: 100%; inset: 0; pointer-events: auto; overflow: visible; }
 .circuit-card { position: absolute; width: 260px; background: var(--control); color: var(--text); border: 1px solid var(--control-border); border-radius: .6rem; }
 .editor-node { display: block; width: 100%; padding: .8rem; background: var(--control); color: var(--text); border: 0; border-radius: .5rem; text-align: left; font-weight: bold; touch-action: none; cursor: grab; }
@@ -24,6 +25,8 @@
 .circuit-port-requirement { float: right; color: var(--muted); font-size: .65rem; font-weight: 500; }
 .circuit-port-tooltip { display: none; position: absolute; z-index: 8; top: auto; bottom: calc(100% - 2px); left: .5rem; width: max-content; max-width: min(360px, 72vw); padding: .45rem .6rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--panel); color: var(--text); box-shadow: 0 4px 14px #0003; font-size: .7rem; font-weight: 500; line-height: 1.35; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .circuit-port:hover .circuit-port-tooltip, .circuit-port:focus-visible .circuit-port-tooltip { display: block; }
+/* A tooltip is read-only: it never takes pointer events from the controls it overlaps. */
+.circuit-port-tooltip { pointer-events: none; }
 .circuit-port.is-unbound { color: var(--muted); }
 .circuit-port[data-contract] .circuit-socket { border-radius: 50%; }
 .circuit-port[data-contract^="optional."] .circuit-socket { border-radius: 2px; transform: rotate(45deg); }
@@ -124,9 +127,10 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
 .workflow-project > p { grid-column: 1 / -1; margin: 0; font-size: .7rem; }
 .workflow-project details { grid-column: 1 / -1; margin: 2px 0 0; font-size: .78rem; }
 .workflow-project details p { margin-bottom: 0; }
-.workflow-task-details > summary { min-height: 42px; display: flex; align-items: center; }
-.workflow-task-details[open] { max-height: min(60vh, 620px); overflow: auto; }
-.workflow-task-details .editor-task-controls { margin-top: 12px; }
+.workflow-task-details { max-height: min(60vh, 620px); overflow: auto; }
+.workflow-task-details h2 { margin: 2px 0 4px; font-size: 1rem; }
+.workflow-task-details p { margin: 4px 0; font-size: .84rem; }
+.workflow-task-details label { margin: 4px 0; }
 .workflow-actions { display: flex; align-items: center; gap: 12px; }
 .workflow-actions .actions { margin: 0; gap: 8px; }
 .workflow-actions button { min-height: 36px; padding: 5px 10px; }
@@ -179,7 +183,15 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
 .circuit-mapping-list dt, .inspector-mapping-list dt { color: var(--muted); }
 .circuit-mapping-list dd, .inspector-mapping-list dd { margin: 0; overflow-wrap: anywhere; }
 .circuit-message { margin: 2px 0 8px; font-size: .8rem; color: var(--muted); }
-.circuit-viewport { height: clamp(420px, calc(100vh - 310px), 760px); max-height: none; }
+/* The canvas grows with its (zoomed) content up to a viewport-relative cap, then scrolls. */
+.circuit-viewport { height: auto; min-height: 240px; max-height: clamp(420px, calc(100vh - 200px), 860px); background: var(--panel); }
+.circuit-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 6px; }
+.circuit-toolbar button { min-height: 32px; padding: 3px 10px; margin: 0; }
+.circuit-zoom { min-width: 3.5rem; text-align: center; font-size: .8rem; font-variant-numeric: tabular-nums; color: var(--text); }
+.circuit-view-note { margin: 0 0 6px; font-size: .78rem; color: var(--muted); }
+.circuit-optional { border-top: 1px solid var(--control-border); }
+.circuit-optional > summary { padding: .45rem 1rem; color: var(--muted); font-size: .76rem; font-weight: 600; cursor: pointer; }
+.circuit-optional > summary.compatible { outline: 2px solid var(--focus); outline-offset: -3px; color: var(--text); }
 
 @media (max-width: 800px) {
   body:has(#view-workflow:not([hidden])) main > section[aria-labelledby="access-heading"] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
@@ -193,8 +205,8 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
   .workflow-project { grid-template-columns: auto minmax(0, 1fr); }
   .workflow-actions { display: block; }
   #editor-pending { margin-top: 6px; }
-  .circuit-viewport { min-height: 360px; height: min(58vh, 620px); }
-  .workflow-task-details[open] { max-height: 60vh; }
+  .circuit-viewport { min-height: 240px; height: auto; max-height: min(70vh, 620px); }
+  .workflow-task-details { max-height: 60vh; }
 }
 /* Research loop: one fieldset per loop facet (limit, feedback, later facets). */
 .workflow-loop-panel fieldset { margin: 0 0 12px; }
