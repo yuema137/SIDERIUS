@@ -1090,9 +1090,12 @@ editor's status instead of hanging (L-3). After the import, focus moves to the f
 advice field (L-6).
 **Open research loop** selects that project through the editor's ordinary project
 change (its pending-edits confirmation applies), waits for the saved source, then calls
-`editorTemplates.importById('single-research-loop')`, the gallery's existing import
+`editorTemplates.importById('single-loop-with-advice')`, the gallery's existing import
 path: an unsaved draft, nothing written before Save. No task declares its own template
-yet, so that catalog entry is the default for every task. Rounds, stop conditions and
+yet, so that catalog entry is the default for every task. It is the loop whose Propose
+model `human_advice` socket is connected (managed `advice`), so the advice field Quick
+start focuses reaches the proposal agent; templates that leave the socket unconnected
+show the existing `.advice-warning` under that field. Rounds, stop conditions and
 training settings are then edited in the ordinary panel. The Run page's step-1 entry is
 one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
 handoff, so another entry can replace it. When this page created a preparation, the

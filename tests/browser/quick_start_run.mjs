@@ -67,6 +67,11 @@ try {
   await page.locator('#circuit-node-train').waitFor();
   // L-6: the advice field has focus after Quick start, as after a gallery import.
   await until(() => page.evaluate(() => document.activeElement?.classList.contains('advice-input')));
+  // The focused field is Propose model's, and its advice input is connected (no warning):
+  // what the user types reaches the proposal agent.
+  assert.equal(await page.locator('#editor-inspector .advice-warning').count(), 0, 'Propose model advice input is connected');
+  const ADVICE = 'Prefer a small interpretable baseline (quick-start advice marker).';
+  await page.keyboard.type(ADVICE);
 
   // L-1b: the Train & tune inspector shows the template's declared pair as plain choices.
   await page.locator('#circuit-node-train').click();
@@ -124,6 +129,14 @@ try {
     await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
   };
   await prepareAndReview();
+  // The typed advice is in the prepared request's Propose model advice input.
+  const {readFile: read} = await import('node:fs/promises');
+  const runId = await page.evaluate(() => JSON.parse(localStorage.getItem(window.reusableIntents.key('preparation'))).payload.selection.run_id);
+  const inputs = join(root, 'runs', runId, 'inputs');
+  const adviceFiles = (await readdir(inputs, {recursive: true})).filter(name => /advice/.test(name));
+  assert.ok(adviceFiles.length, 'An advice input file is prepared: ' + (await readdir(inputs, {recursive: true})).join(', '));
+  assert.ok((await Promise.all(adviceFiles.map(name => read(join(inputs, name), 'utf8')))).some(text => text.includes(ADVICE)),
+    'The typed advice reaches the prepared advice input');
   const prepTexts = await page.evaluate(() => window.prepTexts);
   assert.ok(prepTexts.every(text => !/finished without a prepared run|start over/i.test(text)), 'No false failure while preparing: ' + JSON.stringify(prepTexts));
   // B8-3: the run names the captured version; a newer save is named as not in it.

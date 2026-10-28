@@ -4,8 +4,9 @@
  * settings are then edited in the ordinary panel and recorded in the workflow source. */
 (() => {
   'use strict';
-  // No task declares its own template yet; this catalog entry is the default for all.
-  const DEFAULT_TEMPLATE = 'single-research-loop';
+  // No task declares its own template yet; this catalog entry is the default for all. It
+  // connects Propose model's advice input, so the focused advice field reaches the agent.
+  const DEFAULT_TEMPLATE = 'single-loop-with-advice';
   const $ = id => document.getElementById(id);
   const editorState = () => window.workflowEditor.state;
   function element(tag, text, parent, className) {
