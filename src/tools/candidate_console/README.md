@@ -23,31 +23,65 @@ even when using the default models.
 
 ## Set up and open the console
 
-1. Create separate preparation and candidate output directories. Write an absolute
-   path configuration file using the [configuration example](console-contract.md#configuration).
-   Select the existing task manifest, data directory, LLM profile, resource policy
-   and time limits there. All resource paths must be absolute and canonical,
-   without symlinks. Create the output parents, but leave per-operation child
-   directories for the console to create. Browser users can change the native
-   run name and three advice fields.
-2. Create the access token file at the path selected by `auth_token_file`:
+1. Create the console workspace inside a directory you own, for example your
+   project directory. Pass that parent directory explicitly; there is no default:
+
+   ```bash
+   .venv/bin/python -m tools.candidate_console init --workspace /absolute/project
+   ```
+
+   This creates `/absolute/project/siderius_workspace/` with these folders, each
+   readable only by you (mode 700):
+
+   | Folder | Holds |
+   | --- | --- |
+   | `settings/` | `console.json`, the access token file `console-token` |
+   | `data/` | one folder per task, `data/<task_id>/`, that you fill with task data |
+   | `operations/`, `preparations/`, `candidates/`, `runs/` | console state and run outputs |
+   | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile here |
+   | `projects/` | a conventional place for workflow editor projects |
+
+   It prints the `console.json` path on success. The token unlocks the console;
+   it is separate from any model provider API key. Follow [Credentials](#credentials)
+   below to bind provider keys before Launch.
+
+   `init` is safe to run again. It only creates what is missing; it never
+   deletes, replaces or follows a symlink. It refuses a folder that is a symlink,
+   belongs to another user, or is writable by your group or by others (for
+   example a folder someone else made in `/tmp`), and says which one.
+2. Add your task to `siderius_workspace/settings/console.json`. A task needs its
+   `task_id`, `label`, `task_manifest`, `llm_config_file`, resource policy and time
+   limits; the [configuration example](console-contract.md#configuration) shows
+   every field. Leave out `data_root`, `preparation_root`, `candidate_root` and
+   `reusable_runs_root` to use the workspace folders `data/<task_id>/`,
+   `preparations/<task_id>/`, `candidates/<task_id>/` and `runs/<task_id>/`. Any
+   value you write yourself is used instead. Save an explicit LLM profile; the
+   standard one is in `library/llm/`. Then run `init` again with the same
+   `--workspace`: it creates the task's output folders, but never
+   `data/<task_id>/`. Put the task data there yourself. Browser users can change
+   the native run name and three advice fields.
+
+   A `console.json` without `workspace_root` still works as before: write every
+   path yourself as an absolute, canonical path without symlinks, create the
+   output parents, and create the token file at `auth_token_file`:
 
    ```bash
    .venv/bin/python -c 'import os,secrets; p=input("Token file absolute path: "); fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600); os.write(fd,secrets.token_urlsafe(32).encode()); os.close(fd)'
    ```
-
-   This token unlocks the console; it is separate from any model provider API key.
-   Follow [Credentials](#credentials) below to bind provider keys before Launch.
 3. Check the configuration, then start the server in a persistent terminal/session:
 
    ```bash
-   .venv/bin/python -m tools.candidate_console check --config /absolute/project/console.json
-   .venv/bin/python -m tools.candidate_console serve --config /absolute/project/console.json
+   .venv/bin/python -m tools.candidate_console check --config /absolute/project/siderius_workspace/settings/console.json
+   .venv/bin/python -m tools.candidate_console serve --config /absolute/project/siderius_workspace/settings/console.json
    ```
 
    A successful check prints the browser address and token file location. It
    checks configuration paths, file shape and permissions, without proving task
    composition, required key presence, sandbox availability or provider access.
+   When a required field has no value, the check names it, for example
+   `task my-task needs llm_config_file`. When a workspace folder is missing or
+   unusable, it lists the folder (for example `data/my-task: missing`) and, if
+   `init` can create it, prints the `init` command to run.
    Only `127.0.0.1` binding is supported.
 4. For a remote host, keep the server session running and open an SSH tunnel:
 

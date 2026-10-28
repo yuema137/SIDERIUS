@@ -61,6 +61,79 @@ Undeclared entries are ignored and never logged. Parse refusals are raised
 outside the parser's exception handler, so neither message nor chained cause
 quotes bytes or values; missing declared names are reported by name only.
 
+### Workspace layout and `init`
+
+Owners: `settings_models.py` (file schema), `workspace.py` (derivation,
+readiness, `init`), `config.load_console`, `__main__` (`check`, `serve`, `init`).
+
+**File schema.** `ConsoleFile`/`TaskEntry` are generated from `ConsoleConfig`/`TaskChoice`
+with `pydantic.create_model`; every field keeps its owner's annotation and
+constraints. Differences: `ConsoleFile` adds `workspace_root: str | None` and makes
+`operation_store`/`auth_token_file` optional; `TaskEntry` makes `data_root`,
+`preparation_root`, `candidate_root`, `reusable_runs_root` and `llm_config_file`
+optional. `ConsoleConfig` and `TaskChoice` gain no field, so native requests built
+from `TaskChoice` (`service.preparation_request`) are unchanged.
+
+**Resolution.** `resolve_console(bytes)` validates `ConsoleFile`, dumps it with
+`exclude_unset=True`, fills only keys the file omits, then validates the result as
+`ConsoleConfig`. `load_console(path) -> ResolvedConsole(config, settings)` applies
+the unchanged `validate_config`; `load_config(path)` keeps its signature and result.
+`SettingsContext` carries `workspace_root` and the `(task_id | None, field)` pairs the
+layout filled; it is presentation/readiness input only, never native input.
+When `workspace_root` (canonical, no symlinks) is set and a field is omitted:
+
+| Field | Derived value under `<workspace_root>` |
+| --- | --- |
+| `operation_store` | `state_root=operations`, `preparation_roots=[preparations, runs]`, `candidate_roots=[candidates, runs]` |
+| `auth_token_file` | `settings/console-token` |
+| `TaskChoice.data_root` | `data/<task_id>` |
+| `TaskChoice.preparation_root` | `preparations/<task_id>` |
+| `TaskChoice.candidate_root` | `candidates/<task_id>` |
+| `TaskChoice.reusable_runs_root` | `runs/<task_id>` (an explicit `null` keeps reusable runs disabled) |
+
+`runs` is in both root lists so the derived reusable runs root satisfies the
+`validate_config` scope rule. `llm_config_file`, `task_manifest`, resources and
+credential names are content choices and are never derived. An explicit value
+always wins (parity: an explicit file resolves to exactly
+`ConsoleConfig.model_validate_json(bytes)`). A field with no source raises
+`workspace.MissingSetting`; `check`/`serve` exit 2 and print only the task ID and
+field name, for example `task my-task needs llm_config_file (set it in console.json)`.
+
+**`init --workspace <parent>`.** `<parent>` is explicit (no default) and must be
+an existing canonical directory. The command walks from `/` with
+`O_DIRECTORY|O_NOFOLLOW` descriptors and requires `<parent>` and every existing or
+created workspace directory to satisfy the ownership predicate: a directory,
+`st_uid == os.getuid()`, no group/other write bit. It creates only missing
+children with `mkdir(name, 0o700, dir_fd=…)` and `fchmod 0700`:
+`operations`, `preparations`, `candidates`, `runs`, `projects`, `library`,
+`library/llm`, `library/advice`, `settings`, `data` (`exported_configs` is created
+lazily by its writer). It creates `settings/console-token` with
+`O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0600, 32 random bytes URL-safe encoded;
+an existing token is left untouched and validated by `files.token`. It publishes
+`library/llm/default-<sha12>.json` write-once with the `WorkflowLLMConfig.default()`
+export expression of [LLM defaults](../../../docs/reference/llm-defaults.md)
+(bytes equal `configs/llm/default.json`; no checkout read); existing different
+bytes are refused. It writes `settings/console.json` write-once only when absent:
+`workspace_root`, `port` (default 8740, `--port`), `browser_origin`, `tasks: []`.
+When `console.json` exists and names this workspace, `init` also creates the missing
+derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
+them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
+It never deletes, overwrites or follows a symlink; a refusal names the folder and
+exits 2. Residual race: `core.durable_io` publishes by path, so after the no-follow
+parent check only a same-user process, which already owns the workspace, can swap
+a parent.
+
+**`WorkspaceReadiness`** (`readiness_models.py`, beside `CredentialReadiness`) is an
+ephemeral, name-only projection: `workspace_status` and one `WorkspaceEntry(name,
+status, created_by)` per fixed child, per derived task output root and per derived
+`data/<task_id>`. `status` is `present|missing|not_directory|symlink|not_owner`,
+computed with no-follow `stat` relative to a no-follow root descriptor; task data
+(`created_by="operator"`) reports presence only. `created_by="writer"` entries do
+not affect `ready`. `init_command` is set when `init` could fix a missing item. No
+`os.access` probe and no creation. `check`/`serve` print non-present entries and
+the command to stderr when a workspace is not ready, including when
+`validate_config` refuses.
+
 `recorded_examples` is an optional allowlist for read-only candidate-validation
 records. Each entry has a unique `example_id`, readable `label`, canonical
 `workspace` strictly below an existing `candidate_roots` directory, and the
