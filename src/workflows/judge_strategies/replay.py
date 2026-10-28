@@ -25,7 +25,7 @@ from .models import (
     StrategyResult,
     invocation_sha256,
 )
-from .plan import call_path, call_request, decide, strategy_route
+from .plan import call_path, call_request, decide, next_call, strategy_route
 
 
 def _read_anchored(path: Path, expected_sha256: str) -> StrategyEvidence:
@@ -76,7 +76,7 @@ def replay_llm_strategy(
     for anchor in record.calls:
         if calls and calls[-1].status != "decided":
             raise StrategyError("strategy evidence records a call after a failed call")
-        planned = kind.plan_call(invocation, len(calls))
+        planned = next_call(kind, invocation, len(calls))
         if planned is None:
             raise StrategyError("strategy evidence records more calls than the strategy plans")
         path = call_path(evidence_dir, len(calls), planned.role)
@@ -92,11 +92,9 @@ def replay_llm_strategy(
             raise StrategyError(f"strategy call {len(calls)} is refused: {error}") from error
         calls += (evidence,)
         accounted.add(path)
-    if (
-        calls
-        and calls[-1].status == "decided"
-        and kind.plan_call(invocation, len(calls)) is not None
-    ):
+    if (not calls or calls[-1].status == "decided") and next_call(
+        kind, invocation, len(calls)
+    ) is not None:
         raise StrategyError("strategy evidence ends before the planned call chain is complete")
     if decide(kind, invocation, calls) != record.outcome:
         raise StrategyError("re-derived strategy outcome differs from the recorded outcome")

@@ -47,7 +47,6 @@ from workflows.definition.adaptor_strategies import (
 )
 from workflows.definition.llm_strategies import (
     DebateJudgeStrategy,
-    JudgeMergeStrategy,
     PrimaryAdvisorsStrategy,
     RubricRankStrategy,
 )
@@ -493,7 +492,6 @@ def test_rubric_threshold_over_metric_scored_items_is_not_a_reorder():
     [
         DebateJudgeStrategy(**COMMON, rounds=1, critic=False, judge_output="rank"),
         PrimaryAdvisorsStrategy(**COMMON, primary="first_admissible", advice="single_call"),
-        JudgeMergeStrategy(**COMMON, synthesize_count=1, min_parents=2),
     ],
     ids=lambda s: s.kind,
 )
@@ -584,6 +582,13 @@ def test_rubric_fold_cannot_reach_metric_owners_and_replay_cannot_reach_a_provid
     package = _SRC / "workflows" / "judge_strategies"
     rubric = _imports(package / "rubric_rank.py")
     assert not {m for m in rubric if "metric_order" in m or "evaluation_metric" in m}
-    for module in ("replay.py", "plan.py", "kinds.py", "rubric_rank.py"):
+    for module in (
+        "replay.py",
+        "plan.py",
+        "kinds.py",
+        "rubric_rank.py",
+        "judge_merge.py",
+        "synthesis.py",
+    ):
         imported = _imports(package / module)
         assert not {m for m in imported if "llm_bridge" in m or m == "agent.judge.call"}, module

@@ -24,7 +24,7 @@ from .models import (
     StrategyResult,
     invocation_sha256,
 )
-from .plan import call_path, call_request, decide, strategy_route
+from .plan import call_path, call_request, decide, next_call, strategy_route
 
 
 def _require_fresh(evidence_dir: Path) -> None:
@@ -59,7 +59,7 @@ def run_llm_strategy(
     _require_fresh(invocation.evidence_dir)
     digest = invocation_sha256(invocation)
     calls: tuple[JudgeCallEvidence, ...] = ()
-    while (planned := kind.plan_call(invocation, len(calls))) is not None:
+    while (planned := next_call(kind, invocation, len(calls))) is not None:
         evidence = run_judge_call(
             call_request(digest, planned, calls),
             template=planned.template,

@@ -8,7 +8,7 @@ Contract: ``judge-strategies-contract.md`` beside this file.
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, JsonValue, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.judge import Digest, FailureCode, ItemProjection, JudgeModel
@@ -123,19 +123,58 @@ class ItemRanking(JudgeModel):
         return self
 
 
+class CombinedItem(JudgeModel):
+    """One value a combining kind produced: validated, framework-stamped, with its parents."""
+
+    output_index: int = Field(ge=0)
+    parents: tuple[str, ...] = Field(min_length=1)  # invocation item ids
+    value: dict[str, JsonValue]  # JSON form of a native value of the output contract
+    value_sha256: Digest
+
+    @model_validator(mode="after")
+    def digest_matches(self) -> Self:
+        if self.value_sha256 != canonical_sha256(self.value):
+            raise ValueError("value_sha256 does not match the combined value")
+        return self
+
+
+class CombinedItems(JudgeModel):
+    """Every value of a combining kind, in output order; B6 SELECTs them with ``all/v1``."""
+
+    contract: str = Field(min_length=1)
+    items: tuple[CombinedItem, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def indexed(self) -> Self:
+        if [item.output_index for item in self.items] != list(range(len(self.items))):
+            raise ValueError("combined items are indexed 0..k-1 in output order")
+        return self
+
+
+# Strategy-level failures (no single call failed): too few admissible items to run
+# the kind, or a decided chain whose output count differs from the declared one.
+StrategyFailureCode = Literal["insufficient_items", "cardinality_mismatch"]
+
+
 class StrategyOutcome(JudgeModel):
     """The decision one invocation produced; re-derived exactly on replay."""
 
     status: Literal["decided", "fallback", "failed"]
     ranking: ItemRanking | None
-    failure_code: FailureCode | None
+    # Omitted when absent, so ranking-kind evidence bytes do not carry the field.
+    combined: CombinedItems | None = Field(default=None, exclude_if=lambda value: value is None)
+    failure_code: FailureCode | StrategyFailureCode | None
     fallback_combine: str | None  # Fallback.combine kind B6 must run, iff status == "fallback"
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
         decided = self.status == "decided"
-        if decided != (self.ranking is not None) or decided == (self.failure_code is not None):
-            raise ValueError("a ranking is recorded exactly when decided; a failure code otherwise")
+        produced = (self.ranking is not None) + (self.combined is not None)
+        if (produced == 1) != decided or produced > 1 or decided == (self.failure_code is not None):
+            raise ValueError(
+                "a ranking or combined items are recorded exactly when decided; "
+                "a failure code otherwise"
+            )
         if (self.status == "fallback") != (self.fallback_combine is not None):
             raise ValueError("a fallback combine is named exactly when the status is fallback")
         return self
@@ -148,13 +187,15 @@ class StrategyEvidence(JudgeModel):
     invocation_sha256: Digest
     strategy_kind: str = Field(min_length=1)
     static_call_bound: int = Field(gt=0)
-    calls: tuple[Digest, ...] = Field(min_length=1)
+    calls: tuple[Digest, ...]
     outcome: StrategyOutcome
 
     @model_validator(mode="after")
     def bounded(self) -> Self:
         if len(self.calls) > self.static_call_bound:
             raise ValueError("recorded calls exceed the static call bound")
+        if (not self.calls) != (self.outcome.failure_code == "insufficient_items"):
+            raise ValueError("an invocation makes no call exactly when its items are insufficient")
         return self
 
 
@@ -174,6 +215,9 @@ StrategyRefusalCode = Literal[
     "select_incompatible",
     "metric_scored_reorder",
     "call_bound_exceeds_max_calls",
+    "insufficient_capacity",
+    "output_not_emittable",
+    "cardinality_mismatch",
 ]
 
 
