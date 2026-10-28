@@ -30,6 +30,7 @@ FILE --operation-id UUID`, and `log --store-config FILE --operation-id UUID
 ([cancel](#cancel-an-active-candidate-operation)), the authored-loop controls `stop-loop`,
 `pause-loop`, `review-loop-resume` and `write-loop-resume`
 ([authored-loop CLI](#control-an-authored-loop-from-code-or-the-cli)), and the
+run-seed option `submit --run-seed N` ([run seed](#run-seed-issue-983)), the
 host-ledger options `submit --host-ledger DIR --host-budget FILE` and
 `release-reservation --host-ledger DIR --operation-id UUID`
 ([host reservation ledger](#host-reservation-ledger)). Outputs are schema JSON. Submit
@@ -100,6 +101,63 @@ admissions return before either freshness or value checks, preserving observatio
 when inputs change or credentials disappear. Store lock/directories may already
 exist on refusal; no new operation record, worker or native workspace is claimed.
 The existing environment filter remains the forwarding authority.
+
+## Run seed (issue #983)
+
+Every `prepare`, `prepare_reusable` and `candidate` operation runs under exactly
+one run seed (contract: [seeding](../../../docs/agent-reference/mechanisms/seeding.md)).
+Owners: `seed_admission.py` (`admission_seed`, `require_root_seed`,
+`require_recorded_seed`) and `core.seeding.admitted_run_seed`.
+
+- **Request.** `CandidateRunRequest.run_seed`,
+  `CandidatePreparationRequest.run_seed` and
+  `ReusableCandidatePreparationRequest.run_seed` are `RunSeed | None`
+  (`[0, 2**53 - 1]`, strict int). `None` is omitted from serialization, so a
+  seedless request's bytes and request digest are unchanged (pinned:
+  `tests/unit/tools/candidate_operations/test_source_compatibility.py`,
+  `test_run_seed.py`). The CLI's `submit --run-seed N` sets it on the request
+  file's submission before admission; a file that already carries a different
+  `run_seed`, or a submission of another kind, is refused with code `usage`.
+- **Admission is the entry boundary.** Inside the store lock and before
+  `claim()`, `admission_seed` binds `resolve_run_seed(request.run_seed)`
+  (`source: operator` for an explicit value, `generated` from the CSPRNG
+  otherwise) into `OperationRecord.run_seed: RunSeedBinding`. An existing ID
+  returns before this step, so a retry never mints a second seed. The record
+  validator refuses a binding that is not what admission binds for the request.
+- **Child handoff.** The operation child passes `record.run_seed` to
+  `prepare_candidate`, `prepare_reusable_candidate` or `launch_candidate`
+  (`run_seed=`), which record it in the native receipt before any native effect.
+  A seeded kind whose record has no seed is a `pre_dispatch_failure`; the child
+  never generates one.
+- **Loop resume** copies its root record's binding into its own record and never
+  generates. A root admitted before this contract (an S3b-era record without a
+  seed; its workspace lock does record one) is refused with `loop_resume` by
+  Review (`review_loop_resume`, `write-loop-resume`) before any native read, and
+  therefore also by Resume admission, which repeats the review. The message
+  states the cause (the record has no `run_seed`, so a segment could not prove
+  it continues the same seed) and the remedy (start a fresh candidate run,
+  optionally with `--run-seed N`). The seed is neither adopted from the lock nor
+  re-minted; the old records stay readable.
+- **Reusable preparation provenance.** A candidate submitted with a
+  `reusable_preparation` records the verified preparation receipt's seed as
+  `OperationRecord.preparation_run_seed`. It is provenance only: the candidate
+  keeps its own `run_seed`, and an explicit candidate `run_seed` is the one field
+  its request may add to the prepared request. The value is bound to the
+  selection's pinned receipt bytes (`expected_receipt_sha256`, which include the
+  receipt's `run_seed`), and the child's dispatch-time re-verification refuses
+  any other receipt. Readback does not re-verify it, because status and recovery
+  must not require surviving prepared files; after dispatch it is admitted
+  provenance only. A candidate built from a plain
+  `prepare` operation (console prepared or edited flow) records no
+  `preparation_run_seed`: operations hold no verified link from such a
+  candidate to its preparation (`ReviewedContext` is console metadata, not an
+  admission input), so the field stays `None` rather than being inferred.
+- **Readback.** `read_operation` returns `OperationSnapshot.run_seed` from the
+  record (omitted when `None`) and refuses with `integrity` a native receipt
+  (preparation, reusable top receipt, candidate `launch.json`, loop root) whose
+  `run_seed`/`run_seed_source` differ from the record's. A pre-seed record with
+  a pre-seed receipt reads back unchanged. Native-chain operations record no
+  seed here; their seed lives in the chain's run-invariants lock.
 
 ## Detached process and environment
 

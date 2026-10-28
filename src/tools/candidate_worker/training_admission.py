@@ -12,9 +12,10 @@ from core.hardware_context import get_or_create as get_hardware_context
 from core.hardware_models import HardwareContext
 from core.retired_seed_pins import refuse_set_pins
 from core.run_invariants import RunInvariants, ensure_run_invariants
-from core.run_seed_lock import resolve_workspace_run_seed
+from core.run_seed_lock import WorkspaceRunSeed, adopt_bound_run_seed
 from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+from core.seeding import MissingRunSeed
 from execute_tools.dataset_config import DataScope
 from execute_tools.evaluation_execution import candidate_evaluation_executor
 from execute_tools.health_checks.launch_policy import validate_formal_launch
@@ -43,6 +44,25 @@ class TrainingAdmission:
     bindings: WorkflowRunBindings
     constraints: ConstraintContext | None
     node_id: str
+    #: The global loop iteration this body trains in (1 outside a loop); with
+    #: ``node_id`` it is the tuner's seed scope (issue #983).
+    iteration: int
+
+
+def admitted_workspace_seed(initial: CandidateRunReceipt) -> WorkspaceRunSeed:
+    """The launch receipt's run seed, checked against the workspace lock.
+
+    Raises:
+        MissingRunSeed: the receipt predates the seed contract.
+        RunInvariantsViolation: the lock records a different seed.
+    """
+    binding = initial.seed_binding()
+    if binding is None:
+        raise MissingRunSeed(
+            "candidate launch receipt records no run_seed: it predates the seed "
+            "contract and cannot train on this build; start a fresh candidate"
+        )
+    return adopt_bound_run_seed(initial.workspace, binding)
 
 
 class AdmittedRunFacts(TypedDict):
@@ -161,10 +181,10 @@ def admit_training(
         external_evaluation=candidate_evaluation_executor() is not None,
     )
     # Issue #983 — a settings document that recorded a retired pin is readable
-    # but never executed. Admission is a run-seed entry boundary until S4
-    # admits the seed with the operation: lock, then generation, printed.
+    # but never executed. Admission never generates a seed: it executes the one
+    # the launch receipt bound, and later bodies find it locked.
     refuse_set_pins(settings.retired_seed_pins, "candidate training settings")
-    run_seed = resolve_workspace_run_seed(initial.workspace, None)
+    run_seed = admitted_workspace_seed(initial)
     print(run_seed.log_line(), flush=True)
     preparation = prepare_training_run(
         launch=launch,
@@ -216,5 +236,5 @@ def admit_training(
         str(control / "training_settings.json"), settings.model_dump_json(indent=2).encode()
     )
     return TrainingAdmission(
-        settings, bindings, workflow_constraint_context(launch, composition), node.id
+        settings, bindings, workflow_constraint_context(launch, composition), node.id, iteration
     )

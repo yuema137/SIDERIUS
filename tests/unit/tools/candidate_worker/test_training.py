@@ -406,6 +406,7 @@ def test_after_process_operation_read_reaches_terminal_verifier(
         runtime=runtime_identity(),
         inputs=training_request.files,
         admitted_at=now(),
+        run_seed=receipt.seed_binding(),
     )
     with locked_store(config) as root:
         claim(root, record)
