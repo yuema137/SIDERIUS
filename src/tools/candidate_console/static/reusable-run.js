@@ -200,8 +200,11 @@
   window.reusableCandidate = Object.freeze({async openPrepared(context) {
     if (!session.connected || editor.projectId !== context.project) { status('Select the retained project in Workflow before opening this run.'); return; }
     const captureHeading = document.getElementById('capture-heading');
-    if (window.consoleNavigation.view !== 'run') location.hash = 'run';
-    captureHeading.scrollIntoView({block: 'start'});
+    // Scroll only once the Run panel is visible: the hashchange route runs asynchronously.
+    const scroll = () => requestAnimationFrame(() => captureHeading.scrollIntoView({block: 'start'}));
+    if (window.consoleNavigation.view !== 'run') {
+      window.addEventListener('console-view', scroll, {once: true}); location.hash = 'run';
+    } else scroll();
     invalidate(); handoffGeneration = generation; tasksRevision = session.revision;
     const version = generation, revision = session.revision;
     if (![...$('task').options].some(item => item.value === context.task)) {

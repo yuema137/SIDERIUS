@@ -551,7 +551,7 @@ gets `.has-required-unbound` (red outline/glow) and a `.circuit-problem-badge`.
 server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
 (`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
 focuses the inspector select for `field` (and marks the canvas input
-`.problem-focus`); an unlocated item opens Advanced → Source at its line. The
+`.problem-focus`); an unlocated item opens Advanced source at its line. The
 list never enables Review: Review remains disabled for an incomplete draft.
 Witness: `tests/browser/required_defaults.mjs`.
 
@@ -751,7 +751,8 @@ open, project not runnable, not a reusable declaration, conflict, saving, unsave
 edits). Those reasons explain a closed gate and never open it. The New run and
 Prepared run controllers keep their element IDs and behavior; their task loaders run
 on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
-opening a disclosure.
+opening a disclosure, and scrolls to the capture heading only after the
+`console-view` event shows the Run panel (next animation frame).
 
 When the connection is absent or no workflow source is open, Workflow shows
 **Start from a task example** (select a task, edit, save, run) with a one-line state.
