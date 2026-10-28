@@ -1,6 +1,7 @@
 """Regression tests for the unified effective-plan parameter-rule contract."""
 
 import json
+import math
 import re
 
 import pytest
@@ -308,3 +309,20 @@ def test_workflow_loss_rule_cannot_bypass_a_task_owned_objective() -> None:
             epoch_cap=EpochCapResolution(cap=None, source=None),
             executed_model_type="fcnet",
         )
+
+
+@pytest.mark.parametrize(
+    ("rule", "message"),
+    [
+        ({"exact": math.inf}, "exact rule must not contain a non-finite number"),
+        ({"exact": {"window": [-math.inf]}}, "exact rule must not contain a non-finite number"),
+        ({"allowed": [1.0, math.nan]}, "allowed rule must not contain a non-finite number"),
+        ({"range": {"max": math.inf}}, "range.max must be finite"),
+    ],
+    ids=["exact-inf", "exact-nested", "allowed-nan", "range-bound"],
+)
+def test_non_finite_rule_values_are_refused_naming_the_path(rule: dict, message: str) -> None:
+    """Catches inf/NaN locks that transport later turns into "Infinity", "NaN" or null."""
+    path = "train_config.lr"
+    with pytest.raises(ValueError, match=rf"rules\.`{re.escape(path)}`[\s\S]*{message}"):
+        ParameterRules.model_validate({path: rule})

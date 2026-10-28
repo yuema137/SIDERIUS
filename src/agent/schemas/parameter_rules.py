@@ -266,6 +266,17 @@ register_parameter_predicate("odd_integer", _is_odd_integer)
 register_parameter_predicate("even_integer", _is_even_integer)
 
 
+def _contains_non_finite(value: Any) -> bool:
+    """Whether a rule value holds inf, -inf or NaN, at any nesting depth."""
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, Mapping):
+        return any(_contains_non_finite(item) for item in value.values())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_contains_non_finite(item) for item in value)
+    return False
+
+
 class NumericRange(BaseModel):
     """Inclusive numeric interval for one resolved parameter."""
 
@@ -322,6 +333,14 @@ class ParameterRule(BaseModel):
                 )
         if self.allowed is not None and not self.allowed:
             raise ValueError("allowed must contain at least one value")
+        # Range bounds are already finite (NumericRange). A non-finite exact or
+        # allowed value cannot round-trip through standard JSON transport.
+        declared = self.exact if self.kind == "exact" else self.allowed
+        if _contains_non_finite(declared):
+            raise ValueError(
+                f"{self.kind} rule must not contain a non-finite number (inf, -inf or "
+                "NaN); declare a finite value"
+            )
         if self.predicate is not None and not self.predicate.strip():
             raise ValueError("predicate name must not be empty")
         return self
