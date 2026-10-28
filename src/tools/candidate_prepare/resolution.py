@@ -204,6 +204,11 @@ def resolve_reusable_candidate(
             ),
             nodes=document.definition.nodes,
             loop=document.definition.loop,
+            # Carried verbatim so the worker's v1 input keeps every declared graph
+            # element; today every reusable profile still refuses both before here.
+            routes=document.definition.routes,
+            adaptor_format=document.definition.adaptor_format,
+            adaptors=document.definition.adaptors,
         ),
         positions=document.positions,
     )
