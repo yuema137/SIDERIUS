@@ -184,7 +184,8 @@ def test_agent_refuses_a_missing_run_seed_before_any_llm_call(tmp_path):
 def test_envelope_declaration_survives_dump_and_validate_round_trips():
     """Fails if an undeclared seed is written as ``0`` (a model_dump/validate
     round trip, as the literature and source-scope edges do, would then turn
-    a derived seed into a declared 0), or if a declared seed is dropped."""
+    a derived seed into a declared 0), if a declared seed is dropped, or if
+    explicitness is inferred from the value (an operator's declared 0)."""
     undeclared = AnalysisResourceEnvelope(wall_time_budget_s=10, per_skill_timeout_s=5)
     declared = AnalysisResourceEnvelope(
         wall_time_budget_s=10, per_skill_timeout_s=5, sampling_policy={"seed": PAPER_SEED}
@@ -196,3 +197,9 @@ def test_envelope_declaration_survives_dump_and_validate_round_trips():
         kept = AnalysisResourceEnvelope.model_validate(declared.model_dump(mode=mode))
         assert kept.declared_sampling_seed() == PAPER_SEED
     assert declared.model_dump(mode="json")["sampling_policy"]["seed"] == PAPER_SEED
+    # Explicitness is presence, not value: a declared 0 is still the operator's.
+    zero = AnalysisResourceEnvelope(
+        wall_time_budget_s=10, per_skill_timeout_s=5, sampling_policy={"seed": 0}
+    )
+    assert zero.declared_sampling_seed() == 0
+    assert zero.model_dump(mode="json")["sampling_policy"]["seed"] == 0
