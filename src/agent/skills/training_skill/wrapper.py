@@ -24,7 +24,7 @@ def run_skill(sandbox, **kwargs):
         # so re-dropping it can no longer produce a quiet success.
         eval_sample_set=kwargs.get("eval_sample_set"),
         train_portion=kwargs.get("train_portion"),
-        train_base_seed=kwargs.get("train_base_seed"),
+        seed_context=kwargs.get("seed_context"),
         # RT2-G: operator runtime policy for in-subprocess verification
         # (validated against RuntimeControlPolicy at the executor).
         runtime_policy=kwargs.get("runtime_policy"),

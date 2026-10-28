@@ -17,5 +17,15 @@
   "resolved_file_order": null,
   "train_sampling_seed": 12345,
   "eval_sampling_seed": 12345,
-  "train_base_seed": 67890
+  "seed_context": {
+    "run_seed": 67890,
+    "at": {
+      "iteration": null,
+      "node_id": null,
+      "branch": null,
+      "round": null,
+      "attempt": null,
+      "epoch": null
+    }
+  }
 }

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
+from core.retired_seed_pins import migrate_reviewed_launch_settings
 from workflows.launch_projection import json_launch_values
 from workflows.reviewed_launch_binding import (
     BindingModel,
@@ -102,5 +103,5 @@ class LaunchExpectations(BindingModel):
             raise ReviewedLaunchRefusal("launch_identity_changed")
 
     def check_projection(self, launch, expected: dict[str, JsonValue]) -> None:
-        if json_launch_values(launch) != expected:
+        if json_launch_values(launch) != migrate_reviewed_launch_settings(expected):
             raise ReviewedLaunchRefusal("launch_settings_changed")

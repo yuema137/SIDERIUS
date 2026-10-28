@@ -24,15 +24,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import warnings
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
+    JsonValue,
     SerializerFunctionWrapHandler,
+    TypeAdapter,
+    ValidationError,
     model_serializer,
     model_validator,
 )
@@ -44,8 +47,89 @@ from agent.llm_settings import (
     default_model_for_provider,
 )
 from agent.schemas.llm_retry import RetryPolicy
+from workflows.advice import ADVICE_INERT_KEY_PREFIX as INERT_KEY_PREFIX
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
+
+
+def parse_llm_config_bytes(content: bytes) -> WorkflowLLMConfig:
+    """Strictly parse captured ``--llm_config`` JSON: the one loader for explicit profiles.
+
+    Every explicit profile file reaches this function: ``WorkflowLLMConfig.from_json``
+    serves the CLI and run paths, ``tools.workflow_preview.config.parse_config``
+    serves the preview and candidate paths, and task observation calls it directly.
+    It refuses any key that the
+    model does not declare, at every route depth, so a typo such as ``interpet``
+    or a misspelled nested route key cannot silently select node defaults. A key
+    starting with ``INERT_KEY_PREFIX`` (``"_"``, the advice-artifact convention)
+    is an inert annotation: it is accepted at any depth and discarded before
+    validation. Native models stay lenient for direct Python construction.
+
+    Errors are ``ValueError`` and never carry input values: pydantic echoes the
+    raw bytes or field value in its own messages, and a profile may hold an API
+    key. Malformed JSON reports only the parser position; validation failures
+    report only the field locations and error types.
+    """
+    try:
+        raw = TypeAdapter(JsonValue).validate_json(content)
+    except ValidationError as error:
+        # pydantic's json_invalid context names the position, not the input bytes.
+        first = error.errors()[0]
+        reason = first.get("ctx", {}).get("error", first["type"])
+        raise ValueError(f"llm_config is not valid JSON: {reason}") from None
+    value = _drop_inert_keys(raw)
+    _refuse_unknown_keys(value, WorkflowLLMConfig, "llm_config")
+    try:
+        return WorkflowLLMConfig.model_validate(value)
+    except ValidationError as error:
+        # value_error messages are this module's fixed validator reasons, which never
+        # carry input; every other type is reported by name only.
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in item['loc']) or 'llm_config'}: "
+            + (item["msg"] if item["type"] == "value_error" else item["type"])
+            for item in error.errors()
+        )
+        raise ValueError(f"llm_config failed validation: {problems}") from None
+
+
+def _drop_inert_keys(value: JsonValue) -> JsonValue:
+    if isinstance(value, dict):
+        return {
+            key: _drop_inert_keys(item)
+            for key, item in value.items()
+            if not key.startswith(INERT_KEY_PREFIX)
+        }
+    if isinstance(value, list):
+        return [_drop_inert_keys(item) for item in value]
+    return value
+
+
+def _nested_models(annotation: object) -> tuple[type[BaseModel], ...]:
+    """Return the BaseModel classes a field annotation may hold (through ``X | None``)."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return (annotation,)
+    return tuple(model for arg in get_args(annotation) for model in _nested_models(arg))
+
+
+def _refuse_unknown_keys(value: JsonValue, model: type[BaseModel], context: str) -> None:
+    """Refuse undeclared keys in one mapping, then recurse into its declared route fields."""
+    if not isinstance(value, dict):
+        return  # The native model owns shape and type errors.
+    accepted: set[str] = set()
+    for name, field in model.model_fields.items():
+        accepted.add(name)
+        if field.alias:
+            accepted.add(field.alias)
+            if field.alias != name and name in value and field.alias in value:
+                raise ValueError(f"{context}: duplicate name/alias {name!r} and {field.alias!r}")
+    if unknown := value.keys() - accepted:
+        raise ValueError(f"{context}: unknown configuration keys: {sorted(unknown)}")
+    for name, field in model.model_fields.items():
+        for key in (name, field.alias):
+            if key is None or key not in value:
+                continue
+            for child in _nested_models(field.annotation):
+                _refuse_unknown_keys(value[key], child, f"{context}.{key}")
 
 
 def resolve_standard_llm_config(args: argparse.Namespace) -> WorkflowLLMConfig:
@@ -267,9 +351,85 @@ class LitReviewLLMConfig(BaseModel):
     )
 
 
+class JudgeRouteConfig(BaseModel):
+    """
+    One LLM-judge route: an explicit provider and model, plus a bounded call budget.
+
+    Unlike ``NodeLLMConfig``, a judge route has no defaults and no unbounded form.
+    ``provider`` and ``model_id`` are required because the judge's model is part of
+    the audited evidence; no central default is substituted. ``max_output_tokens``
+    is required and ``max_retries`` must be a finite count of total transport
+    attempts (``LLMBridge`` semantics: 0 and 1 both allow only the initial call).
+    Both integers are strict, so booleans are refused. ``None`` and absent values
+    are refused, so an unbounded retry budget cannot reach a judge call.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: ProviderName = Field(description="LLM provider. Required; no default.")
+    model_id: str = Field(
+        min_length=1,
+        description="Specific model ID passed to the provider. Required; no default.",
+    )
+    reasoning_effort: ReasoningEffort | None = Field(
+        default=None,
+        description="Explicit OpenAI reasoning effort; omitted for other providers.",
+    )
+    max_output_tokens: int = Field(
+        gt=0,
+        strict=True,
+        description="Required output ceiling for every judge call on this route.",
+    )
+    max_retries: int = Field(
+        ge=0,
+        strict=True,
+        description=(
+            "Required finite limit on total transport attempts, including the "
+            "initial request. 0 and 1 both allow only the initial call; "
+            "unbounded retries are not expressible."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_reasoning_effort(self) -> JudgeRouteConfig:
+        if self.reasoning_effort is not None and self.provider != "openai":
+            raise ValueError("reasoning_effort requires provider='openai'")
+        return self
+
+
+class JudgeLLMConfig(BaseModel):
+    """
+    Routes for the three LLM-judge families. Each slot is optional and independent.
+
+    - ``stop``: JudgeStop boundary decisions (consumer lands with B2-4).
+    - ``aggregate``: LLM combine/select strategies inside adaptors (B2-6 onward).
+    - ``debate``: debate-judge strategy calls (B2-7 onward).
+
+    An empty block is refused: declaring ``judge`` means declaring at least one route.
+    This model only declares and validates routes. No judge call is made from
+    it, and the workspace run lock does not yet record it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stop: JudgeRouteConfig | None = None
+    aggregate: JudgeRouteConfig | None = None
+    debate: JudgeRouteConfig | None = None
+
+    @model_validator(mode="after")
+    def require_a_declared_route(self) -> JudgeLLMConfig:
+        if self.stop is None and self.aggregate is None and self.debate is None:
+            raise ValueError("judge must declare at least one of stop, aggregate, debate")
+        return self
+
+
 class WorkflowLLMConfig(BaseModel):
     """
     Per-node LLM configuration for a workflow.
+
+    ``judge`` is the one non-node block: LLM-judge routes (``JudgeLLMConfig``).
+    It is read as ``.judge``, never through ``get()``, and is omitted from the
+    serialized config when unset.
 
     Each field is optional. When None, the corresponding node uses its own
     built-in central model default.
@@ -332,6 +492,15 @@ class WorkflowLLMConfig(BaseModel):
             "behavior. Design Decision 3, 2026-06-11."
         ),
     )
+    judge: JudgeLLMConfig | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Routes for LLM judge families (stop, aggregate, debate). Not a node "
+            "slot: read it as `.judge`, never through `.get()`. Omitted from the "
+            "serialized config when unset, so configs without it keep their bytes."
+        ),
+    )
 
     def get(self, node_name: str) -> dict[str, Any]:
         """
@@ -369,10 +538,13 @@ class WorkflowLLMConfig(BaseModel):
         Args:
             node_name: One of "interpret", "data_analysis", "propose",
                        "implement", "validate", "tune", "lit_review".
+                       "judge" is refused: it is not a node slot; read ``.judge``.
 
         Returns:
             Flat dict of LLM kwargs, or `{}` if the node is not configured.
         """
+        if node_name == "judge":
+            raise ValueError("'judge' is not a node slot; read WorkflowLLMConfig.judge instead")
         # Handle "validate" alias → stored as validate_model
         attr = "validate_model" if node_name == "validate" else node_name
         config = getattr(self, attr, None)
@@ -508,10 +680,9 @@ class WorkflowLLMConfig(BaseModel):
 
     @classmethod
     def from_json(cls, path: str) -> WorkflowLLMConfig:
-        """Load from a JSON file."""
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        return cls.model_validate(data)
+        """Load an explicit profile through the strict loader (see parse_llm_config_bytes)."""
+        with open(path, "rb") as f:
+            return parse_llm_config_bytes(f.read())
 
     @classmethod
     def default(cls) -> WorkflowLLMConfig:

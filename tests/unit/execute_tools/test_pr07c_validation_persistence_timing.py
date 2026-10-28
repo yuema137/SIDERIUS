@@ -39,6 +39,7 @@ from pydantic import BaseModel
 import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.dataset_config import bind_dataset_profile
 from execute_tools.task_data_path import bind_task_data_path
 from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY, LossConfig, TrainConfig
@@ -167,7 +168,7 @@ def observed_run(tmp_path, request, monkeypatch):
                     "results": str(tmp_path / "r"),
                 },
                 exp_id="pr07c_timing",
-                train_base_seed=123,
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=123)),
                 profile=fx.profile,
                 runtime_session=session,
                 **data_path.scope_kwargs(fx.full_sample_set(), fx.full_sample_set()),

@@ -166,7 +166,12 @@ Removal deletes each node, its own request bindings and its layout position.
 It refuses (`node_dependants`, nothing written) when a remaining node reads a
 removed result through any argument, when the research-loop feedback names a removed
 node, or when no capability would remain; it never rewires or disconnects other
-nodes implicitly. Removing a dependent chain together is allowed.
+nodes implicitly. Removing a dependent chain together is allowed. The edited source
+is then re-parsed and validated before it is returned: a removal that leaves another
+reference dangling (a route source or target, a `SelectedSource` merge candidate, an
+adaptor input) is refused as `node_dependants` with the validator's diagnostics
+("Cannot remove <ids>: ..."), never returned as source. Those consumers are not yet
+named individually like ResultSource readers are.
 
 A node with unbound required inputs is a draft-only state. `POST
 /api/editor/{project_id}/node-draft` accepts `NodeDraftRequest(expected_sha256,
@@ -186,7 +191,8 @@ ingress projection own values; the inspector only names supported presentation
 controls. `document.training_settings` remains sparse. Unset removes a key, null
 is explicit, and a supplied value remains authored. Numeric blanks block review
 without becoming zero/null. Epoch controls are ceilings, independent of parameter
-rules and native planning. Sampling and training base seeds have separate controls.
+rules and native planning. There is no seed control: the retired `sampling_seed` /
+`train_base_seed` pins are refused, and the run seed is chosen at launch.
 Each `TrainingControl.help` (`TrainingControlHelp`) projects the field's entry in
 `CandidateTrainingSettings.model_json_schema()` for `WorkflowLaunchConfig`:
 `description`, `unit`, `minimum`/`maximum`, `exclusive_minimum`/`exclusive_maximum`

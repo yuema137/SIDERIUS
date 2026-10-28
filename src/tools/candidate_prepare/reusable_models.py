@@ -3,14 +3,20 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from core.generated_artifact_name import validate_generated_artifact_name
+from core.seeding import RunSeed, SeedSource
 from tools.candidate_worker.models import CandidateRunRequest
 from tools.workflow_preview.models import FileObservation, PreviewModel
 from workflows.definition import ReusableWorkflowDocument, WorkflowDocument
 
-from .models import NATIVE_FILES, CandidatePreparationRequest, PreparationControl
+from .models import (
+    NATIVE_FILES,
+    CandidatePreparationRequest,
+    PreparationControl,
+    require_seed_pair,
+)
 from .resolution import ReusableCandidateLocations
 
 
@@ -28,6 +34,9 @@ class ReusableCandidatePreparationRequest(PreviewModel):
     candidate_network: bool
     candidate_devices: tuple[str, ...]
     candidate_environment_names: tuple[str, ...]
+    #: Issue #983 — the operator's explicit seed for this preparation run; never
+    #: copied into the captured native request. Omitted when ``None``.
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("run_name")
     @classmethod
@@ -98,6 +107,13 @@ class ReusablePreparationReceipt(PreviewModel):
     candidate_request_sha256: str | None = None
     preview_sha256: str | None = None
     error: str | None = None
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
+    run_seed_source: SeedSource | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def seed_pair(self):
+        require_seed_pair(self.run_seed, self.run_seed_source)
+        return self
 
 
 REUSABLE_FILES = (*NATIVE_FILES, "workflow.resolved.py")

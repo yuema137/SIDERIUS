@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
+from core.seeding import RunSeedBinding, admitted_run_seed
 from tools.workflow_preview import WorkflowPreview
 
 from .admission import absent_destination, admit, canonical
@@ -42,8 +43,14 @@ def prepare_reusable_candidate(
     *,
     invocation_id: UUID | None = None,
     expected_observations: ReusablePreparationObservations | None = None,
+    run_seed: RunSeedBinding | None = None,
 ) -> ReusablePreparationReceipt:
-    """Prepare one fresh managed-only v2 capture; never launch or resume a worker."""
+    """Prepare one fresh managed-only v2 capture; never launch or resume a worker.
+
+    ``run_seed`` follows :func:`~tools.candidate_prepare.launch.prepare_candidate`;
+    both the top and the native receipt record it.
+    """
+    seed = admitted_run_seed(request.run_seed, run_seed)
     preparation_id = (
         uuid4()
         if invocation_id is None
@@ -75,6 +82,8 @@ def prepare_reusable_candidate(
         status="failed",
         binding_path=str(binding_path),
         binding_sha256=binding_hash,
+        run_seed=seed.value,
+        run_seed_source=seed.source,
     )
     native = CandidatePreparationReceipt(
         preparation_id=control.preparation_id,
@@ -83,6 +92,8 @@ def prepare_reusable_candidate(
         request_path=str(control_dir / "request.json"),
         log_path=str(control_dir / "worker.log"),
         source_observations=control.sources,
+        run_seed=seed.value,
+        run_seed_source=seed.source,
     )
     if plan.document.execution_profile is not None:
         encode_control(binding)

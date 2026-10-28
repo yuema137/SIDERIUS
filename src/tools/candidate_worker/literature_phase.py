@@ -24,25 +24,23 @@ def run_literature(
     shape = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     )
-    edge = shape.literature
-    if edge is None or edge.review != context.node_id:
-        raise ValueError("literature invocation is not the declared review")
+    if context.node_id not in shape.literature_reviews:
+        raise ValueError("literature invocation is not a declared review")
+    review = context.node_id
     directory = graph_instance_dir(
-        Path(initial.workspace), request.run_name, edge.review, iteration=context.iteration
+        Path(initial.workspace), request.run_name, review, iteration=context.iteration
     )
     if context.storage_workspace != str(directory):
         raise ValueError("literature invocation storage binding disagrees")
     context.require_resolved_binding(
         initial,
         run_name=request.run_name,
-        node_id=edge.review,
+        node_id=review,
         phase="literature",
         storage=inputs.storage,
         implementation_directory="",
     )
-    input_path = literature_input_path(
-        Path(initial.workspace), edge.review, iteration=context.iteration
-    )
+    input_path = literature_input_path(Path(initial.workspace), review, iteration=context.iteration)
     input_path.parent.mkdir(parents=True, exist_ok=True)
     publish_bytes_write_once(str(input_path), inputs.model_dump_json(indent=2).encode())
     factory = contextual_bridge_factory(
@@ -56,7 +54,7 @@ def run_literature(
         bridge_factory=factory,
         root_cache_dir=str(
             literature_cache_dir(
-                Path(initial.workspace), request.run_name, edge.review, iteration=context.iteration
+                Path(initial.workspace), request.run_name, review, iteration=context.iteration
             )
         ),
     )

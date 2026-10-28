@@ -23,8 +23,11 @@ from __future__ import annotations
 
 import os
 
+from tests.helpers.run_seed import TEST_RUN_SEED
+
 PLUGIN_MODEL_TYPE = "pe_wavenet_delta"
 PSEUDO_AGENT_FOLDER = "ml_hyperparameter_tune_agent_k9_invented"
+FIXTURE_RUN_SEED = TEST_RUN_SEED
 _PLUGIN_DIR_REL = os.path.join("tests", "pseudo_data", "plugins")
 
 
@@ -181,6 +184,9 @@ def _fixture_input_kwargs(workspace: str, run_name: str) -> dict:
 
     return dict(
         model_type=PLUGIN_MODEL_TYPE,
+        # Issue #983 — the tuner refuses a missing run seed (an entry boundary
+        # resolves it); a literal keeps the fixture's seeds reproducible.
+        run_seed=FIXTURE_RUN_SEED,
         max_rounds=2,
         is_trial=True,
         trial_strategy="snapshot",

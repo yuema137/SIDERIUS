@@ -6,12 +6,15 @@ bytes, explain consequences and refuse edits that would need implicit rewiring.
 """
 
 from workflows.definition import (
+    AdaptorSource,
     AuthoredWorkflowDocument,
     ExternalRequest,
+    ExternalSource,
     NodeInstance,
     NodePosition,
     ProtocolRequest,
     ResultSource,
+    SelectedSource,
     parse_workflow_source,
 )
 from workflows.definition.source import WorkflowSourceError
@@ -19,6 +22,21 @@ from workflows.definition.source_edits import SourceEditError, insert_node, remo
 
 from .models import AddNodeProposal, NodeDraftView, NodeEditSummary, RemoveNodeProposal
 from .options import pending_node_ports
+
+
+def _source_label(
+    source: ExternalSource | ResultSource | SelectedSource | AdaptorSource,
+) -> str:
+    """Readable name of one argument source, for every source kind."""
+    if isinstance(source, ResultSource):
+        return f"{source.node}.result"
+    if isinstance(source, SelectedSource):
+        return f"{source.branch} selects " + " | ".join(
+            f"{c.node}.result" for c in source.candidates
+        )
+    if isinstance(source, ExternalSource):
+        return source.binding
+    return f"{source.adaptor}.result" + ("" if source.index is None else f"[{source.index}]")
 
 
 class NodeEditRefusal(ValueError):
@@ -111,7 +129,7 @@ def remove_node(proposal: RemoveNodeProposal) -> tuple[str, NodeEditSummary]:
             continue
         for argument in node.request.arguments:
             source = argument.source
-            label = source.node + ".result" if isinstance(source, ResultSource) else source.binding
+            label = _source_label(source)
             if node.id in removed:
                 incoming.append(f"{label} -> {node.id}.{argument.name}")
             elif isinstance(source, ResultSource) and source.node in removed:
@@ -129,6 +147,17 @@ def remove_node(proposal: RemoveNodeProposal) -> tuple[str, NodeEditSummary]:
         source = remove_nodes(proposal.source, proposal.nodes)
     except SourceEditError as error:
         raise NodeEditRefusal("node_edit", str(error)) from error
+    # Consumers the check above does not name (routes, merges, adaptors) are caught by the
+    # declaration validator: a removal is never returned as a dangling source.
+    try:
+        parse_workflow_source(source)
+    except WorkflowSourceError as error:
+        raise NodeEditRefusal(
+            "node_dependants",
+            f"Cannot remove {names}: "
+            + "; ".join(item.message for item in error.diagnostics)
+            + " Nothing was changed.",
+        ) from error
     message = f"Removes {names} with its layout position"
     message += f" and its input connections ({'; '.join(incoming)})." if incoming else "."
     return source, NodeEditSummary(

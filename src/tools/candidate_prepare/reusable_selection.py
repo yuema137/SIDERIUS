@@ -187,6 +187,8 @@ def _verify(
         proposal_path=proposal_receipt_path(plan.document, output),
         composition_fingerprint=fingerprint,
         source_observations=control.sources,
+        run_seed=receipt.run_seed,
+        run_seed_source=receipt.run_seed_source,
     ):
         raise ValueError("native receipt disagrees with verified preparation")
     return VerifiedReusablePreparation(

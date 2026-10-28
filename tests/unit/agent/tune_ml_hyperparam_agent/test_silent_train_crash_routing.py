@@ -51,6 +51,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.hardware_context import HardwareContext
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
+from tests.helpers.run_seed import TEST_RUN_SEED
 
 
 def _stub_hardware_context() -> HardwareContext:
@@ -169,6 +170,7 @@ def _make_input(tmp_path) -> HyperparamTuningInput:
     """1 round, 1 attempt, 1 fail-budget — the moment our single
     inference-side failure lands a record, the outer loop aborts."""
     return HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,

@@ -20,6 +20,7 @@ from tools.candidate_worker.loop_resume import (
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.candidate_worker.preflight import require_credentials
 from tools.candidate_worker.records import verify_candidate_records
+from tools.workspace_sandbox.runner import CancelProbe
 
 from .files import directory, read_bytes, read_model
 from .models import (
@@ -32,6 +33,7 @@ from .models import (
     OperationStoreConfig,
 )
 from .process import runtime_identity
+from .seed_admission import require_recorded_seed, require_root_seed
 from .store import (
     is_authored_loop,
     load_record,
@@ -94,6 +96,9 @@ def root_inputs(record: OperationRecord):
     )
     if record.runtime != root.runtime or record.inputs != root.inputs:
         raise OperationFailure("integrity", "loop continuation runtime or inputs changed")
+    require_recorded_seed(root, initial.seed_binding())
+    if record.run_seed != root.run_seed:
+        raise OperationFailure("integrity", "loop continuation run seed changed")
     return root, saved, initial
 
 
@@ -170,6 +175,10 @@ def review_locked(config: OperationStoreConfig, operation_id: UUID) -> Operation
     from .read import bound, optional, read_operation
 
     record = load_record(config, operation_id)
+    # Issue #983 — before any native read: a segment continues the root's seed,
+    # and an S3b-era root records none (its lock does), so Review refuses it
+    # rather than offering a Resume that could adopt or re-mint a seed.
+    require_root_seed(root_record(record))
     _, request, initial = claimed_inputs(record)
     snapshot = read_operation(config, operation_id)
     receipt = snapshot.receipt
@@ -280,12 +289,12 @@ def reserve(record: OperationRecord) -> None:
         )
 
 
-def execute_resume(record: OperationRecord) -> None:
+def execute_resume(record: OperationRecord, *, cancel_requested: CancelProbe) -> None:
     # Read the selected binding against the admitted operation before native dispatch.
     read_segment(record)
     _, request, initial = root_inputs(record)
     binding = read_continuation(initial, record.submission.request_id)
-    launch_continuation(request, initial, binding)
+    launch_continuation(request, initial, binding, cancel_requested=cancel_requested)
 
 
 def request_loop_pause(config: OperationStoreConfig, operation_id: UUID) -> LoopPause:

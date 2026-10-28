@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
 import time
 
 import pytest
 
+from agent.skills import generated_pytest
 from core.local_code import LocalCodeError, bind_code_package
 from ml_models.plugin_binding import bind_run_model_plugins
 from nodes import ml_code_validator_agent as validator
@@ -35,25 +35,29 @@ def test_real_validator_pytest_child_uses_capture_and_refuses_changed_helper(
     )
     if changed:
         (package.root / "_helper.py").write_text("raise AssertionError('changed code executed')\n")
-    real_run = subprocess.run
+    real_supervise = generated_pytest.supervise_subprocess
     durations = []
 
-    def bounded_run(*args, **kwargs):
+    def timed_supervise(*args, **kwargs):
         started = time.monotonic()
         try:
-            return real_run(*args, **kwargs, timeout=60)
+            return real_supervise(*args, **kwargs)
         finally:
             durations.append(time.monotonic() - started)
             print(f"cold validator child changed={changed}: {durations[-1]:.3f}s")
 
-    monkeypatch.setattr(validator.subprocess, "run", bounded_run)
+    monkeypatch.setattr(generated_pytest, "supervise_subprocess", timed_supervise)
     with bind_code_package(package), bind_run_model_plugins(binding):
         if changed:
             with pytest.raises(LocalCodeError, match="mismatch"):
-                validator._run_tests(str(test_file))
+                validator._run_tests(
+                    str(test_file), test_limit=generated_pytest.PytestLimit(seconds=60.0)
+                )
             assert not marker.exists()
         else:
-            passed, output = validator._run_tests(str(test_file))
+            passed, output = validator._run_tests(
+                str(test_file), test_limit=generated_pytest.PytestLimit(seconds=60.0)
+            )
             assert passed, output
             assert marker.exists()
             assert "1 passed" in output

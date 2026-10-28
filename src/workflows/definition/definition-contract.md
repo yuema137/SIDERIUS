@@ -19,6 +19,14 @@ Tests compare their complete parameter names, annotations, requiredness and
 return types with the catalog. Omitted optional arguments retain native default
 ownership; this package neither resolves nor certifies those effective values.
 
+`adaptor_strategies.py` holds the closed, versioned adaptor strategy declarations,
+the shared B6 types (`SelectStrategy`, `CardinalityBound`, `Fallback`,
+`derive_cardinality`) and `incompatible_pair`; `catalog.py` holds
+`ADAPTOR_STRATEGIES`, `SPLITTABLE_ITEMS` and `RANKABLE_FIELDS`. Documents declare
+adaptors under [Adaptor declarations](#adaptor-declarations-inert); run-time
+semantics: [adaptor contract](../adaptors/adaptor-contract.md). `base.py` holds the
+shared `DeclarationModel`, `Identifier` and `Location` (re-exported by `models.py`).
+
 ## Construction and interchange
 
 ```python
@@ -79,7 +87,9 @@ multiple candidates or schedule parallel execution. Disconnected nodes with
 complete external request declarations are allowed.
 
 Apart from the optional authored `loop` described under
-[Authored loop](#authored-loop), there are no custom/generation/aggregation
+[Authored loop](#authored-loop), the inert `routes` described under
+[Route declarations](#route-declarations-inert) and the inert `adaptors` described under
+[Adaptor declarations](#adaptor-declarations-inert), there are no custom/generation/aggregation
 adapter, feedback, arbitrary-code, constructor configuration or
 execution-control fields. Supplying such fields fails validation. Future support
 requires an audited native owner and an explicit format extension. No generic
@@ -143,6 +153,198 @@ and canonical source, so the declaration digest and source bytes of a loop witho
 conditions are unchanged. Execution semantics, precedence and readback belong to
 the candidate-worker contract ("Deterministic stop conditions").
 
+## Route declarations
+
+`WorkflowDefinition.routes` and `ReusableWorkflowDefinition.routes` optionally carry
+up to 32 `Branch` declarations. An empty tuple is omitted from serialization and
+canonical source, so existing declaration digests, source bytes and receipts are
+unchanged. `candidate.refuse_declaration_only(definition, *, admits_adaptors=False,
+admits_routes=False)`, called first by the shared shape checks
+`candidate.candidate_nodes` and `fanout.execution_families`, refuses any document with
+routes ("conditional routing is declared but this execution profile does not admit
+it", `ROUTING_NOT_ADMITTED`) unless `admits_routes=True`. Only `execution_families`
+for `fanout.ROUTED_PROFILE` (`native-routed-candidate/v1`, v1 preview and worker only;
+B1-PR5) passes it: that profile admits the S1 selection node set
+(`fanout.selection_candidate`) plus at least one route, and refuses a document without
+routes ("the routed profile requires at least one declared route"). Every other
+profile, the fixed candidate, v2 reusable sources (including a v2 document with
+`training_settings`, whose declaration validation runs those checks), managed
+preparation and the console still refuse routed documents. Run-time semantics: the
+candidate-worker contract, "Routed execution profile".
+
+### Readable fields
+
+A predicate reads only a field listed in `catalog.ROUTE_OBSERVABLES` for the branch
+source's capability output contract; free field names and JSON paths do not exist.
+
+| Observable | Contract | Native field | Kind |
+| --- | --- | --- | --- |
+| `validation.passed` | `validation.output` | `ValidatorOutput.passed` | bool |
+| `tuning.status` | `tuning.output` | `HyperparamTuningOutput.status` | enum `completed`, `partial`, `failed` |
+| `tuning.valid_formal` | `tuning.output` | `HyperparamTuningOutput.best_valid_formal_denoising_score` | metric (`float | None`) |
+
+`tests/unit/workflows/test_workflow_routes.py` checks each row against the native schema.
+Adding an observable is a catalog row plus that check.
+
+### Predicates
+
+`RoutePredicate` is a `kind`-discriminated union of leaves and one combinator level:
+
+| Constructor | Fields | Reads | Meaning |
+| --- | --- | --- | --- |
+| `BoolIs` | `kind="bool_is"`, `observable`, `value: bool` | bool | field equals `value` |
+| `EnumIn` | `kind="enum_in"`, `observable`, `values: tuple[str, ...]` (nonempty, unique, catalogued) | enum | field is one of `values` |
+| `MetricAtLeast` | `kind="metric_at_least"`, `observable`, `metric_id: str` (nonempty), `threshold: float` (finite) | metric | a present value is at least `threshold` under the run metric's direction |
+| `IsMissing` | `kind="is_missing"`, `observable` | metric | the value is absent |
+| `AllOf` / `AnyOf` | `terms`: 2 to 8 leaves | — | conjunction / disjunction |
+| `Not` | `term`: one leaf | — | negation |
+
+Combinators contain leaves only (no nesting), so a predicate has at most 8 leaves.
+Every leaf reads the branch's single source result; cross-node predicates need a typed
+aggregation owner and are not expressible. Direction is never declared: `metric_id` must
+equal the run `MetricSpec` id, checked by `tools.candidate_worker.route_eval.admit_route_metrics`,
+called by the routed worker before any dispatch (`route_phase.admit_route_metric`). An absent metric makes `MetricAtLeast` false, never
+an error; `IsMissing` makes that case explicit. Evaluation belongs to the pure route
+evaluator (candidate-worker contract, "Route evaluator").
+
+### Branches, arms and merges
+
+`Branch(id, source=ResultSource(...), cases=(RouteCase(when, targets), ...), default=None)`
+declares 1 to 8 ordered cases; the first matching case wins. `default` is `None`
+(omitted from serialization) or a nonempty tuple of entry nodes. With no default and no
+matching case, no arm runs; a single-case branch without a default is a guard.
+Branch ids are their own namespace and must be unique.
+
+Each target receives a control edge from the branch source, which joins the topological
+check: a target that is the source or one of its ancestors fails as a cycle. The **arm**
+of a case (or the default) is every node reachable from the source whose every path from
+the source passes through one of that entry's targets. Validation refuses:
+
+- unknown route nodes, uncatalogued observables, a leaf whose kind does not fit the
+  observable, and enum values that repeat or are not catalogued;
+- a node that is a target twice, in two cases, or of two branches (nested branching uses
+  a branch whose source lies inside an arm);
+- a node that depends on two arms of one branch except through a merge;
+- a `SelectedSource(branch, candidates=(ResultSource, ...))` merge argument whose branch
+  is unknown or has no `default` (otherwise no arm might run and the merge would starve),
+  whose candidates (at least 2) do not share the argument's output contract, or do not lie
+  one in each arm (every case plus the default). Full coverage places a non-target consumer
+  outside every arm;
+- a merge consumer that also depends on an arm of the branch it merges through another
+  data or control edge, or that is itself a target of that branch;
+- with a `loop`, any arm containing the loop feedback source or any of its predecessors,
+  including merge candidates (decision Q5(a); conservative in v1).
+
+Arms of different cases are disjoint by construction: distinct targets each have a
+direct control edge from the source. A merge is a deterministic select keyed by the
+recorded decision, not an OR/race join; its consumer depends on every candidate for
+scheduling. Readiness skip semantics (`skipped`/`route_not_selected`, merge resolution,
+skip propagation) are owned by `tools.candidate_worker.readiness` (candidate-worker
+contract, readiness authority); decision evidence belongs to the candidate-worker
+`route_phase`.
+
+Public arm helpers (`workflows.definition.routes`, for a validated definition):
+`route_entries(branch)` (entry targets per case, then the default);
+`branch_arms(definition, facts)` (each branch's arms in that order; `facts` from
+`validation.predecessor_facts`, control edges included); `route_targets(definition)`
+(entry target → `RouteTarget(branch, source, control_only)`, where `control_only`
+means the target binds no data from the branch source, so readiness lets a `rejected`
+source's decision run it: the B1-Q1 fallback); `merge_arms(definition, facts)`
+(merge consumer → one `MergeArms(branch, candidates=(MergeArm(node, entry), ...))` per
+`SelectedSource` argument). An adaptor carries no arm label (it runs whichever arm was
+selected, B6-D8), which the routed profile relies on: its selection adaptor reads one
+validator outside and one inside the fallback arm.
+
+## Adaptor declarations (inert)
+
+`WorkflowDefinition` and `ReusableWorkflowDefinition` optionally carry
+`adaptor_format: Literal["siderius.adaptors/v1"] | None` and
+`adaptors: tuple[AdaptorInstance, ...]` (decision B6-D2: optional gated fields on v1
+and v2, because the worker consumes v1). `None` and `()` are omitted from
+serialization and canonical source, so documents without adaptors keep their
+declaration digests and source bytes (pinned: the shipped examples in
+`test_workflow_routes.py`, a loop document with stop conditions in
+`test_adaptor_declarations.py`). Adaptors execute only under the opt-in v1
+execution profiles `fanout.SELECTION_PROFILE` (`native-proposal-fanout-selection/v1`,
+B6-3; shape and run-time semantics in the candidate-worker contract, "Opt-in
+first-passing selection"), `fanout.ROUTED_PROFILE` (same node set plus routes) and the
+B6-4 literature profiles `fanout.LITERATURE_COLLECTION_PROFILE`
+(`native-literature-collection/v1`, S2) and `fanout.LITERATURE_SPLIT_PROFILE`
+(`native-literature-split/v1`, S3; candidate-worker contract, "Literature adaptor
+profiles"); `fanout.ADAPTOR_PROFILES` lists all four. `candidate.refuse_declaration_only(definition, *,
+admits_adaptors=False)` refuses any document with `adaptor_format` ("adaptors are
+declared but this execution profile does not admit them", `ADAPTORS_NOT_ADMITTED`),
+after the routing refusal, in every shape check that preview, preparation, worker and
+verifier admission use; only `execution_families` for the `ADAPTOR_PROFILES` passes
+`admits_adaptors=True`. The reusable (v2) document, preparation and console profile
+lists include none of them yet (B6-7), so a v2 document cannot declare adaptors. `candidate_prepare.resolution` nevertheless carries `routes`,
+`adaptor_format` and `adaptors` verbatim into the effective v1 definition.
+
+### Models
+
+| Constructor | Fields | Notes |
+| --- | --- | --- |
+| `AdaptorInstance` | `id`, `kind="adaptor"`, `inputs: tuple[InputPort, ...]` (≥ 1), `bindings: tuple[PortBinding, ...]`, `combine: DeterministicCombine`, `select: SelectStrategy`, `distribute: DistributeStrategy` | one model (B6-D1); the output contract is derived, never authored |
+| `InputPort` | `name`, `contract` (exact catalogue contract), `cardinality: "one" \| "many"`, `min_items: int ≥ 0 = 1`, `max_items: int > 0 \| None` (omitted when `None`) | a `one` port keeps `min_items=1` and declares no `max_items` |
+| `PortBinding` | `port`, `sources: tuple[Source, ...]` | declared order is every tie-break and "first" order |
+| `AdaptorSource` | `kind="adaptor"`, `adaptor`, `port="result"`, `index: int ≥ 0 \| None` (omitted when `None`) | new `Source` variant: a protocol argument, a port source, or an `AdaptorRequest` source |
+| `AdaptorRequest` | `kind="adaptor"`, `source: AdaptorSource` | new `Request` variant: a whole capability request; the derived contract must equal the capability input |
+
+Strategy constructors are the B6-2 models (`PassCombine`, `CollectCombine`,
+`ConcatItemsCombine`, `MetricRankCombine`, `FieldRankCombine`; `AllSelect`,
+`FirstAdmissibleSelect`, `TopKSelect`, `ThresholdSelect`; `SingleDistribute`,
+`PerItemDistribute`, `SplitItemsDistribute`, `ReplicateDistribute`).
+`catalog.ADAPTOR_STRATEGIES` maps every declarable kind string to
+`AdaptorStrategyContract(stage, declaration, owner)` (inert strings, like
+`PROTOCOLS`); a test keeps it equal to the three discriminated unions. LLM kinds
+(B2) and `custom/v1` (B6-5/B6-6) are not declarable yet; they join the unions and
+the catalogue with their owners.
+
+A port source may be `ExternalSource`, `ResultSource`, `AdaptorSource` or a route
+merge `SelectedSource` (decision 2026-10-28): the merge resolves at run time to the one
+selected candidate's result, which is what record provenance (`AdaptorInputRef.source`,
+a concrete origin) names.
+
+### Format gate and graph
+
+- Any adaptor, `AdaptorSource` argument or `AdaptorRequest` requires
+  `adaptor_format="siderius.adaptors/v1"`; a format with nothing using it is refused.
+  The gate runs before reference checks.
+- Adaptor ids share the node namespace (unique, distinct from node ids). Externals
+  stay separate. Route targets and branch sources remain nodes.
+- Each adaptor's sources add dependency edges; consumers of an `AdaptorSource` depend
+  on the adaptor. Adaptors join the same Kahn cycle check and topological order
+  (`predecessor_facts` includes adaptor vertices). Adaptors are checked before node
+  requests, so a consumer never reports a symptom of an invalid adaptor.
+- Route checks treat adaptors as vertices: a merge into an adaptor port must cover
+  every arm of a branch with a default. Unlike a node, an adaptor may depend on two
+  exclusive arms of one branch without a merge (B6-3): it is ready once every source
+  is terminal and a skipped source is inadmissible (B6-D8), so it never inherits a
+  skip. It therefore carries no arm label to its consumers.
+
+### Validation table (`adaptor_validation.py`)
+
+Refused with a fixed message naming the adaptor (never coerced):
+
+| Rule | Refusal |
+| --- | --- |
+| ports and bindings | duplicate port names or bindings; a port without exactly one binding; no source at all |
+| item bounds | `len(sources)` outside `min_items..max_items` (a `one` port: exactly 1) |
+| contracts | port contract not in `CONTRACTS`; a source whose resolved contract differs from its port contract; ports of different contracts (every deterministic kind has one element contract) |
+| derived output | `output_contract` is the element contract, except `collect/v1`, whose output is `catalog.COLLECTION_CONTRACTS[element]` (`literature.output` → `literature.collection`, B6-4); `collect/v1` over an element without an entry (e.g. `tuning.output`, B6-9) is refused ("collect/v1 has no catalogued collection contract for …") |
+| COMBINE applicability | `concat-items/v1` field must equal `SPLITTABLE_ITEMS[contract]`; `metric-rank/v1` only over `METRIC_SCORED_CONTRACTS`; `field-rank/v1` field must equal `RANKABLE_FIELDS[contract].item_field` and its ports must hold exactly one value |
+| COMBINE/DISTRIBUTE pair | `incompatible_pair`: `per-item/v1` after `collect/v1`, `concat-items/v1` or `field-rank/v1`; `split-items/v1` after `collect/v1` (the same owner the strategy core calls at run time) |
+| SELECT/COMBINE | `first-admissible/v1` requires `pass/v1`; `top-k/v1` and `threshold/v1` require a ranking (`metric-rank/v1`, `field-rank/v1`); `threshold/v1` requires its basis' ranking (`metric` → `metric-rank/v1`; `rubric` → a B2 rubric ranking, so refused until B2) |
+| split field | `split-items/v1` field must equal `SPLITTABLE_ITEMS[contract]` |
+| cardinality | `derive_cardinality(select, distribute)` must be satisfiable |
+| value count (`pass`/`metric-rank`) | `top-k/v1` `k` must not exceed what DISTRIBUTE accepts (`single`/`replicate`: 1, `per-item`: `count`); `all/v1`/`threshold/v1` require the number of bound sources ≤ the derived bound max (the bound excludes the source count; topology is static, B6-D6, so `max_items` is not used) |
+| value count (`field-rank`) | `top-k/v1` `k` must not exceed `split-items/v1` `count` |
+| unfillable split (`field-rank`) | `top-k/v1(k)` then `split-items/v1(count > k, on_short="fail")`: at most `k` entries survive, so the adaptor could only fail |
+| output index | `AdaptorSource.index` is absent for `single/v1` and `< count` for `per-item`/`split-items`/`replicate` |
+
+Run-time-only facts (list lengths, admissibility, metric identity) stay with the
+strategy core, which re-checks every rule it relies on.
+
 ## Static Python source bridge
 
 `parse_workflow_source(source: str) -> AuthoredWorkflowDocument` and
@@ -161,7 +363,13 @@ from this explicit allowlist: `TaskReferences`, `ExternalBinding`,
 `CandidatePreparationOptions`, `ReusableWorkflowDefinition`,
 `ReusableWorkflowDocument`, plus the loop constructors `AuthoredLoop`, `LoopFeedback`,
 `MetricThresholdStop`, `NoImprovementStop` and the reserved, always-refused
-`JudgeStop`. Imported unused constructors are allowed; referenced
+`JudgeStop`, plus the route constructors `Branch`, `RouteCase`, `BoolIs`, `EnumIn`,
+`MetricAtLeast`, `IsMissing`, `AllOf`, `AnyOf`, `Not` and `SelectedSource`, plus the
+adaptor constructors `AdaptorInstance`, `InputPort`, `PortBinding`, `AdaptorSource`,
+`AdaptorRequest` and the thirteen strategy constructors listed under
+[Adaptor declarations](#adaptor-declarations-inert). The
+renderer imports loop, route and adaptor constructors only when the document uses them, so
+existing canonical source bytes are unchanged. Imported unused constructors are allowed; referenced
 constructors must be imported. Aliases, wildcard and relative imports fail.
 
 Only imported bare constructors with unique known keyword arguments, literal
@@ -364,7 +572,14 @@ request carries the execution profile.
 The inert catalog includes `literature.input`, `literature.output`, the `literature`
 capability and `literature-to-proposal`. The latter maps a selected review `output`
 and external `proposal_input` through the existing target-owned
-`local_typed_evidence` protocol. Structural validity alone grants no execution.
+`local_typed_evidence` protocol. Since B6-4 it also includes the contract
+`literature.collection` (`list[NamedLiteratureReviewOutput]`, the existing
+`ml_literature_review_to_ml_model_propose` model: `contribution_id` plus one complete
+`LiteratureReviewOutput`) and the protocol `literature-collection-to-proposal`
+(`reviews: literature.collection`, `proposal_input: proposal.input` → `proposal.input`,
+owner `local_typed_evidence_many`, whose `Sequence` parameter accepts the catalogued
+list; the signature test records that one widening). Only a `collect/v1` adaptor
+output reaches it at run time: no profile admits a `literature.collection` external, and the S2 profile is its only executor. Structural validity alone grants no execution.
 The native worker admits exactly one review and one complete candidate only under
 [its explicit literature profile](../../tools/candidate_worker/candidate-worker-contract.md#opt-in-native-literature-candidate).
 The reusable preparation route below uses the same native profile. Existing source
