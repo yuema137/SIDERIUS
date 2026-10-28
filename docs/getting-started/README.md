@@ -99,7 +99,7 @@ matches your starting point:
   configured task/resources, review and prepare the saved source. Open the
   prepared run, review it and explicitly launch. Each run has separate captured
   inputs and a workspace; later edits affect future runs. For a research loop,
-  Slow control shows each iteration's training results and can stop or pause the
+  Monitor shows each iteration's training results and can stop or pause the
   loop after a completed iteration; a paused loop can be resumed later.
 - **Configured native chain:** have your coding agent prepare a capture and
   add it to the console configuration using the

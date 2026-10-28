@@ -80,7 +80,7 @@
     const successor = status.successor_operation_id;
     const link = $('loop-successor');
     $('loop-continued').hidden = !successor;
-    if (successor) { link.textContent = successor; link.href = '#slow-control/' + successor; localStorage.removeItem(retainedKey(status.operation_id)); }
+    if (successor) { link.textContent = successor; link.href = '#monitor/' + successor; localStorage.removeItem(retainedKey(status.operation_id)); }
     const resumable = status.native_status === 'paused' && !successor && !status.finishing;
     const resume = request.resume, review = resume.review;
     $('loop-resume-group').hidden = !resumable;
@@ -125,7 +125,7 @@
     resume.pending = true; resume.error = ''; render(last);
     try {
       const handle = await session().request('loop-resumes', {request_id: retained(review), predecessor_operation_id: review.predecessor_operation_id, expected_receipt_digest: review.expected_receipt_digest});
-      if (current === request) location.hash = 'slow-control/' + handle.operation_id;
+      if (current === request) location.hash = 'monitor/' + handle.operation_id;
     } catch (error) {
       if (error.stale) return;
       if (error.status) resume.review = null;

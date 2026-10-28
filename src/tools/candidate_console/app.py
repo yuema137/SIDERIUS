@@ -266,6 +266,12 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "new-run.js": "text/javascript",
             "page-guidance.js": "text/javascript",
             "page-guidance.css": "text/css",
+            "onboarding.js": "text/javascript",
+            "onboarding.css": "text/css",
+            "ui-settings.js": "text/javascript",
+            # Operator logo: shapes plus an embedded PNG only, served as <img> (no script context).
+            "siderius-logo-light.svg": "image/svg+xml",
+            "siderius-logo-dark.svg": "image/svg+xml",
             "editor.css": "text/css",
             "editor-parameters.css": "text/css",
             "editor-palette.css": "text/css",

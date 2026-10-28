@@ -49,7 +49,7 @@
       status: $('recorded-token-status'), provenance: $('recorded-token-provenance'), times: $('recorded-token-times')});
   }
   async function loadChoices() {
-    if (!connected || window.consoleNavigation?.view !== 'slow-control') return;
+    if (!connected || window.consoleNavigation?.view !== 'monitor') return;
     const revision = window.consoleSession.revision;
     try {
       const values = await api('recorded-examples');
@@ -100,10 +100,10 @@
     connected = state.connected; readRevision++;
     $('recorded-example-choice').disabled = !connected || choiceRevision !== state.revision;
     $('recorded-example-open').disabled = !connected || !$('recorded-example-choice').value;
-    if (connected && window.consoleNavigation?.view === 'slow-control') void loadChoices();
+    if (connected && window.consoleNavigation?.view === 'monitor') void loadChoices();
     else if (!connected) setStatus('Disconnected. Reconnect to refresh configured examples; no operation state is inferred.');
   });
   window.addEventListener('console-view', event => {
-    if (event.detail.valid && event.detail.view === 'slow-control' && connected) void loadChoices();
+    if (event.detail.valid && event.detail.view === 'monitor' && connected) void loadChoices();
   });
 })();

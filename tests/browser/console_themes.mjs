@@ -12,6 +12,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -38,6 +39,7 @@ try {
   const require = createRequire(import.meta.url);
   const {chromium} = require(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const context = await browser.newContext({colorScheme: 'dark', viewport: {width: 1440, height: 1000}});
   // Count actual timer creation, not timer firings: toggling must not add polling.
   await context.addInitScript(() => {
@@ -214,7 +216,7 @@ try {
   await page.locator('#token').fill('theme-fixture'); await page.locator('#access-form button').click();
   await page.getByText('Connected. Observations', {exact: false}).waitFor();
   await page.locator('#run-name').fill('unsaved-run-fixture');
-  await page.locator('nav a[href="#slow-control"]').click();
+  await page.locator('nav a[href="#monitor"]').click();
   await page.locator('details', {has: page.locator('#tokens-table')}).getByText('Reported token table', {exact: true}).click(); // Recorded example has its own table.
   await page.locator('#operation-id').fill(operation); await page.locator('#monitor-button').click();
   await page.locator('#tokens-status').filter({hasText: 'Partial evidence'}).waitFor();

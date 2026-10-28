@@ -51,7 +51,7 @@
     if (!intent) return;
     const id = intent.payload.selection.preparation_operation_id;
     $('operation-id').textContent = id;
-    $('monitor').href = '#slow-control/' + id;
+    $('monitor').href = '#monitor/' + id;
     // Display-only: a malformed stored version (hand-edited storage) is ignored.
     const stored = intent.source_version;
     const version = stored && typeof stored === 'object' && typeof stored.sha256 === 'string' &&

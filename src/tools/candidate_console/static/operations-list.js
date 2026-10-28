@@ -32,7 +32,7 @@
       const id = String(item.operation_id || '').toLowerCase();
       if (!window.consoleNavigation.isOperationId(id)) continue;
       const entry = document.createElement('li'), link = document.createElement('a'), meta = document.createElement('span');
-      link.href = '#slow-control/' + id; link.dataset.operation = id; link.className = 'operation-link';
+      link.href = '#monitor/' + id; link.dataset.operation = id; link.className = 'operation-link';
       const name = [item.project_id, item.run_name].filter(Boolean).join(' · ');
       link.textContent = name || KINDS[item.kind] || item.kind;
       const state = item.native_status ? `${item.state} (native: ${item.native_status})` : item.state;
@@ -61,9 +61,9 @@
       loading = false; $('operations-refresh').disabled = !session().connected;
     }
   }
-  // Slow control lists once per connection on any of its routes, so a connected page never
+  // Monitor lists once per connection on any of its routes, so a connected page never
   // shows the disconnected hint; entering the bare route again re-reads, Refresh on demand.
-  const wanted = () => window.consoleNavigation.view === 'slow-control' &&
+  const wanted = () => window.consoleNavigation.view === 'monitor' &&
     (listedRevision !== session().revision || (!window.consoleNavigation.operation && !$('route-status').textContent));
   session().subscribe(state => {
     $('operations-refresh').disabled = !state.connected || loading;

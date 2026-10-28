@@ -19,97 +19,125 @@ body {
 header, main, footer, nav.actions {
   max-width: 1920px;
   margin-inline: auto;
-  padding: 24px clamp(16px, 2vw, 32px);
+  padding: var(--space-5) var(--shell-pad);
 }
 
 header.console-header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 16px;
-  padding-top: 4px;
-  padding-bottom: 0;
+  gap: var(--space-2) var(--space-4);
+  padding-top: var(--space-3);
+  padding-bottom: var(--space-2);
 }
 
 .brand {
-  font-weight: 800;
-  letter-spacing: .08em;
-  font-size: 1.3rem;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--bar-height);
 }
+
+/* Operator logo: one <img> per theme; only the active theme's variant is rendered. */
+.logo { display: block; width: auto; height: 30px; }
+:root[data-theme="dark"] .logo-light, :root:not([data-theme="dark"]) .logo-dark { display: none; }
 
 .console-intro {
   margin: 0;
-  font-size: .85rem;
+  font-size: var(--font-label);
 }
 
 .console-intro p {
-  margin: 8px 0;
+  margin: var(--space-2) 0;
 }
 
 .brand span {
-  display: inline-block;
-  letter-spacing: 0;
-  font-weight: 500;
-  font-size: 1rem;
-  margin-left: 16px;
+  color: var(--muted);
+  font-size: var(--font-body);
+  font-weight: 600;
 }
 
-h1, h2 {
-  font-size: 1.3rem;
-  line-height: 1.3;
-  margin: 0 0 16px;
-}
+/* Type hierarchy: page title > section (card) title > subsection > body > help text. */
+h1, h2, h3 { line-height: 1.3; margin: 0 0 var(--space-4); }
+h1 { font-size: var(--font-title); line-height: 28px; font-weight: 600; }
+h2 { font-size: var(--font-heading); line-height: 20px; font-weight: 600; }
+h3 { font-size: var(--font-heading); line-height: 20px; font-weight: 600; margin: var(--space-4) 0 var(--space-2); }
 
 p {
-  margin: 12px 0;
+  margin: var(--space-3) 0;
+  max-width: var(--measure);
   overflow-wrap: anywhere;
 }
 
 main {
   display: grid;
-  gap: 20px;
+  gap: var(--space-4);
 }
 
 .columns {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  gap: var(--space-4);
   min-width: 0;
 }
 
+/* Card: the one bounded block. A direct h2 is its header, separated by a divider. */
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 24px;
+  border-radius: var(--radius-2);
+  box-shadow: var(--elev-0);
+  padding: var(--space-4);
   min-width: 0;
 }
+.card > :first-child { margin-top: 0; }
+.card > :last-child { margin-bottom: 0; }
+.card > h2 {
+  margin: 0 0 var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.card > .eyebrow + h2 { margin-top: 0; }
+/* Subsections inside a card (Monitor's loop, tokens, recorded stages) start below a divider. */
+.card > h3, .card > section > h3 { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+/* A collapsible card: its summary is the header; the divider appears only when open, so
+ * collapsed cards are equal-height bars without trailing whitespace. */
+details.card { padding-block: 0; margin: 0; }
+details.card > summary {
+  margin-inline: calc(-1 * var(--space-4));
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-heading);
+  font-weight: 700;
+}
+details.card[open] { padding-bottom: var(--space-4); }
+details.card[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: var(--space-4); }
+details.card > h2 { border: 0; padding: 0; margin: var(--space-4) 0 var(--space-2); font-size: var(--font-heading); }
+.card > button, .card > select + button { margin-top: var(--space-3); }
 
 .eyebrow {
   color: var(--secondary);
   font-weight: 700;
-  font-size: .85rem;
-  margin: 0 0 8px;
-  text-transform: uppercase;
-  letter-spacing: .04em;
+  font-size: var(--font-label);
+  margin: 0 0 var(--space-1);
 }
 
 .muted, footer {
   color: var(--muted);
-  font-size: .9rem;
+  font-size: var(--font-help);
 }
 
 label {
   display: block;
   font-weight: 600;
-  margin: 12px 0 5px;
+  margin: var(--space-3) 0 var(--space-1);
 }
 
 input, select, textarea, button {
   font: inherit;
   border: 1px solid var(--control-border);
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: var(--radius-1);
+  min-height: var(--control-height);
+  padding: 6px var(--space-3);
   max-width: 100%;
 }
 
@@ -135,7 +163,7 @@ button {
   font-weight: 650;
   cursor: pointer;
   border-color: var(--primary);
-  min-height: 44px;
+  min-height: var(--control-height);
 }
 
 button.secondary {
@@ -167,8 +195,8 @@ fieldset {
   display: flex;
   align-items: end;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 16px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 
 .actions label {
@@ -185,7 +213,7 @@ fieldset {
 }
 
 details {
-  margin: 18px 0;
+  margin: var(--space-4) 0;
 }
 
 summary {
@@ -196,15 +224,15 @@ summary {
 .warning {
   border-left: 3px solid var(--warning);
   background: var(--warning-bg);
-  padding: 12px;
-  font-size: .95rem;
+  padding: var(--space-3);
+  font-size: var(--font-body);
 }
 
 .facts {
   display: grid;
   grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr);
-  gap: 8px 16px;
-  font-size: .93rem;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--font-body);
 }
 
 .facts dt {
@@ -218,8 +246,8 @@ summary {
 }
 
 .mono, pre {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: .85rem;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--font-label);
   overflow-wrap: anywhere;
 }
 
@@ -244,24 +272,9 @@ footer {
   padding-top: 0;
 }
 
-@media (max-width: 1050px) {
-  main, footer {
-    padding-block: 20px;
-  }
-  .card {
-    padding: 20px;
-  }
-}
-
 @media (max-width: 800px) {
   .columns {
     grid-template-columns: 1fr;
-  }
-  main, footer {
-    padding-block: 16px;
-  }
-  .card {
-    padding: 18px;
   }
   .brand span {
     display: block;
@@ -300,7 +313,7 @@ footer {
 .token-table table {
   width: 100%;
   border-collapse: collapse;
-  font-size: .9rem;
+  font-size: var(--font-body);
 }
 
 .token-table th, .token-table td {
@@ -323,12 +336,17 @@ button:not(:disabled):hover { background: var(--primary-hover); }
 button.secondary:not(:disabled):hover { background: var(--bg); }
 
 [hidden] { display: none !important; }
-nav.actions { margin-top: 0; padding-block: 2px; gap: 4px 16px; align-items: center; }
-nav a { padding: 6px 0; }
+/* Shell: header and nav form one bar above the content; all share the shell edges. */
+nav.actions { margin-top: 0; padding-block: 0; gap: var(--space-1) var(--space-5); align-items: center; border-bottom: 1px solid var(--border); }
+nav a { padding: var(--space-2) 0; }
 nav a[aria-current="page"] { font-weight: 700; text-decoration-thickness: 3px; }
 summary { cursor: pointer; padding: 8px 0; font-weight: 600; }
 [data-view] { min-width: 0; }
-main { padding-top: 12px; gap: 16px; }
+main { padding-top: var(--space-4); gap: var(--space-4); }
+/* Every view is one column of cards on the same grid and gap; its h1 is the page title. */
+[data-view] { display: grid; gap: var(--space-4); align-content: start; }
+[data-view] > h1 { margin: 0; }
+[data-view] > details { margin: 0; }
 main > #route-status:empty { display: none; }
 
 /* Connection: full card until connected, then one compact status line. */
@@ -336,25 +354,21 @@ main > #route-status:empty { display: none; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
-  padding: 8px 16px;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-4);
 }
-#access-section.access-collapsed #access-status { flex: 1 1 260px; margin: 0; font-size: .9rem; }
+#access-section.access-collapsed #access-status { flex: 1 1 260px; margin: 0; font-size: var(--font-help); }
 .access-connected { display: flex; flex-wrap: wrap; gap: 8px; }
 .access-connected button { min-height: 36px; padding: 5px 12px; }
 
-/* Home: the workflow journey is the primary path; native chain and configured task are advanced. */
-#view-home, #view-slow-control { display: grid; gap: 16px; align-content: start; }
-#view-home > h1, #view-slow-control > h1 { margin: 0; }
-.journey-steps { margin: 8px 0 0; padding-left: 1.4em; display: grid; gap: 6px; }
-.section-heading { margin: 8px 0 0; font-size: 1.05rem; color: var(--muted); }
-#view-home > details { margin: 0; }
+/* A group label between cards (e.g. Home's Advanced): small caps over a rule, not a card. */
+.section-heading { margin: var(--space-3) 0 0; padding-top: var(--space-3); border-top: 1px solid var(--border); font-size: var(--font-label); font-weight: 600; color: var(--muted); }
 .button-link {
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
-  padding: 10px 16px;
-  border-radius: 6px;
+  min-height: var(--control-height);
+  padding: 6px var(--space-4);
+  border-radius: var(--radius-1);
   background: var(--primary);
   color: var(--on-primary);
   font-weight: 650;
@@ -363,10 +377,10 @@ main > #route-status:empty { display: none; }
 .button-link:hover { background: var(--primary-hover); }
 .actions a:not(.button-link) { align-self: center; }
 
-/* Slow control: operations list beside Status and logs on desktop widths. */
-.slow-control-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+/* Monitor: operations list beside Status and logs on desktop widths. */
+.monitor-layout { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1fr); align-items: start; }
 @media (min-width: 1100px) {
-  .slow-control-layout { grid-template-columns: minmax(280px, 400px) minmax(0, 1fr); }
+  .monitor-layout { grid-template-columns: minmax(280px, 400px) minmax(0, 1fr); }
 }
 .operations-actions { margin-top: 0; }
 .operations-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 70vh; overflow-y: auto; }
@@ -374,6 +388,46 @@ main > #route-status:empty { display: none; }
 .operation-link { display: block; font-weight: 650; overflow-wrap: anywhere; }
 .operation-link[aria-current] { color: var(--text); text-decoration-thickness: 3px; }
 .operations-list li:has(.operation-link[aria-current]) { background: var(--hover); box-shadow: inset 3px 0 var(--primary); padding-left: 10px; }
-.operation-meta { display: block; font-size: .85rem; overflow-wrap: anywhere; }
+.operation-meta { display: block; font-size: var(--font-label); overflow-wrap: anywhere; }
 .manual-operation { margin-top: 8px; }
 
+
+/* View flags (ui-settings.js owns the flags): a section marked data-ui-flag="advanced" or
+ * "developer" is hidden until the matching Settings toggle is on. */
+:root:not([data-ui-advanced="on"]) [data-ui-flag~="advanced"],
+:root:not([data-ui-developer="on"]) [data-ui-flag~="developer"] { display: none !important; }
+
+/* Header: logo, intro, theme, Help and Settings in one 48px bar; Settings opens a panel below. */
+header.console-header { position: relative; min-height: var(--bar-height); }
+.help-button, .settings-button { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 32px; padding: 0 var(--space-3); }
+.help-mark { display: inline-grid; place-items: center; width: 18px; height: 18px; border: 1.5px solid currentColor; border-radius: 50%; font-size: var(--font-label); font-weight: 700; }
+.settings-panel {
+  position: absolute;
+  z-index: 25;
+  top: 100%;
+  right: var(--shell-pad);
+  width: min(360px, calc(100vw - 2 * var(--shell-pad)));
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  background: var(--panel);
+  box-shadow: var(--elev-2);
+}
+.settings-panel h2 { margin: 0 0 var(--space-3); }
+.setting { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2); align-items: start; margin: 0 0 var(--space-3); font-weight: 400; }
+.setting input { width: auto; min-height: 0; margin-top: 3px; }
+.setting > span { display: grid; gap: var(--space-1); }
+.setting > span > span { color: var(--muted); font-size: var(--font-help); }
+
+/* Home: one hero (logo + one sentence) and three entry cards on one row. */
+.home-intro { display: grid; gap: var(--space-3); justify-items: start; padding: var(--space-5) 0 var(--space-2); }
+.home-intro .home-logo { height: 72px; }
+.home-intro p { margin: 0; font-size: var(--font-prose); }
+.home-entries > h2 { margin: 0 0 var(--space-3); }
+.entry-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); margin: 0; padding: 0; list-style: none; }
+.entry-card { display: grid; grid-template-rows: auto 1fr auto; gap: var(--space-2); }
+.entry-card > h3 { margin: 0; padding: 0; border: 0; }
+.entry-card > p { margin: 0; color: var(--muted); font-size: var(--font-body); }
+.entry-card > .button-link { justify-self: start; }
+.home-advanced { display: grid; gap: var(--space-4); }
+@media (max-width: 800px) { .entry-cards { grid-template-columns: minmax(0, 1fr); } }
