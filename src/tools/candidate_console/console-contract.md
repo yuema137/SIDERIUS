@@ -613,8 +613,9 @@ part of the projection.
 
 Slow control: `operations-list.js` renders the list as links to
 `#slow-control/<UUID>`, so selecting a row uses the existing route and Status and
-logs owner. It loads when a bare `#slow-control` route is shown while connected,
-and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
+logs owner. It loads once per connection (session revision) when any Slow control
+route is shown while connected, including `#slow-control/<UUID>`, again whenever the
+bare `#slow-control` route is entered, and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
 operation for live status). Manual UUID entry remains available.
 
 ## Persistent views, routing and session
