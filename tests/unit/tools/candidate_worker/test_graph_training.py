@@ -68,11 +68,7 @@ def graph_training_request(prepared):
         }
     )
     config = json.loads((root / "llm.json").read_bytes())
-    config["tune"] = {
-        "provider": "openai",
-        "model_id": "tuner-test",
-        "planner_strategy": "native-timing-v1",
-    }
+    config["tune"] = {"planner_strategy": "native-timing-v1"}
     (root / "llm.json").write_text(json.dumps(config))
     rules = json.loads((root / "rules.json").read_bytes())
     (root / "training.json").write_text(
