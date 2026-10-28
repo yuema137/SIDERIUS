@@ -20,6 +20,8 @@ from agent.schemas.judge import (
     MergeRequest,
     ProjectedField,
 )
+from agent.schemas.judge_task import JudgeTaskBlocks
+from workflows.adaptors import AdaptorItem
 from workflows.definition.adaptor_strategies import (
     AllSelect,
     CardinalityBound,
@@ -30,6 +32,7 @@ from workflows.definition.adaptor_strategies import (
 from workflows.definition.llm_strategies import JudgeMergeStrategy
 from workflows.definition.models import InputPort
 from workflows.judge_strategies import (
+    PromptBudgetExceeded,
     StrategyError,
     StrategyInvocation,
     admit_llm_strategy,
@@ -307,5 +310,41 @@ def test_a_merge_listing_more_items_than_one_call_may_hold_is_refused(tmp_path):
     assert "batch_too_large" in {r.code for r in admit(inputs=(wide,)).refusals}
     edge = InputPort(name="reviews", contract="literature.output", cardinality="many", max_items=16)
     assert admit(inputs=(edge,)).admitted
-    with pytest.raises(ValidationError, match="at most 16 items per call"):
-        invocation(tmp_path, n=17)
+    bridge = MergeBridge()
+    with pytest.raises(StrategyError, match="17 items exceed 16 items per call"):
+        run(invocation(tmp_path, n=17), bridge, tmp_path)
+    assert bridge.calls == []
+
+
+def _long_review(position: int) -> AdaptorItem:
+    """A review whose projection is at its bound: 24 findings x 2 fields x 4000 chars."""
+    item = literature(position)
+    assert item.value is not None
+    finding = item.value.findings[0].model_copy(
+        update={"content": "c" * 4000, "source_ref": "r" * 4000}
+    )
+    return item.model_copy(
+        update={"value": item.value.model_copy(update={"findings": [finding] * 24})}
+    )
+
+
+def test_a_merge_prompt_over_the_character_budget_is_refused_before_any_call(tmp_path):
+    """Defect: three bounded reviews (~580k rendered characters) are sent to the provider,
+    which fails only there; the refusal must name the budget and the measured size."""
+    items = strategy_items(tuple(_long_review(i) for i in range(3)))
+    bridge = MergeBridge()
+    value = invocation(tmp_path, items=items)
+    with pytest.raises(PromptBudgetExceeded, match=r"renders \d+ prompt characters.*400000"):
+        run(value, bridge, tmp_path)
+    assert bridge.calls == [] and not value.evidence_dir.exists()
+
+
+def test_task_guidance_counts_towards_the_prompt_budget(tmp_path):
+    """Defect: the budget measures the items only, so long task judge guidance
+    (JudgeTaskBlocks) silently overflows the provider context."""
+    guidance = JudgeTaskBlocks(evaluation_guidance="g" * 400_000)
+    value = invocation(tmp_path, strategy=merge(guidance="task_blocks"), task_guidance=guidance)
+    bridge = MergeBridge()
+    with pytest.raises(PromptBudgetExceeded):
+        run(value, bridge, tmp_path)
+    assert bridge.calls == []
