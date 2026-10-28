@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from .files import canonical, config_bytes, private_bytes, token
+from .files import canonical, config_bytes, credential_values, token
 from .models import ConsoleConfig
 
 
@@ -69,12 +69,8 @@ def validate_config(config: ConsoleConfig) -> ConsoleConfig:
                     raise ValueError("editor recovery must be separate from run output roots")
     token(config.auth_token_file)
     if config.credential_file is not None:
-        # Validate private file facts and JSON shape, without selecting/printing values.
-        from pydantic import TypeAdapter
-
-        TypeAdapter(dict[str, str]).validate_json(
-            private_bytes(config.credential_file), strict=True
-        )
+        # Validate private file facts and JSON/dotenv shape, without selecting/printing values.
+        credential_values(config.credential_file)
     return config
 
 

@@ -233,6 +233,47 @@ result files or establish complete billing. The response identifies whether the
 run identity matches retained records or comes from the current run identity file.
 Professional, Assistant and GUI use this same reader.
 
+## Stop, pause or resume a research loop
+
+These steps are for a saved workflow that repeats as a research loop. The
+browser console offers the same actions in Slow control.
+
+1. Stop ends the whole run after the current iteration. Pause ends only the
+   current part of the run (a segment) after the current iteration, and you can
+   resume it later:
+
+   ```sh
+   .venv/bin/python -m tools.candidate_operations pause-loop \
+     --store-config store.json --operation-id RUNNING_OPERATION_UUID
+   ```
+
+   Use `stop-loop` instead of `pause-loop` to stop. The answer means the request
+   was recorded; check `status` until the run reports `paused`, `stopped` or
+   `completed`. If the request arrives during the last iteration, that iteration
+   finishes and the run reports `completed`.
+
+2. To resume a paused loop, review it and save the resume request once:
+
+   ```sh
+   .venv/bin/python -m tools.candidate_operations write-loop-resume \
+     --store-config store.json --operation-id PAUSED_OPERATION_UUID \
+     --output loop-resume.json
+   ```
+
+3. Make the same provider API keys available in this shell as for the original
+   launch, then submit:
+
+   ```sh
+   .venv/bin/python -m tools.candidate_operations submit \
+     --store-config store.json --request loop-resume.json
+   ```
+
+The resumed part gets a new operation UUID; pause it by that UUID. Keep
+`loop-resume.json` and resubmit it unchanged after a lost response. Stopped,
+failed or finished loops cannot be resumed. Python and full rules are in the
+[operations contract](candidate-operations-contract.md#control-an-authored-loop-from-code-or-the-cli).
+The next section is for native chains only.
+
 ## Continue a captured native chain
 
 Use this code/CLI route when a detached native chain ended after a verified

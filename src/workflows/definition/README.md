@@ -82,8 +82,10 @@ The Python API provides `parse_workflow_source(text)` and
 
 The [declaration contract](definition-contract.md) defines the full grammar,
 diagnostics, limits, supported bindings and ownership. Multiple consumers can
-reuse a result; generation of multiple candidates, aggregation, feedback loops
-and human gates need later runtime support.
+reuse a result; generation of multiple candidates, aggregation and human gates
+need later runtime support. The one supported feedback loop, a research loop over
+the interpreted training workflow, is described in the
+[declaration contract](definition-contract.md#authored-loop).
 
 For one connected three-node chain, the optional
 [binding preview](../../tools/workflow_preview/README.md) reads selected local

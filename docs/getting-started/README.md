@@ -55,8 +55,8 @@ For training and scientific scores, use [first-run checks](first-run.md) and
 your external project's saved launch script. This route reads credentials from
 the launch process: use a trusted external shell-compatible credential file or
 managed injection, with the name-only check in the
-[API-key procedure](installation.md#api-keys). The console's JSON credential
-file is a different format. Have your agent show the saved settings, command
+[API-key procedure](installation.md#api-keys). The browser console instead
+reads the `credential_file` named in its configuration. Have your agent show the saved settings, command
 and output directory before execution. An optional
 [setup review](../../src/tools/setup_review/README.md) produces an HTML report.
 
@@ -68,10 +68,11 @@ guide for prerequisites and path requirements.
 
 ## Open the optional workflow console
 
-The browser console can prepare, review and launch **one candidate:
-Propose → Implement → Validate**, followed by native Tune when declared in
-saved reusable source. Use the [training inspector guide](../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
-to configure that fourth stage. Completion is not a scientific success verdict. Create the
+The browser console can prepare, review and launch a saved workflow, from **one
+candidate: Propose → Implement → Validate** up to an interpreted training workflow
+(Interpret → Propose → Implement → Validate → Train & Tune) repeated as a research
+loop. Use the [training inspector guide](../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
+to configure the training stage. Completion is not a scientific success verdict. Create the
 external project with your coding agent first: the browser does not create
 projects or edit the console's task configuration. It can also launch an
 externally configured native chain for multiple iterations, using the same
@@ -97,12 +98,16 @@ matches your starting point:
   **New run** to select the configured task/resources, review and prepare the
   saved source. Open the prepared run, review it and explicitly launch. Each run
   has separate captured inputs and a workspace; later edits affect future runs.
+  For a research loop, Slow control shows each iteration's training results and
+  can stop or pause the loop after a completed iteration; a paused loop can be
+  resumed later.
 - **Configured native chain:** have your coding agent prepare a capture and
   add it to the console configuration using the
   [native-chain instructions](../../src/tools/candidate_console/README.md#run-a-configured-native-chain).
   On Home, select it, review the run destination and execution policy, then
   explicitly launch. Check the original capture for the full scientific
-  settings; this panel does not edit the chain or provide pause/resume.
+  settings; this panel does not edit the chain or provide pause/resume (a saved
+  workflow's research loop can be paused instead).
 
 To bind a reusable workflow in **Workflow builder**:
 

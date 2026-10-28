@@ -13,7 +13,9 @@ this skill adds guidance, not another configuration authority.
 
 Professional and Assistant describe who leads the setup decisions. Both use the
 same public preparation and execution owners below. Select the execution route
-separately: a candidate, optional native training, or a native iterative chain.
+separately: a candidate, optional native training, an
+[authored research loop](#authored-research-loops) over saved source, or a native
+iterative chain.
 
 ## Start from the user's problem, not a prepared manifest
 
@@ -145,7 +147,38 @@ The GUI uses the same preparation and operation owners; preparation and candidat
 launch remain separate explicit actions. Source-declared native training uses the
 [training inspector](../../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
 or ordinary source editing. Keep sparse settings in saved source; completion is
-not scientific validity. Resume remains unsupported.
+not scientific validity. An authored loop can be paused and resumed at completed
+iterations; other candidates have no resume. See below.
+
+## Authored research loops
+
+A saved reusable workflow over the five-node interpreted training body
+(Interpret → Propose → Implement → Validate → Train & Tune) may declare an
+`AuthoredLoop` that repeats the body. Follow the
+[declaration contract](../../../src/workflows/definition/definition-contract.md#authored-loop)
+for fields and stop conditions, and the
+[worker contract](../../../src/tools/candidate_worker/candidate-worker-contract.md#declared-finite-research-body)
+for execution. Preparation and launch are those of any saved source above.
+
+- Assistant: propose `final_iteration` and whether a metric threshold or
+  no-improvement stop is scientifically meaningful, with reasons. Professional:
+  implement the user's stated values exactly. `final_iteration` is a ceiling,
+  not a budget estimate.
+- A `MetricThresholdStop.metric_id` must equal the task's composed metric id;
+  read it from the task package, never guess. Direction comes from the task's
+  metric, never from the declaration. A mismatch refuses at worker admission,
+  not at editor Review.
+- If the user edits the loop in the Workflow Editor, re-read `workflow.py`
+  before changing it; the editor rewrites the file in canonical form.
+- Stop (run-wide, terminal) and Pause (this segment) take effect at the next
+  completed-iteration boundary; an acknowledgement is not the outcome. From
+  code or the CLI follow the
+  [loop control recipe](../../../src/tools/candidate_operations/candidate-operations-contract.md#control-an-authored-loop-from-code-or-the-cli);
+  CLI `review-resume` is for native chains only. Resume launches paid work and
+  needs the same authorization and provider credentials as Launch. Failed,
+  stopped, timed-out or condition-completed loops cannot be resumed.
+- Report per-iteration results as recorded; do not combine or rank iterations
+  on the user's behalf unless asked.
 
 ## Captured native iterative chains
 
@@ -190,7 +223,9 @@ Follow [Review native capture → Launch native chain → Slow control](../../..
 The console uses the same operation owner independently of the editor. Preserve
 the displayed operation UUID; navigation, reconnect and monitoring never launch.
 Retry only the retained pending launch. Each new destination needs its own fresh
-envelope and reviewed capture; the console does not edit captures or stop/resume.
+envelope and reviewed capture; the console does not edit native-chain captures or
+stop/resume them. An [authored research loop](#authored-research-loops) is a
+different route and can be stopped, paused and resumed.
 
 Give the user the saved declaration, request, capture, submission/configuration
 and workspace paths relevant to their route. Inspect shell outcome, cleanup and
