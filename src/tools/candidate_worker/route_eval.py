@@ -27,7 +27,7 @@ from workflows.definition.models import (
     Not,
     RoutePredicate,
 )
-from workflows.definition.routes import route_entries
+from workflows.definition.routes import LEAF_KINDS, route_entries
 
 from .loop_stop import StopModel
 
@@ -74,11 +74,11 @@ class RouteEvaluationOutput(StopModel):
     selected_targets: tuple[str, ...]
     skipped_targets: tuple[str, ...]
     # One predicate outcome per case, in declared order, up to and including the match.
-    leaf_results: tuple[bool, ...] = Field(min_length=1)
+    case_results: tuple[bool, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def _first_match(self) -> Self:
-        *earlier, last = self.leaf_results
+        *earlier, last = self.case_results
         matched = self.selected_case is not None
         if any(earlier) or last != matched:
             raise ValueError("route outcomes must end at the first matching case")
@@ -121,27 +121,31 @@ def admit_route_metrics(branches: tuple[Branch, ...], metric: MetricSpec | None)
 
 
 def evaluate_route(value: RouteEvaluationInput) -> RouteEvaluationOutput:
-    """Pure decision for one branch; the first matching case in declared order wins."""
+    """Pure decision for one branch; the first matching case in declared order wins.
+
+    Every metric declaration, the record stamp and every observable the branch reads
+    are checked BEFORE any case is evaluated, so neither an earlier matching case nor
+    a short-circuiting combinator can hide an unevaluable leaf.
+    """
     branch = value.branch
     admit_route_metrics((branch,), value.metric)
-    order: MetricOrder | None = None
-    if value.metric is not None:
-        try:
-            reconcile_metric_specs(
-                [
-                    StampedMetricSpec(
-                        label="the route source record", spec=value.observation.metric_spec
-                    )
-                ],
-                bound=value.metric,
-            )
-        except ValueError as error:
-            raise RouteConditionError(f"route {branch.id}: {error}") from error
-        order = MetricOrder(value.metric)
+    try:
+        reconcile_metric_specs(
+            [
+                StampedMetricSpec(
+                    label="the route source record", spec=value.observation.metric_spec
+                )
+            ],
+            bound=value.metric,
+        )
+    except ValueError as error:
+        raise RouteConditionError(f"route {branch.id}: {error}") from error
+    order = MetricOrder(value.metric) if value.metric is not None else None
     values = dict(value.observation.values)
+    _check_observation(branch, values)
     outcomes: list[bool] = []
     for case in branch.cases:
-        outcomes.append(_holds(branch.id, case.when, values, order))
+        outcomes.append(_holds(case.when, values, order))
         if outcomes[-1]:
             break
     selected = len(outcomes) - 1 if outcomes[-1] else None
@@ -155,52 +159,68 @@ def evaluate_route(value: RouteEvaluationInput) -> RouteEvaluationOutput:
         skipped_targets=tuple(
             target for index, entry in enumerate(entries) if index != chosen for target in entry
         ),
-        leaf_results=tuple(outcomes),
+        case_results=tuple(outcomes),
     )
 
 
+def _fits(kind: str, allowed: tuple[str, ...], observed: RouteValue) -> bool:
+    if kind == "bool":
+        return isinstance(observed, bool)
+    if kind == "enum":
+        return isinstance(observed, str) and observed in allowed
+    return observed is None or isinstance(observed, float)
+
+
+def _check_observation(branch: Branch, values: dict[str, RouteValue]) -> None:
+    """Every leaf of every case reads a present value of its catalogued kind."""
+    for index, case in enumerate(branch.cases):
+        for leaf in _leaves(case.when):
+            entry = ROUTE_OBSERVABLES.get(leaf.observable)
+            if entry is None or entry.kind != LEAF_KINDS[type(leaf)]:
+                raise RouteConditionError(
+                    f"route {branch.id} case {index}: {leaf.kind} cannot read {leaf.observable!r}"
+                )
+            if leaf.observable not in values:
+                raise RouteConditionError(
+                    f"route {branch.id}: observation lacks {leaf.observable!r}"
+                )
+            if not _fits(entry.kind, entry.values, values[leaf.observable]):
+                raise RouteConditionError(
+                    f"route {branch.id}: {leaf.observable!r} is not a catalogued {entry.kind}"
+                )
+
+
 def _holds(
-    branch: str,
-    predicate: RoutePredicate,
-    values: dict[str, RouteValue],
-    order: MetricOrder | None,
+    predicate: RoutePredicate, values: dict[str, RouteValue], order: MetricOrder | None
 ) -> bool:
     if isinstance(predicate, AllOf):
-        return all(_leaf(branch, term, values, order) for term in predicate.terms)
+        return all(_leaf(term, values, order) for term in predicate.terms)
     if isinstance(predicate, AnyOf):
-        # Every leaf is evaluated, so an unevaluable later leaf is never masked.
-        return any([_leaf(branch, term, values, order) for term in predicate.terms])
+        return any(_leaf(term, values, order) for term in predicate.terms)
     if isinstance(predicate, Not):
-        return not _leaf(branch, predicate.term, values, order)
-    return _leaf(branch, predicate, values, order)
+        return not _leaf(predicate.term, values, order)
+    return _leaf(predicate, values, order)
 
 
 def _leaf(
-    branch: str,
     leaf: BoolIs | EnumIn | MetricAtLeast | IsMissing,
     values: dict[str, RouteValue],
     order: MetricOrder | None,
 ) -> bool:
-    if leaf.observable not in values:
-        raise RouteConditionError(f"route {branch}: observation lacks {leaf.observable!r}")
+    """One leaf over a value ``_check_observation`` already admitted."""
     observed = values[leaf.observable]
     match leaf:
-        case BoolIs() if isinstance(observed, bool):
+        case BoolIs():
             return observed is leaf.value
-        case EnumIn() if isinstance(observed, str):
+        case EnumIn():
             return observed in leaf.values
-        case IsMissing() if observed is None or isinstance(observed, float):
+        case IsMissing():
             return observed is None
-        case MetricAtLeast() if observed is None:
-            return False  # an absent metric is false, never an error (decision B1-Q4)
-        case MetricAtLeast() if isinstance(observed, float):
-            assert order is not None  # admit_route_metrics bound the run metric
+        case MetricAtLeast():
+            if observed is None:
+                return False  # an absent metric is false, never an error (decision B1-Q4)
+            assert order is not None and isinstance(observed, float)
             return order.is_at_least(observed, leaf.threshold)
-        case _:
-            raise RouteConditionError(
-                f"route {branch}: {leaf.kind} cannot read {type(observed).__name__} "
-                f"from {leaf.observable!r}"
-            )
 
 
 def _native_model(contract: str) -> type[BaseModel]:
@@ -216,6 +236,18 @@ def _native_model(contract: str) -> type[BaseModel]:
     return model
 
 
+def _record_stamp(record: BaseModel) -> MetricSpec | None:
+    """The run metric a native record stamps; an explicit choice per projected contract."""
+    from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+    from agent.schemas.validator import ValidatorOutput
+
+    if isinstance(record, HyperparamTuningOutput):
+        return record.metric_spec
+    if isinstance(record, ValidatorOutput):
+        return None  # validation records carry no metric identity
+    raise RouteConditionError(f"no metric stamp rule for {type(record).__name__}")
+
+
 def project_observation(
     branch: Branch, capability: str, record_path: Path, *, iteration: int
 ) -> RouteObservation:
@@ -223,7 +255,9 @@ def project_observation(
 
     ``capability`` is the declared capability of ``branch.source.node``. The digest
     covers exactly the bytes parsed; the verifier re-projects the same record and
-    requires equality.
+    requires equality. Besides ``RouteConditionError``, reading or parsing may raise
+    ``OSError``, ``ValueError`` (4 MiB bound) or ``ValidationError``; every one of
+    them fails the body.
     """
     from .graph_evidence import read_graph_control
 
@@ -241,13 +275,13 @@ def project_observation(
         entry = ROUTE_OBSERVABLES.get(observable)
         if entry is None or entry.contract != contract:
             raise RouteConditionError(f"route {branch.id}: {observable!r} is not on {contract}")
-        values.append((observable, getattr(record, entry.field.rpartition(".")[2])))
+        values.append((observable, getattr(record, entry.attribute)))
     return RouteObservation(
         source_node=branch.source.node,
         iteration=iteration,
         record_sha256=hashlib.sha256(payload).hexdigest(),
         values=tuple(values),
-        metric_spec=getattr(record, "metric_spec", None),
+        metric_spec=_record_stamp(record),
     )
 
 

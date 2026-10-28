@@ -16,6 +16,7 @@ from tools.candidate_worker.route_eval import (
     project_observation,
 )
 from workflows.definition import (
+    AllOf,
     AnyOf,
     BoolIs,
     Branch,
@@ -64,7 +65,7 @@ def test_first_matching_case_wins_in_declared_order():
     """A last-match or unordered evaluator selects c1 or c2 here, not c0."""
     output = decide(branch(FAILED, PASSED, PASSED), (("validation.passed", True),))
     assert output.selected_case == 1
-    assert output.leaf_results == (False, True)
+    assert output.case_results == (False, True)
     assert output.selected_targets == ("c1",)
     assert output.skipped_targets == ("c0", "c2", "d")
 
@@ -77,7 +78,7 @@ def test_no_match_runs_default_or_no_arm(default, selected, skipped):
     """Without a default nothing runs; with one, only the default arm runs."""
     output = decide(branch(PASSED, default=default), (("validation.passed", False),))
     assert output.selected_case is None
-    assert output.leaf_results == (False,)
+    assert output.case_results == (False,)
     assert (output.selected_targets, output.skipped_targets) == (selected, skipped)
 
 
@@ -115,6 +116,7 @@ def test_missing_metric_is_a_false_leaf_not_an_error(when, expected):
 
 
 def test_present_metric_is_not_missing():
+    """An is_missing that ignores the value (always true) selects case 0 here."""
     output = decide(
         branch(IsMissing(observable="tuning.valid_formal")), (("tuning.valid_formal", 0.1),)
     )
@@ -149,6 +151,12 @@ def test_record_stamp_conflicting_with_run_metric_is_refused():
         (PASSED, (("validation.passed", None),)),  # wrong value kind is not "false"
         (EnumIn(observable="tuning.status", values=("failed",)), (("tuning.status", 1.0),)),
         (AnyOf(terms=(PASSED, FAILED)), (("validation.passed", "yes"),)),
+        (EnumIn(observable="tuning.status", values=("failed",)), (("tuning.status", "odd"),)),
+        # A short-circuiting all() would stop at the false leaf and hide the missing one.
+        (
+            AllOf(terms=(FAILED, EnumIn(observable="tuning.status", values=("failed",)))),
+            (("validation.passed", True),),
+        ),
     ],
 )
 def test_unevaluable_observation_fails_instead_of_false(when, values):
@@ -195,6 +203,7 @@ def test_projection_reads_only_branch_observables_and_binds_record_bytes(tmp_pat
 
 
 def test_projection_of_validation_record(tmp_path):
+    """Validation records carry no metric stamp; reading the wrong contract is refused."""
     record = ValidatorOutput(
         passed=False,
         model_type="m",
@@ -216,3 +225,24 @@ def test_projection_of_validation_record(tmp_path):
     assert observation.metric_spec is None
     with pytest.raises(RouteConditionError, match=r"not on validation\.output"):
         project_observation(branch(AT_LEAST), "validation", path, iteration=1)
+
+
+def test_unevaluable_case_after_a_match_is_refused():
+    """Stopping at the first match must not skip checking a later unevaluable case."""
+    route = branch(PASSED, EnumIn(observable="tuning.status", values=("failed",)))
+    with pytest.raises(RouteConditionError, match=r"lacks 'tuning\.status'"):
+        decide(route, (("validation.passed", True),))
+
+
+@pytest.mark.parametrize(("score", "expected"), [(0.1, None), (0.9, 0)])
+def test_all_of_requires_every_leaf(score, expected):
+    """all_of implemented as any() selects case 0 for 0.1 (status matches, score does not)."""
+    when = AllOf(terms=(EnumIn(observable="tuning.status", values=("completed",)), AT_LEAST))
+    values = (("tuning.status", "completed"), ("tuning.valid_formal", score))
+    assert decide(branch(when), values, metric=spec()).selected_case == expected
+
+
+def test_projection_refuses_a_contract_without_a_projection_owner(tmp_path):
+    """Projecting a proposal record would read attributes no catalog row describes."""
+    with pytest.raises(RouteConditionError, match="no route projection owns contract"):
+        project_observation(branch(PASSED), "proposal", tmp_path / "absent.json", iteration=1)

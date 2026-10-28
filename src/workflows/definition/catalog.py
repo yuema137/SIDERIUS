@@ -178,6 +178,11 @@ class RouteObservable:
     kind: Literal["bool", "enum", "metric"]
     values: tuple[str, ...] = ()
 
+    @property
+    def attribute(self) -> str:
+        """The native attribute name: the last segment of ``field``."""
+        return self.field.rpartition(".")[2]
+
 
 # Closed list of fields a route predicate may read. Adding one requires the
 # native-schema drift test; predicates never name free fields or JSON paths.

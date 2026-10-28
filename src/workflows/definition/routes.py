@@ -31,7 +31,7 @@ from .models import (
 Facts = tuple[tuple[str, frozenset[str]], ...]
 Arms = dict[str, tuple[frozenset[str], ...]]
 
-_LEAF_KINDS = {BoolIs: "bool", EnumIn: "enum", MetricAtLeast: "metric", IsMissing: "metric"}
+LEAF_KINDS = {BoolIs: "bool", EnumIn: "enum", MetricAtLeast: "metric", IsMissing: "metric"}
 
 
 def route_entries(branch: Branch) -> tuple[tuple[str, ...], ...]:
@@ -88,7 +88,7 @@ def _check_predicate(branch: str, predicate: RoutePredicate, contract: str) -> N
         observable = ROUTE_OBSERVABLES.get(leaf.observable)
         if observable is None or observable.contract != contract:
             raise ValueError(f"route {branch}: observable is not catalogued for {contract}")
-        if observable.kind != _LEAF_KINDS[type(leaf)]:
+        if observable.kind != LEAF_KINDS[type(leaf)]:
             raise ValueError(f"route {branch}: {leaf.kind} cannot read a {observable.kind}")
         if isinstance(leaf, EnumIn) and (
             len(set(leaf.values)) != len(leaf.values)
