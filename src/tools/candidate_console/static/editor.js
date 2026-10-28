@@ -42,7 +42,7 @@
     savedSha256: base?.sha256 || null, dirty: pending(), sourceDirty,
     sourceAvailable, reusableSource: base?.document?.definition?.schema_version === 2, saving, conflict: !!conflict,
     // Page-bar presentation (editor-page-bar.js): checked proposal, task chip and pending task findings.
-    reviewed: !!reviewed, taskReview: !!taskReview(), taskSelected: !!taskSelection,
+    reviewed: !!reviewed, reviewedTypedSource: !!reviewed?.typed, taskReview: !!taskReview(), taskSelected: !!taskSelection,
     // Every node id the draft knows (saved, pending, deleted): new instance ids avoid all of them.
     nodeIds: [...new Set([...(anchor?.document?.definition.nodes || []).map(n => n.id), ...(graph?.definition.nodes || []).map(n => n.id), ...pendingNodes.map(n => n.node)])],
     taskBinding: base?.document?.task_binding ? {package_id: base.document.task_binding.package_id, revision: base.document.task_binding.revision} : null});
@@ -114,7 +114,17 @@
     if (!canUpdateTask()) return;
     await reviewProposal(clone(taskSelection));
   }
+  // Red-team A-2: typed Python stays pending when advanced tools are hidden; say so in the
+  // beginner view (Show / Discard) instead of locking the canvas without a reason.
+  function hiddenSource() {
+    const typed = (sourceDirty || !!reviewed?.typed) && !window.uiSettings?.isEnabled('advanced');
+    $('hidden-source').hidden = !typed;
+  }
+  $('hidden-source-show').addEventListener('click', () => { window.uiSettings.set('advanced', true); $('advanced').open = true; $('advanced').scrollIntoView({block: 'start'}); $('source').focus(); });
+  $('hidden-source-discard').addEventListener('click', () => discardChanges());
+  window.addEventListener('ui-settings-change', () => hiddenSource());
   function controls() {
+    hiddenSource();
     window.dispatchEvent(new CustomEvent('workflow-editor-state', {detail: projection()}));
     const connected = window.consoleSession.connected;
     $('project').disabled = !connected || !$('project').options.length;
@@ -581,7 +591,7 @@
     }
     if ((base.document.task_binding || graph?.task_binding) && !taskSelection) { status('Select the configured task version, then review.'); return; }
     invalidate();
-    const id = project, version = generation;
+    const id = project, version = generation, typed = proposal.kind === 'source' && sourceDirty;
     const selection = taskSelection ? clone(taskSelection) : null;
     const body = {expected_sha256: base.sha256, proposal};
     if (proposal.kind !== 'task_references' && (base.document.task_binding || graph?.task_binding)) body.task_reference_selection = selection;
@@ -593,7 +603,7 @@
       if (foldLabel(proposal)) fold(value, label || foldLabel(proposal));
       else training = value.training;
       $('source').value = value.source; sourceDirty = false;
-      reviewed = {source: value.source, sha256: value.sha256, base: base.sha256, taskReview: value.task_reference_update,
+      reviewed = {source: value.source, sha256: value.sha256, base: base.sha256, taskReview: value.task_reference_update, typed,
         taskSelection: value.task_reference_update ? (proposal.kind === 'task_references' ? clone(proposal) : selection) : null};
       $('review-disclosure').open = true;
       $('diff').textContent = value.diff || '(No source changes)'; diagnostic(); render();

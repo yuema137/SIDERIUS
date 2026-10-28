@@ -124,3 +124,5 @@ button[data-icon] { justify-content: center; }
 
 /* A port's contract pill never reaches past its own port box (min zoom included). */
 .circuit-port-contract { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Typed Python hidden with advanced tools off (red-team A-2). */
+.hidden-source { color: var(--warning); }

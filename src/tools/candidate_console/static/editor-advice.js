@@ -35,6 +35,9 @@
     input.id = id; input.rows = 4; input.placeholder = target.placeholder; input.disabled = !enabled;
     input.dataset.adviceField = target.field; input.setAttribute('aria-describedby', help.id);
     input.value = values[target.field] ?? '';
+    // Red-team SEC-2: where the text goes, in one sentence, before anyone types a secret.
+    const privacy = element('p', "Advice is sent to the model provider and kept in version history; don't paste secrets.", section, 'advice-privacy');
+    privacy.id = `${id}-privacy`; input.setAttribute('aria-describedby', `${help.id} ${privacy.id}`);
     // Under this protocol the agent reads the advice only through its bound socket.
     const socket = target.socket && item.request.kind === 'protocol' && item.request.protocol === target.socket.protocol
       ? inventory.find(entry => entry.node === item.id && entry.argument === target.socket.argument) : null;

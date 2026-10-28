@@ -205,6 +205,8 @@
     window.addEventListener('console-view', title);
     document.addEventListener('keydown', event => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || !active()) return;
+      // Red-team A-4: an open modal or popover owns the keyboard; the canvas behind it does not change.
+      if (document.querySelector('dialog[open]') || (event.target instanceof Element && event.target.closest('[role="dialog"], [popover]'))) return;
       const key = event.key.toLowerCase();
       if (key !== 'z' && key !== 'y') return;
       // Text controls keep their native text undo; their edits are already draft operations.
