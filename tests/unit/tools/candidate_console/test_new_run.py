@@ -207,7 +207,7 @@ def test_submit_failure_is_not_presubmit_refusal(fresh, monkeypatch):
     def fail(*args, **kwargs):
         raise OperationFailure("busy", "fixture owner already entered")
 
-    monkeypatch.setattr("tools.candidate_console.reusable_preparation.submit_operation", fail)
+    monkeypatch.setattr("tools.candidate_console.service.submit_operation", fail)
     response = client(adapter.console.config).post(
         "/api/editor/fresh/reusable-preparations/prepare",
         json=intent(review).model_dump(mode="json"),

@@ -11,7 +11,6 @@ from tools.candidate_operations import (
     CandidateOperation,
     OperationHandle,
     lookup_operation_request,
-    submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_worker.admission import admit_input_paths
@@ -27,16 +26,16 @@ from tools.workflow_preview.models import FileObservation, PreviewModel, Workflo
 from workflows.definition import ReusableWorkflowDocument, TaskReferences
 
 from .files import credentials
-from .models import CredentialReadiness, PreparedSelection, RouteView
+from .models import CredentialReadiness, PreparedSelection, RouteView, RunResourcesSelection
 from .readiness import credential_readiness
-from .service import CandidateConsole
+from .service import CandidateConsole, with_run_resources
 
 
 class EditedRunSelection(PreparedSelection):
     expected_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class EditedRunLaunch(EditedRunSelection):
+class EditedRunLaunch(EditedRunSelection, RunResourcesSelection):
     expected_review_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     candidate_operation_id: UUID
 
@@ -244,7 +243,7 @@ class EditedCandidate:
                 raise OperationFailure(
                     "conflict", "operation ID identifies another reviewed capture"
                 )
-            return submit_operation(store, prior, launch_environment={})
+            return self.console.submit(prior, launch_environment={})
         review = self._checked_review(
             project_id,
             EditedRunSelection(
@@ -256,8 +255,7 @@ class EditedCandidate:
             raise OperationFailure("stale_review", "reviewed bindings changed; review again")
         request = review.envelope.request
         environment = credentials(self.console.config.credential_file, request.environment_names)
-        return submit_operation(
-            store,
-            CandidateOperation(request_id=selection.candidate_operation_id, request=request),
-            launch_environment=environment,
+        operation = CandidateOperation(request_id=selection.candidate_operation_id, request=request)
+        return self.console.submit(
+            with_run_resources(operation, selection), launch_environment=environment
         )

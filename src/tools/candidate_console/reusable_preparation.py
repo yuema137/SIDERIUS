@@ -10,7 +10,6 @@ from tools.candidate_operations import (
     ReusablePrepareOperation,
     operation_request_digest,
     recover_reusable_preparation,
-    submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare import (
@@ -154,6 +153,6 @@ class ReusablePreparation:
                 raise ReusableAdmissionNotAttempted(
                     error.detail.code, error.detail.message
                 ) from error
-        return submit_operation(
-            store, operation, launch_environment={}, expected_reusable_inputs=intent.expectation
+        return self.console.submit(
+            operation, launch_environment={}, expected_reusable_inputs=intent.expectation
         )

@@ -10,7 +10,6 @@ from tools.candidate_operations import (
     lookup_operation_request,
     operation_request_digest,
     review_native_chain_operation,
-    submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure
 from tools.workflow_authoring.versions import version_record_path
@@ -99,7 +98,7 @@ class NativeChainConsole:
                 or operation_request_digest(prior) != selection.expected_request_digest
             ):
                 raise OperationFailure("conflict", "operation identity differs")
-            return submit_operation(store, prior, launch_environment={})
+            return self.console.submit(prior, launch_environment={})
         choice = self._choice(selection.choice_id)
         submission = NativeChainOperation(request_id=selection.operation_id, request=choice.request)
         if operation_request_digest(submission) != selection.expected_request_digest:
@@ -109,4 +108,5 @@ class NativeChainConsole:
         environment = credentials(
             self.console.config.credential_file, choice.request.environment_names
         )
-        return submit_operation(store, submission, launch_environment=environment)
+        # Native chains are never reserved in the host ledger: they run serially.
+        return self.console.submit(submission, launch_environment=environment)

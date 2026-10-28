@@ -279,7 +279,7 @@ def test_new_review_and_launch_reach_editor_guard(chain, console_config, monkeyp
     monkeypatch.setattr(
         "tools.candidate_console.native_chain.named_credential_readiness", forbidden
     )
-    monkeypatch.setattr("tools.candidate_console.native_chain.submit_operation", forbidden)
+    monkeypatch.setattr("tools.candidate_console.service.submit_operation", forbidden)
     with pytest.raises(OperationFailure, match="overlaps"):
         service.review(NativeChainChoiceSelection(choice_id="chain"))
     with pytest.raises(OperationFailure, match="overlaps"):
@@ -309,7 +309,7 @@ def test_existing_other_kind_refuses_even_matching_owner_digest(chain, console_c
     monkeypatch.setattr(
         "tools.candidate_console.native_chain.lookup_operation_request", lambda *a: operation
     )
-    monkeypatch.setattr("tools.candidate_console.native_chain.submit_operation", forbidden)
+    monkeypatch.setattr("tools.candidate_console.service.submit_operation", forbidden)
     service = NativeChainConsole(CandidateConsole(native_config(console_config, record)))
     with pytest.raises(OperationFailure, match="identity differs"):
         service.launch(

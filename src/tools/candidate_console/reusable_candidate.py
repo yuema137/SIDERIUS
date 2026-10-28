@@ -11,7 +11,6 @@ from tools.candidate_operations import (
     build_reusable_operation,
     lookup_operation_request,
     operation_request_digest,
-    submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare import verify_reusable_preparation
@@ -36,7 +35,7 @@ from .reusable_models import (
     ReusableCaptureSelection,
 )
 from .reusable_policy import capture_path, check_capture_policy, configured_capture
-from .service import CandidateConsole
+from .service import CandidateConsole, with_run_resources
 
 
 class ReusableCandidate:
@@ -218,7 +217,7 @@ class ReusableCandidate:
                 or operation_request_digest(prior) != launch.expected_request_digest
             ):
                 raise OperationFailure("conflict", "operation ID identifies another capture")
-            return submit_operation(store, prior, launch_environment={})
+            return self.console.submit(prior, launch_environment={})
         try:
             _, _, operation = self._operation(
                 project_id, launch.selection, launch.candidate_operation_id
@@ -230,4 +229,6 @@ class ReusableCandidate:
             )
         except OperationFailure as error:
             raise ReusableAdmissionNotAttempted(error.detail.code, error.detail.message) from error
-        return submit_operation(store, operation, launch_environment=environment)
+        return self.console.submit(
+            with_run_resources(operation, launch), launch_environment=environment
+        )

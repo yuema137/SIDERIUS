@@ -61,6 +61,41 @@ Undeclared entries are ignored and never logged. Parse refusals are raised
 outside the parser's exception handler, so neither message nor chained cause
 quotes bytes or values; missing declared names are reported by name only.
 
+### Host reservation ledger (B3-4c)
+
+Optional `host_ledger` (`ConsoleHostLedger`: `ledger_root`, `budget_file`;
+omitted when absent, so existing configurations keep their bytes and every
+launch stays serial and unbudgeted). `CandidateConsole.__init__` loads it once
+(`config.host_scheduling`): the directory must already exist with owned mode
+0700 (`host_ledger.ledger_directory`) and the budget is read only through
+`budget_intake.load_host_budget_file`. Either failure raises `ValueError`
+("configured host ledger is unusable") and the console does not start; it never
+falls back to unbudgeted launches.
+
+`CandidateConsole.submit` is the one console submission path. It passes the
+loaded `HostScheduling` to `submit_operation` for the kinds the ledger governs
+(`LEDGER_KINDS`: `candidate`, `candidate_loop_resume`) and `None` for every
+other kind: preparations and native chains are never reserved and always run
+serially (the UI states this; it is not an omission). A replayed request ID
+returns before the ledger is consulted (operations contract).
+
+Run resources. The three candidate launch selections (`LaunchSelection`,
+`EditedRunLaunch`, `ReusableCaptureLaunch`) include `RunResourcesSelection`:
+optional `resources` (`OperationResources`, the run's reservation; required by
+the ledger, refused `resources_required` without it) and `parallel`
+(`ParallelDispatch`, the per-capability table; see the worker contract,
+"Parallel dispatch"). Both are omitted when absent. `with_run_resources`
+attaches them after the reviewed request's digest check, revalidating through
+the operation and request owners; without them the reviewed operation is
+submitted byte for byte. Under the ledger, `parallel.budget` is refused
+`parallel_budget`; without a configured ledger a `parallel` launch without its
+own budget is refused `parallel_budget_required`. A loop resume inherits its
+root's `resources` and `parallel`. Every refusal reaches the browser as the
+operation owner's typed code. Status: `StatusView.state` and the list state
+include `queued` (B3-5b); its presentation, and "Cancelled before start" for
+`operation_failed` + `cancel_requested` + `cancelled_while_queued`, are the UI
+work tracked with #1074. Tests: `tests/unit/tools/candidate_console/test_host_ledger.py`.
+
 ### Workspace layout and `init`
 
 Owners: `settings_models.py` (file schema), `workspace.py` (derivation,

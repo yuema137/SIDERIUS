@@ -273,9 +273,7 @@ def test_http_refusal_signal_only_before_submission(captured, monkeypatch):
         def uncertain(*args, **kwargs):
             raise OperationFailure("busy", "operation owner entered")
 
-        monkeypatch.setattr(
-            "tools.candidate_console.reusable_candidate.submit_operation", uncertain
-        )
+        monkeypatch.setattr("tools.candidate_console.service.submit_operation", uncertain)
         response = http.post(path, json=launch.model_dump(mode="json"))
         assert response.status_code == 409
         assert "admission_not_attempted" not in response.json()["error"]

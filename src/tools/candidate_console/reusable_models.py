@@ -11,7 +11,7 @@ from tools.candidate_prepare import ReusablePreparedSelection
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import AuthoredLoop
 
-from .models import CredentialReadiness, RouteView
+from .models import CredentialReadiness, RouteView, RunResourcesSelection
 
 
 class ReusableCaptureChoice(PreviewModel):
@@ -23,7 +23,7 @@ class ReusableCaptureSelection(ReusableCaptureChoice):
     preparation: ReusablePreparedSelection
 
 
-class ReusableCaptureLaunch(PreviewModel):
+class ReusableCaptureLaunch(RunResourcesSelection):
     selection: ReusableCaptureSelection
     expected_request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     candidate_operation_id: UUID
