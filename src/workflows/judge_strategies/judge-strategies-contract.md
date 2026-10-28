@@ -190,8 +190,17 @@ earlier call's evidence digest, so an edited, dropped, reordered or re-recorded
 turn makes replay refuse.
 
 `DebateTurn(kind="debate_turn", round, role, item_id, argument ≤ 3000, cites)`:
-`check_payload` requires `(round, role, item_id)` to equal the request's (an
-advocate argues for its own item; a critic names none) and `cites` ⊆ listed ids.
+`cites` holds at most `MAX_SCORED_ITEMS_PER_CALL` distinct ids (schema;
+`invalid_payload` otherwise); `check_payload` requires `(round, role, item_id)`
+to equal the request's (an advocate argues for its own item; a critic names none)
+and `cites` ⊆ listed ids (`inadmissible_choice`).
+
+Prompt size bound: every debate call lists every item, so the per-call item cap
+applies (`batch_too_large` at admission; `StrategyInvocation` refuses more than
+`MAX_SCORED_ITEMS_PER_CALL` items; request `items` carry it as `max_length`).
+`rounds ≤ MAX_DEBATE_ROUNDS` (4, `agent/schemas/judge_task.py`), so a transcript
+holds at most `MAX_DEBATE_TURNS = 4 × (16 + 1) = 68` turns (schema `max_length`),
+each ≤ 3000 characters of argument plus ≤ 16 cites.
 
 - **rank**: the judge returns `RankVerdict(order, rationale)`; `order` must be a
   permutation of the listed ids (no subset, extra or repeat; else
@@ -328,7 +337,8 @@ The adaptor wiring (B6-8) is the only intended caller. It must:
 ## Validation evidence
 
 `tests/unit/workflows/test_debate_judge.py` (B2-7): call count equals the static
-bound and the ranking is the judge's order; every call sees every earlier turn
+bound and the ranking is the judge's order; unlisted and repeated cites refused;
+more items than one call may hold refused; every call sees every earlier turn
 round-major; edited, dropped, reordered and re-recorded turns refused on replay;
 non-permutation orders refused (with fallback); an advocate for another item
 refused; one item → `skipped`, no call, marker, replay; synthesize mode stamped

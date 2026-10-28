@@ -33,6 +33,9 @@ Version = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*
 MAX_RUBRIC_CRITERIA = 32
 MAX_RUBRIC_WEIGHT = 100.0
 MAX_RUBRIC_SCALE_SPAN = 100
+#: Debate rounds a ``debate-judge/v1`` declaration may request (declaration and
+#: debate call schemas share it; kept here because declarations import only this module).
+MAX_DEBATE_ROUNDS = 4
 
 
 class _StrictModel(BaseModel):

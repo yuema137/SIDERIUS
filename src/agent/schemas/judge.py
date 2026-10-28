@@ -14,7 +14,7 @@ from typing import Annotated, Literal, Self, get_args
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
-from agent.schemas.judge_task import JudgeTaskBlocks, RubricSpec
+from agent.schemas.judge_task import MAX_DEBATE_ROUNDS, JudgeTaskBlocks, RubricSpec
 from execute_tools.evaluation_metric import MetricDirection, MetricIdentityKey
 from execute_tools.metric_order import MetricOrder
 
@@ -121,6 +121,10 @@ MAX_PROJECTED_CHARS = 4000
 #: Items any one judge call may list (rubric batch scoring, merge, revision, debate),
 #: so every prompt that lists all items has a fixed size bound.
 MAX_SCORED_ITEMS_PER_CALL = 16
+#: Turns one debate transcript may hold: every round's advocates plus a critic.
+#: With ``DebateTurn.argument`` ≤ 3000 characters and ``cites`` ≤ the item cap,
+#: a transcript is bounded at 68 turns × ~3.3k characters.
+MAX_DEBATE_TURNS = MAX_DEBATE_ROUNDS * (MAX_SCORED_ITEMS_PER_CALL + 1)
 
 
 class ProjectedField(JudgeModel):
@@ -254,16 +258,18 @@ class DebateTurn(JudgeModel):
     """
 
     kind: Literal["debate_turn"]
-    round: int = Field(ge=1)
+    round: int = Field(ge=1, le=MAX_DEBATE_ROUNDS)
     role: Literal["advocate", "critic"]
     item_id: str | None
     argument: str = Field(min_length=1, max_length=3000)
-    cites: tuple[str, ...]
+    cites: tuple[str, ...] = Field(max_length=MAX_SCORED_ITEMS_PER_CALL)
 
     @model_validator(mode="after")
     def advocate_names_item(self) -> Self:
         if (self.role == "advocate") != (self.item_id is not None):
             raise ValueError("an advocate turn names its item; a critic turn names none")
+        if len(set(self.cites)) != len(self.cites):
+            raise ValueError("a turn cites each item at most once")
         return self
 
 
@@ -271,8 +277,8 @@ class _DebateContent(JudgeModel):
     """What every ``debate-judge/v1`` call sees: the items and every earlier turn."""
 
     criterion: str = Field(min_length=1, max_length=2000)
-    items: tuple[JudgedItem, ...] = Field(min_length=2)
-    transcript: tuple[DebateTurn, ...]
+    items: tuple[JudgedItem, ...] = Field(min_length=2, max_length=MAX_SCORED_ITEMS_PER_CALL)
+    transcript: tuple[DebateTurn, ...] = Field(max_length=MAX_DEBATE_TURNS)
     guidance: JudgeTaskBlocks | None
 
     @model_validator(mode="after")
@@ -285,7 +291,7 @@ class AdvocacyRequest(_DebateContent):
     """An advocate's turn in ``round``: argue for ``item_id``."""
 
     kind: Literal["advocacy"] = "advocacy"
-    round: int = Field(ge=1)
+    round: int = Field(ge=1, le=MAX_DEBATE_ROUNDS)
     item_id: str = Field(min_length=1)
 
 
@@ -293,7 +299,7 @@ class CritiqueRequest(_DebateContent):
     """The critic's turn closing ``round``."""
 
     kind: Literal["critique"] = "critique"
-    round: int = Field(ge=1)
+    round: int = Field(ge=1, le=MAX_DEBATE_ROUNDS)
 
 
 class DebateVerdictRequest(_DebateContent):

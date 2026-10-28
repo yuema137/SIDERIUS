@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agent.judge.call import JudgeRunContext
 from agent.schemas.data_analysis.common import canonical_json_bytes, canonical_sha256
@@ -85,7 +86,8 @@ def invocation(tmp_path: Path, n: int = 3, **overrides) -> StrategyInvocation:
 class DebateBridge:
     """Answers each debate role. ``order`` is the judge ranking (default: reverse input)."""
 
-    def __init__(self, *, order=None, drafts=None, turn_item=None) -> None:
+    def __init__(self, *, order=None, drafts=None, turn_item=None, cites=None) -> None:
+        self.cites = cites
         self.order = order
         self.drafts = drafts
         self.turn_item = turn_item
@@ -113,7 +115,7 @@ class DebateBridge:
                 "role": "advocate" if advocate else "critic",
                 "item_id": item_id,
                 "argument": f"turn {len(self.calls)}",
-                "cites": listed[:1],
+                "cites": self.cites if self.cites is not None else listed[:1],
             }
         if "Rank every listed item" in user_prompt:
             order = self.order or list(reversed(listed))
@@ -216,7 +218,7 @@ def test_replay_refuses_a_turn_re_recorded_with_a_forged_chain_digest(tmp_path):
     [
         ["reviews:0", "reviews:1"],
         ["reviews:0", "reviews:1", "reviews:2", "reviews:9"],
-        ["reviews:0", "reviews:0", "reviews:1"],
+        ["reviews:0", "reviews:0", "reviews:1", "reviews:2"],
     ],
     ids=["subset", "extra", "repeat"],
 )
@@ -278,6 +280,41 @@ def test_synthesize_count_and_item_floor_are_enforced(tmp_path):
     bridge = DebateBridge()
     assert run(single, bridge, tmp_path).outcome.failure_code == "insufficient_items"
     assert bridge.calls == []
+
+
+@pytest.mark.parametrize(
+    ("cites", "code"),
+    [
+        (["reviews:9"], "inadmissible_choice"),
+        (["reviews:0", "reviews:0"], "invalid_payload"),
+    ],
+    ids=["unlisted", "duplicate"],
+)
+def test_a_turn_citing_unlisted_or_repeated_items_ends_the_chain(tmp_path, cites, code):
+    """Defect: a turn cites items outside the debate, or repeats cites (which inflate every
+    later prompt that copies the transcript)."""
+    bridge = DebateBridge(cites=cites)
+    result = run(invocation(tmp_path), bridge, tmp_path)
+    assert len(bridge.calls) == 1
+    assert (result.outcome.status, result.outcome.failure_code) == ("failed", code)
+
+
+def test_a_debate_over_more_items_than_one_call_may_hold_is_refused(tmp_path):
+    """Defect: debate prompts grow with the declared item count (a 200-item port is
+    admitted with a 403-call bound and every call lists every item)."""
+    wide = InputPort(
+        name="reviews", contract="literature.output", cardinality="many", max_items=200
+    )
+    refusals = admit_llm_strategy(
+        debate(max_calls=403),
+        inputs=(wide,),
+        output_contract="literature.output",
+        select=TopKSelect(k=1),
+        cardinality=CardinalityBound(min=1, max=1),
+    ).refusals
+    assert "batch_too_large" in {r.code for r in refusals}
+    with pytest.raises(ValidationError, match="at most 16 items per call"):
+        invocation(tmp_path, n=17)
 
 
 PORT = InputPort(name="reviews", contract="literature.output", cardinality="many", max_items=3)
@@ -390,13 +427,13 @@ PINS = [
         "1a9959dfdab75b157c6d38bb3e10366b0e19f814c260b963ac49f85031b8fcaf",
         "bf1c2be16b1be034135fe283c109ec4bfaefbc5eb2f5b96faa05006f6fda594e",
         "b9c3244ef18ef0ef7a88e1fbceee1b37134bb195a8a1f855ca4e0054f6528810",
-        "3232ec709d862d6dae3637e11b0c1a6c818e4d0ff59a6546b6ed6a72ea25bfd8",
+        "219d3ff7a739d47bdc4184bcf7fcb1b9ab06702505a6227c241d425a2750be57",
     ),
     (
         "7a7265d80a610cff11442246fa371fd998a5cd865da07ba39d7129c3b64d6507",
         "f969e25b6d2f5ff3dde61febf6f1fdfc6c5b790b01c7cc967ab2558682214072",
         "45099f8826eb6d09dae7c5bfb76361b2e0dd49e3455616e29cd9d310589ec968",
-        "3232ec709d862d6dae3637e11b0c1a6c818e4d0ff59a6546b6ed6a72ea25bfd8",
+        "219d3ff7a739d47bdc4184bcf7fcb1b9ab06702505a6227c241d425a2750be57",
     ),
     (
         "ad7e9da189b0354f3b03c02c25e251ccb84b5887a1b2872c070be2bc7d1a43a6",
