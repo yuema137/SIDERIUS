@@ -32,6 +32,7 @@ from core.runtime_control.observation_store import ObservationStore
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.scoring_stubs import stub_scoring
 
 
@@ -123,6 +124,7 @@ def _completed_observation_block(tmp_dir: str) -> dict:
 
 def _make_input(tmp_path) -> HyperparamTuningInput:
     return HyperparamTuningInput(
+        run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,

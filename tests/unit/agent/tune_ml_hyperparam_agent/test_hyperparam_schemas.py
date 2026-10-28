@@ -116,7 +116,7 @@ class TestTrialConfig:
     _SEEDS: ClassVar[dict[str, int]] = {
         "train_sampling_seed": 42,
         "eval_sampling_seed": 42,
-        "train_base_seed": 123,
+        "seed_context": {"run_seed": 123},
     }
 
     @pytest.mark.parametrize(

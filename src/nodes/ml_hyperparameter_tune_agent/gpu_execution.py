@@ -28,6 +28,7 @@ from core.runtime_control.training_measurement_assessment import assess_training
 from core.runtime_control.training_measurement_binding import bind_training_measurement
 from core.sandbox_layout import training_checkpoint_path
 from core.subprocess_env import subprocess_env
+from core.training_seeds import TrainingSeedPlan
 from execute_tools.evaluation_execution import candidate_evaluation_executor
 from nodes.ml_hyperparameter_tune_agent.probe_data import build_task_probe_data
 
@@ -81,7 +82,7 @@ def _spec(
         task_composition_ref=bindings.agent_input.task_composition_ref,
         task_scopes=prepared.task_scopes,
         data_dir=bindings.time_data_dir,
-        epoch_seed=prepared.trial_config.train_base_seed,
+        epoch_seed=TrainingSeedPlan(prepared.trial_config.seed_context).epoch(0).subsample,
         train_portion=prepared.trial_config.train_portion,
         max_samples=bindings.agent_input.validation_max_train_samples,
     )

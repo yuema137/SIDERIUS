@@ -41,6 +41,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 import execute_tools.train_engine_sandbox as tes
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     EpochSamplingParams,
@@ -219,7 +220,7 @@ class TestStreamingEngineRefuses:
                     data_dir=str(tmp_path),
                     sandbox_dirs=_sandbox_dirs(tmp_path),
                     exp_id="streaming_zero_step",
-                    train_base_seed=42,
+                    seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
                     profile=PAIR_PROFILE,
                 )
 
@@ -235,7 +236,7 @@ class TestStreamingEngineRefuses:
                 data_dir=str(tmp_path),
                 sandbox_dirs=_sandbox_dirs(tmp_path),
                 exp_id="streaming_ok",
-                train_base_seed=42,
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
                 profile=PAIR_PROFILE,
             )
         assert out is not None

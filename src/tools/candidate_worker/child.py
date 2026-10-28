@@ -7,6 +7,7 @@ from pathlib import Path
 from core.generated_library import bind_generated_library_to_workspace
 from tools.workflow_preview.files import observe_file
 
+from .budget import WorkerBudget
 from .launch import bounded_terminal, publish
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .source import verify_snapshot
@@ -26,6 +27,7 @@ def verify_inputs(request: CandidateRunRequest, control: Path) -> None:
 
 def execute(request_path: Path) -> CandidateRunReceipt:
     request = CandidateRunRequest.model_validate_json(request_path.read_bytes())
+    budget = WorkerBudget.start(request.timeout_seconds)
     control = request_path.parent
     initial = CandidateRunReceipt.model_validate_json((control / "launch.json").read_bytes())
     if initial.graph_trace is not None or initial.loop_trace is not None:
@@ -38,7 +40,7 @@ def execute(request_path: Path) -> CandidateRunReceipt:
     # Import order is an execution invariant: registries can discover at import.
     from .native import execute_native
 
-    receipt = execute_native(request, initial)
+    receipt = execute_native(request, initial, budget=budget)
     graph = request.preview.execution_profile is not None
     if graph:
         receipt = bounded_terminal(initial, receipt)

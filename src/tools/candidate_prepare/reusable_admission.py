@@ -82,9 +82,11 @@ def reusable_locations(
     manifest = resolve_location(project, task.manifest, "task.manifest")
     data = resolve_location(project, task.data_root, "task.data_root")
     if payload is not None:
+        from core.retired_seed_pins import refuse_set_pins
         from workflows.candidate_training_settings import parse_training_settings
 
         settings = parse_training_settings(payload)
+        refuse_set_pins(settings.retired_seed_pins, "reusable preparation training settings")
         if (
             settings.launch.data_dir is not None
             and Path(settings.launch.data_dir).resolve() != data

@@ -14,9 +14,19 @@
       "file_index": null,
       "resolved_order_strategy": "shuffle",
       "resolved_file_order": null,
-      "train_sampling_seed": 1974530640,
-      "eval_sampling_seed": 1974530640,
-      "train_base_seed": 532100910
+      "train_sampling_seed": 6037827125235977323,
+      "eval_sampling_seed": 6037827125235977323,
+      "seed_context": {
+        "run_seed": 20261027,
+        "at": {
+          "iteration": null,
+          "node_id": null,
+          "branch": null,
+          "round": 1,
+          "attempt": 1,
+          "epoch": null
+        }
+      }
     }
   },
   {
@@ -34,9 +44,19 @@
       "file_index": null,
       "resolved_order_strategy": "shuffle",
       "resolved_file_order": null,
-      "train_sampling_seed": 2074996016,
-      "eval_sampling_seed": 2074996016,
-      "train_base_seed": 1800081021
+      "train_sampling_seed": 6526404090833406899,
+      "eval_sampling_seed": 6526404090833406899,
+      "seed_context": {
+        "run_seed": 20261027,
+        "at": {
+          "iteration": null,
+          "node_id": null,
+          "branch": null,
+          "round": 1,
+          "attempt": 2,
+          "epoch": null
+        }
+      }
     }
   },
   {
@@ -54,9 +74,19 @@
       "file_index": null,
       "resolved_order_strategy": "shuffle",
       "resolved_file_order": null,
-      "train_sampling_seed": 1259130770,
-      "eval_sampling_seed": 1259130770,
-      "train_base_seed": 947181658
+      "train_sampling_seed": 2127736240504485206,
+      "eval_sampling_seed": 2127736240504485206,
+      "seed_context": {
+        "run_seed": 20261027,
+        "at": {
+          "iteration": null,
+          "node_id": null,
+          "branch": null,
+          "round": 2,
+          "attempt": 3,
+          "epoch": null
+        }
+      }
     }
   }
 ]

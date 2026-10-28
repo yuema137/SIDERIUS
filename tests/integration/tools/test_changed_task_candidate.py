@@ -266,7 +266,7 @@ def test_concurrent_training_settings_edit_blocks_reference_save(changed_candida
     _, request = reviewed_request(author, targets[1])
     original = parse_workflow_source(author.read().source)
     settings = json.loads(json.dumps(original.training_settings))
-    settings["launch"]["sampling_seed"] = 99
+    settings["launch"]["trial_time_budget_minutes"] = 99.0
     concurrent = original.model_copy(update={"training_settings": settings})
     author.project.source_file.write_text(render_workflow_source(concurrent))
     with pytest.raises(AuthoringError, match="source changed"):

@@ -6,6 +6,7 @@ planning with ``tools.ci.shards``, execution with ``tools.ci.execution``.
 
     python -m tools.ci preflight --root .
     python -m tools.ci bulk --root . --shards 8 --threads 2
+    python -m tools.ci bulk --root . --shards 8 --threads 1 --job-index 0 --job-count 4
     python -m tools.ci sensitive --root .
 """
 
@@ -18,11 +19,12 @@ import tempfile
 from pathlib import Path
 
 from tools.ci.execution import _reject_workdir_inside, run_bulk, run_shard
+from tools.ci.matrix import REPORT_NAME, job_report, job_shard_indices, plan_digest
 from tools.ci.preflight import ExecutionRoot, run_preflight
 from tools.ci.provenance import build_manifest
 from tools.ci.selection import Selection, load_changed_paths, resolve_selection
 from tools.ci.sensitive import SENSITIVE_FILES, sensitive_paths
-from tools.ci.shards import plan_shards, verify_plan
+from tools.ci.shards import ShardPlan, plan_shards, verify_plan
 from tools.ci.weights import DEFAULT_WEIGHT, load_splits, load_weights
 
 
@@ -103,6 +105,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--shards", type=int, default=4)
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--concurrency", type=int, default=None)
+    # Matrix split (issue #990): every job plans ALL ``--shards`` identically and
+    # executes only the indices tools.ci.matrix assigns it. The aggregate CI job
+    # verifies the union with ``src/tools/ci/matrix.py verify``.
+    parser.add_argument("--job-index", type=int, default=0)
+    parser.add_argument("--job-count", type=int, default=1)
     parser.add_argument("--workdir", type=Path, default=None)
     parser.add_argument(
         "--allow-machine-configs",
@@ -128,6 +135,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
+    try:
+        job_indices = job_shard_indices(args.shards, args.job_count, args.job_index)
+    except ValueError as exc:
+        parser.error(f"invalid matrix split: {exc}")
     # OUTSIDE the source tree by default. A workdir inside the checkout puts
     # every shard's TMPDIR — and therefore every `tmp_path` — inside the
     # repository, where tests observe harness scratch as repository content.
@@ -155,6 +166,11 @@ def main(argv: list[str] | None = None) -> int:
         chosen = Selection(chosen.files, True, changed_error)
     print(f"selection: {chosen.reason}", file=sys.stderr)
     files = list(chosen.files)
+    if chosen.full_suite and not files:
+        # Every shard would be empty and trivially green. A full suite with no
+        # tracked test files is a broken checkout, not a passing run.
+        print("FULL SUITE SELECTED ZERO TEST FILES — refusing", file=sys.stderr)
+        return 2
     # Weighted by default: by-count balancing reported imbalance 1.004 and still
     # took 654 s, because it cannot see that one file is 460 s of the 1288.
     measured = {} if args.by_count else load_weights()
@@ -185,6 +201,11 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                     "imbalance": round(plan.imbalance(), 4),
                     "weighted": weights is not None,
+                    "job": {
+                        "index": args.job_index,
+                        "count": args.job_count,
+                        "shards": list(job_indices),
+                    },
                 },
                 indent=2,
             )
@@ -215,6 +236,17 @@ def main(argv: list[str] | None = None) -> int:
                 failures += 1
         return 1 if failures else 0
 
+    digest = plan_digest(((s.index, s.files) for s in plan.shards), plan.sensitive)
+    job_plan = ShardPlan(
+        shards=[s for s in plan.shards if s.index in job_indices], sensitive=plan.sensitive
+    )
+    if args.job_count > 1:
+        print(
+            f"matrix job {args.job_index}/{args.job_count}: shards {list(job_indices)} "
+            f"of {args.shards}, plan {digest[:12]}",
+            file=sys.stderr,
+        )
+
     manifest = build_manifest(
         root,
         mode="bulk",
@@ -229,11 +261,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     result = run_bulk(
         root,
-        plan,
+        job_plan,
         sha=sha,
         workdir=workdir / "bulk",
         threads=args.threads,
-        concurrency=args.concurrency or args.shards,
+        concurrency=args.concurrency or len(job_plan.shards),
     )
     print(result.render(), file=sys.stderr)
 
@@ -257,10 +289,22 @@ def main(argv: list[str] | None = None) -> int:
         "heaviest_shard_s": round(longest.duration_s, 2) if longest else None,
         "failed_shards": [s.index for s in result.failed],
         "invalid_shards": [s.index for s in result.invalid],
+        "checkout_mutations": result.checkout_mutations,
     }
     workdir.mkdir(parents=True, exist_ok=True)
     (workdir / "bulk_result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
     (workdir / "run_manifest.json").write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+    report = job_report(
+        job_index=args.job_index,
+        job_count=args.job_count,
+        shard_count=args.shards,
+        digest=digest,
+        shards_run=[s.index for s in result.shards],
+        ok=result.ok,
+        full_suite=chosen.full_suite,
+        files=len(files),
+    )
+    (workdir / REPORT_NAME).write_text(json.dumps(report, indent=2), encoding="utf-8")
     return 0 if result.ok else 1
 
 

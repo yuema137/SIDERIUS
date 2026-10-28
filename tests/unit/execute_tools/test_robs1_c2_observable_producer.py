@@ -41,6 +41,7 @@ import pytest
 import torch
 
 import execute_tools.train_engine_sandbox as tes
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.dataset_config import bind_dataset_profile
 from execute_tools.observables import (
     DeclaredDynamicObservable,
@@ -132,7 +133,7 @@ def _run(
             data_dir=fx.data_dir,
             sandbox_dirs=_sandbox(tmp_path, name),
             exp_id=name,
-            train_base_seed=123,
+            seed_plan=TrainingSeedPlan(SeedContext(run_seed=123)),
             profile=fx.profile,
             **data_path.scope_kwargs(
                 fx.full_sample_set(),

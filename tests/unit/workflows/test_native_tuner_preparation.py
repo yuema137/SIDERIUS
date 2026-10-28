@@ -44,8 +44,6 @@ def _nondefault_controls():
         train_portion=0.32,
         eval_portion=0.43,
         train_validation_align=False,
-        sampling_seed=137,
-        train_base_seed=241,
         retain_model_outputs=True,
         retain_training_checkpoints=True,
         max_epochs=11,
@@ -238,6 +236,24 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     current_planner = planner_strategy.resolve_planner_strategy("native-timing-v1")
     assert actual_planner_assembly == current_planner.identity.assembly_sha256
     assert actual.expected_planner_strategy == current_planner.identity
+    # Issue #983 — the workflow generates a run seed per run (a seed-owned
+    # path); the oracle predates it. Keep its bytes and check the forwarded
+    # value against the persisted lock below.
+    assert "run_seed" not in expected
+    payload.pop("run_seed")
+    # S3b retired the per-purpose pins (T13) and added the caller-owned seed
+    # position; the oracle predates both. The native chain locates the tuner
+    # at its global iteration.
+    for retired in ("sampling_seed", "train_base_seed"):
+        expected.pop(retired)
+    assert payload.pop("seed_coordinates") == {
+        "iteration": 1,
+        "node_id": None,
+        "branch": None,
+        "round": None,
+        "attempt": None,
+        "epoch": None,
+    }
     if case == "split_routes":
         # The verifier source and execution assembly have evolved independently.
         # Preserve the oracle bytes and verify these source-derived digests against
@@ -282,6 +298,7 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     assert actual_fingerprint == lock.task_composition_fingerprint
     assert actual.expected_planner_strategy == lock.planner_strategy_identity
     assert actual.runtime_verifier_identity == lock.runtime_verifier_identity
+    assert actual.run_seed is not None and actual.run_seed == lock.run_seed
     for field in (
         "experiment_arm",
         "lit_review_enabled",

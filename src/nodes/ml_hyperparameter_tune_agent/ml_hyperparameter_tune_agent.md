@@ -139,12 +139,20 @@ Strategies:
   `drop_last`, so batches may span a file boundary and the optimizer-step
   count is identical to `shuffle` for the same selection.
 
-### Sampling seeds
+### Run seed (issue #983)
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `sampling_seed` | `int \| None` | No | `None` | Seed for `build_sample_set()` — determines which PSD segments form the data scope. When `None`, auto-generated from `SHA-256(run_name + model_type)`. |
-| `train_base_seed` | `int \| None` | No | `None` | Base seed for per-epoch training subsampling. Epoch `n` uses `train_base_seed + n`. When `None`, auto-generated. |
+| `run_seed` | `RunSeed \| None` | Yes in practice | `None` | The run seed the entry boundary resolved and locked. `None` raises `MissingRunSeed` at startup, before any LLM call; the tuner never generates one. Locked in the tuner workspace lock and written to `run_config_{run_name}.json`. |
+| `seed_coordinates` | `SeedCoordinates` | No | empty | Caller-owned seed position (`iteration`, `node_id`, `branch`). The native workflow passes the global chain iteration. `round`, `attempt` and `epoch` are refused. |
+
+Each attempt's `train_sampling_seed`, `eval_sampling_seed` and the trainer's
+`seed_context` derive from `run_seed` at
+`seed_coordinates + (round, attempt=total_attempts)`; see
+[seeding](../../../docs/agent-reference/mechanisms/seeding.md#tuner-attempt-seeds).
+The retired `sampling_seed` / `train_base_seed` fields: a `null` value on
+readback is dropped; a set value is kept in `retired_seed_pins` (provenance)
+and `run()` refuses to execute it (`RetiredSeedPin`).
 
 ### Selection topology (Step-02b)
 
@@ -449,6 +457,7 @@ repository. Result lands at `{workspace}/run_output_{run_name}.json`.
 | `--seed_plugin_path` | `str` (optional) | `None` | Path to a plugin `.py` for plugin model_types. |
 | `--run_name` | `str` | `"test_run"` | Run name. |
 | `--workspace` | `str` | `./siderius_workspace` | Workspace root. |
+| `--run_seed` | `int` (`[0, 2**53 - 1]`) | `None` | Entry boundary (R2): the workspace lock's seed wins, then this flag, then generation; printed as `[seed] run_seed=N source=…` and locked before round 1. A different value than the locked seed is refused. |
 | `--is_trial` | flag | `False` | Enable trial-explore mode. |
 | `--trial_strategy` / `--trial_portion` / `--train_portion` / `--target_files` / ... | various | various | Mirror the schema fields above. |
 | `--file_index` | `int` | `6` | Validation file index (formal mode). Ignored under `--is_trial` per `feedback_no_file_index_in_trial`. |

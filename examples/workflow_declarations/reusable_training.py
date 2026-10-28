@@ -73,8 +73,6 @@ document = ReusableWorkflowDocument(
         "launch": {
             "trial_time_budget_minutes": 2.0,
             "formal_time_budget_minutes": 5.0,
-            "sampling_seed": 17,
-            "train_base_seed": 23,
             "healthgate_mode": "observe_only",
             "result_authority": "diagnostic",
         },

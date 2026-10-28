@@ -12,6 +12,7 @@
     'interpretation.output': {name: 'Interpretation result', colour: 'interpretation', shape: 'square'},
     'literature.input': {name: 'Literature request', colour: 'literature', shape: 'circle'},
     'literature.output': {name: 'Literature result', colour: 'literature', shape: 'square'},
+    'literature.collection': {name: 'Literature results (collection)', colour: 'literature', shape: 'capsule'},
     'proposal.input': {name: 'Proposal request', colour: 'proposal', shape: 'circle'},
     'proposal.output': {name: 'Proposal result', colour: 'proposal', shape: 'square'},
     'implementation.input': {name: 'Implementation request', colour: 'implementation', shape: 'circle'},
