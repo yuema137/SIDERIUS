@@ -33,6 +33,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
 _WATCHED = frozenset({"open", "os.remove", "os.rename", "os.truncate", "shutil.rmtree"})
 
@@ -95,15 +97,24 @@ def _targets(event: str, args: tuple) -> tuple[str | None, ...]:
         writes = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (
             isinstance(flags, int) and flags & _WRITE_FLAGS
         )
-        return (_absolute(path),) if writes else ()
+        return _followed(_absolute(path)) if writes else ()
     if event == "os.rename":
         src, dst, src_fd, dst_fd = args
         return (_absolute(src, src_fd), _absolute(dst, dst_fd))
     if event in ("os.remove", "shutil.rmtree"):
         return (_absolute(args[0], args[1]),)
     if event == "os.truncate":
-        return (_absolute(args[0]),)
+        return _followed(_absolute(args[0]))
     return ()
+
+
+def _followed(path: str | None) -> tuple[str | None, ...]:
+    """The path and its symlink-resolved target: open/truncate follow links.
+
+    ``realpath`` costs syscalls, so it runs only for these already-filtered
+    write events, never for reads or unrelated audit traffic.
+    """
+    return (path, None if path is None else os.path.realpath(path))
 
 
 class CheckoutWriteGuard:
@@ -113,6 +124,7 @@ class CheckoutWriteGuard:
         self._tracked = tracked
         self._tracked_dirs = _parents(tracked)
         self._test_id: str | None = None
+        self._violations: list[str] = []
 
     @contextmanager
     def watching(self, test_id: str) -> Iterator[None]:
@@ -129,7 +141,7 @@ class CheckoutWriteGuard:
         protected = self._tracked_dirs if event == "shutil.rmtree" else frozenset()
         for path in _targets(event, args):
             if path is not None and (path in self._tracked or path in protected):
-                raise CheckoutWriteEscape(
+                message = (
                     f"test {self._test_id} attempted {event} on tracked checkout path "
                     f"{path}. Concurrent CI shards share this checkout, so even a "
                     "restored edit can fail another test (#973). Copy the file "
@@ -137,7 +149,34 @@ class CheckoutWriteGuard:
                     "@pytest.mark.allow_checkout_writes(reason=...) if the edit "
                     "is the behaviour under test."
                 )
+                self._violations.append(message)
+                raise CheckoutWriteEscape(message)
 
+    def take_violations(self) -> list[str]:
+        """Return and clear refused mutations since the last call.
+
+        The raise reaches only the calling thread: an escape in a worker
+        thread (or one swallowed by ``except BaseException``) would otherwise
+        leave the test green. ``fail_report_on_violation`` reads this record.
+        """
+        taken, self._violations = self._violations, []
+        return taken
+
+
+def fail_report_on_violation(guard: CheckoutWriteGuard, report) -> None:
+    """Turn a phase report failed when its test made a refused mutation.
+
+    Called from ``pytest_runtest_makereport`` for setup, call and teardown.
+    A phase that already failed keeps its own traceback.
+    """
+    violations = guard.take_violations()
+    if violations and not report.failed:
+        report.outcome = "failed"
+        report.longrepr = "\n".join(violations)
+
+
+#: Where ``tests/conftest.py`` stashes the session's guard on ``config.stash``.
+GUARD_KEY = pytest.StashKey[CheckoutWriteGuard]()
 
 _GUARDS: list[CheckoutWriteGuard] = []
 _HOOK_INSTALLED = False
