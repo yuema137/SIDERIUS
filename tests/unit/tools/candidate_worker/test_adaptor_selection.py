@@ -90,9 +90,12 @@ def test_first_admissible_trains_the_second_branch_when_the_first_is_rejected(
     picked = record(receipt)
     assert [item["admission"] for item in picked["admissible"]] == ["rejected", "admissible"]
     assert picked["contributions"][0]["inputs"][0]["source"]["node"] == "check1"
-    # The sibling rejection still counts in the existing body aggregate.
-    assert (receipt.status, receipt.validation_passed) == ("rejected", False)
+    # The absorbed sibling rejection is neutral: the selected path decides the body.
+    assert (receipt.status, receipt.validation_passed) == ("completed", True), receipt.error
     verify_graph_trace(request, parent, receipt)
+    for forged in ({"status": "rejected"}, {"validation_passed": False}):
+        with pytest.raises(ValueError, match="aggregate outcome mismatch"):
+            verify_graph_trace(request, parent, receipt.model_copy(update=forged))
 
 
 def test_all_rejected_closes_the_adaptor_and_blocks_tuning(
@@ -105,7 +108,7 @@ def test_all_rejected_closes_the_adaptor_and_blocks_tuning(
     assert states(receipt)["train"] == ("blocked", "dependency_not_successful")
     assert trained == [] and not any(name == "tuner" for name, _ in training_runner)
     assert record(receipt)["outputs"] == []
-    assert receipt.status == "rejected"
+    assert (receipt.status, receipt.validation_passed) == ("rejected", False)
     verify_graph_trace(request, parent, receipt)
 
 
@@ -222,3 +225,24 @@ def test_other_profiles_still_refuse_the_selection_document(prepared):
     assert execution_families(definition, SELECTION_PROFILE).selection is not None
     with pytest.raises(ValueError, match=ADAPTORS_NOT_ADMITTED):
         execution_families(definition, "native-proposal-fanout/v1")
+
+
+def test_a_skipped_adaptor_input_is_refused_with_a_typed_error(prepared):
+    """Unreachable until routed execution: no skip record exists for provenance."""
+    from tools.candidate_worker.adaptor_phase import SkippedAdaptorInputError, adaptor_items
+    from tools.candidate_worker.graph_models import GraphNodeEvidence
+
+    definition = selection_request(prepared).preview.document.definition
+    entries = {
+        node: GraphNodeEvidence(
+            node_id=node,
+            capability="validation",
+            predecessors=(),
+            storage="/s",
+            state="skipped",
+            reason="route_not_selected",
+        )
+        for node in ("check0", "check1")
+    }
+    with pytest.raises(SkippedAdaptorInputError, match="B1-PR5"):
+        adaptor_items(definition.adaptors[0], entries)

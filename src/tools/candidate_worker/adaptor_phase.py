@@ -26,13 +26,30 @@ from workflows.adaptors import (
 from workflows.adaptors.record import PORT
 from workflows.adaptors.run import AdaptorReason
 from workflows.custom_adaptors.contracts import native_type
-from workflows.definition import AdaptorInstance, ResultSource
+from workflows.definition import (
+    AdaptorInstance,
+    ResultSource,
+    ReusableWorkflowDefinition,
+    WorkflowDefinition,
+)
 from workflows.definition.fanout import ProposalFamilies, execution_families
 
+from . import readiness
 from .graph_evidence import read_graph_control, record_digest
-from .graph_models import GraphNodeEvidence, GraphReason, GraphState
+from .graph_models import GraphNodeEvidence, GraphReason, GraphState, GraphTrace
 from .layout import adaptor_dir, adaptor_output_path, adaptor_record_path
 from .models import CandidateRunReceipt, CandidateRunRequest
+
+AdaptorDefinition = WorkflowDefinition | ReusableWorkflowDefinition
+
+
+class SkippedAdaptorInputError(ValueError):
+    """A skipped source reached an adaptor, but no skip record exists to cite.
+
+    Admitted profiles have no routes, so this is unreachable today. Routed
+    execution (B1-PR5) must provide a record for a skipped source before an
+    adaptor may treat it as inadmissible.
+    """
 
 
 def expected_adaptors(
@@ -74,6 +91,11 @@ def adaptor_items(
             if not isinstance(source, ResultSource):
                 raise ValueError(f"adaptor {adaptor.id}: only result sources are executable")
             entry = entries[source.node]
+            if entry.state == "skipped":
+                raise SkippedAdaptorInputError(
+                    f"adaptor {adaptor.id}: input {source.node} was skipped; skipped adaptor "
+                    "inputs need a skip record from routed execution (B1-PR5)"
+                )
             if (
                 entry.state not in ("succeeded", "rejected")
                 or entry.record_path is None
@@ -240,3 +262,41 @@ def tuning_branch(
     if not isinstance(source, ResultSource):
         raise ValueError("the selected validation result has no producing node")
     return next(branch for branch in shape.branches if branch[1] == source.node)
+
+
+def body_outcome(
+    shape: ProposalFamilies, definition: AdaptorDefinition, trace: GraphTrace
+) -> tuple[readiness.BodyStatus, bool]:
+    """Body status and ``validation_passed``, shared by the worker and the verifier.
+
+    A rejection a succeeded adaptor absorbed is neutral, like a skip: it was an
+    inadmissible input, not the body's outcome. Under a selection adaptor,
+    ``validation_passed`` is the selected candidate's validation, i.e. whether the
+    adaptor selected one. Every node keeps its own state in the trace.
+    """
+    entries = (*trace.nodes, *trace.adaptors)
+    absorbed = {
+        source.node
+        for adaptor, item in zip(definition.adaptors, trace.adaptors, strict=True)
+        if item.state == "succeeded"
+        for binding in adaptor.bindings
+        for source in binding.sources
+        if isinstance(source, ResultSource)
+    }
+    status = readiness.body_status(
+        (
+            item.state
+            for item in entries
+            if not (item.state == "rejected" and item.node_id in absorbed)
+        ),
+        tuning=shape.tuning is not None,
+    )
+    if shape.selection is not None:
+        selected = next(item for item in trace.adaptors if item.node_id == shape.selection.adaptor)
+        return status, selected.state == "succeeded"
+    if shape.tuning is None:
+        return status, status == "accepted"
+    passed = all(
+        item.state == "succeeded" for item in trace.nodes if item.capability == "validation"
+    )
+    return status, passed

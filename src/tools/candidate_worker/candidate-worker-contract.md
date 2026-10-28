@@ -610,7 +610,9 @@ Its consumers keep the capability rule, so a `rejected` adaptor blocks the tuner
 order. A succeeded source's value is parsed from its native record (digest checked
 against the trace) with the contract's native model
 (`workflows.custom_adaptors.contracts.native_type`); a rejected source becomes an
-item with state `rejected` and no value; any other source state raises. The pure
+item with state `rejected` and no value; a `skipped` source raises
+`SkippedAdaptorInputError` (routed execution, B1-PR5, must first provide a skip
+record to cite as provenance); any other state raises `ValueError`. The pure
 `run_deterministic_adaptor` decides with `metric=None` (no metric-ranking kind is
 admitted), and `build_adaptor_record` builds the `AdaptorRecord`. Each emitted
 output value is published write-once as canonical JSON at
@@ -632,11 +634,18 @@ It is omitted when empty, so unadapted traces keep their bytes (pinned:
 `test_unadapted_training_trace_bytes_are_unchanged`). `GraphTrace` refuses an
 `"adaptor"` capability in `nodes` and any other capability in `adaptors`.
 `GraphReason` gains `no_admissible_input`, `insufficient_items` and the reserved
-`judge_failure` (B6-8). Adaptor records are not in `native_output_paths`. The body
-aggregate includes adaptor states; `validation_passed` keeps its rule, so a
-selected run whose first validator was rejected reports `status="rejected"`,
-`validation_passed=False` with the tuner `succeeded` (open: whether an absorbed
-rejection should be neutral).
+`judge_failure` (B6-8). Adaptor records are not in `native_output_paths`.
+
+**Body outcome** (`adaptor_phase.body_outcome`, shared by worker and verifier).
+A `rejected` node bound to an adaptor that `succeeded` was an inadmissible input
+the adaptor absorbed; it is neutral in `body_status`, like a skip. Adaptor states
+themselves count. Under the selection profile the selected path decides the body:
+selected input and tuner `succeeded` gives `completed`; an adaptor
+`rejected/no_admissible_input` (or `insufficient_items`) gives `rejected` with a
+blocked tuner. `validation_passed` is the selected candidate's validation, i.e.
+`True` iff the selection adaptor `succeeded`. Every branch keeps its own node
+state in the trace (a rejected sibling stays `rejected/validation_rejected`).
+Profiles without adaptors keep the existing rules (pinned trace bytes above).
 
 **Verification.** `verify_graph_trace` checks adaptor membership and bindings
 against `expected_adaptors`, record path/digest of a decided adaptor, that its
@@ -651,7 +660,8 @@ over execution order; tampered record/output/closure; shape refusals).
 
 Not admitted: v2 reusable source, managed preparation and console for this profile;
 any other strategy triple, metric ranking, per-item/split distribution, routes,
-loops, custom and LLM strategies; a skipped adaptor input (needs routed execution).
+loops, custom and LLM strategies; a skipped adaptor input (`SkippedAdaptorInputError`
+until B1-PR5 provides skip records).
 
 ### Opt-in native literature candidate
 

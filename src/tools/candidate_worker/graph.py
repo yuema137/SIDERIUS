@@ -21,7 +21,7 @@ from workflows.task_composition import RunTaskComposition
 from workflows.termination import infrastructure_abort_reason
 
 from . import phases, readiness
-from .adaptor_phase import execute_adaptor, expected_adaptors, tuning_branch
+from .adaptor_phase import body_outcome, execute_adaptor, expected_adaptors, tuning_branch
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
 from .graph_models import GraphNodeEvidence, GraphTrace
@@ -242,9 +242,7 @@ def execute_fanout(
         nodes=tuple(evidence[node.id] for node in definition.nodes),
         adaptors=tuple(evidence[adaptor.id] for adaptor in definition.adaptors),
     )
-    status = readiness.body_status(
-        (item.state for item in (*trace.nodes, *trace.adaptors)), tuning=shape.tuning is not None
-    )
+    status, validation_passed = body_outcome(shape, definition, trace)
     return initial.model_copy(
         update={
             "status": status,
@@ -252,14 +250,6 @@ def execute_fanout(
             "native_output_paths": tuple(
                 item.record_path for item in trace.nodes if item.record_path is not None
             ),
-            "validation_passed": (
-                all(
-                    item.state == "succeeded"
-                    for item in trace.nodes
-                    if item.capability == "validation"
-                )
-                if shape.tuning
-                else status == "accepted"
-            ),
+            "validation_passed": validation_passed,
         }
     )

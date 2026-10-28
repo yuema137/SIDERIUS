@@ -194,7 +194,7 @@ def verify_graph_trace(
         ):
             raise ValueError("graph receipt lacks terminal trace")
         return
-    from .adaptor_phase import expected_adaptors, verify_adaptors
+    from .adaptor_phase import body_outcome, expected_adaptors, verify_adaptors
 
     expected = expected_nodes(request, initial, iteration=iteration)
     expected_adaptor = expected_adaptors(request, initial, iteration=iteration)
@@ -245,18 +245,11 @@ def verify_graph_trace(
     for item, slot in zip(trace.adaptors, expected_adaptor, strict=True):
         _check_adaptor_entry(item, slot, states)
     replay_readiness((*trace.nodes, *trace.adaptors))
-    status = readiness.body_status(states.values(), tuning=shape.tuning is not None)
+    status, validation_passed = body_outcome(shape, request.preview.document.definition, trace)
     if (
         ("blocked" in states.values() and status in ("accepted", "completed"))
         or receipt.status != status
-        or receipt.validation_passed
-        != (
-            all(
-                item.state == "succeeded" for item in trace.nodes if item.capability == "validation"
-            )
-            if shape.tuning
-            else status == "accepted"
-        )
+        or receipt.validation_passed != validation_passed
     ):
         raise ValueError("graph aggregate outcome mismatch")
     if (
