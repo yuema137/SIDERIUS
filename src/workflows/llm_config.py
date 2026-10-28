@@ -27,7 +27,7 @@ import argparse
 import json
 import warnings
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -45,6 +45,9 @@ from agent.llm_settings import (
     default_model_for_provider,
 )
 from agent.schemas.llm_retry import RetryPolicy
+
+if TYPE_CHECKING:
+    from agent.schemas.judge import JudgeRoute, JudgeRoutes
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
@@ -323,8 +326,9 @@ class JudgeLLMConfig(BaseModel):
     - ``debate``: debate-judge strategy calls (B2-7 onward).
 
     An empty block is refused: declaring ``judge`` means declaring at least one route.
-    This model only declares and validates routes. No judge call is made from
-    it, and the workspace run lock does not yet record it.
+    This model only declares and validates routes. The workspace run lock
+    records the resolved routes canonically (``locked_judge_routes``), so a
+    continuation under a different judge route is refused.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -338,6 +342,37 @@ class JudgeLLMConfig(BaseModel):
         if self.stop is None and self.aggregate is None and self.debate is None:
             raise ValueError("judge must declare at least one of stop, aggregate, debate")
         return self
+
+
+def judge_route(config: JudgeRouteConfig) -> JudgeRoute:
+    """The bridge route one judge call runs on and records as evidence."""
+    from agent.schemas.judge import JudgeRoute
+
+    return JudgeRoute(
+        provider=config.provider,
+        model_id=config.model_id,
+        reasoning_effort=config.reasoning_effort,
+        max_output_tokens=config.max_output_tokens,
+        max_retries=config.max_retries,
+    )
+
+
+def locked_judge_routes(config: JudgeLLMConfig | None) -> JudgeRoutes | None:
+    """The run-lock identity of the declared judge routes; ``None`` keeps the lock bytes."""
+    if config is None:
+        return None
+    from agent.schemas.judge import JudgeRoutes
+
+    return JudgeRoutes(
+        **{
+            family: None if route is None else judge_route(route)
+            for family, route in (
+                ("stop", config.stop),
+                ("aggregate", config.aggregate),
+                ("debate", config.debate),
+            )
+        }
+    )
 
 
 class WorkflowLLMConfig(BaseModel):

@@ -171,6 +171,18 @@ class JudgeRoute(JudgeModel):
     max_retries: int = Field(ge=0)
 
 
+class JudgeRoutes(JudgeModel):
+    """The judge routes one run resolved, per family; the run lock compares them.
+
+    Built from ``WorkflowLLMConfig.judge`` by ``workflows.llm_config.locked_judge_routes``;
+    a recorded call's ``JudgeCallEvidence.route`` must equal its family's route.
+    """
+
+    stop: JudgeRoute | None = None
+    aggregate: JudgeRoute | None = None
+    debate: JudgeRoute | None = None
+
+
 FailureCode = Literal["provider_error", "invalid_payload", "inadmissible_choice", "deadline"]
 
 
