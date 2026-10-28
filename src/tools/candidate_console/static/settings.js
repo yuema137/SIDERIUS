@@ -217,7 +217,7 @@
     busy = true; renderPending(); say('Saving…');
     try {
       view = await session().request('settings', {expected_sha256: view.settings_sha256, settings: draft}, 'PUT');
-      render(); say('Saved; active after server restart.');
+      render(); say(view.notice || 'Saved; active after server restart.');
     } catch (error) {
       if (error.stale) return;
       say(error.code === 'stale' ? 'Settings changed elsewhere since this page loaded. Reload, then choose again.' : 'Not saved: ' + error.message);

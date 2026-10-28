@@ -235,28 +235,34 @@ def test_an_unusable_settings_file_is_named_with_its_recovery(damage, workspace)
     assert json.loads(path.read_text())["llm_profile"] == choice["llm_profile"]
 
 
-def test_save_never_writes_through_a_settings_folder_linked_after_the_cas_read(
+def test_publish_refuses_a_settings_folder_linked_after_its_canonical_check(
     workspace, tmp_path, monkeypatch
 ):
-    """Defect: the publish step follows a settings folder swapped for a link after the
-    compare-and-swap read (path-based publish), redirecting the write elsewhere.
+    """Defect: the publish step opens its parent with a path that follows links.
 
-    The swap happens inside validation, after the no-follow CAS read, so only the
-    publish step's own no-follow parent descriptor can refuse it.
+    The folder is swapped for a link inside the publish step, after ``canonical()``
+    has accepted the path, so only the no-follow descriptor walk of
+    ``files.open_directory`` can refuse it.
     """
+    from tools.candidate_console import settings_service
+
     api = _client(_load(workspace))
     view = api.get("/api/settings").json()
     settings = workspace / "settings"
     aside = tmp_path / "settings-aside"
+    real = settings_service.canonical
 
-    def swap_then_validate(resolved):
-        settings.rename(aside)
-        settings.symlink_to(aside)
-        return resolved
+    def canonical_then_swap(value):
+        checked = real(value)
+        if checked == settings and not settings.is_symlink():
+            settings.rename(aside)
+            settings.symlink_to(aside)
+        return checked
 
-    monkeypatch.setattr("tools.candidate_console.config.validate_resolved", swap_then_validate)
+    monkeypatch.setattr(settings_service, "canonical", canonical_then_swap)
     before = (settings / "global_settings.json").read_bytes()
     response = _put(api, view["settings_sha256"], llm_profile=view["pending"]["llm_profile"])
+    assert settings.is_symlink(), "the swap must happen inside the publish step"
     assert response.status_code == 422 and response.json()["error"]["code"] == "settings_invalid"
     assert (aside / "global_settings.json").read_bytes() == before
     assert sorted(path.name for path in aside.iterdir()) == [
@@ -266,35 +272,90 @@ def test_save_never_writes_through_a_settings_folder_linked_after_the_cas_read(
     ]
 
 
-@pytest.mark.parametrize("failure", ["replace", "short_writes"])
-def test_publish_is_complete_or_leaves_no_trace(failure, tmp_path, monkeypatch):
-    """Defect: a short write publishes a truncated file, or a failed publish leaves its
-    temp file behind or damages the previous file."""
+def _failing(name, *, after=0):
+    """Replace one ``os`` call: the first ``after`` calls pass through, the next raises."""
+    import os
+
+    real, calls = getattr(os, name), []
+
+    def call(*args, **kwargs):
+        calls.append(args)
+        if len(calls) > after:
+            raise OSError(f"{name} refused")
+        return real(*args, **kwargs)
+
+    return call
+
+
+@pytest.mark.parametrize("failure", ["fchmod", "fsync", "replace"])
+def test_failed_publish_leaves_no_trace(failure, tmp_path, monkeypatch):
+    """Defect: a publish that fails before the replace leaves its temp file behind or
+    damages the previous file (cleanup must cover fchmod, write and fsync too)."""
     from tools.candidate_console import settings_service
 
     directory = tmp_path / "settings"
     directory.mkdir(mode=0o700)
     target = directory / "global_settings.json"
     target.write_text("previous")
+    monkeypatch.setattr(settings_service.os, failure, _failing(failure))
+    with pytest.raises(OSError, match=f"{failure} refused"):
+        settings_service._publish_private(target, b"x" * 10000)
+    assert target.read_text() == "previous"
+    assert sorted(path.name for path in directory.iterdir()) == ["global_settings.json"]
+
+
+def test_short_writes_still_publish_every_byte(tmp_path, monkeypatch):
+    """Defect: one ``os.write`` call publishes a truncated settings file."""
+    from tools.candidate_console import settings_service
+
+    directory = tmp_path / "settings"
+    directory.mkdir(mode=0o700)
+    target = directory / "global_settings.json"
     payload = b"x" * 10000
-    if failure == "replace":
-
-        def refuse(*args, **kwargs):
-            raise OSError("replace refused")
-
-        monkeypatch.setattr(settings_service.os, "replace", refuse)
-        with pytest.raises(OSError, match="replace refused"):
-            settings_service._publish_private(target, payload)
-        assert target.read_text() == "previous"
-        assert sorted(path.name for path in directory.iterdir()) == ["global_settings.json"]
-        return
     real = settings_service.os.write
     monkeypatch.setattr(
         "tools.candidate_console.files.os.write", lambda fd, data: real(fd, bytes(data[:7]))
     )
-    settings_service._publish_private(target, payload)
+    assert settings_service._publish_private(target, payload) is True
     assert target.read_bytes() == payload
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_failed_cleanup_keeps_the_original_error_and_says_so(tmp_path, monkeypatch):
+    """Defect: a temp-file removal error replaces the real failure and hides the leftover."""
+    from tools.candidate_console import settings_service
+
+    directory = tmp_path / "settings"
+    directory.mkdir(mode=0o700)
+    target = directory / "global_settings.json"
+    monkeypatch.setattr(settings_service.os, "fsync", _failing("fsync"))
+    monkeypatch.setattr(settings_service.os, "unlink", _failing("unlink"))
+    with pytest.raises(OSError, match="fsync refused") as error:
+        settings_service._publish_private(target, b"x")
+    assert any("could not be removed" in note for note in error.value.__notes__)
+
+
+def test_unconfirmed_directory_sync_reports_a_completed_save(workspace, monkeypatch):
+    """Defect: a save that replaced the file is reported as "nothing was saved"."""
+    from tools.candidate_console import settings_service
+
+    path = _settings_file(workspace)
+    api = _client(_load(workspace))
+    view = api.get("/api/settings").json()
+    folder = {"synthetic": {"root_id": "lab", "subpath": "run-a"}}
+    # The file fsync passes; the directory fsync after os.replace fails.
+    monkeypatch.setattr(settings_service.os, "fsync", _failing("fsync", after=1))
+    response = _put(
+        api,
+        view["settings_sha256"],
+        llm_profile=view["pending"]["llm_profile"],
+        data_folders=folder,
+    )
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert saved["notice"] and "could not confirm" in saved["notice"]
+    assert saved["settings_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert json.loads(path.read_text())["data_folders"] == folder
 
 
 def test_listing_names_a_root_that_is_no_longer_canonical(workspace, tmp_path):
