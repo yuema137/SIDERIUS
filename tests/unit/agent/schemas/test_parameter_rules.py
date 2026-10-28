@@ -109,16 +109,16 @@ def test_exact_inserts_an_omitted_leaf_and_other_rules_preserve_agent_choice() -
         {
             "train_config.batch_size": {"exact": 1},
             "train_config.epochs": {"range": {"min": 1, "max": 5}},
-            "model_config.width": {"allowed": [64, 128]},
+            "model_config.residual_channels": {"allowed": [64, 128]},
         }
     )
-    plan.model_cfg["width"] = 128
+    plan.model_cfg["residual_channels"] = 128
 
     effective = apply_parameter_rules(plan, workflow_rules=rules)
 
     assert effective.train_cfg["batch_size"] == 1
     assert effective.train_cfg["epochs"] == 3
-    assert effective.model_cfg["width"] == 128
+    assert effective.model_cfg["residual_channels"] == 128
 
 
 def test_task_rule_cannot_be_overwritten_by_a_conflicting_workflow_lock() -> None:
@@ -239,6 +239,7 @@ def test_planning_boundary_applies_the_composed_exact_lock() -> None:
         composition_ref=_composition_ref(rules),
         workflow_rules=None,
         epoch_cap=EpochCapResolution(cap=None, source=None),
+        executed_model_type="fcnet",
     )
 
     assert effective.train_cfg["batch_size"] == 1
@@ -256,6 +257,7 @@ def test_planning_boundary_preserves_objective_and_epoch_authorities() -> None:
             ),
             workflow_rules=None,
             epoch_cap=EpochCapResolution(cap=None, source=None),
+            executed_model_type="fcnet",
         )
 
     epoch_rules = ParameterRules.model_validate({"train_config.epochs": {"exact": 5}})
@@ -265,6 +267,7 @@ def test_planning_boundary_preserves_objective_and_epoch_authorities() -> None:
             composition_ref=_composition_ref(epoch_rules),
             workflow_rules=None,
             epoch_cap=EpochCapResolution(cap=2, source="max_epochs"),
+            executed_model_type="fcnet",
         )
 
 
@@ -282,6 +285,7 @@ def test_planning_boundary_applies_workflow_rules_beside_task_rules() -> None:
         composition_ref=_composition_ref(task_rules),
         workflow_rules=workflow_rules,
         epoch_cap=EpochCapResolution(cap=None, source=None),
+        executed_model_type="fcnet",
     )
 
     assert effective.model_cfg["segmentation_size"] == 40_000
@@ -302,4 +306,5 @@ def test_workflow_loss_rule_cannot_bypass_a_task_owned_objective() -> None:
             ),
             workflow_rules=workflow_rules,
             epoch_cap=EpochCapResolution(cap=None, source=None),
+            executed_model_type="fcnet",
         )

@@ -78,10 +78,15 @@ no hidden contracts, no silent defaults.
   annotations, including optional unions. The shared document resolver
   repeats this check so a mutated rule dictionary cannot introduce a silently
   ignored execution lock. Exact rules may insert omitted valid leaves. The
-  resolver also checks `model_config` paths against the selected model's
-  config class (`get_config_class` of the locked or authored `model_type`);
-  unregistered model types are not checked, and `extra="allow"` configs
-  accept unknown keys. The same target check refuses boolean `exact` /
+  resolver also checks `model_config` paths against the executed model's
+  config class (`get_config_class(executed_model_type)`; the caller passes
+  `force_model` or the plan's top-level `model_type`, which is the default).
+  A `model_config.model_type` rule is validated against the executed type and
+  never selects it. The tuner fails closed when the class is unregistered;
+  only proposal-baseline resolution (`defer_missing_non_exact`) defers.
+  `extra="allow"` configs accept unknown keys.
+  `validate_model_parameter_rules` repeats the check once at tuner launch for
+  a fixed `force_model`. The same target check refuses boolean `exact` /
   `allowed` values on a field whose type does not admit `bool`.
   See the [parameter-rule contract](../../../docs/reference/task-composition.md)
   for sampling ownership, composition conflicts and value-validation boundaries.

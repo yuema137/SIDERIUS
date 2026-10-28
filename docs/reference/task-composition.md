@@ -535,17 +535,23 @@ Notes:
   built. Custom-loss plugin hyperparameters are not transported through
   `loss_config` (the plugin executes its `PLUGIN_LOSS_CONFIG_CLASS`
   defaults), so a rule naming one, such as `loss_config.snr_threshold`, is
-  refused. `model_config` targets are checked at effective-rule resolution
-  against the configuration class of the selected model: the exact
-  `model_config.model_type` lock when declared, else the plan's `model_type`
-  (a built-in config class or the plugin's `PLUGIN_CONFIG_CLASS`). Plugin
-  configs keep Pydantic's default of ignoring unknown keys, so a misspelled
-  lock such as `model_config.segmentaton_size` is refused there instead of
-  being dropped; a config declared with `extra="allow"` keeps unknown keys and
-  accepts them. A lock on a field the selected model does not declare refuses
-  that plan. `model_config.model_type` is always a valid target. A model type
-  without a registered config class yet (a proposed generated model before
-  implementation) cannot be checked; execution refuses an unknown model type.
+  refused. `model_config` targets are checked against the configuration
+  class of the executed model (a built-in config class or the plugin's
+  `PLUGIN_CONFIG_CLASS`). The executed model is `--force_model` when it is not
+  `auto`, else the plan's top-level `model_type`; the nested
+  `model_config.model_type` is only a mirror that planning overwrites with the
+  executed model. Plugin configs keep Pydantic's default of ignoring unknown
+  keys, so a misspelled lock such as `model_config.segmentaton_size` is
+  refused instead of being dropped; a config declared with `extra="allow"`
+  keeps unknown keys and accepts them. A lock on a field the executed model
+  does not declare refuses that plan. A `model_config.model_type` rule is
+  judged against the executed model: an exact lock that names another model,
+  or an `allowed` list without it, is refused; it never selects the model.
+  With a fixed `--force_model`, the tuner checks these rules once at launch,
+  before any LLM call or attempt. Without one, the tuner checks each plan and
+  refuses a `model_config` rule when the executed model has no registered
+  config class. Only a proposal baseline, whose generated model may not be
+  implemented yet, defers that check to the tuner.
   The same target check refuses a boolean `exact` value, or a boolean member
   of `allowed`, when the consuming field does not accept a boolean (for
   example `train_config.batch_size: {exact: true}`), because Pydantic would
