@@ -18,6 +18,7 @@ from tools.candidate_worker.loop_resume import (
     segment_control,
 )
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
+from tools.candidate_worker.parallel_models import HostGrant
 from tools.candidate_worker.preflight import require_credentials
 from tools.candidate_worker.records import verify_candidate_records
 from tools.workspace_sandbox.runner import CancelProbe, SpawnObserver
@@ -299,6 +300,7 @@ def execute_resume(
     record: OperationRecord,
     *,
     cancel_requested: CancelProbe,
+    host_grant: HostGrant | None = None,
     on_sandbox_spawn: SpawnObserver | None = None,
 ) -> None:
     """``on_sandbox_spawn``: a placed (host-ledger) segment publishes its sandbox."""
@@ -311,6 +313,7 @@ def execute_resume(
         initial,
         binding,
         cancel_requested=cancel_requested,
+        host_grant=host_grant,
         on_sandbox_spawn=on_sandbox_spawn,
     )
 

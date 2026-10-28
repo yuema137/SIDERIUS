@@ -15,9 +15,11 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from core.runtime_control.scheduling import HostBudget, Placement, plan_dispatch
+from core.runtime_control.scheduling import HostBudget, Placement, ResourceRequest, plan_dispatch
 from core.subprocess_env import CUDA_VISIBLE_DEVICES_ENV_VAR
 from tools.candidate_worker.models import CandidateRunRequest
+from tools.candidate_worker.parallel_envelope import envelope_request
+from tools.candidate_worker.parallel_models import HostGrant
 
 from .files import canonical, overlap, publish
 from .host_ledger import (
@@ -33,7 +35,7 @@ from .host_ledger import (
     without,
     write_state,
 )
-from .host_liveness import PLACEMENT_FILE
+from .host_liveness import GRANT_FILE, PLACEMENT_FILE
 from .host_queue import QUEUE_FILE, HostQueueTicket
 from .models import (
     CandidateOperation,
@@ -83,6 +85,8 @@ class Admitted:
     placement: Placement
     state: HostLedgerState
     resources: OperationResources
+    #: A parallel run: its placement is an envelope and the child receives a grant.
+    parallel: bool = False
 
 
 class LedgerSlot(HostSlot):
@@ -136,11 +140,16 @@ class LedgerSlot(HostSlot):
         write_state(self.root, state)
         if placement.decision == "queued":
             ticket = HostQueueTicket(
-                ledger_root=self.host.ledger_root, budget=self.host.budget, placement=placement
+                ledger_root=self.host.ledger_root,
+                budget=self.host.budget,
+                placement=placement,
+                grant=self.admitted.parallel,
             )
             publish(path / QUEUE_FILE, ticket)
         else:
             publish(path / PLACEMENT_FILE, placement)
+            if self.admitted.parallel:
+                publish(path / GRANT_FILE, HostGrant(budget=self.host.budget, placement=placement))
 
     def spawned(self, record: OperationRecord, child: subprocess.Popen) -> None:
         # The unreaped child pins its PID, so this identity cannot name a reused PID.
@@ -157,9 +166,17 @@ def host_slot(
     submission: OperationSubmission,
 ) -> Iterator[HostSlot]:
     if host is None:
+        _require_serial_or_own_budget(config, submission)
         yield HostSlot()
         return
     root_operation, resources = _declared(config, submission)
+    parallel = root_operation.request.parallel
+    if parallel is not None and parallel.budget is not None:
+        raise OperationFailure(
+            "parallel_budget",
+            "a ledger-placed parallel run schedules inside its reservation; "
+            "remove parallel.budget from the request",
+        )
     _require_disjoint(host.ledger_root, config, root_operation)
     with locked_ledger(host.ledger_root) as root:
         state = sweep(root)
@@ -177,19 +194,40 @@ def _declared(
     A loop resume inherits its root candidate's declaration and launch request:
     the segment runs that request again in the same workspace.
     """
-    operation = submission
-    if submission.kind == "candidate_loop_resume":
-        from .loop_resume import root_record
-
-        root = root_record(load_record(config, submission.request.predecessor_operation_id))
-        operation = root.submission
-    if not isinstance(operation, CandidateOperation) or operation.resources is None:
+    operation = _root_candidate(config, submission)
+    if operation is None or operation.resources is None:
         raise OperationFailure(
             "resources_required",
             "a budgeted launch requires a candidate (or the loop root of a resume) with a "
             "resources declaration",
         )
     return operation, operation.resources
+
+
+def _root_candidate(
+    config: OperationStoreConfig, submission: OperationSubmission
+) -> CandidateOperation | None:
+    if submission.kind == "candidate_loop_resume":
+        from .loop_resume import root_record
+
+        root = root_record(load_record(config, submission.request.predecessor_operation_id))
+        return root.submission if isinstance(root.submission, CandidateOperation) else None
+    return submission if isinstance(submission, CandidateOperation) else None
+
+
+def _require_serial_or_own_budget(
+    config: OperationStoreConfig, submission: OperationSubmission
+) -> None:
+    """Without a ledger a parallel run must bring its own budget (B3-4a)."""
+    if submission.kind not in ("candidate", "candidate_loop_resume"):
+        return
+    operation = _root_candidate(config, submission)
+    parallel = None if operation is None else operation.request.parallel
+    if parallel is not None and parallel.budget is None:
+        raise OperationFailure(
+            "parallel_budget_required",
+            "a parallel run needs parallel.budget, or a host ledger (--host-ledger) to reserve in",
+        )
 
 
 def _require_disjoint(
@@ -225,12 +263,15 @@ def admit(
             "budget_mismatch",
             f"live ledger entries hold budget {state.budget_digest}; got {budget.digest}",
         )
-    _require_reachable(request, resources)
     unit = resources.request(
         unit_id=str(operation_id),
         dispatch_ordinal=state.next_ordinal,
         wall_seconds=request.timeout_seconds,
     )
+    if request.parallel is not None:
+        # One reservation holds the run's whole envelope (its peak concurrent demand).
+        unit = envelope_request(request, unit)
+    _require_reachable(request, unit)
     state = promote(state, budget)
     waiting = tuple(entry.placement.reserved for entry in state.queued)
     running = tuple(r.placement for r in state.reservations)
@@ -238,12 +279,14 @@ def admit(
     own = [p for p in decision.placements + decision.refused if p.unit_id == str(operation_id)]
     if own[0].decision == "refused":
         raise OperationFailure("resource_refused", "; ".join(own[0].reasons))
-    return Admitted(placement=own[0], state=state, resources=resources)
+    return Admitted(
+        placement=own[0], state=state, resources=resources, parallel=request.parallel is not None
+    )
 
 
-def _require_reachable(request: CandidateRunRequest, resources: OperationResources) -> None:
+def _require_reachable(request: CandidateRunRequest, unit: ResourceRequest) -> None:
     """The child must actually receive the placement the ledger reserves."""
-    if resources.gpu_count == 1:
+    if unit.gpu_count == 1:
         missing = [name for name in GPU_PLACEMENT_NAMES if name not in request.environment_names]
         if missing:
             raise OperationFailure(

@@ -404,6 +404,23 @@ completion bytes unchanged). `read_operation` refuses `integrity` when it
 disagrees with `placement.json`. The release itself is observed by the ledger,
 not recorded in the operation directory.
 
+Parallel runs (B3-4a). A candidate whose request carries `parallel`
+([worker contract](../candidate_worker/candidate-worker-contract.md#parallel-dispatch))
+reserves one entry: its envelope, `envelope_request(request, resources.request(...))`,
+the peak concurrent demand of its declared units (never the sum of all of them),
+with `unit_slots` counted against `max_concurrent_units`. It is placed or queued
+like any submission, and the reachability check (`placement_unreachable`) uses
+the envelope's `gpu_count`. A placed parallel run's operation directory also
+holds write-once `host_grant.json` (`HostGrant`: the ledger budget and the
+envelope placement); a queued one's ticket records `grant: true` and its child
+publishes the grant once placed. The child passes it to `launch_candidate` or
+`execute_resume`. Refusals: a parallel request that also carries
+`parallel.budget` under a ledger is `parallel_budget` (one authority); a
+parallel request without a ledger and without `parallel.budget` is
+`parallel_budget_required`. Release and cancel act on the single reservation,
+so the whole envelope is released at once. Serial runs reserve exactly as
+before.
+
 Scheduling mode. `scheduling_mode` in run invariants describes in-run (graph)
 dispatch only. Host placement is operation provenance (`placement.json`,
 `sandbox.json`, the ledger); a placed candidate's run lock still records
