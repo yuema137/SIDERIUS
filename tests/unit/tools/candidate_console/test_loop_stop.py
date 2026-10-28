@@ -235,6 +235,9 @@ def test_status_loop_bound_from_submission_and_bodies_only_from_receipt(
     condition-completed receipt's verified stop reason is dropped or reshaped."""
     operation_id = uuid4()
     monkeypatch.setattr(
+        "tools.candidate_console.service.operation_admitted", lambda config, value: True
+    )
+    monkeypatch.setattr(
         "tools.candidate_console.service.read_operation",
         lambda config, value: _snapshot(value, receipt),
     )

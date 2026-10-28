@@ -317,6 +317,7 @@ def test_status_projects_resume_segment_bound_and_successor(
     """Fails if a resume segment loses its root bound (hiding Stop/Pause) or the
     successor link is dropped or breaks the strict status view."""
     operation_id = uuid4()
+    monkeypatch.setattr(SERVICE + "operation_admitted", lambda config, value: True)
     monkeypatch.setattr(
         SERVICE + "read_operation",
         lambda config, value: _snapshot(value, kind=kind, receipt=receipt, successor=successor),
