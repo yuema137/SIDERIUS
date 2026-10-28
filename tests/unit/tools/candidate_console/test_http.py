@@ -162,8 +162,44 @@ def test_apps_do_not_share_task_choices(console_config):
     first = client(console_config)
     task = console_config.tasks[0].model_copy(update={"label": "Other task"})
     second = client(console_config.model_copy(update={"tasks": (task,)}))
-    assert first.get("/api/choices").json()[0]["label"] == "Synthetic task"
-    assert second.get("/api/choices").json()[0]["label"] == "Other task"
+    assert first.get("/api/choices").json()["tasks"][0]["label"] == "Synthetic task"
+    assert second.get("/api/choices").json()["tasks"][0]["label"] == "Other task"
+
+
+def test_choices_store_id_is_opaque_and_follows_store_identity(console_config, tmp_path):
+    """Browser intents are keyed by this id: two stores must differ, one store must not."""
+    store = console_config.operation_store
+    first = client(console_config).get("/api/choices").json()["operations_store_id"]
+    again = client(console_config).get("/api/choices").json()["operations_store_id"]
+    moved = console_config.model_copy(
+        update={"operation_store": store.model_copy(update={"state_root": str(tmp_path / "s2")})}
+    )
+    other = client(moved).get("/api/choices").json()["operations_store_id"]
+    assert first == again and first != other
+    assert str(tmp_path) not in first and "/" not in first
+
+
+def test_unknown_operation_is_typed_only_after_a_store_read(prepared, tmp_path):
+    """Forget may follow ``unknown_operation`` only; a missing record file is not absence."""
+    service, selection, _ = prepared
+    api = client(service.config)
+    unknown = api.get(f"/api/operations/{uuid4()}")
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "unknown_operation"
+    assert api.get(f"/api/operations/{selection.operation_id}").status_code == 200
+    # An admitted directory whose record is unreadable must not read as unknown.
+    record = Path(service.config.operation_store.state_root) / "operations"
+    record = record / str(selection.operation_id) / "request.json"
+    record.rename(tmp_path / "request.json.aside")
+    hidden = api.get(f"/api/operations/{selection.operation_id}")
+    assert hidden.status_code == 404 and hidden.json()["error"]["code"] == "not_found"
+    # A store root that is not there cannot prove absence either.
+    gone = service.config.operation_store.model_copy(
+        update={"state_root": str(tmp_path / "never-created")}
+    )
+    missing = client(service.config.model_copy(update={"operation_store": gone}))
+    response = missing.get(f"/api/operations/{uuid4()}")
+    assert response.json()["error"]["code"] != "unknown_operation"
 
 
 def test_unexpected_failure_has_secured_sanitized_response(console_config, monkeypatch, caplog):

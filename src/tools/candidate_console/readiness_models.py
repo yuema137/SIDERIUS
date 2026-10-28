@@ -13,6 +13,6 @@ class CredentialReadiness(PreviewModel):
     unresolved_routes: tuple[str, ...]
     present_names: tuple[str, ...]
     missing_names: tuple[str, ...]
-    file_status: Literal["not_needed", "not_selected", "readable", "unavailable"]
+    file_status: Literal["not_needed", "not_selected", "readable", "missing", "unavailable"]
     ready: bool
     instructions: tuple[str, ...]

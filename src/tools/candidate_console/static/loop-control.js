@@ -3,7 +3,9 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const session = () => window.consoleSession;
-  // request: per selected operation; acknowledgements are memory-only, the receipt is the authority.
+  // request: per selected operation. Recorded Stop/Pause comes from the server status
+  // (loop.stop_requested/pause_requested, read from the worker's durable markers), so a
+  // reload or another tab still sees it (M-1); the receipt decides what took effect.
   let request = null, last = null;
   const counted = (loop, verb) => loop.attempted_iterations == null
     ? `${verb}; the body count is unavailable.`
@@ -23,11 +25,24 @@
     }
     return `${after}: stop condition ${reason.kind}`;
   }
-  const retainedKey = id => 'siderius.loop-resume.v1:' + id.toLowerCase();
-  function retained(review) {
+  // Keyed by the operations store (SEC-4): an id retained for another console's store is
+  // never reused here. Legacy per-origin keys are still read so a pending retry replays.
+  const legacyKey = id => 'siderius.loop-resume.v1:' + id.toLowerCase();
+  const retainedKey = (store, id) => `siderius.loop-resume.v2/${store}/${id.toLowerCase()}`;
+  async function storeId() {
+    return session().operationsStoreId || (await session().choices()).operations_store_id;
+  }
+  function retained(review, store) {
     // One client-generated request UUID per reviewed paused receipt survives reloads, so a retry
     // after an unconfirmed outcome reuses it and the owner replays instead of reserving twice.
-    const key = retainedKey(review.predecessor_operation_id);
+    const key = retainedKey(store, review.predecessor_operation_id);
+    try {
+      const legacy = JSON.parse(localStorage.getItem(legacyKey(review.predecessor_operation_id)) || 'null');
+      if (legacy?.origin === location.origin && legacy.expected_receipt_digest === review.expected_receipt_digest && localStorage.getItem(key) === null) {
+        localStorage.setItem(key, JSON.stringify(legacy));
+        localStorage.removeItem(legacyKey(review.predecessor_operation_id));
+      }
+    } catch (_) { /* An unreadable legacy record is ignored. */ }
     try {
       const value = JSON.parse(localStorage.getItem(key) || 'null');
       if (value?.origin === location.origin && value.expected_receipt_digest === review.expected_receipt_digest) return value.request_id;
@@ -36,13 +51,15 @@
     localStorage.setItem(key, JSON.stringify(value));
     return value.request_id;
   }
+  const stopRecorded = status => !!(request?.stop.acknowledged || status.loop?.stop_requested);
+  const pauseRecorded = status => !!(request?.pause.acknowledged || status.loop?.pause_requested);
   function describe(status) {
     const loop = status.loop, segment = status.kind === 'candidate_loop_resume' ? 'Resumed segment. ' : '';
     if (status.state === 'operation_failed' && !status.receipt_available) return segment + 'Research loop outcome unavailable: the operation failed without a native receipt.';
     if (!status.receipt_available) {
       let text = segment + `Research loop: up to ${loop.final_iteration} bodies. The body count is reported by the native receipt at a completed boundary.`;
-      if (request?.stop.acknowledged) text += ' Stop requested: the current body completes first, and the final iteration or a native failure may still end the loop. Not yet stopped.';
-      else if (request?.pause.acknowledged) text += ' Pause requested: the current body completes first, and the final iteration, a Stop or a native failure may still end the loop. Not yet paused.';
+      if (stopRecorded(status)) text += ' Stop requested: the current body completes first, and the final iteration or a native failure may still end the loop. Not yet stopped.';
+      else if (pauseRecorded(status)) text += ' Pause requested: the current body completes first, and the final iteration, a Stop or a native failure may still end the loop. Not yet paused.';
       return text;
     }
     // Receipt body numbers (attempted, stop_reason iterations) are cumulative over the whole run,
@@ -53,7 +70,7 @@
     if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
     if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed body boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.' : ' No partial body is kept; it can be resumed from the next body after review.');
     if (status.native_status === 'completed' && loop.stop_reason) return `Research loop ${stopReason(loop.stop_reason, loop.final_iteration)}.`;
-    if (status.native_status === 'completed') return counted(loop, 'Research loop finished') + (request?.stop.acknowledged || request?.pause.acknowledged ? ' The request did not take effect before the final iteration.' : '');
+    if (status.native_status === 'completed') return counted(loop, 'Research loop finished') + (stopRecorded(status) || pauseRecorded(status) ? ' The request did not take effect before the final iteration.' : '');
     return counted(loop, `Research loop ended (${status.native_status})`);
   }
   function render(status) {
@@ -72,15 +89,19 @@
     const connected = session().connected;
     const running = status.state === 'active' && !status.receipt_available;
     const pending = request.stop.pending || request.pause.pending;
-    $('loop-stop-group').hidden = !(running && !request.stop.acknowledged);
-    $('loop-pause-group').hidden = !(running && !request.stop.acknowledged && !request.pause.acknowledged);
+    $('loop-stop-group').hidden = !(running && !stopRecorded(status));
+    $('loop-pause-group').hidden = !(running && !stopRecorded(status) && !pauseRecorded(status));
     $('loop-stop').disabled = $('loop-pause').disabled = pending || !connected;
     $('loop-stop-status').textContent = !running ? '' : request.stop.pending ? 'Submitting Stop request…' : request.pause.pending ? 'Submitting Pause request…' : request.stop.error || request.pause.error;
 
     const successor = status.successor_operation_id;
     const link = $('loop-successor');
     $('loop-continued').hidden = !successor;
-    if (successor) { link.textContent = successor; link.href = '#monitor/' + successor; localStorage.removeItem(retainedKey(status.operation_id)); }
+    if (successor) {
+      link.textContent = successor; link.href = '#monitor/' + successor;
+      localStorage.removeItem(legacyKey(status.operation_id));
+      if (session().operationsStoreId) localStorage.removeItem(retainedKey(session().operationsStoreId, status.operation_id));
+    }
     const resumable = status.native_status === 'paused' && !successor && !status.finishing;
     const resume = request.resume, review = resume.review;
     $('loop-resume-group').hidden = !resumable;
@@ -124,7 +145,7 @@
     if (!last || !review || resume.pending || !review.credential_readiness.ready || !session().connected) return;
     resume.pending = true; resume.error = ''; render(last);
     try {
-      const handle = await session().request('loop-resumes', {request_id: retained(review), predecessor_operation_id: review.predecessor_operation_id, expected_receipt_digest: review.expected_receipt_digest});
+      const handle = await session().request('loop-resumes', {request_id: retained(review, await storeId()), predecessor_operation_id: review.predecessor_operation_id, expected_receipt_digest: review.expected_receipt_digest});
       if (current === request) location.hash = 'monitor/' + handle.operation_id;
     } catch (error) {
       if (error.stale) return;

@@ -234,6 +234,19 @@ def test_completed_pause_resumes_actual_body_in_new_process(
         final_iteration=3, attempted_iterations=1
     )
     assert loop_status(config, second) == LoopStatusView(final_iteration=3, attempted_iterations=3)
+    # M-1: requests are read from the worker's own durable markers, with the worker's
+    # scoping: the root's Pause belongs to the root segment only; the successor's to it.
+    from tools.candidate_operations import loop_control_requests
+
+    assert loop_control_requests(config, first_id) == (False, True)
+    assert loop_control_requests(config, next_id) == (False, True)
+    (root / f"continuations/{next_id}/pause.json").rename(tmp_path / "successor-pause.json")
+    assert loop_control_requests(config, next_id) == (False, False), "root Pause leaked"
+    (tmp_path / "successor-pause.json").rename(root / f"continuations/{next_id}/pause.json")
+    (root / "stop.json").write_text(json.dumps(stop))
+    assert loop_control_requests(config, next_id) == (True, True), "Stop is run-scoped"
+    assert loop_status(config, second, requests=True).stop_requested
+    (root / "stop.json").rename(tmp_path / "stop.json.aside")
     console = SimpleNamespace(operation_store=config)
     paused_results = read_graph_results(console, first_id)
     resumed_results = read_graph_results(console, next_id)

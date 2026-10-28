@@ -39,7 +39,8 @@ try {
     assert.equal(request.method(), 'GET');
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
     const reply = json => route.fulfill({status: 200, json});
-    if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    if (url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
     // Monitor lists this console's operations once per connection, also on UUID routes.
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     assert.ok(url.pathname.startsWith(`/api/operations/${operation}`));

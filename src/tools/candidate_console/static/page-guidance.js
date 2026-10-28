@@ -49,13 +49,8 @@
   }
   $('workflow-next-run').addEventListener('click', () => { if (window.newRunGate.ready) location.hash = 'run'; });
   $('onboarding-start').addEventListener('click', () => onboarding.open(0));
-  // Home "Start from a template" opens the template gallery on the Workflow page (not the tour).
-  $('home-start-template').addEventListener('click', event => {
-    event.preventDefault();
-    if (window.consoleNavigation.view === 'workflow') { window.editorTemplates.open(); return; }
-    window.addEventListener('console-view', () => requestAnimationFrame(() => window.editorTemplates.open()), {once: true});
-    location.hash = 'workflow';
-  });
+  // Home "Quick start" (quick-start.js) replaces the former Home template entry; the
+  // gallery stays on the Workflow page.
   // Problems popover (spec §9): opens under the chip, never reflows the canvas.
   function setProblemsOpen(open) {
     const chip = $('problems-chip'), box = $('editor-problems');

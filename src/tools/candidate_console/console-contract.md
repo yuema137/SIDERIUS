@@ -125,10 +125,12 @@ verified configured/prepared association (edited review also verifies saved sour
 and bindings). This ephemeral projection reuses worker `credential_requirements`
 and the strict selected private JSON reader. It returns required/omitted provider
 names, unresolved route node names, present/missing required or declared names,
-`file_status` (`not_needed`, `not_selected`, `readable`, `unavailable`), a `ready`
+`file_status` (`not_needed`, `not_selected`, `readable`, `missing` for a configured
+file that does not exist, `unavailable` for one that exists but cannot be read or
+parsed), a `ready`
 boolean and bounded repair instructions. No file is read when there are no names
 to check. Missing/empty extra declared names also block readiness. Invalid or
-removed files after startup remain reviewable with unavailable status; startup
+removed files after startup remain reviewable with `unavailable`/`missing` status; startup
 `check` still validates configured credential file shape (JSON or dotenv) and
 permissions.
 
@@ -151,12 +153,12 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 
 | Method/path | Input/output |
 | --- | --- |
-| GET /api/choices | ChoiceView array |
+| GET /api/choices | `ChoicesView` `{operations_store_id, tasks: ChoiceView[]}`; `operations_store_id` is 32 lowercase hex, a domain-separated SHA-256 prefix of the admitted `OperationStoreConfig` JSON (never a path); browsers key retained operation intents by it and the project id |
 | POST /api/preparations | PrepareSelection → OperationHandle, 202 |
 | GET /api/preparations/{UUID}/review | PreparedReview |
 | POST /api/candidates | LaunchSelection → OperationHandle, 202 |
 | GET /api/operations | `limit=1..200` (default 50) → `OperationListView`, read-only; see "Operation list" |
-| GET /api/operations/{UUID} | StatusView |
+| GET /api/operations/{UUID} | StatusView; 404 `unknown_operation` only after the private store root was opened and lists no such operation (`operation_admitted`); any other missing file stays 404 `not_found`, which never proves absence |
 | GET /api/operations/{UUID}/tokens | CandidateTokenSnapshot, read-only fixed native projection |
 | GET /api/operations/{UUID}/graph-results | GraphResultsView, read-only per-body native tuning report projection |
 | GET /api/operations/{UUID}/log | kind=native or operation, offset>=0, max_bytes=1..65536 → LogChunk |
@@ -339,7 +341,15 @@ the existing status poll, with recorded values unrounded. The receipt's body
 numbers (`attempted_iterations`, `stop_reason.iteration` and its incumbent
 iterations) are whole-run indices, so a resumed segment's line says "Body numbers
 count the whole run, including earlier segments." The console never
-infers per-body progress from an active process. Fixed and non-candidate
+infers per-body progress from an active process. `stop_requested` and
+`pause_requested` (status only; `false` in the operation list) are read by
+`candidate_operations.loop_control_requests` from the worker's own durable markers
+with the worker's scoping: Stop is run-wide (`candidate_run/stop.json`), Pause belongs
+to this operation's segment only (root `candidate_run/pause.json` or
+`continuations/<segment>/pause.json`). They report recorded requests, never their
+effect; the receipt still decides whether a Stop or Pause took effect. Monitor renders
+the Stop/Pause controls from these fields, so a reload or another tab shows a pending
+Stop and hides Pause once a Stop is recorded. Fixed and non-candidate
 operations omit the field. `StatusView.successor_operation_id` forwards the
 operations readback for a segment that a Resume has continued; the segment keeps
 its own receipt.
@@ -888,8 +898,25 @@ Monitor: `operations-list.js` renders the list as links to
 `#monitor/<UUID>`, so selecting a row uses the existing route and Status and
 logs owner. It loads once per connection (session revision) when any Monitor
 route is shown while connected, including `#monitor/<UUID>`, again whenever the
-bare `#monitor` route is entered, and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
-operation for live status). Manual UUID entry remains available.
+bare `#monitor` route is entered, on **Refresh list**, and every 10 s while Monitor is
+visible, the tab is shown and a listed operation is neither `completed` nor
+`operation_failed` (M-4). Each row reads `<project> · <run name> · <local admitted
+time>` (ISO and UUID on hover) and states its outcome with the shared
+`operationOutcome.sentence`. With advanced tools on, unverified records get a next
+step (`python -m tools.candidate_operations status --store-config … --operation-id …`).
+Manual UUID entry remains available.
+
+Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
+(M-2); `state`, `native_status`, process, reason and validation stay in the developer
+Operation facts. `#operation-observed` shows local time (ISO and UUID in its title).
+After one full read of a terminal state (`completed`/`operation_failed`, process
+`exited`, not `finishing`) the operation is no longer polled (status, log, tokens) and
+the line reads `Final status · observed …` (M-5); a 404 `unknown_operation` reads "This
+console has no operation with this ID…" and also stops polling (M-3). Re-entering
+Monitor or an explicit **Read operation** reads it again. Network failures keep the
+"stale" wording. Displayed log text has ANSI CSI sequences removed (M-6; the source log
+is unchanged) and `#log-notice` states that logs are shown as written and not redacted
+(SEC-1).
 
 ## Persistent views, routing and session
 
@@ -910,14 +937,32 @@ link fallback and no credential form.
 
 `session.js` exclusively owns the Bearer token in closure memory. It exposes
 same-origin API requests and connection/revision notifications, never a token
-getter. The single `access-form` captures and immediately clears the password
+getter. Responses are parsed as JSON only when `content-type` is JSON; a non-JSON
+error becomes `Server error (<status>).` and a non-JSON success is refused. A
+failed fetch or a non-JSON 502/503/504 marks the console **unreachable** without
+disconnecting (token, drafts and intents stay): the collapsed status reads
+`Server unreachable. Retrying…` (`.access-unreachable`), a 5 s read-only
+`GET /api/choices` probe runs while the page is visible, and the next response of
+any kind restores `Connected.`; `console-reachability` events carry
+`{reachable}`. `consoleSession.choices()` is the one reader of `/api/choices` and
+retains `operationsStoreId`. The single `access-form` captures and immediately clears the password
 input. Requests use Authorization, cache no-store and credentials omit; POST
 payloads retain their existing owners. No cookie, storage, URL, history payload,
 event, cross-tab channel or document-transfer mechanism carries credentials.
 Theme enum, optional last-operation UUID and the versioned exact reusable launch
 intent are persisted. The launch intent contains only origin/project navigation
 context, retained preparation identity, request digest and operation UUID; never
-source bytes, native requests or credentials.
+source bytes, native requests or credentials. Operation-bearing records are keyed by the
+opaque operations store id: reusable intents (`…v2/<store>/<project>`) and loop
+Resume request ids (`siderius.loop-resume.v2/<store>/<predecessor UUID>`; a legacy
+`siderius.loop-resume.v1:<UUID>` with the same receipt digest is moved on first use).
+Preferences (theme, view flags, tour) and the last-opened operation UUID stay per
+origin because they are read before connecting. Settings (advanced) **Forget this
+browser's console data** (`browser-data.js`) removes every `siderius.*` key except
+records that may name an unfinished operation (reusable intents of other stores or
+projects, loop Resume ids); it is disabled while the open project's own retained run is
+unreleased (`reusableIntents.clearable()`), asks for confirmation, changes nothing on
+the server and reloads the page.
 Reload/new tab requires Connect again. Once connected, the access card collapses
 on every view to one status line with **Change token** (reopens the form; the
 current connection stays until a new Connect) and **Disconnect console** (clears the
@@ -959,9 +1004,9 @@ It infers neither scientific success nor complete billing.
 
 | Route | Primary content and action | Secondary content (Settings-gated unless noted) |
 | --- | --- | --- |
-| `#home` | Hero (theme-matched logo + one sentence); entry cards **Start from a template** (opens the template gallery on Workflow), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** |
+| `#home` | Hero (theme-matched logo + one sentence); entry cards **Quick start** (`#home-quick-start`, see below), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** (the configured-task quick Prepare form; not a beginner entry, API unchanged for CLI/compatibility) |
 | `#workflow` | Page bar (title + dirty badge, project select, task chip, problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Task package and version (collapsed card below the frame); Exact Python changes, References, Advanced source, Version history, Refresh, canvas help, connection mappings (advanced); Details (developer) |
-| `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; captured resources (developer) |
+| `#run` | Stepper `#run-stepper` (Prepare · Review and launch · Follow in Monitor) and one next-step line `#run-next`; saved-version state; **1 · Prepare** entry `#run-entry[data-run-entry="saved-workflow"]` (**Check inputs** then **Prepare**); **2 · Review and launch** (**Review prepared run** then **Launch run**, inline `#capture-launch-reason`) | Back to workflow; **Run an earlier prepared run instead** (collapsed list); Check status now, operation UUIDs and captured resources (developer) |
 | `#monitor` | Recent operations; Status and logs; loop controls; results; token summary | Operation UUID form, Recorded example (advanced); operation facts, token table (developer) |
 
 `page-guidance.js` is presentation only and owns no request or draft state. It reads
@@ -978,6 +1023,20 @@ Prepared run controllers keep their element IDs and behavior; their task loaders
 on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
+
+**Quick start** (`quick-start.js`): Home `#home-quick-start` routes to `#workflow` and
+opens `#quick-start-dialog`, whose **Task** select mirrors the editor's own
+`#editor-project` options (each project carries its own task and data references).
+**Open research loop** selects that project through the editor's ordinary project
+change (its pending-edits confirmation applies), waits for the saved source, then calls
+`editorTemplates.importById('single-research-loop')`, the gallery's existing import
+path: an unsaved draft, nothing written before Save. No task declares its own template
+yet, so that catalog entry is the default for every task. Rounds, stop conditions and
+training settings are then edited in the ordinary panel. The Run page's step-1 entry is
+one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
+handoff, so another entry can replace it. When this page created a preparation, the
+first observed `prepared` status opens it in step 2 once (a read-only `/select`); Review
+and Launch stay explicit.
 
 Until the canvas draws a capability card, the canvas panel shows the empty start state
 `#workflow-start-guide` (spec §7.2): title **Build your research loop**, one sentence from
@@ -1356,10 +1415,18 @@ receiving this signal. Restored, retried, conflicted or ambiguous requests never
 become dismissible through it. No operation-owner semantics or registry changes.
 
 `reusable-run.js` retains one exact launch intent in localStorage before POST and
-checks readback. Failure prevents POST. Pending intent is independent of current
-project/task/selection, so switching cannot overwrite it. Check/retry is explicit;
-reconnect never submits automatically. Completed or eligible initial refused intent
-requires explicit dismissal and storage readback confirmation. Monitor uses existing
+checks readback. Failure prevents POST. Pending intent is keyed by store and project
+(below), so switching task/selection cannot overwrite it. While the Run view is
+visible and connected, both Run controllers read their retained operation every 2 s
+(paused while the tab is hidden) and once on load, reconnect and Run entry; polling
+stops on release, on an initial refusal and on `unknown_operation` (Retry restarts
+it). `reusable-run.js` also reads the retained preparation's status on load/connect so
+Launch eligibility never waits for a manual check (R-2); a disabled Launch shows its
+first reason inline in `#capture-launch-reason`. Retry is the only re-dispatch and is
+offered only for an unresolved or unknown outcome; reconnect never submits.
+Completed or eligible initial refused intent requires explicit dismissal and storage
+readback confirmation. Operation sentences come from `operation-outcome.js`
+(`operationOutcome.sentence`), shared with Monitor. Monitor uses existing
 Slow-control status/log/token routes and native accepted/rejected states.
 
 Editor projects/source state are exposed through a read-only projection/event:
@@ -1395,7 +1462,12 @@ flow. The New run adapter below consumes this monitor without adding job persist
 POST `/api/editor/{project_id}/reusable-preparations/review` returns `NewRunReview`;
 POST `/prepare` returns existing `OperationHandle` with HTTP 202. `NewRunReview.source_version_name`
 (omitted when absent) is the recorded Save name of `expected_source_sha256`,
-display-only and outside the expectation and native request; the browser keeps it
+display-only and outside the expectation and native request. `NewRunReview.credential_readiness`
+is a name-only precheck read in the server process before Prepare: it checks only the
+task's configured `candidate_environment_names` against `credential_file`
+(`named_credential_readiness((), names, path)`); provider-derived requirements exist
+only after preparation, so capture review and launch recheck them. It is outside the
+expectation and never blocks Prepare. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the
 same authentication/origin/body boundary and threadpool transport as capture APIs.
 Selection accepts only task_id, run_name, run_id, preparation_operation_id and
@@ -1428,16 +1500,27 @@ Editor projection adds `reusableSource` and `saving`. Generation/project/session
 fences invalidate stale task/review responses. Pending intent survives form/source
 changes. Successful preparation is not automatic candidate dispatch.
 
-`reusable-intents.js` coordinates only the candidate and preparation keys:
-`siderius.reusable-candidate.v1` (compatible payload) and
-`siderius.reusable-preparation.v1` (version/origin/project/exact NewRunIntent).
+`reusable-intents.js` coordinates only the candidate and preparation records, keyed
+by the opaque operations store id from `/api/choices` and the editor project:
+`siderius.reusable-{candidate,preparation}.v2/<operations_store_id>/<project>`
+(payload unchanged: version/origin/project/exact intent). A record of another store or
+project is never read, checked or blocking here (`eligible()` covers only the current
+pair). A legacy per-origin `…v1` record whose `project` equals the current project is
+moved once under the current store's key on first context; it is then checked
+against this store like any other record. Without a known store id and project no
+record is read and Prepare/Launch stay disabled.
 Before dispatch/retry/state update/dismissal, stored serialization must equal the
 retained record. Readback failure prevents POST. Release evidence is in memory,
 requires matching kind/UUID/request digest, and is cleared by storage events.
 Completed/operation_failed plus exited process, or confirmed spawn_failed, permits
 release; finishing/unknown/alive does not. Only initial live pre-submit refusal
-permits refused-intent dismissal. Restored/retried/404/transport outcomes retain
-identity. Explicit removal rereads identity and confirms absence. This is advisory
+permits refused-intent dismissal. Restored/retried/404 `not_found`/transport
+outcomes retain identity. **Forget** (R-3): `dispatching(kind, record)` is recorded
+before every POST of the record in this page; a later status read answering typed
+`unknown_operation` (`observeUnknown`) makes the record forgettable, so Forget is
+offered only after this page's own Retry (or first dispatch) was followed by an
+unknown read. Forget asks for confirmation, is never offered while the operation is
+known and unreleased, and only removes the browser record. Explicit removal rereads identity and confirms absence. This is advisory
 coordination, not atomic localStorage locking; the native store serializes effects.
 
 An inspected released preparation history may coexist with candidate launch.

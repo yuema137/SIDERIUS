@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
 from tools.candidate_operations import LogReadRequest
-from tools.candidate_operations.models import OperationFailure
+from tools.candidate_operations.models import OperationFailure, UnknownOperation
 
 from .boundary import RequestBoundary
 from .edited_routes import edited_router
@@ -116,6 +116,10 @@ def create_app(config: ConsoleConfig) -> FastAPI:
                 "not_prepared": "preparation has no verified candidate to review",
             }.get(error.detail.code, "native operation could not be verified")
         )
+        if isinstance(error, UnknownOperation):
+            # Typed absence after a successful store read; the only code that may
+            # justify forgetting a retained intent. Plain 404 ``not_found`` never does.
+            return error_response(404, "unknown_operation", error.detail.message)
         response = error_response(409, error.detail.code, message)
         if isinstance(error, ReusableAdmissionNotAttempted):
             return JSONResponse(
@@ -136,7 +140,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
 
     @app.get("/api/choices")
     def choices():
-        return service.choices()
+        return service.choices_view()
 
     @app.post("/api/preparations", status_code=202)
     async def prepare(request: Request):
@@ -237,6 +241,10 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "session.js": "text/javascript",
             "number-format.js": "text/javascript",
             "operations-list.js": "text/javascript",
+            "operation-outcome.js": "text/javascript",
+            "run-steps.js": "text/javascript",
+            "quick-start.js": "text/javascript",
+            "browser-data.js": "text/javascript",
             "navigation.js": "text/javascript",
             "editor-entry.js": "text/javascript",
             "styles.css": "text/css",
