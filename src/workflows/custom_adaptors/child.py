@@ -53,11 +53,16 @@ def _fail(stage: str, detail: str) -> _Failure:
 
 @contextmanager
 def _bounded_log(path: Path, limit: int) -> Iterator[None]:
-    """Route fd 1 and 2 through a pipe; keep the first ``limit`` bytes in ``path``."""
+    """Route fd 1 and 2 through a pipe; keep the first ``limit`` bytes in ``path``.
+
+    The parent's stdout/stderr pipes are not duplicated or restored: after the
+    ``dup2`` this process holds no descriptor to them, so adaptor code cannot
+    write past the cap into the supervisor's capture. On exit fd 1 and 2 point
+    at ``/dev/null``; failure details travel through the log and failure file.
+    """
     sys.stdout.flush()
     sys.stderr.flush()
     read_fd, write_fd = os.pipe()
-    saved = (os.dup(1), os.dup(2))
     os.dup2(write_fd, 1)
     os.dup2(write_fd, 2)
     os.close(write_fd)
@@ -77,10 +82,10 @@ def _bounded_log(path: Path, limit: int) -> Iterator[None]:
     finally:
         sys.stdout.flush()
         sys.stderr.flush()
-        os.dup2(saved[0], 1)
-        os.dup2(saved[1], 2)
-        for fd in saved:
-            os.close(fd)
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, 1)
+        os.dup2(null, 2)
+        os.close(null)
         thread.join(timeout=5.0)  # Escaped descendants may keep the pipe open.
 
 

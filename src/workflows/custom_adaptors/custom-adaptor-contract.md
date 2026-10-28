@@ -133,8 +133,9 @@ still pass implementation and validation before training.
    inherited `SIDERIUS_TASK_CODE_*` transport reach the child; it needs none.
    The supervisor's watchdog notice is redirected to stderr.
 5. The child routes its fd 1 and 2 through a pipe into `child.log`, keeping the
-   first `MAX_LOG_BYTES` (64 KiB) and discarding the rest, so the supervisor's
-   in-memory capture stays small. It calls `bootstrap_code_package(carrier,
+   first `MAX_LOG_BYTES` (64 KiB) and discarding the rest, and closes its only
+   references to the parent's pipes, so the supervisor's in-memory capture
+   stays small. It calls `bootstrap_code_package(carrier,
    digest)`, which verifies every member pin before any adaptor code runs, and
    validates inputs. It then creates the `entered` marker with `O_EXCL`
    immediately before the first member import. After that point adaptor code
@@ -262,8 +263,11 @@ refusal, post-capture edit). Synthetic plugin:
 - No workflow reference, preparation pin, run lock, `CustomExecutionEvidence`
   or replay yet (B6-6a/b); no GUI (B6-7); no LLM adaptors (B6-8).
 - No network or filesystem isolation (see above).
-- The log cap covers fd 1 and 2 as installed by the child. Code that duplicated
-  those descriptors before the redirect (none in the framework; adaptor code
-  runs later) or a descendant that escapes the process group could bypass it.
+- The log cap: the child replaces fd 1 and 2 with its capped pipe and keeps no
+  descriptor to the parent's stdout/stderr pipes, so adaptor code cannot write
+  past the cap into the supervisor's capture (regression: writes to every fd
+  3–64). It does not bound files on disk: adaptor code can still write to the
+  open `child.log` descriptor or any file the operator can write. The parent
+  reads only the log's tail.
 - The child imports native schema modules, which import `torch`; each child
   start costs about 1.5–2 s on the development host.

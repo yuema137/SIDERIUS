@@ -179,6 +179,41 @@ def test_invalid_parameters_fail_without_running_adapt(tmp_path: Path) -> None:
     assert str(caught.value).startswith("[custom_exception] parameters:")
 
 
+def test_adaptor_cannot_flood_the_parent_capture(tmp_path: Path, monkeypatch) -> None:
+    # Defect: a kept duplicate of the parent's stdout/stderr let adaptor code
+    # bypass the 64 KiB log cap and fill the supervisor's in-memory capture.
+    from workflows.custom_adaptors import process
+    from workflows.custom_adaptors.invocation import MAX_LOG_BYTES
+
+    observed = []
+    real = process.supervise_subprocess
+
+    def recording(*args, **kwargs):
+        result = real(*args, **kwargs)
+        observed.append(result.completed)
+        return result
+
+    monkeypatch.setattr(process, "supervise_subprocess", recording)
+    _, manifest = _project(tmp_path)
+    source = (manifest.parent / "sibling_digest.py").read_text()
+    _replace_entry(
+        manifest,
+        source.replace(
+            "    ctx.log(",
+            "    import os\n"
+            "    for fd in range(1, 65):\n"
+            "        try:\n"
+            "            os.write(fd, b'x' * 1_000_000)\n"
+            "        except OSError:\n"
+            "            pass\n"
+            "    ctx.log(",
+        ),
+    )
+    _run_fixture(manifest, tmp_path / "control")
+    completed = observed[0]
+    assert len(completed.stdout or "") + len(completed.stderr or "") <= MAX_LOG_BYTES
+
+
 def test_child_refuses_member_edited_after_capture(tmp_path: Path) -> None:
     # Defect: a child importing current disk bytes would run code that was never
     # admitted. The captured pins must be verified before adaptor code executes.
