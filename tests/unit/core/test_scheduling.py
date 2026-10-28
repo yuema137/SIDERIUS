@@ -254,6 +254,18 @@ def test_budget_digest_tracks_schedulable_content_but_not_its_source():
     assert reordered.digest != base.digest  # declared slot order decides first-fit
 
 
+def test_shared_gpu_acknowledgment_leaves_existing_budget_digests_unchanged():
+    """B3-Q6 field: a budget that does not set it keeps its pre-B3-5 digest.
+
+    The literal was computed from the B3-2 revision (a5028bc3) before the field
+    existed; serializing ``false`` would change every recorded budget digest.
+    """
+    budget = _budget(_slot("GPU-aaaa", 40.0), units=8)
+    assert budget.digest == "d102373eb72f3b9f5a0aa69fb4fba431bab66157e9934759d3d01acf933d1f9d"
+    acknowledged = budget.model_copy(update={"acknowledge_shared_gpu_time_budget": True})
+    assert acknowledged.digest != budget.digest
+
+
 def test_host_memory_derives_only_from_a_declared_positive_role_cap():
     """Inherited or uncapped roles have no bound; guessing one would invent a host cap."""
     declared = RoleCeiling(role="training", gib=24, source="environment")

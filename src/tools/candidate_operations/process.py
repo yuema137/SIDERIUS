@@ -77,14 +77,49 @@ def _stat(pid: int) -> tuple[str, int]:
 
 
 def current_identity(record: OperationRecord) -> ProcessIdentity:
-    _, ticks = _stat(os.getpid())
+    return identity_of(record, os.getpid())
+
+
+def identity_of(record: OperationRecord, pid: int) -> ProcessIdentity:
+    """Identity of a process this caller started and has not reaped (so its PID is pinned)."""
+    _, ticks = _stat(pid)
     return ProcessIdentity(
         operation_id=record.submission.request_id,
         request_digest=record.request_digest,
         boot_id=_boot_id(),
-        pid=os.getpid(),
+        pid=pid,
         start_ticks=ticks,
     )
+
+
+def session_members(session_id: int) -> int | None:
+    """Count live (non-zombie) processes in one session; ``None`` when unobservable.
+
+    Linux keeps a session ID allocated while any process still belongs to it, so a
+    surviving member of an exited leader's session is counted, never confused with
+    an unrelated process that reused the number.
+    """
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return None
+    if not Path("/proc/self/stat").is_file():
+        return None
+    count = 0
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            fields = Path(f"/proc/{name}/stat").read_text().rsplit(")", 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            continue  # exited while scanning
+        except (OSError, IndexError):
+            return None
+        if len(fields) < 4:
+            return None
+        if fields[0] not in {"Z", "X", "x"} and int(fields[3]) == session_id:
+            count += 1
+    return count
 
 
 def observe(identity: ProcessIdentity) -> ProcessObservation:

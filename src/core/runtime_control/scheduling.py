@@ -22,6 +22,7 @@ from pydantic import (
     Field,
     NonNegativeInt,
     PositiveInt,
+    StrictBool,
     model_validator,
 )
 
@@ -126,6 +127,12 @@ class HostBudget(BaseModel):
     cpu_slots: PositiveCount
     max_concurrent_units: PositiveCount
     source: Literal["caller", "file"]
+    #: Decision B3-Q6: the operator accepts that units sharing one GPU contend for
+    #: wall time, so time-budgeted runs may share a slot. Omitted when false, so
+    #: a budget that does not set it keeps its digest.
+    acknowledge_shared_gpu_time_budget: StrictBool = Field(
+        default=False, exclude_if=lambda value: value is False
+    )
 
     @model_validator(mode="after")
     def _distinct_homogeneous_slots(self) -> HostBudget:

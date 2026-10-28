@@ -2,10 +2,10 @@
 
 Owner: `scheduling.py`. Scope: typed resource requests, an explicit host
 budget, and the pure `plan_dispatch` decision that places, queues or refuses
-ready units against a reservation ledger. This module has no production
-dispatch caller yet; budget intake, the run-invariant fields and the child
+ready units against a reservation ledger. Its first production
+caller is the cross-operation host ledger (B3-5a); budget intake, the run-invariant fields and the child
 environment projection are below; process dispatch, receipts and timing are
-later owners (B3-4, B3-5). Without a
+later owners (B3-4, B3-5b). Without a
 `HostBudget`, execution remains serial and nothing here is consulted.
 
 ## Inputs
@@ -33,6 +33,10 @@ later owners (B3-4, B3-5). Without a
   (`caller` or `file`). There are no defaults: every quantity is an explicit
   operator input. Measured capacity alone and `hardware_models._SAFETY_FRACTION`
   are never promoted into a budget. Duplicate slot UUIDs refuse.
+  `acknowledge_shared_gpu_time_budget` (strict bool, default `false`, omitted
+  from serialization and the digest when false) is the operator's acceptance
+  that time-budgeted runs may share a GPU slot (decision B3-Q6); dispatching
+  owners refuse such sharing without it.
   Heterogeneous hardware classes refuse (decision B3-Q3): the proposer's
   `hardware_context` is LLM-visible and must not depend on placement.
 - `HostBudget.digest`: SHA-256 hex of the sorted-key compact JSON of every
@@ -153,9 +157,13 @@ variable).
   unit, replacing any inherited value). The default `None` leaves the
   environment exactly as before; no other key changes with a placement.
 
-No launch flag or console upload calls the loader yet: a run that recorded
-`parallel-v1` while still dispatching serially would misstate its trace
-semantics, so wiring belongs with the dispatching owner (B3-4/B3-5).
+The candidate operations CLI (`submit --host-budget FILE`, B3-5a) is the first
+caller of the loader; it places whole operations through the host reservation
+ledger ([candidate operations contract](../../tools/candidate_operations/candidate-operations-contract.md#host-reservation-ledger))
+and does not set `LockLaunchIdentity.host_budget`: a run that recorded
+`parallel-v1` while its graph still dispatches serially would misstate its
+trace semantics, so that binding belongs with B3-4. No console upload calls
+the loader yet.
 
 ## Limits and validation
 
