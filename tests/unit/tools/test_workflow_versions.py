@@ -152,7 +152,8 @@ def test_record_write_failure_is_atomic_and_reported_after_source_save(editor, m
     proposed = SOURCE.replace("old.json", "b.json")
     with pytest.raises(AuthoringError) as error:
         _save(editor, proposed, "next")
-    assert error.value.code == "version_record"
+    # Distinct from the pre-write "version_record" refusal: the browser adopts `current`.
+    assert error.value.code == "version_record_not_updated"
     assert error.value.current is not None and error.value.current.source == proposed
     assert version_record_path(editor.project.source_file).read_bytes() == record_before
     assert not [p for p in editor.project.source_file.parent.iterdir() if p.suffix == ".tmp"]
@@ -163,6 +164,40 @@ def test_record_write_failure_is_atomic_and_reported_after_source_save(editor, m
         ("observed", None),
         ("saved", "after"),
     ]
+
+
+def test_row_cap_not_byte_cap_bounds_a_worst_case_record(tmp_path):
+    """Fails if a full record of maximal names could hit the byte cap before the row cap.
+
+    Otherwise a valid 1000-row record would be unwritable/unreadable with a refusal
+    that names only one limit.
+    """
+    from datetime import UTC, datetime, timedelta, timezone
+
+    from tools.workflow_authoring.versions import RecordedVersion, appended_record, encode_record
+
+    source = tmp_path / ("w" * 252 + ".py")
+    stamp = datetime(
+        2026, 1, 1, 0, 0, 0, 123456, tzinfo=timezone(timedelta(hours=-11, minutes=-30))
+    )
+    full = VersionRecord(
+        source_name=source.name,
+        versions=tuple(
+            RecordedVersion(
+                sha256=f"{index:064x}",
+                name=f"{index:04d}" + "\U0001f600" * 60,
+                recorded_at=stamp,
+                origin="saved",
+            )
+            for index in range(versions.MAX_VERSIONS)
+        ),
+    )
+    assert len(encode_record(full)) <= versions.MAX_VERSION_RECORD_BYTES
+    with pytest.raises(versions.VersionRecordError) as error:
+        appended_record(source, full, f"{999:064x}", "f" * 64, "next", datetime.now(UTC))
+    message = str(error.value)
+    assert f"{versions.MAX_VERSIONS} versions" in message
+    assert f"{versions.MAX_VERSION_RECORD_BYTES // 1024} KiB" in message
 
 
 def test_record_schema_refuses_ambiguous_history():

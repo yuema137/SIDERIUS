@@ -20,6 +20,7 @@ from tools.workflow_authoring.models import (
     ReviewRequest,
     SaveRequest,
 )
+from tools.workflow_authoring.node_edits import add_node, remove_node
 from tools.workflow_authoring.service import AuthoringError, WorkflowAuthoring
 from workflows.definition import (
     ArgumentBinding,
@@ -275,3 +276,62 @@ def test_incomplete_node_is_draft_only_and_complete_node_saves(tmp_path):
     saved = editor.project.source_file.read_text()
     assert "# author note: keep me" in saved and "# trailing comment" in saved
     assert "validate2" in {node.id for node in parse_workflow_source(saved).definition.nodes}
+
+
+INLINE_PAIR = (
+    SOURCE.replace(" ExternalRequest\n", " ExternalRequest, NodePosition\n")
+    .replace(
+        '(binding="seed")),)',
+        '(binding="seed")),  # a, b\n NodeInstance(id="q", capability="proposal", '
+        'request=ExternalRequest(binding="seed")))',
+    )
+    .replace(
+        "))\n",
+        '), positions=(NodePosition(node="p", x=0.0, y=0.0), NodePosition(node="q", x=1.0, y=1.0)))\n',
+    )
+)
+
+
+def test_removing_the_first_of_two_comma_less_elements_keeps_a_tuple():
+    """Fails if ``(A, B)`` minus ``A`` leaves ``(B)``: a parenthesised value, not a tuple."""
+    from workflows.definition.source_edits import remove_nodes
+
+    source = INLINE_PAIR.replace("),  # a, b\n", "), ")
+    assert 'NodePosition(node="q", x=1.0, y=1.0)))' in source  # no trailing comma in either
+    left = remove_nodes(source, ("p",))
+    document = parse_workflow_source(left)
+    assert [node.id for node in document.definition.nodes] == ["q"]
+    assert [position.node for position in document.positions] == ["q"]
+
+
+def test_removal_keeps_a_comment_owned_by_the_previous_element():
+    """Fails if removing the last element also deletes the comment trailing its predecessor."""
+    from workflows.definition.source_edits import remove_nodes
+
+    left = remove_nodes(INLINE_PAIR, ("q",))
+    assert '(binding="seed")),  # a, b\n' in left
+    assert [node.id for node in parse_workflow_source(left).definition.nodes] == ["p"]
+
+
+def test_insertion_leaves_a_trailing_comment_on_its_own_element():
+    """Fails if a new node is spliced between the last node and its trailing comment."""
+    source = commented_canonical().replace(
+        "            ),\n        ),\n    ),\n    positions=(",
+        "            ),  # last node note\n        ),\n    ),\n    positions=(",
+    )
+    added = add_node(add(source, arguments=BOUND))[0]
+    assert (
+        "            ),  # last node note\n            NodeInstance(\n                id='validate2'"
+        in added
+    )
+    back = remove_node(RemoveNodeProposal(kind="remove_node", source=added, nodes=("validate2",)))
+    assert back[0] == source
+
+
+def test_crlf_source_round_trips_byte_identically():
+    """Fails if inserted lines use bare LF in a CRLF file, or add-then-remove changes bytes."""
+    source = commented_canonical().replace("\n", "\r\n")
+    added = add_node(add(source, arguments=BOUND))[0]
+    assert "validate2" in added and "\n" not in added.replace("\r\n", "")
+    back = remove_node(RemoveNodeProposal(kind="remove_node", source=added, nodes=("validate2",)))
+    assert back[0] == source

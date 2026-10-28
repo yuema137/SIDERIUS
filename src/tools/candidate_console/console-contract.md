@@ -441,7 +441,10 @@ returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
 `/api/editor/{project_id}/versions` returns `VersionList` and GET
 `/versions/{index}?sha256=` returns read-only `VersionDetail` (see named versions
 in the authoring contract); `editor-versions.js` renders the Save name field and
-Version history panel and owns no record policy. `GET /api/editor/node-catalog`
+Version history panel and owns no record policy. Save error `version_record`
+means nothing was written (the reviewed proposal is retained); the distinct
+`version_record_not_updated` means the source was saved but its record was not, so
+`editor.js` adopts the returned saved `current` view. `GET /api/editor/node-catalog`
 and `POST /api/editor/{project_id}/node-draft` serve the node palette (a project
 named `node-catalog`, like `projects`, is shadowed by the fixed route). The existing console
 Bearer token, origin, host and 256 KiB wire-body admission apply to every API
@@ -590,7 +593,7 @@ gets `.has-required-unbound` (red outline/glow) and a `.circuit-problem-badge`.
 server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
 (`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
 focuses the inspector select for `field` (and marks the canvas input
-`.problem-focus`); an unlocated item opens Advanced → Source at its line. The
+`.problem-focus`); an unlocated item opens Advanced source at its line. The
 list never enables Review: Review remains disabled for an incomplete draft.
 Witness: `tests/browser/required_defaults.mjs`.
 
@@ -622,11 +625,22 @@ History: every operation records one undo step (consecutive typing in one field
 coalesces, limit 200). **Undo**/**Redo** buttons and Ctrl/Cmd+Z,
 Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only) restore
 earlier states and invalidate any review. **Discard changes** restores the loaded
-state without reading disk and is itself undoable; **Refresh from disk** re-reads
-and asks first when dirty. Undo/Redo/Discard are disabled while Source text is
-dirty, during Save and while a conflict is shown (the conflict panel's own
-Discard/Rebase apply; Rebase makes the current disk version Discard's target and
-stays disabled while binding patches are pending). A dirty draft prefixes the
+state without reading disk and is itself undoable, including dirty Source text:
+the discard step carries the typed text (`sourceText`) and Undo restores it as
+dirty Source text (invalid training/loop field text is not kept). **Refresh from
+disk** re-reads and asks first when dirty. Undo/Redo are disabled while Source
+text is dirty or an invalid training/loop field draft is pending (Ctrl/Cmd+Z
+then reports why and keeps the typed text); Undo/Redo/Discard are disabled
+during Save and while a conflict is shown (the conflict panel's own
+Discard/Rebase apply). Rebase stays disabled while binding patches are pending;
+it makes the current disk version Discard's target and restarts history there.
+Structured edits are re-applied onto the disk projection by a three-way merge
+(`editorDraft.reapply`, ancestor = the previous base document; arrays merge by
+`id`/`node`/`name`; where both sides changed one value the draft's value wins
+and the status names the paths), so later proposals keep the disk change.
+Pending Source text (dirty, or reviewed into the anchor) is a whole-file
+proposal and is kept unchanged; the status states that it does not include the
+disk change. A dirty draft prefixes the
 page title with `* `, shows an "Unsaved changes" badge in the Workflow heading and
 arms the `beforeunload` guard. Save still writes exactly the reviewed bytes and
 resets history to the saved state.
@@ -836,7 +850,8 @@ open, project not runnable, not a reusable declaration, conflict, saving, unsave
 edits). Those reasons explain a closed gate and never open it. The New run and
 Prepared run controllers keep their element IDs and behavior; their task loaders run
 on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
-opening a disclosure.
+opening a disclosure, and scrolls to the capture heading only after the
+`console-view` event shows the Run panel (next animation frame).
 
 When the connection is absent or no workflow source is open, Workflow shows
 **Start from a task example** (select a task, edit, save, run) with a one-line state.

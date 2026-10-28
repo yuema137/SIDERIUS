@@ -27,8 +27,10 @@ class TrainingControlHelp(BaseModel):
     """Inline help copied from the native settings JSON schema, never authored here.
 
     Absent keys stay ``None``: the editor shows only what the schema declares.
-    ``schema_default`` is the launch-config field default; ``effective`` on the
-    control is the resolved native value for this document.
+    ``schema_default`` is the launch-config field default and is meaningful only when
+    ``has_schema_default`` is true; a declared ``None`` default and an absent default
+    are therefore distinct. ``effective`` on the control is the resolved native value
+    for this document.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -38,6 +40,7 @@ class TrainingControlHelp(BaseModel):
     maximum: float | None = None
     exclusive_minimum: float | None = None
     exclusive_maximum: float | None = None
+    has_schema_default: bool = False
     schema_default: JsonValue = None
 
 
@@ -82,6 +85,7 @@ def control_help(name: str) -> TrainingControlHelp:
         maximum=declared("maximum"),
         exclusive_minimum=declared("exclusiveMinimum"),
         exclusive_maximum=declared("exclusiveMaximum"),
+        has_schema_default="default" in field,
         schema_default=field.get("default"),
     )
 

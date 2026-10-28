@@ -1,10 +1,13 @@
 /* Contract colour/shape tokens for circuit ports, wires, legend and mapping chips.
- * editor-contract-presentation.js sets data-contract-* and --contract-colour. */
+ * editor-contract-presentation.js sets data-contract-* and --contract-colour.
+ * Every token keeps >= 3:1 non-text contrast (WCAG 1.4.11) against each card tint,
+ * --panel, --bg and --control in both themes; the light proposal and implementation
+ * hues are darkened from their capability accents to meet that floor. */
 :root {
   --contract-interpretation: var(--capability-interpretation);
   --contract-literature: var(--capability-literature);
-  --contract-proposal: var(--capability-proposal);
-  --contract-implementation: var(--capability-implementation);
+  --contract-proposal: #ad7410;
+  --contract-implementation: #13918d;
   --contract-validation: var(--capability-validation);
   --contract-tuning: var(--capability-tuning);
   --contract-neutral: var(--muted);
@@ -12,6 +15,8 @@
   --contract-green: #4f7a12;
 }
 :root[data-theme="dark"] {
+  --contract-proposal: var(--capability-proposal);
+  --contract-implementation: var(--capability-implementation);
   --contract-magenta: #e08ad0;
   --contract-green: #9cc95a;
 }
@@ -26,9 +31,12 @@
 .circuit-contract-swatch[data-contract-shape="capsule"] { width: 14px; border-radius: 5px; }
 .circuit-port[data-contract-shape] .circuit-port-contract { border-color: var(--contract-colour); color: var(--text); }
 .circuit-port[aria-pressed="true"] .circuit-socket { box-shadow: 0 0 0 3px var(--focus); }
-/* Connection preview: compatible inputs glow, incompatible inputs dim. */
+/* Connection preview: compatible inputs glow; incompatible inputs dim only the socket
+ * and dash the contract pill, so the label text keeps its >= 4.5:1 contrast. */
 .circuit-port.compatible .circuit-socket { box-shadow: 0 0 0 4px var(--focus); }
-.circuit-port.incompatible { opacity: .38; }
+.circuit-port.incompatible { opacity: 1; }
+.circuit-port.incompatible .circuit-socket { opacity: .35; }
+.circuit-port.incompatible .circuit-port-contract { border-style: dashed; }
 /* The dashed pending wire ends under the pointer; it must not hide the drop target. */
 .circuit-pending { pointer-events: none; }
 .circuit-wire[data-contract-shape] { stroke: var(--contract-colour); }
