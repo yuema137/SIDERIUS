@@ -196,14 +196,39 @@ def validate_model_parameter_rules(
 ) -> None:
     """Launch-time check of ``model_config`` rules against a fixed model.
 
-    With ``force_model`` every attempt executes this model, so a misdeclared
-    lock is refused once before any attempt instead of failing each one.
+    With ``force_model`` every attempt executes this model, so a rule that can
+    never pass for it is refused once before any attempt instead of failing
+    each one. The full resolver runs on an empty model configuration for the
+    forced model: targets must exist in its config class, ``model_type``
+    rules of every kind are judged against it, and exact values are applied.
+    Values the planner chooses later stay deferred.
     """
-    declarations = (
-        ("task", task_rules or ParameterRules()),
-        ("workflow", workflow_rules or ParameterRules()),
+    selected = [
+        ParameterRules(
+            rules={
+                path: rule
+                for path, rule in (rules or ParameterRules()).rules.items()
+                if path.startswith("model_config.")
+            }
+        )
+        for rules in (task_rules, workflow_rules)
+    ]
+    model_config: dict[str, Any] = {}
+    for rules in selected:
+        for path, rule in rules.rules.items():
+            if rule.kind != "exact":
+                continue
+            parent = model_config
+            for part in path.split(".")[1:-1]:
+                # A plan supplies nested parents; the launch document must too.
+                parent = parent.setdefault(part, {})
+    resolve_parameter_rule_document(
+        {"model_type": model_type, "model_config": model_config},
+        task_rules=selected[0],
+        workflow_rules=selected[1],
+        defer_missing_non_exact=True,
+        defer_unknown_model=False,
     )
-    _validate_model_rule_paths({}, declarations, model_type, defer_unknown_model=False)
 
 
 def _validate_parameter_path(path: str, rules: Iterable[ParameterRule]) -> None:
@@ -442,6 +467,7 @@ def resolve_parameter_rule_document(
     task_rules: ParameterRules | None = None,
     workflow_rules: ParameterRules | None = None,
     defer_missing_non_exact: bool = False,
+    defer_unknown_model: bool = False,
     executed_model_type: str | None = None,
 ) -> dict[str, Any]:
     """Resolve the same typed rules on a plan or proposal baseline mapping.
@@ -449,11 +475,12 @@ def resolve_parameter_rule_document(
     The caller owns its resulting schema. This function never mutates the
     authored input: exact rules create effective values in the returned copy,
     while other rule kinds only validate existing values. A proposal baseline
-    may defer an omitted non-exact field, and a model not yet known or
-    registered, until the tuner chooses it; the tuner itself uses the strict
-    default and must validate the effective plan. ``executed_model_type`` is
-    the model that will run (``force_model`` or the plan's ``model_type``);
-    it defaults to the document's top-level ``model_type``.
+    may defer an omitted non-exact field (``defer_missing_non_exact``) and a
+    model that is not known or registered yet (``defer_unknown_model``) until
+    the tuner chooses them; the tuner itself uses the strict defaults and must
+    validate the effective plan. ``executed_model_type`` is the model that
+    will run (``force_model``, the plan's ``model_type``, or a proposal's
+    model name); it defaults to the document's top-level ``model_type``.
     """
     declarations = (
         ("task", task_rules or ParameterRules()),
@@ -475,7 +502,7 @@ def resolve_parameter_rule_document(
         resolved,
         declarations,
         executed_model_type,
-        defer_unknown_model=defer_missing_non_exact,
+        defer_unknown_model=defer_unknown_model,
     )
     for path in sorted(paths):
         exact_values = [
