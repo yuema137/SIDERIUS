@@ -34,6 +34,13 @@
     } else text.textContent = current.reviewedTypedSource
       ? 'The workflow is checked. Save writes the Python text you typed in Advanced source as a new version.'
       : 'The workflow is checked. Save writes exactly the checked file as a new version.';
+    // Red-team S-1: the server lists the comments these exact bytes drop; say so in plain words.
+    const lost = current.removedComments, warning = $('editor-save-comments');
+    warning.hidden = !lost.length;
+    if (lost.length) {
+      const shown = lost.slice(0, 3).map(comment => comment.length > 60 ? comment.slice(0, 59) + '…' : comment).join(', ');
+      warning.textContent = `Saving rewrites the file: ${lost.length} comment${lost.length === 1 ? '' : 's'} will be removed (${shown}${lost.length > 3 ? ', …' : ''}).`;
+    }
   }
   function syncStrip() {
     const current = state();
@@ -47,6 +54,27 @@
   strip.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); showStrip(false); $('editor-review').focus(); } });
   // Pressing Save again re-opens the step even when the check result is unchanged.
   $('editor-review').addEventListener('click', () => { wasReviewed = false; });
+
+  // --- Workflow identity: version tag and dirty dot (tour #18) ----------------------------
+  const tag = element('span', '', null, 'version-tag'); tag.id = 'editor-version-tag'; tag.hidden = true;
+  const dot = element('span', '', tag, 'dirty-dot'); dot.setAttribute('aria-hidden', 'true');
+  const tagName = element('span', '', tag, 'version-tag-name');
+  const tagDirty = element('span', ' · unsaved changes', tag, 'sr-only');
+  $('editor-project').after(tag);
+  function syncTag() {
+    const current = state(), versions = window.editorVersions;
+    const opened = window.consoleSession.connected && current.sourceAvailable && !!current.savedSha256;
+    tag.hidden = !opened || !versions?.loaded;
+    if (tag.hidden) return;
+    // A file the console never saved is not a saved version (red-team A-6/A-7).
+    const name = versions.nameFor(current.savedSha256), recorded = versions.recorded(current.savedSha256);
+    tagName.textContent = name || 'Not saved here yet';
+    tag.classList.toggle('unrecorded', !recorded);
+    dot.hidden = !current.dirty; tagDirty.hidden = !current.dirty;
+    tag.title = (recorded && name ? `Saved version "${name}"` : 'This file has no version saved in the console yet') +
+      (current.dirty ? '. You have unsaved changes.' : '.');
+  }
+  window.addEventListener('editor-versions', syncTag);
 
   // --- Task chip -----------------------------------------------------------------------
   function openTaskPanel(focus) {
@@ -68,13 +96,16 @@
   if (window.uiSettings?.isEnabled('advanced')) $('editor-task-panel').open = true;
 
   // --- Icon buttons and overflow menu -------------------------------------------------
-  for (const [id, icon] of [['editor-undo', 'undo-2'], ['editor-redo', 'redo-2'], ['editor-discard-draft', 'rotate-ccw']]) {
+  for (const [id, icon] of [['editor-undo', 'undo-2'], ['editor-redo', 'redo-2']]) {
     const button = $(id); if (!button) continue;
     const text = button.textContent; button.textContent = '';
     button.classList.add('icon-button'); button.dataset.icon = icon; button.setAttribute('aria-label', text);
     element('span', text, button, 'sr-only');
     if (!button.title) button.title = text;
   }
+  // Revert keeps a visible label beside its icon, so it never reads as a second Undo (red-team A-5).
+  const revert = $('editor-discard-draft');
+  if (revert) { revert.dataset.icon = 'rotate-ccw'; revert.classList.add('revert-button'); revert.title = 'Revert to saved: drop unsaved changes (Undo brings them back)'; }
   function menu() {
     const box = element('details', '', document.querySelector('#view-workflow .workflow-next'), 'overflow-menu');
     const summaryButton = element('summary', '', box, 'icon-button'); summaryButton.dataset.icon = 'ellipsis';
@@ -90,7 +121,8 @@
     item('New from template…', 'layout-template', () => window.editorTemplates?.open());
     item('Take the tour', 'circle-question-mark', () => window.consoleOnboarding?.open(0));
     item('Task package and version', 'flask-conical', () => openTaskPanel(true));
-    item('Version history', 'file-clock', () => reveal('editor-history'), 'advanced');
+    // Beginner entry (red-team A-3): history lists saved versions and restores one as a draft.
+    item('Version history', 'file-clock', () => reveal('editor-history'));
     item('Advanced source', 'code-xml', () => reveal('editor-advanced'), 'advanced');
     item('Settings…', 'settings', () => $('settings-toggle').click());
     box.addEventListener('keydown', event => { if (event.key === 'Escape' && box.open) { box.open = false; summaryButton.focus(); } });
@@ -122,12 +154,13 @@
     const problems = document.querySelectorAll('#editor-problems .editor-problem').length;
     const checking = /checking/.test($('editor-pending').textContent);
     $('editor-save-reason').textContent = !opened || !$('editor-review').disabled ? ''
-      : problems ? `Fix ${problems} problem${problems === 1 ? '' : 's'} to save` : current.saving ? 'Saving…' : checking ? 'Checking…' : '';
+      : problems ? `Fix ${problems} problem${problems === 1 ? '' : 's'} to save` : current.saving ? 'Saving…'
+      : current.inspectionFailed ? 'Check failed: press Check again' : checking ? 'Checking…' : '';
     $('workflow-next-reason').textContent = !opened || !$('workflow-next-run').disabled ? ''
       : !current.candidateEnabled ? 'Not set up for runs' : 'Save a version to run';
   }
   // controls() announces its state before it sets the buttons' disabled flags: read them after.
-  function sync() { syncStrip(); syncChip(); queueMicrotask(syncReasons); fitWorkspace(); }
+  function sync() { syncStrip(); syncChip(); syncTag(); queueMicrotask(syncReasons); fitWorkspace(); }
   new MutationObserver(syncReasons).observe($('editor-problems'), {childList: true, subtree: true, attributes: true});
   window.addEventListener('new-run-gate', syncReasons);
   window.addEventListener('workflow-editor-state', sync);

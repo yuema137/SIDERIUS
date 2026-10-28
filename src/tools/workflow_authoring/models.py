@@ -1,5 +1,6 @@
 """Bounded authoring requests and projections of the existing declaration."""
 
+import unicodedata
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
@@ -248,10 +249,32 @@ class ReviewRequest(Model):
         return self
 
 
-# 1-64 characters, no control characters, no leading/trailing whitespace.
+# 1-64 characters, no control characters, no leading/trailing whitespace. Records
+# written before invisible characters were refused keep loading with this type.
 VersionName = Annotated[
     str, Field(pattern=r"^[^\s\x00-\x1f\x7f](?:[^\x00-\x1f\x7f]{0,62}[^\s\x00-\x1f\x7f])?$")
 ]
+# Characters that render as nothing (zero-width, bidi and other format controls, line and
+# paragraph separators, private-use and unassigned code points): a name containing one
+# looks identical to a different name in history.
+_INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
+def _visible_name(value: str) -> str:
+    hidden = sorted(
+        {
+            f"U+{ord(char):04X}"
+            for char in value
+            if unicodedata.category(char) in _INVISIBLE_CATEGORIES
+        }
+    )
+    if hidden:
+        raise ValueError("version name contains invisible characters: " + ", ".join(hidden))
+    return value
+
+
+# A name a new Save records: VersionName whose every character is visible.
+NewVersionName = Annotated[VersionName, AfterValidator(_visible_name)]
 
 
 class SaveRequest(SourceProposal):
@@ -259,7 +282,9 @@ class SaveRequest(SourceProposal):
     expected_sha256: Digest
     proposal_sha256: Digest
     # Presentation-only name recorded beside the source; omitted -> next "vN".
-    version_name: VersionName | None = Field(default=None, exclude_if=lambda value: value is None)
+    version_name: NewVersionName | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     task_reference_acceptance: TaskReferenceAcceptance | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -366,6 +391,9 @@ class ReviewView(Model):
     diff: str
     document: AuthoredWorkflowDocument
     node_edit: NodeEditSummary | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Comments in the current file that these exact bytes no longer contain (each
+    # occurrence once, text stripped). Save writes these bytes, so the comments are lost.
+    removed_comments: tuple[str, ...] = ()
 
 
 class SaveView(Model):

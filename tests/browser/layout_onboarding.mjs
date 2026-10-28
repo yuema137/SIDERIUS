@@ -56,7 +56,7 @@ try {
   const tourOpen = async () => (await tour.count()) > 0 && await tour.isVisible();
   const connect = async () => {
     await page.locator('#token').fill(metadata.token); await page.locator('#access-form button[type="submit"]').click();
-    await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'), 'workflow open');
+    await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '), 'workflow open');
     await page.locator('.circuit-card').first().waitFor();
   };
 

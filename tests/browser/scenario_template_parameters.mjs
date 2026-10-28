@@ -47,7 +47,7 @@ try {
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   const status = page.locator('#editor-status');
-  await waitUntil(async () => (await status.textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await status.textContent()).includes('Opened '));
   await page.locator('#editor-project').selectOption('reusable');
   await waitUntil(async () => (await page.locator('#editor-path').textContent()) === metadata.reusable_source);
 
@@ -64,7 +64,7 @@ try {
     assert.equal(await gallery.locator('#editor-template-detail svg.template-thumbnail').count(), 1, 'Preview shown before import');
     await gallery.locator('#editor-template-import').click();
     await waitUntil(async () => !(await gallery.evaluate(dialog => dialog.open)));
-    await waitUntil(async () => (await status.textContent()).includes('Declaration validated'));
+    await waitUntil(async () => (await status.textContent()).includes('Checked.'));
     assert.ok((await readFile(metadata.reusable_source)).equals(before), 'Import never writes before Save');
   };
   // Human advice is the first input of the inspector, labelled and multi-line.
@@ -78,7 +78,7 @@ try {
     await page.locator('#editor-review').click();
     await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
     await page.locator('#editor-save').click();
-    await waitUntil(async () => (await status.textContent()).includes('Saved reviewed'));
+    await waitUntil(async () => (await status.textContent()).includes('Saved as "'));
   };
   // Scenario (a): import the single research loop, change a training parameter, review, save.
   await importTemplate('single-research-loop', 'Single research loop');

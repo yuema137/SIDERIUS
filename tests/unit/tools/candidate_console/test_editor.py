@@ -728,3 +728,48 @@ def test_node_palette_catalog_and_node_draft_routes(editor_config):
         refused = client.post("/api/editor/example/node-draft", headers=headers, json=body)
         assert refused.status_code == 422
         assert editor_config.editor_projects[0].source_file.read_text() == base["source"]
+
+
+def test_filesystem_failures_say_what_was_attempted(editor_config, monkeypatch):
+    """Fails if a failed read claims a proposal "remains unsaved" or a failed write does not
+    say nothing was saved (red-team E-4/S-4: one generic message for both)."""
+    import tools.workflow_authoring.service as service
+
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        base = client.get("/api/editor/example", headers=headers).json()
+        proposed = SOURCE.replace("old.json", "gui.json")
+        view = client.post(
+            "/api/editor/example/review",
+            headers=headers,
+            json={
+                "expected_sha256": base["sha256"],
+                "proposal": {"kind": "source", "source": proposed},
+            },
+        ).json()
+
+        def fail(*args, **kwargs):
+            raise OSError("disk unavailable")
+
+        monkeypatch.setattr(service, "publish_bytes_write_once", fail)
+        saved = client.post(
+            "/api/editor/example/save",
+            headers=headers,
+            json={
+                "expected_sha256": base["sha256"],
+                "proposal_sha256": view["sha256"],
+                "source": proposed,
+            },
+        )
+        assert saved.status_code == 409
+        assert saved.json()["error"] == {
+            "code": "filesystem",
+            "message": "Not saved: the project folder or its recovery copies could not be written",
+        }
+        monkeypatch.setattr(service.WorkflowAuthoring, "_read_bytes", fail)
+        read = client.get("/api/editor/example", headers=headers).json()["error"]
+        assert read["code"] == "filesystem" and "unsaved" not in read["message"].lower()
+        assert "not saved" not in read["message"].lower()

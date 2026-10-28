@@ -93,7 +93,7 @@ try {
   await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'changed-saved.png'), fullPage: true});
   if (metadata.training) {
     await page.locator('#editor-refresh').click();
-    await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
+    await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
     await inspectTraining();
     assert.match(await page.locator('#editor-source').inputValue(), /trial_max_epochs.*3/s);
   }

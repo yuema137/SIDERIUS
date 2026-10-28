@@ -164,7 +164,7 @@ try {
   });
   await connect(); await Promise.race([seen, new Promise((_, reject) => setTimeout(() => reject(new Error('Initial projects request not observed')), 15000))]);
   await connect();
-  await page.locator('#editor-status').filter({hasText: 'Opened supported'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
   console.log('PASS: current project loaded while old response pending');
   releaseOld(); await page.waitForTimeout(100);
   assert.ok(lists >= 2);

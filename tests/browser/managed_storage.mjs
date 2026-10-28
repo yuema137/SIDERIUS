@@ -58,7 +58,7 @@ try {
   const cards = () => page.locator('#editor-graph .circuit-card').evaluateAll(items => items.map(item => ({id: item.dataset.node, capability: item.dataset.capability})));
   await page.goto(metadata.origin + '/#workflow');
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
-  await waitUntil(async () => (await status()).includes('Opened supported'), 'open');
+  await waitUntil(async () => (await status()).includes('Opened '), 'open');
   await page.locator('#editor-project').selectOption('reusable');
   await waitUntil(async () => (await page.locator('#editor-path').textContent()) === metadata.reusable_source, 'reusable project');
   const example = storageShape(resolve(root, 'examples/workflow_declarations/reusable_candidate.py'));
@@ -104,7 +104,7 @@ try {
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()), 'checked');
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await status()).includes('Saved reviewed bytes'), 'saved');
+  await waitUntil(async () => (await status()).includes('Saved as "'), 'saved');
   const saved = storageShape(metadata.reusable_source);
   assert.deepEqual(saved.literal_storage, [], 'No literal storage binding');
   const shape = rows => rows.map(({capability, argument, kind, contract}) => ({capability, argument, kind, contract}))

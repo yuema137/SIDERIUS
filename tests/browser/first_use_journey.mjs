@@ -66,7 +66,8 @@ try {
 
   // 1. Home in the beginner view: advanced sections are not shown.
   await page.goto(metadata.origin + '/#home');
-  const advanced = ['#editor-advanced', '#editor-history', '#editor-review-disclosure', '#editor-refresh', '#native-chain-heading', '#monitor-form', '#workflow-details'];
+  // Version history is a beginner surface since red-team A-3; it is not listed here.
+  const advanced = ['#editor-advanced', '#editor-review-disclosure', '#editor-refresh', '#native-chain-heading', '#monitor-form', '#workflow-details'];
   assert.deepEqual(await hidden(advanced), advanced.map(() => true), 'Beginner view hides advanced and developer sections');
   assert.equal(await page.locator('header #access-section #token').isVisible(), true, 'Connect lives in the header banner');
 
@@ -85,7 +86,7 @@ try {
     await page.locator('#editor-version-name').fill(name);
     await page.screenshot({path: join(evidence, `save-step-${name}.png`)});
     await page.locator('#editor-save').click();
-    await waitUntil(async () => (await status()).includes(`Saved reviewed bytes as version "${name}"`), `saved ${name}`);
+    await waitUntil(async () => (await status()).includes(`Saved as "${name}"`), `saved ${name}`);
     assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'The step closes after Save');
   };
 
@@ -94,7 +95,7 @@ try {
   await page.locator('#home-start-template').click();
   const gallery = page.locator('#editor-template-gallery');
   await waitUntil(async () => new URL(page.url()).hash === '#workflow' && await gallery.evaluate(dialog => dialog.open), 'gallery');
-  await waitUntil(async () => (await status()).includes('Opened supported'), 'first project');
+  await waitUntil(async () => (await status()).includes('Opened '), 'first project');
   await gallery.locator('.template-card[data-template="single-loop-with-advice"]').waitFor();
   assert.equal(await gallery.locator('.template-card').first().getAttribute('data-template'), 'blank', 'Blank workflow is the first card');
   await gallery.locator('.template-card[data-template="blank"]').click();
@@ -196,7 +197,7 @@ try {
   const sourceBefore = await readFile(metadata.reusable_source);
   await gallery.locator('#editor-template-import').click();
   await waitUntil(async () => !(await gallery.evaluate(dialog => dialog.open)), 'gallery closed');
-  await waitUntil(async () => (await status()).includes('Declaration validated'), 'template checked');
+  await waitUntil(async () => (await status()).includes('Checked.'), 'template checked');
   assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'A template import does not open the save step');
   assert.ok((await readFile(metadata.reusable_source)).equals(sourceBefore), 'Using a template writes nothing');
   await waitUntil(() => page.evaluate(() => document.activeElement?.classList.contains('advice-input')), 'advice focused');

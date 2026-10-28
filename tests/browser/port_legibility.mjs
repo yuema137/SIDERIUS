@@ -152,8 +152,11 @@ try {
   assert.equal(await chip.getAttribute('aria-expanded'), 'false'); assert.ok(await fields.isHidden());
   await chip.click();
   assert.equal(await chip.getAttribute('aria-expanded'), 'true'); assert.ok(await fields.isVisible());
-  const inputs = await page.locator('.circuit-card[data-node="build_left"] [data-input]').count();
-  assert.equal(await fields.locator('li').count(), inputs, 'one field row per protocol argument');
+  // Sockets exclude framework-supplied inputs (batch 2c: managed storage has no socket);
+  // advanced Mapping details still list every protocol argument, storage included.
+  const sockets = await page.locator('.circuit-card[data-node="build_left"] [data-input]').count();
+  assert.equal(await page.locator('#circuit-input-build_left-storage').count(), 0, 'managed storage has no socket');
+  assert.equal(await fields.locator('li').count(), sockets + 1, 'one field row per protocol argument (sockets plus managed storage)');
   assert.match(await fields.locator('li[data-argument="output"]').textContent(), /hypothesis\.result → output.*proposal\.output/);
   assert.match(await fields.locator('li[data-argument="storage"]').textContent(), /external:\S+ → storage/);
   assert.match(await fields.locator('.circuit-adapter-owner').textContent(), /into implementation\.input.*no extra node/);

@@ -49,7 +49,7 @@ try {
   await page.goto(metadata.origin + '/#workflow');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'), 'open');
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '), 'open');
   const original = await readFile(metadata.source, 'utf8');
   const palette = page.locator('#editor-palette'), popover = page.locator('#palette-popover');
   await waitUntil(async () => (await palette.locator('.palette-row').count()) === 6, 'catalog rows');
