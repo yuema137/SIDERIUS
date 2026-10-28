@@ -47,6 +47,7 @@ the [repository map](docs/repository-map.md).
 | Dashboard and run monitoring | [dashboard guide](docs/guides/dashboard.md), [operating a run](docs/guides/operating-a-run.md) |
 | Candidate console (browser GUI) | [console contract](src/tools/candidate_console/console-contract.md) |
 | Candidate preparation, operations and worker | [prepare contract](src/tools/candidate_prepare/candidate-prepare-contract.md), [operations contract](src/tools/candidate_operations/candidate-operations-contract.md), [worker contract](src/tools/candidate_worker/candidate-worker-contract.md) |
+| Authored research loop, stop conditions, Stop/Pause/Resume | [declaration contract](src/workflows/definition/definition-contract.md#authored-loop), [worker contract](src/tools/candidate_worker/candidate-worker-contract.md#declared-finite-research-body), [loop control recipe and CLI](src/tools/candidate_operations/candidate-operations-contract.md#control-an-authored-loop-from-code-or-the-cli) |
 | Setup review | [setup review](src/tools/setup_review/README.md), [setup skill](docs/agent-reference/siderius-setup-review/SKILL.md) |
 | Examples and Quickstart | [examples](examples/README.md) |
 | LLM routing and providers | [agent contract](src/agent/agent-contract.md), [transport contract](src/agent/llm_transport/transport-contract.md), [LLM defaults](docs/reference/llm-defaults.md) |

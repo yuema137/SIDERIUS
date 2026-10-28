@@ -39,7 +39,10 @@ whether referenced manifests, data or plugins exist.
    adding nodes. Click **Review changes** to validate the graph and inspect the
    exact generated Python diff. After inspector edits, review first to update
    the Python panel before typing source changes. Inspector changes can rewrite formatting and
-   comments; review shows that rewrite.
+   comments; review shows that rewrite. The **Research loop** panel adds or
+   removes the research loop, its iteration limit and stop conditions; a loop your
+   coding agent wrote in `workflow.py` appears there, and Review shows the
+   resulting Python.
 5. Keep the suggested **Version name** (`v1`, `v2`, ...) or type your own, then
    click **Save reviewed source**. Success means the reviewed bytes were saved
    and read back, and `workflow.py.versions.json` beside the source records the

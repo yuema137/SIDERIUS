@@ -4,6 +4,9 @@ SIDERIUS already provides typed adapters for the common node handoffs. The
 adapter below is deterministic: it validates a proposal, maps its model
 specification into `ImplementorInput`, and leaves the caller in control of the
 workspace and task context. It does not invoke an LLM or execute a node.
+To save a whole workflow instead, including a repeated research loop, use a
+[workflow definition](../../src/workflows/definition/README.md) and its
+[authored loop](../../src/workflows/definition/definition-contract.md#authored-loop).
 
 ```python
 import tempfile
