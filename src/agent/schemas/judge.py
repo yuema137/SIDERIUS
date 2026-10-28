@@ -242,8 +242,83 @@ class RevisionRequest(JudgeModel):
         return self
 
 
+class DebateTurn(JudgeModel):
+    """One advocate or critic turn; also carried, verbatim, in later debate requests.
+
+    An advocate argues for ``item_id``; a critic (``item_id`` None) weighs every
+    argument of its round. ``cites`` names listed item ids the argument relies on.
+    """
+
+    kind: Literal["debate_turn"]
+    round: int = Field(ge=1)
+    role: Literal["advocate", "critic"]
+    item_id: str | None
+    argument: str = Field(min_length=1, max_length=3000)
+    cites: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def advocate_names_item(self) -> Self:
+        if (self.role == "advocate") != (self.item_id is not None):
+            raise ValueError("an advocate turn names its item; a critic turn names none")
+        return self
+
+
+class _DebateContent(JudgeModel):
+    """What every ``debate-judge/v1`` call sees: the items and every earlier turn."""
+
+    criterion: str = Field(min_length=1, max_length=2000)
+    items: tuple[JudgedItem, ...] = Field(min_length=2)
+    transcript: tuple[DebateTurn, ...]
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        _distinct_items(self.items)
+        return self
+
+
+class AdvocacyRequest(_DebateContent):
+    """An advocate's turn in ``round``: argue for ``item_id``."""
+
+    kind: Literal["advocacy"] = "advocacy"
+    round: int = Field(ge=1)
+    item_id: str = Field(min_length=1)
+
+
+class CritiqueRequest(_DebateContent):
+    """The critic's turn closing ``round``."""
+
+    kind: Literal["critique"] = "critique"
+    round: int = Field(ge=1)
+
+
+class DebateVerdictRequest(_DebateContent):
+    """The final judge call: rank every item, or synthesize ``synthesize_count`` values."""
+
+    kind: Literal["debate_verdict"] = "debate_verdict"
+    judge_output: Literal["rank", "synthesize"]
+    synthesize_count: int | None = Field(ge=1)
+    output_contract: str | None = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def synthesis_fields(self) -> Self:
+        synthesize = self.judge_output == "synthesize"
+        if synthesize != (self.synthesize_count is not None) or synthesize != (
+            self.output_contract is not None
+        ):
+            raise ValueError("a synthesizing verdict names its count and output contract")
+        return self
+
+
 CallContent = Annotated[
-    StopJudgeRequest | RubricScoringRequest | MergeRequest | AdviceRequest | RevisionRequest,
+    StopJudgeRequest
+    | RubricScoringRequest
+    | MergeRequest
+    | AdviceRequest
+    | RevisionRequest
+    | AdvocacyRequest
+    | CritiqueRequest
+    | DebateVerdictRequest,
     Field(discriminator="kind"),
 ]
 _ROLES_BY_CONTENT: dict[str, frozenset[str]] = {
@@ -252,6 +327,9 @@ _ROLES_BY_CONTENT: dict[str, frozenset[str]] = {
     "merge": frozenset({"merger"}),
     "advice": frozenset({"advisor"}),
     "revision": frozenset({"reviser"}),
+    "advocacy": frozenset({"advocate"}),
+    "critique": frozenset({"critic"}),
+    "debate_verdict": frozenset({"judge"}),
 }
 
 
@@ -321,8 +399,17 @@ class SynthesisVerdict(JudgeModel):
 
 
 # Further strategy payload kinds join this union in their own changes.
+class RankVerdict(JudgeModel):
+    """An ordinal ranking: every listed item id once, best first; no values."""
+
+    kind: Literal["rank"]
+    order: tuple[str, ...] = Field(min_length=1)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
 CallPayload = Annotated[
-    StopVerdict | RubricVerdict | SynthesisVerdict | AdvisoryNote, Field(discriminator="kind")
+    StopVerdict | RubricVerdict | SynthesisVerdict | AdvisoryNote | DebateTurn | RankVerdict,
+    Field(discriminator="kind"),
 ]
 
 
