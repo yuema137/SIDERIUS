@@ -16,6 +16,7 @@ from .models import (
     AuthoredLoop,
     ExternalRequest,
     ExternalSource,
+    JudgeStop,
     NodeInstance,
     NodePosition,
     NoImprovementStop,
@@ -58,6 +59,12 @@ def validate_stop_conditions(loop: AuthoredLoop) -> None:
             and condition.completed_bodies >= loop.final_iteration
         ):
             raise ValueError("no_improvement completed_bodies must be below final_iteration")
+        # The final boundary is never judged, so a judge first consulted there never runs.
+        if (
+            isinstance(condition, JudgeStop)
+            and condition.min_completed_bodies >= loop.final_iteration
+        ):
+            raise ValueError("judge min_completed_bodies must be below final_iteration")
 
 
 def predecessor_facts(
