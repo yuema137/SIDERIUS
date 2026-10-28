@@ -110,11 +110,13 @@ and the budget: permuting either tuple yields an identical `ScheduleDecision`.
 Owner: `budget_intake.py` (decision B3-Q8: a JSON file only, no environment
 variable).
 
-- `load_host_budget_file(path) -> HostBudget` reads one UTF-8 JSON object
+- `load_host_budget_file(path) -> HostBudget` requires a regular file of at
+  most `MAX_HOST_BUDGET_FILE_BYTES` (64 KiB), then reads one UTF-8 JSON object
   holding every `HostBudget` field except `source`, validates it once and
   returns a budget with `source="file"`. Consumers read the returned object,
-  never the file. Refusals raise `HostBudgetFileError` naming the path: an
-  unreadable or non-JSON file, a non-object top level, duplicate keys at any
+  never the file. Refusals raise `HostBudgetFileError` naming the path: a
+  missing path or non-regular file, a file above the byte cap, an unreadable
+  or non-JSON file, a non-object top level, duplicate keys at any
   depth (never resolved last-wins), a file that declares `source` (intake owns
   provenance), and any `HostBudget` validation failure. Nothing is defaulted,
   discovered or read from the environment; each slot's `ceiling` is the
@@ -135,9 +137,16 @@ variable).
   `scheduling_mode` (`_CANONICAL`, decision B3-Q7) and `host_budget`
   (`HostBudgetProvenance`: `digest`, `max_concurrent_units`, `source`;
   `_PROVENANCE`). The two travel together (`parallel-v1` ⇔ budget present).
-  Both are omitted from the lock when serial, so legacy and budget-less locks
-  keep their bytes and a legacy lock parses as `serial`. Resume matrix:
-  serial↔parallel-v1 refuses; parallel-v1 with a different budget validates.
+  Both are omitted from the lock when serial and a legacy lock parses as
+  `serial`: the B3-2 fields do not alter serial lock bytes or the canonical
+  comparison; cross-revision resume still follows the assembly-digest rule
+  (#999). Resume matrix: serial↔parallel-v1 refuses; parallel-v1 with a
+  different budget validates.
+- The lock records only the first run's budget (first writer wins). A resume
+  under a different budget is accepted and leaves the lock unchanged;
+  per-launch budget evidence belongs to the B3-4 placement receipts.
+- Known limitation: a pre-B3-2 build ignores `scheduling_mode` and would read
+  a parallel-v1 lock as serial. No forward-compatibility promise is made.
 - Child environment (`core/subprocess_env.py`):
   `subprocess_env(..., cuda_visible_devices=Placement.cuda_visible_devices)`
   sets `CUDA_VISIBLE_DEVICES` (a slot UUID, or `""` for a placed CPU-only

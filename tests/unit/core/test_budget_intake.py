@@ -26,6 +26,7 @@ from core.run_invariants import (
     write_run_invariants,
 )
 from core.runtime_control.budget_intake import (
+    MAX_HOST_BUDGET_FILE_BYTES,
     HostBudgetFileError,
     HostBudgetProvenance,
     load_host_budget_file,
@@ -100,6 +101,15 @@ class TestBudgetFile:
         text = json.dumps(_FILE)[:-1] + ', "max_concurrent_units": 1}'
         with pytest.raises(HostBudgetFileError, match="duplicate JSON keys"):
             load_host_budget_file(_write(tmp_path, text))
+
+    def test_non_regular_or_oversized_input_refuses_before_parsing(self, tmp_path):
+        """A directory or a huge file must not reach the parser: the cap bounds
+        what one launch flag can make the parent read into memory."""
+        with pytest.raises(HostBudgetFileError, match="not a regular file"):
+            load_host_budget_file(tmp_path)
+        padded = json.dumps(_FILE) + " " * MAX_HOST_BUDGET_FILE_BYTES
+        with pytest.raises(HostBudgetFileError, match=f"exceeds {MAX_HOST_BUDGET_FILE_BYTES}"):
+            load_host_budget_file(_write(tmp_path, padded))
 
     def test_an_invalid_budget_names_the_file(self, tmp_path):
         """A launch-time refusal must point the operator at the file to fix."""

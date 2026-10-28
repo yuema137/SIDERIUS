@@ -64,8 +64,9 @@ makes every resume fail.
 `scheduling_mode` (`serial` or `parallel-v1`) is canonical: a workspace cannot
 switch between serial and budgeted parallel dispatch on resume, because parallel
 drain semantics can change a failed body's trace. It is omitted from the lock at
-`serial`, so legacy and budget-less locks keep their bytes and resume. The budget
-itself (`host_budget`: digest, `max_concurrent_units`, source) is `_PROVENANCE`.
+`serial`: the B3-2 fields do not alter serial lock bytes or the canonical
+comparison; cross-revision resume still follows the assembly-digest rule (#999).
+The budget itself (`host_budget`: digest, `max_concurrent_units`, source) is `_PROVENANCE`.
 Owner: [scheduling contract](../../../src/core/runtime_control/scheduling.md).
 
 Ordering at startup is load-bearing: materialize + hash the effective health

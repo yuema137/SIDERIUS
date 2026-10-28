@@ -20,6 +20,8 @@ from core.runtime_control.scheduling import HostBudget, PositiveCount, Sha256Hex
 #: ``serial``: no budget, one unit at a time (every existing run).
 #: ``parallel-v1``: budgeted dispatch with drain-on-failure trace semantics.
 SchedulingMode = Literal["serial", "parallel-v1"]
+#: A budget is a few slots and scalars; anything larger is not a budget file.
+MAX_HOST_BUDGET_FILE_BYTES = 64 * 1024
 
 
 class HostBudgetFileError(ValueError):
@@ -41,11 +43,18 @@ def load_host_budget_file(path: str | Path) -> HostBudget:
     sets to ``"file"``; a file that declares ``source`` itself is refused so
     provenance cannot be authored. Duplicate keys are refused rather than
     resolved last-wins. Nothing is defaulted, discovered or read from the
-    environment.
+    environment. The path must be a regular file of at most
+    ``MAX_HOST_BUDGET_FILE_BYTES``; it is read once, bounded, before parsing.
     """
     budget_path = Path(path)
+    if not budget_path.is_file():
+        raise HostBudgetFileError(f"host budget file {budget_path} is not a regular file")
     try:
-        text = budget_path.read_text(encoding="utf-8")
+        with budget_path.open("rb") as handle:
+            data = handle.read(MAX_HOST_BUDGET_FILE_BYTES + 1)
+        if len(data) > MAX_HOST_BUDGET_FILE_BYTES:
+            raise HostBudgetFileError(f"exceeds {MAX_HOST_BUDGET_FILE_BYTES} bytes")
+        text = data.decode("utf-8")
         payload = json.loads(text, object_pairs_hook=_refuse_duplicate_keys)
     except HostBudgetFileError as exc:
         raise HostBudgetFileError(f"host budget file {budget_path}: {exc}") from None
