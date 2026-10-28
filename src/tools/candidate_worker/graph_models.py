@@ -9,8 +9,10 @@ from tools.workflow_preview.models import PreviewModel
 GraphCapability = Literal[
     "proposal", "implementation", "validation", "literature", "interpretation", "tuning"
 ]
-GraphState = Literal["pending", "running", "succeeded", "rejected", "failed", "blocked"]
-GraphReason = Literal["dependency_not_successful", "native_failure", "validation_rejected"]
+GraphState = Literal["pending", "running", "succeeded", "rejected", "failed", "blocked", "skipped"]
+GraphReason = Literal[
+    "dependency_not_successful", "native_failure", "validation_rejected", "route_not_selected"
+]
 
 
 class GraphNodeEvidence(PreviewModel):

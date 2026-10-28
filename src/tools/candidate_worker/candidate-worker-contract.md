@@ -401,21 +401,60 @@ are not supported by this profile.
 
 `tools.candidate_worker.readiness.next_dispatch` is the single readiness
 authority. It is pure: `ReadinessInput` carries every declared node in
-declaration order as `NodeReadiness(node_id, predecessors, state)` (`pending`
-for undecided nodes) plus `aborted`; it refuses duplicate ids and undeclared
-predecessors. It inspects the first `pending` node whose predecessors are all
-terminal (neither `pending` nor `running`) and returns one action as
-`ReadinessOutput`: `next=<node_id>` to dispatch it, or
-`terminal=((node_id, "blocked", "dependency_not_successful"),)` when `aborted`
-is true or any predecessor is not `succeeded`; `next=None, terminal=()` means no
-node can act. `execute_fanout` dispatches from this decision, and
-`verify_graph_trace` replays the recorded terminal states through the same
-function and refuses a trace whose `blocked` states differ from it. The
-per-node rule `_close_reason` is the extension point for additional node
-classes; this profile has only capability nodes. If no node can act while some remain
-undecided (unreachable for a validated acyclic declaration), `execute_fanout`
-raises `RuntimeError("graph readiness found no dispatchable node")` and
-`verify_graph_trace` raises `ValueError` (formerly an uncaught `StopIteration`).
+declaration order as `NodeReadiness(node_id, predecessors, state, reason,
+routing)` (`pending` for undecided nodes), `aborted`, and `decisions` (the
+recorded `RouteEvaluationOutput` values, at most one per branch; empty for
+every currently admitted profile). It refuses duplicate ids, undeclared
+predecessors or merge candidates, two decisions for one branch, and a `skipped`
+node without a reason in `SKIP_REASONS` (B1: `route_not_selected`). It
+inspects the first `pending` node whose sources (predecessors plus every merge
+candidate) are all terminal (neither `pending` nor `running`) and returns one
+action as `ReadinessOutput`: `next=<node_id>` to dispatch it, or
+`terminal=((node_id, state, reason),)` to close it without dispatch;
+`next=None, terminal=()` means no node can act. The per-node rule
+`_close_reason`, in precedence order:
+
+1. `aborted` (an earlier native failure) → `blocked/dependency_not_successful`.
+2. Any required source `failed`, `rejected` or `blocked` →
+   `blocked/dependency_not_successful`. Blocked beats skipped.
+3. Any required source `skipped` → `skipped` with that source's reason (first
+   skipped source in predecessor order). This generic propagation applies to any
+   skip reason, so later reasons (B6 `insufficient_items`) need no second rule;
+   skipped never satisfies a required input.
+4. `NodeRouting.route` (the node is an entry target of that branch): dispatched
+   when the branch decision lists it in `selected_targets`, closed
+   `skipped/route_not_selected` when it lists it in `skipped_targets`. A missing
+   decision, or one naming neither, raises `ValueError` (never treated as
+   selected). Arm interiors are skipped by rule 3, not by a separate arm list.
+
+A merge (`NodeRouting.merges`, one `MergeReadiness(branch, candidates)` per
+`SelectedSource` argument; each `MergeCandidate(node, entry)` names the entry
+targets of the arm it lies in) consumes only the candidate whose `entry` equals
+the decision's `selected_targets`; non-selected candidates (skipped or blocked)
+are ignored. No unique match raises `ValueError`. Without a decision (the branch
+source never succeeded) the consumer is blocked if any candidate is
+failed/rejected/blocked, inherits the skip if all are skipped, and otherwise
+raises. `body_status(states, tuning=...)` is the one body aggregate: `failed` if
+any node failed, else `rejected` if any node was rejected, else
+`completed`/`accepted`; `skipped` and `blocked` are neutral (blocked only follows
+a failure or rejection). `validation_passed` is unchanged: with tuning it
+requires every validation node `succeeded`.
+
+`execute_fanout` dispatches from this decision, and `verify_graph_trace` replays
+the recorded terminal states through `graph_evidence.replay_readiness(nodes, *,
+decisions=(), routing=None)`, which refuses a node readiness would dispatch but
+the trace closed, and a node readiness would close whose recorded `(state,
+reason)` differs (for example dispatched inside a non-selected arm, or `blocked`
+where readiness derives `skipped`). The verifier also accepts `skipped` without a
+record path/digest only with a `SKIP_REASONS` reason. Both call sites currently
+pass no decisions or routing, because routed documents remain refused by
+`candidate.refuse_routes`; a `skipped` state in an unrouted trace is therefore
+refused by replay. Adding the `skipped` state and `route_not_selected` reason does
+not change existing trace bytes (pinned by
+`test_unrouted_graph_trace_bytes_are_unchanged`). If no node can act while some
+remain undecided (unreachable for a validated acyclic declaration),
+`execute_fanout` raises `RuntimeError("graph readiness found no dispatchable
+node")` and `verify_graph_trace` raises `ValueError`.
 
 The final optional `graph_trace` contains every declared node exactly once: its
 capability, predecessor IDs, managed storage, terminal state, fixed reason code and
@@ -878,8 +917,9 @@ byte-identical to those before this feature.
 
 `tools.candidate_worker.route_eval` decides one declared `Branch` (definition
 contract, "Route declarations (inert)") from one native record. It has no execution
-caller yet: routed documents are still refused by `candidate.refuse_routes`, and skip
-semantics, decision evidence and a routed profile are later readiness/worker work.
+caller yet: routed documents are still refused by `candidate.refuse_routes`. Readiness
+consumes its output (skip semantics above); decision evidence and a routed profile are
+later worker work.
 
 - `project_observation(branch, capability, record_path, *, iteration)` reads the
   branch source's committed record once (no-follow, 4 MiB bound), validates it with

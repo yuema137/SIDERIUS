@@ -1,13 +1,24 @@
 """Serial readiness authority: one pure rule shared by dispatch and replay."""
 
+import hashlib
+import re
 import sys
 
 import pytest
 
 from tests.helpers.candidate_fanout import fanout_request
 from tools.candidate_worker import launch_candidate, readiness
-from tools.candidate_worker.graph_evidence import verify_graph_trace
-from tools.candidate_worker.readiness import NodeReadiness, ReadinessInput, next_dispatch
+from tools.candidate_worker.graph_evidence import replay_readiness, verify_graph_trace
+from tools.candidate_worker.graph_models import GraphNodeEvidence
+from tools.candidate_worker.readiness import (
+    MergeCandidate,
+    MergeReadiness,
+    NodeReadiness,
+    NodeRouting,
+    ReadinessInput,
+    next_dispatch,
+)
+from tools.candidate_worker.route_eval import RouteEvaluationOutput
 
 from .test_graph import initial
 from .test_native import native_runner
@@ -123,3 +134,242 @@ def test_dispatch_and_replay_both_consume_the_single_readiness_owner(
         request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
     )
     assert set(callers) == {"tools.candidate_worker.graph_evidence"}
+
+
+# --- Skip semantics (B1-PR4): pure readiness and replay over recorded decisions. ---
+
+SKIP = "route_not_selected"
+
+
+def route(selected_case, selected, skipped, branch="r"):
+    """A recorded decision; `case_results` ends at the first match (or covers every case)."""
+    results = (False,) * (selected_case or 0) + (True,) if selected_case is not None else (False,)
+    return RouteEvaluationOutput(
+        branch_id=branch,
+        selected_case=selected_case,
+        selected_targets=selected,
+        skipped_targets=skipped,
+        case_results=results,
+    )
+
+
+def node(node_id, preds=(), state="pending", reason=None, route_id=None, merges=()):
+    return NodeReadiness(
+        node_id=node_id,
+        predecessors=tuple(preds),
+        state=state,
+        reason=reason,
+        routing=NodeRouting(route=route_id, merges=merges),
+    )
+
+
+def merge_ab(branch="r"):
+    return MergeReadiness(
+        branch=branch,
+        candidates=(
+            MergeCandidate(node="a", entry=("a",)),
+            MergeCandidate(node="b", entry=("b",)),
+        ),
+    )
+
+
+def step(*nodes, decisions=(), aborted=False):
+    output = next_dispatch(ReadinessInput(nodes=nodes, aborted=aborted, decisions=decisions))
+    return output.next, output.terminal
+
+
+ROUTE_B = (route(None, ("b",), ("a",)),)  # no case matched: default arm `b` runs
+
+
+@pytest.mark.parametrize(
+    ("nodes", "expected"),
+    [
+        # A target the decision did not select closes as skipped, without dispatch.
+        (
+            (node("src", state="succeeded"), node("a", ("src",), route_id="r")),
+            (None, (("a", "skipped", SKIP),)),
+        ),
+        # The selected target runs.
+        (
+            (node("src", state="succeeded"), node("b", ("src",), route_id="r")),
+            ("b", ()),
+        ),
+        # Skipped never satisfies a required input: its consumer inherits the skip.
+        (
+            (
+                node("src", state="succeeded"),
+                node("a", ("src",), "skipped", SKIP, route_id="r"),
+                node("use", ("a", "src")),
+            ),
+            (None, (("use", "skipped", SKIP),)),
+        ),
+        # Blocked beats skipped: one rejected and one skipped source block the consumer.
+        (
+            (
+                node("src", state="succeeded"),
+                node("a", ("src",), "skipped", SKIP, route_id="r"),
+                node("other", state="rejected", reason="validation_rejected"),
+                node("use", ("a", "other")),
+            ),
+            (None, (("use", "blocked", BLOCKED),)),
+        ),
+        # A rejected route source blocks its targets before any decision is consulted.
+        (
+            (
+                node("src", state="rejected", reason="validation_rejected"),
+                node("a", ("src",), route_id="r"),
+            ),
+            (None, (("a", "blocked", BLOCKED),)),
+        ),
+        # Merge picks the selected arm even though the other candidate was skipped.
+        (
+            (
+                node("a", state="skipped", reason=SKIP),
+                node("b", state="succeeded"),
+                node("join", merges=(merge_ab(),)),
+            ),
+            ("join", ()),
+        ),
+        # A non-selected candidate's blocked state does not reach the merge consumer.
+        (
+            (
+                node("a", state="blocked", reason=BLOCKED),
+                node("b", state="succeeded"),
+                node("join", merges=(merge_ab(),)),
+            ),
+            ("join", ()),
+        ),
+        # The selected candidate's rejection blocks the merge consumer.
+        (
+            (
+                node("a", state="skipped", reason=SKIP),
+                node("b", state="rejected", reason="validation_rejected"),
+                node("join", merges=(merge_ab(),)),
+            ),
+            (None, (("join", "blocked", BLOCKED),)),
+        ),
+    ],
+)
+def test_route_decisions_skip_propagate_and_merge(nodes, expected):
+    assert step(*nodes, decisions=ROUTE_B) == expected
+
+
+def test_merge_waits_for_every_candidate_before_resolving():
+    # Fails if the merge consumer dispatches before the non-selected arm is closed.
+    nodes = (
+        node("a", state="pending"),
+        node("b", state="succeeded"),
+        node("join", merges=(merge_ab(),)),
+    )
+    assert step(*nodes, decisions=ROUTE_B) == ("a", ())
+
+
+def test_route_target_without_a_recorded_decision_refuses_instead_of_running():
+    # Fails if readiness treats a missing decision as "selected" and dispatches the arm.
+    with pytest.raises(ValueError, match="no recorded decision"):
+        step(node("src", state="succeeded"), node("a", ("src",), route_id="r"))
+
+
+def test_merge_over_skipped_source_without_decision_inherits_the_skip():
+    # A nested branch whose source was itself skipped records no decision.
+    nodes = (
+        node("a", state="skipped", reason=SKIP),
+        node("b", state="skipped", reason=SKIP),
+        node("join", merges=(merge_ab(),)),
+    )
+    assert step(*nodes) == (None, (("join", "skipped", SKIP),))
+
+
+def test_skipped_and_blocked_are_neutral_in_body_status():
+    states = ("succeeded", "skipped", "skipped")
+    assert readiness.body_status(states, tuning=False) == "accepted"
+    assert readiness.body_status(states, tuning=True) == "completed"
+    assert readiness.body_status((*states, "rejected"), tuning=False) == "rejected"
+    assert readiness.body_status(("rejected", "failed", "skipped"), tuning=True) == "failed"
+
+
+def evidence(node_id, preds, state, reason=None):
+    dispatched = state in ("succeeded", "rejected")
+    return GraphNodeEvidence(
+        node_id=node_id,
+        capability="validation",
+        predecessors=tuple(preds),
+        storage=f"/w/{node_id}",
+        state=state,
+        record_path=f"/w/{node_id}.json" if dispatched else None,
+        record_sha256="0" * 64 if dispatched else None,
+        reason=reason,
+    )
+
+
+ROUTED = {"a": NodeRouting(route="r"), "b": NodeRouting(route="r")}
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        # A node dispatched inside the non-selected arm.
+        (("succeeded", None), ("succeeded", None)),
+        # A skip readiness would not produce: the selected target recorded as skipped.
+        (("skipped", SKIP), ("skipped", SKIP)),
+        # The terminal state differs from readiness, not only blocked-vs-any-terminal.
+        (("blocked", BLOCKED), ("succeeded", None)),
+    ],
+)
+def test_replay_refuses_a_trace_that_disagrees_with_the_route_decision(a, b):
+    trace = (
+        evidence("src", (), "succeeded"),
+        evidence("a", ("src",), *a),
+        evidence("b", ("src",), *b),
+    )
+    with pytest.raises(ValueError, match="serial readiness"):
+        replay_readiness(trace, decisions=ROUTE_B, routing=ROUTED)
+
+
+def test_replay_accepts_the_skip_readiness_produces():
+    trace = (
+        evidence("src", (), "succeeded"),
+        evidence("a", ("src",), "skipped", SKIP),
+        evidence("b", ("src",), "succeeded"),
+        evidence("use", ("a",), "skipped", SKIP),
+    )
+    replay_readiness(trace, decisions=ROUTE_B, routing=ROUTED)
+    # Without the decision the same skips are unexplained and refused.
+    with pytest.raises(ValueError, match="no recorded decision"):
+        replay_readiness(trace, routing=ROUTED)
+
+
+# Pinned on base 14d03254 (before skip semantics): sha256 of the receipt's trace,
+# status, validation flag and output index, with the workspace and native record
+# digests (which embed tmp paths) masked. New enum values must not move these bytes.
+UNROUTED_TRACE_SHA256 = {
+    "accepted": "3b0b62a412e76632c6a9ad1929afa94d24df5a271a35d6e70fba3764af1ac36e",
+    "rejected": "cbab7a78fe3a41f46a643bafddce480def9db486500874fde8334353f4fd2da6",
+    "failed": "77752ff7436e08173a39c3e2d82ffa09f5780538d97f4d014ad846a23ffba105",
+}
+
+
+@pytest.mark.parametrize("outcome", sorted(UNROUTED_TRACE_SHA256))
+def test_unrouted_graph_trace_bytes_are_unchanged(prepared, native_runner, monkeypatch, outcome):
+    """Fails if skip semantics alter serialization or outcome of an existing graph run."""
+    from tools.candidate_worker import phases
+
+    from .test_native import Provider
+
+    Provider.reject = outcome == "rejected"
+    if outcome == "failed":
+
+        def failed(*args, **kwargs):
+            raise RuntimeError("uncertain native failure")
+
+        monkeypatch.setattr(phases, "run_implementation", failed)
+    request = fanout_request(prepared)
+    receipt = launch_candidate(request)
+    payload = receipt.model_dump_json(
+        include={"status", "validation_passed", "graph_trace", "native_output_paths"}
+    ).replace(receipt.workspace, "<ws>")
+    payload = re.sub(r'"record_sha256":"[0-9a-f]{64}"', '"record_sha256":"<sha>"', payload)
+    assert hashlib.sha256(payload.encode()).hexdigest() == UNROUTED_TRACE_SHA256[outcome], payload
+    verify_graph_trace(
+        request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
+    )

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -12,9 +13,10 @@ from execute_tools.impl_attempts import impl_attempt_dir
 from workflows.definition.fanout import execution_families
 
 from . import readiness
-from .graph_models import GraphCapability, GraphNodeEvidence, GraphState, GraphTrace
+from .graph_models import GraphCapability, GraphNodeEvidence, GraphReason, GraphState, GraphTrace
 from .layout import candidate_control_dir, graph_instance_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .route_eval import RouteEvaluationOutput
 
 
 def expected_nodes(
@@ -106,6 +108,51 @@ def record_digest(path: str) -> str:
         return digest.hexdigest()
 
 
+# Reasons a node closed without a native record may carry, by terminal state.
+_UNDISPATCHED_REASONS: dict[GraphState, frozenset[GraphReason]] = {
+    "failed": frozenset(("native_failure",)),
+    "blocked": frozenset(("dependency_not_successful",)),
+    "skipped": readiness.SKIP_REASONS,
+}
+
+
+def replay_readiness(
+    nodes: tuple[GraphNodeEvidence, ...],
+    *,
+    decisions: tuple[RouteEvaluationOutput, ...] = (),
+    routing: Mapping[str, readiness.NodeRouting] | None = None,
+) -> None:
+    """Replay readiness only, never native execution, over recorded terminal states.
+
+    Every node readiness closes must carry exactly the closing state and reason;
+    every node it dispatches must have been dispatched (succeeded, rejected or
+    failed), so a node run inside a non-selected arm or a skip readiness would not
+    produce is refused. Uncertainty (a failure) stops later effects.
+    """
+    recorded = {item.node_id: item for item in nodes}
+    complete: dict[str, GraphNodeEvidence] = {}
+    aborted = False
+    while len(complete) < len(nodes):
+        step = readiness.next_dispatch(
+            readiness.readiness_input(
+                nodes, complete, aborted=aborted, decisions=decisions, routing=routing
+            )
+        )
+        if step.next is not None:
+            item = recorded[step.next]
+            valid = item.state in ("succeeded", "rejected", "failed")
+        elif step.terminal:
+            node_id, state, reason = step.terminal[0]
+            item = recorded[node_id]
+            valid = (item.state, item.reason) == (state, reason)
+        else:
+            raise ValueError("graph trace violates serial readiness or failure stop")
+        if not valid:
+            raise ValueError("graph trace violates serial readiness or failure stop")
+        aborted = aborted or item.state == "failed"
+        complete[item.node_id] = item
+
+
 def verify_graph_trace(
     request: CandidateRunRequest,
     initial: CandidateRunReceipt,
@@ -176,35 +223,11 @@ def verify_graph_trace(
         elif (
             item.record_path is not None
             or item.record_sha256 is not None
-            or item.reason
-            != ("native_failure" if item.state == "failed" else "dependency_not_successful")
+            or item.reason not in _UNDISPATCHED_REASONS[item.state]
         ):
             raise ValueError("graph incomplete invocation claims output")
-    # Replay readiness only, never native execution: uncertainty stops later effects.
-    complete: dict[str, GraphState] = {}
-    aborted = False
-    while len(complete) < len(trace.nodes):
-        decision = readiness.next_dispatch(
-            readiness.readiness_input(trace.nodes, complete, aborted=aborted)
-        )
-        node_id = decision.next or next((key for key, _, _ in decision.terminal), None)
-        if node_id is None:
-            raise ValueError("graph trace violates serial readiness or failure stop")
-        if (states[node_id] == "blocked") != bool(decision.terminal):
-            raise ValueError("graph trace violates serial readiness or failure stop")
-        aborted = aborted or states[node_id] == "failed"
-        complete[node_id] = states[node_id]
-    status = (
-        "failed"
-        if "failed" in states.values()
-        else (
-            "rejected"
-            if "rejected" in states.values()
-            else "completed"
-            if shape.tuning
-            else "accepted"
-        )
-    )
+    replay_readiness(trace.nodes)
+    status = readiness.body_status(states.values(), tuning=shape.tuning is not None)
     if (
         ("blocked" in states.values() and status in ("accepted", "completed"))
         or receipt.status != status
