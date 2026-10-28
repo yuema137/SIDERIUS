@@ -185,3 +185,74 @@ def test_external_input_catalog_explains_every_socket_contract():
     assert all(entry.summary for entry in entries.values())
     assert entries["storage"].managed and not entries["literature.input"].managed
     assert not entries["llm-provider"].managed
+
+
+def test_deleting_a_read_node_succeeds_as_a_draft_with_not_connected_problems(tmp_path):
+    """Fails if a draft deletion is refused (operator rule: delete always succeeds in the
+    draft), if the reader of the deleted node loses its located problem, or if review
+    saves an invalid document; rewiring the reader to a pending node then reviews."""
+    source = commented_canonical()
+    editor = editor_for(tmp_path, source)
+    deleted = drafts(source, removed=("implement",))
+    view = editor.inspect_node_drafts(
+        NodeDraftsRequest(expected_sha256=editor.read().sha256, proposal=deleted)
+    )
+    assert view.status == "incomplete"
+    assert {(item.code, item.node, item.field) for item in view.problems} == {
+        ("required_unbound", "validate", "output")
+    }
+    ports = {(port.node, port.argument): port for port in view.ports}
+    assert "implement.result" not in [c.label for c in ports[("validate", "output")].choices]
+    with pytest.raises(AuthoringError) as refused:
+        review(editor, deleted)
+    assert refused.value.code == "draft_incomplete"
+    rewired = drafts(
+        source,
+        pending(
+            "build2", "proposal-to-implementation", 400.0, output="propose", storage="@storage"
+        ),
+        removed=("implement",),
+        bindings=(
+            BindingPatch(node="validate", argument="output", source=ResultSource(node="build2")),
+        ),
+    )
+    reviewed = review(editor, rewired)
+    assert [node.id for node in reviewed.document.definition.nodes] == [
+        "propose",
+        "validate",
+        "build2",
+    ]
+    assert reviewed.node_edit is not None and reviewed.node_edit.removed == ("implement",)
+    assert editor.project.source_file.read_text() == source, "review never writes"
+
+
+def test_deleting_every_module_is_a_problem_not_a_refusal(tmp_path):
+    """Fails if emptying the canvas is refused outright (it is a draft state) or if an
+    empty workflow can be reviewed for saving."""
+    source = commented_canonical()
+    editor = editor_for(tmp_path, source)
+    everything = drafts(source, removed=("propose", "implement", "validate"))
+    view = editor.inspect_node_drafts(
+        NodeDraftsRequest(expected_sha256=editor.read().sha256, proposal=everything)
+    )
+    assert view.status == "incomplete"
+    assert "workflow_empty" in {item.code for item in view.problems}
+    with pytest.raises(AuthoringError) as refused:
+        review(editor, everything)
+    assert refused.value.code == "draft_incomplete"
+
+
+def test_deleting_an_unread_node_keeps_every_other_byte(tmp_path):
+    """Fails if a draft deletion nobody reads re-renders the file (comments lost) instead
+    of the targeted removal, so add-then-delete would no longer be byte-identical."""
+    source = commented_canonical()
+    editor = editor_for(tmp_path, source)
+    reviewed = review(editor, drafts(source, removed=("validate",)))
+    assert "# author note: keep me" in reviewed.source and "# trailing comment" in reviewed.source
+    assert "id='validate'" not in reviewed.source
+    changed = [
+        line
+        for line in difflib.ndiff(source.splitlines(True), reviewed.source.splitlines(True))
+        if line[:1] in "+-"
+    ]
+    assert changed and all(line.startswith("- ") for line in changed), "only deletions"

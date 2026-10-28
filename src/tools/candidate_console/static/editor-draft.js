@@ -16,6 +16,7 @@
  *                binding, arguments, x, y}); any number, beside every other edit
  *   externals    new external inputs (ExternalBinding / ManagedCandidateBinding JSON)
  *                that pending or saved sockets may read (editor-node-drafts.js)
+ *   removed      ids of saved nodes deleted in the draft; their readers are disconnected
  *   training, loopTemplate   server presentation values for the anchor (not compared)
  */
 (() => {
@@ -33,7 +34,7 @@
   }
   // Identity of the authored proposal; presentation values never make a draft dirty.
   const identity = state => canonical({document: state.document, bindings: state.bindings, source: state.anchor.source,
-    nodes: state.nodes || [], externals: state.externals || []});
+    nodes: state.nodes || [], externals: state.externals || [], removed: state.removed || []});
   const sameTarget = (patch, node, argument) => patch.node === node && patch.argument === argument;
 
   const withoutText = state => { const {sourceText, ...rest} = state; return rest; };
@@ -120,10 +121,11 @@
   function proposal(state) {
     // Pending nodes/inputs (NodeDraftsProposal): targeted insertions on the anchor, unless
     // other edits travel with them (`document` when edited, binding patches).
-    if (state.nodes?.length || state.externals?.length) {
+    // Deleted saved nodes (`removed`) travel in the same typed proposal.
+    if (state.nodes?.length || state.externals?.length || state.removed?.length) {
       const edited = canonical(state.document) !== canonical(state.anchor.document);
       return {kind: 'node_drafts', source: state.anchor.source, nodes: clone(state.nodes || []), externals: clone(state.externals || []),
-        document: edited ? clone(state.document) : null, bindings: clone(state.bindings)};
+        document: edited ? clone(state.document) : null, bindings: clone(state.bindings), removed: clone(state.removed || [])};
     }
     if (state.bindings.length) {
       // The server inspects patches over this edited document, so layout and inspector edits travel with them.

@@ -11,10 +11,10 @@
 (() => {
   'use strict';
   const clone = value => JSON.parse(JSON.stringify(value));
-  const active = state => (state.nodes?.length || 0) + (state.externals?.length || 0) > 0;
+  const active = state => (state.nodes?.length || 0) + (state.externals?.length || 0) + (state.removed?.length || 0) > 0;
   // Server inspection depends on requests and inputs, not on layout: moving a card never re-inspects.
   const key = state => window.editorDraft.canonical({
-    nodes: (state.nodes || []).map(({x, y, ...rest}) => rest), externals: state.externals || [], bindings: state.bindings,
+    nodes: (state.nodes || []).map(({x, y, ...rest}) => rest), externals: state.externals || [], bindings: state.bindings, removed: state.removed || [],
     externalsSaved: state.document?.definition.externals || [], requests: (state.document?.definition.nodes || []).map(node => node.request)});
   const sourceOf = (item, argument) => argument === null
     ? (item.binding ? {kind: 'external', binding: item.binding} : null)
@@ -28,7 +28,10 @@
    * for nodes still present; sources always come from the current draft. */
   function project(state, view) {
     if (!active(state)) return {graph: state.document, inventory: window.editorDraft.inventory(state)};
-    const graph = clone(state.document);
+    const graph = clone(state.document), gone = new Set(state.removed || []);
+    // Deleted saved nodes disappear with their positions; no socket is offered their result.
+    graph.definition.nodes = graph.definition.nodes.filter(node => !gone.has(node.id));
+    graph.positions = (graph.positions || []).filter(item => !gone.has(item.node));
     graph.definition.externals = [...graph.definition.externals, ...clone(state.externals)];
     for (const item of state.nodes) {
       graph.definition.nodes.push(instance(item));
@@ -37,6 +40,7 @@
     const present = new Set(graph.definition.nodes.map(node => node.id));
     const ports = (view?.ports || state.anchor.inventory || []).filter(port => present.has(port.node));
     const inventory = window.editorDraft.inventory({...state, anchor: {...state.anchor, inventory: ports}});
+    for (const port of inventory) port.choices = port.choices.filter(choice => !(choice.source.kind === 'result' && gone.has(choice.source.node)));
     const pending = new Map(state.nodes.map(item => [item.node, item]));
     for (const port of inventory) {
       const item = pending.get(port.node);
@@ -83,8 +87,11 @@
   }
   const plural = (word, items) => items.length ? `${word}${items.length > 1 ? 's' : ''} ${items.join(', ')}` : '';
   // "node a", "nodes a, b and input s": pending-line and undo-label text.
-  const summary = state => [plural('node', (state.nodes || []).map(item => item.node)),
-    plural('input', (state.externals || []).map(item => item.id))].filter(Boolean).join(' and ');
+  // "new node a", "new nodes a, b and input s", "deletion of x", joined with "; ".
+  const summary = state => {
+    const added = [plural('node', (state.nodes || []).map(item => item.node)), plural('input', (state.externals || []).map(item => item.id))].filter(Boolean).join(' and ');
+    return [added && `new ${added}`, (state.removed || []).length ? `deletion of ${state.removed.join(', ')}` : ''].filter(Boolean).join('; ');
+  };
   // One plain sentence; the located problems are listed by the page-bar problems chip.
   const message = view => view.status === 'complete' ? 'New modules are complete. Save when ready.'
     : 'Connect the inputs marked in red. The problems chip in the bar above lists them.';

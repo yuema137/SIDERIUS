@@ -153,11 +153,17 @@ class NodeDraftsProposal(Model):
     externals: tuple[NewExternal, ...] = ()
     document: AuthoredWorkflowDocument | None = None
     bindings: tuple[BindingPatch, ...] = ()
+    # Anchor nodes deleted in the draft. Deletion always succeeds in the draft: inputs that
+    # read a deleted node become "not connected" problems, a deleted loop feedback module
+    # or an empty workflow is a problem, and Review/Save refuse until none remain.
+    removed: tuple[Identifier, ...] = ()
 
     @model_validator(mode="after")
     def unique_additions(self) -> Self:
-        if not self.nodes and not self.externals:
-            raise ValueError("a node draft adds at least one node or external input")
+        if not self.nodes and not self.externals and not self.removed:
+            raise ValueError("a node draft adds or deletes at least one node or external input")
+        if len(set(self.removed)) != len(self.removed):
+            raise ValueError("deleted node ids must be unique")
         for values, label in (
             ([item.node for item in self.nodes], "node"),
             ([item.id for item in self.externals], "external input"),

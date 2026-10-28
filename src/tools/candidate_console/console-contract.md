@@ -1114,6 +1114,17 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   plain sentence and never repeat the problem list. After undo, redo and Discard the
   problems are recomputed from the restored state's cached server inspection (or
   re-inspected).
+- Delete (operator rule 2026-10-28) always succeeds in the draft, with no confirmation:
+  Delete key, context menu or Remove in Selection adds saved nodes to the draft's
+  `removed` list (pending nodes are cancelled), disconnects every socket that read them
+  (binding patches / pending bindings; a required one becomes a `required_unbound`
+  problem), and Undo restores everything. The draft is inspected as a `node_drafts`
+  proposal with `removed` (`workflow_authoring.models.NodeDraftsProposal`); the server
+  adds `loop_feedback_missing` when a loop endpoint is deleted and `workflow_empty` when
+  no module is left, and Review/Save refuse (`draft_incomplete`) until no problem
+  remains, so the saved file is never invalid. A deletion nobody reads, with no other
+  edits, is a targeted byte-preserving removal; otherwise the combined document is
+  rendered canonically. Deleting every module shows the §7.2 empty state.
 - Disabled Save shows `#editor-save-reason` inline ("Fix N problems to save",
   "Checking…", "Saving…"); disabled Next: Run shows `#workflow-next-reason` ("Save a
   version to run" or "Not set up for runs").

@@ -10,9 +10,12 @@
     parent.append(element); return element;
   };
   const cssId = value => String(value).replace(/[^A-Za-z0-9_-]/g, '\\$&');
+  // Whole-workflow draft problems (deleted loop module, empty workflow): no field to open.
+  const WORKFLOW = new Set(['loop_feedback_missing', 'workflow_empty']);
   // One plain sentence per problem (spec §9): "Propose model: Results analysis is not connected".
   // actions.describe(node, field) -> {module, connector} from the open graph and the server inventory.
   function sentence(item, actions) {
+    if (WORKFLOW.has(item.code)) return item.message.charAt(0).toUpperCase() + item.message.slice(1) + '.';
     if (!item.node) return `Python source${item.line ? ` line ${item.line}` : ''}: ${item.message}`;
     const {module, connector} = actions.describe?.(item.node, item.field || 'request') || {};
     const who = module || item.node;
@@ -43,7 +46,7 @@
       raw.dataset.uiFlag = 'advanced';
       button.addEventListener('click', () => {
         container.classList.remove('open');
-        if (item.node) actions.select(item.node, item.field || 'request'); else actions.source(item.line || null);
+        if (item.node) actions.select(item.node, item.field || 'request'); else if (!WORKFLOW.has(item.code)) actions.source(item.line || null);
       });
     }
   }

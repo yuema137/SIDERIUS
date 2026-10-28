@@ -178,7 +178,9 @@ Removal deletes each node, its own request bindings and its layout position.
 It refuses (`node_dependants`, nothing written) when a remaining node reads a
 removed result through any argument, when the research-loop feedback names a removed
 node, or when no capability would remain; it never rewires or disconnects other
-nodes implicitly. Removing a dependent chain together is allowed.
+nodes implicitly. Removing a dependent chain together is allowed. The browser editor no
+longer sends `remove_node`: it deletes through `NodeDraftsProposal.removed` (below),
+where deletion always succeeds as a draft and these cases become located problems.
 
 A node with unbound required inputs is a draft-only state. `POST
 /api/editor/{project_id}/node-draft` accepts `NodeDraftRequest(expected_sha256,
@@ -193,7 +195,7 @@ valid. Constructor imports added by an insertion are kept by a later removal.
 ### Multi-node drafts and new external inputs
 
 The browser editor uses `NodeDraftsProposal(kind="node_drafts", source, nodes,
-externals, document=None, bindings=())` (`models.py`, applied by
+externals, document=None, bindings=(), removed=())` (`models.py`, applied by
 `node_edits.apply_node_drafts`) for any number of pending additions in one review.
 `nodes` are `PendingNode` values (the `AddNodeProposal` fields without `kind` and
 `source`; `AddNodeProposal` subclasses it). `externals` are new
@@ -481,3 +483,20 @@ candidate may use a changed target objective after explicit review when the
 structured interfaces remain supported. Migrating a trained model or objective
 state, combining execution profiles with training, and I/O adaptation remain
 outside this slice.
+
+### Draft deletion (`NodeDraftsProposal.removed`)
+
+`removed` lists anchor node ids deleted in the draft (unique; an unknown id is
+`node_edit`; a draft must add or delete at least one node or input). Choices never
+offer a deleted node's result. Every remaining socket that reads a deleted result is
+disconnected unless the proposal patches it explicitly (`bindings` win), so a required
+reader reports `required_unbound` (node, field). Deleting a research-loop feedback
+endpoint adds `DraftProblem(code="loop_feedback_missing")` and deleting every node with
+no pending addition adds `DraftProblem(code="workflow_empty")` (both without node).
+Inspection reports these as `incomplete` with `problems`; Review refuses
+`draft_incomplete` until none remain, so a saved document is always valid. Without
+reader patches, `document` edits or problems, deletions are targeted byte removals
+(`source_edits.remove_nodes`) followed by the targeted insertions; otherwise the
+combined document (patched, then without the deleted nodes and positions) is validated
+and rendered canonically. `NodeEditSummary.removed` lists the deleted ids. Tests:
+`tests/unit/tools/test_workflow_node_drafts.py`.

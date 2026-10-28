@@ -18,7 +18,7 @@ from workflows.definition import (
     ResultSource,
     parse_workflow_source,
 )
-from workflows.definition.draft import DraftProblem, WorkflowDraft, inspect_draft
+from workflows.definition.draft import BindingPatch, DraftProblem, WorkflowDraft, inspect_draft
 from workflows.definition.source import WorkflowSourceError, render_workflow_source
 from workflows.definition.source_edits import (
     SourceEditError,
@@ -165,6 +165,7 @@ def _projection(
     """
     base = proposal.document or parse_workflow_source(proposal.source)
     definition = base.definition
+    removed = set(proposal.removed)
     pending = tuple(
         NodeInstance.model_construct(id=item.node, capability=item.capability)
         for item in proposal.nodes
@@ -173,7 +174,8 @@ def _projection(
         **{
             **{name: getattr(definition, name) for name in type(definition).model_fields},
             "externals": (*definition.externals, *proposal.externals),
-            "nodes": (*definition.nodes, *pending),
+            # Deleted nodes offer no result to any socket.
+            "nodes": (*(node for node in definition.nodes if node.id not in removed), *pending),
         }
     )
     return base, type(base).model_construct(
@@ -191,6 +193,63 @@ def node_drafts_ports(proposal: NodeDraftsProposal) -> tuple[PortInventoryEntry,
     return existing + tuple(
         port for item in proposal.nodes for port in pending_node_ports(projected, item)
     )
+
+
+def _removal(
+    base: AuthoredWorkflowDocument, proposal: NodeDraftsProposal
+) -> tuple[tuple[BindingPatch, ...], tuple[DraftProblem, ...]]:
+    """Disconnect patches for inputs that read a deleted node, plus removal problems.
+
+    Explicit patches of the proposal win; every other reader of a deleted result is
+    disconnected (a required one then reports ``required_unbound`` in inspection).
+    """
+    removed = set(proposal.removed)
+    definition = base.definition
+    unknown = removed - {node.id for node in definition.nodes}
+    if unknown:
+        raise NodeEditRefusal("node_edit", f"unknown node: {', '.join(sorted(unknown))}")
+    patched = {(item.node, item.argument) for item in proposal.bindings}
+    patches = list(proposal.bindings)
+    for node in definition.nodes:
+        if node.id in removed or not isinstance(node.request, ProtocolRequest):
+            continue
+        for argument in node.request.arguments:
+            source = argument.source
+            if (
+                isinstance(source, ResultSource)
+                and source.node in removed
+                and (node.id, argument.name) not in patched
+            ):
+                patches.append(BindingPatch(node=node.id, argument=argument.name, source=None))
+    problems: list[DraftProblem] = []
+    loop = definition.loop
+    if loop is not None and {loop.feedback.source.node, loop.feedback.target} & removed:
+        problems.append(
+            DraftProblem(
+                code="loop_feedback_missing",
+                message="the research loop feeds back between deleted modules; "
+                "add them back or remove the research loop",
+            )
+        )
+    if len(removed) == len(definition.nodes) and not proposal.nodes:
+        problems.append(
+            DraftProblem(code="workflow_empty", message="a workflow needs at least one module")
+        )
+    return tuple(patches), tuple(problems)
+
+
+def _without(document: AuthoredWorkflowDocument, removed: set[str]) -> AuthoredWorkflowDocument:
+    payload = document.model_dump(mode="json")
+    payload["definition"]["nodes"] = [
+        node for node in payload["definition"]["nodes"] if node["id"] not in removed
+    ]
+    payload["positions"] = [item for item in payload["positions"] if item["node"] not in removed]
+    try:
+        return type(document).model_validate_json(json.dumps(payload))
+    except ValidationError as error:
+        raise NodeEditRefusal(
+            "draft_invalid", "\n".join(item["msg"] for item in error.errors(include_url=False))
+        ) from error
 
 
 def _collisions(base: AuthoredWorkflowDocument, proposal: NodeDraftsProposal) -> list[str]:
@@ -223,9 +282,14 @@ def apply_node_drafts(proposal: NodeDraftsProposal) -> tuple[str, NodeEditSummar
     refused = [message for item in proposal.nodes for message in _offered(projected, item)]
     if refused:
         raise NodeEditRefusal("draft_invalid", "\n".join(refused))
-    if proposal.document is None and not proposal.bindings:
+    removed = set(proposal.removed)
+    patches, removal_problems = _removal(base, proposal) if removed else (proposal.bindings, ())
+    if proposal.document is None and not patches and not removal_problems:
+        # Targeted edits: deletions without readers and insertions keep every other byte.
         source = proposal.source
         try:
+            if removed:
+                source = remove_nodes(source, proposal.removed)
             for external in proposal.externals:
                 source = insert_external(source, external)
             for item in proposal.nodes:
@@ -254,25 +318,31 @@ def apply_node_drafts(proposal: NodeDraftsProposal) -> tuple[str, NodeEditSummar
                 "draft_invalid",
                 "\n".join(item["msg"] for item in error.errors(include_url=False)),
             ) from error
-        inspection = inspect_draft(
-            WorkflowDraft(base_document=combined, bindings=proposal.bindings)
-        )
-        if inspection.document is None:
+        inspection = inspect_draft(WorkflowDraft(base_document=combined, bindings=patches))
+        if inspection.document is None or removal_problems:
+            problems = (*inspection.problems, *removal_problems)
             raise NodeEditRefusal(
-                "draft_" + inspection.status,
-                "\n".join(inspection.diagnostics),
-                inspection.problems,
+                "draft_" + ("incomplete" if inspection.document is not None else inspection.status),
+                "\n".join((*inspection.diagnostics, *(item.message for item in removal_problems))),
+                problems,
             )
-        source = render_workflow_source(inspection.document)
+        document = _without(inspection.document, removed) if removed else inspection.document
+        source = render_workflow_source(document)
         kept = "the other edits of this draft are rendered as canonical source."
     added = tuple(item.node for item in proposal.nodes)
     parts = [f"{len(added)} node(s) ({', '.join(added)}) with layout positions"] if added else []
+
     if proposal.externals:
         parts.append(
             f"{len(proposal.externals)} external input(s) "
             f"({', '.join(item.id for item in proposal.externals)})"
         )
-    return source, NodeEditSummary(added=added, message=f"Adds {' and '.join(parts)}; {kept}")
+    clauses = [f"Adds {' and '.join(parts)}"] if parts else []
+    if removed:
+        clauses.append(f"Removes {len(removed)} node(s) ({', '.join(proposal.removed)})")
+    return source, NodeEditSummary(
+        added=added, removed=proposal.removed, message=f"{'; '.join(clauses)}; {kept}"
+    )
 
 
 def inspect_node_drafts(proposal: NodeDraftsProposal) -> NodeDraftsView:

@@ -80,11 +80,18 @@ try {
   assert.match(added, /# implement keeps its comment/);
   assert.match(added, /id='validation'/);
 
-  // Delete key on a capability that others read: refused with an explanation, no write.
+  // Delete key on a module that others read: deleted in the draft without confirmation; its
+  // reader becomes a problem, Save is blocked, and Undo brings everything back (no write).
   await page.locator('#circuit-node-implement').focus();
   await page.keyboard.press('Delete');
-  await waitUntil(async () => (await statusText()).includes('Cannot remove implement'), 'dependants refusal');
-  assert.match(await statusText(), /validate\.output reads implement\.result/);
+  await waitUntil(async () => (await page.locator('#circuit-node-implement').count()) === 0, 'deleted in the draft');
+  await waitUntil(async () => (await pendingText()).includes('deletion of implement'), 'deletion is a pending edit');
+  await waitUntil(async () => /Required · Not connected/.test(await page.locator('#circuit-input-validate-output').textContent()), 'reader disconnected');
+  await page.locator('#problems-chip').waitFor({state: 'visible'});
+  assert.equal(await page.locator('#editor-review').isDisabled(), true, 'An invalid draft cannot be saved');
+  await page.locator('#editor-undo').click();
+  await page.locator('#circuit-node-implement').waitFor();
+  await waitUntil(async () => (await pendingText()) === 'No pending edits.', 'undo restores the module and its reader');
   assert.equal(await readFile(metadata.source, 'utf8'), added);
 
   // Context menu offers removal and closes on Escape.
@@ -96,8 +103,10 @@ try {
   // Inspector removal of the added node restores the original bytes exactly.
   await page.locator('#circuit-node-validation').click();
   await page.locator('button[aria-label="Remove validation"]').click();
+  await waitUntil(async () => (await pendingText()).includes('deletion of validation · complete'), 'deletion checked');
+  await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()), 'review removal');
-  assert.match(await statusText(), /Removes validation with its layout position/);
+  assert.match(await statusText(), /Removes 1 node\(s\) \(validation\); all other source bytes are unchanged/);
   await page.locator('#editor-save').click();
   await waitUntil(async () => (await statusText()).includes('Saved reviewed'), 'save removal');
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'add then remove is byte-identical');
@@ -132,7 +141,7 @@ try {
   assert.equal(posts.filter(item => item.url.endsWith('/review')).length, reviews);
   assert.equal(await readFile(metadata.source, 'utf8'), original);
   assert.deepEqual(faults, []);
-  console.log('PASS palette search/click/drag add, incomplete draft gate, bind+review+save with comments, refused dependant removal, context menu, byte-identical removal, discard/undo of a pending node, cancel.');
+  console.log('PASS palette search/click/drag add, incomplete draft gate, bind+review+save with comments, draft deletion of a read module with undo, context menu, byte-identical removal, discard/undo of a pending node, cancel.');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');

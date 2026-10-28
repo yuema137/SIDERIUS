@@ -16,13 +16,13 @@
   let draft = null, bindings = [], anchor = null, inspection = null, inspecting = null;
   // Pending palette nodes and new inputs (draft `nodes`/`externals`, editor-node-drafts.js); `graph` stays the
   // edited document, `display` adds them. Server nodes-draft views are cached by key; the last one is reused while checking.
-  let pendingNodes = [], newExternals = [], display = null, lastNodeView = null, inspectingNode = null; const nodeViews = new Map();
+  let pendingNodes = [], newExternals = [], removedNodes = [], display = null, lastNodeView = null, inspectingNode = null; const nodeViews = new Map();
   const Draft = window.editorDraft, NodeDrafts = window.editorNodeDrafts, hasBindings = () => bindings.length > 0, bindingKey = () => Draft.canonical(bindings);
-  const hasNodeDraft = () => pendingNodes.length > 0 || newExternals.length > 0, isPending = id => pendingNodes.some(item => item.node === id);
+  const hasNodeDraft = () => pendingNodes.length > 0 || newExternals.length > 0 || removedNodes.length > 0, isPending = id => pendingNodes.some(item => item.node === id);
   const nodeKey = () => NodeDrafts.key(draftState()), nodeView = () => nodeViews.get(nodeKey());
   // A conflict with server-inspected patches (bindings, nodes or inputs) cannot rebase.
   const pending = () => sourceDirty || !!draft?.dirty, bindingConflict = () => !!conflict && (hasBindings() || hasNodeDraft());
-  const draftState = () => ({document: graph, bindings, anchor, nodes: pendingNodes, externals: newExternals, training, loopTemplate});
+  const draftState = () => ({document: graph, bindings, anchor, nodes: pendingNodes, externals: newExternals, removed: removedNodes, training, loopTemplate});
   const reproject = () => { ({graph: display, inventory} = graph ? NodeDrafts.project(draftState(), nodeView() || lastNodeView) : {graph: null, inventory: []}); };
   // Draft state of one server projection; the edited document never aliases its anchor.
   const viewState = value => ({document: clone(value.document), bindings: [], training: value.training, loopTemplate: value.loop_template || null,
@@ -131,7 +131,7 @@
     window.editorNodePalette?.setState({enabled: canEditNodes(), pendingNode: pendingNodes.at(-1)?.node || null});
   }
   const pendingText = () => sourceDirty ? 'Pending source edits · not saved'
-    : hasNodeDraft() ? `Pending new ${NodeDrafts.summary(draftState())} · ${nodeView()?.status || 'checking'}`
+    : hasNodeDraft() ? `Pending ${NodeDrafts.summary(draftState())} · ${nodeView()?.status || 'checking'}`
     : hasBindings() ? `Pending binding draft · ${inspection?.key === bindingKey() ? inspection.status : 'checking'}`
     : draft?.dirty ? 'Pending edits · Review changes to update Python source before editing it.' : 'No pending edits.';
   function invalidate() {
@@ -161,7 +161,7 @@
     conflict = value; reviewed = null; controls();
     $('conflict').hidden = false; $('rebase').disabled = bindingConflict() || !value.document;
     $('current').textContent = value.source;
-    const proposal = hasNodeDraft() && !sourceDirty ? `Add ${NodeDrafts.summary(draftState())}`
+    const proposal = hasNodeDraft() && !sourceDirty ? `Draft: ${NodeDrafts.summary(draftState())}`
       : hasBindings() && !sourceDirty
       ? bindings.map(item => `${item.source ? 'Bind' : 'Disconnect'} ${item.node}.${item.argument ?? 'request'}`).join('\n')
       : $('source').value;
@@ -185,7 +185,7 @@
   function restore(state) {
     if (Draft.canonical(state.bindings) !== bindingKey()) inspection = null;
     ({document: graph, bindings, anchor, training, loopTemplate} = state);
-    pendingNodes = clone(state.nodes || []); newExternals = clone(state.externals || []);
+    pendingNodes = clone(state.nodes || []); newExternals = clone(state.externals || []); removedNodes = clone(state.removed || []);
     trainingDrafts.clear(); loopDrafts.clear(); reproject();
     if (display && !display.definition.nodes.some(n => n.id === selected)) selected = display.definition.nodes[0]?.id;
   }
@@ -204,7 +204,7 @@
   }
   // A reviewed source, task-reference or node add/remove becomes the draft's new anchor (one undoable step).
   const foldLabel = proposal => ({source: 'Source edits', task_references: 'Task reference update',
-    add_node: `Add capability ${proposal.node}`, node_drafts: `Add ${NodeDrafts.summary(proposal)}`, remove_node: `Remove capability ${proposal.nodes?.join(', ')}`})[proposal.kind];
+    add_node: `Add capability ${proposal.node}`, node_drafts: `Draft: ${NodeDrafts.summary(proposal)}`, remove_node: `Remove capability ${proposal.nodes?.join(', ')}`})[proposal.kind];
   function fold(value, label) {
     restore(viewState(value)); sourceDirty = false; draft.record(draftState(), label);
   }
@@ -320,11 +320,24 @@
     changed(`Cancel new node ${ids.join(', ')}`); diagnostic(); render();
     status(`New node ${ids.join(', ')} cancelled${result.disconnected.length ? `; disconnected ${result.disconnected.join(', ')}` : ''}. Undo restores it.`);
   }
+  // Delete always succeeds in the draft (operator rule 2026-10-28), with no confirmation: saved
+  // nodes join `removed`, every socket that read them is disconnected (a required one becomes
+  // a problem), and Undo restores all of it. The server refuses only to SAVE an invalid document.
   function removeNodes(ids) {
     if (ids.every(isPending)) { cancelNodes(ids); return; }
-    if (!canEditNodes() || Draft.proposal(draftState()).kind !== 'source') { status('Review/save or discard the current edits before removing a saved capability (new nodes can be removed any time).'); return; }
-    if (ids.length > 1 && !window.confirm(`Remove ${ids.length} capabilities (${ids.join(', ')})? Review still shows the exact change before saving.`)) return;
-    void reviewProposal({kind: 'remove_node', source: anchor.source, nodes: [...ids]});
+    if (!canEditNodes()) { status('Correct the invalid field or resolve the conflict before deleting a module.'); return; }
+    const saved = ids.filter(id => !isPending(id)), gone = new Set([...removedNodes, ...saved]);
+    const result = NodeDrafts.cancel(draftState(), ids.filter(isPending));
+    ({nodes: pendingNodes, bindings} = result);
+    for (const option of anchor.inventory) {
+      if (gone.has(option.node) || option.source?.kind !== 'result' || !gone.has(option.source.node)) continue;
+      bindings = Draft.withBinding(bindings, anchor.inventory, option.node, option.argument, null);
+    }
+    for (const item of pendingNodes) for (const value of item.arguments) if (value.source?.kind === 'result' && gone.has(value.source.node)) pendingNodes = NodeDrafts.bind(pendingNodes, item.node, value.name, null);
+    removedNodes = [...gone]; inspection = null; reproject();
+    const names = ids.map(id => window.editorCapabilityPresentation.label(display?.definition.nodes.find(item => item.id === id)?.capability || graph.definition.nodes.find(item => item.id === id)?.capability));
+    changed(`Delete ${ids.join(', ')}`); render();
+    status(`Deleted ${names.join(', ')}. Undo brings ${ids.length === 1 ? 'it' : 'them'} back.`);
   }
   window.editorNodePalette?.mount($('palette'), $('graph'), {add: startNode, cancel: () => { if (pendingNodes.length) cancelNodes([pendingNodes.at(-1).node]); }});
   function renderGraph() {
@@ -497,7 +510,7 @@
     sourceAvailable = false; sourceDirty = false;
     trainingDrafts.clear(); loopDrafts.clear();
     base = null; graph = null; conflict = null; reviewed = null; inventory = []; training = null; loopTemplate = null; selected = null;
-    draft = null; bindings = []; anchor = null; inspection = null; pendingNodes = []; newExternals = []; display = null; lastNodeView = null; nodeViews.clear();
+    draft = null; bindings = []; anchor = null; inspection = null; pendingNodes = []; newExternals = []; removedNodes = []; display = null; lastNodeView = null; nodeViews.clear();
     $('conflict').hidden = true; $('rebase').disabled = true;
     $('source').value = ''; $('source').disabled = true;
     $('current').textContent = ''; $('conflict-diff').textContent = '';
