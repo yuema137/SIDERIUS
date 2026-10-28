@@ -172,6 +172,7 @@ DEGENERATE_PENALTY_SCORE=""                 # empty → omit flag → schema def
 # §3.2 — Data slicing / reproducibility (13.C-bis; None-default → omit when empty)
 TARGET_FILES=()                     # DEPRECATED no-op (DS7); parsed, not forwarded
 SAMPLING_SEED=""                    # empty == omit == Python None
+RUN_SEED=""                         # issue #983; empty == omit == lock or generate
 # §3.2 — Debugging (action=store_true; 1 emits the flag)
 DEBUG_DUMP_PROMPTS=0
 # §3.2 — Pseudo-mode flags (Stage 3 / Commit 4.5; action=store_true on Python side)
@@ -452,6 +453,7 @@ parse_chain_args() {
           done
           ;;
         --sampling_seed)             SAMPLING_SEED="$2"; shift 2 ;;
+        --run_seed)                  RUN_SEED="$2"; shift 2 ;;
         # §3.2 — Debugging
         --debug_dump_prompts)        DEBUG_DUMP_PROMPTS=1; shift ;;
         # Stage 3 / Commit 4.5 — pseudo-mode flags
@@ -603,6 +605,9 @@ build_app_args() {
     # parsed (so existing invocations don't break) but no longer forwarded.
     if [ -n "$SAMPLING_SEED" ]; then
         APP_ARGS+=(--sampling_seed "$SAMPLING_SEED")
+    fi
+    if [ -n "$RUN_SEED" ]; then
+        APP_ARGS+=(--run_seed "$RUN_SEED")
     fi
     if [ -n "$LLM_CONFIG" ]; then
         APP_ARGS+=(--llm_config "$LLM_CONFIG")
@@ -872,6 +877,9 @@ print_chain_header() {
     fi
     if [ -n "$SAMPLING_SEED" ]; then
         echo "    Sampling seed  : $SAMPLING_SEED"
+    fi
+    if [ -n "$RUN_SEED" ]; then
+        echo "    Run seed       : $RUN_SEED"
     fi
     if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
         echo "    Debug dump     : ON (--debug_dump_prompts)"

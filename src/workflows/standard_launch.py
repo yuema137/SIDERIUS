@@ -68,6 +68,7 @@ def build_standard_launch_config(
         train_portion=args.train_portion,
         eval_portion=args.eval_portion,
         sampling_seed=args.sampling_seed,
+        run_seed=args.run_seed,
         formal_strategy=args.formal_strategy,
         formal_training_scope_source=args.formal_training_scope_source,
         formal_portion=args.formal_portion,

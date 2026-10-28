@@ -163,6 +163,8 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "retain_training_checkpoints": False,
     # PR-C — workflow-owned ordering of two independent evidence capabilities.
     "scientific_evidence_order": "analysis_then_literature",
+    # Issue #983 — explicit operator run seed; None = resolved at startup.
+    "run_seed": None,
 }
 
 

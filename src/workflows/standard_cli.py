@@ -20,8 +20,11 @@ from agent.schemas.ordering import parse_file_order_cli
 from agent.schemas.parameter_rules import ParameterRules
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from core.runtime_control.watchdog_profile import ExecutionRegime
+from core.seeding import RUN_SEED_MAX, RunSeed
 from execute_tools.dataset_config import DataScope
 from workflows.advice import ADVICE_PER_AGENT_KEYS, render_advice_value, resolve_advice_artifact
+
+_RUN_SEED = TypeAdapter(RunSeed)
 
 
 def _positive_int(s: str) -> int:
@@ -37,6 +40,16 @@ def _positive_int(s: str) -> int:
     if v < 1:
         raise argparse.ArgumentTypeError(f"expected a positive integer (>= 1), got {v}")
     return v
+
+
+def _run_seed_arg(s: str) -> int:
+    """argparse type validator: an integer ``RunSeed`` in ``[0, 2**53 - 1]``."""
+    try:
+        return _RUN_SEED.validate_python(int(s))
+    except ValueError as e:  # pydantic.ValidationError is a ValueError
+        raise argparse.ArgumentTypeError(
+            f"expected an integer run seed in [0, {RUN_SEED_MAX}], got {s!r}"
+        ) from e
 
 
 def _portion_floor(s: str) -> float:
@@ -745,6 +758,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Seed for build_sample_set(). None auto-generates per gate.",
+    )
+    parser.add_argument(
+        "--run_seed",
+        type=_run_seed_arg,
+        default=None,
+        help=(
+            "The run's one seed (issue #983), an integer in [0, 2**53 - 1]. Omit it "
+            "to generate one at startup. A workspace keeps its locked seed: a later "
+            "iteration adopts it, and a different value is refused."
+        ),
     )
     parser.add_argument(
         "--trial_time_budget_minutes",

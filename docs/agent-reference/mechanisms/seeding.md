@@ -11,11 +11,14 @@ stochastic unit. It does not own where a seed is admitted, locked, recorded or
 displayed, nor how a trainer seeds its RNGs; those are added by later PRs of
 issue #983 and documented with their owners.
 
-**Landed state.** Only the owner module exists. No production caller imports
-`core.seeding` yet: the tuner still derives its seeds from
+**Landed state.** The native workflow resolves, locks and prints one
+`run_seed` per workspace (`--run_seed`, else the lock, else
+`resolve_run_seed`); see
+[persistence-and-resume.md](persistence-and-resume.md#run-seed-in-the-lock-issue-983).
+No unit seed is derived from it yet: the tuner still derives its seeds from
 `sha256(f"{run_name}_{total_attempts}")`, and the trainer's
 `hash(exp_id)` fallback and unseeded process RNGs are unchanged. Do not cite
-this page as evidence that any run is seeded.
+this page as evidence that any training or sampling is seeded.
 
 ## Public interface
 
@@ -126,4 +129,4 @@ These belong to later #983 PRs, not to `core/seeding.py`:
 - Torch/NumPy process and generator seeding helpers, in
   `execute_tools/process_seeding.py`. The planned legacy `np.random.seed`
   reduction is `derive_seed(..., "trainer.init_numpy", at) & (2**32 - 1)`.
-- Admission and lock integration, record fields and the RNG census guard.
+- Candidate admission, record and receipt fields, and the RNG census guard.

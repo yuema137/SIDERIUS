@@ -238,6 +238,11 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     current_planner = planner_strategy.resolve_planner_strategy("native-timing-v1")
     assert actual_planner_assembly == current_planner.identity.assembly_sha256
     assert actual.expected_planner_strategy == current_planner.identity
+    # Issue #983 — the workflow generates a run seed per run (a seed-owned
+    # path); the oracle predates it. Keep its bytes and check the forwarded
+    # value against the persisted lock below.
+    assert "run_seed" not in expected
+    payload.pop("run_seed")
     if case == "split_routes":
         # The verifier source and execution assembly have evolved independently.
         # Preserve the oracle bytes and verify these source-derived digests against
@@ -282,6 +287,7 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     assert actual_fingerprint == lock.task_composition_fingerprint
     assert actual.expected_planner_strategy == lock.planner_strategy_identity
     assert actual.runtime_verifier_identity == lock.runtime_verifier_identity
+    assert actual.run_seed is not None and actual.run_seed == lock.run_seed
     for field in (
         "experiment_arm",
         "lit_review_enabled",

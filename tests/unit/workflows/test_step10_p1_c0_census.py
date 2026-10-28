@@ -749,4 +749,8 @@ class TestCensusDLegacyLockKeySet:
             "gpu_execution_policy",
             # Explicit planner policy must remain identical across resume (#372).
             "planner_strategy_identity",
+            # Issue #983 — one run seed per workspace; omitted when None so
+            # pre-seed locks keep their bytes, and refused for continuation.
+            "run_seed",
+            "seed_derivation",
         )
