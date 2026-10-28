@@ -14,7 +14,8 @@ from workflows.definition.llm_strategies import LLMStrategy, RubricRankStrategy
 from workflows.definition.models import InputPort
 
 from .kinds import IMPLEMENTED_KINDS
-from .models import StrategyAdmission, StrategyRefusal, StrategyRefusalCode
+from .models import StrategyAdmission, StrategyRefusal, StrategyRefusalCode, lists_every_item
+from .plan import StrategyKind
 from .projection import ITEM_PROJECTORS
 
 
@@ -103,6 +104,77 @@ def _combined_refusals(
     return refusals
 
 
+def _contract_refusals(
+    strategy: LLMStrategy, inputs: tuple[InputPort, ...], output_contract: str
+) -> tuple[str, list[StrategyRefusal]]:
+    """The one input contract and the refusals about input and output contracts."""
+    refusals: list[StrategyRefusal] = []
+    contracts = sorted({port.contract for port in inputs})
+    if len(contracts) != 1:
+        refusals.append(_refusal("mixed_contracts", f"input contracts differ: {contracts}"))
+    contract = contracts[0]
+    if contract not in ITEM_PROJECTORS:
+        refusals.append(
+            _refusal(
+                "unprojectable_contract", f"no LLM item projector is registered for {contract!r}"
+            )
+        )
+    if output_contract != contract:
+        refusals.append(
+            _refusal(
+                "output_contract_mismatch",
+                f"{strategy.kind} emits {contract} values over {contract} inputs, "
+                f"not {output_contract}",
+            )
+        )
+    return contract, refusals
+
+
+def _capacity_refusals(
+    kind: StrategyKind, strategy: LLMStrategy, capacity: int | None
+) -> list[StrategyRefusal]:
+    """The ports' item capacity: bounded, enough for the kind, within the per-call cap."""
+    if capacity is None:
+        return [
+            _refusal(
+                "unbounded_port",
+                "every 'many' port of an LLM strategy declares max_items (static call bound)",
+            )
+        ]
+    if capacity < kind.min_items(strategy):
+        return [
+            _refusal(
+                "insufficient_capacity",
+                f"{strategy.kind} needs at least {kind.min_items(strategy)} items; "
+                f"the ports hold at most {capacity}",
+            )
+        ]
+    if lists_every_item(strategy) and capacity > MAX_SCORED_ITEMS_PER_CALL:
+        hint = "; use per_item scoring" if isinstance(strategy, RubricRankStrategy) else ""
+        return [
+            _refusal(
+                "batch_too_large",
+                f"{strategy.kind} lists every item in one call; up to {capacity} items "
+                f"exceed {MAX_SCORED_ITEMS_PER_CALL} items per call{hint}",
+            )
+        ]
+    return []
+
+
+def _shape_refusals(
+    kind: StrategyKind,
+    strategy: LLMStrategy,
+    contract: str,
+    select: SelectStrategy,
+    cardinality: CardinalityBound,
+) -> list[StrategyRefusal]:
+    """SELECT/cardinality rules for what the kind produces: a ranking or new values."""
+    count = None if kind.output_count is None else kind.output_count(strategy)
+    if count is None:
+        return _ranking_refusals(strategy.kind, contract, select, kind.threshold_basis)
+    return _combined_refusals(strategy, count, contract, select, cardinality)
+
+
 def admit_llm_strategy(
     strategy: LLMStrategy,
     *,
@@ -121,84 +193,30 @@ def admit_llm_strategy(
     """
     slot = strategy.route_slot
     kind = IMPLEMENTED_KINDS.get(strategy.kind)
-    if kind is None:
-        refusal = StrategyRefusal(
-            code="kind_not_implemented",
-            message=f"{strategy.kind} is declared but its implementation has not landed",
+    if kind is None or not inputs:
+        refusal = (
+            _refusal(
+                "kind_not_implemented",
+                f"{strategy.kind} is declared but its implementation has not landed",
+            )
+            if kind is None
+            else _refusal("no_input_ports", "an adaptor declares no input port")
         )
         return StrategyAdmission(
             static_call_bound=None, required_route_slot=slot, refusals=(refusal,)
         )
-    if not inputs:
-        refusal = StrategyRefusal(
-            code="no_input_ports", message="an adaptor declares no input port"
-        )
-        return StrategyAdmission(
-            static_call_bound=None, required_route_slot=slot, refusals=(refusal,)
-        )
-    refusals: list[StrategyRefusal] = []
-    contracts = sorted({port.contract for port in inputs})
-    if len(contracts) != 1:
-        refusals.append(
-            StrategyRefusal(code="mixed_contracts", message=f"input contracts differ: {contracts}")
-        )
-    contract = contracts[0]
-    if contract not in ITEM_PROJECTORS:
-        refusals.append(
-            StrategyRefusal(
-                code="unprojectable_contract",
-                message=f"no LLM item projector is registered for {contract!r}",
-            )
-        )
-    if output_contract != contract:
-        refusals.append(
-            StrategyRefusal(
-                code="output_contract_mismatch",
-                message=f"{strategy.kind} emits {contract} values over {contract} inputs, "
-                f"not {output_contract}",
-            )
-        )
-    count = None if kind.output_count is None else kind.output_count(strategy)
-    if count is None:
-        refusals += _ranking_refusals(strategy.kind, contract, select, kind.threshold_basis)
-    else:
-        refusals += _combined_refusals(strategy, count, contract, select, cardinality)
+    contract, refusals = _contract_refusals(strategy, inputs, output_contract)
+    refusals += _shape_refusals(kind, strategy, contract, select, cardinality)
     if kind.admit_parameters is not None:
         refusals += kind.admit_parameters(strategy, inputs)
     capacity = _item_capacity(inputs)
+    refusals += _capacity_refusals(kind, strategy, capacity)
     bound = None if capacity is None else kind.call_bound(strategy, capacity)
-    if capacity is None:
-        refusals.append(
-            StrategyRefusal(
-                code="unbounded_port",
-                message="every 'many' port of an LLM strategy declares max_items (static call bound)",
-            )
-        )
-    elif capacity < kind.min_items(strategy):
-        refusals.append(
-            _refusal(
-                "insufficient_capacity",
-                f"{strategy.kind} needs at least {kind.min_items(strategy)} items; "
-                f"the ports hold at most {capacity}",
-            )
-        )
-    elif (
-        isinstance(strategy, RubricRankStrategy)
-        and strategy.scoring == "batch"
-        and capacity > MAX_SCORED_ITEMS_PER_CALL
-    ):
-        refusals.append(
-            StrategyRefusal(
-                code="batch_too_large",
-                message=f"batch scoring of up to {capacity} items exceeds "
-                f"{MAX_SCORED_ITEMS_PER_CALL} items per call; use per_item scoring",
-            )
-        )
     if bound is not None and bound > strategy.max_calls:
         refusals.append(
-            StrategyRefusal(
-                code="call_bound_exceeds_max_calls",
-                message=f"{strategy.kind} may make {bound} calls; max_calls is {strategy.max_calls}",
+            _refusal(
+                "call_bound_exceeds_max_calls",
+                f"{strategy.kind} may make {bound} calls; max_calls is {strategy.max_calls}",
             )
         )
     return StrategyAdmission(

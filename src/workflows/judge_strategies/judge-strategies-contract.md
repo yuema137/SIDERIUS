@@ -64,7 +64,7 @@ admitted iff `refusals` is empty. Refusal codes:
 | --- | --- |
 | `kind_not_implemented` | the kind is not in `IMPLEMENTED_KINDS` (only refusal reported; `static_call_bound=None`) |
 | `no_input_ports` | `inputs` is empty (only refusal reported; `static_call_bound=None`) |
-| `batch_too_large` | `scoring="batch"` with an item capacity above `MAX_SCORED_ITEMS_PER_CALL` (16; `agent/schemas/judge.py`), so one batch prompt has a fixed size bound; use `per_item` |
+| `batch_too_large` | a kind that lists every item in one call (`lists_every_item`: every kind except `rubric-rank` with `scoring="per_item"`) over an item capacity above `MAX_SCORED_ITEMS_PER_CALL` (16; `agent/schemas/judge.py`), so every prompt has a fixed size bound; rubric-rank: use `per_item` |
 | `unbounded_port` | a `many` port without `max_items`: the static call bound needs the item capacity (`one` port = 1, `many` port = `max_items`) |
 | `mixed_contracts` | ports of more than one contract |
 | `unprojectable_contract` | no projector in `ITEM_PROJECTORS` (v1: `proposal.output`, `literature.output`) |
@@ -102,7 +102,8 @@ with the omitted count recorded as a field. `proposal.output` projects
 
 `StrategyInvocation(adaptor_id, iteration, strategy, items, output_contract,
 expected_count, rubric, task_guidance, evidence_dir)` refuses: duplicate items;
-batch scoring of more than `MAX_SCORED_ITEMS_PER_CALL` items;
+more than `MAX_SCORED_ITEMS_PER_CALL` items for a kind that lists every item in
+one call (the same cap is the request schemas' `max_length`, e.g. `MergeRequest.items`);
 items of more than one contract; a `rubric` that is absent for `rubric-rank/v1`,
 present for another kind, or whose `rubric_ref(rubric)` differs from
 `strategy.rubric` (content digest); `task_guidance` present iff
@@ -234,9 +235,12 @@ advisors said. Planners receive the earlier decided payloads for this
 (`StrategyKind.plan_call(invocation, earlier)`).
 
 The reviser returns a `SynthesisVerdict`. `check_payload` requires, per draft,
-distinct listed parents (primary or advisors) that include the primary, and a
-contract-valid value with framework-owned fields unset. Parents other than the
-primary are the advisors whose advice was adopted. The fold requires exactly one
+distinct listed parents (primary or advisors) whose first entry is the primary,
+and a contract-valid value with framework-owned fields unset. Lineage contract
+for B6: `CombinedItem.parents[0]` is the primary; the remaining parents are the
+advisors whose advice was adopted. `RevisionRequest.advisors` and `notes` hold at
+most `MAX_SCORED_ITEMS_PER_CALL − 1` entries (the reviser lists every item), and
+admission refuses a larger capacity (`batch_too_large`). The fold requires exactly one
 value (`cardinality_mismatch` otherwise) and stamps
 `adaptor:<adaptor_id>/primary-advisors-llm/v1`. No score arithmetic is involved.
 
@@ -337,7 +341,10 @@ stamped lineage and replay; a declared primary is used, not the first item;
 re-anchored evidence revising another primary refused on replay; per_advisor
 consults advisors in order and the reviser sees every note (N calls); a note
 naming another advisor and a revision dropping the primary refused; an
-inadmissible declared primary → `primary_unavailable` with no call; `metric_best`
+inadmissible declared primary → `primary_unavailable` with no call; a fully
+re-recorded forgery naming another primary (prompt identity and outcome rewritten)
+refused on replay; parents not starting with the primary refused; more items than
+one call may hold refused; `metric_best`
 never runs; admission bounds and one row per refusal; pinned `judge.advice/v1`
 and `judge.revision/v1` digests.
 

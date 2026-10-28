@@ -59,6 +59,16 @@ class StrategyItem(JudgeModel):
         return self
 
 
+def lists_every_item(strategy: LLMStrategy) -> bool:
+    """Whether some call of ``strategy`` lists every invocation item.
+
+    Such a kind is bounded by ``MAX_SCORED_ITEMS_PER_CALL`` items (one per-call cap
+    for every judge call that lists items). Only ``rubric-rank/v1`` with
+    ``scoring="per_item"`` lists one item per call.
+    """
+    return not (isinstance(strategy, RubricRankStrategy) and strategy.scoring == "per_item")
+
+
 class StrategyInvocation(JudgeModel):
     """One adaptor invocation of one LLM strategy, items in B6 declared order."""
 
@@ -86,10 +96,11 @@ class StrategyInvocation(JudgeModel):
             assert self.rubric is not None
             if rubric_ref(self.rubric) != self.strategy.rubric:
                 raise ValueError("the supplied rubric is not the one the strategy references")
-            if self.strategy.scoring == "batch" and len(self.items) > MAX_SCORED_ITEMS_PER_CALL:
-                raise ValueError(
-                    f"batch scoring lists at most {MAX_SCORED_ITEMS_PER_CALL} items per call"
-                )
+        if lists_every_item(self.strategy) and len(self.items) > MAX_SCORED_ITEMS_PER_CALL:
+            raise ValueError(
+                f"{self.strategy.kind} lists every item in one call; at most "
+                f"{MAX_SCORED_ITEMS_PER_CALL} items per call"
+            )
         if (self.strategy.guidance == "task_blocks") != (self.task_guidance is not None):
             raise ValueError("task guidance is supplied iff the strategy declares task_blocks")
         return self

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agent.judge.call import JudgeRunContext
 from agent.schemas.data_analysis.common import canonical_json_bytes, canonical_sha256
@@ -134,8 +135,10 @@ def test_a_declared_primary_is_used_not_the_first_item(tmp_path):
 
 
 def test_replay_refuses_evidence_whose_primary_the_declared_rule_did_not_choose(tmp_path):
-    """Defect: re-anchored evidence that revised another primary replays as if the
-    declared rule had chosen it."""
+    """Defect: a complete, self-consistent forgery that revised another primary (request,
+    request digest, prompt identity, payload lineage and recorded outcome all rewritten,
+    then re-anchored) replays, because readback trusts the recorded request instead of
+    re-deriving the primary from the declared rule."""
     value = invocation(
         tmp_path, strategy=primary_advisors(primary="declared", primary_item="reviews:2")
     )
@@ -145,16 +148,40 @@ def test_replay_refuses_evidence_whose_primary_the_declared_rule_did_not_choose(
     content = record["request"]["content"]
     first, *rest = content["advisors"]
     content["primary"], content["advisors"] = first, [content["primary"], *rest]
-    record["request_sha256"] = canonical_sha256(record["request"])
+    request = CallRequest.model_validate_json(json.dumps(record["request"]))
+    record["request_sha256"] = canonical_sha256(request)
+    record["prompt"] = REVISION_TEMPLATE.identity(request).model_dump(mode="json")
+    parents = ["reviews:0", "reviews:2", "reviews:1"]
+    record["payload"]["items"][0]["parents"] = parents
     forged = canonical_json_bytes(record)
     call_path.write_bytes(forged)
     strategy_path = value.evidence_dir / "strategy.json"
     anchor = json.loads(strategy_path.read_bytes())
     anchor["calls"] = [hashlib.sha256(forged).hexdigest()]
+    anchor["outcome"]["combined"]["items"][0]["parents"] = parents
     strategy_path.write_bytes(canonical_json_bytes(anchor))
-    with pytest.raises(StrategyError, match="call 0 is refused"):
+    with pytest.raises(StrategyError, match="request differs from the re-projected request"):
         replay_llm_strategy(value, ROUTES, expected_sha256=canonical_sha256(anchor))
     assert result.outcome.status == "decided"
+
+
+def test_lineage_names_the_primary_first(tmp_path):
+    """Defect: a revision of primary reviews:2 answering parents [reviews:0, reviews:2]
+    reaches B6 with lineage that reads as if reviews:0 were the primary."""
+    strategy = primary_advisors(primary="declared", primary_item="reviews:2")
+    bridge = AdvisorsBridge(parents=["reviews:0", "reviews:2"])
+    result = run(invocation(tmp_path, strategy=strategy), bridge, tmp_path)
+    assert (result.outcome.status, result.outcome.failure_code) == ("failed", "inadmissible_choice")
+
+
+def test_primary_advisors_over_more_items_than_one_call_may_hold_is_refused(tmp_path):
+    """Defect: the reviser prompt grows with the declared item count (every item is listed)."""
+    wide = InputPort(
+        name="reviews", contract="literature.output", cardinality="many", max_items=200
+    )
+    assert "batch_too_large" in {r.code for r in admit(inputs=(wide,)).refusals}
+    with pytest.raises(ValidationError, match="at most 16 items per call"):
+        invocation(tmp_path, positions=tuple(range(17)))
 
 
 def test_per_advisor_consults_each_advisor_then_revises_with_every_note(tmp_path):
