@@ -49,6 +49,14 @@ _PURPOSES: Final = frozenset(get_args(SeedPurpose))
 CanonicalAtom = str | int | None
 
 
+class MissingRunSeed(ValueError):
+    """A component that must receive a run seed was given none.
+
+    Only an entry boundary may generate a run seed; every other component
+    refuses ``None`` with this error instead of inventing a fallback.
+    """
+
+
 class RunSeedBinding(BaseModel):
     """The resolved seed of one run, as recorded before execution starts."""
 

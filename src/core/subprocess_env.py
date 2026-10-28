@@ -41,6 +41,10 @@ PLUGIN_DIRS_ENV_VAR = "SIDERIUS_PLUGIN_DIRS"
 #: one — sharing would mask globally-registered losses whenever only a
 #: model dir is set. See `docs/design/enable_loss_inventory.md` § Commit L1.
 LOSS_DIRS_ENV_VAR = "SIDERIUS_LOSS_DIRS"
+#: Every SIDERIUS child hashes strings with a fixed seed. The parent
+#: orchestrator process is not covered (stated limitation in seeding.md).
+HASH_SEED_ENV_VAR = "PYTHONHASHSEED"
+CHILD_HASH_SEED = "0"
 
 
 def subprocess_env(
@@ -105,6 +109,9 @@ def subprocess_env(
 
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
+    # Stable str/bytes hashing, so set and frozenset iteration order in task
+    # code is identical across training and probe children (seeding.md).
+    env[HASH_SEED_ENV_VAR] = CHILD_HASH_SEED
     from core.local_code import package_subprocess_env
 
     package_subprocess_env(env)

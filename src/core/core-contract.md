@@ -21,11 +21,12 @@ what a task means — task semantics live in
 | `sandbox_executor.py` | `TidmadSandbox` / `StubSandbox` — the GPU child launch surface: `execute_training`, `execute_inference`, `evaluate_metric`, `execute_scoring`; every child goes through one observed-subprocess seam |
 | `execution_calibration.py` | `resolve_role_ceiling(role)` (typed role/value/source) · `resolve_role_ceiling_gb(role)` (compatibility projection: `None` inherits existing OS limits; explicit `0` adds no cap; positive GiB retains the child RLIMIT_AS setter) · `SIDERIUS_SUBPROCESS_RSS_GB` accepts one global integer or complete role mapping; malformed **refuses** · `calibration_provenance()` records configured policy, not measured OS limits |
 | `hardware_context.py` | `get_or_create(workspace, run_name)` — discovery + the per-run `{run_name}_hardware.json` manifest; `inspect_gpu_runtime()` — fresh backend/property facts without persistence, under the [accelerator contract](accelerator-runtime.md) |
-| `subprocess_env.py` | the one environment a child needs for generated plugin roots and optional captured task-code transport |
+| `subprocess_env.py` | the one environment a child needs for generated plugin roots and optional captured task-code transport; pins `PYTHONHASHSEED=0` |
 | [`local_code/`](local_code/README.md) | finite captured package imports, whole-set identity, verified child transport and named integrity refusal |
 | `runtime_control/` | measurement, admission, watchdog, calibration registry, `launch_guard.run_launch_self_test`, estimator/policy identity |
 | `server_configs/` | per-server calibration registry (`_base.py` schema; one module per host) |
-| `seeding.py` | `RunSeed` · `RunSeedBinding` · `resolve_run_seed` / `generate_run_seed` · `derive_seed` (`siderius-seed/v1`); see the [seeding mechanism](../../docs/agent-reference/mechanisms/seeding.md) |
+| `seeding.py` | `RunSeed` · `RunSeedBinding` · `resolve_run_seed` / `generate_run_seed` · `derive_seed` (`siderius-seed/v1`) · `MissingRunSeed`; see the [seeding mechanism](../../docs/agent-reference/mechanisms/seeding.md) |
+| `training_seeds.py` | torch-free `SeedContext` · `TrainingSeedPlan` (`init_*`, `epoch(k)` → `EpochSeeds`) · `resolve_trainer_seed_plan` (trainer CLI entry boundary) · `trainer_seed_record`; see [trainer seeding](../../docs/agent-reference/mechanisms/seeding.md#trainer-seeding) |
 | `campaign_identity.py` | validates campaign ids, binds campaign state to its identity stamp, and admits campaign homes |
 | `runtime_control/campaign.py` | typed C12 validation-campaign matrix, measured cell records, pairwise plans, and campaign verdicts |
 | `committed_digests.py` · `memory_probe.py` · `inference_defaults.py` · `scientific_authority.py` | single-purpose authorities (read their docstrings) |
