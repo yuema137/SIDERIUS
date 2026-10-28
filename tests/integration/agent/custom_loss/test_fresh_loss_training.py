@@ -42,6 +42,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
 from nodes.ml_hyperparameter_tune_agent.loss_inventory import resolve_run_custom_loss_inventory
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
+from tests.helpers.run_seed import TEST_RUN_SEED
 from workflows.model_exploration import (
     _commit_candidate_capabilities,
     _promote_loss_to_global,
@@ -216,6 +217,7 @@ def _plan(composition, proposal, verdict, storage, sandbox):
         planner_strategy="native-timing-v1",
         is_trial=True,
         health_gate_enabled=False,
+        run_seed=TEST_RUN_SEED,
     )
     inventory = resolve_run_custom_loss_inventory(
         CapabilityRegistry(), composition.forward_contract.model_io, ref
