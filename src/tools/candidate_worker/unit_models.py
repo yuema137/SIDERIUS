@@ -13,7 +13,7 @@ reconciliation read `model_fields_set`.
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt
 
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
@@ -141,6 +141,10 @@ class ValidationUnit(BaseModel):
     inputs: NativeInputs
     proposal: ProposalOutput
     implementation: ImplementorOutput
+    #: Issue #984 — what remained of the worker's `WorkerBudget` when the worker
+    #: dispatched this unit; ``None`` when the worker had no budget. The unit
+    #: re-anchors it at entry, so it bounds the validator's pytest child.
+    worker_budget_seconds: PositiveFloat | None
 
 
 class LiteratureUnit(BaseModel):

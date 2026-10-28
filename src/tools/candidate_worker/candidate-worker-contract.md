@@ -306,6 +306,23 @@ An infrastructure abort returns `failed` while retaining its native output.
 Rejected validation still returns three records and `rejected`. Parent timeout,
 interruption or process failure overrides a child's reported completion.
 
+Each worker process entry (`child.execute`, `loop_resume.execute_continuation`)
+anchors one `budget.WorkerBudget` from `CandidateRunRequest.timeout_seconds` and
+passes it explicitly through `execute_native`/`execute_loop`/`execute_fanout`/
+`run_candidate_phases` to `phases.run_validation`, which bounds the validator's
+pytest child by `pytest_limit()`, the `remaining_seconds()` as a
+`PytestLimit(source="worker_budget")` (issue #984). On a graph profile the
+validation node runs in a unit process: `unit_dispatch.node_invocation` records
+the budget's `remaining_seconds()` at dispatch as
+`ValidationUnit.worker_budget_seconds` (`None` without a budget), and
+`unit_child.run_invocation_file` re-anchors a `WorkerBudget` from it right after
+reading the invocation and passes it to `phases.run_validation`. Every anchor
+follows the launch it measures from, so the value is an upper bound; the
+sandbox limit still governs. A spent
+budget yields a minimal positive limit, failing the pytest check at its first
+deadline poll. Direct callers that pass no budget run pytest group-supervised
+without a deadline.
+
 The optional `training_output` receipt field contains the model name and native
 output SHA-256. It is omitted entirely for legacy receipts. Reconcile and later
 `candidate_operations` reads reach the same inert fixed-path/identity/digest
@@ -423,7 +440,8 @@ three/four-stage path is unchanged and runs in the worker.
   `physical_data_root`, `node_id`, `iteration`, the selected native `storage`,
   and a phase payload discriminated by `phase` (`ProposalUnit`,
   `ImplementationUnit`, `ValidationUnit`, `LiteratureUnit`,
-  `InterpretationUnit`, `TuningUnit`). A proposal after a literature review
+  `InterpretationUnit`, `TuningUnit`). `ValidationUnit.worker_budget_seconds`
+  carries the remaining worker budget (issue #984, above). A proposal after a literature review
   carries the review evidence already applied. `TuningUnit` carries the
   predecessor outputs of the branch `adaptor_phase.tuning_branch` selected in
   the worker (the selection adaptor's contribution, else the only branch), `chain_formal_incumbent_reference` and

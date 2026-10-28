@@ -60,6 +60,12 @@ for name in ("ml_model_proposal_agent", "ml_model_implementor", "ml_code_validat
     importlib.import_module(f"nodes.{{name}}.{{name}}").LLMBridge = Provider
 from ml_models import models_sandbox
 from tools.candidate_worker import phases, unit_child
+validator_module = importlib.import_module("nodes.ml_code_validator_agent.ml_code_validator_agent")
+real_pytest = validator_module.run_generated_pytest
+def bounded_pytest(test_file_path, env, *, limit=None):
+    log(kind="pytest", limit=None if limit is None else limit.model_dump())
+    return real_pytest(test_file_path, env, limit=limit)
+validator_module.run_generated_pytest = bounded_pytest
 log(kind="unit", pid=os.getpid(), module=unit_child.__file__)
 implementation, validation, proposal = (
     phases.run_implementation, phases.run_validation, phases.run_proposal
@@ -243,6 +249,25 @@ def test_real_unit_processes_reproduce_the_in_process_body(
     verify_graph_trace(
         request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
     )
+
+
+def test_validation_unit_bounds_pytest_by_the_remaining_worker_budget(
+    prepared, native_runner, monkeypatch, tmp_path
+):
+    """Fails if the worker budget does not cross into a real validation unit process
+    (issue #984): the unit's real validator must launch generated pytest with a
+    `worker_budget` limit no larger than the request's timeout, never unbounded."""
+    request = fanout_request(prepared)
+    receipt, rows, _ = run_real_units(request, monkeypatch, tmp_path, "none")
+    assert receipt.status == "accepted", receipt.error
+    limits = [row["limit"] for row in rows if row["kind"] == "pytest"]
+    assert len(limits) == 2  # one per validation branch, each in its own unit
+    assert all(
+        limit is not None
+        and limit["source"] == "worker_budget"
+        and 0 < limit["seconds"] <= request.timeout_seconds
+        for limit in limits
+    ), limits
 
 
 @pytest.mark.parametrize("fail", ["raise", "crash"])

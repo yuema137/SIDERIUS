@@ -25,7 +25,6 @@ from nodes.ml_code_validator_agent.ml_code_validator_agent import (
     _check_instantiation_and_gradient,
     _check_plugin,
     _run_tests,
-    subprocess,
 )
 
 __all__ = [
@@ -38,7 +37,6 @@ __all__ = [
     "_check_instantiation_and_gradient",
     "_check_plugin",
     "_run_tests",
-    "subprocess",
 ]
 
 # --- sys.modules rebind ------------------------------------------------------

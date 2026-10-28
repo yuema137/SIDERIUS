@@ -24,16 +24,20 @@ SAFE_PATH_ADDED_ENV = "SIDERIUS_UNIT_SAFE_PATH_ADDED"
 if TYPE_CHECKING:
     from workflows.task_composition import RunTaskComposition
 
+    from .budget import WorkerBudget
     from .unit_models import NodeInvocation, NodeOutput
 
 
 def execute_unit(
-    invocation: "NodeInvocation", composition: "RunTaskComposition"
+    invocation: "NodeInvocation",
+    composition: "RunTaskComposition",
+    budget: "WorkerBudget | None" = None,
 ) -> "tuple[NodeOutput, Path]":
     """The native phase call `graph.execute_fanout` made in-process before B3-3.
 
     Native modules are imported here, after the entry checked the inherited
     generated-library binding (import order is an execution invariant).
+    ``budget`` is the validation unit's re-anchored worker budget (issue #984).
     """
     from .invocation import invocation_from_storage
     from .layout import tuning_input_path
@@ -106,8 +110,31 @@ def execute_unit(
         )
     assert isinstance(unit, ValidationUnit)
     return phases.run_validation(
-        context, request, initial, unit.inputs, config, unit.proposal, unit.implementation
+        context,
+        request,
+        initial,
+        unit.inputs,
+        config,
+        unit.proposal,
+        unit.implementation,
+        budget=budget,
     )
+
+
+def _unit_budget(invocation: "NodeInvocation") -> "WorkerBudget | None":
+    """Re-anchor the dispatching worker's remaining budget in this process (issue #984).
+
+    Anchored right after the invocation is read, so spawn and decode time are
+    not charged: like the worker's own anchor, the value is an upper bound and
+    the outer sandbox limit still governs.
+    """
+    from .budget import WorkerBudget
+    from .unit_models import ValidationUnit
+
+    unit = invocation.unit
+    if not isinstance(unit, ValidationUnit) or unit.worker_budget_seconds is None:
+        return None
+    return WorkerBudget.start(unit.worker_budget_seconds)
 
 
 def run_invocation_file(path: Path) -> None:
@@ -121,6 +148,7 @@ def run_invocation_file(path: Path) -> None:
     from .unit_transport import decode_transport, encode_transport
 
     invocation = decode_transport(NodeInvocation, read_graph_control(path))
+    budget = _unit_budget(invocation)
     if os.path.abspath(verified_chain_workspace()) != os.path.abspath(invocation.initial.workspace):
         raise ValueError("unit child workspace binding disagrees with its invocation")
 
@@ -136,7 +164,7 @@ def run_invocation_file(path: Path) -> None:
             with bind_run_task_composition(
                 composition, physical_data_root=invocation.physical_data_root
             ):
-                output, record = execute_unit(invocation, composition)
+                output, record = execute_unit(invocation, composition, budget)
             result = finished(
                 outcome="returned",
                 output=encode_transport(output).decode(),
