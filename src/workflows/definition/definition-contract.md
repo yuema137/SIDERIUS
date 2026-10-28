@@ -78,7 +78,9 @@ multiple consumers of a result are allowed. Reusing a result does not generate
 multiple candidates or schedule parallel execution. Disconnected nodes with
 complete external request declarations are allowed.
 
-There are no custom/generation/aggregation adapter, feedback, arbitrary-code, constructor configuration or
+Apart from the optional authored `loop` described under
+[Authored loop](#authored-loop), there are no custom/generation/aggregation
+adapter, feedback, arbitrary-code, constructor configuration or
 execution-control fields. Supplying such fields fails validation. Future support
 requires an audited native owner and an explicit format extension. No generic
 subtyping, JSON-schema assignment or execution inference is implemented.
@@ -106,7 +108,21 @@ It changes no historical prompts, training defaults or paper execution paths.
 It does not promise that a future graph executor reproduces those paths; that
 requires separate integration and experiment-owned historical configuration.
 
-## Authored loop stop conditions
+## Authored loop
+
+`WorkflowDefinition.loop` and `ReusableWorkflowDefinition.loop` optionally carry
+`AuthoredLoop(final_iteration, feedback, stop_conditions=())`. `final_iteration`
+is a positive body count; it is a ceiling, not a budget or a promise that every
+body runs. `feedback` is one `LoopFeedback(source=ResultSource(node=...),
+target=..., protocol="tuning-to-interpretation", history="native-research/v1")`;
+these literals are the only accepted protocol and history. Validation requires the
+source node to have capability `tuning` and the target node capability
+`interpretation`. An absent loop is omitted from serialization, so a loop-free
+declaration's digest is unchanged. Execution admission (the supported
+`native-interpretation-candidate/v1` five-node body), Stop and Pause/Resume belong
+to the [candidate-worker contract](../../tools/candidate_worker/candidate-worker-contract.md#declared-finite-research-body).
+
+### Authored loop stop conditions
 
 `AuthoredLoop(final_iteration, feedback, stop_conditions=())` optionally declares
 deterministic hard criteria, a tuple of the discriminated `StopCondition` union

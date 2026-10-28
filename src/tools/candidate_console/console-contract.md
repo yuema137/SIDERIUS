@@ -51,6 +51,15 @@ private reads traverse no-follow directory descriptors. Token syntax encodes at
 least 32 bytes; the operator must generate random bytes. Values never enter native
 requests. Credentials are reread per launch and only configured native environment
 names are passed; native environment validation rejects reserved names.
+The credential file format is decided once, by `files.parse_credential_payload`,
+on the bytes already read through that descriptor: a leading UTF-8 BOM is
+ignored; first non-whitespace byte `{` means a strict JSON object of string names
+to string values (`[` or `"` is refused as malformed JSON); anything else is
+UTF-8 dotenv parsed by python-dotenv `dotenv_values(stream=..., interpolate=False)`
+(no `${...}` expansion, no second open; names without a value are absent).
+Undeclared entries are ignored and never logged. Parse refusals are raised
+outside the parser's exception handler, so neither message nor chained cause
+quotes bytes or values; missing declared names are reported by name only.
 
 `recorded_examples` is an optional allowlist for read-only candidate-validation
 records. Each entry has a unique `example_id`, readable `label`, canonical
@@ -120,7 +129,8 @@ names, unresolved route node names, present/missing required or declared names,
 boolean and bounded repair instructions. No file is read when there are no names
 to check. Missing/empty extra declared names also block readiness. Invalid or
 removed files after startup remain reviewable with unavailable status; startup
-`check` still validates configured credential file shape and permissions.
+`check` still validates configured credential file shape (JSON or dotenv) and
+permissions.
 
 Readiness is absent from native requests, records and review envelope digests.
 No values, lengths, hashes, profile payloads or arbitrary private-file errors are
