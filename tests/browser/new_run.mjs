@@ -210,6 +210,19 @@ try {
   await page.route('**/api/operations/' + admitted.operation_id, route => statusFixture ? route.fulfill(statusFixture) : route.continue());
   await page.reload(); await connect();
   await page.locator('#new-run-operation-status').filter({hasText: 'Keep it'}).waitFor();
+  // B8-2: the store's `unknown` state before the worker records its outcome is not a
+  // finished preparation; it reads as preparing or checking, never "start over".
+  const unknownStatus = reason => ({status: 200, json: {operation_id: admitted.operation_id, kind: 'prepare_reusable',
+    request_digest: JSON.parse(retained).payload.expectation.request_digest, observed_at: 'fixture', state: 'unknown',
+    process: {status: 'unknown', reason}, finishing: false, receipt_available: false, native_status: null, native_id: null,
+    validation_passed: null, reason: 'outcome_unresolved'}});
+  statusFixture = unknownStatus('missing_identity');
+  await page.locator('#new-run-operation-status').filter({hasText: 'Preparing…'}).waitFor();
+  statusFixture = unknownStatus('process_gone');
+  await page.locator('#new-run-operation-status').filter({hasText: 'Checking status…'}).waitFor();
+  assert.doesNotMatch(await page.locator('#new-run-operation-status').textContent(), /finished without|start over/i);
+  statusFixture = {status: 404, json: {error: {code: 'not_found', message: 'fixture missing'}}};
+  await page.locator('#new-run-operation-status').filter({hasText: 'Keep it'}).waitFor();
   // A restored request cannot become discardable through a later refusal or plain 404.
   await page.route('**/reusable-preparations/prepare', route => route.fulfill({status: 409, json: {error: {message: 'fixture restored refusal', admission_not_attempted: true}}}));
   await page.locator('#new-run-retry').click();

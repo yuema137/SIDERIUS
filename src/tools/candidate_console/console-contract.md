@@ -1097,7 +1097,16 @@ training settings are then edited in the ordinary panel. The Run page's step-1 e
 one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
 handoff, so another entry can replace it. When this page created a preparation, the
 first observed `prepared` status opens it in step 2 once (a read-only `/select`); Review
-and Launch stay explicit.
+and Launch stay explicit. A store `unknown` state without a receipt reads "Preparing…"
+(process reason `missing_identity`) or "Checking status…", never as a finished failure
+(B8-2). Step 2 names the version its prepared run holds (`ReusableCaptureReview.
+source_version_name`, display-only `recorded_name` of `source_sha256`, or before review
+the preparation intent's `source_version` handed over by `openPrepared`); when it is not
+the current saved version, `#capture-source`, the top `#run-source-state` and `#run-next`
+say so and `#capture-prepare-current` ("Prepare the current version instead") starts
+step 1 over (B8-3). Step 1's Start over (and that button) dispatches `run-start-over`,
+which clears step 2's selection and review unless a launch is retained, so an older
+capture is never left ready to launch (B8-4).
 
 Until the canvas draws a capability card, the canvas panel shows the empty start state
 `#workflow-start-guide` (spec §7.2): title **Build your research loop**, one sentence from

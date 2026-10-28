@@ -118,6 +118,11 @@
     if (!value.state) return value.observation === 'existing' ? 'This preparation already exists (no second one was created); checking its status…'
       : value.observation === 'operation_failed' ? 'Preparation did not start. Start over to try again.' : 'Sent. Preparing…';
     if (value.state === 'starting' || value.state === 'active' || value.finishing) return 'Preparing… This usually takes under a minute.';
+    // B8-2: the store reports `unknown` until the worker records its identity or outcome;
+    // that is not a finished preparation and never reads as a failure.
+    if (value.state === 'unknown' && !value.receipt_available) {
+      return value.process?.reason === 'missing_identity' ? 'Preparing… This usually takes under a minute.' : 'Checking status…';
+    }
     if (value.state === 'operation_failed') return value.reason === 'spawn_failed'
       ? 'Preparation did not start: the worker could not be launched. Start over to try again.'
       : 'Preparation failed. Its evidence is kept in Monitor; start over to try again.';
@@ -297,13 +302,16 @@
   });
   $('retry').addEventListener('click', () => { problem = ''; void dispatch(false); });
   $('check').addEventListener('click', () => { void check(); });
-  $('dismiss').addEventListener('click', () => {
-    if (!session.connected || busy || !intent) return;
+  // Start over (B8-4): clears step 1 and tells step 2 to drop the prepared run it shows,
+  // so an older capture is never left ready to launch. Step 2 keeps a retained launch.
+  function startOver() {
+    if (!session.connected || busy) return false;
+    if (!intent) { window.dispatchEvent(new CustomEvent('run-start-over')); invalidate(); return true; }
     const state = evidence();
     if (state?.forgettable && !state.released && !state.refused &&
-        !window.confirm('Forget this preparation in this browser? This console has no record of it, so nothing is stopped or deleted.')) return;
+        !window.confirm('Forget this preparation in this browser? This console has no record of it, so nothing is stopped or deleted.')) return false;
     try { coordinator.dismiss('preparation', intent); }
-    catch (_) { status('This preparation changed or its outcome is unconfirmed; it is kept.'); return; }
+    catch (_) { status('This preparation changed or its outcome is unconfirmed; it is kept.'); return false; }
     intent = null;
     operation = null;
     ids = null;
@@ -312,11 +320,21 @@
     retained();
     invalidate();
     suggestName();
+    window.dispatchEvent(new CustomEvent('run-start-over'));
+    return true;
+  }
+  $('dismiss').addEventListener('click', () => { void startOver(); });
+  // Step 2's "Prepare the current version" (B8-3) starts step 1 over for the saved version.
+  window.addEventListener('run-prepare-current', () => {
+    if (!startOver()) { status('Finish or start over the preparation above first.'); return; }
+    document.getElementById('run-entry').scrollIntoView({block: 'start'});
+    $('review').focus();
   });
   $('open').addEventListener('click', () => {
     if ($('open').disabled || !coordinator.same('preparation', intent)) return;
     const selection = intent.payload.selection;
-    void window.reusableCandidate.openPrepared({project: intent.project, task: selection.task_id, run: selection.run_id});
+    void window.reusableCandidate.openPrepared({project: intent.project, task: selection.task_id, run: selection.run_id,
+      sourceVersion: intent.source_version || null});
   });
   coordinator.subscribe(restore);
   suggestName();

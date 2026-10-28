@@ -15,7 +15,8 @@
           : 'The run is in progress. Follow it in Monitor.';
     } else if (launch.selected) {
       step = 'launch';
-      next = launch.reviewed ? 'Next: launch the run.' : 'Next: review the prepared run.';
+      next = launch.outdated ? 'The prepared run below holds an older version: prepare the current version, or launch the older one.'
+        : launch.reviewed ? 'Next: launch the run.' : 'Next: review the prepared run.';
     } else if (prepare.intent) {
       next = prepare.prepared ? 'Next: open the prepared run.' : prepare.problem ? 'The preparation needs attention below.' : 'Preparing… this page updates by itself.';
     } else if (!window.newRunGate?.ready) next = 'Save the workflow first, then come back here.';

@@ -28,7 +28,14 @@
     $('workflow-next-run').disabled = !ready;
     $('workflow-next-run').title = ready ? message : `${message} Run is enabled only for a saved version.`;
     $('workflow-next-state').textContent = ready ? message : `${message} Run is enabled only for a saved version.`;
-    $('run-source-state').textContent = message;
+    // B8-3: while step 2 holds a prepared run of another version, the Run page names what
+    // Launch would actually use instead of claiming the newest save is ready.
+    const captured = window.reusableCandidate?.capturedVersion;
+    const label = version => version.name ? `version "${version.name}"` : `version ${version.sha256.slice(0, 12)}`;
+    $('run-source-state').textContent = captured && ready && captured.sha256 !== state.savedSha256
+      ? `The prepared run in step 2 uses ${label(captured)}. Your saved ${name ? `version "${name}"` : 'version'} is newer and not in it; prepare it to run it.`
+      : captured && captured.sha256 === state.savedSha256 ? `The prepared run in step 2 uses ${label(captured)}, your current saved version.`
+      : message;
     // Empty canvas (CSS hides it once a capability card is drawn): one sentence, one action.
     $('workflow-start-state').textContent = !session.connected ? 'Connect with your console token at the top, then start from a template.'
       : !state.projectId ? 'Choose a workflow project in the bar above, or ask the console operator to configure one.'
@@ -68,7 +75,7 @@
     if ($('editor-problems').classList.contains('open') && !$('editor-problems').contains(event.target) && !$('problems-chip').contains(event.target)) setProblemsOpen(false);
   });
   new MutationObserver(render).observe($('editor-problems'), {attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true});
-  for (const name of ['workflow-editor-state', 'new-run-gate', 'console-view', 'console-onboarding', 'editor-versions']) window.addEventListener(name, render);
+  for (const name of ['workflow-editor-state', 'new-run-gate', 'console-view', 'console-onboarding', 'editor-versions', 'run-step-state']) window.addEventListener(name, render);
   session.subscribe(render);
   render();
 })();

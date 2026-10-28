@@ -32,12 +32,24 @@
   const api = (suffix, body, project = editor.projectId) => session.request(`editor/${encodeURIComponent(project)}/reusable-captures${suffix}`, body);
   const current = (version, revision) => generation === version && session.revision === revision;
   const option = (value, text) => { const el = document.createElement('option'); el.value = value; el.textContent = text; return el; };
+  // The workflow version captured in the open prepared run (B8-3): from its review, or
+  // from step 1's handoff before review. Names come from the version record; SHA otherwise.
+  let handedVersion = null;
+  const capturedVersion = () => review ? {sha256: review.source_sha256, name: review.source_version_name ?? null}
+    : selected && handedVersion ? handedVersion : null;
+  const versionLabel = version => version.name ? `version "${version.name}"` : `version ${version.sha256.slice(0, 12)}`;
+  const outdated = () => { const version = capturedVersion(); return !!version && !!editor.savedSha256 && version.sha256 !== editor.savedSha256; };
   function sourceState() {
-    if (!review) { $('source').textContent = selected ? 'Capture selected. Review its saved source version.' : ''; return; }
-    let comparison = !editor.sourceAvailable ? 'Current source unavailable.' : editor.savedSha256 === review.source_sha256 ? 'Saved source matches capture.' : 'Current saved source differs.';
-    if (editor.dirty) comparison += ' Unsaved draft edits are separate from this capture.';
-    if (editor.conflict) comparison += ' Disk source conflict is unresolved.';
-    $('source').textContent = `Captured source ${review.source_sha256.slice(0, 12)}. ${comparison} Launch uses this captured version.`;
+    const version = capturedVersion();
+    $('prepare-current').hidden = !(outdated() && !intent);
+    if (!version) { $('source').textContent = selected ? 'Prepared run opened. Review it to see what it contains.' : ''; return; }
+    const saved = window.editorVersions?.nameFor?.(editor.savedSha256);
+    let text = `This run uses ${versionLabel(version)}.`;
+    if (!editor.sourceAvailable) text += ' The current workflow source is not open.';
+    else if (outdated()) text += ` You have since saved ${saved ? `version "${saved}"` : 'a newer version'}; it is not in this run. Launch runs the older version.`;
+    if (editor.dirty) text += ' Unsaved edits are not in this run.';
+    if (editor.conflict) text += ' A disk conflict is unresolved.';
+    $('source').textContent = text;
   }
   // Why Launch is disabled, in one inline sentence beside it (R-2); never a tooltip.
   function launchReason(enabled) {
@@ -74,7 +86,7 @@
       : state?.forgettable && !state.released ? 'Forget this operation' : 'Start another run';
     sourceState();
     window.dispatchEvent(new CustomEvent('run-step-state', {detail: {
-      source: 'launch', selected: !!selected, reviewed: !!review, intent: !!intent, problem,
+      source: 'launch', selected: !!selected, outdated: outdated(), reviewed: !!review, intent: !!intent, problem,
       running: !!intent && !state?.released && !problem, finished: !!state?.released
     }}));
   }
@@ -88,7 +100,7 @@
       ? 'Credentials ready (names only checked; no value is shown or sent to this page).'
       : `Credentials not ready${missing.length ? ': missing ' + missing.join(', ') : ''}. ${readiness.instructions.join(' ')}`;
   }
-  function invalidate() { generation++; selected = null; review = null; $('summary').replaceChildren(); $('details').textContent = ''; credentials(null); controls(); }
+  function invalidate() { generation++; selected = null; review = null; handedVersion = null; $('summary').replaceChildren(); $('details').textContent = ''; credentials(null); controls(); }
   function showIntent() {
     $('intent').hidden = !intent;
     problem = ''; observed = null;
@@ -313,7 +325,14 @@
     } catch (_) { storageProblem = true; }
     controls();
   });
-  window.reusableCandidate = Object.freeze({async openPrepared(context) {
+  // B8-4: step 1's Start over drops the prepared run shown here; a retained launch stays.
+  window.addEventListener('run-start-over', () => {
+    if (intent) return;
+    invalidate(); $('run').replaceChildren(option('', 'Choose a prepared run'));
+    status('Prepare a run in step 1, or open an earlier prepared run below.');
+  });
+  $('prepare-current').addEventListener('click', () => window.dispatchEvent(new CustomEvent('run-prepare-current')));
+  window.reusableCandidate = Object.freeze({get capturedVersion() { return capturedVersion(); }, async openPrepared(context) {
     if (!session.connected || editor.projectId !== context.project) { status('Select the retained project in Workflow before opening this run.'); return; }
     const captureHeading = document.getElementById('capture-heading');
     // Scroll only once the Run panel is visible: the hashchange route runs asynchronously.
@@ -331,7 +350,7 @@
     try {
       const value = await api('/select', {task_id: context.task, run_id: context.run}, context.project);
       if (!current(version, revision)) return;
-      selected = value; status('Prepared run opened. Review it, then launch.');
+      selected = value; handedVersion = context.sourceVersion || null; status('Prepared run opened. Review it, then launch.');
       tasksRevision = null;
       void loadTasks();
     } catch (error) { if (!error.stale && current(version, revision)) status(error.message); }

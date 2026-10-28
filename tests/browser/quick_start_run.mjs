@@ -108,13 +108,49 @@ try {
   await page.locator('#editor-training-policy [data-training-choice="healthgate_mode"]').selectOption('observe_only');
   assert.equal(await page.locator('[data-training-choice-field="healthgate_mode"] .field-error').textContent(), '');
   await save();
-  assert.match(await checkInputs(), /Inputs checked/);
-  await page.locator('#new-run-prepare').click();
-  await page.locator('#new-run-operation-status').filter({hasText: 'Prepared.'}).waitFor({timeout: 120000});
-  // Auto-opened in step 2 (this page prepared it).
-  await page.locator('#capture-status').filter({hasText: 'Prepared run opened'}).waitFor();
-  await page.locator('#capture-review').click();
-  await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
+  // B8-2: record every preparation status line; none may claim a finished failure.
+  await page.evaluate(() => {
+    window.prepTexts = [];
+    new MutationObserver(() => window.prepTexts.push(document.getElementById('new-run-operation-status').textContent))
+      .observe(document.getElementById('new-run-operation-status'), {childList: true, characterData: true, subtree: true});
+  });
+  const prepareAndReview = async () => {
+    assert.match(await checkInputs(), /Inputs checked/);
+    await page.locator('#new-run-prepare').click();
+    await page.locator('#new-run-operation-status').filter({hasText: 'Prepared.'}).waitFor({timeout: 120000});
+    // Auto-opened in step 2 (this page prepared it).
+    await page.locator('#capture-status').filter({hasText: 'Prepared run opened'}).waitFor();
+    await page.locator('#capture-review').click();
+    await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
+  };
+  await prepareAndReview();
+  const prepTexts = await page.evaluate(() => window.prepTexts);
+  assert.ok(prepTexts.every(text => !/finished without a prepared run|start over/i.test(text)), 'No false failure while preparing: ' + JSON.stringify(prepTexts));
+  // B8-3: the run names the captured version; a newer save is named as not in it.
+  assert.match(await page.locator('#capture-source').textContent(), /^This run uses version "/);
+  await view('workflow');
+  await page.locator('#editor-loop-final-iteration').fill('2');
+  await save();
+  await view('run');
+  assert.match(await page.locator('#run-source-state').textContent(), /The prepared run in step 2 uses version ".+"\. Your saved version ".+" is newer and not in it/);
+  assert.match(await page.locator('#capture-source').textContent(), /You have since saved version ".+"; it is not in this run/);
+  assert.match(await page.locator('#run-next').textContent(), /older version/);
+  assert.equal(await page.locator('#capture-prepare-current').isVisible(), true);
+  await page.screenshot({path: join(evidence, 'run-older-capture.png'), fullPage: true});
+  // B8-4 (shared by Start over): preparing the current version clears step 2.
+  await page.locator('#capture-prepare-current').click();
+  assert.equal(await page.locator('#capture-launch').isDisabled(), true, 'No older capture left ready to launch');
+  assert.equal(await page.locator('#capture-summary').textContent(), '');
+  assert.equal(await page.locator('#capture-source').textContent(), '');
+  assert.equal(await page.locator('#new-run-intent').isHidden(), true, 'Step 1 started over');
+  assert.match(await page.locator('#run-source-state').textContent(), /is ready to run/);
+  await prepareAndReview();
+  assert.doesNotMatch(await page.locator('#capture-source').textContent(), /not in this run/);
+  // B8-4, the red team's exact path: step 1 "Start over" with a reviewed capture in step 2.
+  await page.locator('#new-run-dismiss').click();
+  assert.equal(await page.locator('#capture-launch').isDisabled(), true, 'Start over leaves nothing to launch');
+  assert.doesNotMatch(await page.locator('#run-next').textContent(), /launch the run/);
+  await prepareAndReview();
   await until(() => page.locator('#capture-launch').isEnabled());
   await page.locator('#capture-launch').click();
   await page.locator('#capture-operation-status').filter({hasText: /Finished|Failed/}).waitFor({timeout: 240000});
