@@ -20,13 +20,14 @@ from pydantic import (
     model_validator,
 )
 
+from core.canonical_json import canonical_sha256
 from core.local_code import (
     CapturedCodePackage,
     CodePackageDeclaration,
     LocalCodeError,
     capture_package,
 )
-from workflows.custom_adaptors.contracts import READABLE_CONTRACT_TYPES, canonical_json, sha256_hex
+from workflows.custom_adaptors.contracts import READABLE_CONTRACTS
 from workflows.custom_adaptors.errors import CustomAdaptorError
 from workflows.definition.catalog import CUSTOM_EMITTABLE
 
@@ -51,10 +52,10 @@ class InputPortSpec(_Model):
 
     @model_validator(mode="after")
     def bounded(self) -> InputPortSpec:
-        if self.contract not in READABLE_CONTRACT_TYPES:
+        if self.contract not in READABLE_CONTRACTS:
             raise ValueError(
                 f"input contract {self.contract!r} is not readable by custom adaptors; "
-                f"use one of {sorted(READABLE_CONTRACT_TYPES)}"
+                f"use one of {sorted(READABLE_CONTRACTS)}"
             )
         if self.cardinality == "one" and (self.min_items != 1 or self.max_items not in (None, 1)):
             raise ValueError(f"port {self.name!r}: cardinality 'one' means exactly one item")
@@ -145,7 +146,7 @@ class AdaptorManifest(_Model):
 
     @property
     def digest(self) -> str:
-        return sha256_hex(canonical_json(self.model_dump(mode="json")))
+        return canonical_sha256(self)
 
 
 class LoadedAdaptor(BaseModel):

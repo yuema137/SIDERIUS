@@ -27,7 +27,7 @@ by `load_adaptor(path)`, which validates and then captures `members` once throug
 | `id` | `^[a-z][a-z0-9_.-]{2,99}$` |
 | `version` | author label, 1..64 chars; readable, not identity |
 | `role` | `combine` \| `select` \| `distribute` (the design's all-in-one `adaptor` role is not admitted in v1) |
-| `inputs[]` | `name` (`^[a-z][a-z0-9_]{0,63}$`, unique), `contract` ∈ `READABLE_CONTRACT_TYPES`, `cardinality` `one`\|`many`, `min_items` ≥ 0 (default 1), `max_items` > 0 or absent; `one` means exactly 1 |
+| `inputs[]` | `name` (`^[a-z][a-z0-9_]{0,63}$`, unique), `contract` ∈ `READABLE_CONTRACTS`, `cardinality` `one`\|`many`, `min_items` ≥ 0 (default 1), `max_items` > 0 or absent; `one` means exactly 1 |
 | `output` | `contract`, `count` 1..64 (default 1) |
 | `entry` | `"<member>.py:<function>"`; member must be listed in `members` |
 | `members` | relative Python files, `CodePackageDeclaration` rules (normalized, no collisions) |
@@ -59,6 +59,15 @@ validated manifest (whitespace and key order do not matter).
 (`core.local_code`): every listed member's relative name and content hash, no
 absolute paths. Editing any member, including a helper the entry imports,
 changes identity. The manifest digest is recorded beside it, not inside it.
+
+Every JSON digest here (manifest digest, output digests, determinism
+comparison) uses `core.canonical_json` (sorted keys, compact, ASCII-escaped),
+the same owner as the adaptor record, so one value has one digest. Fixture file
+digests are SHA-256 of the raw file bytes.
+
+Contract resolution (`contracts.native_type`) is lazy: importing
+`workflows.custom_adaptors` or `tools.adaptors` imports no native schema module,
+`torch`, `ml_models` or `nodes`; validating a value imports its schema.
 
 ## Function interface
 

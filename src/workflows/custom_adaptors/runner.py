@@ -15,14 +15,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter, ValidationError
 
+from core.canonical_json import canonical_json_bytes, canonical_sha256
 from core.local_code import CodePackageDeclaration, LocalCodeError, capture_package
 from core.local_code.transport import publish_transport
-from workflows.custom_adaptors.contracts import (
-    canonical_json,
-    dump_values,
-    sha256_hex,
-    validate_values,
-)
+from workflows.custom_adaptors.contracts import dump_values, validate_values
 from workflows.custom_adaptors.errors import CustomAdaptorError
 from workflows.custom_adaptors.invocation import OUTPUT_FILE, CustomInvocation, PortValues
 from workflows.custom_adaptors.manifest import AdaptorManifest, LoadedAdaptor
@@ -46,7 +42,7 @@ class CustomOutput(BaseModel):
 
     @property
     def author_sha256(self) -> str:
-        return sha256_hex(canonical_json(self.author))
+        return canonical_sha256(self.author)
 
 
 def admit_inputs(manifest: AdaptorManifest, inputs: Mapping[str, Any]) -> tuple[PortValues, ...]:
@@ -137,7 +133,7 @@ def invoke(
         raise CustomAdaptorError(
             "custom_invalid_input", "parameters given without parameters_model"
         )
-    size = len(canonical_json([port.model_dump(mode="json") for port in ports]))
+    size = len(canonical_json_bytes([port.model_dump(mode="json") for port in ports]))
     if size > manifest.limits.max_input_bytes:
         raise CustomAdaptorError(
             "custom_invalid_input",

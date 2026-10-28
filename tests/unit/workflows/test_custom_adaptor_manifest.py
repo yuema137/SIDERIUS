@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
+import sys
 import types
 import typing
 from pathlib import Path
@@ -12,7 +14,7 @@ import pytest
 from pydantic import BaseModel
 
 from workflows.custom_adaptors.admission import write_admission
-from workflows.custom_adaptors.contracts import READABLE_CONTRACT_TYPES
+from workflows.custom_adaptors.contracts import READABLE_CONTRACTS, native_type
 from workflows.custom_adaptors.errors import CustomAdaptorError
 from workflows.custom_adaptors.invocation import PortValues
 from workflows.custom_adaptors.manifest import LoadedAdaptor, load_adaptor
@@ -53,7 +55,7 @@ def test_every_protected_path_names_a_real_native_field() -> None:
     assert set(PROTECTED_FIELDS) == set(CUSTOM_EMITTABLE)
     for contract, rules in PROTECTED_FIELDS.items():
         for rule in rules:
-            current = _model_of(READABLE_CONTRACT_TYPES[contract])
+            current = _model_of(native_type(contract))
             for part in rule.path.replace("[]", "").split("."):
                 if not part:
                     continue
@@ -65,8 +67,8 @@ def test_every_protected_path_names_a_real_native_field() -> None:
 def test_readable_types_match_catalog_contract_strings() -> None:
     # Defect: this module resolving a contract id to a different native model
     # than the catalog names would validate custom values against the wrong schema.
-    for contract, value_type in READABLE_CONTRACT_TYPES.items():
-        model = _model_of(value_type)
+    for contract in READABLE_CONTRACTS:
+        model = _model_of(native_type(contract))
         if isinstance(model, type) and issubclass(model, BaseModel):
             assert f"{model.__module__}.{model.__qualname__}" in CONTRACTS[contract]
 
@@ -216,3 +218,42 @@ def test_distribute_partition_must_match_count_and_be_disjoint(tmp_path: Path) -
     for bad in ([[0]], [[0], [0]], [[2], []]):
         with pytest.raises(CustomAdaptorError):
             validate_output(loaded, ports, bad)
+
+
+def test_adaptor_record_and_custom_output_share_one_digest_for_non_ascii(
+    tmp_path: Path,
+) -> None:
+    # Defect: two canonical encodings (ASCII-escaped vs raw UTF-8) gave one
+    # value two digests across the adaptor record and custom adaptor outputs.
+    from workflows.adaptors.record import canonical_sha256 as record_digest
+
+    loaded = _loaded(tmp_path)
+    ports = (PortValues(name="reviews", contract="literature.output", values=[]),)
+    output = validate_output(loaded, ports, [[_item(content="Schrödinger 波函数")]])
+    assert output.author_sha256 == record_digest(output.author)
+
+
+def test_importing_custom_adaptors_imports_no_native_schemas() -> None:
+    # Defect: eager contract resolution imported native schemas (and torch,
+    # plugin discovery) into any workflow parent that imported this package.
+    # agent.schemas.output_types is the deliberately dependency-free name module
+    # the declaration models use; it is not a native node schema.
+    native = (
+        "agent.schemas.interpretation",
+        "agent.schemas.literature_review",
+        "agent.schemas.proposal",
+        "agent.schemas.implementor",
+        "agent.schemas.validator",
+        "agent.schemas.hyperparam_tuning",
+    )
+    probe = (
+        "import sys\n"
+        "import workflows.custom_adaptors.runner, workflows.custom_adaptors.self_test\n"
+        "import workflows.custom_adaptors.admission, tools.adaptors.cli\n"
+        f"print(sorted(m for m in sys.modules if m in {native!r} "
+        "or m.split('.')[0] in ('torch', 'ml_models', 'nodes')))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "[]"

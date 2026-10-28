@@ -9,13 +9,14 @@ the package identity and would change on every code edit.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from workflows.custom_adaptors.contracts import canonical_json, sha256_hex
+from core.canonical_json import canonical_json_bytes
 from workflows.custom_adaptors.errors import CustomAdaptorError
 from workflows.custom_adaptors.manifest import FixtureSpec, LoadedAdaptor
 from workflows.custom_adaptors.runner import admit_inputs, invoke, validate_output
@@ -66,7 +67,7 @@ def _run_fixture(loaded: LoadedAdaptor, fixture: FixtureSpec, control: Path) -> 
     ports = admit_inputs(loaded.manifest, case.inputs)
     first = invoke(loaded, ports, case.parameters, control / "run-1")
     second = invoke(loaded, ports, case.parameters, control / "run-2")
-    if canonical_json(first) != canonical_json(second):
+    if canonical_json_bytes(first) != canonical_json_bytes(second):
         raise CustomAdaptorError(
             "custom_nondeterministic", f"{fixture.input}: two runs returned different output"
         )
@@ -83,8 +84,8 @@ def _run_fixture(loaded: LoadedAdaptor, fixture: FixtureSpec, control: Path) -> 
         )
     return FixtureResult(
         input=fixture.input,
-        input_sha256=sha256_hex(input_bytes),
-        expected_sha256=sha256_hex(expected_bytes),
+        input_sha256=hashlib.sha256(input_bytes).hexdigest(),
+        expected_sha256=hashlib.sha256(expected_bytes).hexdigest(),
         output_sha256=output.author_sha256,
     )
 
