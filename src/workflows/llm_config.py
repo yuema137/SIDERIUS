@@ -326,9 +326,10 @@ class JudgeLLMConfig(BaseModel):
     - ``debate``: debate-judge strategy calls (B2-7 onward).
 
     An empty block is refused: declaring ``judge`` means declaring at least one route.
-    This model only declares and validates routes. The workspace run lock
-    records the resolved routes canonically (``locked_judge_routes``), so a
-    continuation under a different judge route is refused.
+    ``max_judge_calls`` is the run-level judge call cap (Q-B2-10); it is optional
+    here and required by each judge consumer's admission. The workspace run lock
+    records the resolved routes and cap canonically (``locked_judge_routes``), so a
+    continuation under a different judge route or cap is refused.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -336,6 +337,17 @@ class JudgeLLMConfig(BaseModel):
     stop: JudgeRouteConfig | None = None
     aggregate: JudgeRouteConfig | None = None
     debate: JudgeRouteConfig | None = None
+    max_judge_calls: int | None = Field(
+        default=None,
+        gt=0,
+        strict=True,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Run-level cap on LLM judge calls (decision Q-B2-10). Required by every "
+            "judge consumer: launch admission refuses a declaration whose static judge "
+            "call bound exceeds it, or a judge consumer when it is absent."
+        ),
+    )
 
     @model_validator(mode="after")
     def require_a_declared_route(self) -> JudgeLLMConfig:
@@ -371,7 +383,8 @@ def locked_judge_routes(config: JudgeLLMConfig | None) -> JudgeRoutes | None:
                 ("aggregate", config.aggregate),
                 ("debate", config.debate),
             )
-        }
+        },
+        max_judge_calls=config.max_judge_calls,
     )
 
 

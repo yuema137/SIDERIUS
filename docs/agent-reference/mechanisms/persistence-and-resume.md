@@ -71,12 +71,13 @@ comparison; cross-revision resume still follows the assembly-digest rule (#999).
 The budget itself (`host_budget`: digest, `max_concurrent_units`, source) is `_PROVENANCE`.
 Owner: [scheduling contract](../../../src/core/runtime_control/scheduling.md).
 
-`judge_routes` (B2-4) is canonical: the resolved `WorkflowLLMConfig.judge` routes
-(`JudgeRoutes(stop, aggregate, debate)`, each a `JudgeRoute(provider, model_id,
-reasoning_effort, max_output_tokens, max_retries)` or `None`), built by
+`judge_routes` (B2-4) is canonical: the resolved `WorkflowLLMConfig.judge` routes and
+run-level call cap (`JudgeRoutes(stop, aggregate, debate, max_judge_calls)`, each route
+a `JudgeRoute(provider, model_id, reasoning_effort, max_output_tokens, max_retries)` or
+`None`), built by
 `workflows.llm_config.locked_judge_routes`. A recorded judge verdict replays only
 against the route that produced it, so a continuation cannot add, drop or change a
-judge route. It is omitted from the lock when the config declares no `judge` block,
+judge route or the call cap. It is omitted from the lock when the config declares no `judge` block,
 so judge-free lock bytes are unchanged. All three lock sites agree: the chain
 pre-flight (`run_one_iteration.compute_expected_invariants`) and the workflow
 startup (`training_startup.workflow_lock_identity`) resolve it from the launch's
@@ -174,7 +175,7 @@ see it.
 | resume with different health-gate enablement | startup failure |
 | resume after editing a health plugin or task health config | startup failure (the digest moved) |
 | resume with a `--run_seed` different from the locked `run_seed` | startup failure naming `run_seed` |
-| resume with a judge route added, dropped or changed (`judge_routes`) | startup failure naming `judge_routes` |
+| resume with a judge route or `max_judge_calls` added, dropped or changed (`judge_routes`) | startup failure naming `judge_routes` |
 | continuing a workspace whose lock has no `run_seed` (created before the seed contract) | refused (`pre_seed_lock_violation`); the chain halts. The workspace stays readable and is not modified. A seedless comparison (old tooling reading the lock) still validates against it. |
 | malformed carried confirmations | raises |
 | inspector cannot compute the next iteration | launcher halts with both signals shown |

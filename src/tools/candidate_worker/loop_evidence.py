@@ -118,7 +118,8 @@ def verify_loop(
 
     # A segment may pause only after dispatching its own body, never at its resume point.
     resumed_at = verify_segment(initial, receipt)
-    if trace.attempted_iterations < loop.final_iteration and not has_successor(initial, receipt):
+    successor = has_successor(initial, receipt)
+    if trace.attempted_iterations < loop.final_iteration and not successor:
         require_unused_next(request, initial, trace.attempted_iterations)
     _, bodies, scores = replay_completed(request, initial, trace.attempted_iterations)
     last = bodies[-1] if bodies else None
@@ -127,6 +128,12 @@ def verify_loop(
         raise ValueError("loop stop reason disagrees with re-derived stop conditions")
     if trace.judge_verdicts != verdicts:
         raise ValueError("loop judge verdicts disagree with the recorded judge evidence")
+    from .loop_judge import require_accounted_judge_evidence, require_judge_cap
+
+    require_judge_cap(initial.workspace, loop, len(verdicts))
+    require_accounted_judge_evidence(
+        Path(initial.workspace), verdicts, trace.attempted_iterations, successor=successor
+    )
     expected = (
         last.status
         if last is not None and last.status != "completed"
@@ -155,11 +162,11 @@ def derive_stop(
     """Re-run the stateless evaluator at every completed boundary; trust no recorded value.
 
     A boundary ``needs_stop_judge`` names must hold judge evidence that replays from the
-    re-projected request (``replay_stop_judge``); any other boundary must hold none.
-    Returns the reason that must end the loop at its last completed body, if any, and
+    re-projected request (``replay_stop_judge``); ``verify_loop`` refuses every judge
+    evidence file these verdicts do not account for. Returns the reason that must end the loop at its last completed body, if any, and
     every judged boundary's verdict in order (the trace must record exactly these).
     """
-    from .loop_judge import replay_stop_judge, stop_evidence_path
+    from .loop_judge import replay_stop_judge
 
     loop = request.preview.document.definition.loop
     assert loop is not None
@@ -177,8 +184,6 @@ def derive_stop(
             verdict = replay_stop_judge(request, initial, completed[:count], value)
             verdicts.append(verdict)
             value = value.model_copy(update={"judge_verdict": verdict})
-        elif stop_evidence_path(Path(initial.workspace), count).exists():
-            raise ValueError(f"judge evidence at body {count}, which is never judged")
         reason = evaluate_stop(value).reason
     return reason, tuple(verdicts)
 

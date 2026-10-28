@@ -1377,10 +1377,19 @@ and replay are `loop_judge`; the call, evidence and readback core is `agent/judg
 (judge contract); the route is the run lock's `judge_routes.stop` (persistence
 contract).
 
-Admission. With a `JudgeStop` declared, `execute_loop` refuses with
-`StopConditionError` before any body when `WorkflowLLMConfig.judge.stop` is absent
-(`admit_judge_route`). The route itself is resolved from the workspace run lock at
-call and readback time, so both use the same recorded `JudgeRoute`.
+Admission and call cap (decision Q-B2-10). With a `JudgeStop` declared,
+`execute_loop` refuses with `StopConditionError` before any body
+(`admit_judge_route`) when `WorkflowLLMConfig.judge.stop` is absent, when the
+run-level `WorkflowLLMConfig.judge.max_judge_calls` is absent, or when the static
+judge call bound `judge_call_bound(loop) = final_iteration - min_completed_bodies`
+(one call per judgeable boundary; no LLM adaptor strategies exist yet to add to it)
+exceeds that cap. The route and the cap are resolved from the workspace run lock
+(`RunInvariants.judge_routes`, canonical) at call and readback time. Before each
+call, `call_stop_judge` re-checks the run's calls so far plus one against the locked
+cap and raises `StopConditionError` before any provider contact if it would be
+exceeded (the run fails; with a consistent lock admission makes this unreachable).
+Readback (`require_judge_cap`) refuses a run whose recorded judge verdicts exceed
+the locked cap. Showing the bound before launch belongs to the B2-5 GUI.
 
 Precedence at a completed-body boundary `N` (`needs_stop_judge` is the one pure
 predicate; the worker calls iff it is true, readback requires evidence iff it is true):
@@ -1388,7 +1397,12 @@ predicate; the worker calls iff it is true, readback requires evidence iff it is
 1. a body that is not completed ends the loop with its status; no evaluation, no call;
 2. `N == final_iteration` completes at the limit without a reason; no call;
 3. deterministic conditions decide first, whatever the judge's declared position; a
-   met condition stops with its reason and the judge is not called;
+   met condition stops with its reason and the judge is not called. When the judge
+   would otherwise have been consulted there (`N >= min_completed_bodies`,
+   `skipped_stop_judge`), `mark_skipped_stop_judge` records a usage marker row
+   through the bridge's `emit_marker` (label `judge.stop.skipped`, extra `reason=
+   "deterministic_stop"`, `judge_condition_index`, `deciding_condition_index`); no
+   call and no evidence;
 4. otherwise, when `N >= min_completed_bodies`, `call_stop_judge` makes exactly one
    call (`run_judge_call`, template `judge.stop/v1`, usage label `judge.stop`,
    `max_calls=1`, run context `(workspace, N, run_name, run_id)`) and publishes
@@ -1428,8 +1442,17 @@ Readback. `derive_stop` re-runs the evaluator at every boundary with
 verified body records, reads the evidence (missing evidence refuses), and requires
 canonical bytes and equality of the recorded request, `PromptIdentity` (template,
 prompt and response-schema digests), usage label and the locked route. A failure
-recorded under `on_failure="fail"` on a non-failed loop refuses. Evidence at a
-boundary that is never judged refuses.
+recorded under `on_failure="fail"` on a loop that continued past it refuses ("loop
+continued after a failed judge"). `verify_loop` refuses every file under a judge
+slot (`candidate_run/judge/`, `candidate_run/iteration_NNN/judge/`) that the
+replayed verdicts do not account for, whether or not a judge is declared and at any
+boundary; only a paused segment with a reserved successor may hold later
+boundaries' evidence (its successor's readback accounts for it).
+
+Failed-loop limitation. A loop that ended `failed` (including through a
+`fail`-policy judge failure) has no `loop_trace`, so `verify_loop` returns before
+any replay: its judge evidence (the failed record) is inspectable but is not anchored
+by a digest in the receipt and is not verified.
 
 Anchoring. `LoopTrace.judge_verdicts` records every judged boundary's verified
 `JudgeBoundaryVerdict(iteration, decision, evidence_path, evidence_sha256,
@@ -1449,20 +1472,22 @@ next boundary, and write-once evidence refuses a second call at a boundary. A
 judge request after resume covers bodies of every segment.
 
 Cost bound: at most `final_iteration - min_completed_bodies` judge calls per run, one
-per judged boundary; usage rows land in the run's `token_usage.jsonl` under label
-`judge.stop`.
+per judged boundary, and never more than the locked `max_judge_calls`; usage rows land
+in the run's `token_usage.jsonl` under label `judge.stop` (skips under
+`judge.stop.skipped`).
 
-Limitations: there is no run-level `max_judge_calls` cap; the static bound above (one
-call per judged boundary) is the cost bound. The GUI does not yet offer or render the
-judge condition (B2-5).
+Limitations: the GUI does not yet offer or render the judge condition or show the
+static call bound before launch (B2-5).
 
 Tests: `tests/unit/tools/candidate_worker/test_loop_stop.py` (pure precedence and
 verdict rules), `tests/unit/tools/candidate_worker/test_loop_judge.py` (stub bridge
 through real bodies: anchored reason, replay without a call, tamper/missing/orphan/
 route refusals, multi-boundary verdict reconstruction and an edited `continue`
-rationale refused, deterministic-first and final-boundary zero calls, both failure
-policies with the abstention count, admission refusal, Pause precedence and resume
-without re-judging).
+rationale refused, cap readback and unaccounted (also judge-free and out-of-range)
+evidence refused, deterministic-first skip marker and final-boundary zero calls, both
+failure policies with the abstention count and a fail-policy replay refusal, route/cap
+admission refusals, body Health classes, Pause precedence and resume without
+re-judging).
 
 ## Route evaluator (pure)
 

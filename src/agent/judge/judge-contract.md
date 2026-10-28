@@ -13,7 +13,7 @@ changes.
 | [`agent/schemas/judge.py`](../schemas/judge.py) | Typed records: `StopJudgeRequest` (`CallContent` kind `stop`), `JudgeBodyFacts`, `DirectionWords`, `CallRequest`, `StopVerdict` (`CallPayload`), `PromptIdentity`, `JudgeRoute`, `JudgeCallEvidence` |
 | [`template.py`](template.py) | `JudgeTemplate`: one versioned, framework-owned template per call role; pure rendering and `PromptIdentity` |
 | [`stop_template.py`](stop_template.py) | `STOP_TEMPLATE` (`judge.stop/v1`, usage label `judge.stop`, response model `StopVerdict`) |
-| [`call.py`](call.py) | `run_judge_call` — the only function in the package that contacts a provider; `JudgeRunContext`, `JudgeCallRefused`, `JudgeEvidenceConflict` |
+| [`call.py`](call.py) | `run_judge_call` — the only function in the package that contacts a provider; `emit_judge_marker` (a skipped call's usage marker row through the bound bridge's `emit_marker`; no provider call, no evidence); `JudgeRunContext`, `JudgeCallRefused`, `JudgeEvidenceConflict` |
 | [`evidence.py`](evidence.py) | Readback: `read_call_evidence`, `verify_call_evidence`, `verify_call_chain`, `chain_prior_turns`, `evidence_sha256`; imports no bridge |
 
 Not owned here: provider routing and usage rows (`LLMBridge`,
@@ -171,8 +171,9 @@ with a mocked client; AST guard that readback modules import no bridge.
   verifier is exercised with copied stop evidence.
 - Route resolution: `workflows.llm_config.judge_route` / `locked_judge_routes`
   convert `WorkflowLLMConfig.judge` into `JudgeRoute`/`JudgeRoutes`, which the run
-  lock records canonically (`RunInvariants.judge_routes`). Run-level judge-call
-  budgets belong to the consumers.
+  lock records canonically (`RunInvariants.judge_routes`, including the run-level
+  `max_judge_calls` cap). Consumers enforce the cap (JudgeStop: candidate-worker
+  contract).
 - Task judge guidance text is not rendered by `judge.stop/v1`; JudgeStop therefore
   records `task_guidance_sha256=None`. Rendering guidance needs a new template
   version.

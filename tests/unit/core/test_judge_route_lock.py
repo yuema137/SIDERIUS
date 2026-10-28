@@ -29,7 +29,8 @@ ROUTES = JudgeRoutes(
         reasoning_effort=None,
         max_output_tokens=800,
         max_retries=3,
-    )
+    ),
+    max_judge_calls=5,
 )
 
 
@@ -48,7 +49,11 @@ def _judge_config(**stop: object) -> WorkflowLLMConfig:
     from tests.integration.workflows.test_chain_candidate_graduation import _llm_config_pseudo
 
     return _llm_config_pseudo().model_copy(
-        update={"judge": WorkflowLLMConfig.model_validate({"judge": {"stop": STOP | stop}}).judge}
+        update={
+            "judge": WorkflowLLMConfig.model_validate(
+                {"judge": {"stop": STOP | stop, "max_judge_calls": 5}}
+            ).judge
+        }
     )
 
 
@@ -72,11 +77,12 @@ class TestLockBytes:
                 update={"stop": ROUTES.stop.model_copy(update={"model_id": "gpt-5"})}
             ),
             ROUTES.model_copy(update={"stop": ROUTES.stop.model_copy(update={"max_retries": 9})}),
+            ROUTES.model_copy(update={"max_judge_calls": 6}),
         ],
     )
     def test_a_continuation_cannot_change_or_drop_the_judge_route(self, tmp_path, resumed):
         """Fails if ``judge_routes`` is recorded but not compared: recorded
-        verdicts would then be continued under another model or retry bound."""
+        verdicts would then be continued under another model, retry bound or call cap."""
         write_run_invariants(str(tmp_path), _invariants(ROUTES))
         with pytest.raises(RunInvariantsViolation, match="judge_routes"):
             validate_run_invariants(str(tmp_path), _invariants(resumed))

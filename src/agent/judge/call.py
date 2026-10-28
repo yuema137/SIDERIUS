@@ -23,6 +23,8 @@ class JudgeBridge(Protocol):
 
     def generate(self, system_prompt: str, user_prompt: str, *, label: str) -> Any: ...
 
+    def emit_marker(self, *, label: str, extra: dict[str, Any] | None = None) -> None: ...
+
 
 class JudgeRunContext(JudgeModel):
     """Usage-accounting binding; deliberately outside every hashed request."""
@@ -129,6 +131,22 @@ def _call(
     if refusal is not None:
         return _failure("inadmissible_choice", refusal)
     return {"status": "decided", "payload": payload, "failure_code": None, "failure_message": None}
+
+
+def emit_judge_marker(
+    route: JudgeRoute,
+    context: JudgeRunContext,
+    *,
+    label: str,
+    extra: dict[str, Any],
+    bridge_factory: Callable[[JudgeRoute], JudgeBridge] = bridge_for_route,
+) -> None:
+    """Record a skipped judge call as a usage marker row (no provider call, no evidence).
+
+    The bridge is bound like a real call, so the row lands in the run's
+    ``token_usage.jsonl``; binding failures raise ``JudgeCallRefused``.
+    """
+    _bound_bridge(route, context, bridge_factory).emit_marker(label=label, extra=extra)
 
 
 def run_judge_call(

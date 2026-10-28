@@ -128,7 +128,9 @@ def execute_loop(
             # A met condition completes the loop before any pending Stop/Pause is read.
             scores = (*scores, project_body_score(request, last, iteration))
             completed = (*completed, last)
-            reason, verdict = _boundary_reason(request, initial, completed, scores)
+            reason, verdict = _boundary_reason(
+                request, initial, completed, scores, prior_calls=len(verdicts)
+            )
             verdicts = verdicts if verdict is None else (*verdicts, verdict)
             if reason is not None:
                 break
@@ -152,15 +154,22 @@ def _boundary_reason(
     initial: CandidateRunReceipt,
     completed: tuple[CandidateRunReceipt, ...],
     scores: tuple[BodyScore, ...],
+    *,
+    prior_calls: int,
 ) -> tuple[StopReason | None, JudgeBoundaryVerdict | None]:
-    """Deterministic conditions first; the judge is called only when the boundary needs it."""
+    """Deterministic conditions first; the judge is called only when the boundary needs it.
+
+    A judgeable boundary pre-empted by a deterministic stop records a skip marker.
+    """
+    from .loop_judge import call_stop_judge, mark_skipped_stop_judge
+
     loop = request.preview.document.definition.loop
     assert loop is not None
     value = stop_input(loop, captured_metric(request, initial), scores)
     verdict = None
     if needs_stop_judge(value):
-        from .loop_judge import call_stop_judge
-
-        verdict = call_stop_judge(request, initial, completed, value)
+        verdict = call_stop_judge(request, initial, completed, value, prior_calls=prior_calls)
         value = value.model_copy(update={"judge_verdict": verdict})
+    else:
+        mark_skipped_stop_judge(initial, value)
     return evaluate_stop(value).reason, verdict

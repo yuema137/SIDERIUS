@@ -24,11 +24,11 @@ from .test_training import training_runner as training_runner
 ROUTE = {"provider": "openai", "model_id": "judge-test", "max_output_tokens": 400, "max_retries": 1}
 
 
-def judged_request(prepared, conditions, *, final_iteration):
+def judged_request(prepared, conditions, *, final_iteration, judge=None):
     request = loop_request(prepared, final_iteration=final_iteration, stop_conditions=conditions)
     path = Path(request.preview.project_root) / "llm.json"
     config = json.loads(path.read_text())
-    config["judge"] = {"stop": ROUTE}
+    config["judge"] = {"stop": ROUTE, "max_judge_calls": 8} if judge is None else judge
     path.write_text(json.dumps(config))
     return refresh(request)
 
@@ -38,7 +38,7 @@ def judge_bridge(monkeypatch):
     """Record each judge call; answer from ``decisions`` (an exception is raised as-is)."""
     from tools.candidate_worker import loop_judge
 
-    calls, decisions = [], []
+    calls, decisions, markers = [], [], []
 
     class Bridge:
         def __init__(self, route):
@@ -59,8 +59,11 @@ def judge_bridge(monkeypatch):
                 "confidence": "medium",
             }
 
+        def emit_marker(self, *, label, extra=None):
+            markers.append((self.context, label, extra))
+
     monkeypatch.setattr(loop_judge, "bridge_for_route", Bridge)
-    return calls, decisions
+    return calls, decisions, markers
 
 
 def evidence(workspace, iteration):
@@ -81,7 +84,7 @@ def test_judge_stop_completes_with_an_anchored_reason_and_replays_without_a_call
     from tools.candidate_worker.loop_stop import JudgeStopReason
     from workflows.definition import JudgeStop
 
-    calls, decisions = judge_bridge
+    calls, decisions, _ = judge_bridge
     decisions.extend(["stop"])
     request = judged_request(
         prepared, (JudgeStop(criterion="plateau", min_completed_bodies=2),), final_iteration=4
@@ -130,7 +133,7 @@ def test_judge_stop_completes_with_an_anchored_reason_and_replays_without_a_call
     orphan = evidence(receipt.workspace, 1)
     orphan.parent.mkdir(parents=True)
     orphan.write_bytes(original)
-    with pytest.raises(ValueError, match="judge evidence at body 1, which is never judged"):
+    with pytest.raises(ValueError, match="not accounted for by replay"):
         verify_loop(request, parent, receipt)
     orphan.unlink()
     lock = Path(receipt.workspace) / "run_invariants_lock.json"
@@ -148,7 +151,7 @@ def test_a_deterministic_stop_never_calls_the_judge(
     is spent and a judge declared first could veto the metric stop."""
     from workflows.definition import JudgeStop, MetricThresholdStop
 
-    calls, _ = judge_bridge
+    calls, _, markers = judge_bridge
     metric, threshold, (low, high) = threshold_for(prepared)
     request = judged_request(
         prepared,
@@ -164,6 +167,18 @@ def test_a_deterministic_stop_never_calls_the_judge(
     assert receipt.loop_trace.stop_reason.kind == "metric_threshold"
     assert receipt.loop_trace.stop_reason.condition_index == 1
     assert calls == [] and not evidence(receipt.workspace, 1).exists()
+    # The pre-empted judge call is still visible in the usage ledger as a marker row.
+    assert markers == [
+        (
+            1,
+            "judge.stop.skipped",
+            {
+                "reason": "deterministic_stop",
+                "judge_condition_index": 0,
+                "deciding_condition_index": 1,
+            },
+        )
+    ]
     verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
 
 
@@ -177,7 +192,7 @@ def test_continue_verdicts_run_to_the_limit_without_judging_the_final_body(
     from agent.schemas.judge import JudgeCallEvidence
     from workflows.definition import JudgeStop
 
-    calls, decisions = judge_bridge
+    calls, decisions, _ = judge_bridge
     decisions.extend(["continue", "continue"])
     _, _, (low, _) = threshold_for(prepared)
     request = judged_request(prepared, (JudgeStop(criterion="plateau"),), final_iteration=3)
@@ -202,12 +217,49 @@ def test_continue_verdicts_run_to_the_limit_without_judging_the_final_body(
 
     # An edited continue rationale replays canonically, but its anchored digest refuses it.
     path = evidence(receipt.workspace, 1)
-    tampered = json.loads(path.read_bytes())
+    original = path.read_bytes()
+    tampered = json.loads(original)
     tampered["payload"]["rationale"] = "rewritten after the fact"
     path.write_bytes(
         canonical_json_bytes(JudgeCallEvidence.model_validate_json(json.dumps(tampered)))
     )
     with pytest.raises(ValueError, match="judge verdicts disagree"):
+        verify_loop(request, parent, receipt)
+    path.write_bytes(original)
+    verify_loop(request, parent, receipt)
+
+    # A lock whose cap is below the recorded calls refuses (two calls, cap one).
+    lock = Path(receipt.workspace) / "run_invariants_lock.json"
+    locked = lock.read_text()
+    capped = json.loads(locked)
+    capped["judge_routes"]["max_judge_calls"] = 1
+    lock.write_text(json.dumps(capped))
+    with pytest.raises(ValueError, match="exceed the run's cap"):
+        verify_loop(request, parent, receipt)
+    lock.write_text(locked)
+
+    # Evidence no replayed verdict accounts for refuses, past the scored range too.
+    for planted in (evidence(receipt.workspace, 9), path.parent / "extra.json"):
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_bytes(original)
+        with pytest.raises(ValueError, match="not accounted for by replay"):
+            verify_loop(request, parent, receipt)
+        planted.unlink()
+
+
+def test_planted_judge_evidence_in_a_judge_free_loop_is_refused(prepared, loop_tuner, monkeypatch):
+    """Fails if readback skips the judge-evidence scan for loops without a judge."""
+    request = loop_request(prepared, final_iteration=2)
+    _, _, (low, _) = threshold_for(prepared)
+    scored_bodies(monkeypatch, (low, low))
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    verify_loop(request, parent, receipt)
+    planted = evidence(receipt.workspace, 1)
+    planted.parent.mkdir(parents=True)
+    planted.write_text("{}")
+    with pytest.raises(ValueError, match="not accounted for by replay"):
         verify_loop(request, parent, receipt)
 
 
@@ -219,7 +271,7 @@ def test_a_failed_judge_call_fails_the_loop_or_is_a_recorded_abstention(
     abstention under "continue" stops the loop or loses its failure evidence."""
     from workflows.definition import JudgeStop
 
-    calls, decisions = judge_bridge
+    calls, decisions, _ = judge_bridge
     decisions.extend([RuntimeError("provider down"), "continue"])
     request = judged_request(
         prepared, (JudgeStop(criterion="plateau", on_failure=on_failure),), final_iteration=3
@@ -240,24 +292,66 @@ def test_a_failed_judge_call_fails_the_loop_or_is_a_recorded_abstention(
     assert receipt.loop_trace.judge_abstentions == 1
     assert [item.decision for item in receipt.loop_trace.judge_verdicts] == [None, "continue"]
     assert [iteration for iteration, _, _ in calls] == [1, 2]
-    verify_loop(request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt)
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    verify_loop(request, parent, receipt)
+    # The same evidence replayed under on_failure="fail" refuses: a fail-policy judge
+    # failure can only end a loop failed, never let it continue.
+    from tools.candidate_worker.loop_evidence import derive_stop, replay_completed
+
+    loop = request.preview.document.definition.loop
+    failing = request.model_copy(
+        update={
+            "preview": request.preview.model_copy(
+                update={
+                    "document": request.preview.document.model_copy(
+                        update={
+                            "definition": request.preview.document.definition.model_copy(
+                                update={
+                                    "loop": loop.model_copy(
+                                        update={
+                                            "stop_conditions": (
+                                                JudgeStop(criterion="plateau", on_failure="fail"),
+                                            )
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    )
+                }
+            )
+        }
+    )
+    _, bodies, scores = replay_completed(request, parent, 3)
+    with pytest.raises(ValueError, match="loop continued after a failed judge"):
+        derive_stop(failing, parent, bodies, scores)
 
 
-def test_a_judge_without_its_operator_route_is_refused_before_any_body(
-    prepared, loop_tuner, judge_bridge, monkeypatch
+@pytest.mark.parametrize(
+    ("judge", "refusal"),
+    [
+        ({"aggregate": ROUTE, "max_judge_calls": 8}, "requires a WorkflowLLMConfig.judge.stop"),
+        ({"stop": ROUTE}, "requires WorkflowLLMConfig.judge.max_judge_calls"),
+        # final 4, min 1: three judgeable boundaries do not fit a cap of two (Q-B2-10).
+        ({"stop": ROUTE, "max_judge_calls": 2}, "may make 3 judge calls; max_judge_calls is 2"),
+    ],
+)
+def test_an_unroutable_or_uncapped_judge_is_refused_before_any_body(
+    prepared, loop_tuner, judge_bridge, monkeypatch, judge, refusal
 ):
-    """Fails if a judged loop dispatches bodies and only then discovers it cannot judge."""
+    """Fails if a judged loop dispatches bodies before discovering it has no route, no
+    run-level call cap, or a static call bound above that cap."""
     from workflows.definition import JudgeStop
 
-    request = loop_request(
-        prepared, final_iteration=2, stop_conditions=(JudgeStop(criterion="plateau"),)
+    request = judged_request(
+        prepared, (JudgeStop(criterion="plateau"),), final_iteration=4, judge=judge
     )
     dispatched = []
     _, _, (low, _) = threshold_for(prepared)
-    scored_bodies(monkeypatch, (low, low), on_body=dispatched.append)
+    scored_bodies(monkeypatch, (low,) * 4, on_body=dispatched.append)
     receipt = launch_candidate(request)
     assert receipt.status == "failed"
-    assert "requires a WorkflowLLMConfig.judge.stop route" in receipt.error
+    assert refusal in receipt.error
     assert dispatched == []
 
 
@@ -298,6 +392,9 @@ def test_continue_leaves_a_pending_pause_in_force_and_resume_never_rejudges(
                 "rationale": "r",
                 "confidence": "low",
             }
+
+        def emit_marker(self, *, label, extra=None):
+            pass
 
     monkeypatch.setattr(loop_judge, "bridge_for_route", Bridge)
     request = judged_request(prepared, (JudgeStop(criterion="plateau"),), final_iteration=3)
@@ -354,3 +451,55 @@ def test_continue_leaves_a_pending_pause_in_force_and_resume_never_rejudges(
     root = Path(resumed.workspace) / "candidate_run"
     launched = CandidateRunReceipt.model_validate_json((root / "launch.json").read_bytes())
     assert len(verify_loop(request, launched, resumed)) == 2
+
+
+def _tuning_with(*records):
+    from tests.unit.workflows.test_model_exploration import _make_tuning_output
+
+    return _make_tuning_output(model_type="wavenet").model_copy(
+        update={"best_valid_formal_denoising_score": None, "all_records": list(records)}
+    )
+
+
+def _record(exp_id, *, is_trial, status):
+    from agent.schemas.hyperparam_tuning import ExperimentMemory, ExperimentRecord
+
+    return ExperimentRecord(
+        exp_id=exp_id,
+        status=status,
+        model_type="wavenet",
+        timestamp="2026-10-28T00:00:00Z",
+        params={},
+        denoising_score=0.5,
+        is_trial=is_trial,
+        trial_portion=0.1 if is_trial else None,
+        memory=ExperimentMemory(expert_advice_followed="n/a", hypothesis="n/a", round_index=1),
+    )
+
+
+@pytest.mark.parametrize(
+    ("records", "expected"),
+    [
+        # No Formal record is not evidence of invalidity (a trial-only body included).
+        ((), "unknown"),
+        ((("t1", True, "error"),), "unknown"),
+        # Every Formal record failed: provably invalid.
+        ((("f1", False, "error"), ("f2", False, "error")), "invalid"),
+        # One Formal record whose validity cannot be established keeps the body unknown.
+        ((("f1", False, "error"), ("f2", False, "success")), "unknown"),
+    ],
+)
+def test_body_health_is_invalid_only_when_every_formal_record_is_invalid(
+    tmp_path, records, expected
+):
+    """Fails if a body without Formal evidence is reported ``invalid`` to the judge, or a
+    body whose Formal records all failed is reported ``unknown``."""
+    from tools.candidate_worker.loop_judge import _body_health
+    from tools.candidate_worker.loop_stop import BodyScore
+
+    tuning = _tuning_with(
+        *(_record(exp_id, is_trial=trial, status=status) for exp_id, trial, status in records)
+    )
+    score = BodyScore(iteration=1, valid_formal=None, metric_spec=None)
+    path = tmp_path / "run_output.json"
+    assert _body_health(str(tmp_path), score, tuning, path) == expected

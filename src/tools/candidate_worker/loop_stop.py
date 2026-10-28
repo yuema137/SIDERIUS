@@ -218,6 +218,25 @@ def pending_judge(conditions: tuple[StopCondition, ...]) -> tuple[int, JudgeStop
     )
 
 
+def judge_call_bound(loop: AuthoredLoop) -> int:
+    """Static per-run JudgeStop call bound: one call per judgeable boundary, else 0."""
+    judged = pending_judge(loop.stop_conditions)
+    return 0 if judged is None else loop.final_iteration - judged[1].min_completed_bodies
+
+
+def skipped_stop_judge(value: StopEvaluationInput) -> tuple[int, int] | None:
+    """``(judge index, deciding condition index)`` when a deterministic stop pre-empted a
+    boundary the judge would otherwise have been consulted at; else ``None``.
+    """
+    judged = pending_judge(value.conditions)
+    if judged is None or not judged[1].min_completed_bodies <= value.iteration:
+        return None
+    decided = _decide(value)
+    if not isinstance(decided, StopEvaluationOutput) or decided.reason is None:
+        return None
+    return judged[0], decided.reason.condition_index
+
+
 def needs_stop_judge(value: StopEvaluationInput) -> bool:
     """Whether this boundary is judged: the worker calls iff true; readback requires evidence iff true.
 

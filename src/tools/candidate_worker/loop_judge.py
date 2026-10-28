@@ -11,7 +11,12 @@ import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agent.judge.call import JudgeRunContext, bridge_for_route, run_judge_call
+from agent.judge.call import (
+    JudgeRunContext,
+    bridge_for_route,
+    emit_judge_marker,
+    run_judge_call,
+)
 from agent.judge.evidence import JudgeEvidenceError, evidence_sha256, verify_call_evidence
 from agent.judge.stop_template import STOP_TEMPLATE
 from agent.schemas.judge import (
@@ -21,6 +26,7 @@ from agent.schemas.judge import (
     JudgeBodyFacts,
     JudgeCallEvidence,
     JudgeRoute,
+    JudgeRoutes,
     StopJudgeRequest,
     StopVerdict,
 )
@@ -37,7 +43,9 @@ from .loop_stop import (
     StopConditionError,
     StopEvaluationInput,
     incumbent_fold,
+    judge_call_bound,
     pending_judge,
+    skipped_stop_judge,
 )
 
 if TYPE_CHECKING:
@@ -55,20 +63,67 @@ def stop_evidence_path(workspace: Path, iteration: int) -> Path:
 
 
 def admit_judge_route(loop: AuthoredLoop, config: WorkflowLLMConfig) -> None:
-    """Refuse a declared judge without its operator route before any body is dispatched."""
+    """Refuse an unroutable or uncapped judge before any body is dispatched (Q-B2-10).
+
+    The run's static judge call bound (``judge_call_bound``) must fit the operator's
+    run-level ``WorkflowLLMConfig.judge.max_judge_calls``; an absent cap refuses.
+    """
     judged = pending_judge(loop.stop_conditions)
-    if judged is not None and (config.judge is None or config.judge.stop is None):
+    if judged is None:
+        return
+    if config.judge is None or config.judge.stop is None:
         raise StopConditionError(
             f"stop condition {judged[0]} (judge) requires a WorkflowLLMConfig.judge.stop route"
         )
+    _require_cap(judge_call_bound(loop), config.judge.max_judge_calls, judged[0])
 
 
-def _locked_stop_route(workspace: str) -> JudgeRoute:
+def _require_cap(calls: int, cap: int | None, index: int) -> None:
+    if cap is None:
+        raise StopConditionError(
+            f"stop condition {index} (judge) requires WorkflowLLMConfig.judge.max_judge_calls"
+        )
+    if calls > cap:
+        raise StopConditionError(
+            f"stop condition {index} (judge) may make {calls} judge calls; max_judge_calls is {cap}"
+        )
+
+
+def _locked_judge(workspace: str) -> JudgeRoutes:
     invariants = load_run_invariants(workspace)
     routes = None if invariants is None else invariants.judge_routes
     if routes is None or routes.stop is None:
         raise StopConditionError("a judge stop condition requires the run lock's judge stop route")
-    return routes.stop
+    return routes
+
+
+def _context(initial: "CandidateRunReceipt", iteration: int) -> JudgeRunContext:
+    return JudgeRunContext(
+        workspace=Path(initial.workspace),
+        iteration=iteration,
+        run_name=initial.run_name,
+        run_id=initial.run_id,
+    )
+
+
+def mark_skipped_stop_judge(initial: "CandidateRunReceipt", value: StopEvaluationInput) -> None:
+    """Record a deterministic-first skip as a ``judge.stop.skipped`` usage marker (no call)."""
+    skipped = skipped_stop_judge(value)
+    if skipped is None:
+        return
+    routes = _locked_judge(initial.workspace)
+    assert routes.stop is not None
+    emit_judge_marker(
+        routes.stop,
+        _context(initial, value.iteration),
+        label="judge.stop.skipped",
+        extra={
+            "reason": "deterministic_stop",
+            "judge_condition_index": skipped[0],
+            "deciding_condition_index": skipped[1],
+        },
+        bridge_factory=bridge_for_route,
+    )
 
 
 def _record(body: "CandidateRunReceipt", node_id: str) -> Path:
@@ -212,24 +267,27 @@ def call_stop_judge(
     initial: "CandidateRunReceipt",
     bodies: tuple["CandidateRunReceipt", ...],
     value: StopEvaluationInput,
+    *,
+    prior_calls: int,
 ) -> JudgeBoundaryVerdict:
     """Make the boundary's one judge call, publish its evidence, return its verdict.
 
-    Raises ``JudgeStopError`` for a failed call under ``on_failure="fail"``; the
-    evidence is published first, so the failure stays inspectable.
+    ``prior_calls`` is the run's judge calls so far; a call past the locked
+    ``max_judge_calls`` raises ``StopConditionError`` before any provider contact (the
+    loop fails; admission makes this unreachable for a consistent lock). Raises
+    ``JudgeStopError`` for a failed call under ``on_failure="fail"``; the evidence is
+    published first, so the failure stays inspectable.
     """
     call, index, condition = project_stop_request(request, initial, bodies, value)
+    routes = _locked_judge(initial.workspace)
+    assert routes.stop is not None
+    _require_cap(prior_calls + 1, routes.max_judge_calls, index)
     path = stop_evidence_path(Path(initial.workspace), value.iteration)
     evidence = run_judge_call(
         call,
         template=STOP_TEMPLATE,
-        route=_locked_stop_route(initial.workspace),
-        context=JudgeRunContext(
-            workspace=Path(initial.workspace),
-            iteration=value.iteration,
-            run_name=initial.run_name,
-            run_id=initial.run_id,
-        ),
+        route=routes.stop,
+        context=_context(initial, value.iteration),
         evidence_path=path,
         max_calls=1,
         bridge_factory=bridge_for_route,
@@ -247,7 +305,8 @@ def replay_stop_judge(
 
     Refuses missing or non-canonical evidence, a request, prompt, response schema or
     route that differs from the re-projection, and a failure recorded under
-    ``on_failure="fail"`` (such a loop must have ended ``failed``).
+    ``on_failure="fail"`` on a loop that continued past it (such a loop must have
+    ended ``failed``; a failed loop has no trace, so its evidence is not replayed).
     """
     call, index, condition = project_stop_request(request, initial, bodies, value)
     path = stop_evidence_path(Path(initial.workspace), value.iteration)
@@ -261,7 +320,7 @@ def replay_stop_judge(
             expected_sha256=hashlib.sha256(data).hexdigest(),
             request=call,
             template=STOP_TEMPLATE,
-            route=_locked_stop_route(initial.workspace),
+            route=_locked_route(initial.workspace),
         )
     except JudgeEvidenceError as error:
         raise ValueError(f"judge evidence at body {value.iteration} is refused: {error}") from error
@@ -269,3 +328,54 @@ def replay_stop_judge(
         return _boundary_verdict(evidence, initial.workspace, path, index, condition)
     except JudgeStopError as error:
         raise ValueError(f"loop continued after a failed judge: {error}") from error
+
+
+def _locked_route(workspace: str) -> JudgeRoute:
+    routes = _locked_judge(workspace)
+    assert routes.stop is not None
+    return routes.stop
+
+
+def require_judge_cap(workspace: str, loop: AuthoredLoop, calls: int) -> None:
+    """Readback: the run's recorded judge calls never exceed the locked cap."""
+    judged = pending_judge(loop.stop_conditions)
+    if judged is None or calls == 0:
+        return
+    try:
+        _require_cap(calls, _locked_judge(workspace).max_judge_calls, judged[0])
+    except StopConditionError as error:
+        raise ValueError(f"recorded judge calls exceed the run's cap: {error}") from error
+
+
+def _judge_evidence_files(workspace: Path) -> list[tuple[int | None, Path]]:
+    """Every file under any loop judge slot, with its boundary (``None`` if unparsable)."""
+    root = workspace / "candidate_run"
+    found: list[tuple[int | None, Path]] = [
+        (1, path) for path in sorted((root / "judge").rglob("*")) if not path.is_dir()
+    ]
+    for slot in sorted(root.glob("iteration_*/judge")):
+        digits = slot.parent.name.removeprefix("iteration_")
+        iteration = int(digits) if digits.isdigit() else None
+        found += [(iteration, path) for path in sorted(slot.rglob("*")) if not path.is_dir()]
+    return found
+
+
+def require_accounted_judge_evidence(
+    workspace: Path,
+    verdicts: tuple[JudgeBoundaryVerdict, ...],
+    attempted: int,
+    *,
+    successor: bool,
+) -> None:
+    """Refuse judge evidence the declaration plus replay does not account for.
+
+    Applies whether or not a judge is declared and at every boundary. Only a paused
+    segment with a reserved successor may have later boundaries' evidence, which that
+    successor's own readback accounts for.
+    """
+    accounted = {workspace / verdict.evidence_path for verdict in verdicts}
+    for iteration, path in _judge_evidence_files(workspace):
+        if successor and iteration is not None and iteration > attempted:
+            continue
+        if path not in accounted:
+            raise ValueError(f"judge evidence not accounted for by replay: {path}")
