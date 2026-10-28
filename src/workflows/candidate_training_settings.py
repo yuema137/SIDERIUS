@@ -8,7 +8,7 @@ instructions to execute omitted history, retries or analysis phases.
 import json
 import math
 from dataclasses import fields
-from typing import Self
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
@@ -16,6 +16,7 @@ from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ProposalInput
+from core.retired_seed_pins import refuse_retired_seed_pins
 from core.runtime_control.decision_policy import RuntimeBudget
 from core.runtime_control.validation_limits import validate_phase_deadline
 from execute_tools.dataset_config import DataScope
@@ -75,9 +76,7 @@ SUPPORTED_LAUNCH_FIELDS = frozenset(
         "runtime_watchdog_enabled",
         "runtime_watchdog_floor_seconds",
         "runtime_watchdog_safety_factor",
-        "sampling_seed",
         "skip_formal_min_delta",
-        "train_base_seed",
         "train_portion",
         "train_validation_align",
         "training_validation_portion",
@@ -167,6 +166,13 @@ class CandidateTrainingSettings(BaseModel):
     file_order_override: list[int] | None = None
     enable_structured_health_feedback: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_retired_seed_pins(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            refuse_retired_seed_pins(data.get("launch"), "candidate training settings launch")
+        return data
+
     @model_validator(mode="after")
     def validate_admitted_controls(self) -> Self:
         groups = (SUPPORTED_LAUNCH_FIELDS, INACTIVE_LAUNCH_FIELDS, MANAGED_LAUNCH_FIELDS)
@@ -235,7 +241,6 @@ def proposal_training_values(settings: CandidateTrainingSettings) -> dict[str, o
             "trial_time_budget_minutes",
             "formal_time_budget_minutes",
             "workflow_parameter_rules",
-            "sampling_seed",
             "is_trial",
             "allowed_output_types",
             "baseline_isolation",

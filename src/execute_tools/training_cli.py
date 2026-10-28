@@ -134,14 +134,6 @@ def build_training_parser() -> argparse.ArgumentParser:
         help="Use the same subsample every epoch instead of resampling.",
     )
     parser.add_argument(
-        "--train_base_seed",
-        type=int,
-        default=None,
-        help="Interim tuner transport (#983 S2): pins only the per-epoch subsample "
-        "seed to base + n; the init, order and shuffle seeds derive from a run seed "
-        "the trainer generates. Refused together with --seed_context_json.",
-    )
-    parser.add_argument(
         "--seed_context_json",
         type=str,
         default=None,

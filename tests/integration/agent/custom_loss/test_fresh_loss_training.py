@@ -30,6 +30,7 @@ from core.capability_registry import CapabilityRegistry
 from core.generated_library import bind_generated_library_to_workspace
 from core.sandbox_executor import TidmadSandbox, get_loss_dir, get_plugin_dir
 from core.training_execution_bindings import TrainingExecutionBindings
+from core.training_seeds import SeedContext
 from execute_tools.health_checks.config import HealthChecksConfig
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
@@ -334,7 +335,7 @@ def test_fresh_loss_reaches_native_cpu_training(tmp_path, monkeypatch):
             params["model_config"],
             params["train_config"],
             params["loss_config"],
-            train_base_seed=17,
+            seed_context=SeedContext(run_seed=17),
             execution_bindings=TrainingExecutionBindings(
                 task_scopes=params["task_scopes"],
                 expected_custom_loss_snapshot=params["expected_custom_loss_snapshot"],

@@ -33,6 +33,7 @@ from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import (
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorOutput
+from core.seeding import SeedCoordinates
 from execute_tools.dataset_config import DataScope
 
 # ---------------------------------------------------------------------------
@@ -337,16 +338,16 @@ class TestLocalValidatedModel:
             train_portion=0.15,
             eval_portion=0.5,
             train_validation_align=False,
-            sampling_seed=42,
-            train_base_seed=99,
+            run_seed=42,
+            seed_coordinates=SeedCoordinates(iteration=3),
         )
         assert result.is_trial is True
         assert result.trial_portion == 0.2
         assert result.train_portion == 0.15
         assert result.eval_portion == 0.5
         assert result.train_validation_align is False
-        assert result.sampling_seed == 42
-        assert result.train_base_seed == 99
+        assert result.run_seed == 42
+        assert result.seed_coordinates == SeedCoordinates(iteration=3)
         assert not hasattr(result, "trial_strategy")
         assert not hasattr(result, "target_files")
 

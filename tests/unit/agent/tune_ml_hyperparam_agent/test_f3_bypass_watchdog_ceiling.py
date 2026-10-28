@@ -18,6 +18,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.scoring_stubs import stub_scoring
 from tests.unit.agent.tune_ml_hyperparam_agent.test_tuning_agent import (
     FAKE_CONFIG_MANUAL,
@@ -121,6 +122,7 @@ def _run(
         mock_skill.side_effect = dispatch
 
         inp = HyperparamTuningInput(
+            run_seed=TEST_RUN_SEED,
             planner_strategy="native-timing-v1",
             model_type="punet",
             file_index=6,

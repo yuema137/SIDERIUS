@@ -33,6 +33,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.scoring_stubs import stub_scoring
 from workflows.task_composition import (
     bind_run_task_composition,
@@ -119,6 +120,7 @@ def formal_round(tmp_path):
 
         composition = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
         agent_input = HyperparamTuningInput(
+            run_seed=TEST_RUN_SEED,
             planner_strategy="native-timing-v1",
             model_type="quickstart_reference_mlp",
             run_name="formal_ordering_test",

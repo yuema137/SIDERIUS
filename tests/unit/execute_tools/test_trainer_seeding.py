@@ -200,7 +200,6 @@ class TestTrainerEntryBoundary:
         assert results["seed_derivation"] == "siderius-seed/v1"
         assert results["seed_context"] == plan.context.model_dump(mode="json")
         assert results["process_seeds"] == plan.process_seeds().model_dump()
-        assert "pinned_subsample_base" not in results
         run_seed = results["seed_context"]["run_seed"]
         assert [plan.epoch(k).subsample for k in (0, 1)] == [
             derive_seed(run_seed, "trainer.epoch_subsample", SeedCoordinates(epoch=k))
@@ -208,24 +207,6 @@ class TestTrainerEntryBoundary:
         ]
         forwarded = interpret_training_results(results, expected_validation=False)
         assert not any("seed" in key for key in forwarded.legacy_payload)
-
-    def test_interim_train_base_seed_pins_only_the_subsample(
-        self, two_family, tmp_path, monkeypatch
-    ):
-        """Defect: the S2→S3b interim transport changes the tuner's subsample
-        values (``base + k``), which would also break the GPU probe, whose
-        epoch-0 selection uses ``train_base_seed`` itself; or it pins the init
-        and shuffle streams to the label-derived base."""
-        plan, results = self._main(tmp_path, monkeypatch, two_family, "--train_base_seed", "41")
-
-        assert [plan.epoch(k).subsample for k in (0, 1, 2)] == [41, 42, 43]
-        assert plan.epoch(2, freeze_subsample=True).subsample == 41
-        assert results["seed_source"] == "generated"
-        assert results["pinned_subsample_base"] == 41
-        assert plan.epoch(0).shuffle != plan.epoch(1).shuffle
-        assert plan.init_torch == derive_seed(
-            results["seed_context"]["run_seed"], "trainer.init", SeedCoordinates()
-        )
 
     def test_supplied_context_is_used_verbatim(self, two_family, tmp_path, monkeypatch):
         """Defect: the trainer ignores the parent's ``SeedContext`` and generates."""
@@ -240,17 +221,11 @@ class TestTrainerEntryBoundary:
         assert results["seed_source"] == "supplied"
         assert results["seed_context"] == context.model_dump(mode="json")
 
-    def test_context_and_base_seed_together_are_refused(self, two_family, tmp_path, monkeypatch):
-        """Defect: two subsample authorities silently resolve to one."""
-        path = tmp_path / "seed_context.json"
-        path.write_text(SeedContext(run_seed=5).model_dump_json())
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            self._main(
-                tmp_path,
-                monkeypatch,
-                two_family,
-                *("--seed_context_json", str(path), "--train_base_seed", "41"),
-            )
+    def test_retired_train_base_seed_flag_is_refused(self, two_family, tmp_path, monkeypatch):
+        """Defect: the retired S2 interim transport is still accepted, so a
+        caller could pin the subsample stream outside the run seed (#983 S3b)."""
+        with pytest.raises(SystemExit):
+            self._main(tmp_path, monkeypatch, two_family, "--train_base_seed", "41")
 
 
 class TestSeedPlan:

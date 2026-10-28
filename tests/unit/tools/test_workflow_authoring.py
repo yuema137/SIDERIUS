@@ -386,10 +386,10 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     controls = {c.name: c for c in view.training.controls}
     assert controls["formal_time_budget_minutes"].state == "null"
     assert controls["formal_time_budget_minutes"].nullable
-    assert controls["sampling_seed"].state == "unset"
+    assert controls["trial_max_epochs"].state == "unset"
     assert view.document.training_settings == supplied
     document = view.document.model_copy(deep=True)
-    document.training_settings["launch"]["sampling_seed"] = 31
+    document.training_settings["launch"]["trial_max_epochs"] = 3
     review = author.review(
         ReviewRequest(
             expected_sha256=view.sha256,
@@ -399,15 +399,15 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     assert (
         review.training.workflow_parameter_rules == supplied["launch"]["workflow_parameter_rules"]
     )
-    assert next(c for c in review.training.controls if c.name == "sampling_seed").effective == 31
+    assert next(c for c in review.training.controls if c.name == "trial_max_epochs").effective == 3
     author.save(
         SaveRequest(
             expected_sha256=view.sha256, proposal_sha256=review.sha256, source=review.source
         )
     )
     saved = parse_workflow_source(source.read_text())
-    assert saved.training_settings == {"launch": {**supplied["launch"], "sampling_seed": 31}}
-    assert "train_base_seed" not in saved.training_settings["launch"]
+    assert saved.training_settings == {"launch": {**supplied["launch"], "trial_max_epochs": 3}}
+    assert "formal_max_epochs" not in saved.training_settings["launch"]
 
 
 @pytest.mark.parametrize(

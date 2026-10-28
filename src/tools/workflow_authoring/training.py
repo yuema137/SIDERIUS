@@ -15,8 +15,6 @@ CONTROLS = (
     ("trial_portion", "Trial portion", "number"),
     ("train_portion", "Training portion", "number"),
     ("formal_portion", "Formal portion", "number"),
-    ("sampling_seed", "Sampling seed", "integer"),
-    ("train_base_seed", "Training base seed", "integer"),
     ("retain_training_checkpoints", "Retain training checkpoints", "boolean"),
     ("retain_model_outputs", "Retain model outputs", "boolean"),
 )

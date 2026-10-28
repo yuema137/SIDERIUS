@@ -13,18 +13,30 @@ continuation. Only the target workspace's lock is read, so a history import
 
 from __future__ import annotations
 
+import argparse
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from core.run_invariants import (
     RunInvariantsViolation,
     load_run_invariants,
     pre_seed_lock_violation,
 )
-from core.seeding import RunSeed, format_seed_line, resolve_run_seed
+from core.seeding import RUN_SEED_MAX, RunSeed, format_seed_line, resolve_run_seed
 
 SeedOrigin = Literal["operator", "generated", "locked"]
+_RUN_SEED = TypeAdapter(RunSeed)
+
+
+def run_seed_argument(text: str) -> int:
+    """argparse type for ``--run_seed``: an integer ``RunSeed`` in ``[0, 2**53 - 1]``."""
+    try:
+        return _RUN_SEED.validate_python(int(text))
+    except (ValueError, ValidationError) as error:
+        raise argparse.ArgumentTypeError(
+            f"expected an integer run seed in [0, {RUN_SEED_MAX}], got {text!r}"
+        ) from error
 
 
 class WorkspaceRunSeed(BaseModel):

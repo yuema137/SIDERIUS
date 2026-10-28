@@ -15,18 +15,16 @@ stochastic unit, and how the native trainer applies those seeds. It does not
 own where a run seed is admitted, locked or displayed; later PRs of issue
 #983 add those and document them with their owners.
 
-**Landed state.** The native workflow resolves, locks and prints one
-`run_seed` per workspace (`--run_seed`, else the lock, else
-`resolve_run_seed`); see
+**Landed state.** Every run-seed entry boundary resolves, locks and prints
+one `run_seed` (lock, then `--run_seed`, then `resolve_run_seed`): the native
+workflow startup, the standalone tuner CLI and, until candidate requests carry
+a seed (S4), candidate training admission; see
 [persistence-and-resume.md](persistence-and-resume.md#run-seed-in-the-lock-issue-983).
-The trainer is seeded (see [Trainer seeding](#trainer-seeding)) and the
-`hash(exp_id)` fallback is gone. The tuner does not yet derive its seeds from
-the locked run seed: it still computes `train_sampling_seed`,
-`train_base_seed` and `eval_sampling_seed` from
-`sha256(f"{run_name}_{total_attempts}")` and passes only `--train_base_seed`
-to the trainer, so a tuner-driven trainer runs under the
-[interim rule](#interim-tuner-transport) with its own generated run seed,
-which differs from the locked one.
+The tuner derives every attempt seed from the locked seed
+([Tuner attempt seeds](#tuner-attempt-seeds)) and hands the trainer a
+`SeedContext`, so a tuner-driven trainer never generates its own seed. The
+per-purpose pins `sampling_seed` and `train_base_seed` are retired
+([Retired seed pins](#retired-seed-pins)).
 
 Both entry kinds print their seed through one formatter,
 `core.seeding.format_seed_line`: `[seed] run_seed=N source=S`, where `S` is
@@ -139,8 +137,7 @@ without `hash()`.
 with one `SeedContext`, started from different process RNG states, give
 identical initial weights and loss histories, and a different run seed gives
 different initial weights; a missing plan raises `MissingRunSeed` before model
-construction; `main()` records generated and supplied seeds, keeps the interim
-`B + k` subsample values and refuses two subsample authorities; freezing pins
+construction; `main()` records generated and supplied seeds; freezing pins
 only the subsample stream; the `[seed]` line is printed before training
 starts; children get `PYTHONHASHSEED=0` unless the operator set a value.
 
@@ -151,13 +148,13 @@ starts; children get `PYTHONHASHSEED=0` unless the operator set a value.
 | symbol | contract |
 |---|---|
 | `SeedContext` | frozen, `extra="forbid"`, `strict=True`: `run_seed: RunSeed`, `at: SeedCoordinates` (default all `None`). `at.epoch` must be `None`; the trainer owns the epoch (`ValidationError` otherwise). |
-| `TrainingSeedPlan(context, pinned_subsample_base=None)` | frozen dataclass; a pure function of the context. |
+| `TrainingSeedPlan(context)` | frozen dataclass; a pure function of the context. |
 | `.init_torch` / `.init_python` | `derive_seed(run_seed, "trainer.init" / "trainer.init_python", at)`, 63-bit |
 | `.init_numpy32` | `derive_seed(run_seed, "trainer.init_numpy", at) & (2**32 - 1)` (legacy `np.random.seed` accepts 32 bits; the low bits of SHA-256 output are uniform) |
 | `.process_seeds() -> ProcessSeedRecord` | `{torch, numpy, python}` = the three values above |
 | `.epoch(k, *, freeze_subsample=False) -> EpochSeeds(subsample, order, shuffle)` | `order` / `shuffle` = `derive_seed(…, "trainer.epoch_order" / "trainer.epoch_shuffle", at with epoch=k)`. `subsample` = `derive_seed(…, "trainer.epoch_subsample", at with epoch=k')`, `k' = 0` when `freeze_subsample` else `k`. Freezing affects only the subsample stream. |
 | `require_seed_plan(plan)` | returns `plan`; `None` raises `MissingRunSeed` |
-| `resolve_trainer_seed_plan(context, train_base_seed)` | the trainer CLI entry boundary: a context ⇒ `(TrainingSeedPlan(context), "supplied")`; none ⇒ a generated run seed with empty coordinates and `"generated"`. A context together with `train_base_seed` raises `ValueError`. |
+| `resolve_trainer_seed_plan(context)` | the trainer CLI entry boundary: a context ⇒ `(TrainingSeedPlan(context), "supplied")`; none (a direct trainer invocation only) ⇒ a generated run seed with empty coordinates and `"generated"`. |
 | `trainer_seed_record(plan, source)` | the results-JSON seed fields (below) |
 
 The module imports neither torch nor NumPy, so a parent process can compute the
@@ -208,21 +205,58 @@ lose a generated seed. After training, `main()` adds to the results JSON
 | `seed_derivation` | `"siderius-seed/v1"` |
 | `seed_source` | `"supplied"` or `"generated"` |
 | `process_seeds` | `{torch, numpy, python}` |
-| `pinned_subsample_base` | only under the interim rule below |
 
 These keys never reach an LLM: the tuner's `interpret_training_results`
 forwards only `LEGACY_TRAINING_RESULT_KEYS` and `training_history`.
 
-### Interim tuner transport
+### Tuner attempt seeds
 
-Until the tuner derives a `SeedContext` (issue #983 S3b), it passes only
-`--train_base_seed B`. The trainer then generates a run seed for the
-initialization, order and shuffle streams (`seed_source="generated"`) and
-pins only the subsample stream to `B + k` (`B` when `freeze_subsample`),
-exactly the values the tuner used before. The GPU probe builds its epoch-0
-selection with `epoch_seed=B`, which equals the trainer's epoch-0 subsample
-seed. `--seed_context_json` together with `--train_base_seed` is refused.
-S3b removes `--train_base_seed` and `pinned_subsample_base`.
+Owner: `nodes/ml_hyperparameter_tune_agent/attempt_seeds.py`
+(`derive_attempt_seeds`, `require_run_seed`), called once per attempt by
+`planning.prepare_attempt`.
+
+- Input: `HyperparamTuningInput.run_seed` (required; `None` raises
+  `MissingRunSeed` at tuner startup, before any LLM call) and
+  `HyperparamTuningInput.seed_coordinates`, the caller-owned position
+  (`iteration`, `node_id`, `branch`; supplying `round`, `attempt` or `epoch`
+  is refused). The native workflow passes `SeedCoordinates(iteration=N)` for
+  global chain iteration `N`. Candidate graphs pass empty coordinates until S4
+  supplies the loop iteration and `node_id`.
+- The attempt position adds `round` = the tuner round index and
+  `attempt` = `total_attempts` (global within the tuner run, restored on
+  resume). `run_name`, `exp_id` and paths never enter.
+- `TrialConfig.train_sampling_seed = derive_seed(run_seed, "tuner.train_sampling", at)`;
+  `eval_sampling_seed` is the same value when `train_validation_align`, else
+  `derive_seed(…, "tuner.eval_sampling", at)`; `TrialConfig.seed_context =
+  SeedContext(run_seed, at)`. All three are written to
+  `trial_config_{exp_id}.json`; none is in `ExperimentRecord` or
+  `record_params`, so no seed reaches a prompt.
+- The trainer receives the context as `--seed_context_json`
+  (`configs/<run>/seed_context_<exp_id>.json`, written by
+  `sandbox_executor.execute_training`). `--train_base_seed` no longer exists.
+- GPU probe (M1): the probe builds its epoch-0 selection with
+  `epoch_seed = TrainingSeedPlan(seed_context).epoch(0).subsample`, and
+  `validate_native_inputs(..., seed_context=...)` refuses a protected launch
+  whose derived epoch-0 subsample differs from the measured probe's.
+- Sampling seeds are 63-bit. Task `build_scope` code must seed a generator that
+  accepts them (`numpy.random.default_rng`, `random.Random`); legacy
+  `np.random.seed`/`RandomState` accept only 32 bits.
+
+### Retired seed pins
+
+Owner: `core/retired_seed_pins.py`. `sampling_seed` and `train_base_seed` are
+removed from `WorkflowLaunchConfig`, `HyperparamTuningInput`, `ProposalInput`,
+both protocols and the authored-editor controls. An input that still names
+one is refused with `RetiredSeedPin`
+(`… carries retired seed pin(s) […]: seeds derive from run_seed; set --run_seed`):
+
+| surface | behavior |
+|---|---|
+| `--sampling_seed` (runner CLI) / `run_chain.sh --sampling_seed` | parse error / exit 1 with the message |
+| `HyperparamTuningInput` (any key present, even `null`) | `ValidationError` |
+| candidate training settings / saved workflow `launch` | `ValidationError` |
+| reviewed launch projection recorded before the retirement (`LaunchExpectations.check_projection`) | **migration:** a `null` pin is dropped before comparison, so a seedless saved review still matches; a non-null pin refuses |
+| archived `trial_config_{exp_id}.json` with `train_base_seed` | read as plain JSON evidence; not re-validated |
 
 ### Child environment
 
@@ -255,7 +289,6 @@ bytes are unaffected.
 
 These belong to later #983 PRs:
 
-- Tuner derivation of `SeedContext` and the GPU probe check on derived
-  values (S3b); removal of `--train_base_seed`.
-- Candidate admission, record and receipt fields, display, and the RNG census
-  guard.
+- Candidate request/record/receipt seed fields, loop coordinates
+  (`iteration`, `node_id`) and display (S4–S6).
+- The RNG census guard (S8).

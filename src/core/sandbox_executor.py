@@ -90,6 +90,7 @@ from core.task_transport import (
     task_manifest_argv as _task_manifest_argv,
 )
 from core.training_execution_bindings import TrainingExecutionBindings
+from core.training_seeds import SeedContext
 from execute_tools.data_paths import resolve_physical_data_root
 from execute_tools.dataset_config import (
     DataScope,
@@ -1014,7 +1015,7 @@ class TidmadSandbox:
         l_cfg: dict,
         sample_set: dict | None = None,
         train_portion: float | None = None,
-        train_base_seed: int | None = None,
+        seed_context: SeedContext | None = None,
         runtime_policy: dict | None = None,
         order_strategy: str = "shuffle",
         file_order: list[int] | None = None,
@@ -1041,8 +1042,10 @@ class TidmadSandbox:
                              with the same tuner-owned set for the attempt.)
             train_portion:   Fraction of the scope to subsample per epoch for training.
                              Passed via --train_portion.
-            train_base_seed: Base seed for per-epoch subsampling reproducibility.
-                             Passed via --train_base_seed.
+            seed_context:    The tuner-derived ``SeedContext`` (issue #983) every
+                             trainer seed derives from. Written to JSON and
+                             passed via --seed_context_json; ``None`` lets a
+                             direct caller's trainer generate one.
             runtime_policy:  Optional RT2-B runtime policy dict (validated
                              against ``RuntimeControlPolicy`` before launch).
                              Streaming mode only. When the in-subprocess
@@ -1082,7 +1085,7 @@ class TidmadSandbox:
                 loss_config=vl,
                 task_scopes=bindings.task_scopes,
                 train_portion=train_portion,
-                train_base_seed=train_base_seed,
+                seed_context=seed_context,
                 custom_loss_snapshot=bindings.expected_custom_loss_snapshot,
             )
 
@@ -1201,8 +1204,13 @@ class TidmadSandbox:
             # composed external task.
             if train_portion is not None:
                 cmd.extend(["--train_portion", str(train_portion)])
-            if train_base_seed is not None:
-                cmd.extend(["--train_base_seed", str(train_base_seed)])
+            if seed_context is not None:
+                sc_path = os.path.abspath(
+                    os.path.join(self.dirs["configs"], f"seed_context_{exp_id}.json")
+                )
+                with open(sc_path, "w") as f:
+                    f.write(seed_context.model_dump_json())
+                cmd.extend(["--seed_context_json", sc_path])
             # V19 PR 2: RESOLVED ordering only — the subprocess never learns
             # about proposals or overrides. Flags are appended only when
             # non-default, preserving the default argv.
@@ -2061,7 +2069,7 @@ class StubSandbox(TidmadSandbox):
         l_cfg: dict,
         sample_set: dict | None = None,
         train_portion: float | None = None,
-        train_base_seed: int | None = None,
+        seed_context: SeedContext | None = None,
         runtime_policy: dict | None = None,
         order_strategy: str = "shuffle",
         file_order: list[int] | None = None,

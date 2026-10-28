@@ -80,6 +80,7 @@ from execute_tools.task_data_path import (
     resolve_bound_task_data_path,
 )
 from execute_tools.trial_anchor_map import load_anchor_map
+from nodes.ml_hyperparameter_tune_agent.attempt_seeds import require_run_seed
 from nodes.ml_hyperparameter_tune_agent.checkpoint_retention import (
     CompletedTrainingAttempt,
     finalize_run_checkpoints,
@@ -917,6 +918,8 @@ class HyperparamTuningAgent:
         # workflow) that materializes/hashes the effective config and then
         # constructs the invariants from the result, so the sha in the lock
         # always describes the exact config this run reads.
+        # Issue #983 (M2) — refuse a missing run seed before any LLM call.
+        require_run_seed(agent_input.run_seed)
         run_invariants, _effective_config_path = build_run_invariants(
             resolved_data_scope=resolved_data_scope,
             health_gate_enabled=agent_input.health_gate_enabled,
@@ -1913,6 +1916,7 @@ def main() -> int:
     (`workflows/model_exploration.py`'s own CLI entry) — this is the second
     composition edge, not a new authority.
     """
+    from core.run_seed_lock import resolve_workspace_run_seed
     from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
     parser = build_parser()
@@ -1921,7 +1925,11 @@ def main() -> int:
 
     bind_generated_library_to_workspace(args.workspace)
     run_composition = compose_run_task_bindings(args.task_composition)
-    agent_input = build_agent_input(args, parser, run_composition)
+    # Issue #983 (R2) — the standalone CLI is an entry boundary: lock, then
+    # --run_seed, then generation; run() locks the value before round 1.
+    run_seed = resolve_workspace_run_seed(args.workspace, args.run_seed)
+    print(run_seed.log_line(), flush=True)
+    agent_input = build_agent_input(args, parser, run_composition, run_seed=run_seed.value)
 
     agent = HyperparamTuningAgent()
     with bind_run_task_composition(run_composition, physical_data_root=args.data_dir):
