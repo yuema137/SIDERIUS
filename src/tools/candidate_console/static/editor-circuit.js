@@ -179,7 +179,30 @@
       });
       svg.append(target);
     }
+    drawFeedback(svg, world);
     highlight(); updateVisibility();
+  }
+  // The research loop's feedback wire (tour #18): dashed, from the feedback module's output
+  // over the top of the cards back to the target module. Display only; the loop panel edits it.
+  function drawFeedback(svg, world) {
+    const loop = projection?.document?.definition.loop;
+    const output = loop && world.querySelector(`#circuit-output-${CSS.escape(loop.feedback.source.node)}`);
+    const target = loop && world.querySelector(`.circuit-card[data-node="${CSS.escape(loop.feedback.target)}"] > .editor-node`);
+    if (!output || !target) return;
+    const start = point(output), box = target.getBoundingClientRect(), end = toWorld(box.left, box.top + box.height / 2);
+    const top = Math.max(8, Math.min(...[...world.querySelectorAll('.circuit-card')].map(card => card.offsetTop)) - 28);
+    const path = document.createElementNS(svg.namespaceURI, 'path');
+    path.setAttribute('d', geometry.path([start, {x: start.x + 20, y: start.y}, {x: start.x + 20, y: top}, {x: end.x - 20, y: top}, {x: end.x - 20, y: end.y}, end]));
+    path.classList.add('circuit-feedback'); path.dataset.from = loop.feedback.source.node; path.dataset.to = loop.feedback.target;
+    path.setAttribute('aria-label', `Research loop: ${capabilityOf(loop.feedback.source.node)} feeds back to ${capabilityOf(loop.feedback.target)}`);
+    svg.prepend(path);
+  }
+  // "Check the loop": the token walk (editor-circuit-walk.js) over what this canvas shows.
+  function checkLoop() {
+    if (!projection?.document || !host) return;
+    const walk = window.editorCircuitWalk, value = walk.plan(projection.document, projection.inventory);
+    void walk.run(host, value, {say, module: capabilityOf,
+      connector: option => contracts.describe(option.socket_contract).name});
   }
   // "Connects with" for the socket tooltip: capability names of the server-offered sources
   // (an input) or of the inputs that offer this result (an output). Server data only.
@@ -269,6 +292,8 @@
     }, 'workflow');
     arrange.setAttribute('aria-pressed', String(view.arranged));
     arrange.disabled = !value.document;
+    const check = iconButton(bar, 'Check the loop', 'circuit-check', checkLoop, 'repeat-2');
+    check.disabled = !value.document;
     const tidy = iconButton(bar, 'Tidy up', 'circuit-tidy', tidyUp, 'layout-grid');
     tidy.disabled = !value.document || !value.enabled || value.allowMove === false;
     const note = element('p', '', parent, 'circuit-view-note'); note.setAttribute('aria-live', 'polite');
@@ -279,6 +304,7 @@
     const previous = container.querySelector('.circuit-viewport');
     if (view.key !== key) view = {key, scale: 1, fitPending: true, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
     else if (previous && !view.fitPending) view.scroll = {left: previous.scrollLeft, top: previous.scrollTop};
+    window.editorCircuitWalk?.stop();
     host = container; projection = value; actions = callbacks; cancel(false); selectedWire = null; host.replaceChildren();
     const message = element('p', 'Select a capability to inspect it. Choose an output, then a highlighted input to rebind.', host, 'circuit-message');
     message.setAttribute('role', 'status');

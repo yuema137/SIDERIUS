@@ -93,3 +93,15 @@ body.circuit-gesture, body.circuit-gesture * { user-select: none; -webkit-user-s
 /* Card header: the icon keeps clear of the card edge; instance ids are advanced detail. */
 .circuit-card .editor-node { padding: var(--space-3) var(--space-3) var(--space-2); }
 :root:not([data-ui-advanced="on"]) .circuit-card .capability-instance { display: none; }
+
+/* Research loop feedback wire (display only): dashed, under the ordinary wires. */
+.circuit-feedback { fill: none; stroke: var(--capability-tuning); stroke-width: 2; stroke-dasharray: 6 5; opacity: .75; pointer-events: none; }
+
+/* "Check the loop" walk-through (editor-circuit-walk.js). The token travels a wire; at the
+ * first break the socket gets a soft red halo. The halo stays a few pixels around the 12px
+ * socket, so it is never larger than the card. Reduced motion: the same halo, no pulse. */
+.circuit-walk-token { position: absolute; z-index: 5; width: 12px; height: 12px; margin: -6px 0 0 -6px; border: 2px solid var(--panel); border-radius: 50%; background: var(--focus); box-shadow: 0 0 6px 1px color-mix(in srgb, var(--focus) 60%, transparent); pointer-events: none; }
+.circuit-port.walk-break .circuit-socket { border-color: var(--error); box-shadow: 0 0 0 4px color-mix(in srgb, var(--error) 30%, transparent), 0 0 10px 3px color-mix(in srgb, var(--error) 35%, transparent); animation: walk-halo 1.6s ease-in-out 3; }
+@keyframes walk-halo { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--error) 18%, transparent), 0 0 14px 4px color-mix(in srgb, var(--error) 25%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .circuit-port.walk-break .circuit-socket { animation: none; } }
+.circuit-walk-note { position: absolute; z-index: 6; margin: 0; padding: var(--space-2) var(--space-3); border: 1px solid color-mix(in srgb, var(--error) 45%, var(--border)); border-radius: var(--radius-2); background: var(--panel); color: var(--text); box-shadow: var(--elev-2); font-size: var(--font-help); line-height: 1.4; }
