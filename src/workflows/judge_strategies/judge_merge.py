@@ -119,9 +119,9 @@ def output_count(strategy: JudgeMergeStrategy) -> int:
     return strategy.synthesize_count
 
 
-def plan_call(invocation: StrategyInvocation, call_index: int) -> PlannedCall | None:
+def plan_call(invocation: StrategyInvocation, earlier: tuple[object, ...]) -> PlannedCall | None:
     strategy = _strategy(invocation)
-    if call_index >= 1:
+    if earlier:
         return None
     content = MergeRequest(
         criterion=strategy.criterion,

@@ -150,6 +150,8 @@ def admit_llm_strategy(
     else:
         count = kind.output_count(strategy)
         refusals += _combined_refusals(strategy, count, contract, select, cardinality)
+    if kind.admit_parameters is not None:
+        refusals += kind.admit_parameters(strategy, inputs)
     capacity = _item_capacity(inputs)
     bound = None if capacity is None else kind.call_bound(strategy, capacity)
     if capacity is None:

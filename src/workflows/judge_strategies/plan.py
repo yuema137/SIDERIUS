@@ -23,6 +23,7 @@ from agent.schemas.judge import (
     JudgeRoutes,
 )
 from workflows.definition.llm_strategies import LLMStrategy
+from workflows.definition.models import InputPort
 
 from .models import (
     CALLS_DIR,
@@ -32,6 +33,7 @@ from .models import (
     StrategyFailureCode,
     StrategyInvocation,
     StrategyOutcome,
+    StrategyRefusal,
 )
 
 
@@ -58,21 +60,40 @@ class StrategyKind:
     bounds it); a kind with one folds to ``output_count(strategy)`` new values
     (``CombinedItems``, ``select=all/v1``). ``min_items`` is the fewest admissible
     items the kind can run on; with fewer, no call is made and the outcome is
-    ``insufficient_items``.
+    ``insufficient_items``. ``precheck`` names any other strategy failure known
+    before the first call (e.g. a declared primary that is not admissible).
+    ``plan_call`` receives the payloads of the earlier, decided calls, so a later
+    call can carry what earlier calls said.
     """
 
     call_bound: Callable[[Any, int], int]
     min_items: Callable[[Any], int]
-    plan_call: Callable[[StrategyInvocation, int], PlannedCall | None]
+    plan_call: Callable[[StrategyInvocation, tuple[Any, ...]], PlannedCall | None]
     fold: Callable[[StrategyInvocation, tuple[Any, ...]], ItemRanking | CombinedItems]
     output_count: Callable[[Any], int] | None = None  # combined kinds only
+    precheck: Callable[[StrategyInvocation], StrategyFailureCode | None] | None = None
+    # Kind-specific static refusals over the adaptor's declared input ports.
+    admit_parameters: Callable[[Any, tuple[InputPort, ...]], tuple[StrategyRefusal, ...]] | None = (
+        None
+    )
 
 
-def next_call(kind: StrategyKind, invocation: StrategyInvocation, done: int) -> PlannedCall | None:
-    """The call after ``done`` decided calls, or ``None``; never a call on insufficient items."""
+def precall_failure(
+    kind: StrategyKind, invocation: StrategyInvocation
+) -> StrategyFailureCode | None:
+    """The strategy failure that forbids every call of this invocation, or ``None``."""
     if len(invocation.items) < kind.min_items(invocation.strategy):
+        return "insufficient_items"
+    return None if kind.precheck is None else kind.precheck(invocation)
+
+
+def next_call(
+    kind: StrategyKind, invocation: StrategyInvocation, calls: tuple[JudgeCallEvidence, ...]
+) -> PlannedCall | None:
+    """The call after the decided ``calls``, or ``None``; never a call after a pre-call failure."""
+    if precall_failure(kind, invocation) is not None:
         return None
-    return kind.plan_call(invocation, done)
+    return kind.plan_call(invocation, tuple(call.payload for call in calls))
 
 
 def judged_items(invocation: StrategyInvocation) -> tuple[JudgedItem, ...]:
@@ -139,10 +160,11 @@ def decide(
     kind: StrategyKind, invocation: StrategyInvocation, calls: tuple[JudgeCallEvidence, ...]
 ) -> StrategyOutcome:
     """Outcome of a finished chain: the first failed call ends it under ``on_failure``."""
-    if len(invocation.items) < kind.min_items(invocation.strategy):
+    precall = precall_failure(kind, invocation)
+    if precall is not None:
         if calls:
-            raise StrategyError("a strategy with insufficient items recorded a call")
-        return _failed(invocation, "insufficient_items")
+            raise StrategyError(f"a strategy that fails before any call ({precall}) recorded one")
+        return _failed(invocation, precall)
     failed = next((call for call in calls if call.status != "decided"), None)
     if failed is None:
         try:

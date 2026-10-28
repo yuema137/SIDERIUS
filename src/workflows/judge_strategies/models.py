@@ -151,9 +151,11 @@ class CombinedItems(JudgeModel):
         return self
 
 
-# Strategy-level failures (no single call failed): too few admissible items to run
-# the kind, or a decided chain whose output count differs from the declared one.
-StrategyFailureCode = Literal["insufficient_items", "cardinality_mismatch"]
+# Strategy-level failures (no single call failed). Pre-call: too few admissible items
+# to run the kind, or a declared primary item that is not admissible. After a decided
+# chain: an output count that differs from the declared one.
+StrategyFailureCode = Literal["insufficient_items", "primary_unavailable", "cardinality_mismatch"]
+PRECALL_FAILURES: frozenset[str] = frozenset({"insufficient_items", "primary_unavailable"})
 
 
 class StrategyOutcome(JudgeModel):
@@ -194,8 +196,8 @@ class StrategyEvidence(JudgeModel):
     def bounded(self) -> Self:
         if len(self.calls) > self.static_call_bound:
             raise ValueError("recorded calls exceed the static call bound")
-        if (not self.calls) != (self.outcome.failure_code == "insufficient_items"):
-            raise ValueError("an invocation makes no call exactly when its items are insufficient")
+        if (not self.calls) != (self.outcome.failure_code in PRECALL_FAILURES):
+            raise ValueError("an invocation makes no call exactly when it fails before any call")
         return self
 
 
@@ -218,6 +220,8 @@ StrategyRefusalCode = Literal[
     "insufficient_capacity",
     "output_not_emittable",
     "cardinality_mismatch",
+    "primary_rule_unavailable",
+    "primary_item_undeclared",
 ]
 
 

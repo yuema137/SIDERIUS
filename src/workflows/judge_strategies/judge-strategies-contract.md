@@ -2,9 +2,8 @@
 
 Technical contract for the LLM strategy framework (advanced design B2, PR B2-6).
 Source and tests determine current behavior. Implemented kinds: `rubric-rank/v1`
-(ranking) and `judge-merge/v1` (combining, B2-9). The other two declared kinds
-(`debate-judge/v1`, `primary-advisors-llm/v1`) are refused until their PRs
-(B2-7, B2-8) land. No
+(ranking), `judge-merge/v1` (combining, B2-9) and `primary-advisors-llm/v1`
+(combining, B2-8). `debate-judge/v1` is refused until its PR (B2-7) lands. No
 adaptor can declare or run an LLM kind yet: the adaptor wiring (B6-8) makes the
 union declarable in `AdaptorInstance.combine` and calls this package.
 
@@ -16,15 +15,16 @@ union declarable in `AdaptorInstance.combine` and calls this package.
 | `admission.py` | `admit_llm_strategy` (pure, no I/O) |
 | `projection.py` | `ITEM_PROJECTORS` (contract → projector), `project_item`, `strategy_items` |
 | `kinds.py` | `IMPLEMENTED_KINDS`, `implemented_kind`, `strategy_call_bound` |
-| `plan.py` | `PlannedCall`, `StrategyKind`, `StrategyFoldFailure`, `judged_items`, `next_call`, `strategy_route`, `call_request`, `call_path`, `decide` (shared by run and replay) |
+| `plan.py` | `PlannedCall`, `StrategyKind`, `StrategyFoldFailure`, `judged_items`, `precall_failure`, `next_call`, `strategy_route`, `call_request`, `call_path`, `decide` (shared by run and replay) |
 | `rubric_rank.py` | `rubric-rank/v1`: `call_bound`, `min_items`, `plan_call`, `fold` (pure) |
 | `judge_merge.py` | `judge-merge/v1`: `MERGE_TEMPLATE` (`judge.merge/v1`, role `merger`, usage label `judge.judge-merge`, response `SynthesisVerdict`), `call_bound`, `min_items`, `output_count`, `plan_call`, `fold` |
+| `primary_advisors.py` | `primary-advisors-llm/v1`: `ADVICE_TEMPLATE` (`judge.advice/v1`, role `advisor`, response `AdvisoryNote`), `REVISION_TEMPLATE` (`judge.revision/v1`, role `reviser`, response `SynthesisVerdict`), both usage label `judge.primary-advisors-llm`; `call_bound`, `min_items`, `output_count`, `admit_parameters`, `precheck`, `split`, `plan_call`, `fold` |
 | `synthesis.py` | Combining kinds' values: `output_facts` (contract JSON schema + framework-owned fields for the prompt), `check_draft`, `provenance_label`, `combined_items` |
 | `run.py` | `run_llm_strategy`: the only provider effect in the package |
 | `replay.py` | `replay_llm_strategy`: readback, imports no provider path |
 | `models.py` | `StrategyItem`, `StrategyInvocation`, `invocation_sha256`, `RubricScore`, `CriterionValue`, `ItemRanking`, `CombinedItem`, `CombinedItems`, `StrategyFailureCode`, `StrategyOutcome`, `StrategyEvidence`, `StrategyResult`, `StrategyAdmission`, `StrategyRefusal`, `StrategyError` |
 | `agent/judge/rubric_template.py` | `RUBRIC_TEMPLATE` (`judge.rubric/v1`, role `scorer`, usage label `judge.rubric-rank`, response `RubricVerdict`) |
-| `agent/schemas/judge.py` | Call-level types: `RubricScoringRequest` (`CallContent` kind `rubric_scoring`), `MergeRequest` (kind `merge`, role `merger`), `JudgedItem`, `ItemProjection`, `ProjectedField`, `RubricVerdict` (`CallPayload` kind `rubric`), `SynthesisVerdict` (kind `synthesis`) with `SynthesizedDraft(parents, value)` |
+| `agent/schemas/judge.py` | Call-level types: `RubricScoringRequest` (`CallContent` kind `rubric_scoring`), `MergeRequest` (kind `merge`, role `merger`), `AdviceRequest` (kind `advice`, role `advisor`), `RevisionRequest` (kind `revision`, role `reviser`), `JudgedItem`, `ItemProjection`, `ProjectedField`, `RubricVerdict` (`CallPayload` kind `rubric`), `AdvisoryNote` (kind `advice`), `SynthesisVerdict` (kind `synthesis`) with `SynthesizedDraft(parents, value)` |
 
 Not owned here: every judge call, its evidence file and its readback
 ([judge contract](../../agent/judge/judge-contract.md): `run_judge_call`,
@@ -65,7 +65,9 @@ admitted iff `refusals` is empty. Refusal codes:
 | `select_incompatible` | a rubric ranking feeds only `all/v1`, `top-k/v1` or `threshold/v1` with `basis="rubric"`; a combining kind feeds only `all/v1` |
 | `output_not_emittable` | a combining kind's output contract is not in `catalog.CUSTOM_EMITTABLE` (authority contracts such as `tuning.output` are never synthesized) |
 | `cardinality_mismatch` | a combining kind's declared output count (`judge-merge`: `synthesize_count`) lies outside `cardinality` |
-| `insufficient_capacity` | the ports hold fewer items than the kind's `min_items` (`judge-merge`: `min_parents`) |
+| `insufficient_capacity` | the ports hold fewer items than the kind's `min_items` (`judge-merge`: `min_parents`; `primary-advisors-llm`: 2) |
+| `primary_rule_unavailable` | `primary-advisors-llm` declares `primary="metric_best"`: no projectable contract carries item metric facts yet |
+| `primary_item_undeclared` | `primary="declared"` names a `primary_item` that is not an input position `<port>:<position>` of the declared ports |
 | `metric_scored_reorder` | Q-B2-2: over `METRIC_SCORED_CONTRACTS` items an LLM ranking may feed only `all/v1` or `threshold(basis="rubric")`, never `top-k/v1` (B6 `select` re-checks at run time) |
 | `call_bound_exceeds_max_calls` | `strategy_call_bound(strategy, capacity) > max_calls` |
 
@@ -160,6 +162,39 @@ output_index, parents, value, value_sha256)])`. A merged proposal is a new
 candidate; downstream training still needs its own implementation and
 validation (B6 profile admission). No score arithmetic is involved.
 
+## `primary-advisors-llm/v1`
+
+Parameters: `primary: "declared" | "metric_best" | "first_admissible"` (no
+default, Q-B2-9), `primary_item` iff `declared`, `advice: "single_call" |
+"per_advisor"`. `min_items` = 2, output count 1. Static call bound:
+`single_call` = 1, `per_advisor` = N (N − 1 advisor calls + 1 reviser call).
+
+Primary selection (`split`, pure) never falls back to declaration order unless
+`first_admissible` is declared: `declared` → the item with id `primary_item`;
+if that item is not among the admissible items, `precheck` fails the invocation
+before any call with `primary_unavailable` (zero calls, replayable);
+`first_admissible` → the first item; `metric_best` → refused at admission and
+`StrategyError` at planning (see Limitations). Advisors are the other items in
+declared order. The primary and advisors are part of every request, so a replay
+re-derives them by the declared rule and refuses evidence naming another primary.
+
+`per_advisor`: call `i < N − 1` is an `advisor` call `AdviceRequest(criterion,
+output_contract, primary, advisor=advisors[i], guidance)`; its `AdvisoryNote(
+advisor_item, suggestions: 1..12 strings ≤ 1000 chars)` must name that advisor
+(`inadmissible_choice` otherwise). The last call (the only call for
+`single_call`) is a `reviser` call `RevisionRequest(criterion, output_contract,
+primary, advisors, notes, guidance)`; `notes` holds every earlier note verbatim in
+advisor order (empty for `single_call`), so the reviser's request carries what the
+advisors said. Planners receive the earlier decided payloads for this
+(`StrategyKind.plan_call(invocation, earlier)`).
+
+The reviser returns a `SynthesisVerdict`. `check_payload` requires, per draft,
+distinct listed parents (primary or advisors) that include the primary, and a
+contract-valid value with framework-owned fields unset. Parents other than the
+primary are the advisors whose advice was adopted. The fold requires exactly one
+value (`cardinality_mismatch` otherwise) and stamps
+`adaptor:<adaptor_id>/primary-advisors-llm/v1`. No score arithmetic is involved.
+
 ## Run (`run_llm_strategy`)
 
 1. Refuse with `StrategyError`, before any provider contact: unimplemented kind;
@@ -174,7 +209,8 @@ validation (B6 profile admission). No score arithmetic is involved.
    max_calls=bound)`. Each request names `invocation_sha256` and lists the
    `evidence_sha256` of every earlier call (`prior_turns`). The chain stops at the
    first call whose status is not `decided`.
-3. `decide`: fewer items than `min_items` → no call, `insufficient_items`; all
+3. `decide`: fewer items than `min_items` → no call, `insufficient_items`; a
+   kind `precheck` failure (`primary_unavailable`) → no call, that code; all
    decided → `StrategyOutcome(status="decided", ranking=...)` for a ranking kind or
    `combined=...` for a combining kind (`combined` is omitted from the JSON when
    absent), unless the fold raises `StrategyFoldFailure` (`cardinality_mismatch`);
@@ -238,6 +274,15 @@ The adaptor wiring (B6-8) is the only intended caller. It must:
 
 ## Validation evidence
 
+`tests/unit/workflows/test_primary_advisors.py` (B2-8): single_call bound 1 with
+stamped lineage and replay; a declared primary is used, not the first item;
+re-anchored evidence revising another primary refused on replay; per_advisor
+consults advisors in order and the reviser sees every note (N calls); a note
+naming another advisor and a revision dropping the primary refused; an
+inadmissible declared primary → `primary_unavailable` with no call; `metric_best`
+never runs; admission bounds and one row per refusal; pinned `judge.advice/v1`
+and `judge.revision/v1` digests.
+
 `tests/unit/workflows/test_judge_merge.py` (B2-9): stamped values with parents
 in one call and replay; `min_parents` violated, repeated or foreign parents
 refused; too few items → no call, `insufficient_items`, replayable; a value
@@ -261,6 +306,11 @@ bounds; AST guards (rubric fold imports no metric owner; replay, plan, kinds and
 the fold import no provider path).
 
 ## Limitations
+
+- `primary-advisors-llm/v1` `primary="metric_best"` is refused (`primary_rule_unavailable`):
+  `StrategyItem` carries no metric facts and no metric-scored contract has a
+  projector. It lands with the `tuning.output` projector (B6-9/B3), choosing the
+  primary with `MetricOrder` over Health-valid formal results.
 
 - Not reachable from a workflow until B6-8 (declaration in
   `AdaptorInstance.combine`, catalogue rows, invocation construction, evidence

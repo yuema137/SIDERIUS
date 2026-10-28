@@ -47,7 +47,6 @@ from workflows.definition.adaptor_strategies import (
 )
 from workflows.definition.llm_strategies import (
     DebateJudgeStrategy,
-    PrimaryAdvisorsStrategy,
     RubricRankStrategy,
 )
 from workflows.definition.models import InputPort, ResultSource
@@ -491,7 +490,6 @@ def test_rubric_threshold_over_metric_scored_items_is_not_a_reorder():
     "declared",
     [
         DebateJudgeStrategy(**COMMON, rounds=1, critic=False, judge_output="rank"),
-        PrimaryAdvisorsStrategy(**COMMON, primary="first_admissible", advice="single_call"),
     ],
     ids=lambda s: s.kind,
 )
@@ -588,6 +586,7 @@ def test_rubric_fold_cannot_reach_metric_owners_and_replay_cannot_reach_a_provid
         "kinds.py",
         "rubric_rank.py",
         "judge_merge.py",
+        "primary_advisors.py",
         "synthesis.py",
     ):
         imported = _imports(package / module)

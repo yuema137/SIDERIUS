@@ -42,9 +42,10 @@ def min_items(strategy: RubricRankStrategy) -> int:
     return 1
 
 
-def plan_call(invocation: StrategyInvocation, call_index: int) -> PlannedCall | None:
-    """The ``call_index``-th scorer call (repeat-major, then input order), or ``None`` when done."""
+def plan_call(invocation: StrategyInvocation, earlier: tuple[object, ...]) -> PlannedCall | None:
+    """The next scorer call (repeat-major, then input order), or ``None`` when done."""
     strategy, judged = _parts(invocation)
+    call_index = len(earlier)
     if call_index >= call_bound(strategy, len(judged)):
         return None
     if strategy.scoring == "per_item":

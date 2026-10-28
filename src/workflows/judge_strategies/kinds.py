@@ -4,7 +4,7 @@ from types import MappingProxyType
 
 from workflows.definition.llm_strategies import LLMStrategy
 
-from . import judge_merge, rubric_rank
+from . import judge_merge, primary_advisors, rubric_rank
 from .models import StrategyError
 from .plan import StrategyKind
 
@@ -22,6 +22,15 @@ IMPLEMENTED_KINDS: MappingProxyType[str, StrategyKind] = MappingProxyType(
             plan_call=judge_merge.plan_call,
             fold=judge_merge.fold,
             output_count=judge_merge.output_count,
+        ),
+        "primary-advisors-llm/v1": StrategyKind(
+            call_bound=primary_advisors.call_bound,
+            min_items=primary_advisors.min_items,
+            plan_call=primary_advisors.plan_call,
+            fold=primary_advisors.fold,
+            output_count=primary_advisors.output_count,
+            precheck=primary_advisors.precheck,
+            admit_parameters=primary_advisors.admit_parameters,
         ),
     }
 )

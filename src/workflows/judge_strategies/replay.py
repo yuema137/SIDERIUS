@@ -76,7 +76,7 @@ def replay_llm_strategy(
     for anchor in record.calls:
         if calls and calls[-1].status != "decided":
             raise StrategyError("strategy evidence records a call after a failed call")
-        planned = next_call(kind, invocation, len(calls))
+        planned = next_call(kind, invocation, calls)
         if planned is None:
             raise StrategyError("strategy evidence records more calls than the strategy plans")
         path = call_path(evidence_dir, len(calls), planned.role)
@@ -93,7 +93,7 @@ def replay_llm_strategy(
         calls += (evidence,)
         accounted.add(path)
     if (not calls or calls[-1].status == "decided") and next_call(
-        kind, invocation, len(calls)
+        kind, invocation, calls
     ) is not None:
         raise StrategyError("strategy evidence ends before the planned call chain is complete")
     if decide(kind, invocation, calls) != record.outcome:
