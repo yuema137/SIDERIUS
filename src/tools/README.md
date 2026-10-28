@@ -37,5 +37,7 @@ monitoring of those operations.
 `python -m tools.adaptors` checks a custom adaptor that lives in your own
 project: `inspect` shows its identity, `self-test` runs its examples twice, and
 `admit` records a passing result under your project's `.siderius/adaptors/`.
-Workflows cannot run admitted adaptors yet. See the
+Self-test runs your code as your user; network and files are not blocked. Run
+the command as `python -P -m tools.adaptors` so files in your current folder
+cannot replace framework modules. Workflows cannot run admitted adaptors yet. See the
 [custom adaptor contract](../workflows/custom_adaptors/custom-adaptor-contract.md).

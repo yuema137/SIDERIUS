@@ -127,49 +127,63 @@ still pass implementation and validation before training.
    working directory off `sys.path` (a module in the caller's directory cannot
    shadow framework imports before pin verification); `-s` drops user site.
    Environment allowlist (`process.child_env`): `PATH`, `VIRTUAL_ENV`, `LANG`,
-   `LANGUAGE`, `LC_*`, `PYTHONHASHSEED` (from `core.subprocess_env`, `0` unless
-   the operator set it), `PYTHONNOUSERSITE=1`, and private `HOME` and `TMPDIR`
+   `LANGUAGE`, `LD_LIBRARY_PATH`, `LC_*`, `PYTHONHASHSEED` (the operator's value,
+   else `core.subprocess_env.CHILD_HASH_SEED` = `0`), `PYTHONNOUSERSITE=1`, and private `HOME` and `TMPDIR`
    under the control directory. No provider credentials, plugin directories or
    inherited `SIDERIUS_TASK_CODE_*` transport reach the child; it needs none.
    The supervisor's watchdog notice is redirected to stderr.
 5. The child routes its fd 1 and 2 through a pipe into `child.log`, keeping the
    first `MAX_LOG_BYTES` (64 KiB) and discarding the rest, so the supervisor's
    in-memory capture stays small. It calls `bootstrap_code_package(carrier,
-   digest)`, which verifies every member pin before any adaptor code runs,
-   imports the entry and parameters model from captured bytes, validates
-   parameters and inputs, writes the `ready` marker, calls the function once,
-   and writes `output.json` only if it fits `max_output_bytes`.
-6. Deadline (`process.ReadyDeadline`): before `ready`, a bounded startup
+   digest)`, which verifies every member pin before any adaptor code runs, and
+   validates inputs. It then creates the `entered` marker with `O_EXCL`
+   immediately before the first member import. After that point adaptor code
+   runs: member module bodies on import, the parameters model's validation, and
+   the function call. Output is written only if it fits `max_output_bytes`.
+6. Deadline (`process.EnteredDeadline`): before `entered`, a bounded startup
    allowance (`STARTUP_ALLOWANCE_SECONDS` = 120 s; interpreter and framework
-   import, about 2 s with `torch`); after `ready` is observed, the author's
-   `timeout_seconds`. Observation granularity is the 0.05 s poll.
+   import, about 2 s with `torch`; no adaptor code runs in it). Once `entered`
+   is observed, the author's `timeout_seconds` covers member module bodies,
+   parameters validation and the call. Observation granularity is the 0.05 s poll.
 7. The parent checks `max_output_bytes` again, parses JSON and applies the
    role rules.
 
 Failure reporting: on any failure the child writes `failure.json`
 (`ChildFailure`: `stage` ∈ `identity`, `input`, `parameters`, `adaptor`,
-`output`) and exits 1. The parent trusts `identity`/`input`/`parameters` only
-when the `ready` marker is absent, because once adaptor code has run it could
-forge the file; exit codes carry no meaning beyond zero/non-zero.
+`output`) and exits 1. That file is a hint: adaptor code can write or delete any
+control file. The parent classifies from its own observations. It reports
+`custom_identity_mismatch` only for an `identity` hint when it never observed
+`entered` (during polling or at exit) **and** an independent re-capture of the
+declared members differs from the loaded pins. Exit codes carry no meaning
+beyond zero/non-zero. Inputs are validated by the parent before launch, so a
+child `input` hint is an internal inconsistency and reported as
+`custom_exception`. Known limit: adaptor code that edits its own member files on
+disk and then forges an `identity` hint is reported as an identity mismatch,
+which is true of the bytes on disk at that point.
 
 | reason | cause |
 |---|---|
 | `custom_timeout` | startup allowance or author timeout exceeded; the process group is terminated; the message says which phase |
-| `custom_exception` | adaptor code raised (including `SystemExit`/`os._exit`), import of a member failed, or the child exited non-zero without a trusted typed failure |
-| `custom_identity_mismatch` | member bytes differ from the captured pins (pre-ready `identity` failure) |
+| `custom_exception` | adaptor code raised or exited (including `SystemExit`/`os._exit`), a member import failed, parameters were refused by the author's model (message starts `parameters:`), or the child exited non-zero without a confirmed identity mismatch |
+| `custom_identity_mismatch` | the child refused the pins before `entered`, and the parent's re-capture confirms the member bytes changed |
 | `custom_invalid_output` | output not JSON-compatible or over `max_output_bytes` (child or parent), or contract, protected-field, index or count violation |
-| `custom_invalid_input` | ports, counts, contracts, size refused before launch, or parameters/inputs refused by the child before `ready` |
+| `custom_invalid_input` | ports, counts, contracts, size or parameters-without-model refused by the parent before launch |
 
-Parameters are validated in the child before `ready`, not in the parent:
-the parameters model is user code, and the parent never executes user code.
+Parameters are validated in the child, not in the parent: the parameters model
+is user code, and the parent never executes user code.
 
-This is not a network or filesystem sandbox: `network: "none"` is declared, not
-enforced, and the child can read files the operator can read. Reusing
-`agent/data_analysis/analysis_code_sandbox.py` (bubblewrap + `unshare --net`) is
-an open decision; its `execute` contract is specific to one generated program
-file, its runner and `SkillPayload`, and it mounts the virtualenv but not the
-editable framework source this child imports. See `core/local_code/README.md`
-for the reproducibility (not security) scope.
+This is not a network or filesystem sandbox. `network: "none"` is the author's
+declaration and is not enforced in v1 (`inspect` prints
+`"none (declared, not enforced in v1)"`); `self-test` runs the adaptor as the
+operator's user, so it can reach the network and read or write files the
+operator can. Decision (c), recorded 2026-10-27: a shared isolation owner is
+extracted from `agent/data_analysis/analysis_code_sandbox.py` (bubblewrap +
+`unshare --net`) in its own PR before B6-6b, and the adaptor child moves into
+it. That sandbox's current `execute` contract is specific to one generated
+program file, its runner and `SkillPayload`, and it does not mount the editable
+framework source this child imports, so it is not reused as-is. Custom adaptors
+cannot run in workflows until B6-6. See `core/local_code/README.md` for the
+reproducibility (not security) scope.
 
 ## Self-test (`self_test.py`)
 
@@ -211,6 +225,11 @@ python -m tools.adaptors self-test --manifest PATH
 python -m tools.adaptors admit     --manifest PATH --project DIR [--replace]
 ```
 
+Run it as `python -P -m tools.adaptors ...`, or from a directory other than the
+adaptor's: without `-P`, Python puts the working directory first on `sys.path`,
+so a module there (for example the adaptor's own `pydantic.py`) could shadow the
+CLI's own imports. The child always runs with `-P`.
+
 Success prints exactly one JSON document on stdout, exit 0. Any refusal exits 2
 with `[<reason>] <message>` on stderr and nothing on stdout; `OSError` maps to
 `[io_error]` and `LocalCodeError` to `[package_unreadable]`. `self-test` and
@@ -233,8 +252,9 @@ refusals, protected-field stamping/refusal through `validate_output`, literature
 authority fields, write-once admission, index/partition rules) and
 `tests/unit/tools/test_adaptors_cli.py` (real children: admission location,
 nondeterminism with empty stdout, startup-independent timeout with a fast
-control, environment allowlist and cwd shadowing, forged failure report and
-parameter refusal, post-capture edit). Synthetic plugin:
+control, environment allowlist and cwd shadowing, identity-mismatch forgery
+from a module body, from the call and after unlinking `entered`, parameter
+refusal, post-capture edit). Synthetic plugin:
 `tests/fixtures/custom_adaptors/sibling_digest/`.
 
 ## Limitations
@@ -242,5 +262,8 @@ parameter refusal, post-capture edit). Synthetic plugin:
 - No workflow reference, preparation pin, run lock, `CustomExecutionEvidence`
   or replay yet (B6-6a/b); no GUI (B6-7); no LLM adaptors (B6-8).
 - No network or filesystem isolation (see above).
+- The log cap covers fd 1 and 2 as installed by the child. Code that duplicated
+  those descriptors before the redirect (none in the framework; adaptor code
+  runs later) or a descendant that escapes the process group could bypass it.
 - The child imports native schema modules, which import `torch`; each child
   start costs about 1.5–2 s on the development host.

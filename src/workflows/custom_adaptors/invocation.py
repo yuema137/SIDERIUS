@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 #: Files the child writes in its control directory.
-READY_FILE = "ready"
+ENTERED_FILE = "entered"
 FAILURE_FILE = "failure.json"
 OUTPUT_FILE = "output.json"
 LOG_FILE = "child.log"
@@ -45,11 +45,12 @@ class CustomInvocation(BaseModel):
 
 
 class ChildFailure(BaseModel):
-    """Written by the child before exiting non-zero.
+    """Written by the child before exiting non-zero; a hint, never an authority.
 
-    ``identity``, ``input`` and ``parameters`` are only meaningful before the
-    ready marker exists: once adaptor code has run, it could forge this file, so
-    the parent then classifies every failure as ``custom_exception``.
+    Adaptor module bodies run after ``ENTERED_FILE`` exists and can write or
+    delete any control file. The parent therefore trusts only an ``identity``
+    failure it did not see ``entered`` for, and only after re-verifying the pins
+    itself (`process.launch`).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

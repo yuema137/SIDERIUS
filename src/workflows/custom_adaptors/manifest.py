@@ -91,7 +91,9 @@ class AdaptorManifest(_Model):
     """Author-declared custom adaptor; every field is checked before any effect.
 
     v1 admits deterministic adaptors only (operator decision B6-D7): ``llm``
-    must be absent and ``network`` is ``"none"``. A ``combine`` adaptor emits a
+    must be absent. ``network="none"`` is the author's declaration; v1 does not
+    enforce it (the child runs as the operator's user, without network or
+    filesystem isolation). A ``combine`` adaptor emits a
     ``CUSTOM_EMITTABLE`` contract (B6-D3 = B). ``select`` and ``distribute``
     return indices into their single input port and never author values.
     """

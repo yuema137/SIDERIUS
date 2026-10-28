@@ -3,11 +3,12 @@
     python -P -s -m workflows.custom_adaptors.child <invocation.json>
 
 Order: redirect stdout/stderr into a size-capped log, verify every member pin
-(``bootstrap_code_package``), import the entry and parameters model from
-captured bytes, validate parameters and inputs, write the ready marker, call
-the function once, then write the JSON output if it fits ``max_output_bytes``.
-Any failure writes a typed ``ChildFailure`` and exits 1. The parent alone
-decides output validity; this process never does.
+(``bootstrap_code_package``), validate inputs, create the ``entered`` marker
+(``O_EXCL``) immediately before the first member import, import the entry and
+parameters model from captured bytes (member module bodies run here), validate
+parameters, call the function once, then write the JSON output if it fits
+``max_output_bytes``. Any failure writes a typed ``ChildFailure`` hint and exits
+1. The parent alone classifies failures and decides output validity.
 """
 
 from __future__ import annotations
@@ -30,11 +31,11 @@ from core.local_code import LocalCodeError, acquire_module, bootstrap_code_packa
 from workflows.custom_adaptors.contracts import validate_values
 from workflows.custom_adaptors.interface import AdaptorContext, CustomInputItem
 from workflows.custom_adaptors.invocation import (
+    ENTERED_FILE,
     FAILURE_FILE,
     LOG_FILE,
     MAX_LOG_BYTES,
     OUTPUT_FILE,
-    READY_FILE,
     ChildFailure,
     CustomInvocation,
 )
@@ -90,24 +91,9 @@ def _symbol(path: str, name: str) -> Any:
         return getattr(module, name)
 
 
-def _prepare(invocation: CustomInvocation) -> tuple[Any, Any, BaseModel | None]:
-    """Everything that must succeed before adaptor code runs; typed failures."""
+def _inputs(invocation: CustomInvocation) -> MappingProxyType[str, tuple[CustomInputItem, ...]]:
     try:
-        bootstrap_code_package(invocation.transport_manifest, invocation.transport_sha256)
-    except LocalCodeError as exc:
-        raise _fail("identity", str(exc)) from exc
-    function = _symbol(invocation.entry_path, invocation.entry_function)
-    parameters: BaseModel | None = None
-    if invocation.parameters_path is not None and invocation.parameters_class is not None:
-        model = _symbol(invocation.parameters_path, invocation.parameters_class)
-        if not (isinstance(model, type) and issubclass(model, BaseModel)):
-            raise _fail("parameters", f"{invocation.parameters_class!r} is not a Pydantic model")
-        try:
-            parameters = model.model_validate(invocation.parameters)
-        except ValueError as exc:
-            raise _fail("parameters", str(exc)) from exc
-    try:
-        inputs = MappingProxyType(
+        return MappingProxyType(
             {
                 port.name: tuple(
                     CustomInputItem(index=index, value=value)
@@ -118,12 +104,30 @@ def _prepare(invocation: CustomInvocation) -> tuple[Any, Any, BaseModel | None]:
         )
     except ValueError as exc:
         raise _fail("input", str(exc)) from exc
-    return function, inputs, parameters
+
+
+def _parameters(invocation: CustomInvocation) -> BaseModel | None:
+    if invocation.parameters_path is None or invocation.parameters_class is None:
+        return None
+    model = _symbol(invocation.parameters_path, invocation.parameters_class)
+    if not (isinstance(model, type) and issubclass(model, BaseModel)):
+        raise _fail("parameters", f"{invocation.parameters_class!r} is not a Pydantic model")
+    try:
+        return model.model_validate(invocation.parameters)
+    except ValueError as exc:
+        raise _fail("parameters", str(exc)) from exc
 
 
 def _run(invocation: CustomInvocation) -> None:
-    function, inputs, parameters = _prepare(invocation)
-    invocation.file(READY_FILE).write_bytes(b"")
+    try:
+        bootstrap_code_package(invocation.transport_manifest, invocation.transport_sha256)
+    except LocalCodeError as exc:
+        raise _fail("identity", str(exc)) from exc
+    inputs = _inputs(invocation)
+    # No adaptor code has run yet; from here on, member module bodies execute.
+    os.close(os.open(invocation.file(ENTERED_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    function = _symbol(invocation.entry_path, invocation.entry_function)
+    parameters = _parameters(invocation)
     try:
         result = function(inputs, parameters, AdaptorContext(invocation.adaptor_id))
     except BaseException as exc:  # Adaptor code may raise anything, including SystemExit.

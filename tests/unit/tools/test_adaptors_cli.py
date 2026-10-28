@@ -109,7 +109,7 @@ def test_author_timeout_starts_after_child_startup(tmp_path: Path) -> None:
     with pytest.raises(CustomAdaptorError) as caught:
         _run_fixture(manifest, tmp_path / "slow")
     assert caught.value.reason == "custom_timeout"
-    assert "after ready" in str(caught.value)
+    assert "after entry" in str(caught.value)
 
 
 def test_child_sees_no_caller_secrets_or_cwd_modules(tmp_path: Path, monkeypatch) -> None:
@@ -136,29 +136,47 @@ def test_child_sees_no_caller_secrets_or_cwd_modules(tmp_path: Path, monkeypatch
     assert all(key in allowed or key.startswith("LC_") for key in visible), visible
 
 
-def test_adaptor_cannot_pose_as_identity_mismatch_or_skip_parameter_checks(
-    tmp_path: Path,
-) -> None:
+_PARAMS = "from pydantic import BaseModel\nclass Params(BaseModel):\n    max_items: int = 1\n"
+_FORGE = (
+    "import json, os, sys\n"
+    "from pathlib import Path\n"
+    "def forge(unlink_entered=False):\n"
+    "    control = Path(json.loads(Path(sys.argv[1]).read_text())['control_dir'])\n"
+    "    if unlink_entered:\n"
+    "        (control / 'entered').unlink()\n"
+    "    (control / 'failure.json').write_text(json.dumps("
+    "{'stage': 'identity', 'detail': 'forged'}))\n"
+    "    os._exit(78)\n"
+)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        _FORGE + _PARAMS + "forge()\n",
+        _FORGE + _PARAMS + "def adapt(inputs, params, ctx):\n    forge()\n",
+        _FORGE + _PARAMS + "def adapt(inputs, params, ctx):\n    forge(unlink_entered=True)\n",
+    ],
+    ids=["module-level-forge", "forge-in-call", "unlink-entered-then-forge"],
+)
+def test_adaptor_code_cannot_forge_an_identity_mismatch(tmp_path: Path, body: str) -> None:
+    # Defect: trusting the child's failure file let adaptor code (module body or
+    # call, even after deleting the entered marker) report a pin mismatch.
+    _, manifest = _project(tmp_path)
+    _replace_entry(manifest, body)
+    with pytest.raises(CustomAdaptorError) as caught:
+        _run_fixture(manifest, tmp_path / "control")
+    assert caught.value.reason == "custom_exception"
+
+
+def test_invalid_parameters_fail_without_running_adapt(tmp_path: Path) -> None:
+    # Parameters are validated by the author's model after import, so a refusal
+    # is a custom_exception that names the parameters stage, not an input refusal.
     _, manifest = _project(tmp_path)
     with pytest.raises(CustomAdaptorError) as caught:
         _run_fixture(manifest, tmp_path / "params", max_items=0)
-    assert caught.value.reason == "custom_invalid_input"
-
-    _replace_entry(
-        manifest,
-        "import os, sys, json\n"
-        "from pathlib import Path\n"
-        "from pydantic import BaseModel\n"
-        "class Params(BaseModel):\n    max_items: int = 1\n"
-        "def adapt(inputs, params, ctx):\n"
-        "    control = Path(json.loads(Path(sys.argv[1]).read_text())['control_dir'])\n"
-        "    (control / 'failure.json').write_text(json.dumps("
-        "{'stage': 'identity', 'detail': 'forged'}))\n"
-        "    os._exit(78)\n",
-    )
-    with pytest.raises(CustomAdaptorError) as caught:
-        _run_fixture(manifest, tmp_path / "forged")
     assert caught.value.reason == "custom_exception"
+    assert str(caught.value).startswith("[custom_exception] parameters:")
 
 
 def test_child_refuses_member_edited_after_capture(tmp_path: Path) -> None:

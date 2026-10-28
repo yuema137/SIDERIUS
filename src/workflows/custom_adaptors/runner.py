@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter, ValidationError
 
+from core.local_code import CodePackageDeclaration, LocalCodeError, capture_package
 from core.local_code.transport import publish_transport
 from workflows.custom_adaptors.contracts import (
     canonical_json,
@@ -165,8 +166,19 @@ def invoke(
     )
     request = control_dir / "invocation.json"
     request.write_text(invocation.model_dump_json(), encoding="utf-8")
-    launch(invocation, request, manifest.limits.timeout_seconds)
+    launch(invocation, request, manifest.limits.timeout_seconds, lambda: _pins_changed(loaded))
     return _read_output(manifest, invocation.file(OUTPUT_FILE))
+
+
+def _pins_changed(loaded: LoadedAdaptor) -> bool:
+    """Independent re-capture of the declared members against the loaded identity."""
+    try:
+        current = capture_package(
+            CodePackageDeclaration(root=".", files=loaded.manifest.members), loaded.directory
+        )
+    except LocalCodeError:
+        return True
+    return current.identity != loaded.package.identity
 
 
 def _read_output(manifest: AdaptorManifest, output: Path) -> object:

@@ -8,6 +8,8 @@
 them. ``self-test`` runs every fixture twice in supervised children. ``admit``
 self-tests, then writes ``DIR/.siderius/adaptors/<id>/<identity>.admission.json``
 once (``--replace`` supersedes a different record for the same identity).
+Run it as ``python -P -m tools.adaptors`` (or from a directory other than the
+adaptor's) so modules in the working directory cannot shadow framework imports.
 Success prints exactly one JSON document on stdout and exits 0; any refusal
 exits 2 with a ``[<reason>]`` diagnostic on stderr and nothing on stdout.
 """
@@ -60,6 +62,7 @@ def _inspection(loaded: LoadedAdaptor) -> dict[str, object]:
         "version": manifest.version,
         "role": manifest.role,
         "deterministic": manifest.deterministic,
+        "network": f"{manifest.network} (declared, not enforced in v1)",
         "identity_sha256": loaded.identity_sha256,
         "manifest_sha256": manifest.digest,
         "members": [pin.model_dump() for pin in loaded.package.identity.members],
