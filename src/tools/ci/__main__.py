@@ -166,6 +166,11 @@ def main(argv: list[str] | None = None) -> int:
         chosen = Selection(chosen.files, True, changed_error)
     print(f"selection: {chosen.reason}", file=sys.stderr)
     files = list(chosen.files)
+    if chosen.full_suite and not files:
+        # Every shard would be empty and trivially green. A full suite with no
+        # tracked test files is a broken checkout, not a passing run.
+        print("FULL SUITE SELECTED ZERO TEST FILES — refusing", file=sys.stderr)
+        return 2
     # Weighted by default: by-count balancing reported imbalance 1.004 and still
     # took 654 s, because it cannot see that one file is 460 s of the 1288.
     measured = {} if args.by_count else load_weights()

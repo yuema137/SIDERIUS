@@ -131,12 +131,22 @@ def _bool(report: Mapping[str, object], name: str) -> bool:
     return value
 
 
-def verify_reports(reports: Sequence[Mapping[str, object]]) -> list[str]:
+def verify_reports(
+    reports: Sequence[Mapping[str, object]],
+    *,
+    expect_jobs: int | None = None,
+    expect_shards: int | None = None,
+) -> list[str]:
     """Reasons the set of job reports is NOT one whole, green execution.
 
     An empty list means: every job of one matrix reported, all computed the
     same plan, each ran exactly its assigned shard indices, together they ran
-    every shard index exactly once, and every job was green.
+    every shard index exactly once, every job was green, and no full-suite
+    job planned an empty test universe.
+
+    ``expect_jobs`` / ``expect_shards`` pin the profile the workflow DECLARED.
+    Without them, a consistent set of reports from a smaller matrix (say one
+    job planning one shard) would verify as whole.
     """
     if not reports:
         return ["no matrix job reports were found — the bulk lane produced no evidence"]
@@ -146,6 +156,11 @@ def verify_reports(reports: Sequence[Mapping[str, object]]) -> list[str]:
         try:
             if report.get("schema_version") != REPORT_SCHEMA_VERSION:
                 raise ValueError(f"schema_version {report.get('schema_version')!r}")
+            # An empty universe for a FULL suite is a broken checkout (e.g. no
+            # tracked tests visible), never a pass: every shard would be empty
+            # and trivially green.
+            if _bool(report, "full_suite") and _int(report, "files") == 0:
+                problems.append(f"report #{position} planned a full suite of zero test files")
             parsed.append(
                 (
                     _int(report, "job_index"),
@@ -172,6 +187,12 @@ def verify_reports(reports: Sequence[Mapping[str, object]]) -> list[str]:
         return problems
 
     job_count, shard_count = parsed[0][1], parsed[0][2]
+    if expect_jobs is not None and job_count != expect_jobs:
+        problems.append(f"reports describe {job_count} job(s); the workflow declares {expect_jobs}")
+    if expect_shards is not None and shard_count != expect_shards:
+        problems.append(
+            f"reports describe {shard_count} shard(s); the workflow declares {expect_shards}"
+        )
     job_indices = sorted(p[0] for p in parsed)
     if job_indices != list(range(job_count)):
         problems.append(
@@ -220,11 +241,15 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help=f"directory searched recursively for {REPORT_NAME}",
     )
+    verify.add_argument("--expect-jobs", type=int, default=None, help="declared CI_BULK_JOBS")
+    verify.add_argument("--expect-shards", type=int, default=None, help="declared CI_BULK_SHARDS")
     args = parser.parse_args(argv)
 
     paths = sorted(args.reports_dir.rglob(REPORT_NAME))
     try:
-        problems = verify_reports(_load(paths))
+        problems = verify_reports(
+            _load(paths), expect_jobs=args.expect_jobs, expect_shards=args.expect_shards
+        )
     except (OSError, ValueError) as exc:
         problems = [f"could not read job reports: {type(exc).__name__}: {exc}"]
     if problems:

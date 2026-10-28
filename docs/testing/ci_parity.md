@@ -312,8 +312,8 @@ skips is worse than no harness (§28).
 >
 > At the time this row was written a runner was assumed to have 4 vCPUs; the
 > manifest of run `40616894222` later measured `cpu_count` 2 (§9). Within one
-> runner scheduling cannot beat the CPU budget; and the weight table is calibrated to this host, so shard 0
-> carried the locally-dominant file and finished in **31.3 s** while its
+> runner scheduling cannot beat the CPU budget; and the weight table is
+> calibrated to this host, so shard 0 carried the locally-dominant file and finished in **31.3 s** while its
 > siblings ran 450–524 s. Correctly weighted for CI it would reach ≈ 1.69×.
 >
 > **On a runner this harness buys attribution, hermeticity and the sensitive
@@ -491,9 +491,11 @@ not stable gate names.
   `ci-parity-evidence-bulk-<i>` artifact. `plan_digest` is the SHA-256 of the
   WHOLE plan (every shard's index and files plus the sensitive set).
 * `quality` downloads those artifacts and runs `verify`, which fails unless
-  one report exists per job `0..job_count-1`, all agree on `job_count`,
-  `shard_count` and `plan_digest`, each job ran exactly its assigned indices,
-  the union is every shard index exactly once, and every job reported `ok`.
+  one report exists per job `0..job_count-1`, all agree on `job_count`
+  (equal to `--expect-jobs`), `shard_count` (equal to `--expect-shards`)
+  and `plan_digest`, each job ran exactly its assigned indices,
+  the union is every shard index exactly once, every job reported `ok`, and no
+  full-suite report has `files == 0`.
   The verifier is standard-library only, so the aggregate job runs it with
   `uv run --no-project python -I` and does not install the project.
 * An empty shard (a narrowed selection with fewer files than 8) is recorded as
@@ -501,8 +503,15 @@ not stable gate names.
   would fall back to `testpaths` and run the whole tree.
 
 `matrix.job` in the workflow must list exactly `0..CI_BULK_JOBS-1`, and
-`CI_BULK_SHARDS / CI_BULK_JOBS` must equal the runner CPU count. Drift in the
-first is caught by `verify`; the second is a declaration (see below).
+`CI_BULK_SHARDS / CI_BULK_JOBS` must equal the runner CPU count. A matrix
+entry `>= CI_BULK_JOBS` fails in that job's own `--job-index` argument check;
+a MISSING entry leaves no report for its index and fails `verify`. `verify`
+also receives `--expect-jobs "$CI_BULK_JOBS"` and `--expect-shards
+"$CI_BULK_SHARDS"` from the workflow, so reports from a profile other than the
+declared one are refused even when internally consistent. A full-suite report
+with `files == 0` is refused in the harness (exit 2) and again by `verify`: an
+empty test universe is a broken checkout, never a green run. The CPU ratio is a
+declaration (see below).
 
 Local reproduction: `python -m tools.ci plan --shards 8 --job-index <i>
 --job-count 4` prints the plan plus the job's `shards`; the defaults
@@ -523,7 +532,7 @@ The residual imbalance comes from `weights.json`, which is calibrated to the
 24-core lab host (§7) and still names a split file that no longer exists (the
 harness drops that split and says so). CI-calibrated weights would bring the
 heaviest of 8 shards to ~495 contended test-seconds; regenerating them is a
-separate change.
+separate change (#1004).
 
 ### Why declared rather than detected
 

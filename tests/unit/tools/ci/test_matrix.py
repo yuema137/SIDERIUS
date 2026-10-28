@@ -175,3 +175,89 @@ class TestEmptyShards:
         assert calls == [(0, ("tests/unit/a/test_a.py",))]
         assert [s.index for s in result.shards] == [0, 1]
         assert result.ok
+
+
+class TestDeclaredProfile:
+    def test_a_smaller_matrix_than_declared_is_refused(self):
+        """A consistent report set from the wrong profile is not the declared run.
+
+        Fails as: one job planning one shard (say, the workflow's matrix
+        shrank to ``[0]`` and the job ran with ``--job-count 1``) verifies as
+        whole while the declared 4-job/8-shard profile never executed.
+        """
+        lone = _green(0, jobs=1, shards=1)
+        assert verify_reports([lone]) == []
+        problems = verify_reports([lone], expect_jobs=4)
+        assert any("the workflow declares 4" in p for p in problems)
+
+    def test_a_different_shard_count_than_declared_is_refused(self):
+        """Fails as: jobs that all planned 4 shards pass a workflow declaring 8."""
+        reports = [_green(0), _green(1)]
+        assert verify_reports(reports, expect_jobs=2, expect_shards=4) == []
+        problems = verify_reports(reports, expect_jobs=2, expect_shards=8)
+        assert any("the workflow declares 8" in p for p in problems)
+
+    def test_the_cli_passes_the_declared_profile_through(self, tmp_path: Path):
+        """Fails as: --expect-jobs / --expect-shards are parsed but ignored."""
+        for job in (0, 1):
+            (tmp_path / f"r{job}").mkdir()
+            (tmp_path / f"r{job}" / REPORT_NAME).write_text(json.dumps(_green(job)))
+        base = ["verify", "--reports-dir", str(tmp_path)]
+        assert main([*base, "--expect-jobs", "2", "--expect-shards", "4"]) == 0
+        assert main([*base, "--expect-jobs", "4"]) == 1
+        assert main([*base, "--expect-shards", "8"]) == 1
+
+
+class TestEmptyUniverse:
+    def test_verify_refuses_a_full_suite_of_zero_files(self):
+        """Every shard of an empty plan is trivially green.
+
+        Fails as: a checkout where no tracked test file is visible produces
+        four green jobs and a green aggregate having executed nothing.
+        """
+        empty = [{**_green(0), "files": 0}, {**_green(1), "files": 0}]
+        assert any("zero test files" in p for p in verify_reports(empty))
+
+    def test_the_harness_refuses_a_full_suite_of_zero_files(self, monkeypatch):
+        """Fails as: the harness plans and runs empty shards instead of exiting."""
+        from tools.ci import __main__ as ci_main
+        from tools.ci.selection import Selection
+
+        monkeypatch.setattr(
+            ci_main, "resolve_selection", lambda root, changed: Selection((), True, "empty")
+        )
+        assert ci_main.main(["plan", "--shards", "8", "--job-count", "4"]) == 2
+
+
+class TestAggregateWorkflowVerdict:
+    """The aggregate job IS the status reviewers read; its logic is pinned here.
+
+    Fails as: the final step loses ``always()`` (a failed upstream job leaves
+    it skipped, which GitHub treats as passing), stops requiring success of a
+    lane (e.g. ``== "failure"`` lets a CANCELLED lane through), or the matrix
+    verification step disappears or stops receiving the declared profile.
+    """
+
+    @staticmethod
+    def _workflow() -> dict:
+        import yaml
+
+        root = Path(__file__).resolve().parents[4]
+        return yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+
+    def test_the_final_step_requires_every_lane_to_succeed(self):
+        steps = self._workflow()["jobs"]["quality"]["steps"]
+        final = steps[-1]
+        assert final["if"] == "always()"
+        for lane in ("prepare", "unit", "sensitive"):
+            assert f'"${{{{ needs.{lane}.result }}}}" != "success"' in final["run"], lane
+
+    def test_the_aggregate_verifies_the_declared_matrix(self):
+        wf = self._workflow()
+        runs = [step.get("run", "") for step in wf["jobs"]["quality"]["steps"]]
+        verify = [run for run in runs if "src/tools/ci/matrix.py verify" in run]
+        assert len(verify) == 1
+        assert '--expect-jobs "$CI_BULK_JOBS"' in verify[0]
+        assert '--expect-shards "$CI_BULK_SHARDS"' in verify[0]
+        jobs = int(wf["env"]["CI_BULK_JOBS"])
+        assert wf["jobs"]["unit"]["strategy"]["matrix"]["job"] == list(range(jobs))

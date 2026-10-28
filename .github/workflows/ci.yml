@@ -18,6 +18,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The bulk-lane profile (docs/testing/ci_parity.md §9). Workflow-level so the
+# matrix jobs that EXECUTE it and the aggregate job that VERIFIES it read one
+# declaration. `jobs.unit.strategy.matrix.job` must list 0..CI_BULK_JOBS-1.
+env:
+  CI_BULK_SHARDS: "8"
+  CI_BULK_JOBS: "4"
+
 jobs:
   # The pipeline is four jobs (issue #990). One 2-CPU runner executing the
   # whole bulk lane took ~22 min on a full-suite selection and later runs were
@@ -166,6 +173,7 @@ jobs:
         with:
           name: ci-changed-files
           path: ${{ runner.temp }}/ci_changed_files.json
+          overwrite: true
           retention-days: 14
           if-no-files-found: error
 
@@ -198,8 +206,6 @@ jobs:
       matrix:
         job: [0, 1, 2, 3]
     env:
-      CI_BULK_SHARDS: "8"
-      CI_BULK_JOBS: "4"
       CI_SHARD_THREADS: "1"
     steps:
       - name: Checkout
@@ -374,7 +380,9 @@ jobs:
         if: needs.prepare.result == 'success' && needs.prepare.outputs.docs_only != 'true'
         run: |
           uv run --no-project python -I src/tools/ci/matrix.py verify \
-            --reports-dir "$RUNNER_TEMP/matrix"
+            --reports-dir "$RUNNER_TEMP/matrix" \
+            --expect-jobs "$CI_BULK_JOBS" \
+            --expect-shards "$CI_BULK_SHARDS"
 
       - name: Require every upstream job
         if: always()
