@@ -253,18 +253,27 @@ both protocols and the authored-editor controls.
 pin is kept as historical provenance in the owning schema's
 `retired_seed_pins` field and is never an execution input.
 
-**Execution rule.** Launching or continuing anything that carries a set pin
-is refused with `RetiredSeedPin`
-(`… carries retired seed pin(s) […]: seeds derive from run_seed; set --run_seed`):
+**Admission rule.** New work that *sets* a pin is refused before any
+provider call, so no proposal tokens are spent on a bundle that can never
+train: saving or reviewing a workflow source in the editor
+(`AuthoringError` code `retired_seed_pin`), observing a candidate submission's
+training settings (`workflow_preview.observe_bindings`), and reusable
+candidate preparation (`reusable_admission`). A `null` pin is not a set pin and passes.
 
-| surface | readback | execution |
-|---|---|---|
-| `--sampling_seed` (runner CLI) / `run_chain.sh --sampling_seed` | — | parse error (exit 2) / exit 1 with the message |
-| `HyperparamTuningInput` (`tuning_input.json`, graph evidence) | `null` dropped; set pins → `retired_seed_pins` | `HyperparamTuningAgent.run` refuses before any LLM call |
-| candidate training settings / saved workflow `launch` (`request.json`) | `null` dropped; set pins → `CandidateTrainingSettings.retired_seed_pins` | candidate training admission refuses (covers loop continuation) |
-| `ProposalInput` (`proposal.json`) | ignored (`extra="ignore"`, unchanged) | the protocol has no pin parameter |
-| reviewed launch projection (`LaunchExpectations.check_projection`) | `null` pins dropped before comparison | a set pin refuses |
-| archived `trial_config_{exp_id}.json` with `train_base_seed` | plain JSON evidence; not re-validated | — |
+**Execution rule.** Launching or continuing anything that still carries a set
+pin is refused, which covers requests admitted by an older build. Every
+refusal raises `RetiredSeedPin` (or wraps its message):
+`… carries retired seed pin(s) […]: seeds derive from run_seed; set --run_seed`.
+
+| surface | readback (lenient) | admission (new work) | execution / continuation |
+|---|---|---|---|
+| `--sampling_seed` (runner CLI) / `run_chain.sh --sampling_seed` | — | parse error (exit 2) / exit 1 | — |
+| workflow source `training_settings.launch` | editor `read` shows it | editor review/save refuses | — |
+| candidate training settings (`request.json`, snapshots) | `null` dropped; set pins → `CandidateTrainingSettings.retired_seed_pins` | `observe_bindings` and reusable preparation refuse | `admit_training` refuses before the proposer (also loop continuation) |
+| `HyperparamTuningInput` (`tuning_input.json`, graph evidence) | `null` dropped; set pins → `retired_seed_pins` | the protocol has no pin parameter | `HyperparamTuningAgent.run` refuses before any LLM call |
+| `ProposalInput` (`proposal.json`) | ignored (`extra="ignore"`, unchanged) | the protocol has no pin parameter | — |
+| reviewed launch projection (`LaunchExpectations.check_projection`) | `null` pins dropped before comparison | — | a set pin refuses |
+| archived `trial_config_{exp_id}.json` with `train_base_seed` | plain JSON evidence; not re-validated | — | — |
 
 ### Child environment
 

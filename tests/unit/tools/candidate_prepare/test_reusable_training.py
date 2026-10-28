@@ -70,6 +70,16 @@ def add_training(request):
     )
 
 
+def test_reusable_preparation_refuses_a_set_seed_pin(reusable, monkeypatch):
+    """Issue #983 T13. Fails if a reusable preparation whose source sets a
+    retired pin prepares (and spends proposal calls on) an untrainable bundle."""
+    from core.retired_seed_pins import RetiredSeedPin
+
+    monkeypatch.setitem(SETTINGS["launch"], "sampling_seed", 17)
+    with pytest.raises(RetiredSeedPin, match="seeds derive from run_seed; set --run_seed"):
+        prepare_reusable_candidate(add_training(reusable))
+
+
 def test_two_reusable_runs_reach_native_proposal_and_tuner(
     reusable, direct_child, training_runner, monkeypatch
 ):

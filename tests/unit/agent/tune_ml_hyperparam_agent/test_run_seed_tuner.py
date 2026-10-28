@@ -96,6 +96,33 @@ class TestPseudoIteration:
         lock = json.loads((pathlib.Path(workspace) / "run_invariants_lock.json").read_text())
         assert lock["run_seed"] == FIXTURE_RUN_SEED
 
+    def test_admission_probe_uses_the_trainer_epoch_zero_subsample(self, tmp_path, monkeypatch):
+        """T10 (M1), admission pre-flight leg (``run_admission_preflight``).
+        Fails if the VRAM pre-flight probe selects a different epoch-0 subset
+        than the trainer will train on. The GPU-measurement leg is covered in
+        ``tests/unit/core/test_seed_probe_parity.py``."""
+        import importlib
+
+        from core.training_seeds import SeedContext, TrainingSeedPlan
+
+        execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
+        original = execution.build_task_probe_data
+        seen: list[int | None] = []
+
+        def capture(**kwargs):
+            seen.append(kwargs["epoch_seed"])
+            return original(**kwargs)
+
+        monkeypatch.setattr(execution, "build_task_probe_data", capture)
+        _, _, _, workspace = run_bounded_pseudo_iteration(
+            tmp_path, monkeypatch, preflight_results=_preflight()
+        )
+        expected = [
+            TrainingSeedPlan(SeedContext.model_validate(c["seed_context"])).epoch(0).subsample
+            for c in _trial_configs(workspace)
+        ]
+        assert seen and seen == expected[: len(seen)]
+
     def test_missing_run_seed_is_refused_before_any_llm_call(self, tmp_path, monkeypatch):
         """T11 (M2). Fails if a workflow-reached tuner generates a seed (or
         runs unseeded) when the protocol delivers none."""
