@@ -253,7 +253,8 @@ for effectful runs:
 - The command-line and bridge loaders above (not the paper resolver) report
   what they load through one shared helper. Reporting adds log records only:
   the loaded file, precedence and exit status stay as described. When a non-empty
-  file is actually read, it logs once per process per file, at INFO on logger
+  file is actually read (even when every variable in it was already set and
+  nothing was added), it logs once per process per file, at INFO on logger
   `agent.credential_environment`:
   `Compatibility dotenv loaded <resolved path> (variables already set in the environment take precedence).`
   It then emits a WARNING when the file is outside the SIDERIUS source

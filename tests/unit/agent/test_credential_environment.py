@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
+from pathlib import Path
 
 import pytest
 
-from agent import credential_environment
+from agent import credential_environment, llm_bridge
 from agent.credential_environment import load_compatibility_dotenv
 from agent.llm_bridge import _KNOWN_PROVIDERS, _provider_credential_or_refuse
 
@@ -76,16 +78,16 @@ def test_file_outside_checkout_warns_with_both_paths(tmp_path, monkeypatch, capl
     assert FAKE_VALUE not in caplog.text
 
 
-def test_group_or_world_readable_file_warns_with_mode(tmp_path, monkeypatch, caplog):
-    """Defect: a 0644 secrets file inside the checkout passes unnoticed.
+def test_group_readable_file_warns_with_mode(tmp_path, monkeypatch, caplog):
+    """Defect: a group-readable 0640 secrets file inside the checkout passes unnoticed.
     Fails if no WARNING reports the permissive mode."""
     monkeypatch.setattr(credential_environment, "checkout_root", lambda: tmp_path)
-    path = _dotenv(tmp_path, 0o644)
+    path = _dotenv(tmp_path, 0o640)
 
     load_compatibility_dotenv(path)
 
     [warning] = _records(caplog, logging.WARNING)
-    assert "mode 644" in warning and "chmod 600" in warning
+    assert "mode 640" in warning and "chmod 600" in warning
     assert FAKE_VALUE not in caplog.text
 
 
@@ -120,3 +122,25 @@ def test_blank_provider_key_warns_by_name_without_value(monkeypatch, caplog):
     _provider_credential_or_refuse("gemini", _KNOWN_PROVIDERS["gemini"])
     assert _records(caplog, logging.WARNING) == []
     assert FAKE_VALUE not in caplog.text
+
+
+def test_default_search_starts_at_the_bridge_module_directory(tmp_path, monkeypatch):
+    """Backward compatibility: the bridge's former bare ``load_dotenv()``
+    searched upward from ``src/agent``. Fails if the default search starts
+    anywhere else (e.g. ``find_dotenv(usecwd=True)`` would start at the CWD).
+    The walk is stubbed, so no real file is examined."""
+    import dotenv.main
+
+    starts: list[str] = []
+
+    def record(path):
+        starts.append(path)
+        return iter(())
+
+    monkeypatch.setattr(dotenv.main, "_walk_to_root", record)
+    monkeypatch.setattr(sys, "gettrace", lambda: None)  # coverage would force CWD
+    monkeypatch.chdir(tmp_path)
+
+    assert load_compatibility_dotenv() is False
+    expected = Path(llm_bridge.__file__).resolve().parent
+    assert [Path(p) for p in starts] == [expected]

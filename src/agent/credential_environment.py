@@ -39,7 +39,8 @@ def load_compatibility_dotenv(dotenv_path: str | Path | None = None) -> bool:
             default upward search (``find_dotenv()``).
 
     Returns:
-        python-dotenv's result: True when a non-empty file was read.
+        python-dotenv's result: True when a non-empty file was read, even if every
+        variable in it was already set (that case is still reported).
     """
     path = str(dotenv_path) if dotenv_path is not None else find_dotenv()
     if not path:
