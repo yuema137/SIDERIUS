@@ -638,3 +638,34 @@ def test_completion_records_the_host_placement_it_ran_under(prepared, tmp_path, 
     )
     publish(path / "completion.json", completion)
     assert read_operation(store, operation.request_id).reason == "integrity_failure"
+
+
+def test_a_ledger_from_an_earlier_revision_is_refused_with_one_typed_reason(
+    prepared, tmp_path, children
+):
+    """A B3-5a ledger (reservation-level ``time_budgeted``) surfaced as a raw validation
+    error, so admission, the sweep and the operator release all failed untyped and
+    nothing told the operator what to do."""
+    from tools.candidate_operations.files import publish_encoded
+    from tools.candidate_operations.host_ledger import LEDGER_FILE
+
+    host = _ledger(tmp_path)
+    first = _gpu_operation(prepared, 1.0)
+    submit_operation(_store(tmp_path, "a"), first, launch_environment=KEY, host=host)
+    path = Path(host.ledger_root) / LEDGER_FILE
+    old = json.loads(path.read_text())
+    old["reservations"][0]["time_budgeted"] = False
+    publish_encoded(path, json.dumps(old).encode(), replace=True)
+    before = path.read_bytes()
+    second = _gpu_operation(prepared, 1.0)
+    launch = lambda: submit_operation(  # noqa: E731
+        _store(tmp_path, "b"), second, launch_environment=KEY, host=host
+    )
+    with pytest.raises(OperationFailure) as refused:
+        launch()
+    assert refused.value.detail.code == "ledger_format"
+    assert str(path) in str(refused.value) and "move" in str(refused.value)
+    released = lambda: release_reservation(host.ledger_root, first.request_id)  # noqa: E731
+    assert _code(released) == "ledger_format"
+    assert path.read_bytes() == before  # never rewritten
+    assert _claims(_store(tmp_path, "b")) == []

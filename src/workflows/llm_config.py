@@ -26,7 +26,7 @@ from __future__ import annotations
 import argparse
 import warnings
 from collections.abc import Mapping
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
@@ -48,6 +48,9 @@ from agent.llm_settings import (
 )
 from agent.schemas.llm_retry import RetryPolicy
 from workflows.advice import ADVICE_INERT_KEY_PREFIX as INERT_KEY_PREFIX
+
+if TYPE_CHECKING:
+    from agent.schemas.judge import JudgeRoute, JudgeRoutes
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
@@ -401,13 +404,15 @@ class JudgeLLMConfig(BaseModel):
     """
     Routes for the three LLM-judge families. Each slot is optional and independent.
 
-    - ``stop``: JudgeStop boundary decisions (consumer lands with B2-4).
+    - ``stop``: JudgeStop boundary decisions (``tools/candidate_worker/loop_judge``).
     - ``aggregate``: LLM combine/select strategies inside adaptors (B2-6 onward).
     - ``debate``: debate-judge strategy calls (B2-7 onward).
 
     An empty block is refused: declaring ``judge`` means declaring at least one route.
-    This model only declares and validates routes. No judge call is made from
-    it, and the workspace run lock does not yet record it.
+    ``max_judge_calls`` is the run-level judge call cap (Q-B2-10); it is optional
+    here and required by each judge consumer's admission. The workspace run lock
+    records the resolved routes and cap canonically (``locked_judge_routes``), so a
+    continuation under a different judge route or cap is refused.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -415,12 +420,55 @@ class JudgeLLMConfig(BaseModel):
     stop: JudgeRouteConfig | None = None
     aggregate: JudgeRouteConfig | None = None
     debate: JudgeRouteConfig | None = None
+    max_judge_calls: int | None = Field(
+        default=None,
+        gt=0,
+        strict=True,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Run-level cap on LLM judge calls (decision Q-B2-10). Required by every "
+            "judge consumer: launch admission refuses a declaration whose static judge "
+            "call bound exceeds it, or a judge consumer when it is absent."
+        ),
+    )
 
     @model_validator(mode="after")
     def require_a_declared_route(self) -> JudgeLLMConfig:
         if self.stop is None and self.aggregate is None and self.debate is None:
             raise ValueError("judge must declare at least one of stop, aggregate, debate")
         return self
+
+
+def judge_route(config: JudgeRouteConfig) -> JudgeRoute:
+    """The bridge route one judge call runs on and records as evidence."""
+    from agent.schemas.judge import JudgeRoute
+
+    return JudgeRoute(
+        provider=config.provider,
+        model_id=config.model_id,
+        reasoning_effort=config.reasoning_effort,
+        max_output_tokens=config.max_output_tokens,
+        max_retries=config.max_retries,
+    )
+
+
+def locked_judge_routes(config: JudgeLLMConfig | None) -> JudgeRoutes | None:
+    """The run-lock identity of the declared judge routes; ``None`` keeps the lock bytes."""
+    if config is None:
+        return None
+    from agent.schemas.judge import JudgeRoutes
+
+    return JudgeRoutes(
+        **{
+            family: None if route is None else judge_route(route)
+            for family, route in (
+                ("stop", config.stop),
+                ("aggregate", config.aggregate),
+                ("debate", config.debate),
+            )
+        },
+        max_judge_calls=config.max_judge_calls,
+    )
 
 
 class WorkflowLLMConfig(BaseModel):
@@ -690,7 +738,9 @@ class WorkflowLLMConfig(BaseModel):
 
         Export this value for the downloadable default JSON. Explicit user
         files are parsed separately, preserving partial-config inheritance.
-        Model defaults live in agent.llm_settings; no historical strategy is
+        Model defaults live in agent.llm_settings. The profile selects the
+        framework's native planner explicitly, so it runs on a clean install
+        without an installed planner default; no historical strategy is
         selected here. One transport attempt is not a campaign cost ceiling.
         """
 
@@ -703,7 +753,9 @@ class WorkflowLLMConfig(BaseModel):
             implement=leaf(),
             validate=leaf(),
             propose=ProposalLLMConfig(comparison=leaf(), reasoning=leaf(), proposing=leaf()),
-            tune=TunerLLMConfig(planner=leaf(), reflector=leaf()),
+            tune=TunerLLMConfig(
+                planner_strategy="native-timing-v1", planner=leaf(), reflector=leaf()
+            ),
             lit_review=LitReviewLLMConfig(main=leaf(), search=leaf()),
         )
 
@@ -733,6 +785,9 @@ class WorkflowLLMConfig(BaseModel):
           construct `LitReviewLLMConfig` explicitly instead of using
           `.uniform()`. (Design Decision 3, 2026-06-11.)
 
+        The tuner selects the framework's native planner, so this legacy
+        profile runs on a clean install without an installed planner default.
+
         When called with no reflector overrides, the tuner uses the same
         provider/model for both sub-calls (legacy behavior).
 
@@ -760,6 +815,7 @@ class WorkflowLLMConfig(BaseModel):
             proposing=base_cfg,
         )
         tune_cfg = TunerLLMConfig(
+            planner_strategy="native-timing-v1",
             planner=base_cfg,
             reflector=NodeLLMConfig(
                 provider=reflect_provider or provider,  # type: ignore[arg-type]

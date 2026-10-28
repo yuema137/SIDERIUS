@@ -103,6 +103,7 @@ def prepare_native_tuner_input(
         ),
         train_validation_align=launch.train_validation_align,
         run_seed=run_invariants.run_seed,
+        judge_routes=run_invariants.judge_routes,
         seed_coordinates=seed_coordinates,
         cleanup_denoised=launch.cleanup_denoised,
         retain_model_outputs=launch.retain_model_outputs,
