@@ -5,6 +5,7 @@ from uuid import UUID
 
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
+from core.runtime_control.scheduling import HostBudget
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 
@@ -61,6 +62,7 @@ def execute_loop(
     *,
     continuation: LoopContinuation | None = None,
     budget: WorkerBudget | None = None,
+    host_budget: HostBudget | None = None,
 ) -> CandidateRunReceipt:
     from .graph import execute_fanout
     from .graph_evidence import verify_graph_trace
@@ -105,6 +107,7 @@ def execute_loop(
             iteration=iteration,
             history=history,
             budget=budget,
+            host_budget=host_budget,
         )
         verify_graph_trace(request, initial, last, iteration=iteration, history=history)
         publish_bytes_write_once(str(control / "body.json"), encode_control(last))

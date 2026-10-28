@@ -9,6 +9,7 @@ environment owner without a device selector, i.e. the worker's GPUs.
 
 import subprocess
 import sys
+from pathlib import Path
 
 from core.durable_io import publish_bytes_write_once
 from core.runtime_control.observed_subprocess import (
@@ -39,13 +40,19 @@ def unit_command(invocation_path: str) -> list[str]:
     return [sys.executable, "-m", UNIT_MODULE, invocation_path]
 
 
+def unit_env(*, cuda_visible_devices: str | None = None) -> dict[str, str]:
+    """The unit child's environment; a placement adds only its device selector."""
+    env = subprocess_env(cuda_visible_devices=cuda_visible_devices)
+    if SAFE_PATH_ENV not in env:
+        env[SAFE_PATH_ENV] = env[SAFE_PATH_ADDED_ENV] = "1"
+    return env
+
+
 def spawn_unit(invocation_path: str) -> None:
     """Supervise the unit child; a nonzero exit raises `CalledProcessError`."""
     sys.stdout.flush()
     sys.stderr.flush()
-    env = subprocess_env()
-    if SAFE_PATH_ENV not in env:
-        env[SAFE_PATH_ENV] = env[SAFE_PATH_ADDED_ENV] = "1"
+    env = unit_env()
     try:
         observed = supervise_subprocess(
             unit_command(invocation_path),
@@ -61,14 +68,25 @@ def spawn_unit(invocation_path: str) -> None:
         sys.stderr.write(observed.completed.stderr or "")
 
 
-def run_unit(invocation: NodeInvocation) -> NodeUnitResult:
-    """Publish the invocation, run its child and return the verified result."""
+def publish_invocation(invocation: NodeInvocation) -> tuple[Path, Path]:
+    """Publish the write-once invocation; return it and its result path."""
     path, result_path = unit_paths(
         invocation.initial, invocation.node_id, iteration=invocation.iteration
     )
     path.parent.mkdir(parents=True)
     publish_bytes_write_once(str(path), encode_transport(invocation))
+    return path, result_path
+
+
+def run_unit(invocation: NodeInvocation) -> NodeUnitResult:
+    """Publish the invocation, run its child and return the verified result."""
+    path, result_path = publish_invocation(invocation)
     spawn_unit(str(path))
+    return collect_result(invocation, result_path)
+
+
+def collect_result(invocation: NodeInvocation, result_path: Path) -> NodeUnitResult:
+    """Read the unit's write-once result, replay its cleanup evidence, check identity."""
     result = decode_transport(NodeUnitResult, read_graph_control(result_path))
     # Cleanup evidence first: a later refusal must not hide an uncertain child.
     for lifecycle in result.lifecycles:
@@ -80,7 +98,11 @@ def run_unit(invocation: NodeInvocation) -> NodeUnitResult:
 
 def unit_output(invocation: NodeInvocation) -> tuple[NodeOutput, str]:
     """The in-process phase return value, or the exception class it propagated."""
-    result = run_unit(invocation)
+    return result_output(invocation, run_unit(invocation))
+
+
+def result_output(invocation: NodeInvocation, result: NodeUnitResult) -> tuple[NodeOutput, str]:
+    """Re-raise what the unit's phase raised, or decode the output it returned."""
     if result.outcome == "exited":
         raise SystemExit(result.exit_code)
     if result.outcome == "interrupted":

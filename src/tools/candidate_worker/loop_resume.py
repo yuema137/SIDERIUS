@@ -20,7 +20,12 @@ from tools.workspace_sandbox.runner import (
 from .graph_evidence import read_graph_control
 from .loop_models import LoopContinuation
 from .models import CandidateRunReceipt, CandidateRunRequest
-from .parallel_models import GRANT_CONTROL_FILE, HostGrant, admitted_run_budget
+from .parallel_models import (
+    GRANT_CONTROL_FILE,
+    HostGrant,
+    admitted_run_budget,
+    control_run_budget,
+)
 
 if TYPE_CHECKING:
     from core.chain_state import ChainState
@@ -228,10 +233,15 @@ def execute_continuation(path: Path) -> CandidateRunReceipt:
         raise ValueError("continuation path disagrees with root")
     verify_inputs(request, root)
     bind_generated_library_to_workspace(initial.workspace)
+    # After the binding: the grant reader imports native evidence owners.
+    host_budget = control_run_budget(request.parallel, path.parent)
     from .native import execute_native
 
     receipt = bounded_terminal(
-        initial, execute_native(request, initial, continuation=binding, budget=budget)
+        initial,
+        execute_native(
+            request, initial, continuation=binding, budget=budget, host_budget=host_budget
+        ),
     )
     publish(path.parent / "child.json", receipt, bounded=True)
     return receipt

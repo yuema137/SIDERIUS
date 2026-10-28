@@ -1078,6 +1078,8 @@ def compute_expected_invariants(
             ),
             runtime_completion_policy=args.runtime_completion_policy,
             runtime_verifier_identity=identity.runtime_verifier_identity,
+            # B3-4b — the legacy chain never dispatches in parallel: serial lock.
+            host_budget=None,
             # Issue #983 — the locked seed (refusing a pre-seed lock or a
             # conflicting --run_seed), else the flag; generation stays with
             # the workflow startup, which locks the same value.

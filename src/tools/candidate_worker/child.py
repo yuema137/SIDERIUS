@@ -10,6 +10,7 @@ from tools.workflow_preview.files import observe_file
 from .budget import WorkerBudget
 from .launch import bounded_terminal, publish
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .parallel_models import control_run_budget
 from .source import verify_snapshot
 
 
@@ -38,9 +39,10 @@ def execute(request_path: Path) -> CandidateRunReceipt:
     verify_inputs(request, control)
     bind_generated_library_to_workspace(str(workspace))
     # Import order is an execution invariant: registries can discover at import.
+    host_budget = control_run_budget(request.parallel, control)
     from .native import execute_native
 
-    receipt = execute_native(request, initial, budget=budget)
+    receipt = execute_native(request, initial, budget=budget, host_budget=host_budget)
     graph = request.preview.execution_profile is not None
     if graph:
         receipt = bounded_terminal(initial, receipt)

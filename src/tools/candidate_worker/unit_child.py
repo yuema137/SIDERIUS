@@ -139,6 +139,9 @@ def _unit_budget(invocation: "NodeInvocation") -> "WorkerBudget | None":
 
 def run_invocation_file(path: Path) -> None:
     """Execute the invocation at `path` and publish its write-once result beside it."""
+    from contextlib import nullcontext
+
+    from agent.token_unit import bind_token_unit
     from core.durable_io import publish_bytes_write_once
     from core.runtime_control.observed_subprocess import ProcessLifecycle, observe_process_lifecycle
     from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
@@ -161,8 +164,11 @@ def run_invocation_file(path: Path) -> None:
             composition = compose_run_task_bindings(invocation.manifest_path)
             if composition.semantic_fingerprint != invocation.composition_fingerprint:
                 raise ValueError("unit child composition disagrees with the dispatching body")
-            with bind_run_task_composition(
-                composition, physical_data_root=invocation.physical_data_root
+            with (
+                bind_run_task_composition(
+                    composition, physical_data_root=invocation.physical_data_root
+                ),
+                bind_token_unit(invocation.node_id) if invocation.parallel else nullcontext(),
             ):
                 output, record = execute_unit(invocation, composition, budget)
             result = finished(

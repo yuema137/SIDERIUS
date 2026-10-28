@@ -16,6 +16,7 @@ from core.run_invariants import (
     run_seed_lock_fields,
 )
 from core.run_seed_lock import WorkspaceRunSeed
+from core.runtime_control.scheduling import HostBudget
 from execute_tools.dataset_config import DataScope, resolve_dataset_profile
 from workflows.literature_config import lit_review_config_sha256
 from workflows.llm_config import WorkflowLLMConfig
@@ -73,6 +74,7 @@ def workflow_lock_identity(
     launch: WorkflowLaunchConfig,
     llm_config: WorkflowLLMConfig,
     run_seed: WorkspaceRunSeed | None = None,
+    host_budget: HostBudget | None = None,
 ) -> LockLaunchIdentity:
     """The workflow's arXiv-U1/U3 lock identity, from the launch config.
 
@@ -134,6 +136,7 @@ def workflow_lock_identity(
         ),
         runtime_completion_policy=launch.runtime_completion_policy,
         runtime_verifier_identity=launch.runtime_verifier_identity,
+        host_budget=host_budget,
         **(run_seed_lock_fields(None) if run_seed is None else run_seed.lock_fields()),
     )
 
@@ -152,6 +155,7 @@ def prepare_training_run(
     file_order_override: list[int] | None,
     enable_structured_health_feedback: bool,
     run_seed: WorkspaceRunSeed | None = None,
+    host_budget: HostBudget | None = None,
 ) -> TrainingRunPreparation:
     """Resolve scope and materialize Health; leave lock publication to the caller."""
     _run_scope = data_scope if data_scope is not None else DataScope.default()
@@ -207,7 +211,8 @@ def prepare_training_run(
         # built by the ONE module-level helper (the SE.2 extraction under the
         # 12a budget); the config sha is derived from the same resolved path
         # the lit-review branch below opens.
-        launch_identity=workflow_lock_identity(launch, llm_config, run_seed),
+        # B3-4b — a parallel-v1 run locks its scheduling budget (B3-Q7 canonical mode).
+        launch_identity=workflow_lock_identity(launch, llm_config, run_seed, host_budget),
     )
     return TrainingRunPreparation(
         tuple(_resolved_scope),

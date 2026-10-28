@@ -6,6 +6,7 @@ not parallelized: its units run alone with today's environment. Contract:
 candidate-worker-contract.md, "Parallel dispatch".
 """
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -111,3 +112,52 @@ def admitted_run_budget(
             "a parallel run schedules against exactly one budget: its host grant or parallel.budget"
         )
     return grant.run_budget() if grant is not None else parallel.budget
+
+
+UnitExit = Literal["returned", "raised", "process_failed", "exited", "interrupted", "terminated"]
+
+
+class UnitReceipt(PreviewModel):
+    """Write-once dispatch evidence of one parallel-mode entry (B3-4b).
+
+    Published as ``units/<node_id>/placement.json`` in the body's control
+    directory. ``placement`` is ``None`` for a unit of an undeclared capability
+    (it ran alone) and for an adaptor (a parent step). ``*_event`` values are one
+    body-wide parent sequence, the only ordering the drain verifier trusts;
+    ``*_at`` wall times are for humans. Scientific values stay in native records.
+    """
+
+    node_id: str
+    placement: Placement | None = None
+    queued_event: int | None = Field(default=None, ge=0)
+    started_event: int = Field(ge=0)
+    ended_event: int = Field(ge=0)
+    started_at: str
+    ended_at: str
+    exit: UnitExit
+
+    @model_validator(mode="after")
+    def ordered(self) -> "UnitReceipt":
+        if self.placement is not None and self.placement.decision != "placed":
+            raise ValueError("a unit is dispatched only from a placed placement")
+        queued = self.queued_event if self.queued_event is not None else self.started_event
+        if not queued <= self.started_event <= self.ended_event:
+            raise ValueError("unit receipt events are out of order")
+        return self
+
+
+def control_run_budget(
+    request_parallel: ParallelDispatch | None, control: Path
+) -> HostBudget | None:
+    """The worker's scheduling budget from its control directory (``None``: serial).
+
+    Reads the launch-published ``host_grant.json`` when present (bounded control
+    read) and applies ``admitted_run_budget``.
+    """
+    from .graph_evidence import read_graph_control
+
+    path = control / GRANT_CONTROL_FILE
+    grant = None
+    if path.exists():
+        grant = HostGrant.model_validate_json(read_graph_control(path))
+    return admitted_run_budget(request_parallel, grant)

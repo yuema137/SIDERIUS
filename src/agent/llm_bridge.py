@@ -90,6 +90,7 @@ from agent.schemas.telemetry import (
     TokenUsageChars,
     TokenUsageRow,
 )
+from agent.token_unit import token_unit_fields
 from core.execution_deadline import (
     ExecutionDeadlineExceeded,
     deadline_sleep,
@@ -809,6 +810,7 @@ class LLMBridge:
                 chars=TokenUsageChars(system=0, user=0, total=0),
                 components={},
                 extra={"marker": "iter_end"},
+                **token_unit_fields(),
             )
         except ValidationError as ve:
             print(
@@ -890,6 +892,7 @@ class LLMBridge:
                     chars=TokenUsageChars(system=0, user=0, total=0),
                     components={},
                     extra=dict(extra) if extra else {},
+                    **token_unit_fields(),
                 )
             except ValidationError as ve:
                 print(
@@ -1743,6 +1746,7 @@ class LLMBridge:
                     chars=chars,
                     components=components or {},
                     extra=extra or {},
+                    **token_unit_fields(),
                 )
             except ValidationError as ve:
                 print(

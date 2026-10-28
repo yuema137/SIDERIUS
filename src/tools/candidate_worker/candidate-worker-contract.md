@@ -1465,10 +1465,10 @@ Tests: `tests/unit/tools/candidate_worker/test_route_eval.py`.
 Design: B3-4 (`advanced/b3-parallel-scheduling.md`; operator decisions of
 2026-10-28: per-capability budgets, no joint budget; parallel runs work under
 the host reservation ledger). Owners: `parallel_models.py` (request, grant,
-run-budget authority), `parallel_envelope.py` (peak concurrent demand).
-Status: B3-4a lands the request, the envelope and the grant. Units still
-dispatch serially (one at a time, within the reserved capacity); concurrent
-dispatch inside the grant is B3-4b.
+run-budget authority, receipts), `parallel_envelope.py` (peak concurrent demand),
+`parallel_dispatch.py` (the in-run scheduler loop), `parallel_evidence.py`
+(trace v2 drain verifier), `agent/token_unit.py` (token-ledger attribution).
+B3-4a: request, envelope, grant. B3-4b: concurrent dispatch inside the grant.
 
 Request. `CandidateRunRequest.parallel: ParallelDispatch | None`, omitted when
 `None`, so serial request bytes and digests are unchanged.
@@ -1519,3 +1519,92 @@ publishes it write-once as `candidate_run/host_grant.json`;
 `launch_continuation` publishes it in the segment's control directory.
 
 Tests: `tests/unit/tools/candidate_operations/test_parallel_envelope.py`.
+
+### Concurrent dispatch (B3-4b)
+
+Entry. The worker reads its budget once from its control directory
+(`control_run_budget`: `host_grant.json` if present, then `admitted_run_budget`)
+and passes it as `host_budget` through `execute_native` and `execute_loop` to
+`execute_fanout`. `None` runs the unchanged serial loop (`dispatch_serial`);
+otherwise `parallel_dispatch.dispatch_parallel` runs the body and the trace
+records `scheduling="parallel-v1"`. Both loops share `GraphBody`, which owns the
+per-node steps the serial loop always performed (readiness, adaptor step,
+invocation selection, outcome classification, failure, route decision, terminal
+receipt), so serial behaviour is unchanged.
+
+Admission, before any dispatch (`unit_requests`). One `ResourceRequest` per
+node of a declared capability: `gpu_count`, `vram_gib`
+(`vram_source="configured_cap"`), `host_memory_gib`, `cpu_slots` from the table,
+`wall_seconds` = the request's `timeout_seconds` (carried, not admitted). The
+tuning unit is `time_budgeted` exactly when `trial_time_budget_minutes` or
+`formal_time_budget_minutes` is set, and a GPU tuning declaration must cover the
+run's `active_vram_budget_gb` (refused when that budget is unset). Every request
+is checked against the idle budget; any refusal raises `ParallelRefused`
+(`resource_refused: …`) and the body fails before any unit runs.
+
+Loop. Readiness is B1 `next_dispatch` (`GraphBody.next_node`), with dispatched
+units presented as `running`, so it never returns them or anything waiting on
+them. For the first ready node:
+- an adaptor runs at once in the worker (a pure step, no placement);
+- a node of an undeclared capability waits until nothing is running, then runs
+  through the serial runner (`unit_runner.unit_output`) with the worker's
+  environment, alone;
+- a declared unit is planned with `plan_dispatch((request,), running, budget,
+  on_refusal="halt")`. Placed: its invocation (`NodeInvocation.parallel=True`) is
+  published and `start_unit` spawns the unit child in its own session with
+  `subprocess_env(cuda_visible_devices=placement.cuda_visible_devices)` (slot
+  UUID, or `""` for a CPU unit, which hides every GPU) and
+  `PYTEST_ADDOPTS` gaining `-p no:cacheprovider` (concurrent validators share no
+  `.pytest_cache`; serial pytest commands are unchanged). Queued: the loop waits
+  for a running unit to finish. Strict FIFO: nothing overtakes the first ready
+  unit (decision B3-Q4).
+Completed units are collected in dispatch order among those finished
+(`POLL_SECONDS` = 0.05 s); the result is read, classified and routed exactly as
+in the serial loop. A nonzero unit exit is `failed`/`native_failure`. The trace
+stays declaration-ordered; nothing is aggregated by completion time.
+
+Drain (decision B3-Q2). A failure (a failed unit or adaptor, or a tuning
+infrastructure abort) sets the body's abort, so readiness closes every
+undispatched node as `blocked`; units already running finish with their real
+outcome. A failed body may therefore hold more `succeeded` units than its serial
+trace would, the only observable divergence.
+
+Receipts. Each dispatched entry (unit or adaptor) publishes write-once
+`units/<node_id>/placement.json` (`UnitReceipt`: `placement` or `None` for an
+adaptor or undeclared unit, `queued_event`, `started_event`, `ended_event` from
+one body-wide parent sequence, wall `started_at`/`ended_at`, `exit` ∈
+`returned`/`raised`/`process_failed`/`exited`/`interrupted`). The body's budget is
+published write-once as `parallel_budget.json` in its control directory.
+
+Trace v2 verifier (`parallel_evidence.verify_drain`, called by
+`verify_graph_trace`). `scheduling="parallel-v1"` must equal `request.parallel`
+being set. Every dispatched entry needs a receipt naming it; a placement must
+name the published budget's digest; no receipt may belong to a node readiness
+closed as `blocked`; and no entry may start after the first failed entry ended.
+`replay_readiness(..., drained=...)` then accepts a dispatched node where the
+serial replay would close it as blocked only if its own sources permit it.
+Serial traces verify exactly as before.
+
+Cancellation. SIGTERM during parallel dispatch raises `UnitTerminated` in the
+worker. Any exit from the loop with units running (that signal, an exception,
+`SystemExit`/`KeyboardInterrupt` re-raised from a unit) terminates every running
+unit's process group (`terminate_observed_group`, TERM, 1 s grace, KILL) before
+propagating. An outer timeout or operator cancel kills the sandbox; every unit
+is in its PID namespace and ends with it. Stop and Pause keep body-boundary
+meaning: the active body, including queued units, finishes (decision B3-Q5).
+
+Run lock. `admit_training(..., host_budget=...)` locks
+`scheduling_mode="parallel-v1"` with the budget's provenance
+(`HostBudgetProvenance`, source `caller`/`file`/`host_reservation`). The same
+budget reaches the native tuner (`AdmittedTraining.host_budget` →
+`HyperparamTuningInput.host_budget`, omitted when serial), whose lock must match.
+
+Token ledger. A parallel unit child binds `agent.token_unit.bind_token_unit(node_id)`;
+every `TokenUsageRow` written while bound carries `unit_id` and the unit-owned
+`unit_sequence` (1-based, shared by every bridge the unit constructs), omitted
+otherwise.
+
+Tests: `tests/unit/tools/candidate_worker/test_parallel_dispatch.py` (serial
+golden in any completion order, slot never exceeded, drain + forged receipt,
+SIGTERM kills real unit groups), `test_parallel_lock.py`,
+`tests/unit/agent/test_token_unit.py`.

@@ -67,6 +67,11 @@ class GraphTrace(PreviewModel):
     adaptors: tuple[GraphNodeEvidence, ...] = Field(default=(), exclude_if=lambda value: not value)
     # Route decisions in branch declaration order; omitted when none (unrouted bytes).
     routes: tuple[GraphRouteEvidence, ...] = Field(default=(), exclude_if=lambda value: not value)
+    # B3-4b trace v2: ``parallel-v1`` bodies may drain (units already running when a
+    # failure ended finish). Omitted when serial, so serial traces keep their bytes.
+    scheduling: Literal["serial", "parallel-v1"] = Field(
+        default="serial", exclude_if=lambda value: value == "serial"
+    )
 
     @model_validator(mode="after")
     def _adaptor_entries(self) -> "GraphTrace":

@@ -6,6 +6,7 @@ from pathlib import Path
 from agent.schemas.implementor import ImplementorOutput, ImplementorTaskBlocks
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.validator import ValidatorOutput
+from core.runtime_control.scheduling import HostBudget
 from tools.workflow_preview.config import parse_config
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
@@ -90,8 +91,13 @@ def execute_native(
     *,
     continuation: LoopContinuation | None = None,
     budget: WorkerBudget | None = None,
+    host_budget: HostBudget | None = None,
 ) -> CandidateRunReceipt:
-    """``budget`` is the worker's declared wall budget; ``None`` bounds no child."""
+    """``budget`` is the worker's declared wall budget; ``None`` bounds no child.
+
+    ``host_budget`` is the admitted parallel scheduling budget (B3-4b); ``None``
+    dispatches serially.
+    """
     config = WorkflowLLMConfig.default()
     for index, observation in enumerate(request.files):
         if observation.reference == "llm_config":
@@ -113,7 +119,13 @@ def execute_native(
 
             with iteration_owner(initial.workspace) as lease:
                 result = execute_loop(
-                    request, initial, composition, config, continuation=continuation, budget=budget
+                    request,
+                    initial,
+                    composition,
+                    config,
+                    continuation=continuation,
+                    budget=budget,
+                    host_budget=host_budget,
                 )
                 if result.status == "paused" and (lease is None or lease.unresolved):
                     raise ValueError("native cleanup cannot authorize paused checkpoint")
@@ -121,7 +133,9 @@ def execute_native(
         if request.preview.execution_profile is not None:
             from .graph import execute_fanout
 
-            return execute_fanout(request, initial, composition, config, budget=budget)
+            return execute_fanout(
+                request, initial, composition, config, budget=budget, host_budget=host_budget
+            )
         if any(node.capability == "tuning" for node in request.preview.document.definition.nodes):
             from .training import execute_training
             from .training_admission import admit_training

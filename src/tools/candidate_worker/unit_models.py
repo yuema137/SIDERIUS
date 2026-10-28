@@ -28,6 +28,7 @@ from core.hardware_models import HardwareContext
 from core.run_invariants import RunInvariants
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.observed_subprocess import ProcessLifecycle
+from core.runtime_control.scheduling import HostBudget
 from execute_tools.dataset_config import DataScope
 from workflows.candidate_training_settings import CandidateTrainingSettings
 from workflows.llm_config import WorkflowLLMConfig
@@ -88,6 +89,7 @@ class AdmittedTraining(BaseModel):
     measurement_capability: ResolvedMeasurementCapability | None
     hardware_context: HardwareContext | None
     active_vram_budget_gb: float | None
+    host_budget: HostBudget | None = Field(default=None, exclude_if=lambda value: value is None)
 
     def restore(
         self, composition: RunTaskComposition, config: WorkflowLLMConfig
@@ -103,6 +105,7 @@ class AdmittedTraining(BaseModel):
             self.constraints,
             self.node_id,
             self.iteration,
+            self.host_budget,
         )
 
 
@@ -118,6 +121,7 @@ def admission_from(
         constraints=admitted.constraints,
         node_id=admitted.node_id,
         iteration=admitted.iteration,
+        host_budget=admitted.host_budget,
         **{name: getattr(admitted.bindings, name) for name in _binding_fields()},
     )
     if transport.restore(composition, config) != admitted:
@@ -202,6 +206,9 @@ class NodeInvocation(BaseModel):
     iteration: PositiveInt
     storage: StorageConfig
     unit: PhaseUnit
+    #: B3-4b: dispatched concurrently; the child attributes its token rows to this
+    #: unit. Omitted when serial, so serial invocation bytes are unchanged.
+    parallel: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class NodeUnitResult(BaseModel):
