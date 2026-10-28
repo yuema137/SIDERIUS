@@ -214,3 +214,83 @@ builtins.__import__ = offline
 sys.argv = ['tools.candidate_worker.child', sys.argv[1]]
 runpy.run_module('tools.candidate_worker.child', run_name='__main__')
 """)
+
+
+JUDGE_ROUTE = {
+    "provider": "openai",
+    "model_id": "judge-test",
+    "max_output_tokens": 4096,
+    "max_retries": 0,
+}
+
+
+def literature_judged_request(
+    request,
+    *,
+    combine,
+    select,
+    distribute,
+    reviews=("review0", "review1", "review2"),
+    max_judge_calls=50,
+):
+    """B6-8a: ``reviews`` -> one LLM COMBINE adaptor ``judge`` -> one proposal per output.
+
+    ``single/v1`` feeds ``propose0`` (no index); ``per-item/v1(M)`` feeds ``propose<i>``
+    from output ``i``. The judge routes and run cap are added to the LLM config.
+    """
+    count = 1 if distribute["kind"] == "single/v1" else distribute["count"]
+    request = families_request(request, count)
+    project = Path(request.preview.project_root)
+    raw = request.preview.model_dump(mode="json")
+    definition = raw["document"]["definition"]
+    for node in definition["nodes"]:
+        if node["capability"] == "proposal":
+            index = int(node["id"].removeprefix("propose"))
+            source = {"kind": "adaptor", "adaptor": "judge"}
+            if distribute["kind"] != "single/v1":
+                source["index"] = index
+            node["request"] = {
+                "kind": "protocol",
+                "protocol": "literature-to-proposal",
+                "arguments": [
+                    {"name": "output", "source": source},
+                    {
+                        "name": "proposal_input",
+                        "source": {"kind": "external", "binding": node["request"]["binding"]},
+                    },
+                ],
+            }
+    _review_nodes(raw, request, reviews)
+    definition["adaptor_format"] = "siderius.adaptors/v1"
+    definition["adaptors"] = [
+        {
+            "id": "judge",
+            "inputs": [
+                {
+                    "name": "reviews",
+                    "contract": "literature.output",
+                    "cardinality": "many",
+                    "max_items": len(reviews),
+                }
+            ],
+            "bindings": [
+                {
+                    "port": "reviews",
+                    "sources": [{"kind": "result", "node": node} for node in reviews],
+                }
+            ],
+            "combine": combine,
+            "select": select,
+            "distribute": distribute,
+        }
+    ]
+    config_path = project / "llm.json"
+    config = json.loads(config_path.read_bytes())
+    config["judge"] = {
+        "aggregate": JUDGE_ROUTE,
+        "debate": JUDGE_ROUTE,
+        "max_judge_calls": max_judge_calls,
+    }
+    config_path.write_text(json.dumps(config))
+    raw["execution_profile"] = "native-literature-judged/v1"
+    return _previewed(request, raw, project)

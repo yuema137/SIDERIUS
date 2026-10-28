@@ -10,6 +10,7 @@ import hashlib
 import traceback
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
@@ -37,12 +38,16 @@ from workflows.definition import (
 )
 from workflows.definition.catalog import VALIDITY_GATED_CONTRACTS
 from workflows.definition.fanout import ProposalFamilies, execution_families
+from workflows.definition.llm_strategies import LLM_STRATEGY_TYPES
 
 from . import readiness
 from .graph_evidence import read_graph_control, record_digest
 from .graph_models import GraphNodeEvidence, GraphReason, GraphState, GraphTrace
 from .layout import adaptor_dir, adaptor_output_path, adaptor_record_path
 from .models import CandidateRunReceipt, CandidateRunRequest
+
+if TYPE_CHECKING:
+    from .adaptor_llm import JudgeAdaptorContext
 
 AdaptorDefinition = WorkflowDefinition | ReusableWorkflowDefinition
 
@@ -175,11 +180,25 @@ def decide(
     *,
     iteration: int,
     skips: Mapping[str, str] | None = None,
+    judge: "JudgeAdaptorContext | None" = None,
 ) -> tuple[AdaptorOutcome, AdaptorRecord]:
-    """The pure deterministic decision and its record; no metric-ranking kind is admitted."""
+    """The adaptor's decision and its record; no metric-ranking kind is admitted.
+
+    A deterministic COMBINE is pure. An LLM COMBINE (B6-8a) runs through
+    ``adaptor_llm.decide_llm`` with ``judge``: the worker's context runs the strategy,
+    the verifier's replays it from the recorded anchor.
+    """
+    items = adaptor_items(adaptor, entries, skips)
+    combine = adaptor.combine
+    if isinstance(combine, LLM_STRATEGY_TYPES):
+        if judge is None:
+            raise ValueError(f"adaptor {adaptor.id}: an LLM COMBINE requires the judge context")
+        from .adaptor_llm import decide_llm
+
+        return decide_llm(adaptor, items, iteration=iteration, context=judge)
     outcome = run_deterministic_adaptor(
-        adaptor_items(adaptor, entries, skips),
-        combine_strategy=adaptor.combine,
+        items,
+        combine_strategy=combine,
         select_strategy=adaptor.select,
         distribute_strategy=adaptor.distribute,
         metric=None,
@@ -187,7 +206,7 @@ def decide(
     record = build_adaptor_record(
         adaptor_id=adaptor.id,
         iteration=iteration,
-        combine=adaptor.combine,
+        combine=combine,
         select=adaptor.select,
         distribute=adaptor.distribute,
         outcome=outcome,
@@ -202,7 +221,9 @@ def graph_closure(outcome: AdaptorOutcome) -> tuple[GraphState, GraphReason | No
 
 def _graph_reason(reason: AdaptorReason | None) -> GraphReason | None:
     match reason:
-        case None | "no_admissible_input" | "insufficient_items" | "too_many_items":
+        case (
+            None | "no_admissible_input" | "insufficient_items" | "too_many_items" | "judge_failure"
+        ):
             return reason
         case _:  # a new AdaptorReason must be mapped to a graph reason explicitly
             raise ValueError(f"adaptor reason {reason!r} has no graph reason")
@@ -258,6 +279,7 @@ def execute_adaptor(
     workspace: Path,
     iteration: int,
     skips: Mapping[str, str] | None = None,
+    judge: "JudgeAdaptorContext | None" = None,
 ) -> tuple[GraphNodeEvidence, AdaptorOutcome | None]:
     """Decide, publish outputs then the record (write-once), and close the trace slot.
 
@@ -266,7 +288,7 @@ def execute_adaptor(
     a skip record is a contract gap, never a run outcome, so it propagates.
     """
     try:
-        outcome, record = decide(adaptor, entries, iteration=iteration, skips=skips)
+        outcome, record = decide(adaptor, entries, iteration=iteration, skips=skips, judge=judge)
         state, reason = graph_closure(outcome)
         adaptor_dir(workspace, iteration=iteration).mkdir(parents=True, exist_ok=True)
         for output in outcome.outputs:
@@ -298,6 +320,7 @@ def execute_adaptor(
 
 def verify_adaptors(
     request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
     nodes: tuple[GraphNodeEvidence, ...],
     adaptors: tuple[GraphNodeEvidence, ...],
     *,
@@ -308,15 +331,23 @@ def verify_adaptors(
     """Recompute every recorded adaptor from the native records it names.
 
     The record and every emitted output must equal the recomputation byte for
-    byte, and the trace closure must equal the recomputed outcome.
+    byte, and the trace closure must equal the recomputed outcome. An LLM COMBINE
+    is replayed from the strategy evidence its recorded record anchors (never run):
+    readback contacts no provider.
     """
     entries = {item.node_id: item for item in (*nodes, *adaptors)}
     outcomes: dict[str, AdaptorOutcome] = {}
+    judge = _replay_context(request, initial, entries)
     for adaptor in request.preview.document.definition.adaptors:
         entry = entries[adaptor.id]
         if entry.record_path is None:
             continue
-        outcome, record = decide(adaptor, entries, iteration=iteration, skips=skips)
+        outcome, record = decide(adaptor, entries, iteration=iteration, skips=skips, judge=judge)
+        if isinstance(adaptor.combine, LLM_STRATEGY_TYPES) and record.strategy_evidence is None:
+            from .adaptor_llm import judge_evidence_dir
+
+            if judge_evidence_dir(workspace, adaptor.id, iteration).exists():
+                raise ValueError(f"adaptor {adaptor.id} has judge evidence its record never ran")
         if read_graph_control(Path(entry.record_path)) != canonical_json_bytes(record):
             raise ValueError(f"adaptor {adaptor.id} record does not match its recomputation")
         if (entry.state, entry.reason) != graph_closure(outcome):
@@ -340,6 +371,25 @@ def verify_adaptors(
             raise ValueError(f"adaptor {adaptor.id} published outputs its record does not derive")
         outcomes[adaptor.id] = outcome
     return outcomes
+
+
+def _replay_context(
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    entries: Mapping[str, GraphNodeEvidence],
+) -> "JudgeAdaptorContext | None":
+    """Replay context with each recorded LLM adaptor's strategy evidence anchor."""
+    from .adaptor_llm import llm_adaptors, replay_context
+
+    anchors: dict[str, str] = {}
+    for adaptor in llm_adaptors(request.preview.document.definition.adaptors):
+        path = entries[adaptor.id].record_path
+        if path is None:
+            continue
+        recorded = AdaptorRecord.model_validate_json(read_graph_control(Path(path)))
+        if recorded.strategy_evidence is not None:
+            anchors[adaptor.id] = recorded.strategy_evidence.sha256
+    return replay_context(request, initial, anchors)
 
 
 def tuning_branch(

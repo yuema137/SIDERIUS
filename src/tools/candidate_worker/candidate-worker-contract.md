@@ -1066,7 +1066,42 @@ either literature shape. Proposal diagnostics are per node
 | Profile | Admission (`fanout.literature_collection_candidate` / `literature_split_candidate`) |
 | --- | --- |
 | `native-literature-collection/v1` (S2) | ≥ 1 external reviews; one adaptor with one `literature.output` port binding every review result exactly once, `collect/v1` + `all/v1` + `single/v1`; exactly one proposal using `literature-collection-to-proposal(reviews=AdaptorSource(<adaptor>), proposal_input=<external seed>)`; its complete branches |
+| `native-literature-judged/v1` (B6-8a) | ≥ 1 external reviews; one adaptor with one `literature.output` port (`max_items` declared) binding every review exactly once, an LLM COMBINE kind (`fanout.literature_judged_candidate`; any other profile refuses an LLM COMBINE with `LLM_COMBINE_NOT_ADMITTED`), `single/v1` or `per-item/v1(M)`; one proposal per output through `literature-to-proposal(output=AdaptorSource(<adaptor>[, index=i]), proposal_input=<external seed>)` (no index for `single/v1`, indices `0..M-1` each once); `admit_llm_strategy` admits the kind and the deterministic validation table admits a declared `Fallback.combine` with the same SELECT/DISTRIBUTE; one complete family per proposal. See "LLM COMBINE literature profile" |
 | `native-literature-split/v1` (S3) | exactly one external review; one adaptor with one `literature.output` port bound to it and `split-items/v1(field="findings", count=M, on_short)` after any COMBINE/SELECT pair the declaration validation table admits (S3 is `field-rank/v1(confidence, descending)` + `top-k/v1(k)`); exactly M proposals, each `literature-to-proposal(output=AdaptorSource(<adaptor>, index=i), proposal_input=<external seed>)`, indices `0..M-1` each bound once; one complete family per proposal |
+
+**LLM COMBINE literature profile** (`native-literature-judged/v1`, B6-8a;
+`adaptor_llm.py`, `adaptor_phase.decide`). Before any effect, `graph.execute_fanout`
+builds `judge_adaptor_context(request, initial, composition.judge_task)`:
+
+- **Routes.** `run_judge_routes` reads `WorkflowLLMConfig.judge` from the run's
+  captured, digest-checked `llm_config` snapshot (`locked_judge_routes`); an absent
+  block refuses; when a workspace run lock holds judge routes they must be equal.
+  Worker and verifier read the same snapshot.
+- **Rubrics (D3).** A `rubric-rank/v1` rubric resolves only against the task
+  composition's `rubrics:` (`resolve_rubric_ref`); an unknown or edited rubric raises
+  `UnsupportedRubricSource` naming that source (experiment-owned rubrics are not
+  supported). `guidance="task_blocks"` requires task `judge_blocks`.
+- **Run-level judge call sum (D4).** `Σ_adaptors strategy_call_bound(strategy,
+  bound sources) × bodies + stop_calls ≤ WorkflowLLMConfig.judge.max_judge_calls`,
+  with `bodies = loop.final_iteration` (1 without a loop) and `stop_calls =
+  loop_stop.judge_call_bound(loop)` (0 without a loop); an absent cap refuses. A
+  refusal fails the run before any node starts (receipt `failed`, no graph trace).
+
+Execution: `decide_llm` admits the items (B6 rule), and with none admissible records
+`rejected/no_admissible_input` without calling B2. Otherwise it builds
+`StrategyInvocation(evidence_dir=<adaptor dir>/<id>.judge)`, runs
+`run_llm_strategy` (bridge resolved at call time through
+`agent.judge.call.bridge_for_route`; usage rows under the run context), maps the
+outcome onto the B6 core (adaptor contract) and records the evidence anchor. A
+strategy refusal raised before any provider contact (prompt budget, item cap)
+fails the slot without a record, like any uncertain adaptor failure. The verifier
+(`verify_adaptors`) recomposes the judge declarations from the task manifest
+(`task_composition.compose_judge_declarations`, judge sections only), takes each
+recorded record's `strategy_evidence.sha256` and replays with
+`replay_llm_strategy`: it never contacts a provider; any edited, reordered or stray
+call file, a changed rubric file, or a judge directory under a record without an
+anchor refuses. GUI: the console lists no candidate profiles, so nothing is added
+there; the profile is preview/launch-selectable like S2/S3.
 
 **Protocol application** (`literature_edges.proposal_input`, the one owner unit
 dispatch and the verifier call). The single-review profile keeps

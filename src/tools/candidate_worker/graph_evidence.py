@@ -270,6 +270,7 @@ def verify_graph_trace(
     entries = {item.node_id: item for item in (*trace.nodes, *trace.adaptors)}
     outcomes = verify_adaptors(
         request,
+        initial,
         trace.nodes,
         trace.adaptors,
         workspace=Path(initial.workspace),

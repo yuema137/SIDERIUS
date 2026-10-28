@@ -6,9 +6,10 @@ Source and tests determine current behavior. Every declared kind is implemented:
 `primary-advisors-llm/v1` (combining, B2-8) and `debate-judge/v1` (ranking or
 combining, B2-7). `kind_not_implemented` remains the refusal for a kind added to
 the union before its implementation; a test keeps the union and
-`IMPLEMENTED_KINDS` equal. No
-adaptor can declare or run an LLM kind yet: the adaptor wiring (B6-8) makes the
-union declarable in `AdaptorInstance.combine` and calls this package.
+`IMPLEMENTED_KINDS` equal. B6-8a declares the kinds in `AdaptorInstance.combine`
+(`llm_strategies.AdaptorCombine`) and executes them only under
+`native-literature-judged/v1` (`tools/candidate_worker/adaptor_llm.py`; the
+candidate-worker contract, "LLM COMBINE literature profile").
 
 ## Scope and owners
 
@@ -310,7 +311,13 @@ accounted for. It returns the recorded `StrategyResult`.
 
 ## B6-8 consumer contract
 
-The adaptor wiring (B6-8) is the only intended caller. It must:
+The adaptor wiring is the only caller. B6-8a implements every item below in
+`workflows/definition/fanout.literature_judged_candidate` (admission, including the
+fallback check through `adaptor_validation.check_strategies`) and
+`tools/candidate_worker/adaptor_llm.py` (invoke, consume, replay, launch-time call
+sum). A `skipped` outcome is consumed like `decided`; `prompt_too_large`,
+`insufficient_items`, `primary_unavailable` and `cardinality_mismatch` are failures
+under `on_failure` like call failures. The adaptor:
 
 1. **Declare.** Add `LLMStrategy` to `AdaptorInstance.combine` and the kinds to
    `catalog.ADAPTOR_STRATEGIES` (owner `workflows.judge_strategies`); new fields stay
@@ -402,8 +409,8 @@ because it never invokes `run_judge_call`.
   projector. It lands with the `tuning.output` projector (B6-9/B3), choosing the
   primary with `MetricOrder` over Health-valid formal results.
 
-- Not reachable from a workflow until B6-8 (declaration in
-  `AdaptorInstance.combine`, catalogue rows, invocation construction, evidence
-  directory, fallback execution and the run-level call cap).
+- Reachable only under `native-literature-judged/v1` (B6-8a); the proposer-N
+  shape (LLM rank over `proposal.output` feeding branches) is B6-8b, and an adaptor
+  before tuning inside a loop body (B6-8c) depends on B6-9.
 - `tuning.output` and `validation.output` have no projector, so rubric ranking of
   trained candidates is refused (B6-9/B3 multi-tuning).
