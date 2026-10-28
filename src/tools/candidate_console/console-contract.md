@@ -445,7 +445,8 @@ gone; nothing to stop) 409 with route-local fixed messages in
 Native detail and paths are never echoed.
 
 `StatusView.cancel_requested` and `StatusView.cancellable` mirror the snapshot
-fields and are omitted when false, so existing status bytes are unchanged.
+fields and are omitted when false, so existing status bytes are unchanged unless a
+new cancel is possible (then `cancellable: true` is added).
 `cancellable` is the single authority for offering Stop run; the page keeps no
 kind or state list of its own.
 

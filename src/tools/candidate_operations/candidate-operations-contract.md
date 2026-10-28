@@ -386,7 +386,8 @@ Readback and verification. `OperationSnapshot.cancel_requested` is `true` when a
 bound `cancel.json` exists. `OperationSnapshot.cancellable` (`cancel.cancellable`)
 is `true` exactly when a new request would be recorded: a cancellable kind, state
 `active` and no intent yet; the console offers Stop run only from it. Both are
-omitted when false, so existing snapshot bytes are unchanged. A cancelled run reads `state="completed"` with native receipt status
+omitted when false, so existing snapshot bytes are unchanged unless a new cancel is
+possible (then `cancellable: true` is added). A cancelled run reads `state="completed"` with native receipt status
 `cancelled` (distinct from `failed`, `timed_out` and `interrupted`). A `cancelled`
 receipt without a recorded `CancelRequest` is an integrity failure (`unknown`), and
 `reconcile` turns a sandbox child that claims `cancelled` after a normal exit into
