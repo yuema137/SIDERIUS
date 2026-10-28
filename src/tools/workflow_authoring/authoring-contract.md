@@ -301,6 +301,47 @@ does not know the task's declared metric: `metric_id` is a validated text field,
 and a mismatch with the run metric fails the loop at execution (the worker
 contract), not at Review.
 
+## Workflow templates and advice targets
+
+Owner: `templates.py` (the only template catalog) and `advice_targets.py`.
+Routes (`tools/candidate_console/template_routes.py`, authenticated):
+`GET /api/editor/templates` -> `TemplateCatalog` (`id`, `title`, one-line
+`description`, `preview` = nodes with capability/position, result edges, loop
+endpoints and `final_iteration`, all derived from the template document);
+`POST /api/editor/{project_id}/template` with `TemplateImportRequest`
+(`template_id`, `expected_sha256`) -> `TemplateImportView` (`template_id`,
+unsaved `source`); `GET /api/editor/advice-targets` -> `AdviceTargets`.
+
+Templates are reusable v2 shapes with no task, data, advice, output-type or
+training values (`training_settings={}`: native launch defaults apply):
+
+| id | Shape | Profile |
+| --- | --- | --- |
+| `single-research-loop` | interpret -> propose -> implement -> validate -> train, feedback train -> interpret, `final_iteration=1` | `native-interpretation-candidate/v1` |
+| `single-loop-with-advice` | same, proposal `human_advice` -> managed `advice`, `expert_context` -> managed `findings` | same |
+| `single-step` | propose -> implement -> validate -> train, no loop | plain candidate |
+
+Every external is a `ManagedCandidateBinding` routed as `check_candidate_roles`
+admits. Import is write-free: it reads the current source, refuses a stale
+`expected_sha256` (409 `conflict`) or an unparsed source (409 `unsupported`),
+copies the project's own task references (v1: `manifest`/`data_root`; v2: the
+references and accepted `task_binding`) and renders canonical source. The
+browser reviews it as an ordinary `source` proposal; a bound source therefore
+still requires explicit task selection, and only Save publishes. No template
+contains Literature: no catalogued protocol joins `literature.output` into an
+interpretation-fed proposal, and N reviews -> one proposal needs the B6
+aggregation work (B6-1/B6-3/B6-4).
+
+Advice targets name where each agent reads free-text advice:
+`preparation_options.proposal_advice` / `implementation_advice` /
+`validation_advice` and `training_settings.launch.human_advice_tune`
+(tuning). `advice_targets()` fails closed if a field leaves its owning model.
+The proposal target carries `socket` (`interpretation-to-proposal`,
+`human_advice`): under that protocol the proposal agent reads the advice only
+through the bound socket. No loop-wide advice field exists
+(`human_advice_mindset` is an inactive launch field), so advice is per agent.
+Unit owner: `tests/unit/tools/candidate_console/test_templates.py`.
+
 ## Bound-source publication boundary
 
 Inert read accepts the optional v2 TaskBinding declaration. Bound review and Save

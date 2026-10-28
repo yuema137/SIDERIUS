@@ -27,6 +27,7 @@ from workflows.definition import TaskBinding
 from workflows.definition.source import WorkflowSourceError
 
 from .models import TaskChoice
+from .template_routes import add_template_routes
 
 
 class EditorTaskChoice(BaseModel):
@@ -135,6 +136,9 @@ def editor_router(
     def external_inputs() -> ExternalInputCatalog:
         """Read-only explanation of how each catalog contract becomes an external input."""
         return external_input_catalog()
+
+    # Template gallery and advice targets (template_routes.py); fixed paths first.
+    add_template_routes(router, selected, perform)
 
     @router.get("/{project_id}")
     def read(project_id: str):

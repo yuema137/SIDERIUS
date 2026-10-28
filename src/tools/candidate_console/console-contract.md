@@ -786,6 +786,23 @@ details and typed route chips with receive/send arrows, hover and keyboard popov
 content, compatible-port highlighting and its removal, Escape, light/dark text
 contrast >= 4.5:1, the narrow drawer, and that nothing is posted or written.
 
+Templates and advice (`editor-templates.js`, `editor-advice.js`,
+`editor-templates.css`; server contract in
+`tools/workflow_authoring/authoring-contract.md`): the Workflow page shows a compact
+"Start from a template" card; its dialog lists compact cards (icon, title, one
+sentence) and shows the graph preview of the chosen template, with loop details
+collapsed, before "Import as draft". Import calls
+`window.workflowEditor.importSource(source, label)`, which runs the ordinary
+source Review; the result folds into the draft as one undoable step and Save is
+still required. The node inspector calls `window.editorAdvice.render` directly
+after the node heading, so "Your advice to the agents" (multi-line, help,
+example placeholder) is its first input; edits are draft document edits with one
+coalesced undo step per node, disabled while a palette node is pending.
+`tests/browser/scenario_template_parameters.mjs` (import loop, edit a training
+parameter, review, save) and `tests/browser/scenario_template_advice.mjs` (import
+the advice loop, write advice, review, save; contrast warning on the plain loop;
+documents the B6-blocked three-review aggregation scenario) use the same variables.
+
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
 qualification for operations remains separately owned.

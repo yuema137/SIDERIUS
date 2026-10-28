@@ -41,7 +41,8 @@
   const projection = () => Object.freeze({projectId: project, candidateEnabled,
     savedSha256: base?.sha256 || null, dirty: pending(), sourceDirty,
     sourceAvailable, reusableSource: base?.document?.definition?.schema_version === 2, saving, conflict: !!conflict});
-  window.workflowEditor = Object.freeze({get state() { return projection(); }});
+  // importSource: a template's unsaved source enters the ordinary source Review (editor-templates.js).
+  window.workflowEditor = Object.freeze({get state() { return projection(); }, importSource: (source, label) => reviewProposal({kind: 'source', source}, label)});
   const bindingEqual = (a, b) => !!a && !!b && ['schema_version', 'package_id', 'revision', 'semantic_fingerprint', 'task_data_path_id'].every(key => a[key] === b[key]);
   const taskReview = () => reviewed?.taskReview;
   function taskAccepted() {
@@ -365,6 +366,9 @@
       const heading = node('div', '', $('inspector'));
       const capabilityLabel = window.editorCapabilityPresentation.append(heading, item.capability, item.id, 'inspector-capability-heading');
       heading.setAttribute('aria-label', `${capabilityLabel}, instance ${item.id}`);
+      // Human advice is the first input of the inspector (editor-advice.js renders it).
+      window.editorAdvice?.render($('inspector'), {document: graph, item, inventory, enabled: canEditCircuit()},
+        (mutate, label) => { if (graph === capturedGraph) { mutate(graph); changed(label, `advice:${item.id}`); } });
       window.editorNodePalette?.inspectorActions($('inspector'), item.id, {remove: removeNodes, enabled: canEditCircuit()});
       const mapping = node('details', '', $('inspector')); mapping.className = 'inspector-mapping';
       node('summary', 'Mapping details', mapping);
@@ -521,7 +525,7 @@
   });
   $('refresh').addEventListener('click', () => refresh());
   $('source').addEventListener('input', () => { sourceDirty = true; invalidate(); for (const input of document.querySelectorAll('#editor-inspector select, #editor-inspector input, #editor-inspector button, #editor-references input')) input.disabled = true; });
-  async function reviewProposal(proposal) {
+  async function reviewProposal(proposal, label = null) {
     if (!window.consoleSession.connected || saving || draftsPending() || !base?.document) return;
     if (proposal.kind === 'draft' && !(inspection?.key === bindingKey() && inspection.status === 'complete')) {
       status('The binding draft must pass declaration validation before review.'); return;
@@ -537,7 +541,7 @@
       if (!current(id, version)) return;
       // Source text may add nodes/externals: its reviewed projection becomes the draft anchor.
       // Structured drafts stay as edited, so later edits, undo and Discard keep working on them.
-      if (foldLabel(proposal)) fold(value, foldLabel(proposal));
+      if (foldLabel(proposal)) fold(value, label || foldLabel(proposal));
       else training = value.training;
       $('source').value = value.source; sourceDirty = false;
       reviewed = {source: value.source, sha256: value.sha256, base: base.sha256, taskReview: value.task_reference_update,
@@ -546,6 +550,7 @@
       $('diff').textContent = value.diff || '(No source changes)'; diagnostic(); render();
       $('pending').textContent = value.source !== base.source ? 'Pending reviewed source · not saved' : 'No source changes; review acceptance may still be required.';
       status(value.node_edit ? value.node_edit.message + ' Inspect the exact Python diff, then save.' : value.task_reference_update ? 'Inspect the Python diff and task findings. Confirm supported findings before saving.' : 'Declaration validated. Inspect the exact Python diff, then save.');
+      return true;
     } catch (error) {
       if (error.stale) return;
       if (!current(id, version)) return;
@@ -554,7 +559,7 @@
         diagnostic(error.value?.diagnostics); status(error.message); return;
       }
       const refused = error.value?.proposal;
-      if (refused && ['source', 'task_references'].includes(proposal.kind)) fold(refused, foldLabel(proposal));
+      if (refused && ['source', 'task_references'].includes(proposal.kind)) fold(refused, label || foldLabel(proposal));
       if (refused) { $('source').value = refused.source; sourceDirty = false; }
       if (refused?.task_reference_update) showTaskRefusal(refused, selection || refused);
       else if (proposal.kind === 'draft' && ['draft_incomplete', 'draft_invalid'].includes(error.code)) {
