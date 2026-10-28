@@ -38,11 +38,13 @@ from functools import partial
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
-from dotenv import load_dotenv
 from openai import APIError, OpenAI
 from openai.types.chat import ChatCompletionMessageFunctionToolCall
 from pydantic import ValidationError
 
+# Bound to the historical name: callers and tests patch ``llm_bridge.load_dotenv``.
+from agent.credential_environment import load_compatibility_dotenv as load_dotenv
+from agent.credential_environment import warn_if_blank_credential
 from agent.llm_settings import (
     DEFAULT_LLM_PROVIDER,
     provider_configuration,
@@ -212,6 +214,7 @@ def _provider_credential_or_refuse(provider: str, known: _ProviderConfig) -> str
             key here would send a foreign credential to its endpoint.
     """
     api_key = os.getenv(known["api_key_env"])
+    warn_if_blank_credential(known["api_key_env"], api_key, provider=provider)
     if api_key is not None or known["api_key_env"] == _SDK_FALLBACK_KEY_ENV:
         return api_key
     raise LLMBridgeContextError(

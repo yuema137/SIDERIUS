@@ -65,8 +65,8 @@ if TYPE_CHECKING:
     from workflows.native_chain_binding import NativeChainLaunchContext
     from workflows.reviewed_launch import ReviewedLaunchContext
 
-from dotenv import load_dotenv
 
+from agent.credential_environment import load_compatibility_dotenv
 from agent.data_analysis.source_scope import source_prompt_identity
 from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.telemetry import LLMBridgeContextError
@@ -178,7 +178,7 @@ SIDERIUS_ROOT = (
     str(_CHECKOUT_ROOT) if _CHECKOUT_ROOT is not None else str(Path(__file__).resolve().parents[2])
 )
 if _CHECKOUT_ROOT is not None:
-    load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
+    load_compatibility_dotenv(Path(SIDERIUS_ROOT) / ".env")
 
 
 def load_validation_fixed_candidate_plan(path: str | None) -> dict | None:
