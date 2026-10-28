@@ -41,7 +41,18 @@ class ResultSource(DeclarationModel):
     port: Literal["result"] = "result"
 
 
-Source = Annotated[ExternalSource | ResultSource, Field(discriminator="kind")]
+class SelectedSource(DeclarationModel):
+    """Merge: the result of the one candidate whose arm ``branch`` selected.
+
+    A deterministic select keyed by the recorded route decision, never an OR/race join.
+    """
+
+    kind: Literal["selected"] = "selected"
+    branch: Identifier
+    candidates: tuple[ResultSource, ...] = Field(min_length=2)
+
+
+Source = Annotated[ExternalSource | ResultSource | SelectedSource, Field(discriminator="kind")]
 
 
 class ArgumentBinding(DeclarationModel):
@@ -111,6 +122,93 @@ StopCondition = Annotated[
 ]
 
 
+MAX_ROUTE_BRANCHES = 32
+MAX_ROUTE_CASES = 8
+MAX_ROUTE_LEAVES = 8
+ObservableId = Annotated[str, StringConstraints(min_length=1, max_length=100)]
+
+
+class BoolIs(DeclarationModel):
+    """True when a catalogued boolean observable equals ``value``."""
+
+    kind: Literal["bool_is"] = "bool_is"
+    observable: ObservableId
+    value: bool
+
+
+class EnumIn(DeclarationModel):
+    """True when a catalogued enum observable is one of ``values``."""
+
+    kind: Literal["enum_in"] = "enum_in"
+    observable: ObservableId
+    values: tuple[str, ...] = Field(min_length=1)
+
+
+class MetricAtLeast(DeclarationModel):
+    """True when a present metric observable is at least ``threshold`` under the run metric.
+
+    Direction comes only from the run's ``MetricSpec``; an absent value is false.
+    """
+
+    kind: Literal["metric_at_least"] = "metric_at_least"
+    observable: ObservableId
+    metric_id: str = Field(min_length=1)
+    threshold: float = Field(allow_inf_nan=False)
+
+
+class IsMissing(DeclarationModel):
+    """True when a catalogued metric observable has no value."""
+
+    kind: Literal["is_missing"] = "is_missing"
+    observable: ObservableId
+
+
+RouteLeaf = Annotated[BoolIs | EnumIn | MetricAtLeast | IsMissing, Field(discriminator="kind")]
+
+
+class AllOf(DeclarationModel):
+    kind: Literal["all_of"] = "all_of"
+    terms: tuple[RouteLeaf, ...] = Field(min_length=2, max_length=MAX_ROUTE_LEAVES)
+
+
+class AnyOf(DeclarationModel):
+    kind: Literal["any_of"] = "any_of"
+    terms: tuple[RouteLeaf, ...] = Field(min_length=2, max_length=MAX_ROUTE_LEAVES)
+
+
+class Not(DeclarationModel):
+    kind: Literal["not"] = "not"
+    term: RouteLeaf
+
+
+# One combinator level over leaves only: combinators never nest.
+RoutePredicate = Annotated[
+    BoolIs | EnumIn | MetricAtLeast | IsMissing | AllOf | AnyOf | Not,
+    Field(discriminator="kind"),
+]
+
+
+class RouteCase(DeclarationModel):
+    when: RoutePredicate
+    targets: tuple[Identifier, ...] = Field(min_length=1)
+
+
+class Branch(DeclarationModel):
+    """Exclusive route over one upstream result; the first matching case wins.
+
+    ``default=None`` means no arm runs when no case matches, so a single-case
+    branch without a default is a guard (conditional edge). Branch ids form
+    their own namespace. Declaration only: execution admission is separate.
+    """
+
+    id: Identifier
+    source: ResultSource
+    cases: tuple[RouteCase, ...] = Field(min_length=1, max_length=MAX_ROUTE_CASES)
+    default: tuple[Identifier, ...] | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+
+
 class AuthoredLoop(DeclarationModel):
     final_iteration: Annotated[int, Field(gt=0)]
     feedback: LoopFeedback
@@ -126,6 +224,9 @@ class WorkflowDefinition(DeclarationModel):
     externals: tuple[ExternalBinding, ...] = ()
     nodes: tuple[NodeInstance, ...] = Field(min_length=1)
     loop: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
+    routes: tuple[Branch, ...] = Field(
+        default=(), max_length=MAX_ROUTE_BRANCHES, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def validate_connections(self) -> Self:
@@ -212,6 +313,9 @@ class ReusableWorkflowDefinition(DeclarationModel):
     externals: tuple[ExternalBinding | ManagedCandidateBinding, ...] = ()
     nodes: tuple[NodeInstance, ...] = Field(min_length=1)
     loop: AuthoredLoop | None = Field(default=None, exclude_if=lambda value: value is None)
+    routes: tuple[Branch, ...] = Field(
+        default=(), max_length=MAX_ROUTE_BRANCHES, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def validate_connections(self) -> Self:

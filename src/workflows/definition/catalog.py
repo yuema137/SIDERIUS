@@ -209,3 +209,65 @@ PROTECTED_FIELDS = MappingProxyType(
         ),
     }
 )
+
+
+@dataclass(frozen=True)
+class RankableField:
+    """A non-metric numeric field on the entries of a catalogued list.
+
+    ``provenance`` labels where the number comes from; it is recorded beside every
+    ranking built from it and is never a score or a validity fact.
+    """
+
+    list_field: str
+    item_field: str
+    provenance: str
+
+
+# Contract -> its one list field that adaptors may concatenate or split.
+SPLITTABLE_ITEMS = MappingProxyType({"literature.output": "findings"})
+
+# Contract -> the catalogued entry field that ``field-rank/v1`` may rank by.
+RANKABLE_FIELDS = MappingProxyType(
+    {"literature.output": RankableField("findings", "confidence", "self-reported")}
+)
+
+# Contracts whose succeeded values carry formal metric results (Health-qualified
+# admission; an LLM ranking may filter them, never reorder them).
+METRIC_SCORED_CONTRACTS = frozenset({"tuning.output"})
+
+# Contracts whose succeeded values carry a deterministic pass/fail validity flag.
+VALIDITY_GATED_CONTRACTS = frozenset({"validation.output"})
+
+
+@dataclass(frozen=True)
+class RouteObservable:
+    """One readable native output field; ``field`` is documentation, never a lookup path."""
+
+    contract: str
+    field: str
+    kind: Literal["bool", "enum", "metric"]
+    values: tuple[str, ...] = ()
+
+
+# Closed list of fields a route predicate may read. Adding one requires the
+# native-schema drift test; predicates never name free fields or JSON paths.
+ROUTE_OBSERVABLES = MappingProxyType(
+    {
+        "validation.passed": RouteObservable(
+            "validation.output", "agent.schemas.validator.ValidatorOutput.passed", "bool"
+        ),
+        "tuning.status": RouteObservable(
+            "tuning.output",
+            "agent.schemas.hyperparam_tuning.HyperparamTuningOutput.status",
+            "enum",
+            ("completed", "partial", "failed"),
+        ),
+        "tuning.valid_formal": RouteObservable(
+            "tuning.output",
+            "agent.schemas.hyperparam_tuning.HyperparamTuningOutput"
+            ".best_valid_formal_denoising_score",
+            "metric",
+        ),
+    }
+)
