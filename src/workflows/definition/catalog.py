@@ -133,3 +133,25 @@ PROTOCOLS = MappingProxyType(
         ),
     }
 )
+
+
+@dataclass(frozen=True)
+class RankableField:
+    """A non-metric numeric field on the entries of a catalogued list.
+
+    ``provenance`` labels where the number comes from; it is recorded beside every
+    ranking built from it and is never a score or a validity fact.
+    """
+
+    list_field: str
+    item_field: str
+    provenance: str
+
+
+# Contract -> its one list field that adaptors may concatenate or split.
+SPLITTABLE_ITEMS = MappingProxyType({"literature.output": "findings"})
+
+# Contract -> the catalogued entry field that ``field-rank/v1`` may rank by.
+RANKABLE_FIELDS = MappingProxyType(
+    {"literature.output": RankableField("findings", "confidence", "self-reported")}
+)

@@ -26,6 +26,7 @@ into here one iteration at a time.
 | `llm_config.py` | `WorkflowLLMConfig` — per-node LLM routing, loaded from a `--llm_config` JSON |
 | `run_bindings.py` | `WorkflowRunBindings` — run-scoped authorities settled at startup; refuses mutable chain state by construction |
 | `strategy_modes.py` | the `Literal` vocabularies for exploration/strategy/formal-round modes |
+| `adaptors/` | Pure deterministic adaptor strategy core (admit → combine → select → distribute, `AdaptorRecord`); not yet wired to execution. Contract: [adaptor-contract.md](adaptors/adaptor-contract.md) |
 
 ## Inputs
 
