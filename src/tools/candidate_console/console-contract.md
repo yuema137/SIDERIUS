@@ -464,7 +464,12 @@ External source chips remain inspector bindings. Omitted optional ports and argu
 creation/deletion are not graphical controls in this slice.
 
 The node palette (`editor-palette.js`, `editor-palette.css`; presentation only,
-`editor.js` owns the draft) is mounted above the canvas. It lists
+`editor.js` owns the draft) is a sticky side rail left of the canvas
+(`.editor-canvas-layout`; own scroll, at most the viewport height) so a drag
+source and the canvas share the screen; under 900px it collapses to a drawer opened
+by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
+Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
+drag payload. It lists
 `GET /api/editor/node-catalog` entries grouped by capability with a text search,
 and adds one by click (placed right of the existing cards) or by dragging an entry
 onto the canvas (dropped at that world position). It proposes an unused instance
@@ -582,7 +587,8 @@ overlapping layout, zoomed drag arithmetic and a non-empty task panel.
 `tests/browser/node_palette.mjs` (same variables; unit owner
 `tests/unit/tools/test_workflow_node_edits.py`) checks palette categories/search,
 click and drag add, the incomplete-draft Review gate with no disk write, binding the
-new node, review/save keeping author comments, refused removal of a node others
+new node, review/save keeping author comments, drag source and canvas centre both
+in view before the drag, refused removal of a node others
 read (Delete key), the context menu, byte-identical inspector removal of the added
 node and cancelling a dragged draft.
 

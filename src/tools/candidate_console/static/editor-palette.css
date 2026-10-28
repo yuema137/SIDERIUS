@@ -1,16 +1,26 @@
-/* Node palette (editor-palette.js): presentation only. */
-.editor-palette { margin: 0 0 .6rem; padding: .5rem .6rem; border: 1px solid var(--control-border); border-radius: .5rem; }
+/* Node palette (editor-palette.js): presentation only.
+ * A sticky side rail beside the canvas so a drag source and its drop target share the
+ * viewport; under 900px it becomes a toggleable drawer above the canvas. */
+.editor-canvas-layout { display: grid; grid-template-columns: 13.5rem minmax(0, 1fr); gap: .75rem; align-items: start; }
+.editor-palette { position: sticky; top: .5rem; z-index: 5; max-height: calc(100vh - 1rem); overflow: auto; padding: .5rem .6rem; border: 1px solid var(--control-border); border-radius: .5rem; background: var(--panel); }
 .editor-palette h3 { margin: 0 0 .4rem; font-size: .9rem; }
-.editor-palette .palette-search { width: 100%; max-width: 22rem; margin-bottom: .4rem; }
-.editor-palette .palette-list { display: flex; flex-wrap: wrap; gap: .4rem .8rem; }
-.editor-palette .palette-category { min-width: 12rem; }
+.editor-palette .palette-toggle { display: none; width: 100%; text-align: left; }
+.editor-palette .palette-search { width: 100%; margin-bottom: .4rem; box-sizing: border-box; }
+.editor-palette .palette-list { display: flex; flex-direction: column; gap: .4rem; }
 .editor-palette .palette-category summary { font-size: .75rem; font-weight: 700; color: var(--muted); cursor: pointer; }
-.editor-palette .palette-entry { display: block; margin: .25rem 0; padding: .3rem .55rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--control); color: var(--text); text-align: left; cursor: grab; user-select: none; }
+.editor-palette .palette-entry { display: block; margin: .25rem 0; padding: .3rem .55rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--control); color: var(--text); text-align: left; font-size: .8rem; overflow-wrap: anywhere; cursor: grab; user-select: none; }
 .editor-palette .palette-entry:hover:not([aria-disabled="true"]) { border-color: var(--focus); }
 .editor-palette .palette-entry:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .editor-palette .palette-entry[aria-disabled="true"] { color: var(--muted); opacity: .6; cursor: not-allowed; }
 .editor-palette .palette-note, .editor-palette .palette-empty { margin: .3rem 0 0; color: var(--muted); font-size: .75rem; }
 .editor-palette .palette-cancel { margin-top: .4rem; }
+@media (max-width: 900px) {
+  .editor-canvas-layout { grid-template-columns: minmax(0, 1fr); }
+  .editor-palette { max-height: 60vh; }
+  .editor-palette h3 { display: none; }
+  .editor-palette .palette-toggle { display: block; }
+  .editor-palette:not(.open) .palette-body { display: none; }
+}
 .editor-remove-node { margin: .4rem 0; }
 .node-context-menu { position: fixed; z-index: 20; padding: .25rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--panel); box-shadow: 0 4px 14px #0003; }
 .node-context-menu button { display: block; width: 100%; text-align: left; }

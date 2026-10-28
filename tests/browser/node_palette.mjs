@@ -101,10 +101,18 @@ try {
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'add then remove is byte-identical');
 
   // Drag a palette entry onto the canvas, then cancel the draft without a request to review.
-  await palette.locator('.palette-search').fill('');
-  assert.equal(await palette.locator('.palette-entry[data-capability="proposal"][data-protocol=""]').getAttribute('aria-disabled'), 'false');
+  await palette.locator('.palette-search').fill('proposal');
+  const source = palette.locator('.palette-entry[data-capability="proposal"][data-protocol=""]'), target = page.locator('.circuit-viewport');
+  assert.equal(await source.getAttribute('aria-disabled'), 'false');
   const reviews = posts.filter(item => item.url.endsWith('/review')).length;
-  await palette.locator('.palette-entry[data-capability="proposal"][data-protocol=""]').dragTo(page.locator('.circuit-viewport'));
+  // The palette rail is sticky beside the canvas: with the canvas centred, both are on screen.
+  await target.evaluate(element => element.scrollIntoView({block: 'center'}));
+  await source.scrollIntoViewIfNeeded();
+  const viewport = page.viewportSize(), from = await source.boundingBox(), to = await target.boundingBox();
+  const inside = (x, y) => x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height;
+  assert.ok(inside(from.x, from.y) && inside(from.x + from.width, from.y + from.height), `drag source in view ${JSON.stringify(from)}`);
+  assert.ok(inside(to.x + to.width / 2, to.y + to.height / 2), `canvas centre in view ${JSON.stringify(to)}`);
+  await source.dragTo(target);
   await page.locator('#circuit-node-proposal').waitFor();
   await waitUntil(async () => (await pendingText()).includes('Pending new node proposal'), 'drag draft');
   await palette.locator('.palette-cancel').click();

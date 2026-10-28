@@ -80,14 +80,20 @@
   }
   function mount(container, graphElement, callbacks) {
     host = container; canvas = graphElement; actions = callbacks; host.replaceChildren();
+    // Side rail beside the canvas (editor-palette.css keeps it sticky in view); under 900px
+    // it collapses to a drawer opened by this toggle. Click-to-add works in both layouts.
     element('h3', 'Add capability', host);
-    const search = element('input', '', host, 'palette-search');
+    const toggle = element('button', 'Add capability', host, 'palette-toggle');
+    toggle.type = 'button'; toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', 'editor-palette-body');
+    toggle.addEventListener('click', () => toggle.setAttribute('aria-expanded', String(host.classList.toggle('open'))));
+    const body = element('div', '', host, 'palette-body'); body.id = 'editor-palette-body';
+    const search = element('input', '', body, 'palette-search');
     search.type = 'search'; search.placeholder = 'Search capabilities'; search.setAttribute('aria-label', 'Search capabilities');
     search.addEventListener('input', renderList);
-    element('div', '', host, 'palette-list');
-    const cancel = element('button', 'Cancel new node', host, 'palette-cancel');
+    element('div', '', body, 'palette-list');
+    const cancel = element('button', 'Cancel new node', body, 'palette-cancel');
     cancel.type = 'button'; cancel.hidden = true; cancel.addEventListener('click', () => actions.cancel());
-    element('p', 'Click or drag a capability onto the canvas. A new node stays a local draft until its required inputs are connected and you review and save.', host, 'palette-note').setAttribute('role', 'status');
+    element('p', 'Click or drag a capability onto the canvas. A new node stays a local draft until its required inputs are connected and you review and save.', body, 'palette-note').setAttribute('role', 'status');
     canvas.addEventListener('dragover', event => { if (state.enabled && [...event.dataTransfer.types].includes('text/plain')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } });
     canvas.addEventListener('drop', event => {
       const data = event.dataTransfer.getData('text/plain'), index = data.startsWith(PREFIX) ? data.slice(PREFIX.length) : '';
