@@ -435,3 +435,20 @@ header.console-header { position: relative; min-height: var(--bar-height); }
 /* Header chip: authenticated but the last request could not reach the console (E-6). */
 #access-section.access-collapsed.access-unreachable #access-status { color: var(--warning-text, var(--text)); }
 #access-section.access-collapsed.access-unreachable #access-status::before { background: var(--warning); }
+
+/* Run page: one stepper, one primary action per state (R-6). */
+.run-stepper { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); margin: 0 0 var(--space-3); padding: 0; list-style: none; font-size: var(--font-help); color: var(--muted); }
+.run-stepper li { display: flex; align-items: center; gap: var(--space-2); }
+.run-step-number { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid var(--border); border-radius: 50%; font-size: var(--font-label); }
+.run-stepper li[aria-current="step"] { color: var(--text); font-weight: 600; }
+.run-stepper li[aria-current="step"] .run-step-number { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
+.run-stepper li[data-done] .run-step-number { border-color: var(--success); color: var(--success); }
+.run-next { max-width: none; margin: 0 0 var(--space-4); font-weight: 600; }
+.run-credentials { margin: var(--space-2) 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warning); background: var(--warning-bg); }
+.run-credentials[data-ready] { border-left-color: var(--success); background: transparent; }
+.run-operation { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.run-earlier { margin-top: var(--space-4); }
+.run-step[data-current] { border-color: var(--primary); }
+.quick-start { width: min(520px, calc(100vw - 32px)); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); color: var(--text); }
+.quick-start::backdrop { background: rgb(0 0 0 / 45%); }
+.quick-start h2 { margin-top: 0; }

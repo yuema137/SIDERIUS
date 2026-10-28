@@ -1,6 +1,6 @@
 /** First-use journey witness: the operator's real first use in the default (beginner) view,
  * real Chromium + real authoring API + temporary projects (workflow_editor_server), 1440x1100.
- * Home -> connect in the header banner -> Home "Start from a template" -> gallery, Blank
+ * Home -> connect in the header banner -> Workflow "Templates" -> gallery, Blank
  * workflow first -> module search focused -> `+` beside the unconnected output adds Implement
  * already wired -> drag + Tidy up (undoable, no overlap) -> Storage folder via "Create
  * external input" -> Save opens the confirmation step (Cancel, then Save version).
@@ -89,9 +89,11 @@ try {
     assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'The step closes after Save');
   };
 
-  // 3. Path A, build it yourself (first project, a one-module workflow): Home "Start from a
-  //    template" -> Blank workflow (first card) -> module search focused.
-  await page.locator('#home-start-template').click();
+  // 3. Path A, build it yourself (first project, a one-module workflow): Workflow "Templates"
+  //    -> Blank workflow (first card) -> module search focused. (Home now leads with Quick
+  //    start, witnessed by quick_start.mjs.)
+  await page.locator('nav a[href="#workflow"]').click();
+  await page.locator('#editor-template-open').click();
   const gallery = page.locator('#editor-template-gallery');
   await waitUntil(async () => new URL(page.url()).hash === '#workflow' && await gallery.evaluate(dialog => dialog.open), 'gallery');
   await waitUntil(async () => (await status()).includes('Opened supported'), 'first project');

@@ -73,7 +73,10 @@
     if (!value || typeof value.operations_store_id !== 'string' || !/^[0-9a-f]{32}$/.test(value.operations_store_id) || !Array.isArray(value.tasks)) {
       throw new Error('The console sent unreadable task choices.');
     }
-    storeId = value.operations_store_id;
+    if (storeId !== value.operations_store_id) {
+      storeId = value.operations_store_id;
+      window.dispatchEvent(new CustomEvent('console-store', {detail: {operationsStoreId: storeId}}));
+    }
     return value;
   }
   window.consoleSession = Object.freeze({request, choices, subscribe(listener) { listeners.add(listener); }, get connected() { return connected; }, get revision() { return revision; }, get reachable() { return reachable; }, get operationsStoreId() { return storeId; }});

@@ -945,9 +945,9 @@ It infers neither scientific success nor complete billing.
 
 | Route | Primary content and action | Secondary content (Settings-gated unless noted) |
 | --- | --- | --- |
-| `#home` | Hero (theme-matched logo + one sentence); entry cards **Start from a template** (opens the template gallery on Workflow), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** |
+| `#home` | Hero (theme-matched logo + one sentence); entry cards **Quick start** (`#home-quick-start`, see below), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** (the configured-task quick Prepare form; not a beginner entry, API unchanged for CLI/compatibility) |
 | `#workflow` | Page bar (title + dirty badge, project select, task chip, problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Task package and version (collapsed card below the frame); Exact Python changes, References, Advanced source, Version history, Refresh, canvas help, connection mappings (advanced); Details (developer) |
-| `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; captured resources (developer) |
+| `#run` | Stepper `#run-stepper` (Prepare · Review and launch · Follow in Monitor) and one next-step line `#run-next`; saved-version state; **1 · Prepare** entry `#run-entry[data-run-entry="saved-workflow"]` (**Check inputs** then **Prepare**); **2 · Review and launch** (**Review prepared run** then **Launch run**, inline `#capture-launch-reason`) | Back to workflow; **Run an earlier prepared run instead** (collapsed list); Check status now, operation UUIDs and captured resources (developer) |
 | `#monitor` | Recent operations; Status and logs; loop controls; results; token summary | Operation UUID form, Recorded example (advanced); operation facts, token table (developer) |
 
 `page-guidance.js` is presentation only and owns no request or draft state. It reads
@@ -964,6 +964,20 @@ Prepared run controllers keep their element IDs and behavior; their task loaders
 on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
+
+**Quick start** (`quick-start.js`): Home `#home-quick-start` routes to `#workflow` and
+opens `#quick-start-dialog`, whose **Task** select mirrors the editor's own
+`#editor-project` options (each project carries its own task and data references).
+**Open research loop** selects that project through the editor's ordinary project
+change (its pending-edits confirmation applies), waits for the saved source, then calls
+`editorTemplates.importById('single-research-loop')`, the gallery's existing import
+path: an unsaved draft, nothing written before Save. No task declares its own template
+yet, so that catalog entry is the default for every task. Rounds, stop conditions and
+training settings are then edited in the ordinary panel. The Run page's step-1 entry is
+one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
+handoff, so another entry can replace it. When this page created a preparation, the
+first observed `prepared` status opens it in step 2 once (a read-only `/select`); Review
+and Launch stay explicit.
 
 Until the canvas draws a capability card, the canvas panel shows the empty start state
 `#workflow-start-guide` (spec §7.2): title **Build your research loop**, one sentence from
@@ -1319,10 +1333,18 @@ receiving this signal. Restored, retried, conflicted or ambiguous requests never
 become dismissible through it. No operation-owner semantics or registry changes.
 
 `reusable-run.js` retains one exact launch intent in localStorage before POST and
-checks readback. Failure prevents POST. Pending intent is independent of current
-project/task/selection, so switching cannot overwrite it. Check/retry is explicit;
-reconnect never submits automatically. Completed or eligible initial refused intent
-requires explicit dismissal and storage readback confirmation. Monitor uses existing
+checks readback. Failure prevents POST. Pending intent is keyed by store and project
+(below), so switching task/selection cannot overwrite it. While the Run view is
+visible and connected, both Run controllers read their retained operation every 2 s
+(paused while the tab is hidden) and once on load, reconnect and Run entry; polling
+stops on release, on an initial refusal and on `unknown_operation` (Retry restarts
+it). `reusable-run.js` also reads the retained preparation's status on load/connect so
+Launch eligibility never waits for a manual check (R-2); a disabled Launch shows its
+first reason inline in `#capture-launch-reason`. Retry is the only re-dispatch and is
+offered only for an unresolved or unknown outcome; reconnect never submits.
+Completed or eligible initial refused intent requires explicit dismissal and storage
+readback confirmation. Operation sentences come from `operation-outcome.js`
+(`operationOutcome.sentence`), shared with Monitor. Monitor uses existing
 Slow-control status/log/token routes and native accepted/rejected states.
 
 Editor projects/source state are exposed through a read-only projection/event:
@@ -1396,16 +1418,27 @@ Editor projection adds `reusableSource` and `saving`. Generation/project/session
 fences invalidate stale task/review responses. Pending intent survives form/source
 changes. Successful preparation is not automatic candidate dispatch.
 
-`reusable-intents.js` coordinates only the candidate and preparation keys:
-`siderius.reusable-candidate.v1` (compatible payload) and
-`siderius.reusable-preparation.v1` (version/origin/project/exact NewRunIntent).
+`reusable-intents.js` coordinates only the candidate and preparation records, keyed
+by the opaque operations store id from `/api/choices` and the editor project:
+`siderius.reusable-{candidate,preparation}.v2/<operations_store_id>/<project>`
+(payload unchanged: version/origin/project/exact intent). A record of another store or
+project is never read, checked or blocking here (`eligible()` covers only the current
+pair). A legacy per-origin `…v1` record whose `project` equals the current project is
+moved once under the current store's key on first context; it is then checked
+against this store like any other record. Without a known store id and project no
+record is read and Prepare/Launch stay disabled.
 Before dispatch/retry/state update/dismissal, stored serialization must equal the
 retained record. Readback failure prevents POST. Release evidence is in memory,
 requires matching kind/UUID/request digest, and is cleared by storage events.
 Completed/operation_failed plus exited process, or confirmed spawn_failed, permits
 release; finishing/unknown/alive does not. Only initial live pre-submit refusal
-permits refused-intent dismissal. Restored/retried/404/transport outcomes retain
-identity. Explicit removal rereads identity and confirms absence. This is advisory
+permits refused-intent dismissal. Restored/retried/404 `not_found`/transport
+outcomes retain identity. **Forget** (R-3): `dispatching(kind, record)` is recorded
+before every POST of the record in this page; a later status read answering typed
+`unknown_operation` (`observeUnknown`) makes the record forgettable, so Forget is
+offered only after this page's own Retry (or first dispatch) was followed by an
+unknown read. Forget asks for confirmation, is never offered while the operation is
+known and unreleased, and only removes the browser record. Explicit removal rereads identity and confirms absence. This is advisory
 coordination, not atomic localStorage locking; the native store serializes effects.
 
 An inspected released preparation history may coexist with candidate launch.

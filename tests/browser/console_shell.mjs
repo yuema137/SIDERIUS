@@ -145,7 +145,7 @@ try {
   assert.equal(await page.locator('#access-connected').isHidden(), true);
   assert.equal(await page.locator('#monitor-button').isDisabled(), true);
 
-  assert.equal(await page.evaluate(() => window.pollTimers), 2, 'Only the status poll and one reachability probe (started while unreachable)');
+  assert.equal(await page.evaluate(() => window.pollTimers), 4, 'Monitor status poll, Run preparation and launch polls (idle without a retained intent), and one reachability probe');
   assert.equal(requests.filter(item => item.path === '/api/operations').length >= 1, true);
   assert.deepEqual(faults, []);
   console.log('PASS: compact connection, operation list opens Status and logs, rounded scores, journey-first Home, aligned shell');
