@@ -5,9 +5,9 @@
   // A mouse press never focuses a card (pointerdown preventDefault), and selecting re-renders:
   // the clicked heading is focused after that render so Delete and Alt+arrows act on it.
   let refocus = null;
-  // View-only state (zoom, scroll, arranged view, expanded optional inputs). It is
+  // View-only state (zoom, scroll, expanded optional inputs). It is
   // kept per opened graph and never reaches a document, so viewing never changes source.
-  let view = {key: null, scale: 1, fitPending: false, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
+  let view = {key: null, scale: 1, fitPending: false, scroll: null, expanded: new Set(), adapters: new Set()};
   const CARD_GAP = {x: 135, y: 90};
   // Fit to view never goes below this zoom (text stays >= ~9px at the 12px label size); larger
   // graphs scroll inside the viewport. Manual zoom out still reaches 40%.
@@ -115,10 +115,9 @@
     });
     viewport.dataset.outsideCards = String(outside.length);
     const zoom = host.querySelector('.circuit-zoom'); if (zoom) zoom.textContent = `${Math.round(view.scale * 100)} %`;
-    note.textContent = (outside.length
-      ? `${outside.length} of ${cards.length} capabilities are partly outside the view. Scroll the canvas or use Fit to view.`
-      : `All ${cards.length} capabilities are in view.`) +
-      (view.arranged ? ' Arranged view: display only; the saved positions are unchanged.' : '');
+    note.textContent = outside.length
+      ? `${outside.length} of ${cards.length} modules are partly outside the view. Scroll the canvas or use Fit to view.`
+      : `All ${cards.length} modules are in view.`;
     // Edge shadows mark each side that still has content to scroll to.
     const shadows = [];
     if (viewport.scrollLeft > 1) shadows.push('inset 14px 0 12px -12px var(--edge)');
@@ -159,7 +158,7 @@
       const output = [...world.querySelectorAll('[data-output]')].find(value => value.dataset.node === source.node);
       if (!output) continue;
       const route = geometry.route(point(output), point(input), boxes, cards.indexOf(output.closest('.circuit-card')), cards.indexOf(input.closest('.circuit-card')), occupied);
-      if (!route) { say('Some wires could not be routed around overlapping or crowded cards. Use Arrange view (display only) or Fit to view, or move cards; the connection list retains every binding.'); continue; }
+      if (!route) { say('Some wires could not be drawn around overlapping cards. Tidy up, or move the cards apart.'); continue; }
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', geometry.path(route)); path.classList.add('circuit-wire');
       if (output.dataset.contract) contracts.decorate(path, output.dataset.contract);
@@ -268,17 +267,19 @@
     value.classList.add('icon-button'); value.setAttribute('aria-label', label); value.dataset.tipLabel = label;
     element('span', label, value, 'sr-only'); return value;
   };
-  // Tidy up: one undoable layout edit (editor.js move) on the 16px grid; the view refits.
+  // Pipeline position of a module (Literature/Interpret -> Propose -> Implement -> Validate -> Train & tune).
+  const STAGES = ['literature', 'interpretation', 'proposal', 'implementation', 'validation', 'tuning'];
+  const stageOf = id => { const index = STAGES.indexOf(projection.document.definition.nodes.find(node => node.id === id)?.capability); return index < 0 ? STAGES.length : index; };
+  // Tidy up (the one layout tool, red-team A-1): one undoable layout edit (editor.js move) on
+  // the 16px grid; the view refits.
   function tidyUp() {
     if (!projection?.document || !projection.enabled || projection.allowMove === false) return;
     const cards = [...host.querySelectorAll('.circuit-card')];
     const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
-    const placed = geometry.tidy(projection.document.definition.nodes, size);
-    view.arranged = false; view.fitPending = true; view.scroll = null;
+    const placed = geometry.tidy(projection.document.definition.nodes, size, undefined, undefined, stageOf);
+    view.fitPending = true; view.scroll = null;
     actions.move([...placed].map(([node, position]) => ({node, ...position})), 'Tidy up layout');
   }
-  // Re-render the current projection after a view-only change (arranged view).
-  const rerender = () => { if (host && projection) render(host, projection, actions); };
   function toolbar(parent, value) {
     const bar = element('div', '', parent, 'circuit-toolbar');
     bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Canvas view');
@@ -287,11 +288,6 @@
     iconButton(bar, 'Zoom in', 'circuit-zoom-in', () => applyScale(Math.min(1, Math.round((view.scale + 0.1) * 10) / 10)), 'zoom-in');
     iconButton(bar, 'Actual size', 'circuit-zoom-reset', () => applyScale(1), 'maximize');
     iconButton(bar, 'Fit to view', 'circuit-fit', fit, 'scan');
-    const arrange = iconButton(bar, view.arranged ? 'Show saved layout' : 'Arrange view (display only)', 'circuit-arrange', () => {
-      view.arranged = !view.arranged; view.fitPending = true; view.scroll = null; rerender();
-    }, 'workflow');
-    arrange.setAttribute('aria-pressed', String(view.arranged));
-    arrange.disabled = !value.document;
     const check = iconButton(bar, 'Check the loop', 'circuit-check', checkLoop, 'repeat-2');
     check.disabled = !value.document;
     const tidy = iconButton(bar, 'Tidy up', 'circuit-tidy', tidyUp, 'layout-grid');
@@ -302,7 +298,7 @@
     const focus = refocus || (container.contains(document.activeElement) ? document.activeElement.id : null); refocus = null;
     const key = `${value.viewKey ?? ''}|${(value.document?.definition.nodes || []).map(node => node.id).join(',')}`;
     const previous = container.querySelector('.circuit-viewport');
-    if (view.key !== key) view = {key, scale: 1, fitPending: true, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
+    if (view.key !== key) view = {key, scale: 1, fitPending: true, scroll: null, expanded: new Set(), adapters: new Set()};
     else if (previous && !view.fitPending) view.scroll = {left: previous.scrollLeft, top: previous.scrollTop};
     window.editorCircuitWalk?.stop();
     host = container; projection = value; actions = callbacks; cancel(false); selectedWire = null; host.replaceChildren();
@@ -322,9 +318,8 @@
     const saved = new Map(value.document.positions.map(p => [p.node, p]));
     const cards = [];
     // A move persists every displayed position, so later sources never mix stored and fallback layouts.
-    // Moving a card in the arranged view adopts the displayed layout as an ordinary local edit.
     const layout = (moved, x, y) => cards.map(card => card.dataset.node === moved ? {node: moved, x, y} : {node: card.dataset.node, ...card._position});
-    const move = positions => { view.arranged = false; actions.move(positions); };
+    const move = positions => actions.move(positions);
     for (const node of value.document.definition.nodes) {
       const card = element('article', '', world, 'circuit-card'); card.dataset.node = node.id; card.dataset.capability = node.capability;
       const heading = element('button', '', card, 'editor-node');
@@ -418,8 +413,7 @@
     }
     // Card size comes from the rendered cards (editor.css owns it), never a copied constant.
     const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
-    // The arranged view uses the same placement with no stored positions: display only.
-    const placed = geometry.place(value.document.definition.nodes, view.arranged ? new Map() : saved, size, CARD_GAP);
+    const placed = geometry.place(value.document.definition.nodes, saved, size, CARD_GAP);
     for (const card of cards) card._position = placed.get(card.dataset.node);
     const ox = 60 - Math.min(0, ...cards.map(card => card._position.x)), oy = 60 - Math.min(0, ...cards.map(card => card._position.y));
     for (const card of cards) { card.style.left = card._position.x + ox + 'px'; card.style.top = card._position.y + oy + 'px'; }
@@ -430,9 +424,9 @@
     else if (view.scroll) { viewport.scrollLeft = view.scroll.left; viewport.scrollTop = view.scroll.top; }
     updateVisibility();
     const overlapping = geometry.overlaps(cards.map(card => cardBox(card)));
-    if (!view.arranged && overlapping.length) {
-      const names = overlapping.map(([a, b]) => `${cards[a].dataset.node} and ${cards[b].dataset.node}`).join('; ');
-      say(`Saved card positions overlap (${names}). Arrange view shows a non-overlapping layout without changing the saved source; moving a card there adopts that layout as a reviewable edit.`);
+    if (overlapping.length) {
+      const names = overlapping.map(([a, b]) => `${capabilityOf(cards[a].dataset.node)} and ${capabilityOf(cards[b].dataset.node)}`).join('; ');
+      say(`Some cards overlap (${names}). Tidy up arranges them in columns; Undo puts them back.`);
     }
     if (focus) document.getElementById(focus)?.focus({preventScroll: true});
   }

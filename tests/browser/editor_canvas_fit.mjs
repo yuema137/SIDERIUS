@@ -2,11 +2,11 @@
  * at 1440x900 (UX walkthrough 2026-10-27: 2 of 5 cards off-screen, PROPOSE cut off,
  * overlapping interpretation cards, an empty "Task package and version" box).
  * Fails if: any of the five cards lies outside the canvas or the window after open;
- * Fit, zoom or Arrange view sends a POST, dirties the editor or changes saved bytes;
+ * Fit or zoom sends a POST, dirties the editor or changes saved bytes;
  * an optional unbound input is drawn as its own card row instead of inside the
  * "N optional inputs" summary, the summary cannot expand, or its state is lost when a
  * selection re-renders the canvas; the interpretation fixture renders overlapping cards
- * or an unrouted wire; an overlapping saved layout offers no display-only way out; a
+ * or an unrouted wire; an overlapping saved layout offers no undoable Tidy up way out; a
  * zoomed pointer drag records screen pixels instead of document pixels; or the task
  * panel shows no state text (before connect, light and dark).
  * Env: EDITOR_PYTHON (this checkout .venv/bin/python), CONSOLE_PLAYWRIGHT_MODULE,
@@ -206,26 +206,25 @@ try {
   await page.screenshot({path: join(evidence, 'interpretation-fit-1440x900.png')});
   assert.equal(await readFile(metadata.interpretation_source, 'utf8'), interpretationBytes);
 
-  // 5. An overlapping saved layout: the canvas says so and Arrange view is a display-only way out.
+  // 5. An overlapping saved layout: the canvas says so and Tidy up (the one layout tool,
+  // red-team A-1) is the way out: one undoable local edit, nothing posted or saved.
   await writeFile(metadata.five_node_partial_source, overlapping);
   const overlapBytes = await readFile(metadata.five_node_partial_source, 'utf8');
   const saved = byNode(parsed(metadata.five_node_partial_source).positions);
   await open('five_node_partial');
-  assert.match(await page.locator('.circuit-message').textContent(), /overlap.*Arrange view/);
+  assert.match(await page.locator('.circuit-message').textContent(), /overlap.*Tidy up/);
+  assert.equal(await page.locator('#circuit-arrange').count(), 0, 'no second, display-only layout tool');
   posts.length = 0;
-  const arrange = page.locator('#circuit-arrange');
-  await arrange.click();
-  assert.equal(await arrange.getAttribute('aria-pressed'), 'true');
-  await assertDisjoint('arranged view');
-  await assertWired('arranged view');
-  assert.match(await page.locator('.circuit-view-note').textContent(), /display only/);
-  await page.locator('#circuit-arrange').click();
-  assert.equal(await page.locator('#circuit-arrange').getAttribute('aria-pressed'), 'false');
+  await page.locator('#circuit-tidy').click();
+  await assertDisjoint('tidied layout');
+  await assertWired('tidied layout');
+  assert.equal(await dirty(), true, 'Tidy up is an ordinary undoable edit');
+  await page.locator('#editor-undo').click();
   const shown = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.circuit-card')].map(element => [element.dataset.node, {...element._position}])));
-  assert.deepEqual(shown, saved, 'Leaving Arrange view shows the saved positions again');
+  assert.deepEqual(shown, saved, 'Undo puts the saved positions back');
   assert.deepEqual(posts, []);
   assert.equal(await dirty(), false);
-  assert.equal(await readFile(metadata.five_node_partial_source, 'utf8'), overlapBytes, 'Arrange view never changes saved bytes');
+  assert.equal(await readFile(metadata.five_node_partial_source, 'utf8'), overlapBytes, 'Tidy up never writes the file by itself');
 
   // 6. A zoomed pointer drag records document pixels (screen delta / zoom).
   await page.locator('#circuit-fit').click();
