@@ -155,6 +155,7 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | POST /api/preparations | PrepareSelection → OperationHandle, 202 |
 | GET /api/preparations/{UUID}/review | PreparedReview |
 | POST /api/candidates | LaunchSelection → OperationHandle, 202 |
+| GET /api/operations | `limit=1..200` (default 50) → `OperationListView`, read-only; see "Operation list" |
 | GET /api/operations/{UUID} | StatusView |
 | GET /api/operations/{UUID}/tokens | CandidateTokenSnapshot, read-only fixed native projection |
 | GET /api/operations/{UUID}/graph-results | GraphResultsView, read-only per-body native tuning report projection |
@@ -317,6 +318,11 @@ bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning
 "Skipped, not run: <node> (<reason>), ...". No cross-body score or ordering is
 computed or displayed; route decision details (observable values, case) are
 B1-PR6 monitor work.
+Non-integer numbers are display-rounded by `number-format.js` (up to four
+decimals; four significant digits for magnitudes below 1e-3 or from 1e9); the
+exact reported value stays in the cell's tooltip. Stop-condition values in the
+loop state are rounded the same way, with exact values in its tooltip. Stored and
+transported values are unchanged.
 
 Witnesses: `test_console_graph_results_reuse_native_run_report_without_paths`
 (native graph record vs `project_run`, no path, failed stage has no score, changed
@@ -421,6 +427,53 @@ its per-body results once completed. A continued predecessor shows "Continued by
 projections in `candidate_worker/test_loop_resume.py` (real two-segment store), and
 `tests/browser/loop_controls.mjs` (stubbed API).
 
+## Stop run (operator cancel)
+
+`CandidateConsole.cancel_operation(UUID)` delegates once to
+`candidate_operations.request_cancel`, which owns kind/terminal/liveness admission,
+idempotency, the write-once `cancel.json` intent and the child-enforced group
+termination ([operations contract](../candidate_operations/candidate-operations-contract.md#cancel-an-active-candidate-operation)).
+HTTP POST `/api/operations/{UUID}/cancel` passes the ordinary mutation boundary
+and accepts only the empty JSON object (`OperationCancelSelection`). Success returns
+`OperationCancelAcknowledgement` `{"operation_id": UUID, "outcome": "requested"}`:
+recorded, never stopped. A repeated POST replays the first request and returns 200
+even after the run became terminal. Refusals: unknown operation 404; `kind`
+(not a candidate operation), `terminal` (already finished; nothing stopped),
+`starting` (no process identity yet; retry shortly) and `not_running` (process
+gone; nothing to stop) 409 with route-local fixed messages in
+`OPERATION_CANCEL_REFUSALS`; `integrity` and others 409 with the generic message.
+Native detail and paths are never echoed.
+
+`StatusView.cancel_requested` and `StatusView.cancellable` mirror the snapshot
+fields and are omitted when false, so existing status bytes are unchanged unless a
+new cancel is possible (then `cancellable: true` is added).
+`cancellable` is the single authority for offering Stop run; the page keeps no
+kind or state list of its own.
+
+Browser: `operation-stop.js` owns `window.operationStop.mount(prefix)`, which
+binds `#<prefix>-group`, `#<prefix>-button` and `#<prefix>-status` and returns
+`render(status | null)`. It is mounted twice and draws only from statuses the page
+already reads (no extra polling): Slow control (`operation-stop`, every monitor
+poll) and the Run page retained candidate intent (`capture-stop`, on Check status
+or launch). **Stop run** is shown only while the latest status has `cancellable`
+true and no acknowledgement is held. A click opens `window.confirm` stating that the
+run ends immediately, cannot be undone or resumed, produces no candidate result,
+keeps files written so far in the run folder, and that a model call in progress
+may still be billed without appearing in the token report; declining sends nothing. Accepting disables the button for the pending request, so
+one click sequence issues one POST. Status text: "Sending Stop…", then "Stopping
+the run…" until a receipt; native `cancelled` reads "Run stopped. Files written so
+far stay in the run folder; no candidate result is produced."; a receipt with another status after a request reads "Stop was
+requested, but the run finished first."; a refusal reads "Stop was not recorded:
+<message>" (a network failure adds that retrying is safe). While the session is
+disconnected or the page's latest poll failed (`observation(true)` from `app.js`),
+the line is prefixed "Last observed:"; the next successful render clears it. State
+resets when another operation is selected. While `cancel_requested` is true the loop **Stop at next
+boundary** and **Pause at next boundary** controls are hidden, and a `cancelled`
+loop receipt reads "Research loop stopped by you before it finished. Files written
+so far stay in the run folder; this run cannot be resumed." Witnesses:
+`tests/unit/tools/candidate_console/test_operation_cancel.py` and
+`tests/browser/operation_stop.mjs` (stubbed API).
+
 ## Recorded candidate examples
 
 `ConsoleConfig.recorded_examples` defaults to empty. The authenticated
@@ -447,7 +500,7 @@ refuses recovery/output-root overlap. No source is required when selection is
 absent. `CandidateConsole` retains only native operation policy; `editor.py`
 constructs separate `WorkflowAuthoring` services and routes.
 
-`/editor.html`, `/editor.js` and `/editor.css` are static assets. The editor shares
+`/editor.html`, `/editor.js`, `/editor.css` and the editor modules named below are static assets (`app.py` serves an exact name map). The editor shares
 the persistent shell and memory-only session with the operation monitor; its
 source/review policy remains owned by `editor.js`. `GET /api/editor/projects`
 returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
@@ -472,9 +525,54 @@ Neither owns a graph, catalog, schema, request or execution engine. Type-compati
 rebinding uses exact existing server BindingChoices. Circuit and inspector call
 one editor.js mutation; dragging writes positions through that same draft owner.
 Bindings/profile/options are not inferred from card order or geometry. Request
-protocols display as adaptor labels inside their actual consumer, not extra nodes.
+protocols display inside their actual consumer, not as extra nodes: a protocol
+node's card carries a `.circuit-adapter` chip ("Mapping: <protocol id>", coloured by
+the protocol's output contract) below its output row, where upward port tooltips
+(which take no pointer events) cannot cover it, that expands, per card and remembered across
+re-renders of the same graph, into one row per inventory argument
+(`<source> → <argument>` with the socket contract) and the native owner function
+that maps them into `protocol_mapping.output_contract`. External-request nodes have
+no chip.
+
+Port legibility is presentation keyed on the server-sent contract id
+(`editor-contract-presentation.js`, styles in `editor-contract-presentation.css`).
+A table gives each catalog contract a readable name, a colour token
+(`--contract-<colour>`, defined for both themes) and a socket shape (`circle` for
+`<capability>.input`, `square` for `<capability>.output`, `diamond` for
+`optional.*`, `capsule` for other contracts); a unit census binds the table to
+`CONTRACTS` and requires distinct (colour, shape) pairs and names. An id missing
+from the table (a newer server catalog) gets a stable hash-derived token. Port
+pills show the readable name (the id stays in the tooltip), wires take the colour of
+the result they carry, required inputs and outputs have filled sockets and optional
+inputs hollow ones, and a closed "Port types (N)" legend lists the contracts present
+in the opened graph. The table never decides compatibility. Connection preview
+reads only the server's `port_inventory` choices: hovering an output highlights
+offered inputs and dims the rest without selecting; pressing an output and releasing
+over an input binds exactly as output-then-input clicks do. A refused or dimmed
+input states `<input> expects <socket contract> (<name>), but <source> provides
+<output contract> (<name>)`, or that the server does not offer the source although
+both contracts match.
 External source chips remain inspector bindings. Omitted optional ports, argument
 creation/deletion and new nodes are not graphical controls in this slice.
+Required and bound inputs always render as card rows; optional unbound inputs fold
+into one `.circuit-optional` disclosure per card ("N optional inputs"), expandable
+and remembered across re-renders of the same graph. While an output is pending,
+the summary is highlighted when a folded input is type-compatible.
+
+Canvas view state (zoom, scroll, Arrange view, expanded optional rows) is owned by
+`editor-circuit.js`, keyed by project and node IDs, and never reaches a document:
+viewing sends no request and cannot change saved bytes. The canvas is a CSS
+`transform: scale()` of the world, with positions kept in document pixels
+(drags divide screen deltas by the zoom). On opening a graph it fits once
+(`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
+canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size and
+Arrange view. The canvas grows with its zoomed content up to
+`clamp(420px, 100vh - 200px, 860px)`, shows edge shadows toward unseen content,
+and a note states how many capabilities are partly outside the view. Arrange view
+displays `geometry.place` with no stored positions (display only); a move made
+there records the displayed layout as an ordinary local edit and leaves Arrange
+view. Overlapping saved cards (`geometry.overlaps`) and unrouteable wires are
+reported with that display-only way out.
 
 The workflow-level Research loop panel (`editor-loop-controls.js`, view only;
 `editor.js` owns the draft) shows "No research loop declared" with an Add action
@@ -503,8 +601,31 @@ from the captured declaration, and the launch summary states "up to N iterations
 or "none (one workflow body)", followed by "stops early when …" for each declared
 stop condition.
 
+The Selection inspector groups one node's parameters (`editor-node-parameters.js`,
+view only; `editor.js` owns every mutation): **Inputs** (one binding select per
+socket, required/optional and bound state in its label; a required unbound one is
+marked `.field-problem`), **Training settings** on a tuning node (a
+`#editor-training-settings` disclosure, open on selection, listing every
+`TrainingInspector` control with its mode select, value, a per-field "Reset to
+default" that removes the authored key, a `Default` / `Modified` / `Changed, not
+saved` badge against the native default and the loaded source, and inline help
+from `TrainingControl.help` plus the native preview), **Loop and stop settings**
+on a feedback endpoint (a summary and a button to the workflow-level Research loop
+panel) and **Model hyperparameters** on a tuning node (read-only: they are owned
+by the task manifest, shown as `definition.task.manifest` and any task binding;
+no control edits them). A card whose server inventory has a required unbound input
+gets `.has-required-unbound` (red outline/glow) and a `.circuit-problem-badge`.
+`#editor-problems` (`editor-problems.js`, beside Review) lists "N problems" from
+server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
+(`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
+focuses the inspector select for `field` (and marks the canvas input
+`.problem-focus`); an unlocated item opens Advanced → Source at its line. The
+list never enables Review: Review remains disabled for an incomplete draft.
+Witness: `tests/browser/required_defaults.mjs`.
+
 Socket/drag gestures send no requests. Source editing, disconnection, conflict,
-saving and invalid training drafts gate mutations; stale rendered projections
+saving and invalid training/loop drafts gate mutations (invalid drafts do not block
+capability selection, which is navigation); stale rendered projections
 cannot mutate a replacement document. Required whole-declaration checks remain
 Review/Save, with execution-profile/alias admission owned by separate native
 preparation. Type-compatible highlights do not claim runtime compatibility. Existing
@@ -549,7 +670,16 @@ node tests/browser/workflow_editor.mjs
 `tests/browser/capability_layout.mjs` (same variables) opens a five-node authored
 loop and checks paper headings, no generic card, pairwise-disjoint cards in light
 and dark themes, and full-layout persistence for pointer and keyboard moves;
-`tests/browser/circuit_geometry.mjs` checks fallback placement without a browser.
+`tests/browser/circuit_geometry.mjs` checks fallback placement, fit-scale bounds
+and overlap detection without a browser. `tests/browser/editor_canvas_fit.mjs`
+(same variables) checks at 1440x900 that all five cards are in view after
+fit-on-open, that view controls send nothing and keep bytes, folded optional
+inputs, the disjoint fully wired interpretation fixture, Arrange view on an
+overlapping layout, zoomed drag arithmetic and a non-empty task panel. `tests/browser/port_legibility.mjs` (same variables) opens the
+eight-node families fixture and checks one distinct colour+shape token and readable
+pill name per contract, filled/hollow sockets, wire colour, the legend, hover
+preview (highlight/dim without selecting), the two-contract refusal, the mapping
+chip's field rows and drag-to-connect, without writing the source.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
@@ -581,6 +711,33 @@ existing admissions fail closed. Clients must retain the same UUID on ambiguous
 responses and may inspect it through the existing monitor.
 
 
+## Operation list
+
+`GET /api/operations` lists operations admitted by this console's own operation
+store, most recently admitted first, at most `limit` rows. The owner is
+`tools.candidate_operations.list_operations`: it enumerates only
+`{state_root}/operations/<UUID>` entries, verifies each through the same
+`load_record` path as a single read, sorts by the record's `admitted_at`, and
+projects at most `limit` rows through `read_operation`. It creates nothing,
+claims nothing, and never launches. A non-canonical entry name or a record that
+fails verification (unreadable, invalid JSON, identity or configuration
+mismatch) is skipped and counted in `unreadable`, never guessed into a row. At
+most 4096 directory entries are examined per request; a larger store reports
+`incomplete=true`, and other operations remain readable by UUID.
+
+`OperationListView.operations[]` carries `operation_id`, `kind`, `run_name`,
+`project_id` (the reviewed editor project, when recorded), `admitted_at`,
+`state`, `native_status` and, for authored loops, the same `LoopStatusView` as
+status. Receipts, digests, workspace/log/output paths and credentials are not
+part of the projection.
+
+Slow control: `operations-list.js` renders the list as links to
+`#slow-control/<UUID>`, so selecting a row uses the existing route and Status and
+logs owner. It loads once per connection (session revision) when any Slow control
+route is shown while connected, including `#slow-control/<UUID>`, again whenever the
+bare `#slow-control` route is entered, and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
+operation for live status). Manual UUID entry remains available.
+
 ## Persistent views, routing and session
 
 `index.html` owns a single document with persistent Home, Workflow and Slow control
@@ -606,7 +763,11 @@ Theme enum, optional last-operation UUID and the versioned exact reusable launch
 intent are persisted. The launch intent contains only origin/project navigation
 context, retained preparation identity, request digest and operation UUID; never
 source bytes, native requests or credentials.
-Reload/new tab requires Connect again.
+Reload/new tab requires Connect again. Once connected, the access card collapses
+on every view to one status line with **Change token** (reopens the form; the
+current connection stays until a new Connect) and **Disconnect console** (clears the
+in-memory token, bumps the revision and publishes a disconnected state, exactly as a
+401 does). Any disconnect reopens the form.
 
 Connect validates through the explicit deep-link operation GET, otherwise choices
 GET. Operation 404/409 means unavailable data and does not reject valid access.
@@ -621,6 +782,12 @@ reconnect restart for the new revision without replacing a loaded pending draft.
 Editor projects load only on Workflow entry. Choices/project failures remain local;
 known-operation reads need neither task choices nor editor configuration. The one
 existing visible-document two-second polling loop retains its cursor/epoch owners.
+
+Home leads with the workflow journey (open the workflow, edit and review, prepare
+a new run, launch and monitor) and its **Open workflow** action. The native chain
+and configured-task flows follow under **Advanced**. All views share one shell:
+a compact header (title, about, theme), navigation and content aligned on one
+left edge, up to 1920px wide.
 
 Home's configured-task flow is a secondary disclosure independent of the editor
 selection. Prepared workspace, identity, routes, limits, devices/network and
@@ -909,6 +1076,13 @@ are present. Empty choices preserve ordinary unbound editing. This inert GET
 does not inspect files, compose/import tasks or start native observations; internal
 resource paths/settings and credentials are absent. Metadata is configured intent,
 not verification of current task contents or execution readiness.
+
+The Task package and version panel is always visible and never empty: it states
+the saved binding (`This workflow uses task package …, version …`) or that the
+workflow is unbound, then either the version selector with Update workflow
+references (when choices exist) or `#editor-task-unavailable`, which explains that
+no configured task declares `task_revision` and links the README's "Bind a task
+version". Refresh task choices is always present.
 
 Workflow builder shows saved binding separately and starts with no task selection.
 Users explicitly select a choice (or click the unique matching saved-choice action).

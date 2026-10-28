@@ -13,7 +13,14 @@ from core.seeding import RunSeedBinding, admitted_run_seed
 from execute_tools.impl_attempts import impl_attempt_dir
 from tools.workflow_preview.files import observe_file
 from tools.workspace_sandbox.profile import SandboxProfile
-from tools.workspace_sandbox.runner import ExecutionResult, SpawnObserver, run, run_observed
+from tools.workspace_sandbox.runner import (
+    CancelProbe,
+    ExecutionResult,
+    SpawnObserver,
+    SupervisionOptions,
+    run,
+    run_observed,
+)
 
 from .admission import admit_input_paths
 from .layout import candidate_proposal_dir
@@ -49,6 +56,8 @@ def reconcile(
         child = CandidateRunReceipt.model_validate_json(
             read_graph_control(child_path) if graph_request is not None else child_path.read_bytes()
         )
+        if child.status == "cancelled":
+            raise ValueError("only supervision records cancellation")
         for name in RECEIPT_IDENTITY_FIELDS:
             if getattr(child, name) != getattr(initial, name):
                 raise ValueError(f"child receipt changed {name}")
@@ -101,6 +110,7 @@ def launch_candidate(
     invocation_id: UUID | None = None,
     run_seed: RunSeedBinding | None = None,
     on_sandbox_spawn: SpawnObserver | None = None,
+    cancel_requested: CancelProbe | None = None,
 ) -> CandidateRunReceipt:
     """Run precisely one chain; failures preserve the claimed workspace.
 
@@ -109,6 +119,8 @@ def launch_candidate(
     generates one. Either way the initial receipt records it before any node runs.
     ``on_sandbox_spawn`` receives the sandbox PID before the chain is awaited (the
     host reservation ledger binds it); omitted, the launch is unchanged.
+    ``cancel_requested`` is polled while the sandbox runs; when it fires the
+    sandbox group is terminated and the receipt status is ``cancelled``.
     """
     request = CandidateRunRequest.model_validate_json(request.model_dump_json())
     seed = admitted_run_seed(request.run_seed, run_seed)
@@ -174,7 +186,11 @@ def launch_candidate(
             request.read_only,
         )
         argv = [sys.executable, "-m", "tools.candidate_worker.child", str(control / "request.json")]
-        observer = {} if on_sandbox_spawn is None else {"on_spawn": on_sandbox_spawn}
+        observer: SupervisionOptions = {}
+        if on_sandbox_spawn is not None:
+            observer["on_spawn"] = on_sandbox_spawn
+        if cancel_requested is not None:
+            observer["cancel_requested"] = cancel_requested
         if definition.loop is not None:
             observed_result = run_observed(profile, argv, **observer)
             publish_bytes_write_once(

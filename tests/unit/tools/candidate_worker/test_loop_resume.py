@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from core.runtime_control.process_group import GroupCleanup, GroupObservation
 from tools.candidate_operations import (
     CandidateLoopResumeOperation,
     CandidateLoopResumeRequest,
@@ -41,7 +42,15 @@ def process_segments(monkeypatch):
 
     operations = []
 
-    def observed(profile, argv):
+    def observed(profile, argv, *, cancel_requested=None, **_supervision):
+        # Like the runner, poll a supplied probe first: a fired probe ends the segment as
+        # cancelled before any body runs. Without a recorded intent the probe is False.
+        if cancel_requested is not None and cancel_requested():
+            return ObservedExecutionResult(
+                execution=ExecutionResult(status="cancelled", returncode=-15, elapsed_seconds=0),
+                direct_child_reaped=True,
+                cleanup=GroupCleanup(required=False, final=GroupObservation(status="absent")),
+            )
         pid = os.fork()
         if pid == 0:
             try:
@@ -669,6 +678,81 @@ def test_resumed_segment_reports_run_total_tokens_from_both_segments(
     ] == [("openai", "fixture-model", all_calls, 11 * all_calls, 2 * all_calls, 13 * all_calls)]
     root = read_operation_tokens(config, first_id)
     assert segment.model_dump(exclude={"observed_at"}) == root.model_dump(exclude={"observed_at"})
+
+
+def test_cancel_reaches_resumed_segment_and_reads_back_trace_less(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """Fails if the operation child stops passing its cancel probe to a resumed segment's
+    supervisor (the resumed body would run to completion), or if a trace-less ``cancelled``
+    continuation receipt cannot be read back through ``read_segment`` as a verified,
+    unresumable terminal."""
+    from tools.candidate_operations import child
+    from tools.candidate_operations.cancel import CANCEL_FILE
+    from tools.candidate_operations.files import publish
+    from tools.candidate_operations.models import CancelRequest
+    from tools.candidate_operations.store import now, operation_path
+    from tools.candidate_worker import training
+
+    request = loop_request(prepared, final_iteration=2)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    first_id, next_id = uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_after_body_one(self, value):
+        output = real_tune(self, value)
+        if "iteration_001" in value.storage.local.workspace:
+            request_loop_pause(config, first_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_after_body_one)
+    # Forked operation children inherit this: only the resumed segment's probe fires.
+    real_probe = child.cancel_probe
+    monkeypatch.setattr(
+        child,
+        "cancel_probe",
+        lambda path, record: (
+            (lambda: True) if record.submission.request_id == next_id else real_probe(path, record)
+        ),
+    )
+    submit_operation(
+        config, CandidateOperation(request_id=first_id, request=request), launch_environment=env
+    )
+    process_segments()
+    review = review_loop_resume(config, first_id)
+    submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=first_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment=env,
+    )
+    process_segments()
+    unvouched = read_operation(config, next_id)
+    assert (unvouched.state, unvouched.reason) == ("unknown", "integrity_failure"), unvouched
+    publish(
+        operation_path(config, next_id) / CANCEL_FILE,
+        CancelRequest(
+            operation_id=next_id, request_digest=unvouched.request_digest, requested_at=now()
+        ),
+    )
+    second = read_operation(config, next_id)
+    assert second.state == "completed" and second.cancel_requested, second
+    assert second.receipt is not None and second.receipt.status == "cancelled"
+    assert second.receipt.loop_trace is None and second.receipt_digest
+    workspace = Path(second.receipt.workspace)
+    assert not (workspace / "candidate_run" / "iteration_002").exists()
+    assert read_operation(config, first_id).successor_operation_id == next_id
+    with pytest.raises(OperationFailure):
+        review_loop_resume(config, next_id)
 
 
 def test_resumed_segment_bounds_validator_pytest_by_its_own_worker_budget(

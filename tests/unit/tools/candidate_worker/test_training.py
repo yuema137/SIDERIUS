@@ -68,11 +68,7 @@ def training_request(prepared):
     )
     (root / "seed.json").write_text(json.dumps(seed))
     config = json.loads((root / "llm.json").read_text())
-    config["tune"] = {
-        "provider": "openai",
-        "model_id": "tuner-test",
-        "planner_strategy": "native-timing-v1",
-    }
+    config["tune"] = {"planner_strategy": "native-timing-v1"}
     (root / "llm.json").write_text(json.dumps(config))
     return refresh(
         prepared.model_copy(

@@ -1,5 +1,6 @@
 """Small presentation projection; native settings remain the only default authority."""
 
+from functools import cache
 from typing import Literal, get_args, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -20,6 +21,27 @@ CONTROLS = (
 )
 
 
+class TrainingControlHelp(BaseModel):
+    """Inline help copied from the native settings JSON schema, never authored here.
+
+    Absent keys stay ``None``: the editor shows only what the schema declares.
+    ``schema_default`` is the launch-config field default and is meaningful only when
+    ``has_schema_default`` is true; a declared ``None`` default and an absent default
+    are therefore distinct. ``effective`` on the control is the resolved native value
+    for this document.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    description: str | None = None
+    unit: str | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    exclusive_minimum: float | None = None
+    exclusive_maximum: float | None = None
+    has_schema_default: bool = False
+    schema_default: JsonValue = None
+
+
 class TrainingControl(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     name: str
@@ -28,6 +50,7 @@ class TrainingControl(BaseModel):
     nullable: bool
     state: Literal["unset", "null", "supplied"]
     effective: JsonValue
+    help: TrainingControlHelp = TrainingControlHelp()
 
 
 class TrainingInspector(BaseModel):
@@ -35,6 +58,34 @@ class TrainingInspector(BaseModel):
     controls: tuple[TrainingControl, ...]
     allowed_output_types: tuple[str, ...] | None
     workflow_parameter_rules: JsonValue = None
+
+
+@cache
+def _launch_schema() -> dict[str, dict]:
+    from workflows.candidate_training_settings import CandidateTrainingSettings
+
+    schema = CandidateTrainingSettings.model_json_schema()
+    return schema["$defs"]["WorkflowLaunchConfig"]["properties"]
+
+
+def control_help(name: str) -> TrainingControlHelp:
+    """Project one launch field's declared JSON-schema metadata."""
+    field = _launch_schema()[name]
+    branches = [field, *field.get("anyOf", ())]
+
+    def declared(key: str):
+        return next((branch[key] for branch in branches if key in branch), None)
+
+    return TrainingControlHelp(
+        description=declared("description"),
+        unit=declared("unit"),
+        minimum=declared("minimum"),
+        maximum=declared("maximum"),
+        exclusive_minimum=declared("exclusiveMinimum"),
+        exclusive_maximum=declared("exclusiveMaximum"),
+        has_schema_default="default" in field,
+        schema_default=field.get("default"),
+    )
 
 
 def training_inspector(document: AuthoredWorkflowDocument) -> TrainingInspector | None:
@@ -70,6 +121,7 @@ def training_inspector(document: AuthoredWorkflowDocument) -> TrainingInspector 
                 if authored[name] is None
                 else "supplied",
                 effective=effective[name],
+                help=control_help(name),
             )
             for name, label, kind in CONTROLS
         ),

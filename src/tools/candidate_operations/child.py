@@ -11,6 +11,7 @@ from tools.candidate_prepare import prepare_candidate, prepare_reusable_candidat
 from tools.candidate_prepare.reusable_models import ReusablePreparationObservations
 from tools.candidate_worker import launch_candidate
 
+from .cancel import cancel_probe
 from .files import canonical, publish, read_model
 from .host_liveness import PLACEMENT_FILE, SANDBOX_FILE
 from .models import SEEDED_SUBMISSIONS, Completion, OperationRecord
@@ -70,12 +71,13 @@ def execute(path: Path) -> int:
         elif record.submission.kind == "candidate_loop_resume":
             from .loop_resume import execute_resume
 
-            execute_resume(record)
+            execute_resume(record, cancel_requested=cancel_probe(path, record))
         else:
             launch_candidate(
                 record.submission.request,
                 invocation_id=record.native_id,
                 run_seed=record.run_seed,
+                cancel_requested=cancel_probe(path, record),
                 **sandbox_observer(record, path),
             )
         native = native_receipt(record)

@@ -1,0 +1,56 @@
+/* Contract colour/shape tokens for circuit ports, wires, legend and mapping chips.
+ * editor-contract-presentation.js sets data-contract-* and --contract-colour.
+ * Every token keeps >= 3:1 non-text contrast (WCAG 1.4.11) against each card tint,
+ * --panel, --bg and --control in both themes; the light proposal and implementation
+ * hues are darkened from their capability accents to meet that floor. */
+:root {
+  --contract-interpretation: var(--capability-interpretation);
+  --contract-literature: var(--capability-literature);
+  --contract-proposal: #ad7410;
+  --contract-implementation: #13918d;
+  --contract-validation: var(--capability-validation);
+  --contract-tuning: var(--capability-tuning);
+  --contract-neutral: var(--muted);
+  --contract-magenta: #a3378f;
+  --contract-green: #4f7a12;
+}
+:root[data-theme="dark"] {
+  --contract-proposal: var(--capability-proposal);
+  --contract-implementation: var(--capability-implementation);
+  --contract-magenta: #e08ad0;
+  --contract-green: #9cc95a;
+}
+.circuit-port[data-contract-shape] .circuit-socket,
+.circuit-contract-swatch { border: 2px solid var(--contract-colour); background: var(--contract-colour); transform: none; }
+.circuit-port[data-contract-fill="hollow"] .circuit-socket, .circuit-contract-swatch[data-contract-fill="hollow"] { background: var(--control); }
+.circuit-port[data-contract-shape="circle"] .circuit-socket, .circuit-contract-swatch[data-contract-shape="circle"] { border-radius: 50%; }
+.circuit-port[data-contract-shape="square"] .circuit-socket, .circuit-contract-swatch[data-contract-shape="square"] { border-radius: 2px; }
+.circuit-port[data-contract-shape="diamond"] .circuit-socket, .circuit-contract-swatch[data-contract-shape="diamond"] { border-radius: 2px; transform: rotate(45deg); }
+.circuit-port[data-contract-shape="capsule"] .circuit-socket { width: 18px; height: 10px; top: calc(50% - 5px); left: -10px; border-radius: 5px; }
+.circuit-output[data-contract-shape="capsule"] .circuit-socket { left: auto; right: -10px; }
+.circuit-contract-swatch[data-contract-shape="capsule"] { width: 14px; border-radius: 5px; }
+.circuit-port[data-contract-shape] .circuit-port-contract { border-color: var(--contract-colour); color: var(--text); }
+.circuit-port[aria-pressed="true"] .circuit-socket { box-shadow: 0 0 0 3px var(--focus); }
+/* Connection preview: compatible inputs glow; incompatible inputs dim only the socket
+ * and dash the contract pill, so the label text keeps its >= 4.5:1 contrast. */
+.circuit-port.compatible .circuit-socket { box-shadow: 0 0 0 4px var(--focus); }
+.circuit-port.incompatible { opacity: 1; }
+.circuit-port.incompatible .circuit-socket { opacity: .35; }
+.circuit-port.incompatible .circuit-port-contract { border-style: dashed; }
+/* The dashed pending wire ends under the pointer; it must not hide the drop target. */
+.circuit-pending { pointer-events: none; }
+.circuit-wire[data-contract-shape] { stroke: var(--contract-colour); }
+.circuit-wire.selected, .circuit-wire.focused { stroke: var(--focus); }
+.circuit-contract-legend { margin: 0 0 6px; font-size: .76rem; }
+.circuit-contract-legend > summary { color: var(--muted); font-weight: 600; cursor: pointer; }
+.circuit-contract-legend-note { margin: 4px 0; color: var(--muted); }
+.circuit-contract-legend-list { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 0; padding: 0; list-style: none; }
+.circuit-contract-legend-list li { display: inline-flex; align-items: center; gap: 6px; }
+.circuit-contract-legend-list code { color: var(--muted); font-size: .7rem; }
+.circuit-contract-swatch { display: inline-block; flex: none; width: 10px; height: 10px; box-sizing: border-box; }
+.circuit-adapter { padding: 4px 10px 6px; border-top: 1px solid var(--control-border); border-bottom: 0; font-size: .72rem; }
+.circuit-adapter-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 0; margin: 0; padding: 2px 8px; border: 1px solid var(--contract-colour, var(--control-border)); border-radius: 999px; background: var(--control); color: var(--text); font-size: .7rem; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+.circuit-adapter-fields ul { margin: 6px 0 4px; padding: 0; list-style: none; }
+.circuit-adapter-fields li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 2px 0; overflow-wrap: anywhere; }
+.circuit-adapter-fields code { color: var(--muted); font-size: .66rem; }
+.circuit-adapter-owner { margin: 4px 0 0; color: var(--muted); overflow-wrap: anywhere; }

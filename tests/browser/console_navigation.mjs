@@ -48,7 +48,8 @@ try {
       if (failEditor) return reply({error: {message: 'Fixture project unavailable'}}, 409);
       return route.continue();
     }
-    if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices') return reply([]);
+    if (['/api/choices', '/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
+    if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     assert.ok(url.pathname.startsWith('/api/operations/' + operation), 'URL UUID wins over remembered ID');
     if (unavailable) return reply({error: {message: 'Fixture unavailable operation'}}, 404);
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
@@ -61,6 +62,8 @@ try {
     return reply({operation_id: operation, kind: 'candidate', state: 'running', observed_at: 'fixture observation', process: {status: 'alive'}, receipt_available: false});
   });
   const connect = async () => {
+    // Connected pages collapse the token form; reconnecting reopens it explicitly.
+    if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); 
     await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
     await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
     assert.equal(await page.locator('#token').inputValue(), '');

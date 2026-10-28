@@ -13,6 +13,7 @@ from core.durable_io import publish_bytes_write_once
 from core.run_seed_lock import run_seed_argument
 from core.runtime_control.budget_intake import HostBudgetFileError, load_host_budget_file
 
+from .cancel import request_cancel
 from .files import encode, read_bytes
 from .host_ledger import HostScheduling, release_reservation
 from .logs import read_operation_log
@@ -41,6 +42,7 @@ OPERATION_COMMANDS = (
     "status",
     "log",
     "tokens",
+    "cancel",
     "stop-loop",
     "pause-loop",
     "review-loop-resume",
@@ -168,6 +170,7 @@ OPERATION_HANDLERS: dict[str, OperationCommand] = {
     "status": lambda config, args: read_operation(config, UUID(args.operation_id)),
     "log": read_log,
     "tokens": lambda config, args: read_operation_tokens(config, UUID(args.operation_id)),
+    "cancel": lambda config, args: request_cancel(config, UUID(args.operation_id)),
     "stop-loop": lambda config, args: request_loop_stop(config, UUID(args.operation_id)),
     "pause-loop": lambda config, args: request_loop_pause(config, UUID(args.operation_id)),
     "review-loop-resume": lambda config, args: review_loop_resume(config, UUID(args.operation_id)),
