@@ -469,7 +469,9 @@ aggregating reader (token read projection, iteration rollup, campaign spend,
 baseline report) groups by run, iteration, label or provider, never by row
 position; `validate_token_usage_jsonl` checks order only against iteration-flush
 markers and warns, without failing, on non-monotonic timestamps. Rows carry no
-unit identity yet. Only a tuning node mutates process registries
+unit identity; optional unit attribution is deferred to parallel dispatch, so
+serial ledgers are unchanged. The B3-0 audit therefore found nothing to snapshot
+per body. Only a tuning node mutates process registries
 (`stage_native_plugins`); the only profile admitting tuning (interpretation
 candidate) has one branch, so tuning is the body's last node, and the next loop
 body is sequential by design. Witness:
