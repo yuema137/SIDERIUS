@@ -49,7 +49,8 @@ try {
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
     const reply = (json, status = 200) => route.fulfill({status, json});
     if (url.pathname.startsWith('/api/editor/')) return reply({error: {message: 'Fixture project unavailable'}}, 409);
-    if (['/api/choices', '/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') {
       assert.equal(url.searchParams.get('limit'), '50');
       return reply({operations: [

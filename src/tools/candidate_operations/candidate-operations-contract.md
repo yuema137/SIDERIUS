@@ -824,6 +824,12 @@ authored loop raises `kind` (reachable only with tampered records). It reads no
 native file, process or credential, and an unknown operation raises `FileNotFoundError`.
 Predecessor-link cycles raise `integrity`.
 
+`operation_admitted(config, operation_id) -> bool` is the only absence proof. It
+opens the private state root (missing or non-private root raises, never `False`)
+and returns `False` only when `operations/` or the `operations/<UUID>` entry is
+absent; any present entry, even one still mid-admission, returns `True`. Callers
+that need a typed refusal raise `UnknownOperation` (code `unknown_operation`).
+
 ### Control an authored loop from code or the CLI
 
 CLI `review-resume` and the native continuation above serve captured native

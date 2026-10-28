@@ -1,7 +1,7 @@
 /* The only Bearer owner: credentials never leave this closure except in headers. */
 (() => {
   'use strict';
-  let token = '', revision = 0, connected = false;
+  let token = '', revision = 0, connected = false, storeId = null;
   const listeners = new Set();
   let changing = false;
   // Connected pages show one compact line; the token form returns only on request or disconnect.
@@ -36,14 +36,23 @@
     }
     return value;
   }
-  window.consoleSession = Object.freeze({request, subscribe(listener) { listeners.add(listener); }, get connected() { return connected; }, get revision() { return revision; }});
+  // The one reader of GET /api/choices: {operations_store_id, tasks}.
+  async function choices() {
+    const value = await request('choices');
+    if (!value || typeof value.operations_store_id !== 'string' || !/^[0-9a-f]{32}$/.test(value.operations_store_id) || !Array.isArray(value.tasks)) {
+      throw new Error('The console sent unreadable task choices.');
+    }
+    storeId = value.operations_store_id;
+    return value;
+  }
+  window.consoleSession = Object.freeze({request, choices, subscribe(listener) { listeners.add(listener); }, get connected() { return connected; }, get revision() { return revision; }, get operationsStoreId() { return storeId; }});
   document.getElementById('access-form').addEventListener('submit', async event => {
     event.preventDefault();
     token = document.getElementById('token').value.trim(); document.getElementById('token').value = '';
     revision++; const version = revision; connected = false; publish(); status('Connecting…');
     const selected = window.consoleNavigation?.operation;
     try {
-      try { await request(selected ? 'operations/' + selected : 'choices'); }
+      try { await (selected ? request('operations/' + selected) : choices()); }
       catch (error) { if (!selected || ![404, 409].includes(error.status)) throw error; }
       if (version !== revision) return;
       connected = true; changing = false; status('Connected.'); publish();
@@ -53,7 +62,7 @@
     changing = true; present(); document.getElementById('token').focus();
   });
   document.getElementById('access-disconnect').addEventListener('click', () => {
-    token = ''; revision++; connected = false; publish();
+    token = ''; revision++; connected = false; storeId = null; publish();
     status('Disconnected. Enter the console token to reconnect; drafts and the selected operation are retained.');
     document.getElementById('token').focus();
   });

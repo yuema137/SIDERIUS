@@ -167,6 +167,18 @@ class ChoiceView(PreviewModel):
     reusable_runs_root: str | None = None
 
 
+class ChoicesView(PreviewModel):
+    """Configured tasks plus an opaque identity of this console's operation store.
+
+    ``operations_store_id`` lets a browser key retained operation intents by store
+    without learning a server path; it changes whenever the admitted store
+    configuration (state root or allowed output roots) changes.
+    """
+
+    operations_store_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    tasks: tuple[ChoiceView, ...]
+
+
 class RouteView(PreviewModel):
     node_id: str
     provider: str | None

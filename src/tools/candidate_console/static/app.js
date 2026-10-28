@@ -38,7 +38,7 @@
   async function loadChoices() {
     const selectedTask = $('task').value;
     try {
-      choices = await api('choices');
+      choices = (await window.consoleSession.choices()).tasks;
       $('task').replaceChildren();
       for (const task of choices) {
         const option = document.createElement('option'); option.value = task.task_id; option.textContent = task.label; $('task').append(option);

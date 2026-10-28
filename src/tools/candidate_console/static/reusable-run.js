@@ -107,7 +107,7 @@
     if (!session.connected || tasksRevision === session.revision) return;
     const revision = session.revision, version = generation; tasksRevision = revision;
     try {
-      const tasks = await session.request('choices');
+      const tasks = (await session.choices()).tasks;
       if (!current(version, revision)) {
         if (version < handoffGeneration) return;
         tasksRevision = null;

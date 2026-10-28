@@ -111,7 +111,7 @@
     const project = editor.projectId;
     tasksRevision = revision;
     try {
-      const values = await session.request('choices');
+      const values = (await session.choices()).tasks;
       if (!current(version, revision, project)) {
         tasksRevision = null;
         void tasks();

@@ -50,7 +50,8 @@ try {
       if (failEditor) return reply({error: {message: 'Fixture project unavailable'}}, 409);
       return route.continue();
     }
-    if (['/api/choices', '/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     assert.ok(url.pathname.startsWith('/api/operations/' + operation), 'URL UUID wins over remembered ID');
     if (unavailable) return reply({error: {message: 'Fixture unavailable operation'}}, 404);

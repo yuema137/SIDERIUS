@@ -1,5 +1,6 @@
 """Code-callable console policy; native operations remain the execution owner."""
 
+import hashlib
 from pathlib import Path
 from uuid import UUID
 
@@ -16,6 +17,7 @@ from tools.candidate_operations import (
     PrepareOperation,
     list_operations,
     loop_root_operation,
+    operation_admitted,
     read_operation,
     read_operation_log,
     read_operation_tokens,
@@ -25,7 +27,7 @@ from tools.candidate_operations import (
     review_loop_resume,
     submit_operation,
 )
-from tools.candidate_operations.models import OperationFailure
+from tools.candidate_operations.models import OperationFailure, UnknownOperation
 from tools.candidate_operations.read import lookup_operation_request
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
 from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
@@ -36,6 +38,7 @@ from .config import validate_config
 from .files import credentials
 from .graph_results import read_graph_results
 from .models import (
+    ChoicesView,
     ChoiceView,
     ConsoleConfig,
     GraphResultsView,
@@ -122,6 +125,14 @@ class CandidateConsole:
             )
             for t in self.config.tasks
         )
+
+    def operations_store_id(self) -> str:
+        """Opaque, stable digest of the admitted store configuration; never a path."""
+        encoded = self.config.operation_store.model_dump_json().encode()
+        return hashlib.sha256(b"siderius-operation-store/v1\0" + encoded).hexdigest()[:32]
+
+    def choices_view(self) -> ChoicesView:
+        return ChoicesView(operations_store_id=self.operations_store_id(), tasks=self.choices())
 
     def prepare(self, selection: PrepareSelection) -> OperationHandle:
         selection = PrepareSelection.model_validate_json(selection.model_dump_json())
@@ -214,6 +225,8 @@ class CandidateConsole:
         )
 
     def status(self, operation_id: UUID) -> StatusView:
+        if not operation_admitted(self.config.operation_store, operation_id):
+            raise UnknownOperation()
         snapshot = read_operation(self.config.operation_store, operation_id)
         receipt = snapshot.receipt
         native_id = (

@@ -191,6 +191,31 @@ def operation_path(config: OperationStoreConfig, operation_id: UUID) -> Path:
     return path
 
 
+def operation_admitted(config: OperationStoreConfig, operation_id: UUID) -> bool:
+    """False only after the private store root was opened and lists no such operation.
+
+    A missing or non-private store root raises instead: an unavailable store never
+    proves absence. A present entry (even one still being admitted) returns True.
+    """
+    if not isinstance(operation_id, UUID):
+        raise OperationFailure("operation_id", "operation_id must be a UUID")
+    root = canonical(validate_config(config).state_root)
+    private_directory(root)
+    operations = root / "operations"
+    with directory(root) as descriptor:
+        try:
+            os.stat("operations", dir_fd=descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+    private_directory(operations)
+    with directory(operations) as descriptor:
+        try:
+            os.stat(str(operation_id), dir_fd=descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+    return True
+
+
 def load_record(config: OperationStoreConfig, operation_id: UUID) -> OperationRecord:
     path = operation_path(config, operation_id)
     record = read_model(path / "request.json", OperationRecord, private_file=True)

@@ -36,6 +36,7 @@ from .prepared import read_prepared_candidate
 from .read import lookup_operation_request, read_operation, recover_reusable_preparation
 from .reusable import build_reusable_operation
 from .store import digest as operation_request_digest
+from .store import operation_admitted
 from .submit import request_loop_stop, submit_operation
 from .tokens import read_operation_tokens
 
@@ -65,6 +66,7 @@ __all__ = [
     "list_operations",
     "lookup_operation_request",
     "loop_root_operation",
+    "operation_admitted",
     "operation_request_digest",
     "read_operation",
     "read_operation_log",

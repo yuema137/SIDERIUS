@@ -86,7 +86,7 @@ try {
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') return reply({ operations: [], unreadable: 0, examined: 0, incomplete: false });
     if (url.pathname.endsWith('/graph-results')) return reply({ error: { code: 'not_found', message: 'Fixture has no workflow results' } }, 404);
-    if (url.pathname === '/api/choices') return reply([{ task_id: 'synthetic', label: 'Synthetic ' + hostile, task_manifest: '/fixture/task.json', data_root: '/fixture/data', llm_config_file: '/fixture/llm.json', preparation_root: '/fixture/preparations', candidate_root: '/fixture/candidates', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300 }]);
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: [{ task_id: 'synthetic', label: 'Synthetic ' + hostile, task_manifest: '/fixture/task.json', data_root: '/fixture/data', llm_config_file: '/fixture/llm.json', preparation_root: '/fixture/preparations', candidate_root: '/fixture/candidates', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300 }]});
     if (url.pathname === '/api/preparations') {
       preparation = request.postDataJSON();
       if (dropPreparation) { dropPreparation = false; await route.abort(); return; }
