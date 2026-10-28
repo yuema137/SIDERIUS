@@ -201,6 +201,8 @@
     if (JSON.stringify(option.source) === JSON.stringify(source)) return;
     inspection = null; bindings = Draft.withBinding(bindings, anchor.inventory, nodeId, argument, source); inventory = Draft.inventory(draftState());
     changed(`${source ? 'Connect' : 'Disconnect'} ${nodeId}.${argument ?? 'request'}`); render();
+    // Back on the anchor nothing is inspected, so the last draft's problems no longer apply.
+    if (!hasBindings()) diagnostic();
     status(hasBindings() ? 'Checking binding draft with the workflow declaration validator…' : 'Connections match the loaded source again.');
   }
   function inspectIfNeeded() {
