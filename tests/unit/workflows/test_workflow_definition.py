@@ -238,14 +238,49 @@ def test_layout_references_are_checked(positions):
         )
 
 
-def test_import_does_not_load_native_runtime_or_resolve_external_files():
-    program = """
+# Declaration validation may import exactly these agent modules (pydantic-only).
+_GUARD = """
 import sys
-from workflows.definition import WorkflowDefinition
+{prelude}
+from workflows.definition import AdaptorInstance, WorkflowDefinition
 WorkflowDefinition.model_validate_json(sys.argv[1])
-assert not any(n.startswith(('agent.', 'nodes.', 'torch')) and n not in {'agent.schemas', 'agent.schemas.output_types'} for n in sys.modules)
+AdaptorInstance.model_validate_json(sys.argv[2])
+allowed = {{'agent.schemas', 'agent.schemas.output_types', 'agent.schemas.judge_refs'}}
+assert not any(n.startswith(('agent.', 'nodes.', 'torch')) and n not in allowed for n in sys.modules)
 """
-    subprocess.run([sys.executable, "-c", program, definition().model_dump_json()], check=True)
+
+LLM_ADAPTOR = {
+    "id": "judge_reviews",
+    "inputs": [{"name": "reviews", "contract": "literature.output", "cardinality": "many"}],
+    "bindings": [{"port": "reviews", "sources": [{"kind": "result", "node": "review"}]}],
+    "combine": {
+        "kind": "rubric-rank/v1",
+        "route_slot": "aggregate",
+        "max_calls": 1,
+        "guidance": "none",
+        "criterion": "c",
+        "rubric": {"id": "r", "version": "1", "sha256": "a" * 64},
+        "scoring": "batch",
+        "repeats": 1,
+    },
+    "select": {"kind": "top-k/v1", "k": 1},
+    "distribute": {"kind": "single/v1"},
+}
+
+
+@pytest.mark.parametrize(
+    ("prelude", "passes"),
+    [("", True), ("import agent.schemas.judge_task", False)],
+    ids=["declaration-only", "judge_task-imported"],
+)
+def test_import_does_not_load_native_runtime_or_resolve_external_files(prelude, passes):
+    """Defect: declaration validation (including an LLM COMBINE declaration) imports an
+    agent module beyond the pydantic-only allowlist. The second case proves the guard
+    still catches ``agent.schemas.judge_task`` (and its data_analysis imports)."""
+    program = _GUARD.format(prelude=prelude)
+    args = [definition().model_dump_json(), json.dumps(LLM_ADAPTOR)]
+    result = subprocess.run([sys.executable, "-c", program, *args], capture_output=True)
+    assert (result.returncode == 0) == passes, result.stderr.decode()[-2000:]
 
 
 def test_catalog_matches_exact_native_protocol_signatures():

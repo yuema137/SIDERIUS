@@ -264,12 +264,15 @@ _STRATEGY_MODELS = "workflows.definition.adaptor_strategies"
 _COMBINE_OWNER = "workflows.adaptors.combine.combine"
 _SELECT_OWNER = "workflows.adaptors.select.select"
 _DISTRIBUTE_OWNER = "workflows.adaptors.run.run_deterministic_adaptor"
+_LLM_MODELS = "workflows.definition.llm_strategies"
+_LLM_OWNER = "workflows.judge_strategies.run_llm_strategy"
 
 # Closed set of adaptor strategy kinds (B6). ``collect/v1`` is admitted only over an
 # element contract with a ``COLLECTION_CONTRACTS`` entry and its consumer protocol
 # (``literature.output`` since B6-4; ``tuning.output`` waits for B6-9). The kind
-# string carries its version; a changed semantic is a new row. LLM kinds join with
-# their B2 owner.
+# string carries its version; a changed semantic is a new row. LLM kinds (B2) are
+# owned by ``workflows.judge_strategies`` and execute only under
+# ``native-literature-judged/v1`` (B6-8a).
 ADAPTOR_STRATEGIES = MappingProxyType(
     {
         "pass/v1": AdaptorStrategyContract(
@@ -286,6 +289,18 @@ ADAPTOR_STRATEGIES = MappingProxyType(
         ),
         "field-rank/v1": AdaptorStrategyContract(
             "combine", f"{_STRATEGY_MODELS}.FieldRankCombine", _COMBINE_OWNER
+        ),
+        "debate-judge/v1": AdaptorStrategyContract(
+            "combine", f"{_LLM_MODELS}.DebateJudgeStrategy", _LLM_OWNER
+        ),
+        "rubric-rank/v1": AdaptorStrategyContract(
+            "combine", f"{_LLM_MODELS}.RubricRankStrategy", _LLM_OWNER
+        ),
+        "primary-advisors-llm/v1": AdaptorStrategyContract(
+            "combine", f"{_LLM_MODELS}.PrimaryAdvisorsStrategy", _LLM_OWNER
+        ),
+        "judge-merge/v1": AdaptorStrategyContract(
+            "combine", f"{_LLM_MODELS}.JudgeMergeStrategy", _LLM_OWNER
         ),
         "all/v1": AdaptorStrategyContract("select", f"{_STRATEGY_MODELS}.AllSelect", _SELECT_OWNER),
         "first-admissible/v1": AdaptorStrategyContract(
