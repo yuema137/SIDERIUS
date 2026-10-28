@@ -8,6 +8,7 @@ carries. Contract ids in `catalog.CONTRACTS` stay the identity and the
 compatibility key; names are presentation only and never decide a connection.
 
 - **Keyed by schema, not by id or module.** `contract_schema(id)` is the
+  contract's semantic type where `SEMANTIC_SCHEMAS` declares one, otherwise the
   catalog native type label without an optional `| None` wrapper;
   `SCHEMA_NAMES` maps that label to `SchemaName(name, description, kind)`.
   `contract_name(id)` resolves through the schema, so ids that carry the same
@@ -48,7 +49,7 @@ only colour and shape per id.
 | --- | --- | --- | --- |
 | `interpretation.input` | Run summaries | produced | Condensed summaries of one or more finished training runs. |
 | `interpretation.output` | Results analysis | produced | A reading of run results with per-model scores and the best and worst models. |
-| `optional.text` | Text value | external | Free text that you provide, such as a data folder path or an exact language model name. |
+| `optional.text` | Data folder | external | The path of the folder that holds the task's data, as you provide it. |
 | `optional.expert-advice` | Expert advice | setting | Advice written by a person for a module to consider. |
 | `optional.expert-context` | Expert notes | setting | Context items from people or analysis modules that inform a model design. |
 | `optional.parameter-rules` | Parameter rules | setting | Limits on which model and training parameters may change and how. |
@@ -67,21 +68,25 @@ only colour and shape per id.
 | `optional.constraint-context` | Run constraints | setting | A statement of the known run restrictions and who declared them. |
 | `optional.task-composition-ref` | Task reference | external | A pointer to the run's task declaration, never a second copy of it. |
 | `llm-provider` | Language model provider | external | Which language model service is called, such as openai or anthropic. |
-| `optional.model-id` | Text value | external | Free text that you provide, such as a data folder path or an exact language model name. |
+| `optional.model-id` | Language model name | external | An exact model name at the chosen service; when omitted, the service's default model is used. |
 
-## Known degeneracy
+## Semantic schema types
 
-`optional.text` and `optional.model-id` both carry `str | None`, so both show
-"Text value". They remain distinct contract ids, so the catalog does not offer
-one where the other is expected even though their names match; the argument
-label (`data_dir`, `llm_model_id`) carries the role. Merging the ids or giving
-them distinct schema types is an open catalog decision, not a naming one.
+`optional.text` (the `data_dir` argument) and `optional.model-id` (the
+`llm_model_id` argument) both carry native `str | None` but mean different
+things and stay separate, not interconnectable, contract ids.
+`SEMANTIC_SCHEMAS` keys each by its own semantic type
+(`semantic.DataFolderPath`, `semantic.LanguageModelName`), so they read
+"Data folder" and "Language model name". These labels are local to the
+definition catalog; native signatures, contract ids and wire formats are
+unchanged. A future primitive-typed contract with its own meaning gets its own
+semantic type here.
 
 ## Validation
 
 `tests/unit/workflows/test_contract_names.py` checks catalog coverage, unique
 names and descriptions per schema, the word rules above, same schema ⇒ same
-name, `produced` ⇔ exchanged by a capability, and the adaptor rule.
+name and distinct (semantic) schemas ⇒ distinct names, `produced` ⇔ exchanged by a capability, and the adaptor rule.
 `tests/unit/tools/test_workflow_authoring.py` checks the serialized fields;
 `tests/browser/port_legibility.mjs` checks names, arrows and the legend in the
 browser. `catalog.py`/`contract_names.py` are not inputs to

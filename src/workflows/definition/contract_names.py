@@ -1,7 +1,7 @@
 """Single owner of the human-facing names of catalog contract schemas.
 
-A name names the SCHEMA a contract carries (its native type, ignoring an optional
-``| None`` wrapper), never a module and never a direction: the same schema shows
+A name names the SCHEMA a contract carries (its semantic type where declared,
+otherwise its native type ignoring an optional ``| None`` wrapper), never a module and never a direction: the same schema shows
 the same name on an input socket, an output socket, the palette, the legend and in
 documents, whichever modules exchange it. Contract ids in
 :data:`workflows.definition.catalog.CONTRACTS` remain the identity and the
@@ -23,6 +23,17 @@ you provide. Sockets show direction with arrows, not names."""
 
 ADAPTOR_ARROW = " → "
 OPTIONAL_SUFFIX = " | None"
+
+# Semantic schema types for contracts whose native type is a bare primitive. Two
+# catalog ids carry ``str | None`` with different meanings and stay separate
+# (not interconnectable), so each is keyed by its own semantic type here. These
+# labels are local to the definition catalog: native signatures, contract ids and
+# wire formats are unchanged.
+DATA_FOLDER_PATH = "semantic.DataFolderPath"
+LANGUAGE_MODEL_NAME = "semantic.LanguageModelName"
+SEMANTIC_SCHEMAS = MappingProxyType(
+    {"optional.text": DATA_FOLDER_PATH, "optional.model-id": LANGUAGE_MODEL_NAME}
+)
 
 
 @dataclass(frozen=True)
@@ -110,10 +121,15 @@ SCHEMA_NAMES = MappingProxyType(
             "Which language model service is called, such as openai or anthropic.",
             "external",
         ),
-        "str": SchemaName(
-            "Text value",
-            "Free text that you provide, such as a data folder path or an exact "
-            "language model name.",
+        DATA_FOLDER_PATH: SchemaName(
+            "Data folder",
+            "The path of the folder that holds the task's data, as you provide it.",
+            "external",
+        ),
+        LANGUAGE_MODEL_NAME: SchemaName(
+            "Language model name",
+            "An exact model name at the chosen service; when omitted, the service's "
+            "default model is used.",
             "external",
         ),
         "agent.schemas.hyperparam_tuning.ExpertAdviceInput": SchemaName(
@@ -146,8 +162,10 @@ SCHEMA_NAMES = MappingProxyType(
 
 
 def contract_schema(contract_id: str) -> str:
-    """Native schema label a contract carries, without its optional wrapper."""
-    return CONTRACTS[contract_id].removesuffix(OPTIONAL_SUFFIX)
+    """Schema a contract carries: its semantic type when declared, otherwise the
+    native type label without its optional wrapper."""
+    native = CONTRACTS[contract_id].removesuffix(OPTIONAL_SUFFIX)
+    return SEMANTIC_SCHEMAS.get(contract_id, native)
 
 
 def contract_name(contract_id: str) -> SchemaName:

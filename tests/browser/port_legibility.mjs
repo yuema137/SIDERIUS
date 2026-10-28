@@ -84,6 +84,15 @@ try {
     if (!arrow.output) assert.ok(arrow.first, 'incoming arrow precedes the input label');
   }
   assert.match(await output('hypothesis').getAttribute('aria-label'), /^Sends Model plan\./);
+  // Arrows sit in the port padding: they add no height, so measured layout keeps cards apart.
+  const arrowFlow = await page.evaluate(() => [...document.querySelectorAll('.circuit-port > .circuit-port-direction')]
+    .every(mark => getComputedStyle(mark).position === 'absolute'));
+  assert.ok(arrowFlow, 'direction arrows take no layout space');
+  const cardRects = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => ({
+    node: card.dataset.node, left: card.offsetLeft, top: card.offsetTop, right: card.offsetLeft + card.offsetWidth, bottom: card.offsetTop + card.offsetHeight})));
+  for (const [i, a] of cardRects.entries()) for (const b of cardRects.slice(i + 1)) {
+    assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.node} and ${b.node} do not overlap`);
+  }
   // Required inputs/outputs are filled; optional inputs are hollow.
   for (const port of ports.filter(value => value.required !== undefined)) {
     assert.equal(port.fill, port.required === 'true' ? 'filled' : 'hollow', port.id);

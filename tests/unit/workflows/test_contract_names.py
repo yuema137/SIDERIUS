@@ -51,15 +51,19 @@ def test_every_catalog_schema_has_one_plain_name_free_of_direction_and_module():
 
 
 def test_contract_ids_resolve_names_by_schema_not_by_id():
-    """Fails if two ids carrying the same schema (today ``optional.text`` and
-    ``optional.model-id``, both ``str | None``) show different names, or an optional
-    wrapper renames its schema, or ids with distinct schemas share a name."""
+    """Fails if two ids carrying the same schema show different names, an optional
+    wrapper renames its schema, ids with distinct schemas share a name, or the two
+    ``str | None`` contracts (data folder vs language model name, kept separate)
+    collapse into one bare ``str`` schema and one name."""
     by_schema: dict[str, set[str]] = {}
     for contract in CONTRACTS:
         by_schema.setdefault(contract_schema(contract), set()).add(contract_name(contract).name)
     assert all(len(names) == 1 for names in by_schema.values()), by_schema
     assert len({next(iter(names)) for names in by_schema.values()}) == len(by_schema)
-    assert contract_name("optional.text") == contract_name("optional.model-id")
+    assert CONTRACTS["optional.text"] == CONTRACTS["optional.model-id"] == "str | None"
+    assert contract_schema("optional.text") != contract_schema("optional.model-id")
+    assert contract_name("optional.text").name == "Data folder"
+    assert contract_name("optional.model-id").name == "Language model name"
 
 
 def test_produced_schemas_are_exactly_those_capabilities_exchange():
@@ -81,6 +85,6 @@ def test_adaptor_name_joins_the_two_schema_names():
         "Results analysis → Search evidence"
     )
     with pytest.raises(ValueError):
-        adaptor_name("optional.text", "optional.model-id")
+        adaptor_name("optional.text", "optional.text")
     with pytest.raises(KeyError):
         adaptor_name("proposal.output", "unknown.contract")
