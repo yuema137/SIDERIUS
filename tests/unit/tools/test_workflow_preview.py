@@ -426,3 +426,17 @@ def test_uri_is_not_accidentally_resolved_as_local_filename(request_at):
     fake.write_text("opaque")
     with pytest.raises(ValueError, match=r"task.manifest.*local path, not a URI"):
         preview_workflow(with_task(request_at, manifest="https://example.test/task.yaml"))
+
+
+def test_judge_is_reported_inactive_only_when_declared(request_at):
+    """`judge` is not a node slot: undeclared configs keep their inactive-role tuple."""
+    undeclared = preview_workflow(request_at)
+    declared = preview_workflow(
+        configured(
+            request_at,
+            {"judge": {"stop": {"max_output_tokens": 800, "max_retries": 2}}},
+        )
+    )
+    assert "judge" not in undeclared.inactive_roles
+    assert declared.inactive_roles[-1] == "judge"
+    assert declared.inactive_roles[:-1] == undeclared.inactive_roles

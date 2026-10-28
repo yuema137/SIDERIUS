@@ -31,6 +31,7 @@ from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
     model_serializer,
@@ -267,6 +268,70 @@ class LitReviewLLMConfig(BaseModel):
     )
 
 
+class JudgeRouteConfig(BaseModel):
+    """
+    One LLM-judge route: provider, model and a bounded call budget.
+
+    Unlike ``NodeLLMConfig``, a judge route has no unbounded form. The output
+    ceiling is required and ``max_retries`` must be a finite count of total
+    transport attempts (``LLMBridge`` semantics: 0 and 1 both allow only the
+    initial call). ``None`` and absent values are refused, so an unbounded retry
+    budget cannot reach a judge call. Other nodes are unaffected.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: ProviderName = Field(
+        default=DEFAULT_LLM_PROVIDER,
+        description="LLM provider.",
+    )
+    model_id: str = Field(
+        default_factory=lambda data: default_model_for_provider(data["provider"]),
+        description="Specific model ID passed to the provider.",
+    )
+    reasoning_effort: ReasoningEffort | None = Field(
+        default=None,
+        description="Explicit OpenAI reasoning effort; omitted for other providers.",
+    )
+    max_output_tokens: int = Field(
+        gt=0,
+        description="Required output ceiling for every judge call on this route.",
+    )
+    max_retries: int = Field(
+        ge=0,
+        description=(
+            "Required finite limit on total transport attempts, including the "
+            "initial request. 0 and 1 both allow only the initial call; "
+            "unbounded retries are not expressible."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_reasoning_effort(self) -> JudgeRouteConfig:
+        if self.reasoning_effort is not None and self.provider != "openai":
+            raise ValueError("reasoning_effort requires provider='openai'")
+        return self
+
+
+class JudgeLLMConfig(BaseModel):
+    """
+    Routes for the three LLM-judge families. Each slot is optional and independent.
+
+    - ``stop``: JudgeStop boundary decisions (consumer lands with B2-4).
+    - ``aggregate``: LLM combine/select strategies inside adaptors (B2-6 onward).
+    - ``debate``: debate-judge strategy calls (B2-7 onward).
+
+    This model only declares and validates routes. No judge call is made from
+    it, and the workspace run lock does not yet record it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stop: JudgeRouteConfig | None = None
+    aggregate: JudgeRouteConfig | None = None
+    debate: JudgeRouteConfig | None = None
+
+
 class WorkflowLLMConfig(BaseModel):
     """
     Per-node LLM configuration for a workflow.
@@ -332,6 +397,15 @@ class WorkflowLLMConfig(BaseModel):
             "behavior. Design Decision 3, 2026-06-11."
         ),
     )
+    judge: JudgeLLMConfig | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Routes for LLM judge families (stop, aggregate, debate). Not a node "
+            "slot: read it as `.judge`, never through `.get()`. Omitted from the "
+            "serialized config when unset, so configs without it keep their bytes."
+        ),
+    )
 
     def get(self, node_name: str) -> dict[str, Any]:
         """
@@ -373,6 +447,8 @@ class WorkflowLLMConfig(BaseModel):
         Returns:
             Flat dict of LLM kwargs, or `{}` if the node is not configured.
         """
+        if node_name == "judge":
+            raise ValueError("'judge' is not a node slot; read WorkflowLLMConfig.judge instead")
         # Handle "validate" alias → stored as validate_model
         attr = "validate_model" if node_name == "validate" else node_name
         config = getattr(self, attr, None)
