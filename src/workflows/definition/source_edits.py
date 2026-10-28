@@ -23,6 +23,8 @@ class _Bytes:
 
     def __init__(self, source: str) -> None:
         self.data = source.encode("utf-8")
+        # Inserted lines follow the file's own convention so CRLF files stay CRLF.
+        self.newline = b"\r\n" if b"\r\n" in self.data else b"\n"
         self.starts = [0]
         for line in self.data.splitlines(keepends=True):
             self.starts.append(self.starts[-1] + len(line))
@@ -45,6 +47,20 @@ class _Bytes:
         while offset < len(self.data) and self.data[offset] in b" \t":
             offset += 1
         return offset
+
+    def comma_after(self, offset: int) -> int | None:
+        """Offset of a comma following ``offset`` past blanks, if any."""
+        after = self.skip_blank(offset)
+        return after if self.data[after : after + 1] == b"," else None
+
+    def line_tail(self, offset: int) -> bool:
+        """Only blanks and an optional comment remain on ``offset``'s line."""
+        rest = self.skip_blank(offset)
+        return rest >= len(self.data) or self.data[rest : rest + 1] in (b"\n", b"\r", b"#")
+
+    def stands_alone(self, offset: int) -> bool:
+        """Only blanks precede ``offset`` on its line."""
+        return self.skip_blank(self.line_start(offset)) == offset
 
     def indent(self, offset: int) -> bytes:
         """Leading whitespace of the line containing ``offset``."""
@@ -86,47 +102,77 @@ def _constant(call: ast.expr, name: str) -> object:
     return keyword.value.value if keyword and isinstance(keyword.value, ast.Constant) else None
 
 
-def _render(value: DeclarationModel, indent: bytes) -> bytes:
+def _render(value: DeclarationModel, indent: bytes, newline: bytes) -> bytes:
     lines = _render_value(value, 0).encode("utf-8").split(b"\n")
-    return b"\n".join([lines[0], *(indent + line for line in lines[1:])])
+    return newline.join([lines[0], *(indent + line for line in lines[1:])])
 
 
-def _append(text: _Bytes, container: ast.Tuple, value: DeclarationModel) -> tuple[int, int, bytes]:
-    """Insert one element after the last element of a literal tuple."""
+def _append(
+    text: _Bytes, container: ast.Tuple, value: DeclarationModel
+) -> list[tuple[int, int, bytes]]:
+    """Insert one element after the last element of a literal tuple.
+
+    A comment trailing the last element stays on that element's line: the new
+    element starts on the following line instead of being spliced before it.
+    """
+    nl = text.newline
     if not container.elts:
         # ``()`` becomes a one-element block indented under the owning keyword line.
         outer = text.indent(text.start(container))
         inner = outer + b"    "
-        body = b"(\n" + inner + _render(value, inner) + b",\n" + outer + b")"
-        return text.start(container), text.end(container), body
+        body = b"(" + nl + inner + _render(value, inner, nl) + b"," + nl + outer + b")"
+        return [(text.start(container), text.end(container), body)]
     last = container.elts[-1]
     begin, end = text.start(last), text.end(last)
-    alone = text.skip_blank(text.line_start(begin)) == begin
-    indent = text.indent(begin) if alone else b" " * last.col_offset
-    after = text.skip_blank(end)
-    if after < len(text.data) and text.data[after : after + 1] == b",":
-        return after + 1, after + 1, b"\n" + indent + _render(value, indent) + b","
-    return end, end, b",\n" + indent + _render(value, indent)
+    indent = text.indent(begin) if text.stands_alone(begin) else b" " * last.col_offset
+    comma = text.comma_after(end)
+    stop = end if comma is None else comma + 1
+    edits = [] if comma is not None else [(end, end, b",")]
+    rest = text.skip_blank(stop)
+    if rest < len(text.data) and text.data[rest : rest + 1] == b"#":
+        line_end = text.line_end(stop)
+        element = indent + _render(value, indent, nl) + b","
+        if line_end == len(text.data) or text.data[line_end - 1 : line_end] != b"\n":
+            return [*edits, (line_end, line_end, nl + element)]
+        return [*edits, (line_end, line_end, element + nl)]
+    return [*edits, (stop, stop, nl + indent + _render(value, indent, nl) + b",")]
 
 
 def _element_span(text: _Bytes, container: ast.Tuple, index: int) -> tuple[int, int]:
-    """Bytes owning one tuple element: whole lines when it stands alone on them."""
+    """Bytes owning one tuple element: whole lines when it stands alone on them.
+
+    A comment between the previous element and this one belongs to the previous
+    element (it trails that element's line) and is never inside the span.
+    """
     element = container.elts[index]
     begin, end = text.start(element), text.end(element)
-    after = text.skip_blank(end)
-    comma = after < len(text.data) and text.data[after : after + 1] == b","
-    stop = after + 1 if comma else end
-    rest = text.skip_blank(stop)
-    line_tail = rest >= len(text.data) or text.data[rest : rest + 1] in (b"\n", b"\r", b"#")
-    if text.skip_blank(text.line_start(begin)) == begin and line_tail:
+    comma = text.comma_after(end)
+    stop = end if comma is None else comma + 1
+    if text.stands_alone(begin) and text.line_tail(stop):
         return text.line_start(begin), text.line_end(stop)
-    if comma:
+    if comma is not None:
         return begin, text.skip_blank(stop)
     if index == 0:
         return begin, end
-    previous = container.elts[index - 1]
-    separator = text.data.find(b",", text.end(previous), begin)
-    return (separator + 1 if separator >= 0 else text.end(previous)), end
+    # The last element without a trailing comma: drop the blanks before it on
+    # its own line, back to the previous element's comma, keeping that comma
+    # (a remaining single element stays a tuple) and any comment before it.
+    separator = text.comma_after(text.end(container.elts[index - 1]))
+    floor = text.end(container.elts[index - 1]) if separator is None else separator + 1
+    return max(floor, text.line_start(begin)), end
+
+
+def _keep_tuple(
+    text: _Bytes, container: ast.Tuple, removed: set[int]
+) -> tuple[int, int, bytes] | None:
+    """A comma for a sole surviving element so ``(A, B)`` minus ``A`` stays ``(B,)``."""
+    kept = [index for index in range(len(container.elts)) if index not in removed]
+    if len(kept) != 1:
+        return None
+    end = text.end(container.elts[kept[0]])
+    if text.comma_after(end) is not None:
+        return None
+    return end, end, b","
 
 
 def _apply(data: bytes, edits: Iterable[tuple[int, int, bytes]]) -> str:
@@ -158,7 +204,8 @@ def _import_edit(
     if after < len(text.data) and text.data[after : after + 1] == b",":
         # A trailing-comma block (canonical style): one name per line.
         indent = text.indent(text.start(last))
-        return after + 1, after + 1, b"".join(b"\n" + indent + n.encode() + b"," for n in missing)
+        added = b"".join(text.newline + indent + n.encode() + b"," for n in missing)
+        return after + 1, after + 1, added
     return end, end, b"".join(b", " + name.encode() for name in missing)
 
 
@@ -181,18 +228,19 @@ def insert_node(source: str, node: NodeInstance, position: NodePosition) -> str:
     nodes = _tuple_keyword(definition, "nodes")
     if nodes is None:
         raise SourceEditError("definition has no nodes tuple")
-    edits = [_append(text, nodes, node)]
+    edits = _append(text, nodes, node)
     positions = _tuple_keyword(root, "positions")
+    nl = text.newline
     if positions is not None:
-        edits.append(_append(text, positions, position))
+        edits.extend(_append(text, positions, position))
     else:
         last = root.keywords[-1]
         indent = text.indent(text.start(last))
-        block = b"positions=(\n" + indent + b"    " + _render(position, indent + b"    ")
-        block += b",\n" + indent + b")"
+        block = b"positions=(" + nl + indent + b"    " + _render(position, indent + b"    ", nl)
+        block += b"," + nl + indent + b")"
         after = text.skip_blank(text.end(last.value))
         if text.data[after : after + 1] == b",":
-            edits.append((after + 1, after + 1, b"\n" + indent + block + b","))
+            edits.append((after + 1, after + 1, nl + indent + block + b","))
         else:
             edits.append((text.end(last.value), text.end(last.value), b", " + block))
     if (imports := _import_edit(text, module, _constructors(node) | {"NodePosition"})) is not None:
@@ -215,15 +263,16 @@ def remove_nodes(source: str, nodes: tuple[str, ...]) -> str:
     removed = set(nodes)
     edits: list[tuple[int, int, bytes]] = []
     found: set[object] = set()
-    for index, element in enumerate(node_tuple.elts):
-        if (identity := _constant(element, "id")) in removed:
-            found.add(identity)
-            edits.append((*_element_span(text, node_tuple, index), b""))
-    if found != removed:
-        raise SourceEditError("node ids must be written as plain string literals")
-    positions = _tuple_keyword(root, "positions")
-    for index, element in enumerate(positions.elts if positions else ()):
-        if _constant(element, "node") in removed:
-            assert positions is not None
-            edits.append((*_element_span(text, positions, index), b""))
+    for container, field in ((node_tuple, "id"), (_tuple_keyword(root, "positions"), "node")):
+        dropped: set[int] = set()
+        for index, element in enumerate(container.elts if container else ()):
+            if (identity := _constant(element, field)) in removed:
+                assert container is not None
+                found.add(identity)
+                dropped.add(index)
+                edits.append((*_element_span(text, container, index), b""))
+        if container is not None and (comma := _keep_tuple(text, container, dropped)):
+            edits.append(comma)
+        if container is node_tuple and found != removed:
+            raise SourceEditError("node ids must be written as plain string literals")
     return _apply(text.data, edits)
