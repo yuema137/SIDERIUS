@@ -2,14 +2,17 @@
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TypedDict, Unpack
 
 from agent.schemas.constraint_disclosure import ConstraintContext
-from agent.schemas.ordering import resolve_ordering
+from agent.schemas.ordering import OrderStrategy, resolve_ordering
 from agent.schemas.proposal import ProposalInput
 from core.durable_io import publish_bytes_write_once
 from core.hardware_context import get_or_create as get_hardware_context
-from core.run_invariants import ensure_run_invariants
+from core.hardware_models import HardwareContext
+from core.run_invariants import RunInvariants, ensure_run_invariants
 from core.runtime_control.launch_guard import run_launch_self_test
+from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import DataScope
 from execute_tools.evaluation_execution import candidate_evaluation_executor
 from execute_tools.health_checks.launch_policy import validate_formal_launch
@@ -38,6 +41,42 @@ class TrainingAdmission:
     bindings: WorkflowRunBindings
     constraints: ConstraintContext | None
     node_id: str
+
+
+class AdmittedRunFacts(TypedDict):
+    """Every binding admission establishes besides the composition and LLM config."""
+
+    workspace: str
+    run_name: str
+    run_dir: str
+    run_id: str | None
+    data_scope: DataScope | None
+    resolved_data_scope: tuple[int, ...]
+    scope_is_partial: bool
+    run_invariants: RunInvariants | None
+    health_gate_enabled: bool
+    health_gate_files: tuple[int, ...] | None
+    health_checks_config: str | None
+    order_strategy_override: OrderStrategy | None
+    file_order_override: tuple[int, ...] | None
+    enable_structured_health_feedback: bool
+    measurement_capability: ResolvedMeasurementCapability | None
+    hardware_context: HardwareContext | None
+    active_vram_budget_gb: float | None
+
+
+def admitted_run_bindings(
+    composition: RunTaskComposition,
+    config: WorkflowLLMConfig,
+    **admitted: Unpack[AdmittedRunFacts],
+) -> WorkflowRunBindings:
+    """The candidate worker's one `WorkflowRunBindings` construction.
+
+    Admission supplies the facts it established; a graph unit process rebuilds
+    the same admission from its transported facts and its own re-bound
+    composition and LLM config (`unit_models.AdmittedTraining.restore`).
+    """
+    return WorkflowRunBindings(**admitted, task_composition=composition, llm_config=config)
 
 
 def reconcile_proposal(seed: ProposalInput, admitted: TrainingAdmission) -> ProposalInput:
@@ -139,7 +178,9 @@ def admit_training(
     run_launch_self_test(require_probe_runner=launch.require_probe_runner, capability=capability)
     ensure_run_invariants(initial.workspace, preparation.invariants)
     hardware = get_hardware_context(Path(initial.workspace), initial.run_name)
-    bindings = WorkflowRunBindings(
+    bindings = admitted_run_bindings(
+        composition,
+        config,
         workspace=initial.workspace,
         run_name=initial.run_name,
         run_id=initial.run_id,
@@ -158,8 +199,6 @@ def admit_training(
         if settings.file_order_override is None
         else tuple(settings.file_order_override),
         enable_structured_health_feedback=settings.enable_structured_health_feedback,
-        task_composition=composition,
-        llm_config=config,
         measurement_capability=capability,
         hardware_context=hardware,
         active_vram_budget_gb=active_vram_budget(launch),
