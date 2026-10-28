@@ -34,20 +34,25 @@ def _refusal(code: StrategyRefusalCode, message: str) -> StrategyRefusal:
     return StrategyRefusal(code=code, message=message)
 
 
-def _ranking_refusals(kind: str, contract: str, select: SelectStrategy) -> list[StrategyRefusal]:
-    """SELECT rules for a rubric ranking."""
+def _ranking_refusals(
+    kind: str, contract: str, select: SelectStrategy, threshold_basis: str | None
+) -> list[StrategyRefusal]:
+    """SELECT rules for a ranking; ``threshold/v1`` only on the kind's own value basis."""
     refusals: list[StrategyRefusal] = []
-    rubric_threshold = isinstance(select, ThresholdSelect) and select.basis == "rubric"
-    if not (isinstance(select, AllSelect | TopKSelect) or rubric_threshold):
+    own_threshold = (
+        isinstance(select, ThresholdSelect)
+        and threshold_basis is not None
+        and select.basis == threshold_basis
+    )
+    if not (isinstance(select, AllSelect | TopKSelect) or own_threshold):
+        if threshold_basis is None:
+            reason = "its ranking is ordinal (no values)"
+        else:
+            reason = f"threshold basis must be {threshold_basis!r}"
         refusals.append(
             _refusal(
                 "select_incompatible",
-                f"{kind} ranks by rubric; {select.kind} cannot consume it"
-                + (
-                    " (threshold basis must be 'rubric')"
-                    if isinstance(select, ThresholdSelect)
-                    else ""
-                ),
+                f"{kind} ranks items; {select.kind} cannot consume it ({reason})",
             )
         )
     if contract in METRIC_SCORED_CONTRACTS and isinstance(select, TopKSelect):
@@ -55,8 +60,8 @@ def _ranking_refusals(kind: str, contract: str, select: SelectStrategy) -> list[
         refusals.append(
             _refusal(
                 "metric_scored_reorder",
-                f"{contract} carries formal metric results; {kind} may only feed "
-                "threshold/v1 (basis rubric) or all/v1",
+                f"{contract} carries formal metric results; {kind} may only filter "
+                "them (threshold/v1 on its own basis) or pass them all (all/v1)",
             )
         )
     return refusals
@@ -145,10 +150,10 @@ def admit_llm_strategy(
                 f"not {output_contract}",
             )
         )
-    if kind.output_count is None:
-        refusals += _ranking_refusals(strategy.kind, contract, select)
+    count = None if kind.output_count is None else kind.output_count(strategy)
+    if count is None:
+        refusals += _ranking_refusals(strategy.kind, contract, select, kind.threshold_basis)
     else:
-        count = kind.output_count(strategy)
         refusals += _combined_refusals(strategy, count, contract, select, cardinality)
     if kind.admit_parameters is not None:
         refusals += kind.admit_parameters(strategy, inputs)
