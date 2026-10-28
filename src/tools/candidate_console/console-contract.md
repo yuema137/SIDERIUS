@@ -181,7 +181,7 @@ inputs. Unexpected failures log exception class only and return secured generic5
 inside the boundary; arbitrary native/plugin logs are not universally redacted.
 
 Responses carry no-store, nosniff, no-referrer, frame denial and self-only external
-script/style CSP. Token is memory-only in the browser; IDs may persist. Page uses
+script/style/image CSP. Token is memory-only in the browser; IDs may persist. Page uses
 textContent, explicit mutation buttons, retained UUID/payload for retries, visible
 polling and stale observation on disconnection. Known-ID monitoring is independent
 of draft/review. Server termination does not cancel detached native operations;
@@ -843,12 +843,12 @@ It infers neither scientific success nor complete billing.
 
 ### Page inventory and guidance
 
-| Route | Primary content and action | Secondary content |
+| Route | Primary content and action | Secondary content (Settings-gated unless noted) |
 | --- | --- | --- |
-| `#home` | Workflow journey; **Open workflow** | **Advanced**: native chain card; collapsed **Prepare configured task** |
-| `#workflow` | Project, task package/version, canvas + Selection; **Save reviewed source** (Refresh and Review are secondary buttons); **Next: prepare a run** | Research loop panel; collapsed References, Advanced source, Review exact Python changes, Details |
-| `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; collapsed captured resources |
-| `#monitor` | Recent operations; Status and logs | Loop controls, observations, token table, logs, Recorded example |
+| `#home` | Hero (theme-matched logo + one sentence); entry cards **Start from a template** (opens the tour on Workflow), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** |
+| `#workflow` | Page bar (title, problems chip, **Review changes**, version name, **Save reviewed source**, Undo/Redo/Discard, **Next: prepare a run**); status line; project and task package/version; docked rail, canvas and Selection | Research loop panel and Review exact Python changes (shown); References, Advanced source, Version history, Refresh, canvas help, connection mappings (advanced); Details (developer) |
+| `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; captured resources (developer) |
+| `#monitor` | Recent operations; Status and logs; loop controls; results; token summary | Operation UUID form, Recorded example (advanced); operation facts, token table (developer) |
 
 `page-guidance.js` is presentation only and owns no request or draft state. It reads
 `window.workflowEditor.state` and `window.newRunGate.ready`. `new-run.js` remains the
@@ -864,12 +864,122 @@ on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` inst
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
 
-When the connection is absent or no workflow source is open, Workflow shows
-**Start from a task example** (select a task, edit, save, run) with a one-line state.
-A step line (`#step-indicator`, `role="navigation"`, not a `<nav>` element) shows
-Task › Workflow › Run › Results on Workflow (Task until a source is open), Run and
-Monitor, with `aria-current="step"` and a done mark for completed steps; it is
-hidden on Home. Witness: `tests/browser/page_guidance.mjs`.
+Until the canvas draws a capability card, the canvas panel shows the empty start state
+`#workflow-start-guide` (spec §7.2): title **Build your research loop**, one sentence from
+`page-guidance.js` (`#workflow-start-state`: connect, choose a project, source not open, or
+add a module) and one action, **Take the 4-step tour**. CSS hides it with
+`.workflow-canvas-panel:has(.circuit-card)`. The Selection panel shows `.inspector-empty`
+until `.inspector-capability-heading` exists. The page-bar `#problems-chip` mirrors the
+`.editor-problem` count that `editor-problems.js` renders (MutationObserver; hidden at 0)
+and focuses the first problem. A step line (`#step-indicator`, `role="navigation"`, not a
+`<nav>` element) shows Task › Workflow › Run › Results on Workflow (Task until a source is
+open), Run and Monitor, with `aria-current="step"` and a done mark for completed steps; it
+is hidden on Home. Witness: `tests/browser/page_guidance.mjs`.
+
+### Layout system, Settings and onboarding
+
+Owner of tokens: `theme.css`, adopted from `ui-design-spec.md` §1–§2: spacing
+`--space-1..7` (4/8/12/16/24/32/48 px), `--bar-height` 48 px, `--control-height` 36 px,
+radii `--radius-1/2/pill` (4/8/999 px), `--elev-0/1/2` (elevation only for overlays and
+movable canvas cards), type `--font-title` 20, `--font-heading`/`--font-body` 14,
+`--font-label`/`--font-help` 12 px (`--font-prose` 16 px for the Home sentence), no
+all-caps labels. Light accents (`--primary #2e6da6`, `--secondary #0f7672`,
+`--error #c4304a`, `--warning #85600c`) keep 4.5:1 text on the page, panels and every
+capability tint. `styles.css` owns the shell and card component: header, nav and content
+share `--shell-pad`; every view is one grid column with `--space-4` gaps; a `.card` is
+bordered (`--radius-2`, no shadow) and a direct `h2` is its header above a divider;
+`details.card` summaries are equal-height header bars whose divider appears only when
+open. `editor.css` owns the Workflow frame: page bar, then the docked
+`.editor-workspace` grid `var(--rail-width) 272px | canvas | var(--inspector-width) 352px`
+(320 px below 1280 px), height `calc(100vh - 96px)`, 1 px dividers and no gutters; each
+`.dock-panel` scrolls independently under a sticky 48 px header. Below 900 px the panels
+stack at natural height and the rail is `editor-palette.js`'s drawer. The rail column is
+`--rail-width`; s9's collapsed icon rail may set it to 48 px.
+
+Logo: `siderius-logo-light.svg` (navy wordmark) and `siderius-logo-dark.svg` (white
+wordmark) are exact-allowlisted `image/svg+xml` assets (shapes plus an embedded PNG, no
+script) rendered only through `<img alt="SIDERIUS">`. Each place carries both images;
+CSS shows the variant matching `data-theme` (theme.js resolves System). The header logo
+is 30 px high; the Home hero logo 72 px. The response CSP adds `img-src 'self'` for them.
+
+Settings (`ui-settings.js`, loaded in `<head>` before styles so the first paint is
+already filtered): flags `advanced` ("Show advanced tools") and `developer` ("Show
+developer details"), default off, stored as `siderius.console.ui.<flag> = "on"`
+(storage denial keeps the page default). The module sets `data-ui-<flag>="on"` on the
+root; `styles.css` hides any `[data-ui-flag~="<flag>"]` element otherwise. API:
+`window.uiSettings.isEnabled(flag)`, `.set(flag, enabled)`, `.flags`; event
+`ui-settings-change` `{flag, enabled}`. The header **Settings** button opens a
+non-modal panel with the two checkboxes (Esc closes). Flags change visibility only: no
+request, draft or run state; hidden sections keep their state. Witnesses that exercise
+gated sections call `showAllConsoleSections(browser)` from
+`tests/browser/console_view_flags.mjs`.
+
+Tour (`onboarding.js`, spec §7.3 within its 3–4 step limit): opt-in only, from the empty
+canvas, the header **Help** button or Home **Start from a template**; from another page it
+switches to `#workflow` first. Four steps, each highlighting a visible element with an
+outline ring and a non-modal card placed beside it (right, below, left, above, clamped;
+no backdrop, the page stays usable): **Choose a task** (`#editor-project`), **Pick a
+module** (`#editor-palette`), **Match connector names** (`.circuit-viewport`), **Save a
+version** (`#editor-save`). Buttons Skip · Back · Next / OK; Esc = Skip; focus returns
+to the opener. Outcome `done`/`dismissed` is stored as `siderius.console.tour.v1`; it
+never reopens itself. Witness: `tests/browser/layout_onboarding.mjs` (defaults, Settings
+toggles and persistence, tour anchoring/non-blocking/reopen, logo per theme, docked frame
+geometry at 1440×1100 and 1024×768 in both themes, card disjointness, page-grid edges,
+text ≥ 4.5:1 and ≥ 12 px outside the canvas, rail and inspector internals).
+
+#### Feature inventory (Beginner / Advanced / Developer)
+
+Default view = Beginner. `data-ui-flag="advanced"` sections appear with Settings ›
+**Show advanced tools**; `data-ui-flag="developer"` with **Show developer details**.
+"Gated" = gated in this change (s11-owned markup); "Hook" = sibling-owned content for
+the spec conformance pass to gate with the same attribute or `uiSettings.isEnabled()`.
+
+| Page | Control / section | Class | Status | Reason |
+| --- | --- | --- | --- | --- |
+| Shell | Logo, nav, Connect / Connected line, theme, Help, Settings | Beginner | shown | Needed to reach any page and to get help |
+| Shell | About this console | Beginner | shown | One-line orientation, collapsed |
+| Shell | Step line Task › Workflow › Run › Results | Beginner | shown | Tells a new user where they are |
+| Home | Hero: logo + one sentence | Beginner | shown | Says what SIDERIUS does |
+| Home | Entry cards: Start from a template, Open a workflow, Monitor runs | Beginner | shown | The three first actions |
+| Home | Run a configured native chain | Advanced | gated | Externally reviewed captures; not a first-use path |
+| Home | Prepare configured task (native Prepare / Launch candidate) | Advanced | gated | Server-configured route independent of the editor |
+| Workflow | Page bar: title, problems chip, Review changes, Version name, Save reviewed source, Undo/Redo/Discard, Next: prepare a run | Beginner | shown | Edit → review → save → run loop |
+| Workflow | Refresh from disk | Advanced | gated | Only for external edits to the source file |
+| Workflow | Status line (Run gate reason, pending edits, version help) | Beginner | shown | Explains why Run is closed |
+| Workflow | Problems list (`#editor-problems`) | Beginner | shown | Required inputs to fix before saving |
+| Workflow | Source conflict tools (discard / rebase) | Advanced | shown when a conflict exists | Must stay reachable to resolve a conflict safely |
+| Workflow | Workflow project select; task package and version | Beginner | shown | Choose a task |
+| Workflow | Module rail (palette) | Beginner | shown | Add modules |
+| Workflow | Canvas, toolbar, empty-canvas start state | Beginner | shown | Build and connect |
+| Workflow | Canvas controls help (keyboard-move hints) | Advanced | gated | Long control reference; the tour covers first use |
+| Workflow | Connection mappings list | Advanced | gated | Protocol detail per binding |
+| Workflow | Contract legend details, Mapping chips on cards | Advanced | hook (s1/s10 canvas) | Raw contract ids and field mapping |
+| Workflow | Selection inspector (inputs, defaults, advice) | Beginner | shown | Configure the selected module |
+| Workflow | Inspector mapping details, model-hyperparameter owner link | Advanced | hook (s8 inspector) | Protocol / task-manifest detail |
+| Workflow | Research loop panel | Beginner | shown | Iteration limit and stop conditions |
+| Workflow | References (task / external locations) | Advanced | gated | Paths owned by the task configuration |
+| Workflow | Advanced source (Python editor) | Advanced | gated | Direct source editing |
+| Workflow | Review exact Python changes | Beginner | shown | Review opens it before Save |
+| Workflow | Version history | Advanced | gated | Restore / inspect earlier versions |
+| Workflow | Details (save behavior, concurrent writers) | Developer | gated | Implementation notes |
+| Run | Saved-version state, New run (task, name, Review preparation, Prepare saved source) | Beginner | shown | Prepare the run |
+| Run | Selected source, inputs and resource limits | Beginner | shown | What will run |
+| Run | Prepared run (open, review, Launch captured run) | Beginner | shown | Start the run |
+| Run | Captured resources and version | Developer | gated | Raw capture record |
+| Monitor | Recent operations, Status, loop Stop/Pause/Resume, training results | Beginner | shown | Follow a run and read results |
+| Monitor | Activity and logs | Beginner | shown | Explains failures |
+| Monitor | Reported LLM tokens summary | Beginner | shown | Cost awareness |
+| Monitor | Operation UUID form, remembered ID | Advanced | gated | Opening an operation not in the list |
+| Monitor | Operation facts | Developer | gated | Raw native/operation fields |
+| Monitor | Reported token table | Developer | gated | Raw per-model rows |
+| Monitor | Native chain observation details | Advanced | hook (native-chain-monitor.js) | Native recipe internals |
+| Monitor | Recorded example | Advanced | gated | Read-only validation evidence |
+
+Not yet adopted from the spec (follow-up, not in this change): Lucide icon sprite
+(gear/help/step/empty-state icons use text), Help menu (§7.4 shows only the tour),
+connection chip in the header (L6), moving project/task into an inspector Workflow tab
+(L5), review dialog (§9), tour backdrop (omitted so the page never blocks), canvas
+internals below 12 px and inspector internals (s1/s8/s9/s10 conformance pass).
 
 Navigation qualification: `tests/browser/console_navigation.mjs` uses the same
 explicit environment as the editor gate. Its temporary synthetic observations

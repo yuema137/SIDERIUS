@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const require = createRequire(import.meta.url);
 for (const name of ['CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_TEST_ORIGIN']) {
@@ -36,10 +37,11 @@ const server = createServer(async (req, res) => {
   // (for example editor-task-controls.js) breaks session listeners before Connect completes.
   const asset = /^\/([a-z0-9-]+)\.(js|css)$/.exec(req.url);
   if (asset) files[req.url] = [asset[1] + '.' + asset[2], asset[2] === 'js' ? 'text/javascript' : 'text/css'];
+  if (/^\/siderius-logo-(light|dark)\.svg$/.test(req.url)) files[req.url] = [req.url.slice(1), 'image/svg+xml'];
   const file = files[req.url];
   if (!file) { res.writeHead(404); res.end(); return; }
   try {
-    res.writeHead(200, { 'Content-Type': file[1], 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'" });
+    res.writeHead(200, { 'Content-Type': file[1], 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'" });
     res.end(await readFile(join(assets, file[0])));
   } catch { res.writeHead(500); res.end(); }
 });
@@ -48,6 +50,7 @@ const { chromium } = require(process.env.CONSOLE_PLAYWRIGHT_MODULE);
 let browser;
 try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE });
+  showAllConsoleSections(browser);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   const faults = [];

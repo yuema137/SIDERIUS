@@ -62,10 +62,17 @@ even when using the default models.
    and the connect card shrinks to a **Connected** line with **Change token** and
    **Disconnect console**. Reloading or opening a new tab requires Connect again;
    the password field clears immediately and the token stays only in this
-   document's memory. Home's main path is **Open workflow**: edit and review the
-   workflow, prepare a new run, then launch and monitor it.
+   document's memory. Home offers three starting points: **Start from a template**
+   (opens Workflow with a short guided tour), **Open a workflow** and **Monitor runs**.
+   **Help** in the header reopens the tour at any time.
+   Tools a first-time user does not need stay hidden until you turn them on in
+   **Settings** (header): **Show advanced tools** adds the source editor,
+   references, version history, Refresh from disk, native chains, configured-task
+   preparation, the operation-UUID form and recorded examples; **Show developer
+   details** adds operation facts, raw token tables, captured resources and save
+   internals. The browser remembers both choices.
 6. To generate a candidate from the server's configured task, expand **Prepare
-   configured task** on Home. Select a task, fill the run name and optional advice,
+   configured task** on Home (Settings › Show advanced tools). Select a task, fill the run name and optional advice,
    and expand **Configured paths** to inspect the inputs and output parents.
    **Prepare request** creates separate UUID child paths. Review the resolved
    workspace, task, models, credential blockers and resource policy before
@@ -74,7 +81,7 @@ even when using the default models.
    selected in Workflow Editor. Preparation never launches automatically.
 7. To observe an existing operation, choose **Monitor** and select it under
    **Recent operations** (operations this console admitted, newest first), or
-   enter its complete operation UUID. You can also open a link such as
+   enter its complete operation UUID (Settings › Show advanced tools). You can also open a link such as
    `http://127.0.0.1:8740/#monitor/22222222-2222-4222-8222-222222222222`
    (replace the example UUID), then Connect. No task or editor project selection
    is needed. The optional remembered ID is labelled **Last opened on this browser**;
@@ -95,8 +102,9 @@ even when using the default models.
    The view has no operation import or execution controls, and a missing saved
    source is shown as unavailable.
 8. To author a configured declaration, choose **Workflow Editor**. Select a node
-   to inspect its supported bindings; expand **References** for task and external
-   locations, or **Advanced source** for exact Python bytes. Review opens the
+   to inspect its supported bindings. With **Show advanced tools** on, expand
+   **References** for task and external locations, or **Advanced source** for
+   exact Python bytes. Review opens the
    exact diff; Save writes those reviewed bytes. Connections, card moves and
    inspector edits collect in one set of pending edits that you review and save
    together. **Undo**/**Redo** (Ctrl+Z / Ctrl+Shift+Z) step through them;
@@ -107,9 +115,10 @@ even when using the default models.
    unsaved-change guard. Saving does not run the declaration.
    The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
-   Until a workflow is open, the page shows **Start from a task example**: select a
-   task, edit, save, run. Save behavior and concurrent-writer notes are under
-   **Details**. After a successful save, **Next: prepare a run** opens the **Run**
+   Until the canvas has a module, it says what to do next and offers the 4-step
+   tour (choose a task, pick a module, match connector names, save a version).
+   Save behavior and concurrent-writer notes are under **Details** (Settings ›
+   Show developer details). After a successful save, **Next: prepare a run** opens the **Run**
    page; it stays disabled, with the reason beside it, while edits are unsaved or
    the project is not enabled for runs.
    A step line (Task › Workflow › Run › Results) shows where you are.
@@ -228,7 +237,8 @@ The browser launches that configured recipe independently of the editor.
    credential names there. The [configuration contract](console-contract.md#configured-native-chains)
    specifies these fields. For a native-only console, omit `tasks` and
    `editor_projects`; no dummy candidate task is needed.
-2. Check and start the console with the commands above, then Connect. On Home,
+2. Check and start the console with the commands above, then Connect. Turn on
+   **Settings › Show advanced tools**. On Home,
    choose the capture under **Run a configured native chain** and select
    **Review native capture**. Inspect its run name, final iteration, workspace,
    input identities, resource policy and credential readiness. Consult the

@@ -12,6 +12,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -38,6 +39,7 @@ try {
   const require = createRequire(import.meta.url);
   const {chromium} = require(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const context = await browser.newContext({colorScheme: 'dark', viewport: {width: 1440, height: 1000}});
   // Count actual timer creation, not timer firings: toggling must not add polling.
   await context.addInitScript(() => {

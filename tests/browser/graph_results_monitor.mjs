@@ -6,6 +6,7 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {tmpdir} from 'node:os';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -28,6 +29,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage(), requests = [], faults = [];
   page.on('pageerror', error => faults.push(error.message));
   const headline = (score, id) => ({best_exp_id: id, best_score: score, best_formal_score: score, best_valid_exp_id: id, best_valid_score: score, best_valid_formal_score: score});

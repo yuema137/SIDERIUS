@@ -1,7 +1,7 @@
 /** Console shell witnesses over a stubbed API (no provider/GPU/native effects):
  * the connect card collapses to one line on every view, Monitor lists operations
  * and opens one in Status and logs, metric values are display-rounded with the exact
- * value kept, Home leads with the workflow journey, and nav/content share one edge.
+ * value kept, Home leads with three entry cards, and nav/content share one edge.
  * Required: EDITOR_PYTHON, CONSOLE_PLAYWRIGHT_MODULE, CONSOLE_BROWSER_EXECUTABLE. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -9,6 +9,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -32,6 +33,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const context = await browser.newContext({viewport: {width: 1440, height: 1000}, colorScheme: 'light'});
   await context.addInitScript(() => {
     window.pollTimers = 0; const interval = window.setInterval.bind(window);
@@ -76,11 +78,11 @@ try {
   assert.equal(await page.locator('#token').isVisible(), true);
   assert.equal(await page.locator('#access-connected').isHidden(), true);
   const order = await page.evaluate(() => [...document.querySelectorAll('#view-home h2')].map(h => h.id || h.textContent));
-  assert.ok(order.indexOf('journey-heading') === 0 && order.indexOf('journey-heading') < order.indexOf('native-chain-heading'), 'Main journey precedes the native chain: ' + order);
-  assert.equal(await page.locator('#view-home .journey-steps li').count(), 4);
-  assert.equal(await page.locator('#view-home .journey .button-link').getAttribute('href'), '#workflow');
+  assert.ok(order.indexOf('journey-heading') === 0 && order.indexOf('journey-heading') < order.indexOf('native-chain-heading'), 'Entry cards precede the native chain: ' + order);
+  // Home leads with at most three entry cards (template, workflow, monitor).
+  assert.deepEqual(await page.locator('#view-home .entry-card .button-link').evaluateAll(links => links.map(link => link.getAttribute('href'))), ['#workflow', '#workflow', '#monitor']);
   // One shell: header, nav and content start on the same edge.
-  const card = await left('#view-home .journey');
+  const card = await left('#view-home .entry-card');
   for (const selector of ['header .brand', 'nav.actions a']) assert.ok(Math.abs((await left(selector)) - card) <= 2, `${selector} is not aligned with content`);
 
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();

@@ -2,6 +2,7 @@
  * Covers the separate #run page, the "Next: prepare a run" handoff gated only by the
  * New run gate (window.newRunGate), the first-run "Start from a task example" guide,
  * the Task > Workflow > Run > Results step indicator and the collapsed secondary detail.
+ * The empty-canvas start state names the next action; the tour itself is layout_onboarding.mjs.
  * The fixture configures no runnable project, so one projects reply is rewritten to mark
  * `reusable` runnable; no preparation, launch, provider call or file write is performed.
  * Explicit env: EDITOR_PYTHON, CONSOLE_PLAYWRIGHT_MODULE, CONSOLE_BROWSER_EXECUTABLE. */
@@ -12,6 +13,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -31,6 +33,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
   const faults = [], posts = [];
   page.on('pageerror', error => faults.push(error.message));
@@ -52,8 +55,8 @@ try {
 
   // First run, before Connect: the task-example guide and the Task step lead.
   assert.equal(await page.locator('#workflow-start-guide').isVisible(), true);
-  assert.equal(await page.locator('#workflow-start-guide li').count(), 4);
-  assert.match(await page.locator('#workflow-start-guide').textContent(), /Select a task.*Edit.*Save.*Run/s);
+  assert.match(await page.locator('#start-guide-heading').textContent(), /Build your research loop/);
+  assert.equal(await page.locator('#workflow-start-guide button').count(), 1, 'The empty canvas offers one action');
   assert.match(await page.locator('#workflow-start-state').textContent(), /Connect/);
   assert.equal(await current(), 'Task');
   assert.equal(await next.isDisabled(), true);
@@ -67,7 +70,7 @@ try {
 
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
   await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
-  assert.equal(await page.locator('#workflow-start-guide').isHidden(), true, 'Guide yields once a workflow is open');
+  assert.equal(await page.locator('#workflow-start-guide').isHidden(), true, 'The empty-canvas start state yields to the workflow');
   assert.equal(await current(), 'Workflow');
   assert.match(await page.locator('#step-indicator li[data-step="task"]').getAttribute('class') || '', /done/);
   // The first project is not runnable: the handoff stays closed and says why.
