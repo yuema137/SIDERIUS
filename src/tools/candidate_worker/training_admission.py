@@ -132,7 +132,7 @@ def admit_training(
         workspace=initial.workspace,
         llm_config=config,
         task_composition=composition,
-        run_seed=run_seed.value,
+        run_seed=run_seed,
         **{
             name: getattr(settings, name)
             for name in type(settings).model_fields
