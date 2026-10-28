@@ -86,3 +86,19 @@ button[data-icon] { justify-content: center; }
 /* Without cards the empty state leads; the (empty) viewport shrinks to the remaining room
  * and stays the palette drop target. */
 .workflow-canvas-panel:not(:has(.circuit-card)) #editor-graph > .circuit-viewport { min-height: 0; }
+
+/* `+` add-handle on an unconnected output (editor-canvas-add.js, canvas-study V5): shown
+ * while the card is hovered, focused or selected; 8px outside the card's right edge. */
+.circuit-add-next { position: absolute; z-index: 4; right: -28px; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; min-height: 20px; padding: 0; border-radius: 50%; border-color: var(--primary); background: var(--panel); color: var(--primary); }
+.circuit-card:hover > .circuit-add-next, .circuit-card:focus-within > .circuit-add-next, .circuit-card:has(.editor-node[aria-pressed="true"]) > .circuit-add-next, .circuit-add-next:focus-visible { display: inline-flex; }
+.circuit-card:has(.circuit-output:disabled) > .circuit-add-next { display: none; }
+.circuit-add-next:not(:disabled):hover { background: var(--primary); color: var(--on-primary); }
+.canvas-add-popover { position: fixed; z-index: 30; display: grid; gap: var(--space-2); width: 280px; max-height: 312px; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); box-shadow: var(--elev-2); }
+.canvas-add-search { min-height: 32px; }
+.canvas-add-list { display: grid; gap: var(--space-1); overflow: auto; }
+.canvas-add-list p { margin: 0; }
+.canvas-add-option { display: flex; min-height: 36px; padding: 0 var(--space-2); border-color: transparent; background: var(--panel); color: var(--text); text-align: left; font-weight: 500; }
+.canvas-add-option:not(:disabled):hover { background: var(--hover); }
+.canvas-add-heading { grid-template-columns: 20px minmax(0, 1fr); }
+.canvas-add-heading svg { width: 20px; height: 20px; }
+.circuit-view-button .icon { margin-right: var(--space-1); }

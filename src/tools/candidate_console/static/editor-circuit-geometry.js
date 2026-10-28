@@ -135,7 +135,8 @@ function routeOnGrid(start, end, boxes, occupied) {
   return simplifyRoute(points.reverse());
 }
 // Display ranks from declared edges only; this does not admit or execute a graph.
-function arrange(nodes, spacing, column) {
+// Longest-path rank of every node over its result inputs (sources first).
+function rankNodes(nodes) {
   const remaining = new Set(nodes.map(node => node.id)), ranks = new Map();
   const parents = id => {
     const request = nodes.find(node => node.id === id).request;
@@ -147,9 +148,29 @@ function arrange(nodes, spacing, column) {
     if (!ready.length) ready.push(remaining.values().next().value);
     for (const id of ready) { ranks.set(id, Math.max(0, ...parents(id).map(parent => (ranks.get(parent) ?? -1) + 1))); remaining.delete(id); }
   }
+  return {ranks, parents};
+}
+function arrange(nodes, spacing, column) {
+  const {ranks} = rankNodes(nodes);
   const rows = new Map(), positions = new Map();
   for (const [id, rank] of ranks) { const index = rows.get(rank) || 0; positions.set(id, {x: index * column, y: rank * spacing}); rows.set(rank, index + 1); }
   return positions;
+}
+// "Tidy up" (canvas-study V1): left-to-right columns by longest path from a source, rows
+// ordered by the mean row of each node's sources (fewer crossings), all on the `grid`.
+// Column/row steps are the card size plus `gap`, rounded up to the grid.
+function tidy(nodes, size, gap = {x: 80, y: 32}, grid = 16) {
+  const {ranks, parents} = rankNodes(nodes);
+  const up = value => Math.ceil(value / grid) * grid;
+  const column = up(size.width + gap.x), spacing = up(size.height + gap.y);
+  const columns = new Map(), row = new Map();
+  for (const node of nodes) { const rank = ranks.get(node.id); if (!columns.has(rank)) columns.set(rank, []); columns.get(rank).push(node.id); }
+  for (const rank of [...columns.keys()].sort((a, b) => a - b)) {
+    const mean = id => { const rows = parents(id).filter(parent => row.has(parent)).map(parent => row.get(parent)); return rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0; };
+    const ids = columns.get(rank).sort((a, b) => mean(a) - mean(b) || (a < b ? -1 : a > b ? 1 : 0));
+    ids.forEach((id, index) => row.set(id, index));
+  }
+  return new Map(nodes.map(node => [node.id, {x: ranks.get(node.id) * column, y: row.get(node.id) * spacing}]));
 }
 // Saved positions stay exact. Unsaved nodes keep their ranked layout, shifted
 // right of every saved card, so a fallback card never covers a stored one.
@@ -191,5 +212,5 @@ function overlaps(boxes) {
   return pairs;
 }
 function path(points) { return points.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' '); }
-globalThis.editorCircuitGeometry = Object.freeze({route, path, segmentClear, arrange, place, fitScale, overlaps});
+globalThis.editorCircuitGeometry = Object.freeze({route, path, segmentClear, arrange, place, tidy, fitScale, overlaps});
 })();

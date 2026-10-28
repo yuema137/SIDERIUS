@@ -69,3 +69,22 @@ assert.deepEqual(overlaps([{left: -80, right: 135, top: 20, bottom: 200}, {left:
   'The interpretation fixture regression (interpret at x=-80 under build at x=120) is reported');
 assert.deepEqual(overlaps([{left: 0, right: 100, top: 0, bottom: 100}, {left: 100, right: 200, top: 0, bottom: 100}]), [], 'Touching edges are not an overlap');
 console.log('PASS view fit scale bounds and saved-layout overlap detection');
+
+// Tidy up: columns follow the longest path from a source (a skip edge cannot pull a node
+// left), rows follow the mean row of the sources, and every position is on the 16px grid.
+{
+  const {tidy} = globalThis.editorCircuitGeometry;
+  const result = from => ({kind: 'result', node: from, port: 'result'});
+  const node = (id, sources) => ({id, request: {kind: 'protocol', protocol: 'p', arguments: sources.map((from, i) => ({name: 'a' + i, source: result(from)}))}});
+  const nodes = [node('validate', ['implement', 'propose']), node('implement', ['propose']), {id: 'propose', request: {kind: 'external', binding: 'x'}}, node('side', ['propose']), node('lone', [])];
+  const placed = tidy(nodes, {width: 215, height: 150});
+  const column = Math.ceil((215 + 80) / 16) * 16, row = Math.ceil((150 + 32) / 16) * 16;
+  assert.deepEqual([placed.get('propose').x, placed.get('lone').x], [0, 0], 'Sources start the first column');
+  assert.equal(placed.get('implement').x, column, 'One step after its source');
+  assert.equal(placed.get('validate').x, 2 * column, 'Longest path, not the shortest (propose -> validate skip edge)');
+  assert.deepEqual([placed.get('implement').y, placed.get('side').y].sort(), [0, row], 'Siblings share a column on separate rows');
+  for (const {x, y} of placed.values()) assert.ok(x % 16 === 0 && y % 16 === 0, 'On the 16px grid');
+  const keys = [...placed.values()].map(({x, y}) => `${x},${y}`);
+  assert.equal(new Set(keys).size, keys.length, 'No two modules share a slot');
+  console.log('PASS tidy layout: longest-path columns, grid-aligned disjoint slots');
+}

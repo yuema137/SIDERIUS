@@ -224,16 +224,26 @@
     }
     return button;
   }
-  const button = (parent, text, id, onClick) => {
+  const button = (parent, text, id, onClick, icon = null) => {
     const value = element('button', text, parent, 'circuit-view-button'); value.type = 'button'; value.id = id;
+    if (icon && window.consoleIcons) value.prepend(window.consoleIcons.make(icon));
     value.addEventListener('click', onClick); return value;
   };
+  // Tidy up: one undoable layout edit (editor.js move) on the 16px grid; the view refits.
+  function tidyUp() {
+    if (!projection?.document || !projection.enabled || projection.allowMove === false) return;
+    const cards = [...host.querySelectorAll('.circuit-card')];
+    const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
+    const placed = geometry.tidy(projection.document.definition.nodes, size);
+    view.arranged = false; view.fitPending = true; view.scroll = null;
+    actions.move([...placed].map(([node, position]) => ({node, ...position})), 'Tidy up layout');
+  }
   // Re-render the current projection after a view-only change (arranged view).
   const rerender = () => { if (host && projection) render(host, projection, actions); };
   function toolbar(parent, value) {
     const bar = element('div', '', parent, 'circuit-toolbar');
     bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Canvas view');
-    button(bar, 'Fit to view', 'circuit-fit', fit).title = 'Scale the view so every capability is visible. Saved positions are unchanged.';
+    button(bar, 'Fit to view', 'circuit-fit', fit, 'scan').title = 'Scale the view so every capability is visible. Saved positions are unchanged.';
     button(bar, '−', 'circuit-zoom-out', () => applyScale(Math.max(0.4, Math.round((view.scale - 0.1) * 10) / 10))).setAttribute('aria-label', 'Zoom out');
     const zoom = element('span', `${Math.round(view.scale * 100)} %`, bar, 'circuit-zoom'); zoom.setAttribute('aria-label', 'Canvas zoom');
     button(bar, '+', 'circuit-zoom-in', () => applyScale(Math.min(1, Math.round((view.scale + 0.1) * 10) / 10))).setAttribute('aria-label', 'Zoom in');
@@ -244,6 +254,9 @@
     arrange.setAttribute('aria-pressed', String(view.arranged));
     arrange.title = 'Display a non-overlapping layout derived from the connections. Display only: saved positions change only if you then move a card, review and save.';
     arrange.disabled = !value.document;
+    const tidy = button(bar, 'Tidy up', 'circuit-tidy', tidyUp, 'layout-grid');
+    tidy.title = 'Line the modules up left to right in pipeline order. One undoable edit; save to keep it.';
+    tidy.disabled = !value.document || !value.enabled || value.allowMove === false;
     const note = element('p', '', parent, 'circuit-view-note'); note.setAttribute('aria-live', 'polite');
   }
   function render(container, value, callbacks) {
@@ -381,6 +394,7 @@
       target.setAttribute('aria-disabled', String(!enabled)); target.setAttribute('tabindex', enabled ? '0' : '-1');
     }
     for (const heading of host.querySelectorAll('.editor-node')) heading.setAttribute('aria-disabled', String(!selectable));
+    const tidy = host.querySelector('#circuit-tidy'); if (tidy) tidy.disabled = !enabled || !projection.document || projection.allowMove === false;
     if (!enabled) { cancel(); selectedWire = null; highlight(); }
   }
   document.addEventListener('keydown', event => {

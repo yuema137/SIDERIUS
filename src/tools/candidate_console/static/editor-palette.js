@@ -49,6 +49,20 @@
     const {x, y} = placement(point);
     actions.add({node: instanceId(entry.capability), capability: entry.capability, protocol: entry.protocol, x, y});
   }
+  // `+` add-handle (editor-canvas-add.js): routes with an argument that carries the source
+  // card's output contract (presentation filter; the server inspection still decides).
+  const accepting = (entry, contractId) => entry.protocol ? entry.arguments.filter(item => item.contract.id === contractId) : [];
+  function connectable(contractId) { return (catalog || []).filter(entry => accepting(entry, contractId).length); }
+  /** Add `entry` 5 grid units right of `sourceNode`, its matching argument bound to that output (one draft edit). */
+  function addConnected(entry, sourceNode, contractId) {
+    const card = cards().find(item => item.dataset.node === sourceNode);
+    const argument = accepting(entry, contractId).sort((a, b) => Number(b.required) - Number(a.required))[0];
+    if (!state.enabled || !actions || !card?._position || !argument) return false;
+    actions.add({node: instanceId(entry.capability), capability: entry.capability, protocol: entry.protocol,
+      x: card._position.x + card.offsetWidth + 80, y: card._position.y,
+      arguments: [{name: argument.name, source: {kind: 'result', node: sourceNode, port: 'result'}}]});
+    return true;
+  }
   function renderList() {
     const list = host.querySelector('.palette-list'); list.replaceChildren(); guidance().hide(canvas); syncGuide();
     if (!catalog) { element('p', loading ? 'Loading capabilities…' : 'Connect to load the capability catalog.', list, 'palette-empty'); return; }
@@ -177,5 +191,6 @@
   }
   document.addEventListener('pointerdown', event => { if (menu && !menu.contains(event.target)) closeMenu(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu(); });
-  window.editorNodePalette = Object.freeze({mount, setState, project, bind, draftMessage, inspectorActions, contextMenu});
+  window.editorNodePalette = Object.freeze({mount, setState, project, bind, draftMessage, inspectorActions, contextMenu, connectable, addConnected,
+    get enabled() { return state.enabled; }});
 })();
