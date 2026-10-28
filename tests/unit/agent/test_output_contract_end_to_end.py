@@ -33,6 +33,7 @@ from ml_models import plugin_loader
 from ml_models.models_format_sandbox import validate_output_loss_compatibility
 from nodes.ml_code_validator_agent import _check_instantiation_and_gradient
 from nodes.ml_model_implementor.ml_model_implementor import _assemble_plugin
+from tests.helpers.probe_seed import PROBE_SEED
 
 # Forward bodies that genuinely produce each contract's shape. The declaration
 # alone is not enough — A2 checks the model against its own declaration.
@@ -108,7 +109,7 @@ def test_declared_contract_survives_every_hop(tmp_path, output_type):
 
     # hop 4: the validator reads the declaration and checks the real forward
     inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-        str(plugin_path)
+        str(plugin_path), probe_seed=PROBE_SEED
     )
     assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
 

@@ -183,7 +183,10 @@ def observe_family(request, order, monkeypatch, provider, pristine):
     """Run one body from pristine registries; return family 1's normalized view."""
     restore(pristine)
     with observed_run(monkeypatch, provider) as seen:
-        receipt = launch_candidate(declared_in(families_request(request), order))
+        # One explicit run seed for every compared run: probe seeds are recorded
+        # (issue #983), and three launches would otherwise each generate one.
+        declared = declared_in(families_request(request), order)
+        receipt = launch_candidate(declared.model_copy(update={"run_seed": 11}))
     assert receipt.status == "accepted", receipt.error
     assert tuple(seen["sequence"]) == order
     assert seen["registry_writes"] == []

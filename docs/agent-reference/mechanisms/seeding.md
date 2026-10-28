@@ -328,10 +328,39 @@ which raises `MissingRunSeed` for `None`. Data analysis runs only in the native
 workflow (`model_exploration` → `run_optional_data_analysis`), not in candidate
 preparation.
 
+## Validation probes
+
+Owner: `core.probe_seeds` (torch-free) and `execute_tools.process_seeding`
+(`apply_process_seeds`, `seeded_scope`). A model probe's seeds are the
+`validation.probe` value of a `SeedContext` at
+`(iteration, node_id or None, attempt)`: Python and torch get the 63-bit
+value, legacy NumPy its low 32 bits. `attempt` is the 1-based implementation
+number within the iteration, so a retried implementation draws anew. The fixed
+workflow builds the context from its lock's `run_seed` with `node_id=None`; a
+candidate graph from the admitted run seed and its node's iteration and id.
+`MLModelImplementor(probe_seed=...)` and `MLCodeValidatorAgent(probe_seed=...)`
+carry it (constructor arguments, never prompt input).
+
+- In-process probes (the implementor self-check, the validator's
+  instantiation/gradient check) run inside `seeded_scope`, which restores the
+  caller's Python, NumPy and torch states afterwards.
+- `validator_probe_worker` receives the context through the environment
+  variable `SIDERIUS_PROBE_SEED_CONTEXT` (`probe_seed_env`) and seeds its
+  process before importing the candidate. The validator's pytest child gets
+  the same entry, so a task-owned probe in generated pytest inherits it; the
+  generated test source is not changed.
+- `require_probe_seed` raises `MissingRunSeed` when no context is supplied or
+  inherited. Standalone implementor/validator CLIs are entry boundaries: they bind
+  `--run_seed` or generate a run seed (`core.seeding.resolve_run_seed`) and
+  print the `[seed]` line.
+- `ValidatorOutput.probe_seed` records the context. The legacy generated
+  pytest templates (LLM-visible prompt text with `torch.randint`) are
+  unchanged and run unseeded inside their pytest child.
+
 ## Not yet provided
 
 These belong to later #983 PRs:
 
 - Console seed input and display (S6).
-- Validation-probe and generated-program seeding, and the generated-seed scan (S7b).
+- Generated-program seeding and the generated-seed scan (S7c).
 - The RNG census guard (S8).

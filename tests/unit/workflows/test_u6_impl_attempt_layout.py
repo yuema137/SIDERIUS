@@ -209,3 +209,24 @@ def test_the_funnel_and_the_registration_consume_the_terminal_attempt(tmp_path):
     assert registered_output.model_file_path.endswith(
         os.path.join("impl_002", "models", "gated_tcn_2.py")
     )
+
+
+def test_each_implementation_retry_probes_under_its_own_seed(tmp_path):
+    """Issue #983 S7b: the native workflow gives each implementation of an
+    iteration its own ``validation.probe`` context (iteration, no node id,
+    1-based implementation number) from the locked run seed, shared by that
+    implementation's implementor and validator. Fails if a retry reuses the
+    previous draw (constant attempt), the wiring drops the context, or the
+    seed is not the lock's."""
+    from core.run_invariants import load_run_invariants
+
+    calls: dict = {}
+    _run_with_forced_retries(tmp_path, (False, False, True), constructor_calls=calls)
+    implement = [call.kwargs["probe_seed"] for call in calls["implement"]]
+    validate = [call.kwargs["probe_seed"] for call in calls["validate"]]
+    assert implement == validate
+    locked = load_run_invariants(str(tmp_path / "workflow_output"))
+    assert locked is not None and locked.run_seed is not None
+    assert [(c.run_seed, c.at.iteration, c.at.node_id, c.at.attempt) for c in implement] == [
+        (locked.run_seed, 1, None, attempt) for attempt in (1, 2, 3)
+    ]

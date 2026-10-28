@@ -116,6 +116,7 @@ from agent.utils.proposer_preflight import (
 from core.chain_state import ChainState
 from core.hardware_context import get_or_create as get_or_create_hardware_context
 from core.layout import package_root
+from core.probe_seeds import probe_seed_context
 
 # Step 12 / PR-12a C6 — `core.resume` no longer imports a private symbol from
 # THIS module, so the cycle that forced `RestoredState` under TYPE_CHECKING and
@@ -2453,6 +2454,9 @@ def run_workflow(
                     f"previous_failures from iteration {iteration - 1}'s tuner."
                 )
 
+        # Issue #983: the n-th implementation of this iteration; with the
+        # iteration it places each probe's validation.probe seeds.
+        _implementation_number = 0
         for attempt in range(1, launch.max_proposal_attempts + 1):
             # Construction admission happens after code validation. Reset the
             # validation result so a refused candidate cannot leave a stale
@@ -2638,6 +2642,13 @@ def run_workflow(
                 previous_validation_failure: str | None = None
 
                 for impl_attempt in range(1, launch.max_impl_attempts + 1):
+                    _implementation_number += 1
+                    _probe_seed = probe_seed_context(
+                        _run_invariants.run_seed,
+                        iteration=iteration,
+                        node_id=None,
+                        attempt=_implementation_number,
+                    )
                     impl_suffix = (
                         f" (impl {impl_attempt}/{launch.max_impl_attempts})"
                         if launch.max_impl_attempts > 1
@@ -2688,6 +2699,7 @@ def run_workflow(
                     _impl_agent = MLModelImplementor(
                         **bindings.llm_config.get("implement"),
                         bridge_factory=bridge_factory,
+                        probe_seed=_probe_seed,
                     )
                     _bind_iter_context(_impl_agent)
                     impl_output = _impl_agent.run(impl_input)
@@ -2714,6 +2726,7 @@ def run_workflow(
                     _valid_agent = MLCodeValidatorAgent(
                         **valid_llm,
                         bridge_factory=bridge_factory,
+                        probe_seed=_probe_seed,
                     )
                     _bind_iter_context(_valid_agent)
                     validation = _valid_agent.run(valid_input)

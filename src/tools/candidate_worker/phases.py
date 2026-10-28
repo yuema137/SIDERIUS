@@ -9,6 +9,8 @@ from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full
 from agent.schemas.validator import ValidatorOutput
 from core.durable_io import publish_bytes_write_once
 from core.generated_artifact_name import validate_generated_artifact_name
+from core.probe_seeds import probe_seed_context
+from core.training_seeds import SeedContext
 from nodes.ml_code_validator_agent.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import MLModelProposalAgent
@@ -102,13 +104,27 @@ def run_implementation(
         reference_code={},
         previous_validation_failure=None,
     )
-    implementor = MLModelImplementor(**config.get("implement"))
+    implementor = MLModelImplementor(
+        **config.get("implement"), probe_seed=context_probe_seed(context, initial)
+    )
     context.bind(implementor)
     implemented = implementor.run(implementation)
     verify_artifacts(implemented, attempt, request.read_only, seed.task_composition_ref)
     implementation_path = Path(attempt.impl_dir) / f"implementor_{context.run_name}.json"
     capture_record(implementation_path, implemented)
     return implemented, implementation_path
+
+
+def context_probe_seed(
+    context: FixedInvocationContext, initial: CandidateRunReceipt
+) -> SeedContext:
+    """Issue #983: the node's ``validation.probe`` context from its admitted run seed."""
+    return probe_seed_context(
+        initial.run_seed,
+        iteration=context.iteration,
+        node_id=context.node_id,
+        attempt=context.attempt,
+    )
 
 
 def run_validation(
@@ -156,7 +172,9 @@ def run_validation(
             human_advice=request.validation_advice,
             inherited_components=proposal.inherited_components,
         )
-    validator = MLCodeValidatorAgent(**config.get("validate"))
+    validator = MLCodeValidatorAgent(
+        **config.get("validate"), probe_seed=context_probe_seed(context, initial)
+    )
     context.bind(validator)
     validated = validator.run(
         validation,

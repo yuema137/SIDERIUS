@@ -53,6 +53,7 @@ import importlib
 import pytest
 
 from agent.schemas.implementor import ImplementorInput
+from tests.helpers.probe_seed import PROBE_SEED
 
 _impl = importlib.import_module("nodes.ml_model_implementor.ml_model_implementor")
 #: The DOWNSTREAM consumer of the same construction rule. ``TestOne
@@ -333,9 +334,10 @@ class TestTheImplementorCanStillEmitSuchACandidate:
         baseline = _implementor_input("c12p_f12e_g1_selfcheck_v1", {"channels": 8})
         src = _impl._assemble_plugin(baseline, _CODE)
 
-        assert _impl._smoke_test_plugin(src, "c12p_f12e_g1_selfcheck_v1", None) is None, (
-            "the implementor's own smoke test cannot construct the plugin it just assembled"
-        )
+        assert (
+            _impl._smoke_test_plugin(src, "c12p_f12e_g1_selfcheck_v1", None, probe_seed=PROBE_SEED)
+            is None
+        ), "the implementor's own smoke test cannot construct the plugin it just assembled"
         assert (
             _impl._check_baseline_schema_compatibility(
                 src, "c12p_f12e_g1_selfcheck_v1", baseline.baseline_config
@@ -636,7 +638,7 @@ class TestOneProbeConstructionAuthority:
         monkeypatch.setattr(_val, "probe_config_kwargs", _spy)
 
         inst_ok, _grad_ok, _otype_ok, err, _total, _trainable = (
-            _val._check_instantiation_and_gradient(str(path))
+            _val._check_instantiation_and_gradient(str(path), probe_seed=PROBE_SEED)
         )
 
         assert seen, (
@@ -667,8 +669,8 @@ class TestOneProbeConstructionAuthority:
         path.write_text(src, encoding="utf-8")
 
         before = _resolution_chain(name)
-        _val._check_instantiation_and_gradient(str(path))
-        assert _impl._smoke_test_plugin(src, name, None) is None
+        _val._check_instantiation_and_gradient(str(path), probe_seed=PROBE_SEED)
+        assert _impl._smoke_test_plugin(src, name, None, probe_seed=PROBE_SEED) is None
         after = _resolution_chain(name)
 
         assert before == (0, None), f"the undeclared candidate did not start undeclared: {before}"

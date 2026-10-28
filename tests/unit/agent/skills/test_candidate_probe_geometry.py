@@ -17,6 +17,7 @@ from agent.schemas.model_io_contract import (
     TensorAxis,
     TensorContract,
 )
+from tests.helpers.probe_seed import PROBE_SEED
 
 _impl = importlib.import_module("nodes.ml_model_implementor.ml_model_implementor")
 _val = importlib.import_module("nodes.ml_code_validator_agent.ml_code_validator_agent")
@@ -65,8 +66,11 @@ def test_both_nodes_accept_legal_declared_length(tmp_path, length, fixed):
     path = tmp_path / "reflection_probe.py"
     path.write_text(source)
     declaration = contract(fixed)
-    assert _impl._smoke_test_plugin(source, "reflection_probe", declaration) is None
-    result = _val._check_instantiation_and_gradient(str(path), declaration)
+    assert (
+        _impl._smoke_test_plugin(source, "reflection_probe", declaration, probe_seed=PROBE_SEED)
+        is None
+    )
+    result = _val._check_instantiation_and_gradient(str(path), declaration, probe_seed=PROBE_SEED)
     assert result[:4] == (True, True, True, None), result
 
 
@@ -75,8 +79,8 @@ def test_probe_config_conflict_is_diagnosed_before_model_forward(tmp_path):
     path = tmp_path / "reflection_probe.py"
     path.write_text(source)
     for error in (
-        _impl._smoke_test_plugin(source, "reflection_probe", contract(192)),
-        _val._check_instantiation_and_gradient(str(path), contract(192))[3],
+        _impl._smoke_test_plugin(source, "reflection_probe", contract(192), probe_seed=PROBE_SEED),
+        _val._check_instantiation_and_gradient(str(path), contract(192), probe_seed=PROBE_SEED)[3],
     ):
         assert error and "Probe contract conflict" in error
         assert "192" in error and "384" in error

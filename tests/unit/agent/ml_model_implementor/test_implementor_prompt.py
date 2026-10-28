@@ -297,7 +297,9 @@ class TestDeferredScope:
         """
         import inspect
 
-        from nodes.ml_model_implementor.ml_model_implementor import _smoke_test_plugin
+        from nodes.ml_model_implementor.ml_model_implementor import (
+            _smoke_test_plugin_in_scope as _smoke_test_plugin,
+        )
 
         body = inspect.getsource(_smoke_test_plugin)
         assert "expected [1, 256, 64]" not in body, (

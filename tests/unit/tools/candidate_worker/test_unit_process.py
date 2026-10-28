@@ -207,7 +207,10 @@ def test_real_unit_processes_reproduce_the_in_process_body(
     process registry between units, or drops a unit's subprocess lifecycle evidence."""
     from ml_models import models_sandbox
 
-    reference = fanout_request(separate_request(tmp_path, "in_process"))
+    # Both runs pin one run seed: the recorded probe seed derives from it (#983).
+    reference = fanout_request(separate_request(tmp_path, "in_process")).model_copy(
+        update={"run_seed": 11}
+    )
     prompts = []
     generate, generate_text = Provider.generate, Provider.generate_text
 
@@ -224,7 +227,7 @@ def test_real_unit_processes_reproduce_the_in_process_body(
         expected = launch_candidate(reference)
     assert expected.status == "accepted", expected.error
 
-    request = fanout_request(prepared)
+    request = fanout_request(prepared).model_copy(update={"run_seed": 11})
     receipt, rows, observed = run_real_units(request, monkeypatch, tmp_path, "none")
     assert receipt.status == "accepted", receipt.error
     assert trace_sha256(receipt) == UNROUTED_TRACE_SHA256["accepted"]

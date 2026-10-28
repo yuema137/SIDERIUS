@@ -130,6 +130,18 @@ output = agent.run(inp)  # -> ImplementorOutput
 
 The constructor accepts `bridge_factory` (test injection — defaults to `LLMBridge`) and `max_retries` (defaults to `None`, infinite quota retry per project policy). Note `max_retries` on the constructor is the LLMBridge-level network retry; the **code self-correction repair count** is a separate field on `ImplementorInput` (`inp.max_retries`, default `2`).
 
+**Probe seed (issue #983).** The constructor also takes
+`probe_seed: SeedContext` — the run seed plus `(iteration, node_id or None,
+attempt)`; the fixed workflow passes `node_id=None` and the 1-based
+implementation number within the iteration, a candidate graph its node's
+iteration and id (`phases.context_probe_seed`). The self-check refuses `None`. Model probes draw
+from its `validation.probe` stream ([seeding](../../../docs/agent-reference/mechanisms/seeding.md#validation-probes)):
+an in-process probe runs inside `seeded_scope`, a bounded probe child or
+generated pytest receives it through `SIDERIUS_PROBE_SEED_CONTEXT`
+(`core.probe_seeds.PROBE_SEED_ENV`); generated test bytes are unchanged. A
+missing context raises `MissingRunSeed`. The standalone CLI is an entry
+boundary: it binds `--run_seed` or generates a run seed (`core.seeding.resolve_run_seed`) and prints the `[seed]` line.
+
 ## Storage outputs
 
 This node writes **four files** below the configured workspace by default:

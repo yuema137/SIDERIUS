@@ -8,6 +8,8 @@ lives in ``core/training_seeds.py``.
 from __future__ import annotations
 
 import random
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import numpy as np
 import torch
@@ -22,11 +24,33 @@ def seed_process(plan: TrainingSeedPlan) -> ProcessSeedRecord:
     ``torch.manual_seed`` also seeds all CUDA devices (lazily when CUDA is
     not yet initialised).
     """
-    record = plan.process_seeds()
+    return apply_process_seeds(plan.process_seeds())
+
+
+def apply_process_seeds(record: ProcessSeedRecord) -> ProcessSeedRecord:
+    """Seed the three process-global generators from ``record``; return it."""
     random.seed(record.python)
     np.random.seed(record.numpy)
     torch.manual_seed(record.torch)
     return record
+
+
+@contextmanager
+def seeded_scope(record: ProcessSeedRecord) -> Iterator[ProcessSeedRecord]:
+    """Seed the process generators for an in-process unit, then restore them.
+
+    ``torch.random.fork_rng`` restores torch CPU and CUDA state; Python and
+    legacy NumPy states are saved and restored here, so the orchestrator's own
+    streams are unchanged after the unit.
+    """
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    with torch.random.fork_rng():
+        try:
+            yield apply_process_seeds(record)
+        finally:
+            random.setstate(python_state)
+            np.random.set_state(numpy_state)
 
 
 def torch_generator(seed: int) -> torch.Generator:
