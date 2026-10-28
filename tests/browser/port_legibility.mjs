@@ -142,7 +142,7 @@ try {
 
   // Refused connection names both contracts.
   await output('check_left').click(); await input('build_left', 'output').click();
-  assert.match(await message(), /refused: build_left\.output expects proposal\.output \(Model plan\), but check_left\.result provides validation\.output \(Code verdict\)/);
+  assert.equal(await message(), "Can't connect: Validate sends Code verdict; this input receives Model plan.", 'refusal names both connector types');
   assert.equal(await dirty(), false); await page.keyboard.press('Escape');
 
   // U5: the protocol mapping chip expands to source -> argument field mappings.
