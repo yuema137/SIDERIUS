@@ -102,7 +102,7 @@ def main() -> int:
         from .app import create_app
 
         uvicorn.run(
-            create_app(config),
+            create_app(config, resolved.settings),
             host=config.bind_host,
             port=config.port,
             proxy_headers=False,

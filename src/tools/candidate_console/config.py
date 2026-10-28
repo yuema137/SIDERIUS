@@ -1,5 +1,6 @@
 """Validate inert operator resources without composing tasks or constructing clients."""
 
+from dataclasses import replace
 from pathlib import Path
 
 from .files import canonical, config_bytes, credential_values, token
@@ -98,7 +99,8 @@ def load_console(path: str) -> ResolvedConsole:
     from .workspace import resolve_console
 
     resolved = resolve_console(config_bytes(path))
-    return validate_resolved(resolved)
+    context = replace(resolved.settings, console_path=canonical(path))
+    return validate_resolved(ResolvedConsole(resolved.config, context))
 
 
 def validate_resolved(resolved: ResolvedConsole) -> ResolvedConsole:

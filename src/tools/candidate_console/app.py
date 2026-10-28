@@ -33,6 +33,9 @@ from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_preparation_routes import reusable_preparation_router
 from .reusable_routes import reusable_router
 from .service import CandidateConsole
+from .settings_models import SettingsContext
+from .settings_routes import settings_router
+from .settings_service import ConsoleSettings
 
 
 def error_response(status: int, code: str, message: str) -> JSONResponse:
@@ -78,7 +81,8 @@ def refusal(table: dict[str, str], error: OperationFailure) -> JSONResponse:
     return error_response(409, error.detail.code, table[error.detail.code])
 
 
-def create_app(config: ConsoleConfig) -> FastAPI:
+def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -> FastAPI:
+    """``settings`` is the startup snapshot's context; absent, the Settings page is read-only."""
     service = CandidateConsole(config)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.console = service
@@ -93,6 +97,11 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     app.include_router(reusable_router(service))
     app.include_router(native_chain_router(service))
     app.include_router(reusable_preparation_router(service))
+    app.include_router(
+        settings_router(
+            ConsoleSettings(service.config, settings or SettingsContext(None, frozenset()))
+        )
+    )
     app.add_middleware(RequestBoundary, config=service.config, token=token(config.auth_token_file))
 
     @app.exception_handler(RequestValidationError)
@@ -279,6 +288,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "reusable-intents.js": "text/javascript",
             "new-run.js": "text/javascript",
             "page-guidance.js": "text/javascript",
+            "settings.js": "text/javascript",
             "page-guidance.css": "text/css",
             "editor.css": "text/css",
             "editor-parameters.css": "text/css",

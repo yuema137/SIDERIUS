@@ -152,6 +152,7 @@ class SettingsContext:
     settings: GlobalSettings | None = None  # active: loaded at startup
     settings_sha256: str | None = None
     from_settings: frozenset[tuple[str, str]] = frozenset()  # (task_id, field)
+    console_path: Path | None = None  # the console.json this snapshot was loaded from
 
     def origin(self, task_id: str | None, field: str) -> Origin:
         if task_id is not None and (task_id, field) in self.from_settings:
