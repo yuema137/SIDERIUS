@@ -5,6 +5,7 @@ silently lose; Pydantic field declarations themselves are not retested.
 """
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -14,6 +15,7 @@ from tests.unit.tools.test_workflow_authoring import SOURCE, request
 from tools.workflow_authoring.models import Project
 from tools.workflow_authoring.service import AuthoringError, WorkflowAuthoring, digest
 from tools.workflow_authoring.versions import (
+    RecordedVersion,
     VersionRecord,
     recorded_name,
     version_record_path,
@@ -241,3 +243,34 @@ def test_preparation_name_lookup_is_display_only(editor):
     assert recorded_name(source, digest(SOURCE.encode())) is None
     version_record_path(source).write_text("not json")
     assert recorded_name(source, digest(first.encode())) is None
+
+
+def test_new_names_refuse_invisible_characters_but_old_records_still_load():
+    """Fails if a name differing only by a zero-width or bidi character is recorded (it
+    shows as a duplicate-looking history row, red-team S-6), or if a record written
+    before this rule stops loading (its project would lose history and Save)."""
+    from tools.workflow_authoring.models import SaveRequest
+
+    fields = {"source": "x", "expected_sha256": "0" * 64, "proposal_sha256": "0" * 64}
+    hidden_names = (
+        "from-tab-a" + chr(0x200B),
+        "v" + chr(0x202E) + "2",
+        "a" + chr(0x2028) + "b",
+        "a" + chr(0xE000),
+    )
+    for hidden in hidden_names:
+        with pytest.raises(ValidationError, match="invisible"):
+            SaveRequest(**fields, version_name=hidden)
+    assert SaveRequest(**fields, version_name="Tidy layout · v2").version_name == "Tidy layout · v2"
+    old = VersionRecord(
+        source_name="workflow.py",
+        versions=(
+            RecordedVersion(
+                sha256="1" * 64,
+                name="from-tab-a" + chr(0x200B),
+                recorded_at=datetime.now(UTC),
+                origin="saved",
+            ),
+        ),
+    )
+    assert VersionRecord.model_validate_json(old.model_dump_json()) == old
