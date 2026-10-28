@@ -118,7 +118,8 @@ class StopJudgeRequest(JudgeModel):
 #: Deterministic projection bounds: one item never dominates a prompt.
 MAX_PROJECTED_FIELDS = 64
 MAX_PROJECTED_CHARS = 4000
-#: Items one scoring call may list, so a batch prompt has a fixed size bound.
+#: Items any one judge call may list (rubric batch scoring, merge, revision, debate),
+#: so every prompt that lists all items has a fixed size bound.
 MAX_SCORED_ITEMS_PER_CALL = 16
 
 
@@ -181,7 +182,7 @@ class MergeRequest(JudgeModel):
     output_contract: str = Field(min_length=1)
     synthesize_count: int = Field(ge=1)
     min_parents: int = Field(ge=2)
-    items: tuple[JudgedItem, ...] = Field(min_length=2)
+    items: tuple[JudgedItem, ...] = Field(min_length=2, max_length=MAX_SCORED_ITEMS_PER_CALL)
     guidance: JudgeTaskBlocks | None
 
     @model_validator(mode="after")

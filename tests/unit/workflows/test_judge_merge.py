@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agent.judge.call import JudgeRunContext
 from agent.schemas.data_analysis.common import canonical_json_bytes, canonical_sha256
@@ -295,3 +296,16 @@ PINS = (
     "38363e0adfa630a48629aca3b223afc9eb23ed2c31f33bf0c64813211432da3d",
     "3d0a15fdfbe6bab17b8f8e89293af17dfeae9790708a74d62784c87b8d8f72bb",
 )
+
+
+def test_a_merge_listing_more_items_than_one_call_may_hold_is_refused(tmp_path):
+    """Defect: the merge prompt grows with the declared item count (a 200-item port is
+    admitted and its one call lists every item)."""
+    wide = InputPort(
+        name="reviews", contract="literature.output", cardinality="many", max_items=200
+    )
+    assert "batch_too_large" in {r.code for r in admit(inputs=(wide,)).refusals}
+    edge = InputPort(name="reviews", contract="literature.output", cardinality="many", max_items=16)
+    assert admit(inputs=(edge,)).admitted
+    with pytest.raises(ValidationError, match="at most 16 items per call"):
+        invocation(tmp_path, n=17)
