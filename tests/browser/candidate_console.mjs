@@ -118,13 +118,13 @@ try {
   await page.getByLabel('Console token', { exact: true }).focus();
   await page.keyboard.type('browser-fixture-token'); await page.keyboard.press('Tab'); await page.keyboard.press('Enter');
   await page.getByText('Connected. Observations', { exact: false }).waitFor({state: 'attached'});
-  await page.getByLabel('Run name', { exact: true }).fill('browser-offline');
+  await page.locator('#prepare-form').getByLabel('Run name', { exact: true }).fill('browser-offline');
   await page.getByText('Optional stage advice', { exact: true }).click();
   await page.getByLabel('Proposal advice', { exact: true }).fill(hostile);
   await page.getByRole('button', { name: 'Prepare request', exact: true }).dblclick();
   await page.getByText('Submission outcome is unconfirmed or refused:', { exact: false }).waitFor({state: 'attached'});
   assert.equal(requests.filter(item => item.method === 'POST').length, 1);
-  assert.equal(await page.getByLabel('Run name', { exact: true }).isDisabled(), true);
+  assert.equal(await page.locator('#prepare-form').getByLabel('Run name', { exact: true }).isDisabled(), true);
   const uncertainId = await page.locator('#prepare-id').textContent();
   await page.locator('nav a[href="#slow-control"]').click();
   await page.locator('nav a[href="#home"]').click();
@@ -234,7 +234,7 @@ try {
   await page.locator('#configured-task > summary').click();
   // Fresh preparation and stale review refuse a second launch until reviewed again.
   finishing = false; nativeState = 'completed'; staleLaunch = true;
-  await page.getByLabel('Run name', { exact: true }).fill('second-run');
+  await page.locator('#prepare-form').getByLabel('Run name', { exact: true }).fill('second-run');
   await page.getByRole('button', { name: 'Prepare request', exact: true }).click();
   await page.getByText('Prepared request loaded.', { exact: false }).waitFor({state: 'attached'});
   await page.getByRole('button', { name: 'Launch candidate', exact: true }).click();
@@ -247,7 +247,7 @@ try {
   readinessBlocked = true;
   const frozenReview = await page.locator('#review').textContent();
   await page.getByRole('button', { name: 'New preparation', exact: true }).click();
-  await page.getByLabel('Run name', { exact: true }).fill('edited-draft');
+  await page.locator('#prepare-form').getByLabel('Run name', { exact: true }).fill('edited-draft');
   assert.ok(frozenReview.includes('second-run')); assert.equal(await page.locator('#review').textContent(), '');
   assert.ok((await page.locator('#configured-paths').textContent()).includes('/fixture/llm.json'));
   await page.getByRole('button', { name: 'Prepare request', exact: true }).click();

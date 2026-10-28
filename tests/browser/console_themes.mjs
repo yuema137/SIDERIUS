@@ -201,7 +201,9 @@ try {
     const path = new URL(route.request().url()).pathname;
     assert.equal(route.request().method(), 'GET', 'Theme test forbids all effectful console requests');
     let body;
-    if (path === '/api/choices') body = [{task_id: 'synthetic', label: 'Synthetic theme fixture', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300}];
+    if (['/api/native-chain/choices', '/api/recorded-examples'].includes(path)) body = [];
+    else if (path === '/api/operations') body = {operations: [], unreadable: 0, examined: 0, incomplete: false};
+    else if (path === '/api/choices') body = [{task_id: 'synthetic', label: 'Synthetic theme fixture', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300}];
     else if (path.endsWith('/tokens')) {
       if (tokenError) return route.fulfill({status: 409, json: {error: {code: 'integrity', message: 'Synthetic token read error'}}});
       body = {run_id: operation, availability: 'available', reason: 'reported_responses', quality: {partial: true}, observed_at: 'fixture', groups: [{provider: 'fixture', requested_model: 'offline', served_model: null, response_rows: 1, reported_input_tokens: 12, reported_output_tokens: null, reported_total_tokens: null, missing_input_rows: 0, missing_output_rows: 1, missing_total_rows: 1}]};
@@ -225,7 +227,11 @@ try {
   await page.locator('#tokens-status').filter({hasText: 'Reported tokens stale'}).waitFor();
   await capture('console-error-monitor');
   assert.deepEqual(await monitor(), before);
-  assert.equal(apiRequests.filter(([method]) => method !== 'GET').length, 2, 'Only two explicit editor review requests may mutate before console monitoring');
+  // Non-GET editor calls are read-only inspections: two explicit Reviews plus the binding
+  // draft check (POST editor/<project>/draft, 6026b798). Save/prepare/launch must never occur.
+  const nonGet = apiRequests.filter(([method]) => method !== 'GET').map(([, path]) => path);
+  assert.equal(nonGet.filter(path => path.endsWith('/review')).length, 2, 'Exactly the two explicit editor reviews');
+  assert.ok(nonGet.every(path => /^\/api\/editor\/[^/]+\/(review|draft)$/.test(path)), 'Only review/draft inspections before console monitoring: ' + nonGet.join(', '));
   assert.deepEqual(faults, []);
   await context.close();
 

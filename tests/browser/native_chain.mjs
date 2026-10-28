@@ -171,7 +171,9 @@ async function projections(context, metadata, realStatus) {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     const reply = json => route.fulfill({json});
-    if (path === '/api/choices') return reply([]);
+    // Read-only shell lists (recorded examples, Slow control operation list) are outside this witness.
+    if (path === '/api/choices' || path === '/api/recorded-examples') return reply([]);
+    if (path === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     if (path === '/api/native-chain/choices') return reply([{choice_id: 'one', label: 'One'}, {choice_id: 'two', label: 'Two'}]);
     if (path === '/api/native-chain/review') {reviewRequestCount++; reviewReply = true; await holdReview; return reply(fakeReview);}
     if (path.endsWith('/tokens')) {tokenReply = true; await holdTokens; return reply({groups: [{provider: 'STALE-CANDIDATE', requested_model: 'old', served_model: null, reported_total_tokens: 999}], quality: {partial: false}, reason: 'reported_responses', observed_at: 'old'});}

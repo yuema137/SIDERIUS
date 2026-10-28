@@ -140,8 +140,10 @@ try {
   await page.screenshot({path: join(evidence, 'recovered-monitor.png'), fullPage: true});
   // Restore configured resources for the other fresh admissions; recovery above ran without them.
   await rename(metadata.source + '.saved', metadata.source); await rename(metadata.credential + '.saved', metadata.credential);
-  await page.locator('nav a[href="#workflow"]').click(); await page.locator('#capture-check').click();
-  await page.locator('#capture-finish').waitFor(); await page.locator('#capture-finish').click();
+  // Dismissal needs release evidence: re-check until the wrapper has finished, not just the native result.
+  await page.locator('nav a[href="#workflow"]').click();
+  await until(async () => {await page.locator('#capture-check').click(); return page.locator('#capture-finish').isVisible();}, 90000);
+  await page.locator('#capture-finish').click();
   await page.locator('#capture-task').selectOption('synthetic');
   await page.locator('#capture-refresh').click(); await open(metadata.captures[1]);
   assert.match(await page.locator('#capture-source').textContent(), /differs/);
