@@ -50,7 +50,8 @@ class NodeReadiness(StopModel):
     """One declared node as readiness sees it; `pending` means not yet decided."""
 
     node_id: str
-    predecessors: tuple[str, ...]  # required sources, including a route's control edge
+    # Required sources, including a route's control edge, excluding merge candidates.
+    predecessors: tuple[str, ...]
     state: GraphState
     reason: GraphReason | None = None  # recorded reason; a skip is inherited from it
     routing: NodeRouting = NodeRouting()
@@ -59,6 +60,8 @@ class NodeReadiness(StopModel):
     def _skip_has_reason(self) -> "NodeReadiness":
         if self.state == "skipped" and self.reason not in SKIP_REASONS:
             raise ValueError("a skipped node must carry a skip reason")
+        if set(self.predecessors) & set(_merged(self.routing)):
+            raise ValueError("a merge candidate is not also a required predecessor")
         return self
 
 
@@ -93,10 +96,13 @@ class ReadinessOutput(StopModel):
         return self
 
 
+def _merged(routing: NodeRouting) -> tuple[str, ...]:
+    return tuple(item.node for merge in routing.merges for item in merge.candidates)
+
+
 def _sources(node: NodeReadiness) -> tuple[str, ...]:
     """Every node whose terminal state this node waits for."""
-    merged = (item.node for merge in node.routing.merges for item in merge.candidates)
-    return (*node.predecessors, *merged)
+    return (*node.predecessors, *_merged(node.routing))
 
 
 def _merge_input(
@@ -119,7 +125,9 @@ def _merge_input(
         if all(item.state == "skipped" for item in candidates):
             return candidates[0]
         raise ValueError(f"{node_id}: merge over route {merge.branch} lacks its decision")
-    chosen = [item for item in merge.candidates if item.entry == decision.selected_targets]
+    # Arm identity is the entry-target set; declared order carries no meaning.
+    selected = frozenset(decision.selected_targets)
+    chosen = [item for item in merge.candidates if frozenset(item.entry) == selected]
     if len(chosen) != 1:
         raise ValueError(f"{node_id}: route {merge.branch} selected no single merge candidate")
     return nodes[chosen[0].node]
@@ -165,7 +173,8 @@ def _close_reason(
         return ("blocked", "dependency_not_successful")
     skipped = next((source for source in sources if source.state == "skipped"), None)
     if skipped is not None:
-        assert skipped.reason is not None  # NodeReadiness refuses a skip without a reason
+        if skipped.reason is None:  # unreachable: NodeReadiness refuses a reasonless skip
+            raise ValueError(f"{skipped.node_id}: skipped without a reason")
         return ("skipped", skipped.reason)
     return _route_closure(node, decisions)
 
@@ -207,12 +216,17 @@ def readiness_input(
 
     def project(slot: GraphNodeEvidence) -> NodeReadiness:
         item = decided.get(slot.node_id)
+        routing = routes.get(slot.node_id, NodeRouting())
+        # Declared dependency facts list every merge candidate; readiness consumes only
+        # the selected one, so candidates leave the AND set (PR2 refuses a plain
+        # dependence on a merged arm, so nothing required is dropped).
+        merged = frozenset(_merged(routing))
         return NodeReadiness(
             node_id=slot.node_id,
-            predecessors=slot.predecessors,
+            predecessors=tuple(key for key in slot.predecessors if key not in merged),
             state="pending" if item is None else item.state,
             reason=None if item is None else item.reason,
-            routing=routes.get(slot.node_id, NodeRouting()),
+            routing=routing,
         )
 
     return ReadinessInput(

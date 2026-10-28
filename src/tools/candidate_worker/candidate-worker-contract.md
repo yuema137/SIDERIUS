@@ -405,8 +405,14 @@ declaration order as `NodeReadiness(node_id, predecessors, state, reason,
 routing)` (`pending` for undecided nodes), `aborted`, and `decisions` (the
 recorded `RouteEvaluationOutput` values, at most one per branch; empty for
 every currently admitted profile). It refuses duplicate ids, undeclared
-predecessors or merge candidates, two decisions for one branch, and a `skipped`
-node without a reason in `SKIP_REASONS` (B1: `route_not_selected`). It
+predecessors or merge candidates, two decisions for one branch, a `skipped`
+node without a reason in `SKIP_REASONS` (B1: `route_not_selected`), and a node
+whose merge candidate is also one of its `predecessors`. `predecessors` are the
+required sources (including a route's control edge), excluding merge
+candidates: declared dependency facts list every candidate as a consumer
+dependency, so `readiness_input` removes a node's merge candidates from its slot
+predecessors (safe because declaration validation refuses a plain dependence on
+a merged arm). It
 inspects the first `pending` node whose sources (predecessors plus every merge
 candidate) are all terminal (neither `pending` nor `running`) and returns one
 action as `ReadinessOutput`: `next=<node_id>` to dispatch it, or
@@ -430,7 +436,7 @@ action as `ReadinessOutput`: `next=<node_id>` to dispatch it, or
 A merge (`NodeRouting.merges`, one `MergeReadiness(branch, candidates)` per
 `SelectedSource` argument; each `MergeCandidate(node, entry)` names the entry
 targets of the arm it lies in) consumes only the candidate whose `entry` equals
-the decision's `selected_targets`; non-selected candidates (skipped or blocked)
+the decision's `selected_targets` as a set (declared order carries no meaning); non-selected candidates (skipped or blocked)
 are ignored. No unique match raises `ValueError`. Without a decision (the branch
 source never succeeded) the consumer is blocked if any candidate is
 failed/rejected/blocked, inherits the skip if all are skipped, and otherwise

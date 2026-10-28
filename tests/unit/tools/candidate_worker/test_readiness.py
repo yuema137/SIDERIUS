@@ -304,6 +304,37 @@ def evidence(node_id, preds, state, reason=None):
 
 ROUTED = {"a": NodeRouting(route="r"), "b": NodeRouting(route="r")}
 
+MERGED = {**ROUTED, "join": NodeRouting(merges=(merge_ab(),))}
+
+
+def test_merge_consumer_with_declared_candidate_predecessors_runs_the_selected_arm():
+    """Fails if a merge candidate stays in the AND set: the skipped arm would skip `join`.
+
+    `dependency_graph` lists every merge candidate as a predecessor of the consumer,
+    so the slot carries ("a", "b") exactly as declared.
+    """
+    trace = (
+        evidence("src", (), "succeeded"),
+        evidence("a", ("src",), "skipped", SKIP),
+        evidence("b", ("src",), "succeeded"),
+        evidence("join", ("a", "b"), "succeeded"),
+    )
+    done = {item.node_id: item for item in trace[:3]}
+    step = next_dispatch(
+        readiness.readiness_input(trace, done, aborted=False, decisions=ROUTE_B, routing=MERGED)
+    )
+    assert (step.next, step.terminal) == ("join", ())
+    replay_readiness(trace, decisions=ROUTE_B, routing=MERGED)
+    wrong = (*trace[:3], evidence("join", ("a", "b"), "skipped", SKIP))
+    with pytest.raises(ValueError, match="serial readiness"):
+        replay_readiness(wrong, decisions=ROUTE_B, routing=MERGED)
+
+
+def test_merge_candidate_cannot_also_be_a_required_predecessor():
+    # Fails if a direct NodeReadiness could AND over a candidate the merge may not select.
+    with pytest.raises(ValueError, match="merge candidate"):
+        node("join", ("a",), merges=(merge_ab(),))
+
 
 @pytest.mark.parametrize(
     ("a", "b"),
@@ -356,7 +387,7 @@ def test_unrouted_graph_trace_bytes_are_unchanged(prepared, native_runner, monke
 
     from .test_native import Provider
 
-    Provider.reject = outcome == "rejected"
+    monkeypatch.setattr(Provider, "reject", outcome == "rejected")
     if outcome == "failed":
 
         def failed(*args, **kwargs):
