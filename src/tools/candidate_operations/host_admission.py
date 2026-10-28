@@ -12,12 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
-from core.execution_calibration import MalformedCeilingOverride
-from core.runtime_control.pair_admission import (
-    HOST_VRAM_QUOTA_MIB_ENV,
-    host_quota_gib,
-    mib_from_gib,
-)
 from core.runtime_control.scheduling import HostBudget, Placement, plan_dispatch
 from core.subprocess_env import CUDA_VISIBLE_DEVICES_ENV_VAR
 
@@ -46,7 +40,7 @@ from .process import identity_of
 from .store import native_directory
 
 #: Names a placed GPU run must declare so its sandbox receives the placement.
-GPU_PLACEMENT_NAMES = (CUDA_VISIBLE_DEVICES_ENV_VAR, HOST_VRAM_QUOTA_MIB_ENV)
+GPU_PLACEMENT_NAMES = (CUDA_VISIBLE_DEVICES_ENV_VAR,)
 
 
 class HostSlot:
@@ -83,26 +77,16 @@ class LedgerSlot(HostSlot):
         self.admitted = admitted
 
     def launch_environment(self, source: Mapping[str, str]) -> Mapping[str, str]:
-        """Overlay the placement so every later name check and the child see it.
+        """Overlay the placed GPU so every later name check and the child see it.
 
-        The slot UUID replaces any inherited ``CUDA_VISIBLE_DEVICES``. The run's own
-        ceiling owner receives a host quota no larger than the reserved VRAM, so its
-        existing GPU admission refuses a run that would exceed the reservation. A
-        CPU-only unit binds no device node (admission), so it needs neither.
+        The slot UUID replaces any inherited ``CUDA_VISIBLE_DEVICES``. The declared
+        ``vram_gib`` is the ledger's accounting only; the run's own admission does
+        not yet enforce it (#1018). A CPU-only unit binds no device node
+        (admission), so it needs no selector.
         """
-        placement, resources = self.admitted.placement, self.admitted.resources
-        if placement.gpu_uuid is None or resources.vram_gib is None:
+        if self.admitted.placement.gpu_uuid is None:
             return source
-        try:
-            inherited = host_quota_gib(environ=source)
-        except MalformedCeilingOverride as error:
-            raise OperationFailure("host_quota", str(error)) from error
-        quota = resources.vram_gib if inherited is None else min(inherited, resources.vram_gib)
-        return {
-            **source,
-            CUDA_VISIBLE_DEVICES_ENV_VAR: placement.gpu_uuid,
-            HOST_VRAM_QUOTA_MIB_ENV: repr(mib_from_gib(quota)),
-        }
+        return {**source, CUDA_VISIBLE_DEVICES_ENV_VAR: self.admitted.placement.gpu_uuid}
 
     def reserve(self, path: Path, record: OperationRecord) -> None:
         reservation = HostReservation(
@@ -210,7 +194,7 @@ def _require_reachable(operation: CandidateOperation, resources: OperationResour
             raise OperationFailure(
                 "placement_unreachable",
                 "a GPU reservation requires " + ", ".join(missing) + " in environment_names "
-                "so the sandbox receives the placed device and its VRAM quota",
+                "so the sandbox receives the placed device",
             )
     elif request.devices:
         raise OperationFailure(

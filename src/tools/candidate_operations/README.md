@@ -192,11 +192,12 @@ the reservation back when its processes, including training, have ended.
    needs, for example
    `{"gpu_count": 1, "vram_gib": 3.0, "vram_source": "configured_cap", "host_memory_gib": 8.0, "cpu_slots": 2, "time_budgeted": false}`.
    Set `time_budgeted` to `true` when the run uses a training time budget. A GPU
-   run must also list `CUDA_VISIBLE_DEVICES` and `SIDERIUS_GPU_VRAM_QUOTA_MIB` in
-   `request.environment_names`. That is how the run receives its GPU, and a
-   memory quota no larger than `vram_gib`, so the run itself refuses a model
-   that would need more than it reserved. Only `candidate` submissions are
-   accepted with a budget; other kinds are refused with `resources_required`.
+   run must also list `CUDA_VISIBLE_DEVICES` in `request.environment_names`;
+   that is how the run receives the GPU it was given. The `vram_gib` you declare
+   is what the ledger reserves. The run itself does not yet check that it stays
+   within it, so declare at least the run's own VRAM budget. Only `candidate`
+   submissions are accepted with a budget; other kinds are refused with
+   `resources_required`.
 4. Submit every candidate with the same ledger directory and budget file. The
    two flags always go together:
 

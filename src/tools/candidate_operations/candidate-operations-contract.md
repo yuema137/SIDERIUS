@@ -184,9 +184,13 @@ Resource declaration. `CandidateOperation.resources: OperationResources | None`
 included in the request digest when present): `gpu_count` (0/1), `vram_gib`
 and `vram_source` (exactly for a GPU unit), `host_memory_gib`, `cpu_slots`,
 `time_budgeted`. `ResourceRequest` owns the field rules; `wall_seconds` is the
-request's `timeout_seconds`. VRAM is enforced in-run (below). `time_budgeted`
-is the operator's statement and is not yet cross-checked against the run's
-resolved time admission (#1018).
+request's `timeout_seconds`. The declared `vram_gib` is the ledger's
+accounting; the run's own admission does not yet enforce it (see #1018).
+`time_budgeted` is likewise the operator's statement, not yet cross-checked
+against the run's resolved time admission (#1018). The whole-GPU host quota
+`SIDERIUS_GPU_VRAM_QUOTA_MIB` is deliberately not set from the reservation: it
+bounds the device's aggregate use, so it would refuse a correctly placed
+co-tenant, and its admission is observe-only by default.
 
 Admission, before the claim (each refusal is an `OperationFailure` with this
 code and leaves no claim, reservation or child):
@@ -196,9 +200,9 @@ code and leaves no claim, reservation or child):
 2. ledger location (above): `path`; then the lock (`ledger_busy`);
 3. sweep (see Release);
 4. live reservations under another budget digest: `budget_mismatch`;
-5. the child could not receive the placement: a GPU declaration without both
-   `CUDA_VISIBLE_DEVICES` and `SIDERIUS_GPU_VRAM_QUOTA_MIB` in
-   `request.environment_names` (the sandbox passes declared names only), or a
+5. the child could not receive the placement: a GPU declaration without
+   `CUDA_VISIBLE_DEVICES` in `request.environment_names` (the sandbox passes
+   declared names only), or a
    CPU-only declaration that binds device nodes (`request.devices`):
    `placement_unreachable`;
 6. `plan_dispatch` refusal (cannot fit even an idle budget):
@@ -216,12 +220,7 @@ unbound, so a crash fails closed) and the `Placement` is published write-once
 as `operations/<UUID>/placement.json`. For a GPU unit the launch mapping is
 overlaid before every later name check and the child environment: the slot UUID
 replaces any inherited `CUDA_VISIBLE_DEVICES` (the sandbox sees the slot as
-logical device 0), and `SIDERIUS_GPU_VRAM_QUOTA_MIB` becomes the minimum of the
-inherited quota (a malformed value refuses `host_quota`) and the reserved
-`vram_gib`, in MiB. That variable is read by the run's own ceiling owner
-(`pair_admission.host_quota_gib` via `resolve_gpu_ceiling`), so in-run GPU
-admission refuses a model whose requirement exceeds the reservation. A
-CPU-only unit binds no device node. After `Popen` returns, the child's
+logical device 0). No other variable changes. A CPU-only unit binds no device node. After `Popen` returns, the child's
 identity is read from `/proc` while it is unreaped (its PID cannot be reused)
 and bound. A `Popen` `OSError` removes the reservation and publishes
 `spawn_failure.json` as before, so a failed operation directory may hold both
@@ -261,6 +260,20 @@ never sees the sandbox.
   `integrity` (a published identity names another operation). Otherwise it
   releases, including an unbound reservation whose child never published an
   identity, on the operator's word.
+
+Known caveats (not covered by the evidence above):
+
+- bwrap startup window: `--die-with-parent` takes effect only once bwrap has
+  set its parent-death signal during startup. If the operation child dies in
+  that short window, before `sandbox.json` is published, a starting sandbox
+  can outlive it unobserved, and the sweep may release the reservation.
+- Setuid-root bwrap with `/proc` mounted `hidepid` (1/2/invisible): the bwrap
+  leader and its root-owned members are invisible to this user, so an absent
+  leader is not evidence of exit. `sandbox_may_be_hidden()` detects that
+  combination (setuid `bwrap` on `PATH` and a `hidepid` `/proc` mount, or
+  either fact unreadable) and then reports an absent sandbox leader as
+  `unknown`. Such a reservation is never released automatically; the operator
+  release may release it, since no live member is visible.
 
 Scheduling mode. `scheduling_mode` in run invariants describes in-run (graph)
 dispatch only. Host placement is operation provenance (`placement.json`,

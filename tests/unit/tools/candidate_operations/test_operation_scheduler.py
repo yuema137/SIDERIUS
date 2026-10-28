@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import pytest
 
-from core.runtime_control.pair_admission import ResolvedGpuCeiling, host_quota_gib
+from core.runtime_control.pair_admission import ResolvedGpuCeiling
 from core.runtime_control.scheduling import GpuHardwareClass, GpuSlot, HostBudget
 from tests.unit.tools.candidate_worker.conftest import prepared
 from tools.candidate_operations import CandidateOperation, OperationStoreConfig, submit_operation
@@ -34,7 +34,7 @@ from tools.candidate_operations.store import load_record
 
 SLOT = "GPU-aaaa"
 KEY = {"OPENAI_API_KEY": "offline-test-key"}
-GPU_NAMES = ("CUDA_VISIBLE_DEVICES", "SIDERIUS_GPU_VRAM_QUOTA_MIB")
+GPU_NAMES = ("CUDA_VISIBLE_DEVICES",)
 
 
 def _budget(*, acknowledge: bool = False, memory: float = 64.0) -> HostBudget:
@@ -155,19 +155,16 @@ def _reservations(host: HostScheduling):
 def test_two_stores_share_one_budget_and_the_child_gets_its_placement(prepared, tmp_path, children):
     """A per-store ledger would place both 3 GiB operations on one 4 GiB slot.
 
-    The second is refused before any claim; the first child sees only its slot and
-    a VRAM quota no larger than its reservation, which the run's own ceiling owner
-    (``host_quota_gib``) reads, so in-run GPU admission refuses anything bigger.
+    The second is refused before any claim; the first child sees only its slot,
+    replacing whatever device selector the launcher inherited.
     """
     host = _ledger(tmp_path)
     first_store, second_store = _store(tmp_path, "store-a"), _store(tmp_path, "store-b")
     first = _gpu_operation(prepared, 3.0)
-    launch = {**KEY, "SIDERIUS_GPU_VRAM_QUOTA_MIB": "8192", "CUDA_VISIBLE_DEVICES": "0,1"}
+    launch = {**KEY, "CUDA_VISIBLE_DEVICES": "0,1"}
     handle = submit_operation(first_store, first, launch_environment=launch, host=host)
     assert handle.observation == "starting"
-    env = children.envs[0]
-    assert env["CUDA_VISIBLE_DEVICES"] == SLOT
-    assert host_quota_gib(environ=env) == 3.0
+    assert children.envs[0]["CUDA_VISIBLE_DEVICES"] == SLOT
     placement = json.loads((_operation_dir(first_store, first) / "placement.json").read_text())
     assert (placement["decision"], placement["gpu_uuid"]) == ("placed", SLOT)
     (reservation,) = _reservations(host)
@@ -175,20 +172,14 @@ def test_two_stores_share_one_budget_and_the_child_gets_its_placement(prepared, 
     assert reservation.process.pid == children.children[0].pid
 
     second = _gpu_operation(prepared, 3.0)
-    smaller_quota = {**KEY, "SIDERIUS_GPU_VRAM_QUOTA_MIB": "2048"}
-    assert (
-        _code(
-            lambda: submit_operation(
-                second_store, second, launch_environment=smaller_quota, host=host
-            )
-        )
-        == "host_capacity"
+    launch_second = lambda: submit_operation(  # noqa: E731
+        second_store, second, launch_environment=KEY, host=host
     )
+    assert _code(launch_second) == "host_capacity"
     assert _claims(second_store) == []
 
     _end(children.children[0])
-    submit_operation(second_store, second, launch_environment=smaller_quota, host=host)
-    assert host_quota_gib(environ=children.envs[1]) == 2.0  # an inherited tighter quota wins
+    assert launch_second().observation == "starting"
 
 
 def test_reservation_is_kept_while_the_sandbox_session_outlives_the_child(
@@ -220,6 +211,36 @@ def test_reservation_is_kept_while_the_sandbox_session_outlives_the_child(
 
     _end(sandbox)
     assert launch().observation == "starting"
+
+
+def test_a_hidden_sandbox_leader_is_never_a_positive_exit(
+    prepared, tmp_path, children, processes, monkeypatch
+):
+    """Setuid-root bwrap under /proc hidepid reads as absent while it may still run."""
+    monkeypatch.setattr(
+        "tools.candidate_operations.host_liveness.sandbox_may_be_hidden", lambda: True
+    )
+    host = _ledger(tmp_path)
+    store = _store(tmp_path, "store-a")
+    first = _gpu_operation(prepared, 3.0)
+    submit_operation(store, first, launch_environment=KEY, host=host)
+    sandbox = _session_leader()
+    processes.append(sandbox)
+    sandbox_observer(load_record(store, first.request_id), _operation_dir(store, first))[
+        "on_sandbox_spawn"
+    ](sandbox.pid)
+    _end(children.children[0])
+    _end(sandbox)  # now absent from /proc: indistinguishable from hidden
+
+    second = _gpu_operation(prepared, 3.0)
+    other = _store(tmp_path, "store-b")
+    assert (
+        _code(lambda: submit_operation(other, second, launch_environment=KEY, host=host))
+        == "host_capacity"
+    )
+    released = release_reservation(host.ledger_root, first.request_id)  # operator's word
+    assert released.evidence.sandbox is not None
+    assert released.evidence.sandbox.leader == "unknown"
 
 
 def test_serial_child_publishes_no_sandbox_identity(admitted, tmp_path):
@@ -311,9 +332,7 @@ def test_mixed_host_refusals_leave_no_claim(prepared, tmp_path, children):
         ),
         "resources_required": (CandidateOperation(request_id=uuid4(), request=prepared), host),
         "placement_unreachable": (
-            _gpu_operation(
-                prepared, 1.0, names=(*prepared.environment_names, "CUDA_VISIBLE_DEVICES")
-            ),
+            _gpu_operation(prepared, 1.0, names=prepared.environment_names),
             host,
         ),
         "resource_refused": (_gpu_operation(prepared, 5.0), host),

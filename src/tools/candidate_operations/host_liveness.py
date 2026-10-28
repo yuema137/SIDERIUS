@@ -10,6 +10,9 @@ having no live member is evidence that the whole sandbox, including training,
 has ended. Contract: candidate-operations-contract.md, "Host reservation ledger".
 """
 
+import os
+import shutil
+import stat
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -75,12 +78,41 @@ class ReservationEvidence(PreviewModel):
         return any(part.unobservable for part in self.parts())
 
 
-def session_evidence(identity: ProcessIdentity) -> SessionEvidence:
+def session_evidence(identity: ProcessIdentity, *, may_be_hidden: bool = False) -> SessionEvidence:
+    """``may_be_hidden``: an absent leader may be a live process /proc does not show."""
     observation = observe(identity)
     if observation.reason == "different_boot":
         return SessionEvidence(leader="exited", members=0)
+    leader = observation.status
+    if may_be_hidden and observation.reason == "pid_absent":
+        leader = "unknown"
     # Each recorded process is a session leader, so its PID is its session ID.
-    return SessionEvidence(leader=observation.status, members=session_members(identity.pid))
+    return SessionEvidence(leader=leader, members=session_members(identity.pid))
+
+
+def sandbox_may_be_hidden() -> bool:
+    """A setuid-root bwrap under ``/proc`` ``hidepid`` is invisible to this user.
+
+    Such a leader reads as absent, which must not count as a positive exit.
+    """
+    executable = shutil.which("bwrap")
+    try:
+        setuid = executable is not None and bool(os.stat(executable).st_mode & stat.S_ISUID)
+        mounts = Path("/proc/self/mounts").read_text()
+    except OSError:
+        return True  # cannot rule it out
+    return setuid and any(_hides_pids(line) for line in mounts.splitlines())
+
+
+def _hides_pids(mount: str) -> bool:
+    fields = mount.split()
+    if len(fields) < 4 or fields[1] != "/proc" or fields[2] != "proc":
+        return False
+    for option in fields[3].split(","):
+        name, _, value = option.partition("=")
+        if name == "hidepid":
+            return value not in {"0", "off"}
+    return False
 
 
 def published_identity(
@@ -108,5 +140,7 @@ def reservation_evidence(
     sandbox = published_identity(state_root, operation_id, request_digest, SANDBOX_FILE)
     return ReservationEvidence(
         child=None if child is None else session_evidence(child),
-        sandbox=None if sandbox is None else session_evidence(sandbox),
+        sandbox=None
+        if sandbox is None
+        else session_evidence(sandbox, may_be_hidden=sandbox_may_be_hidden()),
     )
