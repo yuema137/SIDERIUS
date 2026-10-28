@@ -304,9 +304,17 @@ constraint sections refuse; incomplete context is completed from
 bindings are checked against that same result. The admitted proposal is saved
 before its first call; resolved settings are saved to
 `candidate_run/training_settings.json`. `CandidateTrainingSettings` serializes
-an accepted nonfinite float as the JSON string `"Infinity"`, `"-Infinity"` or
-`"NaN"` (`ser_json_inf_nan="strings"`), so admission's own JSON round trip and
-the saved document preserve it exactly; finite values are byte-identical. The
+an accepted nonfinite value of a typed `float` field as the JSON string
+`"Infinity"`, `"-Infinity"` or `"NaN"` (`ser_json_inf_nan="strings"`), so
+admission's own JSON round trip and the saved document preserve it exactly;
+finite values are byte-identical. This covers floats on `WorkflowLaunchConfig`
+and nested dataclasses, which inherit the setting; a nested `BaseModel` uses its
+own config, so a launch float there must refuse inf/NaN or carry the same
+setting (guarded by
+`test_candidate_settings_nonfinite_floats_inherit_the_string_encoding`).
+Not yet covered, pending the `parameter_rules.py` follow-up: the `Any`-typed
+`ParameterRule.exact` / `allowed` (reaching `constraint_context.task_rules`) and
+the `NumericRange.min` / `max` bounds still serialize inf/NaN as `null`. The
 graph tuning input that `graph_evidence` rereads is written with the same string
 encoding. Ingress may write such a value as a string (for example `"-inf"`).
 Whether a value may be nonfinite stays with its owner (issue #1012).
