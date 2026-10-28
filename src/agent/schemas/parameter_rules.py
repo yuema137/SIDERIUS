@@ -13,10 +13,10 @@ nor safe to load from an experiment manifest.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from types import UnionType
-from typing import Annotated, Any, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -36,22 +36,39 @@ class ParameterRuleError(ValueError):
     """A parameter-rule declaration or effective value is invalid."""
 
 
-def _model_path_exists(annotation: Any, parts: list[str]) -> bool:
-    """Recognize fields from their consuming models, including optional unions.
+def _target_annotations(annotation: Any, parts: list[str]) -> list[Any]:
+    """Leaf annotations that consume ``parts`` in a model, across optional unions.
 
-    A model with ``extra="allow"`` keeps unknown keys, so they are consumed.
+    An empty result means no consuming field exists. A model with
+    ``extra="allow"`` keeps unknown keys, so they are consumed as ``Any``.
     """
     origin = get_origin(annotation)
     if origin is Annotated:
-        return _model_path_exists(get_args(annotation)[0], parts)
+        return _target_annotations(get_args(annotation)[0], parts)
     if origin in (Union, UnionType):
-        return any(_model_path_exists(branch, parts) for branch in get_args(annotation))
+        return [
+            leaf for branch in get_args(annotation) for leaf in _target_annotations(branch, parts)
+        ]
     if not isinstance(annotation, type) or not issubclass(annotation, BaseModel):
-        return False
+        return []
     field = annotation.model_fields.get(parts[0])
     if field is None:
-        return annotation.model_config.get("extra") == "allow"
-    return len(parts) == 1 or _model_path_exists(field.annotation, parts[1:])
+        return [Any] if annotation.model_config.get("extra") == "allow" else []
+    if len(parts) == 1:
+        return [field.annotation]
+    return _target_annotations(field.annotation, parts[1:])
+
+
+def _admits_bool(annotation: Any) -> bool:
+    """Whether a field type keeps a boolean as a boolean instead of coercing it."""
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _admits_bool(get_args(annotation)[0])
+    if origin in (Union, UnionType):
+        return any(_admits_bool(branch) for branch in get_args(annotation))
+    if origin is Literal:
+        return any(isinstance(value, bool) for value in get_args(annotation))
+    return annotation is Any or annotation is bool
 
 
 def _fixed_rule_schemas() -> dict[str, type[BaseModel]]:
@@ -68,25 +85,43 @@ def _fixed_rule_schemas() -> dict[str, type[BaseModel]]:
     return {"train_config": TrainConfig, "loss_config": LossConfig}
 
 
-def _validate_rule_target(path: str, parts: list[str], schema: type[BaseModel]) -> None:
-    """Refuse a rule whose target the consuming schema would silently drop."""
-    if not _model_path_exists(schema, parts[1:]):
+def _validate_rule_target(
+    path: str,
+    parts: list[str],
+    schema: type[BaseModel],
+    rules: Iterable[ParameterRule],
+) -> None:
+    """Refuse a rule the consuming schema would silently drop or reinterpret."""
+    leaves = _target_annotations(schema, parts[1:])
+    if not leaves:
         raise ParameterRuleError(
             f"unsupported {parts[0]} parameter path {path!r}: target must exist in "
             f"{schema.__name__} or one of its nested configuration models; check the "
             f"{parts[0]} fields in the task-composition parameter-rule contract"
         )
+    if any(_admits_bool(leaf) for leaf in leaves):
+        return
+    for rule in rules:
+        declared = [rule.exact] if rule.kind == "exact" else list(rule.allowed or ())
+        if any(isinstance(value, bool) for value in declared):
+            raise ParameterRuleError(
+                f"{rule.kind} parameter rule for {path!r} declares a boolean, but "
+                f"{schema.__name__} does not accept a boolean there and would coerce it "
+                "to a number; declare a value of the field's type"
+            )
 
 
-def _validate_fixed_rule_path(path: str, parts: list[str]) -> None:
+def _validate_fixed_rule_path(path: str, parts: list[str], rules: Iterable[ParameterRule]) -> None:
     """Keep fixed training and loss targets aligned with their execution schema."""
     schema = _fixed_rule_schemas().get(parts[0])
     if schema is not None:
-        _validate_rule_target(path, parts, schema)
+        _validate_rule_target(path, parts, schema, rules)
 
 
 def _validate_model_rule_paths(
-    document: Mapping[str, Any], paths: set[str], locked_model_type: Any
+    document: Mapping[str, Any],
+    rules_by_path: Mapping[str, list[ParameterRule]],
+    locked_model_type: Any,
 ) -> None:
     """Check ``model_config`` targets against the selected model's config class.
 
@@ -99,7 +134,7 @@ def _validate_model_rule_paths(
     """
     model_paths = [
         path
-        for path in sorted(paths)
+        for path in sorted(rules_by_path)
         if path.startswith("model_config.") and path != "model_config.model_type"
     ]
     model_config = document.get("model_config")
@@ -114,11 +149,11 @@ def _validate_model_rule_paths(
     if schema is None:
         return
     for path in model_paths:
-        _validate_rule_target(path, path.split("."), schema)
+        _validate_rule_target(path, path.split("."), schema, rules_by_path[path])
 
 
-def _validate_parameter_path(path: str) -> None:
-    """Validate declaration syntax and fixed-contract target membership."""
+def _validate_parameter_path(path: str, rules: Iterable[ParameterRule]) -> None:
+    """Validate declaration syntax and fixed-contract target membership and type."""
     parts = path.split(".")
     if any(not part or not part.isidentifier() for part in parts):
         raise ParameterRuleError(f"invalid parameter path {path!r}")
@@ -127,7 +162,7 @@ def _validate_parameter_path(path: str) -> None:
             f"parameter path {path!r} must target a leaf under "
             "model_config, train_config, or loss_config"
         )
-    _validate_fixed_rule_path(path, parts)
+    _validate_fixed_rule_path(path, parts, rules)
 
 
 def register_parameter_predicate(name: str, predicate: ParameterPredicate) -> None:
@@ -255,8 +290,8 @@ class ParameterRules(BaseModel):
 
     @model_validator(mode="after")
     def validate_paths(self) -> ParameterRules:
-        for path in self.rules:
-            _validate_parameter_path(path)
+        for path, rule in self.rules.items():
+            _validate_parameter_path(path, (rule,))
         return self
 
 
@@ -366,16 +401,22 @@ def resolve_parameter_rule_document(
     # Frozen models can still contain a mutated rules dictionary. Recheck at
     # this shared execution boundary, including proposal-baseline resolution.
     resolved = deepcopy(dict(document))
-    paths = {path for _, rules in declarations for path in rules.rules}
-    for path in paths:
-        _validate_parameter_path(path)
+    rules_by_path: dict[str, list[ParameterRule]] = {}
+    for _, rules in declarations:
+        for path, rule in rules.rules.items():
+            rules_by_path.setdefault(path, []).append(rule)
+    paths = set(rules_by_path)
+    for path, path_rules in rules_by_path.items():
+        _validate_parameter_path(path, path_rules)
     model_type_locks = [
         rule.exact
         for _, rules in declarations
         for rule_path, rule in rules.rules.items()
         if rule_path == "model_config.model_type" and rule.kind == "exact"
     ]
-    _validate_model_rule_paths(resolved, paths, model_type_locks[0] if model_type_locks else None)
+    _validate_model_rule_paths(
+        resolved, rules_by_path, model_type_locks[0] if model_type_locks else None
+    )
     for path in sorted(paths):
         exact_values = [
             rule.exact

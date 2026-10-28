@@ -81,7 +81,8 @@ no hidden contracts, no silent defaults.
   resolver also checks `model_config` paths against the selected model's
   config class (`get_config_class` of the locked or authored `model_type`);
   unregistered model types are not checked, and `extra="allow"` configs
-  accept unknown keys.
+  accept unknown keys. The same target check refuses boolean `exact` /
+  `allowed` values on a field whose type does not admit `bool`.
   See the [parameter-rule contract](../../../docs/reference/task-composition.md)
   for sampling ownership, composition conflicts and value-validation boundaries.
 

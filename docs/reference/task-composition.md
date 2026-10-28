@@ -546,6 +546,11 @@ Notes:
   that plan. `model_config.model_type` is always a valid target. A model type
   without a registered config class yet (a proposed generated model before
   implementation) cannot be checked; execution refuses an unknown model type.
+  The same target check refuses a boolean `exact` value, or a boolean member
+  of `allowed`, when the consuming field does not accept a boolean (for
+  example `train_config.batch_size: {exact: true}`), because Pydantic would
+  execute it as `1` or `0`. Boolean fields such as `train_config.drop_last`
+  keep boolean rules.
 - A workflow may add a second rule set through
   `--workflow_parameter_rules '<json>'`, using the same shape. Task and
   workflow rules are enforced together: the workflow may narrow a task rule
