@@ -472,6 +472,54 @@ The family profile generates N independent instances, not N outputs from one
 proposer call; no scientific diversity, ranking, aggregation, parallel execution,
 training, conditional routing, buffers, human gates or graph resume is implied.
 
+Branch isolation within one body (audited for B3 parallel scheduling): no
+family or branch reads a file or plugin registry an independent sibling wrote.
+Family inputs are materialized from the captured snapshots before the first node
+runs; the interpretation candidate re-materializes its proposal input after the
+interpretation node, inside its single chain, which has no sibling. Each
+implementation writes its plugin, `description.md`, tests and losses only below
+its own `graph_instances/<implementation-id>/.../impl_001/`. The worker never
+registers into the workspace `generated_library` (capability index, models,
+losses) and never writes `<workspace>/plugins/`. These are the shared locations
+that the proposer, implementor and model-description readers consult. The
+validator loads a generated plugin with a plain `exec_module` that does not
+enter `sys.modules`, and it does not populate the process model/loss registries.
+Only a tuning node mutates those registries (`stage_native_plugins`). The only
+profile admitting tuning (interpretation candidate) has one branch, so tuning is
+the body's last node; the next loop body is sequential by design.
+
+One process-global state is shared: the torch default RNG. The implementor
+self-check and the validator probes draw unseeded probe inputs, and their probe
+models draw initial weights from it. A family-1 node's probe tensors and weights
+therefore depend on how many draws earlier nodes made. Recorded outputs are
+unaffected (pass/fail, shapes, gradient checks and records compare equal across
+declaration orders). The stream is not reproducible even serially: an unseeded
+process starts from a nondeterministic torch default seed. Running each unit in
+its own process (B3-3) gives each unit a fresh stream instead of a shared one.
+Seeding the probes is a behaviour change outside B3-0.
+
+The shared `token_usage.jsonl` is append-only. By source reading (the witness
+below replaces `LLMBridge`), the only in-run read is `LLMBridge`'s first-row
+`run_id` identity check. Every aggregating reader (token read projection,
+iteration rollup, campaign spend, baseline report) groups by run, iteration,
+label or provider, never by row position. `validate_token_usage_jsonl` checks
+order only against iteration-flush markers, and warns without failing on
+non-monotonic timestamps. Rows carry no unit identity; optional unit attribution
+is deferred to parallel dispatch, so serial ledgers are unchanged.
+
+The B3-0 audit therefore found nothing to snapshot per body. Witness:
+`tests/unit/tools/candidate_worker/test_branch_isolation.py` runs real native
+node bodies with a scripted provider in three declaration orders. Its two
+families propose distinct models. It requires the actual dispatch sequence to
+equal the declaration order, and no node to leave a process-registry write
+behind. It requires an empty workspace `generated_library` and no
+`<workspace>/plugins/`. Finally it requires byte-identical family-1 proposal
+input, prompts, debug dump and normalized proposal, implementation and
+validation records. A future profile that promotes into the workspace library,
+writes `<workspace>/plugins/`, or admits several tuning nodes in one body must
+snapshot those reads per unit, or run each unit in its own process, before
+independent units may run concurrently.
+
 Reusable version-2 source and managed preparation also support this profile through
 [the reusable family contract](../candidate_prepare/candidate-prepare-contract.md#reusable-independent-proposal-families).
 Code callers may still supply version-1 native inputs directly. Both routes use
