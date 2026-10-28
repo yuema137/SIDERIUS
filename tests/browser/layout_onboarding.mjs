@@ -207,7 +207,8 @@ try {
     return {view: view.dataset.view, overlaps, blocks, logo: logoBox && {height: logoBox.height, theme: logo.classList.contains('logo-dark') ? 'dark' : 'light', loaded: logo.complete && logo.naturalWidth > 0}, logoOverlaps, viewBox: box(view), access: box(document.getElementById('access-section')), accessCollapsed: document.getElementById('access-section').classList.contains('access-collapsed'),
       overflow: document.documentElement.scrollWidth - innerWidth,
       columns: workspace ? {workspace: box(workspace), palette: column('.editor-workspace > .editor-palette'), canvas: column('.workflow-canvas-panel'), inspector: column('.workflow-inspector-panel'),
-        headers: [header('.editor-workspace > .editor-palette > h3'), header('.workflow-canvas-panel > h2'), header('.workflow-inspector-panel > h2')]} : null};
+        headers: [header('.editor-workspace > .editor-palette > h3'), header('.workflow-canvas-panel > h2'), header('.workflow-inspector-panel > h2')],
+        viewport: column('.circuit-viewport'), panelScrollTop: view.querySelector('.workflow-canvas-panel')?.scrollTop ?? 0} : null};
   });
   const contrast = () => page.evaluate(() => {
     const parse = value => { const match = /rgba?\(([^)]+)\)/.exec(value); if (!match) return null; const parts = match[1].split(/[ ,/]+/).filter(Boolean).map(Number); return {rgb: parts.slice(0, 3), alpha: parts.length > 3 ? parts[3] : 1}; };
@@ -262,6 +263,10 @@ try {
           }
           assert.ok(Math.abs(inspector.right - inspector.left - (width >= 1280 ? 352 : 320)) <= 1, `${label}: Selection width ${inspector.right - inspector.left}`);
           assert.ok(headers.every(value => value !== null && Math.abs(value - 48) <= 1), `${label}: 48px panel headers ${headers}`);
+          // The canvas viewport is bounded by its panel (it scrolls inside; the panel never scrolls).
+          const {viewport} = result.columns;
+          if (viewport) assert.ok(viewport.top >= canvas.top - .5 && viewport.bottom <= canvas.bottom + .5 && viewport.height <= workspace.height && result.columns.panelScrollTop === 0,
+            `${label}: canvas viewport inside its panel ${JSON.stringify({viewport, canvas, workspace})}`);
         }
         assert.deepEqual(await contrast(), [], `${label}: text below 4.5:1 or 12px`);
         await page.screenshot({path: join(evidence, `${label}.png`), fullPage: true});

@@ -102,13 +102,25 @@ try {
   await waitUntil(async () => !(await gallery.evaluate(dialog => dialog.open)), 'gallery closed');
   assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('palette-search')), true, 'Blank workflow focuses the module search');
   await page.waitForTimeout(100);
-  const frame = await page.evaluate(() => {
-    const viewport = document.querySelector('.circuit-viewport').getBoundingClientRect(), workspace = document.querySelector('.editor-workspace').getBoundingClientRect();
-    return {scrollY, top: viewport.top, bottom: viewport.bottom, height: viewport.height, workspaceBottom: workspace.bottom, innerHeight};
-  });
+  // The canvas viewport is bounded by the frame: it scrolls inside, the panel never does.
+  const bounded = async label => {
+    const frame = await page.evaluate(() => {
+      const rect = selector => document.querySelector(selector).getBoundingClientRect();
+      const viewport = rect('.circuit-viewport'), workspace = rect('.editor-workspace'), panel = rect('.workflow-canvas-panel');
+      return {scrollY, top: viewport.top, bottom: viewport.bottom, height: viewport.height, panelBottom: panel.bottom, panelTop: panel.top,
+        panelScrollTop: document.querySelector('.workflow-canvas-panel').scrollTop, workspaceHeight: workspace.height, workspaceBottom: workspace.bottom, innerHeight};
+    });
+    assert.ok(frame.top >= frame.panelTop - .5 && frame.bottom <= frame.panelBottom + .5 && frame.height <= frame.workspaceHeight && frame.panelScrollTop === 0,
+      `${label}: viewport inside the canvas panel ${JSON.stringify(frame)}`);
+    return frame;
+  };
+  const frame = await bounded('open');
   assert.equal(frame.scrollY, 0);
   assert.ok(frame.top >= 0 && frame.bottom <= frame.innerHeight && frame.workspaceBottom <= frame.innerHeight + 1 && frame.height >= 400,
     `Canvas visible without page scroll and tall: ${JSON.stringify(frame)}`);
+  await page.locator('.circuit-contract-legend > summary').click();
+  await bounded('legend open');
+  await page.locator('.circuit-contract-legend > summary').click();
   await page.screenshot({path: join(evidence, 'workflow-open-1440.png')});
 
   // 4. `+` beside the unconnected output adds the next module already wired (one undo step).
@@ -193,6 +205,9 @@ try {
   await page.locator('#circuit-tidy').click();
   await waitUntil(async () => /Tidy up layout/.test(await page.locator('#editor-undo').getAttribute('title')), 'template tidy recorded');
   assert.deepEqual(await overlaps(), [], 'Tidy up leaves the template cards disjoint');
+  await page.locator('#circuit-fit').click();
+  await bounded('template after fit');
+  assert.equal(await page.locator('.circuit-viewport').getAttribute('data-outside-cards'), '0', 'Fit shows every module inside the visible viewport');
   await saveVersion('first-loop');
   assert.ok((await readFile(metadata.reusable_source, 'utf8')).includes(advice), 'Saved file holds the advice');
 

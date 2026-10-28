@@ -1055,9 +1055,13 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   `workflowEditor.state` gained presentation fields `reviewed`, `taskReview`,
   `taskSelected` and `taskBinding` (`{package_id, revision}` or null).
 - Canvas (at least 900 px wide): the canvas header holds **Templates**; the panel is a
-  flex column whose `#editor-graph` grid gives `.circuit-viewport` the remaining height
-  (at least 240 px); the panel scrolls only when its content cannot fit, and its header
-  is not sticky, so nothing covers the canvas. The circuit toolbar sits bottom-right of
+  flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
+  `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
+  height; the viewport scrolls and zooms inside it, so Fit fits the visible viewport.
+  Open disclosures in the panel (port-type legend, canvas help and connection
+  mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
+  and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
+  workspace height, panel `scrollTop` 0. The circuit toolbar sits bottom-right of
   the canvas and the connector legend bottom-left. The wire `<svg>` has
   `pointer-events: none`; only `.circuit-wire-target` strokes take pointer hits, so
   cards and ports stay hoverable and wires stay clickable. Below 900 px the panels keep
