@@ -221,12 +221,13 @@ def test_null_non_exact_rule_is_refused_not_reinterpreted_as_exact_null(kind: st
         ParameterRules.model_validate_json(json.dumps({path: {kind: None}}))
 
 
+@pytest.mark.parametrize("side", ["min", "max"])
 @pytest.mark.parametrize("bound", [True, "3"])
-def test_non_numeric_range_bound_is_refused_not_coerced(bound: object) -> None:
+def test_non_numeric_range_bound_is_refused_not_coerced(side: str, bound: object) -> None:
     """Catches ``true`` silently becoming 1.0 or ``"3"`` becoming 3.0 in a range."""
     path = "train_config.epochs"
-    with pytest.raises(ValueError, match=rf"rules\.`{re.escape(path)}`\.range\.min"):
-        ParameterRules.model_validate({path: {"range": {"min": bound}}})
+    with pytest.raises(ValueError, match=rf"rules\.`{re.escape(path)}`\.range\.{side}"):
+        ParameterRules.model_validate({path: {"range": {side: bound}}})
 
 
 def test_planning_boundary_applies_the_composed_exact_lock() -> None:
