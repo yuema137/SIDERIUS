@@ -1062,9 +1062,12 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
   and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
   workspace height, panel `scrollTop` 0. The circuit toolbar sits bottom-right of
-  the canvas and the connector legend bottom-left. The wire `<svg>` has
-  `pointer-events: none`; only `.circuit-wire-target` strokes take pointer hits, so
-  cards and ports stay hoverable and wires stay clickable. Below 900 px the panels keep
+  the canvas and the connector legend bottom-left. The wire layer is the world's own
+  child `<svg>` (`.circuit-world > svg`; never the first `svg` of the canvas, which may be
+  a toolbar icon) with `pointer-events: none`; only `.circuit-wire-target` strokes take
+  pointer hits, so cards and ports stay hoverable and wires stay clickable. A drag
+  released over an input binds the input whose own box holds the release point,
+  preferring a highlighted (compatible) one; contract pills are clipped to their port. Below 900 px the panels keep
   their natural height (no `--workspace-height`). **Tidy up** (`#circuit-tidy`,
   `layout-grid`) places every module with `editorCircuitGeometry.tidy`: columns by
   longest result-input path from a source, rows by the mean row of the sources (ties

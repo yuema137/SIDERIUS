@@ -15,6 +15,7 @@
     if (className) value.className = className;
     parent.append(value); return value;
   };
+  const wireLayer = () => host.querySelector('.circuit-world > svg');
   const say = text => { if (host) host.querySelector('.circuit-message').textContent = text; };
   function cancel(redraw = true) {
     const moved = drag;
@@ -132,7 +133,8 @@
   }
   function draw() {
     if (!host) return;
-    const svg = host.querySelector('svg'); svg.replaceChildren();
+    // The wire layer is the world's own <svg>; toolbar buttons also hold (icon) svgs.
+    const svg = wireLayer(); svg.replaceChildren();
     const world = host.querySelector('.circuit-world');
     sizeWorld();
     const cards = [...world.querySelectorAll('.circuit-card')];
@@ -406,13 +408,21 @@
   document.addEventListener('pointerup', event => {
     if (!connecting) return;
     connecting = false;
-    const input = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-input]');
-    if (pending && input && host?.contains(input)) input.click();
+    if (!pending || !host) return;
+    // The input whose own box holds the release point; a highlighted (compatible) one wins
+    // over a neighbour whose label might reach into it at small zoom.
+    const holding = [...host.querySelectorAll('[data-input]')].filter(element => {
+      const box = element.getBoundingClientRect();
+      return element.getClientRects().length && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
+    });
+    const input = holding.find(element => element.classList.contains('compatible')) || holding[0] ||
+      document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-input]');
+    if (input && host.contains(input)) input.click();
   });
   document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Connection selection cancelled.'); } });
   document.addEventListener('pointermove', event => {
     if (!pending || !host?.contains(event.target)) return;
-    const output = host.querySelector(`#circuit-output-${CSS.escape(pending.node)}`), svg = host.querySelector('svg');
+    const output = host.querySelector(`#circuit-output-${CSS.escape(pending.node)}`), svg = wireLayer();
     const start = point(output), end = toWorld(event.clientX, event.clientY);
     svg.querySelector('.circuit-pending')?.remove();
     const path = document.createElementNS(svg.namespaceURI, 'path'); path.classList.add('circuit-pending');

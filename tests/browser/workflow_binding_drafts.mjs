@@ -47,12 +47,17 @@ try {
   const output = page.locator('#circuit-output-propose'), input = page.locator('#circuit-input-implement-output');
   assert.equal(await wire.count(), 1);
 
-  // A user scrolls the canvas into view before pointing at a wire; off-screen points have no hit target.
-  // hitPoint maps path coordinates with getScreenCTM, which does not reliably include the canvas'
-  // CSS zoom transform in Chromium; at Actual size (zoom 1) the mapping is exact.
+  // As a user would: at Actual size, pan the canvas viewport (its own scroll, never the window)
+  // until the wire is in the middle of it; off-screen points have no hit target.
   await page.locator('#circuit-zoom-reset').click();
-  await page.locator('.circuit-viewport').scrollIntoViewIfNeeded();
-  await wire.scrollIntoViewIfNeeded();
+  const panned = await wire.evaluate(path => {
+    const viewport = path.closest('.circuit-viewport'), frame = viewport.getBoundingClientRect(), box = path.getBoundingClientRect();
+    viewport.scrollTop += box.top + box.height / 2 - (frame.top + frame.height / 2);
+    viewport.scrollLeft += box.left + box.width / 2 - (frame.left + frame.width / 2);
+    const after = path.getBoundingClientRect();
+    return {scrollY, inside: after.bottom > frame.top && after.top < frame.bottom && after.right > frame.left && after.left < frame.right};
+  });
+  assert.deepEqual(panned, {scrollY: 0, inside: true}, 'The viewport pans to the wire; the window does not scroll');
   const wirePoint = await hitPoint(wire);
   assert.ok(wirePoint);
   assert.equal(await page.evaluate(({x, y}) => document.elementFromPoint(x, y)?.classList.contains('circuit-wire-target'), wirePoint), true, 'A visible wire stroke receives pointer hits');
