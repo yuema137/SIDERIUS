@@ -3,6 +3,7 @@
 import argparse
 import contextlib
 import sys
+from urllib.parse import urlsplit
 
 from .config import load_console
 from .files import config_bytes
@@ -94,7 +95,15 @@ def main() -> int:
     if resolved is None:
         return 2
     config = resolved.config
-    print(f"Console: {config.browser_origin}; access token file: {config.auth_token_file}")
+    browser_port = urlsplit(config.browser_origin).port
+    print(f"Console address: {config.browser_origin}")
+    print(f"Access token file: {config.auth_token_file}")
+    print("  The console asks for this token when you connect, on this machine or remotely.")
+    print(f"  Show it with: cat {config.auth_token_file}")
+    print("  On this machine: open the console address in your browser.")
+    print("  On a remote server: first run on your own computer")
+    print(f"    ssh -N -L 127.0.0.1:{browser_port}:127.0.0.1:{config.port} YOUR_HOST")
+    print("  then open the console address there.")
     _print_readiness(workspace_readiness(resolved))
     if args.command == "serve":
         import uvicorn
