@@ -51,9 +51,11 @@ _FIX: dict[GpuUnavailableCause, str] = {
     ),
     "cuda_init_failed": (
         "NVIDIA device nodes and /sys are visible, but CUDA failed to initialize. "
-        "Check the driver on this machine with nvidia-smi, pass /dev/nvidiactl and "
-        "/dev/nvidia-uvm as well as /dev/nvidia<N>, and make sure CUDA_VISIBLE_DEVICES "
-        "is not set to an empty value"
+        "Check the driver on this machine with nvidia-smi. The run sandbox passes the "
+        "NVIDIA control nodes present at launch and cannot create one; if "
+        "/dev/nvidia-uvm is missing on the host, run nvidia-smi (or "
+        "nvidia-modprobe -u -c=0) once on the host, then relaunch. Make sure "
+        "CUDA_VISIBLE_DEVICES is not set to an empty value"
     ),
 }
 
