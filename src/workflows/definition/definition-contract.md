@@ -139,7 +139,10 @@ to the [candidate-worker contract](../../tools/candidate_worker/candidate-worker
 
 `AuthoredLoop(final_iteration, feedback, stop_conditions=())` optionally declares
 stop criteria, a tuple of the discriminated `StopCondition` union (`kind` is the
-discriminator): two deterministic hard criteria and one LLM-judged criterion:
+discriminator): two deterministic hard criteria and one LLM-judged criterion.
+Every condition also carries `on_met: Literal["stop", "request_input"] = "stop"`:
+`"stop"` completes the loop early; `"request_input"` ("Pause and ask me") pauses
+the loop and asks the operator, who continues it through the reviewed Resume.
 
 | Constructor | Fields | Meaning |
 | --- | --- | --- |
@@ -155,12 +158,18 @@ reached before the final iteration, and a judge `min_completed_bodies` at or abo
 any-of in declared order (a disjunctive stop, not a graph join). A `JudgeStop` is
 always consulted after them, whatever its declared position; its position only
 fixes its `condition_index`. The judge's model route is not part of the declaration:
-it is the operator's `WorkflowLLMConfig.judge.stop`, and every field of `JudgeStop`
-renders in canonical source (defaults included). An empty tuple is omitted from serialization
+it is the operator's `WorkflowLLMConfig.judge.stop`. Every field renders in canonical
+source (defaults included) except `on_met`: its default `"stop"` is omitted from
+serialization (`exclude_if`) and from canonical source (the renderer's
+`_OMITTED_WHEN_DEFAULT` table), so a condition declared before `on_met` existed keeps
+its source bytes and declaration digest; `on_met="request_input"` renders and changes
+the digest. The judge prompt is unchanged by `on_met`: for a `request_input` judge, a
+"stop" verdict means "ask the operator". An empty tuple is omitted from serialization
 and canonical source, so the declaration digest and source bytes of a loop without
-conditions are unchanged. Execution semantics, precedence and readback belong to
-the candidate-worker contract ("Deterministic stop conditions" and "Judge stop
-condition").
+conditions are unchanged. Execution semantics, `stop`-before-`request_input`
+precedence, the input anchor and readback belong to the candidate-worker contract
+("Deterministic stop conditions", "Judge stop condition" and "Condition input
+pause").
 
 ## Route declarations
 

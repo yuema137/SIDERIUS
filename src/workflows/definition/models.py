@@ -106,15 +106,23 @@ class LoopFeedback(DeclarationModel):
     history: Literal["native-research/v1"]
 
 
+# What a met condition does: ``"stop"`` completes the loop; ``"request_input"`` pauses
+# it and asks the operator. The default is omitted from serialization and canonical
+# source, so every declaration written before ``on_met`` keeps its bytes and digest.
+StopAction = Literal["stop", "request_input"]
+
+
 class MetricThresholdStop(DeclarationModel):
     """Stop once the loop incumbent reaches ``threshold`` under the run metric's direction.
 
-    Direction is never declared here: it comes from the run's ``MetricSpec``.
+    Direction is never declared here: it comes from the run's ``MetricSpec``. With
+    ``on_met="request_input"`` it pauses once, when the incumbent first reaches it.
     """
 
     kind: Literal["metric_threshold"] = "metric_threshold"
     metric_id: str = Field(min_length=1)
     threshold: float = Field(allow_inf_nan=False)
+    on_met: StopAction = Field(default="stop", exclude_if=lambda value: value == "stop")
 
 
 class NoImprovementStop(DeclarationModel):
@@ -122,6 +130,7 @@ class NoImprovementStop(DeclarationModel):
 
     kind: Literal["no_improvement"] = "no_improvement"
     completed_bodies: Annotated[int, Field(gt=0)]
+    on_met: StopAction = Field(default="stop", exclude_if=lambda value: value == "stop")
 
 
 class JudgeStop(DeclarationModel):
@@ -130,13 +139,15 @@ class JudgeStop(DeclarationModel):
     Consulted only after every deterministic condition continued, never at the final
     boundary and never before ``min_completed_bodies``. The route is operator-owned
     (``WorkflowLLMConfig.judge.stop``), never declared here. ``on_failure="continue"``
-    records a failed call as an abstention; ``"fail"`` ends the loop ``failed``.
+    records a failed call as an abstention; ``"fail"`` ends the loop ``failed``. With
+    ``on_met="request_input"`` a "stop" verdict pauses the loop and asks the operator.
     """
 
     kind: Literal["judge"] = "judge"
     criterion: str = Field(min_length=1, max_length=2000)
     min_completed_bodies: Annotated[int, Field(gt=0)] = 1
     on_failure: Literal["fail", "continue"] = "fail"
+    on_met: StopAction = Field(default="stop", exclude_if=lambda value: value == "stop")
 
 
 StopCondition = Annotated[
