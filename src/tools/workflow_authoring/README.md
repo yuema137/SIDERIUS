@@ -33,7 +33,7 @@ whether referenced manifests, data or plugins exist.
    This is an addition to the console's other required fields. All three paths
    must be explicit absolute paths with existing parents. Restart the console
    after changing its configuration.
-4. Follow **Workflow Editor** from the console, enter its access token and choose
+4. Open the **Workflow** tab of the console, enter its access token and choose
    a project. Select a node to edit a supported binding, or edit task/external
    locations. The Python panel also accepts supported source changes, including
    adding nodes. Click **Save** to validate the graph; a save row opens (with
@@ -64,3 +64,28 @@ last comparison can be overwritten and may be missing from recovery copies.
 Use trusted local project directories. A lost connection leaves a save unconfirmed
 until you inspect disk again. See the [authoring contract](authoring-contract.md)
 for exact limits, refusals and concurrency behavior.
+
+## View a hand-written workflow.py in the experimental console
+
+Use this to look at a `workflow.py` your coding agent wrote, as a canvas of nodes
+and their ports. Viewing alone does not change the file, but the editor can save.
+
+1. Complete steps 1 and 2 above so the file and recovery directory exist.
+2. Add the `editor_projects` entry from step 3 to your console configuration
+   (`ConsoleConfig`, the file passed to the console). Its four keys are exactly
+   `project_id`, `project_root`, `source_file` and `recovery_directory`; all paths
+   are absolute. Restart the console so it reads the change.
+3. In the console, open the **Workflow** tab and choose the project from step 4 of
+   the list above.
+   The canvas draws the workflow's nodes and their ports.
+
+Caveats:
+
+- The editor is read-write. **Save** rewrites `workflow.py` from the editor's
+  canonical form, which can change formatting and comments. Before you save, keep
+  a copy or commit the file to version control. Version history keeps recovery
+  copies of the previous and proposed bytes, but `workflow.py` stays authoritative,
+  so these copies are not a substitute for version control.
+- Adaptor and LLM-judge declarations are not drawn. The console source has no
+  adaptor drawing, so a workflow that uses them shows only its nodes. Edit those
+  parts in the file itself and check them with the authoring contract.
