@@ -89,12 +89,11 @@ def invoke_phase(sandbox, phase, *, watchdog=False):
 def test_recorded_hidden_bytes_change_admission_without_relabeling_them():
     decision = decide()
     assert not decision.admitted
-    assert decision.reason_code == "environment_headroom_unproven"
+    assert decision.reason_code == "insufficient_headroom"
     assert decision.evidence["outside_upper_bound_mib"] == 2263
     assert decision.evidence["aggregate_gib"] == (27648 + 2779) / 1024
     raw = decision.evidence["observed_accounting"]
     assert raw["other_mib"] == 0 and raw["own_tree_mib"] == 516
-    assert "not evidence that the model is too large" in decision.reason
 
 
 @pytest.mark.parametrize("capacity", [4096, 32768, 524288])
@@ -140,9 +139,8 @@ def test_missing_or_inconsistent_accounting_does_not_prove_headroom(corruption):
 )
 def test_absent_or_unusable_phase_evidence_is_actionable(requirement, provenance):
     decision = decide(requirement_mib=requirement, requirement_provenance=provenance, mode="trial")
-    assert not decision.admitted
-    assert "phase-specific measurement evidence" in decision.reason
-    assert "training evidence cannot substitute for inference" in decision.reason
+    assert decision.admitted
+    assert decision.requirement_source == "unavailable"
 
 
 def test_launcher_declaration_survives_real_child_environment(tmp_path, monkeypatch):
@@ -244,7 +242,7 @@ def test_partial_rows_do_not_establish_cleanliness_or_absence_but_own_measuremen
 @pytest.mark.parametrize("phase", ["training", "inference"])
 @pytest.mark.parametrize("mode", ["trial", "formal"])
 @pytest.mark.parametrize("enforcement", ["observe_only", "enforce", "enforce_resource_limits"])
-def test_real_phase_callers_do_not_spawn_without_phase_evidence(
+def test_real_phase_callers_apply_ordinary_posture_with_coherent_accounting(
     tmp_path, monkeypatch, phase, mode, enforcement, watchdog
 ):
     import core.sandbox_executor as executor
@@ -253,7 +251,11 @@ def test_real_phase_callers_do_not_spawn_without_phase_evidence(
     monkeypatch.setenv(PROCESS_VISIBILITY_ENV, "namespace_limited")
     monkeypatch.setattr("core.runtime_control.gpu_accounting.sample", lambda *a, **k: accounting())
     monkeypatch.setattr(executor, "_make_phase_observer", lambda *a: None)
-    spawn = Mock(side_effect=AssertionError("actual phase must not launch"))
+
+    class LaunchReached(BaseException):
+        pass
+
+    spawn = Mock(side_effect=LaunchReached)
     monkeypatch.setattr(executor, "_run_observed_subprocess", spawn)
     composition = compose_run_task_bindings(str(ROOT / "configs/task_composition/quickstart.yaml"))
     with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
@@ -270,14 +272,24 @@ def test_real_phase_callers_do_not_spawn_without_phase_evidence(
             if phase == "inference"
             else {}
         )
-        result = invoke_phase(sandbox, phase, watchdog=watchdog)
-    assert result["status"] == "skipped_resource_admission"
-    assert result["admission"]["reason_code"] == "environment_headroom_unproven"
-    assert (
-        result["admission"]["evidence"]["effective_execution_conditions"]["refusal_enforcement"]
-        == "all_phase_modes"
-    )
-    spawn.assert_not_called()
+        stops = mode == "formal" and enforcement == "enforce"
+        if stops:
+            result = invoke_phase(sandbox, phase, watchdog=watchdog)
+            assert result["status"] == "skipped_resource_admission"
+            assert result["admission"]["reason_code"] == "policy_unavailable"
+            spawn.assert_not_called()
+        else:
+            with pytest.raises(LaunchReached):
+                invoke_phase(sandbox, phase, watchdog=watchdog)
+            spawn.assert_called_once()
+            observations = getattr(sandbox, "admission_observations", [])
+            if mode == "formal":
+                assert observations[-1]["would_refuse"] is True
+                assert observations[-1]["reason_code"] == "policy_unavailable"
+                assert (
+                    observations[-1]["admission"]["evidence"]["process_visibility"]
+                    == "namespace_limited"
+                )
 
 
 def test_policy_exception_does_not_escape_via_trial_fallback(monkeypatch):
@@ -301,7 +313,7 @@ def test_policy_exception_does_not_escape_via_trial_fallback(monkeypatch):
 def test_infrastructure_record_retains_decision_and_forbids_shrink():
     from nodes.ml_hyperparameter_tune_agent.records import _build_resource_admission_record
 
-    decision = decide()
+    decision = decide(accounting(own_tree_mib=None))
     record = _build_resource_admission_record(
         resource_type="gpu_memory",
         reason_code=decision.reason_code,
@@ -318,7 +330,10 @@ def test_infrastructure_record_retains_decision_and_forbids_shrink():
     )
     assert record["status"] == "skipped_infrastructure_failure"
     assert record["denoising_score"] is None
-    assert record["memory"]["admission_evidence"]["evidence"]["outside_upper_bound_mib"] == 2263
+    assert (
+        record["memory"]["admission_evidence"]["evidence"]["observed_accounting"]["own_tree_mib"]
+        is None
+    )
     assert "Do NOT reduce model" in json.dumps(record)
 
 
@@ -338,7 +353,9 @@ def test_executor_refusal_reaches_tuner_as_environment_evidence(monkeypatch, pha
         ),
         measured_requirements={},
     )
-    monkeypatch.setattr("core.runtime_control.gpu_accounting.sample", lambda *a: accounting())
+    monkeypatch.setattr(
+        "core.runtime_control.gpu_accounting.sample", lambda *a: accounting(own_tree_mib=None)
+    )
     status = _admission_refusal(sandbox, phase=phase)
     assert _handle_admission_refusal(
         status,
@@ -506,3 +523,125 @@ def test_retained_parent_cuda_bytes_are_additional_to_new_worker_requirement():
     assert decision.evidence["outside_upper_bound_mib"] == 0
     assert decision.evidence["retained_own_tree_mib"] == 2048
     assert decision.evidence["aggregate_gib"] == 5
+
+
+@pytest.mark.parametrize("source", ["environment", "snapshot"])
+@pytest.mark.parametrize(
+    "gap", ["unavailable", "sampling_error", "incoherent", "missing", "uuid", "declaration"]
+)
+def test_coherent_accounting_routes_to_ordinary_admission_but_gaps_stop(monkeypatch, source, gap):
+    """The routing boundary must admit the complete sample and reject its degraded successor."""
+    monkeypatch.delenv(PROCESS_VISIBILITY_ENV, raising=False)
+    snapshot = accounting(
+        own_tree_mib=0,
+        per_pid_total_mib=0,
+        device_used_mib=1556,
+        unattributed_mib=1556,
+        accounting_skew_mib=1556,
+    )
+    if source == "environment":
+        monkeypatch.setenv(PROCESS_VISIBILITY_ENV, "namespace_limited")
+        snapshot = snapshot.model_copy(update={"process_visibility": None})
+    options = dict(
+        snapshot=snapshot, requirement_mib=None, requirement_provenance=None, mode="trial"
+    )
+    initial = evaluate_gpu_admission(**options)
+    assert initial.admitted
+    assert initial.evidence["process_visibility"] == "namespace_limited"
+    assert (
+        initial.evidence["effective_execution_conditions"]["refusal_enforcement"] == "phase_policy"
+    )
+    if gap == "unavailable":
+        options["snapshot"] = GpuAccountingSnapshot(
+            device=DEVICE, telemetry_available=False, process_visibility="namespace_limited"
+        )
+    elif gap == "sampling_error":
+        options["sampling_error"] = "stale sample after failed refresh"
+    elif gap == "incoherent":
+        options["snapshot"] = snapshot.model_copy(update={"unattributed_mib": 0})
+    elif gap == "missing":
+        options["snapshot"] = snapshot.model_copy(update={"own_tree_mib": None})
+    elif gap == "uuid":
+        options["snapshot"] = snapshot.model_copy(
+            update={"device": DEVICE.model_copy(update={"uuid": ""})}
+        )
+    else:
+        monkeypatch.setenv(PROCESS_VISIBILITY_ENV, "invalid")
+    decision = evaluate_gpu_admission(**options)
+    assert not decision.admitted
+    assert decision.reason_code == "environment_headroom_unproven"
+
+
+@pytest.mark.parametrize("phase", ["training", "inference"])
+@pytest.mark.parametrize("mode", ["trial", "formal"])
+def test_namespace_capacity_refusal_stops_observe_only_while_cli_proceeds(
+    tmp_path, monkeypatch, phase, mode
+):
+    """Exercise the real launch boundary with snapshot-only namespace provenance."""
+    import core.sandbox_executor as executor
+    from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+    class LaunchReached(BaseException):
+        pass
+
+    monkeypatch.delenv(PROCESS_VISIBILITY_ENV, raising=False)
+    current = accounting()
+    monkeypatch.setattr("core.runtime_control.gpu_accounting.sample", lambda *a, **k: current)
+    monkeypatch.setattr(executor, "_make_phase_observer", lambda *a: None)
+    spawn = Mock(side_effect=LaunchReached)
+    monkeypatch.setattr(executor, "_run_observed_subprocess", spawn)
+    composition = compose_run_task_bindings(str(ROOT / "configs/task_composition/quickstart.yaml"))
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
+        sandbox = executor.TidmadSandbox(
+            run_name="visibility", workspace=str(tmp_path), device_identity=DEVICE
+        )
+        sandbox.admission_policy = GpuAdmissionPolicy(
+            mode=mode, enforcement="observe_only", ceiling_gib=28
+        )
+        sandbox.measured_requirements = {
+            phase: {
+                "requirement_mib": 27 * 1024,
+                "provenance": "measured",
+                "ownership": ended_worker_ownership(DEVICE.uuid).model_dump(mode="json"),
+            }
+        }
+        result = invoke_phase(sandbox, phase)
+        assert result["status"] == "skipped_resource_admission"
+        assert result["admission"]["reason_code"] == "insufficient_headroom"
+        assert result["admission"]["evidence"]["aggregate_gib"] == (27648 + 2779) / 1024
+        spawn.assert_not_called()
+
+        current = current.model_copy(update={"process_visibility": None})
+        with pytest.raises(LaunchReached):
+            invoke_phase(sandbox, phase)
+        spawn.assert_called_once()
+        assert sandbox.admission_observations[-1]["would_refuse"] is True
+        assert sandbox.admission_observations[-1]["reason_code"] == "insufficient_headroom"
+
+
+@pytest.mark.parametrize("mode", ["trial", "formal"])
+@pytest.mark.parametrize(
+    "variable", ["SIDERIUS_PAIR_VRAM_CEILING_GIB", "SIDERIUS_GPU_VRAM_QUOTA_MIB"]
+)
+def test_missing_namespace_requirement_keeps_ceiling_resolution_failure_conservative(
+    monkeypatch, mode, variable
+):
+    from core.runtime_control.admission import stops_phase
+
+    monkeypatch.delenv(PROCESS_VISIBILITY_ENV, raising=False)
+    monkeypatch.setenv(variable, "not-a-number")
+    decision = decide(
+        requirement_mib=None, requirement_provenance=None, ceiling_gib=None, mode=mode
+    )
+    assert decision.reason_code == "environment_headroom_unproven"
+    assert variable in decision.reason
+    assert stops_phase("observe_only", decision.reason_code, evidence=decision.evidence)
+    ordinary = decide(
+        accounting(process_visibility=None),
+        requirement_mib=None,
+        requirement_provenance=None,
+        ceiling_gib=None,
+        mode=mode,
+    )
+    assert ordinary.reason_code == "policy_unavailable"
+    assert not stops_phase("observe_only", ordinary.reason_code, evidence=ordinary.evidence)
