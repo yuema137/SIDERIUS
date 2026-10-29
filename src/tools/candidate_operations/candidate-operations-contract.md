@@ -1058,8 +1058,11 @@ The empty envelope must have been created before capture review. Its native
 workspace remains absent until native shell launch. The explicit 300-second
 timeout and 1 MiB observation budget are example caller choices. Configure
 provider environment names for enabled real routes. Explicit GPU device paths
-and read-only `/sys` may be needed to reproduce captured hardware facts; select
-the actual host paths, never bypass installation/hardware binding. No GUI or automatic capture builder is implied.
+may be needed to reproduce captured hardware facts; select the actual host paths,
+never bypass installation/hardware binding. Native chains run through the same
+`workspace_sandbox.command.command_prefix`, so a `/dev/nvidia<N>` device adds
+read-only `/sys` and the present NVIDIA control nodes automatically
+(`tools.workspace_sandbox.gpu.passthrough`); no `/sys` path is selected. No GUI or automatic capture builder is implied.
 
 ## Captured native continuation
 

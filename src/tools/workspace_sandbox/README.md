@@ -130,8 +130,9 @@ at least one `/dev/nvidia<N>` node, the sandbox adds two things itself
 - **All of host `/sys`, read-only.** The process can read the host's hardware
   and kernel metadata: PCI devices, CPU and NUMA topology, loaded modules and
   their parameters, block and network device names, cgroup and power
-  information. It cannot change any of it. This is what Docker, Flatpak and
-  Apptainer expose to GPU containers. On the checked RTX 5090 host a smaller set
+  information. It cannot change any of it. Docker mounts sysfs read-only in
+  containers and Apptainer binds host `/sys`; Flatpak binds selected `/sys`
+  subdirectories. On the checked RTX 5090 host a smaller set
   (the GPU's PCI directory plus `/sys/module/nvidia*`) was also enough. The
   sandbox mounts all of `/sys` so that other drivers and library versions that
   read more metadata keep working.

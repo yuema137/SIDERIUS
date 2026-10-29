@@ -3,8 +3,8 @@
 A ``/dev/nvidia<N>`` node alone does not let CUDA start: without host ``/sys``,
 ``cudaGetDeviceCount`` fails with error 304 (cudaErrorOperatingSystem). On the
 checked RTX 5090 host the GPU's PCI directory plus ``/sys/module/nvidia*`` was
-also enough, but the passthrough mounts all of ``/sys`` read-only, the
-practice Docker, Flatpak and Apptainer use, so a driver that reads other
+also enough, but the passthrough mounts all of ``/sys`` read-only (Docker
+mounts sysfs read-only; Apptainer binds host ``/sys``), so a driver that reads other
 sysfs metadata keeps working. It also passes the NVIDIA control nodes the host
 has. Nothing here is user configuration and a profile without a GPU node gets
 no passthrough at all.

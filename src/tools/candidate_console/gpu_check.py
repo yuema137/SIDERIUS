@@ -24,6 +24,12 @@ from .models import ConsoleConfig, TaskChoice
 #: Wall-clock cap for one probe (PyTorch import plus CUDA initialization).
 PROBE_TIMEOUT_SECONDS = 120.0
 RESULT_FILE = "gpu-check.json"
+#: Created by the driver on first CUDA use; the sandbox can pass it but not create it.
+UVM_NODE = Path("/dev/nvidia-uvm")
+UVM_NOTE = (
+    "/dev/nvidia-uvm is missing on this host and the sandbox cannot create it; run "
+    "nvidia-smi (or nvidia-modprobe -u -c=0) once on the host, then check again"
+)
 
 
 def probe() -> tuple[bool, str]:
@@ -74,6 +80,8 @@ def _check_task(task: TaskChoice) -> tuple[bool, str]:
             f"Task {task.task_id}: sandbox passes {passed}"
             + (" and read-only /sys" if extra_read_only else "")
         )
+        if not UVM_NODE.is_char_device():
+            print(f"Task {task.task_id}: note: {UVM_NOTE}")
         command = [sys.executable, "-m", __name__, str(workspace / RESULT_FILE)]
         try:
             outcome = run(profile, command)

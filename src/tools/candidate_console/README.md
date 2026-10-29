@@ -177,8 +177,14 @@ overwrites an existing `tasks/` folder.
    missing: no device node was passed; device nodes were passed but `/sys` is not
    mounted (CUDA error 304: the run did not get the automatic passthrough, so check
    that the task lists a `/dev/nvidia<N>` node and run `check --gpu`); or CUDA
-   failed to start with both present (check the driver with `nvidia-smi`, and do
-   not set `CUDA_VISIBLE_DEVICES` to an empty value).
+   failed to start with both present (check the driver with `nvidia-smi`; if
+   `/dev/nvidia-uvm` is missing on the host, run `nvidia-smi` or
+   `nvidia-modprobe -u -c=0` once on the host, because the sandbox cannot create
+   it; and do not set `CUDA_VISIBLE_DEVICES` to an empty value).
+
+   Older entries that list control nodes such as `/dev/nvidia-uvm` or
+   `/dev/nvidiactl` in `candidate_devices` keep working, but a listed node missing
+   at launch refuses the run, so prefer listing only `/dev/nvidia<N>`.
 
    You can also write the task entry yourself. A task needs its `task_id`,
    `label`, `task_manifest`, resource policy and time limits; the

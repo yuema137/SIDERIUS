@@ -16,6 +16,7 @@ from tools.workspace_sandbox import gpu
 from tools.workspace_sandbox.command import command_prefix
 from tools.workspace_sandbox.profile import SandboxProfile
 
+REAL_CONTROL_NODES = gpu.control_nodes  # captured before the autouse stub
 CONTROL = (Path("/dev/nvidiactl"), Path("/dev/nvidia-uvm"), Path("/dev/nvidia-caps/nvidia-cap1"))
 
 
@@ -91,3 +92,31 @@ def test_missing_gpu_node_is_refused_with_a_plain_cause(tmp_path):
             devices=(Path("/dev/nvidia97"),),
             timeout_seconds=10,
         )
+
+
+def test_control_nodes_keep_only_real_character_devices(tmp_path, monkeypatch):
+    """Defect: a symlink or regular file named like a control node (or under
+    /dev/nvidia-caps) is dev-bound, or a host without the caps folder crashes.
+    Fails if anything but a non-symlink character device is returned."""
+    caps = tmp_path / "caps"
+    caps.mkdir()
+    (caps / "nvidia-cap1").symlink_to("/dev/null")
+    (caps / "nvidia-cap2").write_text("")
+    (tmp_path / "ctl-link").symlink_to("/dev/null")
+    (tmp_path / "ctl-file").write_text("")
+    real = (Path("/dev/null"), tmp_path / "ctl-link", tmp_path / "ctl-file", tmp_path / "gone")
+    monkeypatch.setattr(gpu, "CONTROL_NODES", real)
+    monkeypatch.setattr(gpu, "CAPS_DIRECTORY", caps)
+    assert REAL_CONTROL_NODES() == (Path("/dev/null"),)
+    monkeypatch.setattr(gpu, "CAPS_DIRECTORY", tmp_path / "no-caps")
+    assert REAL_CONTROL_NODES() == (Path("/dev/null"),)
+
+
+def test_sys_is_added_only_when_the_host_has_it(tmp_path, monkeypatch):
+    """Defect: a host (or container) without /sys gets a bind of a missing path, so
+    bwrap fails before CUDA can report anything. Fails if the missing /sys is bound
+    or the device nodes stop being passed."""
+    monkeypatch.setattr(gpu, "SYSFS", tmp_path / "absent")
+    assert gpu.passthrough((Path("/dev/nvidia0"),)) == ((), CONTROL)
+    monkeypatch.setattr(gpu, "SYSFS", tmp_path)
+    assert gpu.passthrough((Path("/dev/nvidia0"),)) == ((tmp_path,), CONTROL)

@@ -89,3 +89,37 @@ def test_probe_outcome_is_reported_as_pass_or_its_cause(
     assert gpu_check.check_gpu(config, "synthetic") == code
     assert expected in capsys.readouterr().out
     assert seen and seen[0][1:3] == ["-m", "tools.candidate_console.gpu_check"]
+
+
+@pytest.mark.parametrize("uvm_present", [True, False])
+def test_missing_uvm_node_prints_the_host_side_fix(
+    uvm_present, console_config, monkeypatch, tmp_path, capsys
+):
+    """Defect: on a fresh headless host /dev/nvidia-uvm does not exist yet, the sandbox
+    cannot create it (no capabilities, private /dev), and check --gpu gives no hint
+    that one host-side nvidia-smi fixes it. Fails if the note is missing when the node
+    is absent or printed when it is present."""
+    monkeypatch.setattr(gpu_check, "UVM_NODE", Path("/dev/null") if uvm_present else tmp_path)
+    monkeypatch.setattr(
+        gpu_check,
+        "task_profile",
+        lambda task, workspace: SandboxProfile.model_construct(
+            workspace=workspace,
+            read_only=(),
+            network=False,
+            devices=(Path("/dev/nvidia0"),),
+            environment_names=(),
+            timeout_seconds=gpu_check.PROBE_TIMEOUT_SECONDS,
+        ),
+    )
+
+    def fake_run(value, argv):
+        Path(argv[-1]).write_text(json.dumps({"passed": False, "message": "no CUDA"}))
+        return ExecutionResult(status="failed", returncode=1, elapsed_seconds=1.0)
+
+    monkeypatch.setattr(gpu_check, "run", fake_run)
+    gpu_check.check_gpu(_with_devices(console_config, ("/dev/nvidia0",)))
+    out = capsys.readouterr().out
+    assert ("run nvidia-smi (or nvidia-modprobe -u -c=0) once on the host" in out) is not (
+        uvm_present
+    )
