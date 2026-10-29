@@ -124,6 +124,10 @@ def resolve_training_workload(
     )
 
 
+#: Epoch seed for row-count-only materialization of a task training scope.
+ROW_COUNT_EPOCH_SEED = 0
+
+
 def resolve_task_scope_training_workload(
     training_scope: object,
     *,
@@ -210,10 +214,17 @@ def resolve_task_scope_training_workload(
             "bound, so its row count cannot be declared by the implementation "
             "that built it."
         )
+    # This path only counts rows: `len(dataset)` of a portion/ceiling draw
+    # does not depend on which rows the seed picks. The explicit seed lets a
+    # task that refuses an absent seed (only entry boundaries generate seeds)
+    # be priced instead of failing, and keeps this materialization
+    # deterministic; it is the same fixed value the time-measurement warmup
+    # uses (`evaluate_time_skill/wrapper.py`).
     dataset = bound.training_dataset(
         training_scope,
         EpochSamplingParams(
             data_dir=data_dir,
+            epoch_seed=ROW_COUNT_EPOCH_SEED,
             train_portion=train_portion,
             max_samples=max_samples,
         ),
