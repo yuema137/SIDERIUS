@@ -491,6 +491,7 @@ class ExternalInputKind(Model):
     contract: NativeContract
     managed: bool
     summary: str
+    managed_summary: str | None = None
     example: str
 
 

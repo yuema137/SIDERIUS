@@ -257,11 +257,16 @@ Saved documents stay valid because only a `complete` draft can be reviewed.
 
 `GET /api/editor/external-inputs` returns `ExternalInputCatalog`
 (`external_inputs.external_input_catalog`): one `ExternalInputKind(contract,
-managed, summary, example)` per catalog contract that no capability produces as
+managed, summary, managed_summary, example)` per catalog contract that no capability produces as
 a result. `managed` derives from `ManagedCandidateBinding.contract`, minus
 `literature.input` (which also needs `literature_settings`). It applies only to
 reusable (schema 2) documents; a managed binding in a schema 1 document is
-`invalid`. `summary` is a short plain-language explanation and `example` is a placeholder file name.
+`invalid`. `summary` is one plain sentence and `example` is a placeholder file name.
+`managed_summary`, when present, explains the managed route only: reusable
+unbound-input help uses it only when `managed` is true, and bound-input help
+only when the port is `framework_supplied`. Version-1 file inputs retain the
+neutral `summary`. Managed interpretation starts cold and later receives the
+previous round's training results through `tuning-to-interpretation`.
 No location is ever proposed. Task packages declare none of these inputs, so the
 author types a project-relative path to a JSON file holding the contract's
 `native_type` value. The path is read only when a run is prepared.

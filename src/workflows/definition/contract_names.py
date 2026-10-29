@@ -53,8 +53,7 @@ SCHEMA_NAMES = MappingProxyType(
         ),
         "agent.schemas.interpretation.InterpretationOutput": SchemaName(
             "Results analysis",
-            "A cold start on the first round (no earlier results needed), then the previous "
-            "round's analysis with per-model scores and the best and worst models.",
+            "A reading of run results with per-model scores and the best and worst models.",
             "produced",
         ),
         "agent.schemas.literature_review.LiteratureReviewInput": SchemaName(

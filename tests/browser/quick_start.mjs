@@ -76,11 +76,30 @@ try {
   await page.locator('#editor-loop-final-iteration').waitFor({state: 'visible'});
   assert.equal(await page.locator('#editor-loop-final-iteration').inputValue(), '1');
   await page.locator('#editor-loop-stop-conditions').waitFor({state: 'visible'});
-  // Propose's evidence tooltip must not imply the first round needs earlier results.
+  // Cold-start guidance belongs to the managed run input, not the shared schema tooltip.
+  await page.locator('#circuit-node-interpret').click();
+  const managedHelp = page.locator('#editor-inspector .managed-input-help');
+  await managedHelp.waitFor({state: 'visible'});
+  assert.match(await managedHelp.textContent(), /first round starts cold/);
+  assert.ok((await managedHelp.textContent()).includes("previous round's training results"));
   await page.locator('#circuit-input-propose-output').hover();
   await page.locator('#circuit-tooltip').waitFor({state: 'visible'});
-  assert.match(await page.locator('#circuit-tooltip').textContent(), /cold start on the first round \(no earlier results needed\)/);
-  assert.ok((await page.locator('#circuit-tooltip').textContent()).includes("previous round's analysis"));
+  assert.ok(!(await page.locator('#circuit-tooltip').textContent()).includes('cold start'));
+  // Exercise the same unbound interpretation form in v1 and reusable contexts.
+  const forms = await page.evaluate(() => {
+    const option = {socket_contract: {id: 'interpretation.input'}, bound: false, choices: []};
+    return [false, true].map(reusable => {
+      const parent = document.createElement('div');
+      window.editorExternalInputs.render(parent, {option, nodeId: 'interpret', reusable,
+        taken: new Set(), enabled: true, ready: () => {}}, () => {});
+      return {help: parent.querySelector('.external-input-help').textContent,
+        pathHidden: parent.querySelector('[name="external-location"]').parentElement.hidden};
+    });
+  });
+  assert.ok(!forms[0].help.includes('cold'));
+  assert.equal(forms[0].pathHidden, false, 'v1 asks for a file without promising managed input');
+  assert.ok(forms[1].help.includes('first round starts cold'));
+  assert.equal(forms[1].pathHidden, true);
   // Training settings are on the Train & tune module.
   await page.locator('#circuit-node-train').click();
   // The author's choice wins over Quick start's bounded advice re-focus (L-6): the clicked

@@ -470,6 +470,9 @@
       window.editorAdvice?.render($('inspector'), {document: graph, item, inventory, enabled: canEditCircuit()},
         (mutate, label) => { if (graph === capturedGraph) { mutate(graph); changed(label, `advice:${item.id}`); } });
       node('h3', 'Inputs', $('inspector'));
+      for (const option of inventory.filter(entry => entry.node === item.id && entry.framework_supplied)) {
+        window.editorExternalInputs.renderManaged($('inspector'), option, render);
+      }
       // Framework-supplied inputs (managed storage, …) are no user requirement: advanced Mapping details only.
       for (const option of inventory.filter(entry => entry.node === item.id && !entry.framework_supplied)) {
         // "[swatch] Connector name · Required" (spec §8.2); the field name is advanced detail.

@@ -41,7 +41,8 @@
     const socket = `${nodeId}.${option.argument || 'request'}`;
     const id = suggestion(`${nodeId}_${option.argument || 'input'}`, context.taken);
     const choose = option.choices.some(choice => choice.source.kind === 'external') ? 'Choose an existing input above, or create one.' : 'No input of this kind exists yet: create one.';
-    const help = element('p', `${window.editorContractPresentation.describe(option.socket_contract).name}: ${entry.summary} ${choose}`, parent, 'external-input-help');
+    const summary = context.reusable && entry.managed ? (entry.managed_summary || entry.summary) : entry.summary;
+    const help = element('p', `${window.editorContractPresentation.describe(option.socket_contract).name}: ${summary} ${choose}`, parent, 'external-input-help');
     help.dataset.socket = socket;
     const form = element('details', '', parent, 'external-input-create'); form.dataset.socket = socket;
     element('summary', 'Create external input…', form);
@@ -72,5 +73,11 @@
         : {id: value, contract: entry.contract.id, location: path}, nodeId, option.argument);
     });
   }
-  window.editorExternalInputs = Object.freeze({render});
+  function renderManaged(parent, option, ready) {
+    if (!option.framework_supplied) return;
+    if (!catalog) { void load(ready); return; }
+    const entry = catalog.get(option.socket_contract.id);
+    if (entry?.managed && entry.managed_summary) element('p', entry.managed_summary, parent, 'managed-input-help');
+  }
+  window.editorExternalInputs = Object.freeze({render, renderManaged});
 })();
