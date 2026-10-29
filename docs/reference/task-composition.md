@@ -505,7 +505,13 @@ Notes:
 - `parameter_rules` constrains leaves under `model_config`, `train_config`, or
   `loss_config` through dotted paths. Each path declares exactly one of `exact`, `range`, `allowed`,
   or `predicate`. `exact` supplies the executed leaf value even when the agent
-  omitted it; the other forms validate the agent's choice. Predicate names
+  omitted it; the other forms validate the agent's choice. Only `exact` may be
+  null (`{exact: null}` locks a null value); a null `range`, `allowed` or
+  `predicate` is refused rather than read as an exact-null lock. `range`
+  bounds must be JSON/YAML numbers: booleans and numeric strings are refused
+  rather than coerced. Write exponent bounds with a decimal point in YAML,
+  for example `1.0e-5`, not `1e-5`: YAML 1.1 reads `1e-5` as a string, which
+  is then refused. Predicate names
   must be registered with `register_parameter_predicate`; executable Python
   expressions and raw lambdas are not accepted in YAML. The complete rule set
   is part of the composition fingerprint, so changing it requires a fresh
@@ -523,7 +529,13 @@ Notes:
   existing typed schema still owns selected-variant and value validation.
   An exact lock may supply an omitted valid leaf; optional parent mappings must
   already exist for nested writes. `train_config.lr_schedule: {exact: null}`
-  remains supported. Model-specific `model_config` paths remain extensible;
+  remains supported. Loss rule targets are checked the same way against the
+  fields of the execution `LossConfig`; a misspelled field such as
+  `loss_config.gammmma` is refused instead of being dropped when the loss is
+  built. Custom-loss plugin hyperparameters are not transported through
+  `loss_config` (the plugin executes its `PLUGIN_LOSS_CONFIG_CLASS`
+  defaults), so a rule naming one, such as `loss_config.snr_threshold`, is
+  refused. Model-specific `model_config` paths remain extensible;
   this fixed-field validation does not close the model plugin's configuration.
 - A workflow may add a second rule set through
   `--workflow_parameter_rules '<json>'`, using the same shape. Task and
