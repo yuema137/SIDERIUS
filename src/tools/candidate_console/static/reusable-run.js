@@ -21,6 +21,7 @@
   function stopCondition(condition) {
     if (condition.kind === 'metric_threshold') return `${condition.metric_id} reaches ${condition.threshold} (task metric direction)`;
     if (condition.kind === 'no_improvement') return `${condition.completed_bodies} completed bod${condition.completed_bodies === 1 ? 'y' : 'ies'} pass without improvement`;
+    if (condition.kind === 'judge') return `a language-model judge decides to stop ("${condition.criterion}"), first after ${condition.min_completed_bodies} completed bod${condition.min_completed_bodies === 1 ? 'y' : 'ies'}; a failed judge call ${condition.on_failure === 'continue' ? 'is recorded as an abstention' : 'ends the loop as failed'}`;
     return `unsupported condition ${condition.kind}`;
   }
   let editor = window.workflowEditor.state, generation = 0, selected = null, review = null;

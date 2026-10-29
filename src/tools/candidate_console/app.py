@@ -120,11 +120,11 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
 
     @app.exception_handler(OperationFailure)
     async def operation_error(request: Request, error: OperationFailure):
-        # Only credential names and the launch-policy owner's fixed refusal text are
-        # forwarded; other native errors may carry paths.
+        # Only credential names and the launch-policy and judge-route owners' fixed
+        # refusal texts are forwarded; other native errors may carry paths.
         message = (
             error.detail.message
-            if error.detail.code in ("credentials", "launch_policy")
+            if error.detail.code in ("credentials", "launch_policy", "judge_route")
             else {
                 "native_chain_policy": "native chain choice is unavailable or overlaps editor writes",
                 "not_supported": "native-chain token aggregation is not supported",
