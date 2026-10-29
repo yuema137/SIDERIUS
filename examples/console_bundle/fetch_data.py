@@ -20,18 +20,33 @@ refused and never overwritten. Exit status 0 on success, 2 on refusal.
 
 from __future__ import annotations
 
-import argparse
-import hashlib
-import importlib.util
-import json
 import os
-import re
-import stat
 import sys
-from pathlib import Path
-from types import ModuleType
 
-sys.dont_write_bytecode = True  # never leave __pycache__ inside the verified bundle
+# Bootstrap with startup modules only: remove all bundle-root aliases before
+# importing anything an unlisted file could shadow (including stdlib modules).
+sys.path[:] = [
+    entry
+    for entry in sys.path
+    if os.path.realpath(entry) != os.path.dirname(os.path.realpath(__file__))
+]
+sys.dont_write_bytecode = True
+
+try:
+    import argparse
+    import hashlib
+    import importlib.util
+    import json
+    import re
+    import stat
+    from pathlib import Path
+    from types import ModuleType
+    from typing import TYPE_CHECKING
+except ImportError as error:
+    raise SystemExit(f"fetch_data requires a working Python standard library: {error}") from error
+
+if TYPE_CHECKING:
+    from tools.candidate_console.example_bundle import VerifiedBundle
 
 HERE = Path(__file__).resolve().parent
 
@@ -52,21 +67,28 @@ def _load_generator(package: Path, source: bytes) -> ModuleType:
 
 def render_shards(package: Path) -> dict[str, bytes]:
     """``{shard file name: bytes}``, each verified against the package's data manifest."""
+    return _render_verified_shards(_read_bundle(package))
+
+
+def _read_bundle(package: Path) -> VerifiedBundle:
     from tools.candidate_console.example_bundle import BundleRefused, read_bundle
 
     package = package.absolute()
     if package.name != "task":
         raise FetchRefused("--package must name the task/ folder in an unpacked bundle")
     try:
-        bundle = read_bundle(str(package.parent))
+        return read_bundle(str(package.parent))
     except BundleRefused as error:
         raise FetchRefused(str(error)) from None
+
+
+def _render_verified_shards(bundle: VerifiedBundle) -> dict[str, bytes]:
     generator_name = "task/plugins/_quickstart_task.py"
     manifest_name = "task/declared/data_manifest.json"
     for name in (generator_name, manifest_name):
         if name not in bundle.files:
             raise FetchRefused(f"SHA256SUMS does not list {name}")
-    generator = _load_generator(package, bundle.files[generator_name])
+    generator = _load_generator(bundle.root / "task", bundle.files[generator_name])
     manifest = json.loads(bundle.files[manifest_name])
     expected = manifest["sha256"]
     shards = {}
@@ -148,13 +170,6 @@ def write_shards(workspace: Path, task_id: str, shards: dict[str, bytes]) -> Pat
     return target
 
 
-def _default_task_id() -> str | None:
-    fragment = HERE / "console-task.json"
-    if not fragment.is_file():
-        return None
-    return json.loads(fragment.read_text("utf-8"))["task_id"]
-
-
 def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description="Write the quickstart example data.")
     cli.add_argument("--workspace", required=True, help="absolute path of siderius_workspace/")
@@ -163,12 +178,10 @@ def main(argv: list[str] | None = None) -> int:
         "--package", default=str(HERE / "task"), help="the task package (default: ./task)"
     )
     args = cli.parse_args(argv)
-    task_id = args.task_id or _default_task_id()
-    if task_id is None:
-        print("fetch_data refused: pass --task-id (no console-task.json here).", file=sys.stderr)
-        return 2
     try:
-        target = write_shards(Path(args.workspace), task_id, render_shards(Path(args.package)))
+        bundle = _read_bundle(Path(args.package))
+        task_id = args.task_id or bundle.task.task_id
+        target = write_shards(Path(args.workspace), task_id, _render_verified_shards(bundle))
     except FetchRefused as error:
         print(f"fetch_data refused: {error}.", file=sys.stderr)
         return 2

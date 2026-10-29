@@ -51,8 +51,10 @@ version in the zip's name.
    ```
 
    This creates `/absolute/downloads/siderius-example-quickstart-<version>/`.
-   To check the download yourself, run `sha256sum -c SHA256SUMS` inside it;
-   every line should end in `OK`. Steps 3 and 4 also verify the listed files.
+   Before running the script, run `sha256sum -c SHA256SUMS` inside this folder
+   as an independent check; every line should end in `OK`. The script cannot
+   verify itself: its code is already running when it checks the bundle.
+   Steps 3 and 4 also verify the listed files.
 
 2. Create your private key file and the console workspace. The first command
    creates an empty key file that only you can read (mode `600`; its folder must
@@ -89,6 +91,8 @@ version in the zip's name.
    A missing or changed file stops the command before task code runs or data
    is written; unpack the zip again. If you pass `--package`, it must name the
    `task/` folder inside an unpacked bundle with its own `SHA256SUMS`.
+   The default task ID comes from that bundle's verified `console-task.json`;
+   `--task-id` overrides it.
 
    It writes four CSV files to `siderius_workspace/data/quickstart/`, readable
    only by you, and ends with `Data ready in .../data/quickstart`. It refuses a
