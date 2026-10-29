@@ -19,7 +19,12 @@ from tools.candidate_operations.models import (
     ProcessObservation,
 )
 from tools.candidate_worker.loop_models import LoopStop, LoopTrace
-from tools.candidate_worker.loop_stop import MetricThresholdReason, NoImprovementReason
+from tools.candidate_worker.loop_stop import (
+    InputRequestSummary,
+    LoopInputRequest,
+    MetricThresholdReason,
+    NoImprovementReason,
+)
 from tools.candidate_worker.models import CandidateRunReceipt
 from workflows.definition import AuthoredLoop, LoopFeedback, ResultSource
 
@@ -112,6 +117,29 @@ def test_finished_or_unclaimed_loop_refusals_are_409_without_echo(
     assert response.status_code == 409
     assert response.json()["error"] == {"code": code, "message": message}
     assert "DO-NOT-ECHO" not in response.text and "/secret" not in response.text
+
+
+INPUT_REQUEST = LoopInputRequest(
+    reason=NoImprovementReason(
+        condition_index=0,
+        iteration=3,
+        k=2,
+        non_improving_bodies=2,
+        last_improvement_iteration=1,
+        incumbent=0.81,
+    ),
+    summary=InputRequestSummary(
+        iteration=3,
+        final_iteration=5,
+        metric_id="accuracy",
+        direction="higher",
+        incumbent=0.81,
+        incumbent_iteration=1,
+        non_improving_bodies=2,
+        input_anchor=0,
+        bodies_since_input=3,
+    ),
+)
 
 
 def _loop_submission(operation_id, final_iteration):
@@ -226,6 +254,19 @@ def _snapshot(operation_id, receipt):
                 },
             },
         ),
+        (
+            5,
+            CandidateRunReceipt.model_construct(
+                run_id="f" * 32,
+                status="paused",
+                loop_trace=LoopTrace(attempted_iterations=3, input_request=INPUT_REQUEST),
+            ),
+            {
+                "final_iteration": 5,
+                "attempted_iterations": 3,
+                "input_request": INPUT_REQUEST.model_dump(mode="json"),
+            },
+        ),
         (None, None, None),
     ),
     ids=(
@@ -233,14 +274,17 @@ def _snapshot(operation_id, receipt):
         "stopped-receipt-body-count",
         "threshold-stop-reason-from-receipt",
         "no-improvement-stop-reason-from-receipt",
+        "input-request-from-paused-receipt",
         "fixed-candidate",
     ),
 )
 def test_status_loop_bound_from_submission_and_bodies_only_from_receipt(
     console_config, monkeypatch, final_iteration, receipt, expected
 ):
-    """Fails if an active loop loses its declared bound, a body count is guessed, or a
-    condition-completed receipt's verified stop reason is dropped or reshaped."""
+    """Fails if an active loop loses its declared bound, a body count is guessed, a
+    condition-completed receipt's verified stop reason is dropped or reshaped, a
+    condition-paused receipt's input request is dropped, or loops without one gain an
+    ``input_request`` key (their status bytes must stay unchanged)."""
     operation_id = uuid4()
     monkeypatch.setattr(
         "tools.candidate_console.service.operation_admitted", lambda config, value: True

@@ -22,6 +22,8 @@ const thresholdStop = '77777777-7777-4777-8777-777777777777';
 const patienceStop = '88888888-8888-4888-8888-888888888888';
 const resumedStop = '99999999-9999-4999-8999-999999999999';
 const judgeStop = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const asking = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const judgeAsking = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 let browser;
 try {
   const metadata = await new Promise((accept, reject) => {
@@ -76,6 +78,8 @@ try {
       const id = url.pathname.split('/')[3], count = id === pausing ? 1 : id === resumed ? 3 : 0;
       return reply({operation_id: id, available: count > 0, bodies: Array.from({length: count}, (_, index) => ({iteration: index + 1, tuning_state: 'failed', result: null}))});
     }
+    if (url.pathname === `/api/operations/${asking}/loop-resume-review`) return reply({predecessor_operation_id: asking, expected_receipt_digest: digest, completed_iterations: 7, final_iteration: 12,
+      credential_readiness: {required_names: ['OPENAI_API_KEY'], omitted_names: [], unresolved_routes: [], present_names: ['OPENAI_API_KEY'], missing_names: [], file_status: 'readable', ready: true, instructions: []}});
     if (url.pathname === `/api/operations/${pausing}/loop-resume-review`) return reply({predecessor_operation_id: pausing, expected_receipt_digest: digest, completed_iterations: 1, final_iteration: 3,
       credential_readiness: {required_names: ['OPENAI_API_KEY'], omitted_names: [], unresolved_routes: [], present_names: ['OPENAI_API_KEY'], missing_names: [], file_status: 'readable', ready: true, instructions: []}});
     if (url.pathname === `/api/operations/${pausing}`) return reply(!pausingTerminal ? status(pausing, {loop: {final_iteration: 3, attempted_iterations: null}})
@@ -101,6 +105,23 @@ try {
       const value = {...terminal(resumedStop, 'completed', 3), kind: 'candidate_loop_resume'};
       value.loop = {final_iteration: 5, attempted_iterations: 3, stop_reason: {kind: 'no_improvement', condition_index: 0, iteration: 3,
         k: 2, non_improving_bodies: 2, last_improvement_iteration: 1, incumbent: 0.75}};
+      return reply(value);
+    }
+    if (url.pathname === `/api/operations/${asking}`) {
+      // A "Pause and ask me" no-improvement condition paused the loop: no operator Pause marker.
+      const value = terminal(asking, 'paused', 7);
+      value.loop = {final_iteration: 12, attempted_iterations: 7, stop_requested: false, pause_requested: false, input_request: {
+        reason: {kind: 'no_improvement', condition_index: 0, iteration: 7, k: 3, non_improving_bodies: 3, last_improvement_iteration: 4, incumbent: 0.81},
+        summary: {iteration: 7, final_iteration: 12, metric_id: 'accuracy', direction: 'higher', incumbent: 0.81, incumbent_iteration: 4, non_improving_bodies: 3, input_anchor: 0, bodies_since_input: 7}}};
+      return reply(value);
+    }
+    if (url.pathname === `/api/operations/${judgeAsking}`) {
+      // The judge asked; a Stop recorded while waiting means the run cannot continue.
+      const value = terminal(judgeAsking, 'paused', 3), evidence = {evidence_path: 'judge/3.json', evidence_sha256: 'e'.repeat(64), request_sha256: 'f'.repeat(64)};
+      value.loop = {final_iteration: 5, attempted_iterations: 3, stop_requested: true, pause_requested: false, input_request: {
+        reason: {kind: 'judge', condition_index: 0, iteration: 3, ...evidence},
+        summary: {iteration: 3, final_iteration: 5, metric_id: 'accuracy', direction: 'lower', incumbent: null, incumbent_iteration: null, non_improving_bodies: 3, input_anchor: 0, bodies_since_input: 3}},
+        judge_verdicts: [{iteration: 3, decision: 'stop', rationale: 'Scores stopped moving.', confidence: 'high'}]};
       return reply(value);
     }
     if (url.pathname === `/api/operations/${judgeStop}`) {
@@ -233,6 +254,24 @@ try {
     'Judge after body 3: stop · Two bodies add no new insight. (confidence high)',
   ]);
   assert.equal(resumePosts.length, 1);
+
+  // "Pause and ask me": a condition-paused receipt says what was met in plain words, and the
+  // existing reviewed Resume continues it (no extra request fields).
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, asking);
+  await state.filter({hasText: 'Waiting for your input. No improvement for 3 bodies (best 0.81 at body 4, higher is better). Paused after body 7 of 12. Review and resume to continue with body 8.'}).waitFor();
+  assert.equal(await state.getAttribute('title'), 'Exact recorded values: incumbent 0.81');
+  await resumeGroup.waitFor({state: 'visible'});
+  await page.locator('#loop-resume-review').click();
+  await page.locator('#loop-resume-summary').filter({hasText: 'body 8 of 12'}).waitFor();
+  await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-waiting-for-input.png'), fullPage: true});
+  await page.locator('#loop-resume').click();
+  await page.waitForFunction(id => location.hash.startsWith('#monitor/') && location.hash !== '#monitor/' + id, asking);
+  assert.equal(resumePosts.length, 2);
+  assert.deepEqual(Object.keys(resumePosts[1]).sort(), ['expected_receipt_digest', 'predecessor_operation_id', 'request_id']);
+  assert.equal(resumePosts[1].predecessor_operation_id, asking);
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, judgeAsking);
+  await state.filter({hasText: 'Waiting for your input. The judge asked for your input: Scores stopped moving. (no valid score yet). Paused after body 3 of 5. Stop was requested; this run cannot continue.'}).waitFor();
+  assert.ok(await resumeGroup.isHidden(), 'a recorded Stop leaves nothing to resume');
   assert.equal(posts.length, 1);
   assert.deepEqual(faults, []);
   console.log('PASS: Stop and Pause post once and read "requested" until the receipt; a paused loop is resumable after review, Resume posts once with the retained UUID, and the resumed segment shows Stop and its bodies; a receipt stop_reason reads in plain words, with whole-run body numbers on a resumed segment.');

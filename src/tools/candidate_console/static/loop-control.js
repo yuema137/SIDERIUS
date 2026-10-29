@@ -26,6 +26,21 @@
     if (reason.kind === 'judge') return `${after}: the judge decided to stop`;
     return `${after}: stop condition ${reason.kind}`;
   }
+  // A declared "Pause and ask me" condition paused the loop: what was met, in plain words,
+  // from the receipt's verified input request (and the judge's own rationale, if it asked).
+  function inputRequest(loop) {
+    const asked = loop.input_request, reason = asked.reason, summary = asked.summary;
+    const bodies = n => `${n} bod${n === 1 ? 'y' : 'ies'}`;
+    const best = summary.incumbent == null ? 'no valid score yet' : `best ${number(summary.incumbent)} at body ${summary.incumbent_iteration}, ${summary.direction} is better`;
+    let met;
+    if (reason.kind === 'metric_threshold') met = `${reason.metric_id} reached ${number(reason.incumbent)} (threshold ${number(reason.threshold)}, ${reason.direction} is better; best at body ${reason.incumbent_iteration}).`;
+    else if (reason.kind === 'no_improvement') met = `No improvement for ${bodies(reason.non_improving_bodies)} (${best}).`;
+    else if (reason.kind === 'judge') {
+      const verdict = (loop.judge_verdicts || []).find(item => item.iteration === reason.iteration);
+      met = `The judge asked for your input${verdict?.rationale ? ': ' + verdict.rationale : ''} (${best}).`;
+    } else met = `Condition ${reason.kind} was met (${best}).`;
+    return `Waiting for your input. ${met} Paused after body ${summary.iteration} of ${summary.final_iteration}.`;
+  }
   // Recorded JudgeStop verdicts (B2-5): each boundary's decision, with the judge's own
   // rationale from its evidence when the call decided; an abstention says so.
   function verdictLines(loop) {
@@ -81,6 +96,11 @@
   function outcome(status, loop) {
     if (status.native_status === 'cancelled') return 'Research loop stopped by you before it finished. Files written so far stay in the run folder; this run cannot be resumed.';
     if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
+    if (status.native_status === 'paused' && loop.input_request) {
+      return inputRequest(loop) + (status.successor_operation_id ? ' A resumed segment continues this run.'
+        : stopRecorded(status) ? ' Stop was requested; this run cannot continue.'
+          : ` Review and resume to continue with body ${loop.input_request.summary.iteration + 1}.`);
+    }
     if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed body boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.' : ' No partial body is kept; it can be resumed from the next body after review.');
     if (status.native_status === 'completed' && loop.stop_reason) return `Research loop ${stopReason(loop.stop_reason, loop.final_iteration)}.`;
     if (status.native_status === 'completed') return counted(loop, 'Research loop finished') + (stopRecorded(status) || pauseRecorded(status) ? ' The request did not take effect before the final iteration.' : '');
@@ -99,7 +119,7 @@
     const verdicts = status.receipt_available ? verdictLines(status.loop) : [];
     $('loop-judge').hidden = !verdicts.length;
     $('loop-judge').replaceChildren(...verdicts.map(text => { const item = document.createElement('li'); item.textContent = text; return item; }));
-    const reason = status.receipt_available ? status.loop.stop_reason : null;
+    const reason = status.receipt_available ? (status.loop.stop_reason || status.loop.input_request?.reason) : null;
     const exact = reason ? ['incumbent', 'threshold'].filter(key => typeof reason[key] === 'number').map(key => `${key} ${reason[key]}`) : [];
     if (exact.length) $('loop-state').title = 'Exact recorded values: ' + exact.join(', '); else $('loop-state').removeAttribute('title');
     const connected = session().connected;
@@ -119,7 +139,8 @@
       localStorage.removeItem(legacyKey(status.operation_id));
       if (session().operationsStoreId) localStorage.removeItem(retainedKey(session().operationsStoreId, status.operation_id));
     }
-    const resumable = status.native_status === 'paused' && !successor && !status.finishing;
+    // A recorded Stop makes a paused run terminal: the owner refuses Resume, so none is offered.
+    const resumable = status.native_status === 'paused' && !successor && !status.finishing && !stopRecorded(status);
     const resume = request.resume, review = resume.review;
     $('loop-resume-group').hidden = !resumable;
     $('loop-resume-review').disabled = resume.pending || !connected;

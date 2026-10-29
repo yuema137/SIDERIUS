@@ -645,6 +645,11 @@ completed the loop early; Monitor renders it in plain words ("Research loop
 stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
 higher is better; best at body 3)", "… no improvement for 2 bodies …", or "… the judge
 decided to stop") from the existing status poll, with recorded values unrounded.
+`input_request` is the receipt's verified `loop_trace.input_request`
+(`LoopInputRequest{reason, summary}`), present only when a declared
+`on_met="request_input"` condition paused the loop ("Pause and ask me"); omitted
+otherwise, so other loops' status bytes are unchanged. It is projected unchanged;
+its meaning and readback belong to the worker contract ("Condition input pause").
 `judge_verdicts` (B2-5, read-only; omitted when empty) lists the receipt's verified
 `loop_trace.judge_verdicts` in boundary order as `JudgeVerdictView{iteration, decision,
 rationale, confidence}`: `decision` is `stop`/`continue`, or `null` for a recorded
@@ -728,7 +733,16 @@ messages. Unknown predecessor 404.
 Monitor shows **Pause at next boundary** beside Stop for an active loop
 segment with no receipt; after acknowledgement it reads "Pause requested … Not yet
 paused." A `paused` receipt reads "paused at a completed body boundary after N of M
-bodies" and is resumable, never "ended". Without a successor it offers **Review
+bodies" and is resumable, never "ended". A `paused` receipt with `loop.input_request`
+instead reads "Waiting for your input." followed by what was met in plain words from
+the request (for example "No improvement for 3 bodies (best 0.81 at body 4, higher
+is better). Paused after body 7 of 12."; a judge request adds the rationale of that
+boundary's `judge_verdicts` entry), then "Review and resume to continue with body
+N+1.", "A resumed segment continues this run." with a successor, or "Stop was
+requested; this run cannot continue." when `stop_requested`. The exact recorded
+values stay in the state's tooltip. A paused status with `stop_requested` (either
+pause kind) offers no Resume: the owner refuses a stopped run. Resuming an input
+request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
 resume** (one GET on click, never polled), then **Resume loop**, disabled unless
 credentials are ready. The client generates one request UUID per reviewed digest
 and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
