@@ -88,7 +88,7 @@ try {
   const helpText = await page.locator('#access-help').textContent();
   for (const text of ['What it is:', 'not a model provider API key', 'Where to find it:',
     'siderius_workspace/settings/console-token', 'Local or remote:',
-    'ssh -N -L PORT:127.0.0.1:PORT YOUR_HOST', 'kept only in this page’s memory']) {
+    'ssh -N -L 127.0.0.1:PORT:127.0.0.1:PORT YOUR_HOST', 'kept only in this page’s memory']) {
     assert.ok(helpText.includes(text), text);
   }
   if (process.env.CONSOLE_EVIDENCE_DIR) await mkdir(process.env.CONSOLE_EVIDENCE_DIR, {recursive: true});
