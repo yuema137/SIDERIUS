@@ -2,16 +2,27 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from execute_tools.dataset_config import DatasetProfile
 from execute_tools.health_checks._composition import HealthBindingState
+from execute_tools.health_checks.roster_projection import HealthRosterProjection
 from execute_tools.task_data_path import StorageReadScope
+from tools.setup_review.composition_check import observe_composition
 from tools.setup_review.composition_models import (
+    CHILD_RESULT_NAME,
     CandidateCheckOptions,
     CompositionJob,
+    CompositionResult,
+    DataScopeFacts,
+    SampleCountFacts,
     TaskCheckSettings,
+    TaskCompositionSummary,
+    TaskPackageFacts,
     TaskSummaryRequest,
 )
-from tools.setup_review.package_facts import project_package_facts
+from tools.setup_review.composition_transport import read_composition_result
+from tools.setup_review.package_facts import BASIS, project_package_facts
 
 
 def _job(**extra) -> CompositionJob:
@@ -124,3 +135,90 @@ def test_quickstart_counts_describe_the_full_declared_split(tmp_path):
     assert facts.sample_counts is not None
     assert (facts.sample_counts.training, facts.sample_counts.evaluation) == (128, 64)
     assert facts.scopes.basis.startswith("full task split")
+
+
+def _passed(job: CompositionJob, package: TaskPackageFacts | None) -> CompositionResult:
+    task = TaskCompositionSummary(
+        semantic_fingerprint="b" * 64,
+        task_data_path_id="stub",
+        task_config={},
+        dataset_profile={},
+        primary_metric={},
+        secondary_metrics=[],
+        parameter_rules={},
+        inference_preflight={},
+        source_paths={},
+        plugins=[],
+        code_package_identity=None,
+        prompt_renderer_identity=None,
+        preflight_estimator_identity={},
+        data_analysis_identity=None,
+        task_health_declaration="explicit_none",
+    )
+    return CompositionResult(
+        request_sha256=job.digest,
+        manifest_sha256=job.manifest_sha256,
+        outcome="passed",
+        task=task,
+        planner_strategy_identity={},
+        package=package,
+    )
+
+
+def _facts(counts: SampleCountFacts | None) -> TaskPackageFacts:
+    return TaskPackageFacts(
+        health=HealthRosterProjection(declaration="explicit_none", gates=()),
+        objective=None,
+        deliverable=None,
+        model_plugins=(),
+        implementation_sources={},
+        scopes=DataScopeFacts(state="not_declared", basis=BASIS),
+        sample_counts=counts,
+    )
+
+
+@pytest.mark.parametrize(
+    ("summary", "package", "match"),
+    [
+        (None, _facts(None), "task summary"),
+        (TaskSummaryRequest(data_root="/abs/data"), None, "task summary"),
+        (
+            TaskSummaryRequest(data_root="/abs/data"),
+            _facts(SampleCountFacts(state="counted", training=1, evaluation=1)),
+            "sample count",
+        ),
+        (
+            TaskSummaryRequest(data_root="/abs/data", count_samples=True),
+            _facts(None),
+            "sample count",
+        ),
+    ],
+)
+def test_transport_refuses_package_facts_that_do_not_match_the_request(
+    tmp_path, summary, package, match
+):
+    """Defect: a child result with unrequested (or missing) package facts or sample
+    counts is accepted, so the console shows facts nobody asked the child for."""
+    job = _job(summary=summary).model_copy(update={"scratch": str(tmp_path)})
+    (tmp_path / CHILD_RESULT_NAME).write_text(_passed(job, package).model_dump_json())
+    with pytest.raises(ValueError, match=match):
+        read_composition_result(job)
+
+
+def test_observation_validates_the_data_root_it_mounts(tmp_path):
+    """Defect: the caller's data_root is validated while the sandbox mounts the job's
+    own summary data_root, so an unvalidated root could be exposed to task code."""
+    manifest = tmp_path / "task.yaml"
+    manifest.write_text("synthetic: true\n")
+    (tmp_path / "data").mkdir()
+    job = CompositionJob(
+        manifest=str(manifest),
+        manifest_sha256="a" * 64,
+        planner_strategy=None,
+        scratch=str(tmp_path / "scratch"),
+        settings=TaskCheckSettings(timeout_seconds=1),
+        summary=TaskSummaryRequest(data_root=str(tmp_path / "data")),
+    )
+    with pytest.raises(ValueError, match="differs from the task-summary job"):
+        observe_composition(job, (tmp_path,), data_root=tmp_path / "other")
+    assert not (tmp_path / "scratch").exists()

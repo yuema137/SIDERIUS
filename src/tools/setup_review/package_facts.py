@@ -14,7 +14,7 @@ from execute_tools.health_checks.roster_projection import project_health_roster
 from execute_tools.task_data_path import (
     EpochSamplingParams,
     EvalMaterializationParams,
-    bind_task_data_path,
+    build_full_declared_split,
     declares_scope_capability,
     resolve_storage_read_scope,
 )
@@ -39,31 +39,6 @@ BASIS = (
     "full task split, before any run-level sampling: snapshot strategy, training "
     "and evaluation portion 1.0, no sampling seed and no planner-chosen task parameters"
 )
-
-
-def _formal_scopes(composition: RunTaskComposition) -> tuple[object, object]:
-    """Build the full training/evaluation scopes through the run's acquisition owner."""
-    from nodes.ml_hyperparameter_tune_agent.scope_acquisition import acquire_attempt_scopes
-
-    with (
-        bind_dataset_profile(composition.dataset_profile),
-        bind_task_data_path(composition.task_data_path),
-    ):
-        scopes = acquire_attempt_scopes(
-            composed=True,
-            mode="formal",
-            trial_strategy="snapshot",
-            trial_portion=FULL_PORTION,
-            eval_strategy="snapshot",
-            eval_portion=FULL_PORTION,
-            train_sampling_seed=None,
-            eval_sampling_seed=None,
-            target_files=None,
-            subset=None,
-            validation_max_samples=None,
-            task_parameters={},
-        )
-    return scopes.training, scopes.evaluation
 
 
 def _volume(impl: object, data_root: str, scope: object) -> ScopeVolume | None:
@@ -107,7 +82,9 @@ def _scope_facts(
             counts if request.count_samples else None
         )
     try:
-        training, evaluation = _formal_scopes(composition)
+        # A task may read its bound dataset profile while building scopes.
+        with bind_dataset_profile(composition.dataset_profile):
+            training, evaluation = build_full_declared_split(composition.task_data_path)
     except Exception as error:
         failed = DataScopeFacts(state="failed", basis=basis, message=_message(error))
         counts = SampleCountFacts(state="failed", message=_message(error))
