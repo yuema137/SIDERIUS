@@ -400,7 +400,7 @@ Authentication precedes body receive/JSON decoding/business validation. Authoriz
 JSON mutation bodies are buffered to at most 256 KiB using actual received bytes,
 not Content-Length. Non-JSON returns415; oversized returns413. Only `/` and the exact static allowlist in `app.py` are unauthenticated; no
 filesystem directory mount
-or interactive API documentation exists. Other errors use
+or interactive API documentation exists. GET/HEAD non-API requests accepting `text/html` with one rejected Host and no forwarding headers receive a secured plain-text 403 directing the browser to `http://{bind_host}:{port}/`; other errors use
 `{"error":{"code":"...","message":"..."}}`: auth401, Host/Origin403,
 missing operation/resource404, invalid fields422, busy/conflict/stale/integrity/
 policy/credential errors409, unexpected500. Validation responses do not echo
