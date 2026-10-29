@@ -2500,7 +2500,8 @@ profile declares no TIDMAD topology, because every round would be `single_file` 
 could not train. An unreadable profile is `stale_review`. Training admission
 (`candidate_worker.training_admission.refuse_untrainable_launch`, after
 `run_launch_self_test`) and tuner startup (`validate_training_mode_startup`, composed
-runs only) ask the same owner again. Templates declare `is_trial: true`.
+runs only) ask the same owner again. Templates declare `is_trial: true`,
+`healthgate_mode: blocking` and `result_authority: scientific` (`templates.DECLARED_LAUNCH_POLICY`).
 Prepare reuses the same review, so the refusal there carries
 `admission_not_attempted`. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the

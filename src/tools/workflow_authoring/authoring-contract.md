@@ -365,11 +365,12 @@ unsaved `source`); `GET /api/editor/advice-targets` -> `AdviceTargets`.
 Templates are reusable v2 shapes with no task, data, advice, output-type or
 training values except the launch policy pair, which training admission requires
 and has no default for, and the training mode: `training_settings={"launch":
-DECLARED_LAUNCH_POLICY}` = `healthgate_mode="blocking"`, `result_authority="diagnostic"`,
+DECLARED_LAUNCH_POLICY}` = `healthgate_mode="blocking"`, `result_authority="scientific"`,
 `is_trial=true`. Blocking lets the task's own blocking Health checks invalidate a
 round while its recording checks only record (`observe_only` is refused at training
-admission when the task declares blocking checks); diagnostic claims no scientific
-standing. `is_trial=true` is trial/formal mode, the command line's default: the native
+admission when the task declares blocking checks); scientific standing lets
+Health-valid results form the run's authoritative score (with `diagnostic` every
+result is excluded from it). `is_trial=true` is trial/formal mode, the command line's default: the native
 default `false` is `single_file` mode, which Run review, training admission and tuner
 startup refuse for a task whose dataset profile has no TIDMAD topology
 (`execute_tools.dataset_config.single_file_mode_refusal`). These values are written

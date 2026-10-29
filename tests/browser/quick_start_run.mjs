@@ -2,7 +2,7 @@
  * runnable legacy project; Quick start itself is quick_start.mjs), then Run. With the launch policy unset in the Train & tune inspector, the
  * field is marked required and the Run page's Check inputs refuses with the launch
  * policy owner's message before anything is prepared; with the template's declared
- * pair (Block on failure / Diagnostic, trial/formal mode) Check inputs passes and the launched run gets past
+ * pair (Block on failure / Scientific, trial/formal mode) Check inputs passes and the launched run gets past
  * training admission. Offline fixture provider and training runner; no paid API. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -78,7 +78,7 @@ try {
   const policy = page.locator('#editor-training-policy');
   await policy.waitFor();
   assert.equal(await policy.locator('[data-training-choice="healthgate_mode"]').inputValue(), 'blocking');
-  assert.equal(await policy.locator('[data-training-choice="result_authority"]').inputValue(), 'diagnostic');
+  assert.equal(await policy.locator('[data-training-choice="result_authority"]').inputValue(), 'scientific');
   assert.equal(await policy.locator('[data-training-choice="healthgate_mode"] option:checked').textContent(), 'Block on failure');
   // Unset reads as a problem on the field.
   await policy.locator('[data-training-choice="healthgate_mode"]').selectOption('');

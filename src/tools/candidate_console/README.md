@@ -896,7 +896,11 @@ Select **fit / tuning** in Workflow. The small inspector edits **Trial/formal mo
 (`is_trial`), trial/formal budget minutes, epoch ceilings, portions and retention
 flags. Keep **Trial/formal mode** on, as the templates and the command line do: with
 it off, every round uses single-file mode, which only a task with TIDMAD topology can
-train in, so Run review refuses such a run for any other task before it calls a model. Open **Training
+train in, so Run review refuses such a run for any other task before it calls a model.
+Templates start with **Health checks** set to Block on failure and **Result
+standing** set to Scientific: the task's blocking checks can invalidate a round, and
+Health-valid results count toward the run's best score. With Diagnostic, every
+result is excluded from that score, which suits exploring only. Open **Training
 settings** (collapsed, with the number of changed fields). **Default** removes the
 key; **None** explicitly stores null where supported. Empty numbers block review;
 zero is validated by the native owner. There is no seed setting here: each run gets

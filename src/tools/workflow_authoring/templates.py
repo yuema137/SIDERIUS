@@ -44,17 +44,18 @@ TemplateId = Literal["single-research-loop", "single-loop-with-advice", "single-
 
 # Every template contains Train & tune, whose launch policy has no default
 # (execute_tools.health_checks.launch_policy). Templates declare it visibly in the
-# authored source as blocking Health checks with diagnostic standing: the task's own
+# authored source as blocking Health checks with scientific standing: the task's own
 # blocking checks invalidate a round and its recording checks only record (an
 # observe-only run is refused at training admission when the task declares blocking
-# checks). Diagnostic standing claims no scientific standing; the author may change
-# both in the Train & tune inspector. Templates also
+# checks). Scientific standing lets Health-valid results count as the run's
+# authoritative score (a diagnostic run excludes every result from it); the author
+# may change both in the Train & tune inspector. Templates also
 # declare trial/formal mode (``is_trial``), the command line's default: the native
 # launch default (false) is single-file mode, which only a TIDMAD-topology task can
 # train in (``execute_tools.dataset_config.single_file_mode_refusal``).
 DECLARED_LAUNCH_POLICY: dict[str, str | bool] = {
     "healthgate_mode": "blocking",
-    "result_authority": "diagnostic",
+    "result_authority": "scientific",
     "is_trial": True,
 }
 # The smallest valid loop bound, as for a one-click added loop (loop.py): an

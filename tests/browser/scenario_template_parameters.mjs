@@ -113,7 +113,7 @@ try {
   const saved = parsed();
   assert.equal(saved.execution_profile, 'native-interpretation-candidate/v1');
   assert.equal(saved.definition.loop.final_iteration, 1, 'Finite iteration limit from the template');
-  assert.deepEqual(saved.training_settings, {launch: {healthgate_mode: 'blocking', result_authority: 'diagnostic', is_trial: true, trial_max_epochs: 3}}, 'Only the template policy pair, its trial/formal mode and the edited parameter are authored');
+  assert.deepEqual(saved.training_settings, {launch: {healthgate_mode: 'blocking', result_authority: 'scientific', is_trial: true, trial_max_epochs: 3}}, 'Only the template policy pair, its trial/formal mode and the edited parameter are authored');
   assert.deepEqual(saved.definition.task, original.definition.task, 'The project task references are kept');
   assert.equal(saved.task_binding, undefined, 'No task is chosen by the template');
   assert.deepEqual(faults, []);
