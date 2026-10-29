@@ -202,6 +202,7 @@ def execute_generated_program(
     timeout_s: float,
     max_host_memory_gb: float,
     sandbox: AnalysisCodeSandbox | None = None,
+    program_seed: int,
 ) -> SkillResult:
     """Execute fixed source, then certify its untrusted payload in the parent."""
 
@@ -230,6 +231,7 @@ def execute_generated_program(
     }
     runner = sandbox or AnalysisCodeSandbox()
     receipt = runner.execute(
+        program_seed=program_seed,
         program=program,
         source_path=source_path,
         materialization_paths=materialization_paths,

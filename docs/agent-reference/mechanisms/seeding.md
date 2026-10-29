@@ -359,9 +359,40 @@ carry it (constructor arguments, never prompt input).
   pytest templates (LLM-visible prompt text with `torch.randint`) are
   unchanged and run unseeded inside their pytest child.
 
+## Generated code
+
+**Analysis programs.** Every generated analysis program runs seeded: the
+sandbox runner seeds Python `random` and legacy NumPy from the request before
+`analyze` runs (`analysis_code_sandbox.executed_program_seeds`). A
+`deterministic` program keeps the seed it declared (kept as written); its
+declaration refuses a seed above `2**32 - 1`, the NumPy legacy range
+(validator-enforced, so the LLM-visible schema is unchanged). Any other program
+gets `sampling_seed.program_seed` =
+`derive_seed(run_seed, "data_analysis.program",
+SeedCoordinates(iteration, node_id=None, branch=<invocation index in the
+accepted plan>, attempt))`; Python gets the 63-bit value, NumPy its low 32
+bits. Each invocation's value is recorded as
+`InvocationSamplingSeed.program_seed` in the run's `sampling_seeds.json`;
+distinct programs and attempts draw independent streams, and the same plan
+position reproduces on resume. Prompts are unchanged.
+
+**Hard-coded seeds (Q4).** `core.generated_seed_scan.scan_seed_calls` is a
+best-effort scan by call name. It reports calls to `manual_seed`,
+`manual_seed_all`, `seed` and `SeedSequence`, and to `default_rng` /
+`RandomState` with a positional argument, as `GeneratedSeedCall(file, line,
+call)`; call text is bounded to 200 characters. It does not cover seeds passed
+only by keyword, seeding through other libraries, or aliased indirection;
+widening coverage is a follow-up. Source that cannot be parsed (syntax, or
+nesting too deep for the parser) yields nothing. The scan never modifies,
+strips or overrides code and never reaches a prompt. Records:
+`ValidatorOutput.generated_seed_calls` for the generated plugin (omitted when
+empty), and `generated_analysis/seed_calls/{source_sha256}.json` in the
+analysis run store for each persisted analysis program. Such a call reseeds a
+generator with the program's own constant: the one class of seed not derived
+from `run_seed`.
+
 ## Not yet provided
 
 These belong to later #983 PRs:
 
-- Generated-program seeding and the generated-seed scan (S7c).
 - The RNG census guard (S8).

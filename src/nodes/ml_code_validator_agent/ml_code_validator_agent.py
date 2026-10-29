@@ -71,6 +71,7 @@ from agent.skills.model_io_probe_skill import (
     probe_config_kwargs,
 )
 from core.generated_artifact_name import validate_generated_artifact_name
+from core.generated_seed_scan import scan_seed_calls
 from core.local_code.failure import raise_if_code_package_failure
 from core.probe_seeds import (
     probe_process_seeds,
@@ -864,6 +865,15 @@ class MLCodeValidatorAgent:
             forbid_ok, forbid_err = _check_forbidden_patterns(inp.model_file_path)
         else:
             forbid_ok, forbid_err = False, "Skipped — plugin file not found"
+        # Issue #983 (Q4): record seeds the generated plugin hard-codes; never
+        # modifies the source and never reaches a prompt.
+        seed_calls = (
+            scan_seed_calls(
+                read_source(inp.model_file_path, captured_entry), file=inp.model_file_path
+            )
+            if captured_entry is not None or os.path.isfile(inp.model_file_path)
+            else ()
+        )
 
         # 6 + 7 + (output-type). Long temporal probes use a bounded child;
         # small probes preserve the existing in-process path.
@@ -1013,6 +1023,7 @@ class MLCodeValidatorAgent:
         out = ValidatorOutput(
             passed=passed,
             probe_seed=probe_seed,
+            generated_seed_calls=list(seed_calls),
             # V21 PR E: explicit echo beside the existing hand-echoed
             # model_type; persisted in validation_{run_name}.json, which is
             # what makes a died-at-validation candidate joinable.

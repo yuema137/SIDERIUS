@@ -159,7 +159,7 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
 `probe_seed: SeedContext` — the run seed plus `(iteration, node_id or None,
 attempt)`; the fixed workflow passes `node_id=None` and the 1-based
 implementation number within the iteration, a candidate graph its node's
-iteration and id (`phases.context_probe_seed`). `run()` refuses `None`; `ValidatorOutput.probe_seed` records the context (never prompt input). Model probes draw
+iteration and id (`phases.context_probe_seed`). `run()` refuses `None`; `ValidatorOutput.probe_seed` records the context (never prompt input). `ValidatorOutput.generated_seed_calls` records seeding calls the generated plugin hard-codes ([generated code](../../../docs/agent-reference/mechanisms/seeding.md#generated-code)); the plugin is never modified. Model probes draw
 from its `validation.probe` stream ([seeding](../../../docs/agent-reference/mechanisms/seeding.md#validation-probes)):
 an in-process probe runs inside `seeded_scope`, a bounded probe child or
 generated pytest receives it through `SIDERIUS_PROBE_SEED_CONTEXT`
