@@ -1,0 +1,87 @@
+/* Node palette (editor-palette.js): presentation only. Sizes use the theme.css layout
+ * tokens (ui-design-spec.md §4: 36px rows, --space-3 row padding, 12px labels). In the
+ * workflow workspace editor.css docks it as the rail (static, --rail-width).
+ * A sticky side rail beside the canvas so a drag source and its drop target share the
+ * viewport; under 900px it becomes a toggleable drawer above the canvas. */
+.editor-palette { position: sticky; top: var(--space-2); z-index: 5; max-height: calc(100vh - var(--space-4)); overflow: auto; padding: var(--space-2) var(--space-3); border: 1px solid var(--control-border); border-radius: var(--radius-2); background: var(--panel); }
+.editor-palette h3 { margin: 0 0 var(--space-2); font-size: var(--font-heading); }
+.editor-palette .palette-toggle { display: none; width: 100%; text-align: left; }
+.editor-palette .palette-search { width: 100%; margin-bottom: var(--space-2); box-sizing: border-box; }
+.editor-palette .palette-list { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--control-border); border-top: 0; border-radius: var(--radius-2); overflow: hidden; }
+/* Compact stack: one aligned row per capability (icon, name, step, badge); rows share
+ * dividers, not margins (margin 0 overrides the global details margin in styles.css),
+ * so the collapsed rail has no gaps. Expanding a row shows its details. */
+.editor-palette .palette-category { --capability-accent: var(--capability-generic); --capability-tint: var(--control); margin: 0; border-left: 4px solid var(--capability-accent); background: var(--panel); }
+/* Every row carries the same top divider (the list has no top border), so all rows
+ * have the same block size. */
+.editor-palette .palette-category { border-top: 1px solid var(--control-border); }
+.editor-palette .palette-category[data-capability="interpretation"] { --capability-accent: var(--capability-interpretation); --capability-tint: var(--capability-interpretation-tint); }
+.editor-palette .palette-category[data-capability="literature"] { --capability-accent: var(--capability-literature); --capability-tint: var(--capability-literature-tint); }
+.editor-palette .palette-category[data-capability="proposal"] { --capability-accent: var(--capability-proposal); --capability-tint: var(--capability-proposal-tint); }
+.editor-palette .palette-category[data-capability="implementation"] { --capability-accent: var(--capability-implementation); --capability-tint: var(--capability-implementation-tint); }
+.editor-palette .palette-category[data-capability="validation"] { --capability-accent: var(--capability-validation); --capability-tint: var(--capability-validation-tint); }
+.editor-palette .palette-category[data-capability="tuning"] { --capability-accent: var(--capability-tuning); --capability-tint: var(--capability-tuning-tint); }
+.editor-palette .palette-row { display: flex; align-items: center; gap: var(--space-2); box-sizing: border-box; height: var(--control-height); line-height: 1; padding: 0 var(--space-3); cursor: pointer; list-style: none; color: var(--text); overflow: hidden; }
+.editor-palette .palette-row::-webkit-details-marker { display: none; }
+.editor-palette .palette-row::after { flex: none; content: "▸"; color: var(--text); font-size: var(--font-label); }
+.editor-palette .palette-category[open] > .palette-row { background: var(--capability-tint); }
+.editor-palette .palette-category[open] > .palette-row::after { content: '▾'; }
+.editor-palette .palette-row:hover { background: var(--hover); }
+.editor-palette .palette-row:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+.editor-palette .palette-row .capability-heading { display: flex; align-items: center; flex: 1; min-width: 0; gap: var(--space-2); }
+.editor-palette .palette-row .capability-heading svg { flex: none; width: 20px; height: 20px; }
+.editor-palette .palette-row .capability-name { flex: 1; min-width: 0; font-size: var(--font-heading); line-height: 20px; font-weight: 600; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; word-break: normal; }
+.editor-palette .palette-step { flex: none; min-width: 18px; padding: 0 var(--space-1); border: 1px solid var(--control-border); border-radius: var(--radius-pill); color: var(--text); font-size: var(--font-label); font-weight: 700; text-align: center; }
+/* Start here / Optional context marker: a dot with accessible text and a tooltip. */
+/* The dot is drawn by ::before so the marker itself keeps a transparent background and
+ * its (visually hidden) text reads against the row: text contrast stays the row's. */
+.editor-palette .palette-badge { flex: none; display: inline-flex; color: var(--text); }
+.editor-palette .palette-badge::before { content: ""; width: .55rem; height: .55rem; box-sizing: border-box; border: 2px solid var(--focus); border-radius: 50%; }
+.editor-palette .palette-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.editor-palette .palette-details-badge { font-weight: 700; }
+.editor-palette .palette-badge[data-badge="Start here"]::before { background: var(--focus); }
+.editor-palette .palette-details { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--control-border); background: var(--capability-tint); color: var(--text); font-size: var(--font-label); line-height: 16px; }
+.editor-palette .palette-details p { margin: var(--space-1) 0; }
+.editor-palette .palette-details-label { font-weight: 700; }
+.editor-palette .palette-details-output { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+/* Addable route rows inside an expanded capability. */
+.editor-palette .palette-entry { display: grid; gap: var(--space-1); margin: var(--space-1) 0 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--control-border); border-radius: var(--radius-1); background: var(--panel); color: var(--text); text-align: left; font-size: var(--font-label); overflow-wrap: anywhere; cursor: grab; user-select: none; }
+.editor-palette .palette-entry-route { font-weight: 600; }
+.editor-palette .palette-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.editor-palette .palette-chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); border: 1px solid var(--control-border); border-radius: var(--radius-pill); background: var(--panel); color: var(--text); font-size: var(--font-label); line-height: 16px; }
+.editor-palette .palette-chip[data-contract] { border-color: var(--contract-colour); }
+.palette-arrow { color: var(--text); font-weight: 700; }
+.editor-palette .palette-entry:hover:not([aria-disabled="true"]) { border-color: var(--focus); box-shadow: 0 1px 6px #0002; }
+.editor-palette .palette-entry:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.editor-palette .palette-entry[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
+.editor-palette .palette-guide { margin: 0 0 var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--control-border); border-radius: var(--radius-2); background: var(--hover); color: var(--text); font-size: var(--font-help); line-height: 16px; }
+.editor-palette .palette-guide p { margin: 0; }
+.editor-palette .palette-guide-more { margin: var(--space-1) 0 0; }
+.editor-palette .palette-guide-more summary { padding: 0; font-size: var(--font-help); }
+.editor-palette .palette-guide-more p { margin-top: var(--space-1); }
+.editor-palette .palette-guide.palette-guide-empty { border: 2px dashed var(--focus); }
+.editor-palette .palette-guide.palette-guide-empty .palette-guide-lead { font-weight: 600; }
+/* Hover/focus popover (appended to <body> so the rail's scroll box never clips it). */
+.palette-popover { position: fixed; z-index: 30; width: min(22rem, calc(100vw - 16px)); overflow: auto; box-sizing: border-box; padding: var(--space-2) var(--space-3); border: 1px solid var(--control-border); border-radius: var(--radius-2); background: var(--panel); color: var(--text); box-shadow: var(--elev-2); font-size: var(--font-label); line-height: 16px; }
+.palette-popover .capability-heading { grid-template-columns: 24px minmax(0, 1fr); grid-template-rows: auto; }
+.palette-popover .capability-heading svg { grid-row: 1; width: 22px; height: 22px; }
+.palette-popover h4 { margin: var(--space-2) 0 var(--space-1); font-size: var(--font-label); }
+.palette-popover p { margin: var(--space-1) 0; }
+.palette-popover ul { margin: 0; padding-left: 0; list-style: none; }
+.palette-popover li, .palette-popover .palette-popover-output { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin: var(--space-1) 0; }
+.palette-popover .palette-from-external { font-style: italic; }
+.palette-popover .palette-popover-hint { color: var(--text); font-size: var(--font-help); }
+/* Ports already on the canvas that the hovered entry could read from or feed. */
+.circuit-port.palette-compatible { outline: 2px dashed var(--focus); outline-offset: -3px; }
+.circuit-port.palette-compatible .circuit-socket { box-shadow: 0 0 0 4px var(--focus); }
+.editor-palette .palette-note, .editor-palette .palette-empty { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--font-help); }
+.editor-palette .palette-cancel { margin-top: var(--space-2); }
+@media (max-width: 900px) {
+  .editor-palette { max-height: 60vh; }
+  .editor-palette h3 { display: none; }
+  .editor-palette .palette-toggle { display: block; }
+  .editor-palette:not(.open) .palette-body { display: none; }
+}
+.editor-remove-node { margin: .4rem 0; }
+.node-context-menu { position: fixed; z-index: 20; padding: .25rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--panel); box-shadow: 0 4px 14px #0003; }
+.node-context-menu button { display: block; width: 100%; text-align: left; }

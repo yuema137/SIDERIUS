@@ -13,6 +13,7 @@ from tools.workflow_preview.models import FileObservation, PreviewModel, Workflo
 
 from .graph_models import GraphTrace
 from .loop_models import LoopTrace
+from .parallel_models import ParallelDispatch
 
 
 class ReviewedContext(PreviewModel):
@@ -54,6 +55,9 @@ class CandidateRunRequest(PreviewModel):
     #: boundary generate one. Omitted when ``None``, so seedless request bytes
     #: and digests are unchanged.
     run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: B3-4 — opt-in parallel graph dispatch; omitted for serial runs, so their
+    #: request bytes and digests are unchanged.
+    parallel: ParallelDispatch | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def source_binding(self):

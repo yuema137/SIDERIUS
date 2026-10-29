@@ -9,13 +9,25 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from tools.setup_review.composition_models import TaskCheckSettings
-from tools.workflow_authoring.models import DraftRequest, Project, ReviewRequest, SaveRequest
+from tools.workflow_authoring.external_inputs import external_input_catalog
+from tools.workflow_authoring.models import (
+    DraftRequest,
+    ExternalInputCatalog,
+    NodeCatalog,
+    NodeDraftRequest,
+    NodeDraftsRequest,
+    Project,
+    ReviewRequest,
+    SaveRequest,
+)
+from tools.workflow_authoring.options import node_catalog
 from tools.workflow_authoring.service import AuthoringError, WorkflowAuthoring
 from tools.workflow_authoring.task_models import TaskReferenceTarget
 from workflows.definition import TaskBinding
 from workflows.definition.source import WorkflowSourceError
 
 from .models import TaskChoice
+from .template_routes import add_template_routes
 
 
 class EditorTaskChoice(BaseModel):
@@ -62,7 +74,9 @@ def editor_router(
             raise HTTPException(404)
         return services[project_id]
 
-    def perform(action: Callable[[], BaseModel]) -> BaseModel | JSONResponse:
+    def perform(
+        action: Callable[[], BaseModel], *, writing: bool = False
+    ) -> BaseModel | JSONResponse:
         try:
             return action()
         except AuthoringError as error:
@@ -86,14 +100,15 @@ def editor_router(
                 },
             )
         except OSError:
+            # A read never claims anything about a proposal; a failed write says nothing was saved.
+            message = (
+                "Not saved: the project folder or its recovery copies could not be written"
+                if writing
+                else "The workflow file or its project folder is unavailable on disk"
+            )
             return JSONResponse(
                 status_code=409,
-                content={
-                    "error": {
-                        "code": "filesystem",
-                        "message": "configured source/recovery is unavailable; proposal remains unsaved",
-                    }
-                },
+                content={"error": {"code": "filesystem", "message": message}},
             )
 
     @router.get("/projects")
@@ -114,6 +129,19 @@ def editor_router(
                 for target in task_targets
             )
         )
+
+    @router.get("/node-catalog", response_model=NodeCatalog)
+    def catalog() -> NodeCatalog:
+        """Read-only projection of the native catalog for the node palette."""
+        return node_catalog()
+
+    @router.get("/external-inputs", response_model=ExternalInputCatalog)
+    def external_inputs() -> ExternalInputCatalog:
+        """Read-only explanation of how each catalog contract becomes an external input."""
+        return external_input_catalog()
+
+    # Template gallery and advice targets (template_routes.py); fixed paths first.
+    add_template_routes(router, selected, perform)
 
     @router.get("/{project_id}")
     def read(project_id: str):
@@ -142,10 +170,24 @@ def editor_router(
         proposal = DraftRequest.model_validate_json(await request.body())
         return await run_in_threadpool(perform, lambda: service.inspect_draft(proposal))
 
+    @router.post("/{project_id}/node-draft")
+    async def node_draft(project_id: str, request: Request):
+        service = selected(project_id)
+        proposal = NodeDraftRequest.model_validate_json(await request.body())
+        return await run_in_threadpool(perform, lambda: service.inspect_node_draft(proposal))
+
+    @router.post("/{project_id}/nodes-draft")
+    async def nodes_draft(project_id: str, request: Request):
+        service = selected(project_id)
+        proposal = NodeDraftsRequest.model_validate_json(await request.body())
+        return await run_in_threadpool(perform, lambda: service.inspect_node_drafts(proposal))
+
     @router.post("/{project_id}/save")
     async def save(project_id: str, request: Request):
         service = selected(project_id)
         proposal = SaveRequest.model_validate_json(await request.body())
-        return await run_in_threadpool(perform, lambda: service.save(proposal))
+        return await run_in_threadpool(
+            lambda: perform(lambda: service.save(proposal), writing=True)
+        )
 
     return router

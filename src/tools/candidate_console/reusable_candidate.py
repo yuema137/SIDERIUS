@@ -22,6 +22,7 @@ from tools.candidate_prepare.reusable_selection import (
     inspect_current_reusable_binding,
     inspect_reusable_binding,
 )
+from tools.workflow_authoring.versions import recorded_name
 
 from .files import credentials
 from .models import RouteView, TaskChoice
@@ -207,6 +208,9 @@ class ReusableCandidate:
             environment_names=request.environment_names,
             read_only=request.read_only,
             credential_readiness=credential_readiness(request, self.console.config.credential_file),
+            source_version_name=recorded_name(
+                Path(binding.original_source.path), binding.original_source.sha256
+            ),
             seed=review_label(selection.run_seed),
         )
 

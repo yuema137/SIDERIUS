@@ -72,7 +72,9 @@ def direct_child(monkeypatch):
     """Real child/native imports without sandbox; sandbox coverage lives in integration."""
 
     def execute(profile, argv):
-        child = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        child = subprocess.run(
+            argv, capture_output=True, text=True, timeout=profile.timeout_seconds
+        )
         if child.returncode:
             raise AssertionError(
                 child.stderr + (profile.workspace / "preparation/worker.log").read_text()

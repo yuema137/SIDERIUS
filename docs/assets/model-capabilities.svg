@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="224" viewBox="0 0 960 224" role="img" aria-labelledby="title desc">
+  <title id="title">Models tested with SIDERIUS</title>
+  <desc id="desc">Choose from providers used in research workflows and newly tested integrations. The table below lists the models.</desc>
+  <rect width="960" height="224" rx="20" fill="#101c2e"/>
+  <circle cx="916" cy="22" r="125" fill="#172b43"/>
+  <g font-family="sans-serif">
+    <text x="32" y="35" font-size="12" letter-spacing="2" fill="#8ecce5">SIDERIUS / MODEL DIRECTORY</text>
+    <text x="32" y="75" font-size="30" font-weight="700" fill="#ffffff">Choose a model. Start exploring.</text>
+    <text x="32" y="105" font-size="15" fill="#c4d2e1">Providers and models we have used or tested with SIDERIUS.</text>
+    <rect x="32" y="131" width="440" height="65" rx="12" fill="#1b3045" stroke="#38536a"/>
+    <circle cx="54" cy="153" r="4" fill="#a0e4cb"/>
+    <text x="68" y="158" font-size="14" font-weight="700" fill="#a0e4cb">WORKFLOW USE</text>
+    <text x="48" y="182" font-size="16" fill="#ffffff">OpenAI · Gemini · DeepSeek</text>
+    <rect x="488" y="131" width="440" height="65" rx="12" fill="#1b3045" stroke="#38536a"/>
+    <circle cx="510" cy="153" r="4" fill="#9dddf3"/>
+    <text x="524" y="158" font-size="14" font-weight="700" fill="#9dddf3">INTEGRATION TESTED</text>
+    <text x="504" y="182" font-size="16" fill="#ffffff">Claude · Kimi · GLM</text>
+  </g>
+</svg>

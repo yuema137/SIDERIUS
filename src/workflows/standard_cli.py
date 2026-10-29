@@ -247,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lane F3: ELEVATED wall-time ceiling (minutes) for a score-qualified "
         "bypass formal attempt — one value drives BOTH re-evaluated admission and "
         "the watchdog ceiling. Omitted (None) = a qualified bypass grants NO "
-        "extension. Campaign frozen value: 200.",
+        "extension. Must be finite and positive. Campaign frozen value: 200.",
     )
     parser.add_argument(
         "--order_strategy_override",
@@ -767,13 +767,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--trial_time_budget_minutes",
         type=float,
         default=None,
-        help="Trial wall-time budget in minutes. None disables Trial time admission.",
+        help=(
+            "Trial wall-time budget in minutes; must be finite and positive. "
+            "Omit (None) to disable Trial time admission."
+        ),
     )
     parser.add_argument(
         "--formal_time_budget_minutes",
         type=float,
         default=None,
-        help="Formal wall-time budget in minutes. None disables Formal time admission.",
+        help=(
+            "Formal wall-time budget in minutes; must be finite and positive. "
+            "Omit (None) to disable Formal time admission."
+        ),
     )
     parser.add_argument(
         "--trial_time_admission_source",

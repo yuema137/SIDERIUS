@@ -237,6 +237,7 @@ def test_generated_program_consumes_only_certified_transient_predictions(
         analysis_input=inp, repair_seed=repair_seed, use_scope_ref=use_scope_ref
     )
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_ModelInputCapability(
             Path(runtime_inputs.paths[0].path).read_bytes()
         ),

@@ -14,6 +14,7 @@ from agent.schemas.data_analysis.common import (
     canonical_json_bytes,
     canonical_sha256,
 )
+from agent.schemas.data_analysis.context import DataAnalysisInput
 from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.protocols.interpreter_to_data_analysis import local_analysis_input
@@ -37,6 +38,19 @@ from workflows.model_exploration import (
 )
 
 
+def _workflow_input(tmp_path: Path) -> DataAnalysisInput:
+    template = _input(tmp_path)
+    # These workflow contract tests run real analysis workers, not deadline
+    # checks. Allow for child startup and scheduling delays on a loaded host.
+    return template.model_copy(
+        update={
+            "resource_envelope": template.resource_envelope.model_copy(
+                update={"wall_time_budget_s": 300.0, "per_skill_timeout_s": 60.0}
+            )
+        }
+    )
+
+
 @pytest.mark.allow_real_subprocess
 def test_committed_prior_registry_restores_as_typed_workflow_input(
     tmp_path: Path, monkeypatch
@@ -44,7 +58,7 @@ def test_committed_prior_registry_restores_as_typed_workflow_input(
     """Cross-process reuse must read only a committed prior report and exact registry."""
 
     prior_workspace = tmp_path / "iter_001" / "iteration_001"
-    prior_input = _input(prior_workspace).model_copy(
+    prior_input = _workflow_input(prior_workspace).model_copy(
         update={
             "request_id": "iteration-001",
             "storage": StorageConfig(
@@ -54,6 +68,7 @@ def test_committed_prior_registry_restores_as_typed_workflow_input(
         }
     )
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **kwargs: _Bridge(analysis_input=prior_input, **kwargs),
         provider="test",
@@ -169,7 +184,7 @@ def _interpretation(brief) -> InterpretationOutput:
 def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
     tmp_path, monkeypatch
 ) -> None:
-    template = _input(tmp_path)
+    template = _workflow_input(tmp_path)
     interpretation = _interpretation(template.analysis_brief)
     capability = _Capability()
     binding = ResolvedWorkflowDataAnalysis(
@@ -232,6 +247,7 @@ def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
 
     output = run_optional_data_analysis(
         interpretation,
+        run_seed=11,
         binding=binding,
         iteration=1,
         run_name="workflow-run",
@@ -273,6 +289,7 @@ def test_missing_brief_stops_at_typed_edge_without_invoking_agent(tmp_path) -> N
 
     output = run_optional_data_analysis(
         _interpretation(None),
+        run_seed=11,
         binding=binding,
         iteration=1,
         run_name="workflow-run",
@@ -290,7 +307,7 @@ def test_missing_brief_stops_at_typed_edge_without_invoking_agent(tmp_path) -> N
 
 @pytest.mark.allow_real_subprocess
 def test_inline_lock_reaches_same_standalone_input_contract(tmp_path) -> None:
-    template = _input(tmp_path)
+    template = _workflow_input(tmp_path)
     interpretation = _interpretation(template.analysis_brief)
 
     class _LockCapturingCapability(_Capability):
@@ -335,6 +352,7 @@ def test_inline_lock_reaches_same_standalone_input_contract(tmp_path) -> None:
 
     output = run_optional_data_analysis(
         interpretation,
+        run_seed=11,
         binding=binding,
         iteration=1,
         run_name="workflow-run",
@@ -406,6 +424,7 @@ def test_rejected_analysis_plan_recovers_through_workflow_proposer_handoff(tmp_p
         bridge = bridge_class(analysis_input=expected)
         output = run_optional_data_analysis(
             interpretation,
+            run_seed=11,
             binding=binding,
             iteration=iteration,
             run_name="workflow-run",
@@ -488,6 +507,7 @@ def test_native_stage_usage_is_recorded_only_with_explicit_chain_context(
     )
     output = run_optional_data_analysis(
         _interpretation(template.analysis_brief),
+        run_seed=11,
         binding=binding,
         iteration=4,
         run_name="native",

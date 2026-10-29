@@ -168,6 +168,18 @@ class ChoiceView(PreviewModel):
     reusable_runs_root: str | None = None
 
 
+class ChoicesView(PreviewModel):
+    """Configured tasks plus an opaque identity of this console's operation store.
+
+    ``operations_store_id`` lets a browser key retained operation intents by store
+    without learning a server path; it changes whenever the admitted store
+    configuration (state root or allowed output roots) changes.
+    """
+
+    operations_store_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    tasks: tuple[ChoiceView, ...]
+
+
 class RouteView(PreviewModel):
     node_id: str
     provider: str | None
@@ -210,6 +222,10 @@ class LoopStatusView(PreviewModel):
     # The receipt's verified reason when a declared stop condition completed the loop
     # before its limit; absent otherwise (and absent while no receipt exists).
     stop_reason: StopReason | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Durable Stop/Pause requests recorded for this run (Stop) or segment (Pause), read
+    # from the worker's own marker files; the receipt still decides what took effect.
+    stop_requested: bool = False
+    pause_requested: bool = False
 
 
 class LoopStopSelection(PreviewModel):
@@ -268,7 +284,7 @@ class StatusView(PreviewModel):
     kind: OperationKind
     request_digest: str
     observed_at: str
-    state: Literal["active", "completed", "operation_failed", "unknown"]
+    state: Literal["queued", "active", "completed", "operation_failed", "unknown"]
     process: ProcessObservation
     successor_operation_id: UUID | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -341,7 +357,7 @@ class OperationListItemView(PreviewModel):
     run_name: str | None
     project_id: str | None
     admitted_at: str
-    state: Literal["active", "completed", "operation_failed", "unknown"]
+    state: Literal["queued", "active", "completed", "operation_failed", "unknown"]
     native_status: str | None
     loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
     #: Display wording from ``seed_labels.readback_label`` (issue #983).

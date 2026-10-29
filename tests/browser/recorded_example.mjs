@@ -6,6 +6,7 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR', 'HISTORICAL_WORKSPACE', 'HISTORICAL_RUN_ID']) assert.ok(process.env[key], `Set ${key}`);
@@ -25,6 +26,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   page = await browser.newPage();
   page.on('response', response => {if (new URL(response.url()).pathname.startsWith('/api/')) responses.push({path: new URL(response.url()).pathname, status: response.status()});});
   page.on('pageerror', error => faults.push(error.message));
@@ -33,7 +35,7 @@ try {
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
-  await page.goto(`${metadata.origin}/#slow-control`);
+  await page.goto(`${metadata.origin}/#monitor`);
   await page.locator('#recorded-example-choice option[value="tess-recorded"]').waitFor({state: 'attached'});
   await page.locator('#recorded-example-open').click();
   await page.locator('#recorded-example-status').filter({hasText: 'Candidate validation evidence verified'}).waitFor();
@@ -42,10 +44,10 @@ try {
   assert.match(await page.locator('#recorded-example-heading').locator('..').textContent(), /Candidate validation evidence only/);
   assert.match(content, /accepted/);
   assert.match(content, /Validation passed/);
-  assert.match(content, /PROPOSE: tiny_pooled_conv_regressor/);
-  assert.match(content, /IMPLEMENT: tiny_pooled_conv_regressor/);
-  assert.match(content, /VALIDATE: tiny_pooled_conv_regressor · passed: true/);
-  assert.doesNotMatch(content, /(PROPOSAL|IMPLEMENTATION|VALIDATION):/, 'Stages use the editor paper labels, not upper-cased IDs');
+  assert.match(content, /Propose model: tiny_pooled_conv_regressor/);
+  assert.match(content, /Implement: tiny_pooled_conv_regressor/);
+  assert.match(content, /Validate: tiny_pooled_conv_regressor · passed: true/);
+  assert.doesNotMatch(content, /(PROPOSAL|IMPLEMENTATION|VALIDATION):/, 'Stages use the editor display names, not upper-cased IDs');
   assert.match(content, /Editable source snapshot.*Unavailable in the captured request/);
   assert.match(content, /Observed provider reports; missing or unrecorded usage may exist/);
   assert.match(await page.locator('#recorded-token-rows').textContent(), /26942/);
@@ -82,7 +84,7 @@ try {
   assert.deepEqual(faults, []);
   assert.ok(calls.length >= 3);
   assert.ok(calls.every(call => call.method === 'GET'), 'recorded example uses GET only');
-  // '/api/operations' is Slow control's read-only list (bare route); no single-operation route is read.
+  // '/api/operations' is Monitor's read-only list (bare route); no single-operation route is read.
   assert.ok(calls.every(call => ['/api/choices', '/api/native-chain/choices', '/api/operations', '/api/recorded-examples', `/api/recorded-examples/${metadata.example_id}`, '/api/recorded-examples/tess-recorded-b', '/api/recorded-examples/tess-invalid-declaration'].includes(call.path)), 'no operation, preparation, launch, review, token, or log route is called');
   assert.ok(responses.filter(response => response.path === '/api/recorded-examples/tess-invalid-declaration').every(response => response.status === 409));
   assert.ok(responses.filter(response => response.path !== '/api/recorded-examples/tess-invalid-declaration').every(response => response.status === 200));

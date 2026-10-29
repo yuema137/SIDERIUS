@@ -2,7 +2,7 @@
 
 import hashlib
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from uuid import UUID
@@ -18,9 +18,10 @@ from tools.candidate_worker.loop_resume import (
     segment_control,
 )
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
+from tools.candidate_worker.parallel_models import HostGrant
 from tools.candidate_worker.preflight import require_credentials
 from tools.candidate_worker.records import verify_candidate_records
-from tools.workspace_sandbox.runner import CancelProbe
+from tools.workspace_sandbox.runner import CancelProbe, SpawnObserver
 
 from .files import directory, read_bytes, read_model
 from .models import (
@@ -78,6 +79,39 @@ def loop_root_operation(
     if root.submission.kind != "candidate":
         raise OperationFailure("integrity", "loop root submission is not a candidate")
     return root.submission
+
+
+def loop_control_requests(config: OperationStoreConfig, operation_id: UUID) -> tuple[bool, bool]:
+    """Read-only ``(stop_requested, pause_requested)`` from the durable worker markers.
+
+    Stop is run-scoped (``candidate_run/stop.json``); Pause is scoped to this operation's
+    own segment, exactly as the worker consumes them (``tools.candidate_worker.loop``).
+    Before the root worker claims its workspace no request can have been recorded, so
+    both are ``False``. This is a display read: a malformed, unreadable or foreign marker
+    reads as no request recorded (``False``) instead of failing the status route; the
+    worker's own consumption of the markers stays fail-closed.
+    """
+    from tools.candidate_worker.loop import pause_requested, stop_requested
+
+    record = load_record(validate_config(config), operation_id)
+    if not is_authored_loop(record):
+        return False, False
+    try:
+        root, _, initial = root_inputs(record)
+    except FileNotFoundError:
+        return False, False
+    segment_id = None if record == root else record.submission.request_id
+
+    def recorded(read: Callable[[], bool]) -> bool:
+        try:
+            return read()
+        except (OSError, ValueError):
+            return False
+
+    return (
+        recorded(lambda: stop_requested(initial)),
+        recorded(lambda: pause_requested(initial, segment_id)),
+    )
 
 
 def root_inputs(record: OperationRecord):
@@ -226,8 +260,14 @@ def admit(
     config: OperationStoreConfig,
     submission: CandidateLoopResumeOperation,
     launch_environment: Mapping[str, str],
+    *,
+    deferred: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
-    """Admit one Resume under the store lock; return the root's credential environment names."""
+    """Admit one Resume under the store lock; return the root's credential environment names.
+
+    ``deferred`` names (a queued GPU segment's device selector) are not required
+    from ``launch_environment``: the waiting child sets them once placed.
+    """
     review = review_locked(config, submission.request.predecessor_operation_id)
     if review.receipt_digest != submission.request.expected_receipt_digest:
         raise OperationFailure("loop_resume", "reviewed paused receipt changed")
@@ -246,7 +286,7 @@ def admit(
     try:
         require_credentials(
             root.submission.request.selected_constructor_routes,
-            root.submission.request.environment_names,
+            tuple(n for n in root.submission.request.environment_names if n not in deferred),
             launch_environment,
         )
     except ValueError as error:
@@ -289,12 +329,26 @@ def reserve(record: OperationRecord) -> None:
         )
 
 
-def execute_resume(record: OperationRecord, *, cancel_requested: CancelProbe) -> None:
+def execute_resume(
+    record: OperationRecord,
+    *,
+    cancel_requested: CancelProbe,
+    host_grant: HostGrant | None = None,
+    on_sandbox_spawn: SpawnObserver | None = None,
+) -> None:
+    """``on_sandbox_spawn``: a placed (host-ledger) segment publishes its sandbox."""
     # Read the selected binding against the admitted operation before native dispatch.
     read_segment(record)
     _, request, initial = root_inputs(record)
     binding = read_continuation(initial, record.submission.request_id)
-    launch_continuation(request, initial, binding, cancel_requested=cancel_requested)
+    launch_continuation(
+        request,
+        initial,
+        binding,
+        cancel_requested=cancel_requested,
+        host_grant=host_grant,
+        on_sandbox_spawn=on_sandbox_spawn,
+    )
 
 
 def request_loop_pause(config: OperationStoreConfig, operation_id: UUID) -> LoopPause:

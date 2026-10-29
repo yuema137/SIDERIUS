@@ -10,16 +10,22 @@ from uuid import UUID
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
 from tools.workspace_sandbox.profile import SandboxProfile
-from tools.workspace_sandbox.runner import CancelProbe, ObservedExecutionResult, run_observed
+from tools.workspace_sandbox.runner import (
+    CancelProbe,
+    ObservedExecutionResult,
+    SpawnObserver,
+    run_observed,
+)
 
 from .graph_evidence import read_graph_control
 from .loop_models import LoopContinuation
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .parallel_models import GRANT_CONTROL_FILE, HostGrant, admitted_run_budget
 
 if TYPE_CHECKING:
     from core.chain_state import ChainState
 
-    from .loop_stop import BodyScore
+    from .loop_stop import BodyScore, JudgeBoundaryVerdict
 
 
 def segment_control(initial: CandidateRunReceipt, segment_id: UUID | None) -> Path:
@@ -127,11 +133,19 @@ def has_successor(initial: CandidateRunReceipt, receipt: CandidateRunReceipt) ->
 
 def resume_history(
     request: CandidateRunRequest, initial: CandidateRunReceipt, binding: LoopContinuation
-) -> tuple["ChainState", CandidateRunReceipt, tuple["BodyScore", ...]]:
+) -> tuple[
+    "ChainState",
+    tuple[CandidateRunReceipt, ...],
+    tuple["BodyScore", ...],
+    tuple["JudgeBoundaryVerdict", ...],
+]:
     """Run under the native lease: recheck the binding, then rebuild history by replay.
 
-    The stop-score carrier is rebuilt from the same whole-run replay, so conditions span
-    segments.
+    Returns the history, every completed body receipt (the last one feeds the next
+    body), the stop-score carrier and the predecessor's judge verdicts (its trace was
+    just verified against the evidence), so conditions, judge requests and the
+    anchored verdicts span segments. A paused boundary already holds its judge
+    evidence; the continuation starts at the next boundary, so none is judged twice.
     """
     from .loop import stop_requested
     from .loop_evidence import replay_completed, require_unused_next, verify_loop
@@ -147,7 +161,8 @@ def resume_history(
     last = bodies[-1] if bodies else None
     if last is None or last.status != "completed":
         raise ValueError("resume requires completed required feedback")
-    return state, last, scores
+    assert prior.loop_trace is not None
+    return state, bodies, scores, prior.loop_trace.judge_verdicts
 
 
 def launch_continuation(
@@ -156,16 +171,22 @@ def launch_continuation(
     binding: LoopContinuation,
     *,
     cancel_requested: CancelProbe | None = None,
+    host_grant: HostGrant | None = None,
+    on_sandbox_spawn: SpawnObserver | None = None,
 ) -> CandidateRunReceipt:
     """Only operation admission publishes the binding; no fresh-workspace bypass.
 
-    ``cancel_requested`` has the ``launch_candidate`` meaning for this segment.
+    ``cancel_requested`` and ``on_sandbox_spawn`` have the ``launch_candidate``
+    meaning for this segment.
     """
     from .launch import bounded_terminal, publish, reconcile
 
     control = segment_control(initial, binding.operation_id)
     if read_continuation(initial, binding.operation_id) != binding:
         raise ValueError("resume launch binding changed")
+    admitted_run_budget(request.parallel, host_grant)
+    if host_grant is not None:
+        publish_bytes_write_once(str(control / GRANT_CONTROL_FILE), encode_control(host_grant))
     profile = SandboxProfile(
         workspace=Path(initial.workspace),
         read_only=tuple(Path(p) for p in request.read_only),
@@ -179,6 +200,7 @@ def launch_continuation(
             profile,
             [sys.executable, "-m", __name__, str(control / "continuation.json")],
             cancel_requested=cancel_requested,
+            on_spawn=on_sandbox_spawn,
         )
         publish_bytes_write_once(str(control / "supervision.json"), encode_control(observed))
         terminal = reconcile(

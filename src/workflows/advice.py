@@ -51,6 +51,11 @@ ADVICE_PER_AGENT_KEYS = (
 )
 ADVICE_RECOGNISED_KEYS = (*ADVICE_PER_AGENT_KEYS, "mindset")
 
+#: Keys with no reusable-workflow carrier yet (interpretation is a deterministic
+#: cold start; analysis and mindset have no reusable consumer). Reusable callers
+#: must surface these, never drop them silently.
+ADVICE_KEYS_WITHOUT_REUSABLE_CARRIER = ("interpret", "analysis", "mindset")
+
 #: The ONE way to say "this key is deliberately not advice". A leading
 #: underscore marks an inert annotation block. It is spelled as an explicit
 #: opt-out precisely so
@@ -100,7 +105,8 @@ def _validate_advice_consumability(content: dict, *, resolved: str, observed: st
 
     Args:
         content: The parsed advice mapping.
-        resolved: Absolute path, for the message.
+        resolved: Names the bytes in the message: the CLI's resolved path, or a
+            path-free caller's label.
         observed: The artifact's observed digest, for the message — the
             operator needs to know WHICH bytes were refused.
 
@@ -178,7 +184,8 @@ class AdviceArtifact:
     """The advice artifact this process actually read.
 
     Attributes:
-        path: The resolved ABSOLUTE path the bytes came from.
+        path: Names the bytes: the CLI loader's resolved absolute path, or the
+            ``label`` a ``parse_advice_bytes`` caller supplied.
         sha256: The OBSERVED sha256 of those exact bytes. This — never a
             declared value — is what reaches the workspace lock.
         content: The parsed advice mapping, from the SAME bytes.
@@ -250,19 +257,52 @@ def load_advice_artifact(path: str, *, declared_sha256: str | None = None) -> Ad
             f"campaign must read one artifact; an edit between two band "
             f"launches is exactly what this comparison exists to catch."
         )
+    return parse_advice_bytes(data, label=resolved)
+
+
+def parse_advice_bytes(data: bytes, *, label: str) -> AdviceArtifact:
+    """Parse and validate advice bytes the caller already read; the ONE advice parser.
+
+    ``load_advice_artifact`` delegates here after its single read and digest
+    certification, so a path-free caller (bytes uploaded to, or read no-follow
+    by, the candidate console) gets the identical verdict and message text.
+    No file is opened, and no size bound is applied: the caller owns it (the
+    console's 256 KiB request boundary for uploads, ``safe_bytes`` for reads).
+
+    Args:
+        data: The exact bytes to parse; the digest is computed over them.
+        label: Names the bytes in the returned ``path`` and in every message
+            (the resolved path for the CLI; an upload or allowlist label
+            otherwise).
+
+    Returns:
+        The artifact: ``path=label``, the observed ``sha256`` and the parsed
+        mapping from the same bytes.
+
+    Raises:
+        AdviceArtifactError: the bytes are not UTF-8 JSON or not a JSON object, or their
+            content cannot inject (see ``_validate_advice_consumability``).
+    """
+    observed = hashlib.sha256(data).hexdigest()
     try:
         content = json.loads(data)
     except json.JSONDecodeError as exc:
         raise AdviceArtifactError(
-            f"advice artifact at {resolved} (sha256={observed}) is not valid JSON: {exc}"
+            f"advice artifact at {label} (sha256={observed}) is not valid JSON: {exc}"
         ) from exc
+    except UnicodeDecodeError as exc:
+        # Position only: the codec's own text quotes the offending byte.
+        raise AdviceArtifactError(
+            f"advice artifact at {label} (sha256={observed}) is not valid UTF-8 JSON "
+            f"(invalid byte at position {exc.start})."
+        ) from None
     if not isinstance(content, dict):
         raise AdviceArtifactError(
-            f"advice artifact at {resolved} (sha256={observed}) must be a JSON "
+            f"advice artifact at {label} (sha256={observed}) must be a JSON "
             f"object of advice keys; got {type(content).__name__}."
         )
-    _validate_advice_consumability(content, resolved=resolved, observed=observed)
-    return AdviceArtifact(path=resolved, sha256=observed, content=content)
+    _validate_advice_consumability(content, resolved=label, observed=observed)
+    return AdviceArtifact(path=label, sha256=observed, content=content)
 
 
 def resolve_advice_artifact(args: argparse.Namespace) -> AdviceArtifact | None:

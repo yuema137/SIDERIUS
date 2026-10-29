@@ -47,6 +47,7 @@ from typing import Any, ClassVar, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
+from agent.schemas.judge import JudgeRoutes
 from core.execution_calibration import calibration_provenance
 from core.generated_library import generated_library_provenance
 from core.planner_strategy_identity import PlannerStrategyIdentity
@@ -422,6 +423,12 @@ class RunInvariants(BaseModel):
     host_budget: HostBudgetProvenance | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # B2-4 (operator decision B, deferred from B2-2) — the resolved LLM-judge
+    # routes. CANONICAL: a recorded judge verdict is only replayable against the
+    # route that produced it, so a continuation cannot switch judge model or
+    # bounds. ``None`` (no `judge` block) is omitted, so every judge-free lock
+    # keeps its bytes.
+    judge_routes: JudgeRoutes | None = Field(default=None, exclude_if=lambda value: value is None)
     created_at: str | None = None
     # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
     # run executed under, plus their provenance. RECORDED, never compared.
@@ -533,6 +540,8 @@ class RunInvariants(BaseModel):
         "seed_derivation",
         # B3-Q7 — serial and parallel-v1 traces can differ on failure.
         "scheduling_mode",
+        # B2-4 — recorded judge verdicts replay only against their own route.
+        "judge_routes",
     )
 
     #: Fields RECORDED for audit and never compared (Step 11 C3, R-11-6).
@@ -1087,6 +1096,10 @@ class LockLaunchIdentity(BaseModel):
     #: The builder derives the canonical scheduling mode and the recorded
     #: budget provenance from it; ``None`` yields a byte-identical lock.
     host_budget: HostBudget | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: B2-4 — the resolved judge routes (``workflows.llm_config.locked_judge_routes``).
+    #: CANONICAL, so every entry point threads it explicitly; ``None`` (no judge
+    #: block) yields a byte-identical lock.
+    judge_routes: JudgeRoutes | None = None
 
     @model_validator(mode="after")
     def _seed_and_derivation_travel_together(self) -> LockLaunchIdentity:
@@ -1293,6 +1306,7 @@ def build_run_invariants(
             run_seed=_launch_identity.run_seed,
             seed_derivation=_launch_identity.seed_derivation,
             run_seed_source=_launch_identity.run_seed_source,
+            judge_routes=_launch_identity.judge_routes,
             # B3-2 — one rule derives the canonical mode from the budget; the
             # budget itself is recorded as provenance.
             scheduling_mode=scheduling_mode_for(_launch_identity.host_budget),

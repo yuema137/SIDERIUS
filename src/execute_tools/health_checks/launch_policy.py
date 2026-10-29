@@ -101,6 +101,43 @@ def _enforcing_gate_ids(
     return frozenset(g.id for g in config.health_gates if g.on_fail.action in BLOCKING_ACTIONS)
 
 
+def validate_declared_policy(*, healthgate_mode: str | None, result_authority: str | None) -> None:
+    """Refusals 1-3: the declaration alone, before any HealthGate config is read.
+
+    Pure and side-effect free, so a reviewer (for example the console preparation
+    review) can refuse a missing or contradictory declaration before anything is
+    prepared or launched. ``validate_formal_launch`` calls it first; refusals 4-6
+    need the governed config and run only at launch.
+
+    Raises:
+        FormalLaunchPolicyError: the pair is missing or self-contradictory.
+    """
+    missing = [
+        name
+        for name, value in (
+            ("--healthgate_mode", healthgate_mode),
+            ("--result_authority", result_authority),
+        )
+        if value is None
+    ]
+    if missing:
+        raise FormalLaunchPolicyError(
+            f"a formal launch must declare {' and '.join(missing)}. There is "
+            f"no default: defaulting to blocking/scientific would let this "
+            f"run claim enforcement and scientific standing that nobody "
+            f"configured. Declare both explicitly."
+        )
+
+    if healthgate_mode == "observe_only" and result_authority == "scientific":
+        raise FormalLaunchPolicyError(
+            "observe_only + scientific is a contradiction: gates that only "
+            "record cannot certify a result. Use observe_only + diagnostic "
+            "to observe, or blocking + scientific to enforce and certify. "
+            "(blocking + diagnostic is also legal — enforced, deliberately "
+            "not promoted.)"
+        )
+
+
 def validate_formal_launch(
     *,
     healthgate_mode: str | None,
@@ -129,30 +166,7 @@ def validate_formal_launch(
     Raises:
         FormalLaunchPolicyError: any of the six refusals above.
     """
-    missing = [
-        name
-        for name, value in (
-            ("--healthgate_mode", healthgate_mode),
-            ("--result_authority", result_authority),
-        )
-        if value is None
-    ]
-    if missing:
-        raise FormalLaunchPolicyError(
-            f"a formal launch must declare {' and '.join(missing)}. There is "
-            f"no default: defaulting to blocking/scientific would let this "
-            f"run claim enforcement and scientific standing that nobody "
-            f"configured. Declare both explicitly."
-        )
-
-    if healthgate_mode == "observe_only" and result_authority == "scientific":
-        raise FormalLaunchPolicyError(
-            "observe_only + scientific is a contradiction: gates that only "
-            "record cannot certify a result. Use observe_only + diagnostic "
-            "to observe, or blocking + scientific to enforce and certify. "
-            "(blocking + diagnostic is also legal — enforced, deliberately "
-            "not promoted.)"
-        )
+    validate_declared_policy(healthgate_mode=healthgate_mode, result_authority=result_authority)
 
     # --- 4. the declaration must match the config it describes ---------
     enforcing = _enforcing_gate_ids(health_checks_config, task_health_binding)

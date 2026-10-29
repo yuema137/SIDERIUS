@@ -1,9 +1,3 @@
-.editor-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
-  gap: 1rem;
-}
-
 #editor-source {
   font-family: monospace;
   width: 100%;
@@ -37,7 +31,9 @@
 .circuit-wire { fill: none; stroke: var(--edge); stroke-width: 2; pointer-events: none; }
 .circuit-wire.selected, .circuit-wire.focused { stroke: var(--focus); stroke-width: 4; }
 .circuit-wire-target { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
-.circuit-wire-target:focus-visible { outline: none; }
+/* Keyboard focus on a wire: a soft halo along the stroke (selection only recolours it). */
+.circuit-wire-target:focus-visible { outline: none; stroke: color-mix(in srgb, var(--focus) 40%, transparent); }
+.circuit-viewport:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .circuit-disconnect { margin: .35rem 0; }
 .circuit-port-unbound-label { font-weight: 700; }
 .circuit-port.is-unbound[data-required="true"] { border-color: var(--warning); }
@@ -70,11 +66,6 @@ pre {
 }
 
 
-@media (max-width: 800px) {
-  .editor-workspace {
-    grid-template-columns: 1fr;
-  }
-}
 .editor-task-controls p, .editor-task-controls li { overflow-wrap: anywhere; }
 .editor-task-controls label { display: block; margin: .6rem 0; }
 .editor-task-controls select { max-width: 100%; }
@@ -82,77 +73,95 @@ pre {
 .editor-task-controls .editor-task-acknowledgement { display: flex; align-items: flex-start; gap: .5rem; }
 .editor-task-acknowledgement input { width: auto; flex: none; }
 
-/* Workflow is a canvas workspace; prose pages keep the shared 1240px measure. */
-body:has(#view-workflow:not([hidden])) header,
-body:has(#view-workflow:not([hidden])) main,
-body:has(#view-workflow:not([hidden])) footer,
-body:has(#view-workflow:not([hidden])) nav.actions {
-  width: 100%;
-  max-width: 1920px;
-}
-body:has(#view-workflow:not([hidden])) main { padding: 12px clamp(16px, 2vw, 32px) 24px; gap: 12px; }
-body:has(#view-workflow:not([hidden])) main > #route-status:empty { display: none; }
-body:has(#view-workflow:not([hidden])) nav.actions { margin: 0; min-height: 32px; padding-inline: clamp(16px, 2vw, 32px); }
-body:has(#view-workflow:not([hidden])) header { display: flex; align-items: center; gap: 16px; padding: 4px 24px 0; }
-body:has(#view-workflow:not([hidden])) .console-intro { display: block; margin: 0; font-size: .82rem; color: var(--muted); }
-body:has(#view-workflow:not([hidden])) .console-intro p { margin: 8px 0; }
-body:has(#view-workflow:not([hidden])) .theme-control { margin: 0 0 0 auto; }
-body:has(#view-workflow:not([hidden])) main > section[aria-labelledby="access-heading"] {
+/* Workflow page (ui-design-spec.md §1.2): a 48px page bar (title, problems, edit actions,
+ * Run), one status line, the project/task row, then the docked workspace. */
+#view-workflow { font-size: var(--font-body); gap: var(--space-3); }
+
+.page-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
-  padding: 6px 12px;
+  gap: var(--space-2) var(--space-3);
+  min-height: var(--bar-height);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  background: var(--panel);
 }
-body:has(#view-workflow:not([hidden])) .theme-control select { min-height: 36px; padding: 5px 9px; }
-body:has(#view-workflow:not([hidden])) #access-heading { margin: 0; font-size: .95rem; white-space: nowrap; }
-body:has(#view-workflow:not([hidden])) .access-help { margin: 0; font-size: .74rem; }
-body:has(#view-workflow:not([hidden])) #access-form { flex: 1 1 520px; min-width: 360px; margin: 0; align-items: center; }
-body:has(#view-workflow:not([hidden])) #access-form .grow { min-width: 220px; }
-body:has(#view-workflow:not([hidden])) #access-form label { margin: 0; font-size: .82rem; }
-body:has(#view-workflow:not([hidden])) #access-form input { padding: 6px 10px; min-height: 38px; }
-body:has(#view-workflow:not([hidden])) #access-form button { min-height: 38px; padding: 6px 12px; }
-body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin: 0; font-size: .7rem; }
-#view-workflow > h1 { margin: 0 0 6px; font-size: 1.2rem; }
-.workflow-controls {
-  display: grid;
-  grid-template-columns: minmax(250px, .8fr) minmax(280px, 1.2fr);
-  gap: 12px;
-  align-items: start;
-}
-.workflow-project, .workflow-task-details, .workflow-actions { padding: 7px 12px; margin: 0; }
-.workflow-project { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: center; }
-.workflow-project > label { margin: 0; }
-.workflow-project > p { grid-column: 1 / -1; margin: 0; font-size: .7rem; }
-.workflow-project details { grid-column: 1 / -1; margin: 2px 0 0; font-size: .78rem; }
-.workflow-project details p { margin-bottom: 0; }
-.workflow-task-details { max-height: min(60vh, 620px); overflow: auto; }
-.workflow-task-details h2 { margin: 2px 0 4px; font-size: 1rem; }
-.workflow-task-details p { margin: 4px 0; font-size: .84rem; }
-.workflow-task-details label { margin: 4px 0; }
-.workflow-actions { display: flex; align-items: center; gap: 12px; }
-.workflow-actions .actions { margin: 0; gap: 8px; }
-.workflow-actions button { min-height: 36px; padding: 5px 10px; }
-#editor-pending { flex: 1 1 180px; margin: 0; color: var(--muted); font-size: .78rem; }
+.page-bar > h1 { margin: 0 var(--space-2) 0 0; display: flex; align-items: center; gap: var(--space-2); }
+.page-bar .actions { margin: 0; gap: var(--space-2); align-items: center; flex: 1 1 auto; }
+.page-bar .actions label { margin: 0; font-size: var(--font-label); }
+.page-bar .workflow-next { margin-left: auto; }
+.problems-chip { min-height: 24px; padding: 0 var(--space-2); border-color: var(--error); border-radius: var(--radius-pill); color: var(--error); font-size: var(--font-label); }
+.page-status { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-5); padding: 0 var(--space-4); color: var(--muted); font-size: var(--font-help); }
+.page-status p { margin: 0; }
+#workflow-next-state { color: var(--text); }
+
+/* Task package and version: a collapsible card below the frame (editor-page-bar.js chip opens it). */
+.workflow-task-details .editor-task-controls > h2 { margin: 0 0 var(--space-3); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
+.workflow-task-details p { margin: var(--space-2) 0; font-size: var(--font-help); }
+.workflow-task-details label { margin: var(--space-1) 0; }
+
+/* Docked workspace (spec §1.2, L4): rail | canvas | Selection, separated by 1px dividers, no
+ * gutters, one frame. Panels share one height (viewport minus header and page bar) and scroll
+ * independently under fixed 48px headers. s9's collapsed icon rail may set --rail-width: 48px. */
 .editor-workspace {
-  grid-template-columns: minmax(0, 2.2fr) minmax(290px, .9fr);
-  align-items: start;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--inspector-width);
+  grid-template-areas: "palette canvas inspector";
+  height: calc(100vh - 96px);
+  min-height: 480px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  background: var(--panel);
+  overflow: hidden;
 }
-.workflow-canvas-panel { min-height: 0; padding: 16px; }
-.workflow-canvas-panel > h2, .workflow-inspector-panel > h2 { margin-bottom: 10px; }
-.canvas-help { margin: 0 0 8px; font-size: .84rem; }
-.canvas-help p { margin: 6px 0; color: var(--muted); }
-.workflow-inspector-panel {
-  position: sticky;
-  top: 12px;
-  max-height: min(760px, calc(100vh - 170px));
+.editor-workspace > .editor-palette { grid-area: palette; }
+.editor-workspace > .workflow-canvas-panel { grid-area: canvas; }
+.editor-workspace > .workflow-inspector-panel { grid-area: inspector; }
+.editor-workspace > .dock-panel {
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
-  padding: 16px;
+  padding: 0 var(--space-4) var(--space-4);
+  background: var(--panel);
 }
-.connection-list { margin: 8px 0 0; font-size: .82rem; }
-.connection-list ul { margin: 8px 0 0; padding-left: 1.25rem; }
-.connection-list li { overflow-wrap: anywhere; margin: 4px 0; }
+.editor-workspace > .dock-panel + .dock-panel { border-left: 1px solid var(--border); }
+/* Rail: a docked column, not a sticky floating box (overrides editor-palette.css). */
+.editor-workspace > .editor-palette { position: static; z-index: auto; max-height: none; margin: 0; border: 0; border-radius: 0; }
+.editor-workspace > .dock-panel > h2, .editor-workspace > .editor-palette > h3 {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  height: var(--bar-height);
+  margin: 0 calc(-1 * var(--space-4)) var(--space-3);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-size: var(--font-heading);
+  font-weight: 600;
+}
+.canvas-help { margin: 0 0 var(--space-3); font-size: var(--font-help); }
+.canvas-help > summary { padding: 0; }
+.canvas-help p { margin: var(--space-2) 0; color: var(--muted); }
+.connection-list { margin: var(--space-3) 0 0; font-size: var(--font-help); }
+.connection-list ul { margin: var(--space-2) 0 0; padding-left: var(--space-5); }
+.connection-list li { overflow-wrap: anywhere; margin: var(--space-1) 0; }
+
+/* Empty states (spec §7.2): replace the area's content; one sentence, at most one action. */
+.empty-state { margin: 0 0 var(--space-3); padding: var(--space-5); max-width: none; border: 1px dashed var(--control-border); border-radius: var(--radius-2); color: var(--muted); font-size: var(--font-help); }
+.empty-state:empty { display: none; }
+.empty-state.start-guide { margin: var(--space-7) auto; max-width: 400px; text-align: center; border-color: var(--border); }
+.empty-state.start-guide h2 { margin: 0 0 var(--space-2); color: var(--text); font-size: var(--font-title); line-height: 28px; }
+.empty-state.start-guide p { margin: 0 auto var(--space-4); }
+.workflow-canvas-panel:has(.circuit-card) #workflow-start-guide { display: none; }
+.workflow-inspector-panel:has(.inspector-capability-heading) .inspector-empty { display: none; }
+
+@media (max-width: 1279px) {
+  :root { --inspector-width: 320px; }
+}
 
 .circuit-card { width: 215px; border-radius: 10px; background: var(--capability-generic-tint); }
 .circuit-card.capability-interpretation { --capability-accent: var(--capability-interpretation); --capability-tint: var(--capability-interpretation-tint); }
@@ -169,7 +178,7 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
 .capability-heading { display: grid; grid-template-columns: 30px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; gap: 2px 9px; width: 100%; min-width: 0; text-align: left; }
 .capability-heading svg { grid-column: 1; grid-row: 1 / span 2; width: 28px; height: 28px; color: var(--capability-accent, var(--capability-generic)); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .capability-name { grid-column: 2; grid-row: 1; color: var(--text); font-size: .95rem; font-weight: 750; letter-spacing: .015em; line-height: 1.2; overflow-wrap: anywhere; }
-.capability-instance { grid-column: 2; grid-row: 2; color: var(--muted); font-size: .72rem; font-weight: 500; line-height: 1.2; overflow-wrap: anywhere; }
+.capability-instance { grid-column: 2; grid-row: 2; color: var(--muted); font-size: var(--font-label); font-weight: 500; line-height: 1.2; overflow-wrap: anywhere; }
 .inspector-capability-heading { margin: 0 0 10px; }
 .inspector-capability-heading .capability-name { font-size: 1.05rem; }
 .inspector-mapping, .circuit-mapping { margin: 0; border-top: 1px solid var(--border); padding: 6px 10px 8px; font-size: .76rem; }
@@ -189,20 +198,16 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
 .circuit-optional > summary { padding: .45rem 1rem; color: var(--muted); font-size: .76rem; font-weight: 600; cursor: pointer; }
 .circuit-optional > summary.compatible { outline: 2px solid var(--focus); outline-offset: -3px; color: var(--text); }
 
+@media (max-width: 899px) {
+  /* Narrow: one column at natural height; the rail is editor-palette.js's drawer. */
+  .editor-workspace { grid-template-columns: minmax(0, 1fr); grid-template-areas: "palette" "canvas" "inspector"; height: auto; min-height: 0; }
+  .editor-workspace > .dock-panel { overflow: visible; }
+  .editor-workspace > .dock-panel + .dock-panel { border-left: 0; border-top: 1px solid var(--border); }
+  .editor-workspace > .editor-palette { padding-top: var(--space-4); }
+  .editor-workspace > .editor-palette > h3 { display: none; }
+}
 @media (max-width: 800px) {
-  body:has(#view-workflow:not([hidden])) main > section[aria-labelledby="access-heading"] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  body:has(#view-workflow:not([hidden])) #access-heading { white-space: normal; }
-  /* Narrow screens: the desktop 360px form floor and one-line header exceed a 390px viewport. */
-  body:has(#view-workflow:not([hidden])) header { flex-wrap: wrap; padding-inline: 16px; }
-  body:has(#view-workflow:not([hidden])) #access-form { flex-basis: auto; min-width: 0; }
-  body:has(#view-workflow:not([hidden])) #access-form .grow { min-width: min(100%, 220px); }
-  .workflow-controls, .editor-workspace { grid-template-columns: minmax(0, 1fr); }
-  .workflow-inspector-panel { position: static; max-height: none; }
-  .workflow-project { grid-template-columns: auto minmax(0, 1fr); }
-  .workflow-actions { display: block; }
-  #editor-pending { margin-top: 6px; }
   .circuit-viewport { min-height: 240px; height: auto; max-height: min(70vh, 620px); }
-  .workflow-task-details { max-height: 60vh; }
 }
 /* Research loop: one fieldset per loop facet (limit, feedback, later facets). */
 .workflow-loop-panel fieldset { margin: 0 0 12px; }

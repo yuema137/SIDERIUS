@@ -18,7 +18,7 @@ from core.run_invariants import (
 from core.run_seed_lock import WorkspaceRunSeed
 from execute_tools.dataset_config import DataScope, resolve_dataset_profile
 from workflows.literature_config import lit_review_config_sha256
-from workflows.llm_config import WorkflowLLMConfig
+from workflows.llm_config import WorkflowLLMConfig, locked_judge_routes
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import RunTaskComposition
 from workflows.task_settings import validate_scope_settings
@@ -134,6 +134,8 @@ def workflow_lock_identity(
         ),
         runtime_completion_policy=launch.runtime_completion_policy,
         runtime_verifier_identity=launch.runtime_verifier_identity,
+        # B2-4 — the same resolver the chain pre-flight uses, so the two agree.
+        judge_routes=locked_judge_routes(llm_config.judge),
         **(run_seed_lock_fields(None) if run_seed is None else run_seed.lock_fields()),
     )
 

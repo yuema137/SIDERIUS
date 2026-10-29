@@ -371,6 +371,7 @@ def test_proposer_transports_independent_stage_efforts():
 # Bytes of a fixed uniform config WITHOUT `judge`, captured from origin/master
 # (69a9d81a). Pins the serialized shape that run locks and launch expectations
 # compare; a stray `"judge": null` would change it for every existing workflow.
+# Issue #1034 deliberately set the legacy profile's planner to native-timing-v1.
 UNIFORM_WITHOUT_JUDGE_JSON = (
     '{"interpret":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
     '"data_analysis":null,'
@@ -379,7 +380,7 @@ UNIFORM_WITHOUT_JUDGE_JSON = (
     '"proposing":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null}},'
     '"implement":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
     '"validate":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
-    '"tune":{"planner_strategy":null,'
+    '"tune":{"planner_strategy":"native-timing-v1",'
     '"planner":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'
     '"reflector":{"provider":"openai","model_id":"gpt-4o","reasoning_effort":null}},'
     '"lit_review":{"main":{"provider":"openai","model_id":"gpt-4o-mini","reasoning_effort":null},'

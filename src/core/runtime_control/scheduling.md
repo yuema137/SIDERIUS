@@ -2,10 +2,11 @@
 
 Owner: `scheduling.py`. Scope: typed resource requests, an explicit host
 budget, and the pure `plan_dispatch` decision that places, queues or refuses
-ready units against a reservation ledger. Its first production
-caller is the cross-operation host ledger (B3-5a); budget intake, the run-invariant fields and the child
-environment projection are below; process dispatch, receipts and timing are
-later owners (B3-4, B3-5b). Without a
+ready units against a reservation ledger. Its production caller is the
+cross-operation host ledger (B3-5a admission; B3-5b queued operations and their
+waiting children); budget intake, the run-invariant fields and the child
+environment projection are below. In-run graph dispatch, unit receipts and
+timing belong to B3-4. Without a
 `HostBudget`, execution remains serial and nothing here is consulted.
 
 ## Inputs
@@ -15,7 +16,11 @@ later owners (B3-4, B3-5b). Without a
   `gpu_count` (`0` or `1`; the trainer owns one device), `vram_gib` and
   `vram_source` (`measured` or `configured_cap`; both required exactly when
   `gpu_count == 1`), `host_memory_gib`, `cpu_slots`, `wall_seconds` (the
-  existing watchdog/timeout owner's value; carried, not used for admission).
+  existing watchdog/timeout owner's value; carried, not used for admission),
+  `time_budgeted` (strict bool, default `false`, omitted from serialization
+  when false: the unit runs under a measured time budget, decision B3-Q6),
+  `unit_slots` (positive, default 1, omitted when 1: the concurrent units a
+  parallel run's envelope may run, B3-4a).
   Requests are derived by the core, never authored by an LLM. Booleans and
   non-finite quantities are refused.
 - `host_memory_gib_from_role(RoleCeiling)` projects a declared positive
@@ -30,13 +35,14 @@ later owners (B3-4, B3-5b). Without a
   `pair_admission.resolve_gpu_ceiling`.
 - `HostBudget`: `gpus` (declared order is first-fit order; may be empty),
   `host_memory_gib`, `cpu_slots`, `max_concurrent_units`, `source`
-  (`caller` or `file`). There are no defaults: every quantity is an explicit
+  (`caller`, `file`, or `host_reservation` for a run's budget derived from its
+  host-ledger grant, `HostGrant.run_budget`). There are no defaults: every quantity is an explicit
   operator input. Measured capacity alone and `hardware_models._SAFETY_FRACTION`
   are never promoted into a budget. Duplicate slot UUIDs refuse.
   `acknowledge_shared_gpu_time_budget` (strict bool, default `false`, omitted
   from serialization and the digest when false) is the operator's acceptance
-  that time-budgeted runs may share a GPU slot (decision B3-Q6); dispatching
-  owners refuse such sharing without it.
+  that time-budgeted runs may share a GPU slot (decision B3-Q6);
+  `plan_dispatch` enforces it (step 3).
   Heterogeneous hardware classes refuse (decision B3-Q3): the proposer's
   `hardware_context` is LLM-visible and must not depend on placement.
 - `HostBudget.digest`: SHA-256 hex of the sorted-key compact JSON of every
@@ -60,7 +66,8 @@ default, so every caller states its refusal semantics.
    `running`; a tie refuses rather than being broken by input order.
 3. Ready units are visited in ascending `dispatch_ordinal`:
    - **refused** when the request cannot fit even an idle budget: host
-     memory or CPU slots above the budget total, a GPU unit with no slots, or
+     memory, CPU slots or `unit_slots` above the budget total, a GPU unit with
+     no slots, or
      a VRAM request infeasible alone on every slot. Reasons start with
      `escalated to operator`. Nothing is shrunk, re-batched or re-routed. The
      refusal policy then applies:
@@ -72,13 +79,20 @@ default, so every caller states its refusal semantics.
        units are planned as if it were absent. This is the cross-operation
        mode (B3-5), where operations are independent submissions.
    - **queued** when it would fit an idle budget but the ledger is full in
-     some dimension: `max_concurrent_units`, unreserved host memory,
-     unreserved CPU slots, or no slot with enough unreserved VRAM. Strict
+     some dimension: `max_concurrent_units` (the ledger's summed `unit_slots`
+     plus the request's), unreserved host memory,
+     unreserved CPU slots, or no slot with enough unreserved VRAM that it may
+     share. Decision B3-Q6: unless the budget sets
+     `acknowledge_shared_gpu_time_budget`, a slot already holding a placed
+     unit is not eligible when either the candidate or any unit on that slot
+     is `time_budgeted` (contention changes measured-time admission). That
+     slot's reason reads `<uuid>: a time-budgeted unit would share it …`.
+     An idle slot is always eligible, so this rule never refuses. Strict
      FIFO (decision B3-Q4): after the first queued unit, every later ordinal
      queues behind it (`strict FIFO: waiting behind earlier unit …`), even a
      smaller unit that would fit. No backfill.
-   - **placed** otherwise. A GPU unit takes the first declared slot whose
-     ledger members plus the candidate are feasible under
+   - **placed** otherwise. A GPU unit takes the first declared eligible slot
+     whose ledger members plus the candidate are feasible under
      `evaluate_resolved_pair_admission(..., limits=slot.ceiling)`; that
      function is the only VRAM arithmetic (aggregate `<=` effective ceiling,
      effective ceiling = min of operator ceiling, host quota, measured
@@ -169,7 +183,7 @@ the loader yet.
 
 A ledger sum within the ceiling is admission evidence, not a guarantee
 against other host users (see [GPU ceilings](gpu-ceilings.md)). Wall time
-is not admitted here; time-budget coupling on a shared GPU (decision
-B3-Q6) belongs to the dispatching owners. Focused CPU tests:
+is not admitted here; only its coupling on a shared GPU (decision B3-Q6) is a
+placement constraint. Focused CPU tests:
 `tests/unit/core/test_scheduling.py`, `tests/unit/core/test_budget_intake.py`,
 `tests/unit/core/test_subprocess_env_placement.py`. No GPU, process or LLM was exercised.

@@ -7,6 +7,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[key], `Set ${key}`);
@@ -26,12 +27,13 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}}), faults = [];
   page.on('pageerror', error => faults.push(error.message));
   await page.goto(metadata.origin + '/#workflow');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   await page.locator('#editor-project').selectOption('interpretation');
   await waitUntil(async () => (await page.locator('#editor-source').inputValue()).includes('native-interpretation-candidate/v1'));
   const pending = () => page.locator('#editor-pending').textContent();
@@ -44,22 +46,35 @@ try {
   await page.locator('button[aria-label="Disconnect build.output"]').click();
   await waitUntil(async () => (await pending()).includes('incomplete'));
   assert.equal(await buildCard.evaluate(card => card.classList.contains('has-required-unbound')), true);
-  assert.match(await buildCard.locator('.circuit-problem-badge').textContent(), /^1 required input missing$/);
+  // The socket carries the red light; the card only a small count badge (§8.3).
+  assert.equal(await buildCard.locator('.circuit-problem-badge').textContent(), '1');
+  assert.equal(await buildCard.locator('.circuit-problem-badge').getAttribute('aria-label'), '1 required input not connected');
+  assert.notEqual(await page.locator('#circuit-input-build-output .circuit-socket').evaluate(socket => getComputedStyle(socket).boxShadow), 'none', 'The unconnected socket shows its ring');
+  assert.equal(await buildCard.evaluate(card => getComputedStyle(card).boxShadow), 'none', 'No card-wide glow');
   assert.equal(await page.locator('.circuit-card.has-required-unbound').count(), 1, 'Only the offending card is flagged');
+  // Problems live in the page-bar chip's popover (spec §9); the canvas never reflows.
+  const chip = page.locator('#problems-chip');
+  await chip.waitFor({state: 'visible'});
+  assert.match(await chip.textContent(), /^1 problem$/);
+  assert.equal(await problems.isVisible(), false, 'The popover stays closed until the chip is used');
+  await chip.click();
   assert.equal(await problems.isVisible(), true);
-  assert.equal(await problems.locator('h2').textContent(), '1 problem');
+  assert.equal(await problems.locator('h2').textContent(), '1 problem to fix before saving');
   const item = problems.locator('button.editor-problem');
   assert.equal(await item.count(), 1);
   assert.equal(await item.getAttribute('data-node'), 'build');
   assert.equal(await item.getAttribute('data-field'), 'output');
   assert.equal(await item.getAttribute('data-code'), 'required_unbound');
-  assert.match(await item.textContent(), /build\.output: required input is unbound/);
+  assert.match(await item.locator('.editor-problem-text').textContent(), /^Implement: .+ is not connected$/, 'One plain sentence: module and connector name');
+  assert.match(await item.locator('.editor-problem-raw').textContent(), /build\.output · required input is not connected/, 'Raw location is advanced detail');
+  assert.match(await page.locator('#editor-save-reason').textContent(), /^Fix 1 problem to save$/, 'Disabled Save says why');
   assert.equal(await page.locator('#editor-review').isDisabled(), true, 'An incomplete draft blocks Review');
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
 
   // The problem jumps from another selection back to the node and focuses its field.
   await page.locator('#circuit-node-interpret').click();
   assert.equal(await page.locator('#circuit-node-build').getAttribute('aria-pressed'), 'false');
+  if (!(await problems.isVisible())) await chip.click();
   await item.click();
   assert.equal(await page.locator('#circuit-node-build').getAttribute('aria-pressed'), 'true');
   assert.deepEqual(await page.evaluate(() => [document.activeElement?.dataset.node, document.activeElement?.dataset.argument]), ['build', 'output']);
@@ -73,10 +88,12 @@ try {
   assert.equal(await page.locator('.circuit-problem-badge').count(), 0);
   assert.equal(await problems.isHidden(), true);
 
-  // U7/U8/C8: the tuning inspector lists every training setting expanded, with help and reset.
+  // U7/U8/C8: the tuning inspector lists every training setting (one click open), with help and reset.
   await page.locator('#circuit-node-fit').click();
   const settings = page.locator('#editor-training-settings');
-  assert.equal(await settings.evaluate(details => details.open), true, 'Defaults are listed expanded on selection');
+  assert.equal(await settings.evaluate(details => details.open), false, 'Collapsed on selection, with a changed-count summary (spec §8.1)');
+  assert.match(await settings.locator('summary').textContent(), /^Training settings · \d+ of \d+ changed$/);
+  await settings.locator('summary').click();
   const rows = settings.locator('[data-training-field]');
   assert.ok((await rows.count()) > 5);
   assert.equal(await rows.count(), await settings.locator('[data-training-mode]').count());
@@ -129,7 +146,7 @@ try {
   const diff = await page.locator('#editor-diff').textContent();
   assert.match(diff, /trial_max_epochs/); assert.match(diff, /-.*trial_time_budget_minutes/);
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   const saved = await readFile(metadata.interpretation_source, 'utf8');
   assert.match(saved, /'trial_max_epochs': 4/); assert.doesNotMatch(saved, /trial_time_budget_minutes/);
   await page.locator('#circuit-node-fit').click();
@@ -142,8 +159,9 @@ try {
   await page.locator('#editor-advanced').evaluate(details => { details.open = true; });
   await page.locator('#editor-source').fill(saved + '\nbroken = (\n');
   await page.locator('#editor-review').click();
-  await waitUntil(async () => await problems.isVisible());
+  await waitUntil(async () => await page.locator('#problems-chip').isVisible());
   await page.locator('#editor-advanced').evaluate(details => { details.open = false; });
+  await page.locator('#problems-chip').click();
   const sourceItem = problems.locator('button.editor-problem').first();
   assert.equal(await sourceItem.getAttribute('data-node'), null);
   await sourceItem.click();

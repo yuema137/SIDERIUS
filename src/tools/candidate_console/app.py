@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
 from tools.candidate_operations import LogReadRequest
-from tools.candidate_operations.models import OperationFailure
+from tools.candidate_operations.models import OperationFailure, UnknownOperation
 
 from .boundary import RequestBoundary
 from .edited_routes import edited_router
@@ -33,6 +33,10 @@ from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_preparation_routes import reusable_preparation_router
 from .reusable_routes import reusable_router
 from .service import CandidateConsole
+from .settings_file import protected_paths
+from .settings_models import SettingsContext
+from .settings_routes import settings_router
+from .settings_service import ConsoleSettings
 
 
 def error_response(status: int, code: str, message: str) -> JSONResponse:
@@ -78,8 +82,11 @@ def refusal(table: dict[str, str], error: OperationFailure) -> JSONResponse:
     return error_response(409, error.detail.code, table[error.detail.code])
 
 
-def create_app(config: ConsoleConfig) -> FastAPI:
+def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -> FastAPI:
+    """``settings`` is the startup snapshot's context (``load_console(...).settings``);
+    absent, the Settings page is read-only."""
     service = CandidateConsole(config)
+    workspace = None if settings is None else settings.workspace_root
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.console = service
     app.include_router(
@@ -92,7 +99,14 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     app.include_router(edited_router(service))
     app.include_router(reusable_router(service))
     app.include_router(native_chain_router(service))
-    app.include_router(reusable_preparation_router(service))
+    app.include_router(
+        reusable_preparation_router(service, protected=protected_paths(service.config, workspace))
+    )
+    app.include_router(
+        settings_router(
+            ConsoleSettings(service.config, settings or SettingsContext(None, frozenset()))
+        )
+    )
     app.add_middleware(RequestBoundary, config=service.config, token=token(config.auth_token_file))
 
     @app.exception_handler(RequestValidationError)
@@ -106,10 +120,11 @@ def create_app(config: ConsoleConfig) -> FastAPI:
 
     @app.exception_handler(OperationFailure)
     async def operation_error(request: Request, error: OperationFailure):
-        # Only credential name diagnostics are safe to forward; native errors may carry paths.
+        # Only credential names and the launch-policy owner's fixed refusal text are
+        # forwarded; other native errors may carry paths.
         message = (
             error.detail.message
-            if error.detail.code == "credentials"
+            if error.detail.code in ("credentials", "launch_policy")
             else {
                 "native_chain_policy": "native chain choice is unavailable or overlaps editor writes",
                 "not_supported": "native-chain token aggregation is not supported",
@@ -125,6 +140,10 @@ def create_app(config: ConsoleConfig) -> FastAPI:
                 "not_prepared": "preparation has no verified candidate to review",
             }.get(error.detail.code, "native operation could not be verified")
         )
+        if isinstance(error, UnknownOperation):
+            # Typed absence after a successful store read; the only code that may
+            # justify forgetting a retained intent. Plain 404 ``not_found`` never does.
+            return error_response(404, "unknown_operation", error.detail.message)
         response = error_response(409, error.detail.code, message)
         if isinstance(error, ReusableAdmissionNotAttempted):
             return JSONResponse(
@@ -145,7 +164,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
 
     @app.get("/api/choices")
     def choices():
-        return service.choices()
+        return service.choices_view()
 
     @app.post("/api/preparations", status_code=202)
     async def prepare(request: Request):
@@ -255,6 +274,10 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "session.js": "text/javascript",
             "number-format.js": "text/javascript",
             "operations-list.js": "text/javascript",
+            "operation-outcome.js": "text/javascript",
+            "run-steps.js": "text/javascript",
+            "quick-start.js": "text/javascript",
+            "browser-data.js": "text/javascript",
             "navigation.js": "text/javascript",
             "editor-entry.js": "text/javascript",
             "styles.css": "text/css",
@@ -266,6 +289,8 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "editor-contract-presentation.js": "text/javascript",
             "editor-contract-presentation.css": "text/css",
             "editor-circuit.js": "text/javascript",
+            "editor-palette.js": "text/javascript",
+            "editor-palette-guidance.js": "text/javascript",
             "editor-circuit-geometry.js": "text/javascript",
             "editor-task-controls.js": "text/javascript",
             "editor-loop-controls.js": "text/javascript",
@@ -274,14 +299,40 @@ def create_app(config: ConsoleConfig) -> FastAPI:
             "editor-versions.js": "text/javascript",
             "editor-draft.js": "text/javascript",
             "editor-draft.css": "text/css",
+            "editor-node-drafts.js": "text/javascript",
+            "editor-external-inputs.js": "text/javascript",
+            "editor-external-inputs.css": "text/css",
             "reusable-run.js": "text/javascript",
             "reusable-intents.js": "text/javascript",
             "new-run.js": "text/javascript",
             "seed-input.js": "text/javascript",
             "page-guidance.js": "text/javascript",
+            "settings.js": "text/javascript",
             "page-guidance.css": "text/css",
+            "onboarding.js": "text/javascript",
+            "onboarding.css": "text/css",
+            "ui-settings.js": "text/javascript",
+            # Operator logo: shapes plus an embedded PNG only, served as <img> (no script context).
+            "siderius-logo-light.svg": "image/svg+xml",
+            "siderius-logo-dark.svg": "image/svg+xml",
             "editor.css": "text/css",
             "editor-parameters.css": "text/css",
+            "editor-palette.css": "text/css",
+            "editor-templates.js": "text/javascript",
+            "editor-templates.css": "text/css",
+            "editor-advice.js": "text/javascript",
+            "editor-page-bar.js": "text/javascript",
+            "editor-save-outcome.js": "text/javascript",
+            "editor-canvas-add.js": "text/javascript",
+            "editor-canvas-ui.css": "text/css",
+            "editor-circuit-tooltip.js": "text/javascript",
+            "editor-circuit-walk.js": "text/javascript",
+            "editor-inspector-rows.js": "text/javascript",
+            "editor-managed-inputs.js": "text/javascript",
+            "editor-page-bar.css": "text/css",
+            "icons.js": "text/javascript",
+            # Vendored Lucide sprite (shapes only; licence in icons-LICENSE.txt), fetched by icons.js.
+            "icons.svg": "image/svg+xml",
         }
         if asset not in types:
             raise HTTPException(404)

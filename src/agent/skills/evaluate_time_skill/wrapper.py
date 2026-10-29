@@ -600,7 +600,7 @@ def _gate_decision(
     phase = runtime_phase if runtime_phase in ("proposal", "trial", "formal") else "trial"
     decision = policy.decide(
         estimate,
-        RuntimeBudget(time_seconds=max(effective_budget_minutes, 1e-9) * 60.0),
+        RuntimeBudget(time_seconds=effective_budget_minutes * 60.0),
         RuntimeMode(phase=phase, candidate_stage="post_implementation"),  # type: ignore[arg-type]
         # No bounded live probe feeds this pre-flight today (the tuner's
         # authoritative formal measurement is the in-subprocess

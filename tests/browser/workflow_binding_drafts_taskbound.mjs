@@ -6,6 +6,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[key], `Set ${key}`);
@@ -25,6 +26,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}}), faults = [], posts = [], gets = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => {
@@ -35,7 +37,7 @@ try {
   await page.goto(metadata.origin + '/#workflow');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   await page.locator('.workflow-task-details').evaluate(element => { element.open = true; });
   const source = page.locator('#editor-source'), taskChoice = page.locator('#editor-task-choice');
   const original = await readFile(metadata.source, 'utf8');
@@ -77,7 +79,7 @@ try {
   assert.match(await page.locator('#editor-diff').textContent(), /llm_provider/);
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'Review does not publish the bound draft');
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   const saved = await readFile(metadata.source, 'utf8');
   assert.doesNotMatch(saved, /name='llm_provider'/);
   assert.match(saved, /TaskBinding\(/, 'Saving a port draft preserves the existing task identity');
