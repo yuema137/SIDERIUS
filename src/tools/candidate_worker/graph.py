@@ -14,6 +14,7 @@ from workflows.task_composition import RunTaskComposition
 from workflows.termination import infrastructure_abort_reason
 
 from . import readiness, route_phase, unit_runner
+from .adaptor_llm import judge_adaptor_context
 from .adaptor_phase import (
     body_outcome,
     execute_adaptor,
@@ -52,6 +53,9 @@ def execute_fanout(
         if shape.tuning
         else None
     )
+    # Before any effect: LLM COMBINE adaptors' routes, rubrics, guidance and the run's
+    # static judge call sum against max_judge_calls (B6-8a; D3, D4).
+    judge = judge_adaptor_context(request, initial, composition.judge_task)
     inputs = materialize_fanout(
         request,
         Path(initial.workspace),
@@ -102,6 +106,7 @@ def execute_fanout(
                 workspace=Path(initial.workspace),
                 iteration=iteration,
                 skips=route_phase.skip_citations(evidence, routes, routing),
+                judge=judge,
             )
             if outcome is not None:
                 outcomes[decision.next] = outcome

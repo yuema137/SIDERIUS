@@ -280,7 +280,16 @@ first-passing selection"), `fanout.ROUTED_PROFILE` (same node set plus routes) a
 B6-4 literature profiles `fanout.LITERATURE_COLLECTION_PROFILE`
 (`native-literature-collection/v1`, S2) and `fanout.LITERATURE_SPLIT_PROFILE`
 (`native-literature-split/v1`, S3; candidate-worker contract, "Literature adaptor
-profiles"); `fanout.ADAPTOR_PROFILES` lists all four. `candidate.refuse_declaration_only(definition, *,
+profiles"), and the B6-8a `fanout.LITERATURE_JUDGED_PROFILE`
+(`native-literature-judged/v1`), the only profile that executes an LLM COMBINE
+kind; `fanout.ADAPTOR_PROFILES` lists all five. `AdaptorInstance.combine` is
+`llm_strategies.AdaptorCombine` (the deterministic kinds plus the four B2 LLM kinds);
+declaration validation applies the table rows that need no B2 owner (a ranking LLM
+kind feeds `top-k/v1`/`all/v1`; `threshold/v1` basis `rubric` reads only
+`rubric-rank/v1`) and imports no agent module beyond the pydantic-only
+`agent.schemas.judge_refs` (`RubricRef`, `MAX_DEBATE_ROUNDS`; the import-guard test
+allowlists exactly it and proves `agent.schemas.judge_task` still trips it). The kind's
+own rules (`admit_llm_strategy`) run at profile admission. `candidate.refuse_declaration_only(definition, *,
 admits_adaptors=False)` refuses any document with `adaptor_format` ("adaptors are
 declared but this execution profile does not admit them", `ADAPTORS_NOT_ADMITTED`),
 after the routing refusal, in every shape check that preview, preparation, worker and

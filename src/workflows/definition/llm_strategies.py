@@ -12,9 +12,17 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
-from agent.schemas.judge_task import MAX_DEBATE_ROUNDS, RubricRef
+from agent.schemas.judge_refs import MAX_DEBATE_ROUNDS, RubricRef
 
-from .adaptor_strategies import MAX_ADAPTOR_OUTPUTS, Fallback
+from .adaptor_strategies import (
+    MAX_ADAPTOR_OUTPUTS,
+    CollectCombine,
+    ConcatItemsCombine,
+    Fallback,
+    FieldRankCombine,
+    MetricRankCombine,
+    PassCombine,
+)
 from .base import DeclarationModel
 
 
@@ -75,3 +83,35 @@ LLMStrategy = Annotated[
     DebateJudgeStrategy | RubricRankStrategy | PrimaryAdvisorsStrategy | JudgeMergeStrategy,
     Field(discriminator="kind"),
 ]
+
+
+#: Every member of the LLM union, for ``isinstance`` checks.
+LLM_STRATEGY_TYPES = (
+    DebateJudgeStrategy,
+    RubricRankStrategy,
+    PrimaryAdvisorsStrategy,
+    JudgeMergeStrategy,
+)
+
+# The adaptor COMBINE slot: a deterministic kind (B6) or an LLM kind (B2). Admission of
+# an LLM kind (``workflows.judge_strategies.admit_llm_strategy``) runs at profile and
+# launch admission, never during declaration validation (which imports no B2 owner).
+AdaptorCombine = Annotated[
+    PassCombine
+    | CollectCombine
+    | ConcatItemsCombine
+    | MetricRankCombine
+    | FieldRankCombine
+    | DebateJudgeStrategy
+    | RubricRankStrategy
+    | PrimaryAdvisorsStrategy
+    | JudgeMergeStrategy,
+    Field(discriminator="kind"),
+]
+
+
+def produces_ranking(strategy: LLMStrategy) -> bool:
+    """Whether the LLM kind ranks the items it receives (else it synthesizes new values)."""
+    if isinstance(strategy, RubricRankStrategy):
+        return True
+    return isinstance(strategy, DebateJudgeStrategy) and strategy.judge_output == "rank"
