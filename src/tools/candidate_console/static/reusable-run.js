@@ -122,6 +122,7 @@
     for (const [label, key] of [['Proposal advice', 'proposal_advice'], ['Implementation advice', 'implementation_advice'], ['Validation advice', 'validation_advice']]) line(label, value[key] || 'none');
     const training = value.facts?.training;
     if (training) {
+      line('Tuning rounds per body', training.max_rounds);
       line('Health mode', ({observe_only: 'Record only', blocking: 'Block on failure'})[training.healthgate_mode] || 'Not declared');
       for (const phase of ['trial', 'formal']) {
         const budget = training[`${phase}_time_budget_minutes`];

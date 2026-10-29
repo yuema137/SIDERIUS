@@ -290,6 +290,13 @@ declares a `default` key, so a declared `null` default (shown as "Schema default
 null") is distinct from an absent default (no default line). Other keys the schema
 does not declare stay `null` and are not shown.
 `effective` remains the resolved native value for the document.
+The integer **Tuning rounds per body** control edits `training_settings.launch.max_rounds`.
+Its native default remains 10; Default leaves the key absent and Set value saves
+the supplied limit. The generic static training renderer consumes this control
+without a separate browser default. Existing native validation remains authoritative,
+including refusal of trial-scoped overrides when `is_trial=true`, `max_rounds=1`
+and `force_formal_round=true` would discard them. This limit applies within each
+research-loop body, independently of the loop's body count.
 `TrainingInspector.policy` (`TrainingChoiceControl`, `policy_controls`) projects the two
 required launch choices training admission has no default for: **Health checks**
 (`healthgate_mode`: Record only = `observe_only`, Block on failure = `blocking`) and

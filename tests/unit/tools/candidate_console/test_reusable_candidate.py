@@ -574,10 +574,11 @@ def test_review_repeats_the_device_warnings_for_the_reviewed_request(captured, m
     )
 
 
+@pytest.mark.parametrize("rounds", [None, 3])
 @pytest.mark.parametrize("mode", ["observe_only", "blocking"])
 @pytest.mark.parametrize("interpretation", [False, True])
 def test_review_projects_prepared_training_and_task_locks(
-    reusable, direct_child, console_config, monkeypatch, tmp_path, mode, interpretation
+    reusable, direct_child, console_config, monkeypatch, tmp_path, mode, interpretation, rounds
 ):
     """Review lost native budgets, Health and task locks; changing the editor must
     not replace the already prepared facts. The facts assertions fail without the fix.
@@ -603,6 +604,8 @@ def test_review_projects_prepared_training_and_task_locks(
         render_workflow_source(ReusableWorkflowDocument.model_validate_json(json.dumps(payload)))
     )
     monkeypatch.setitem(SETTINGS["launch"], "healthgate_mode", mode)
+    if rounds is not None:
+        monkeypatch.setitem(SETTINGS["launch"], "max_rounds", rounds)
     request = add_training(reusable)
     if interpretation:
         from tests.browser.workflow_editor_server import interpretation_profile_source
@@ -636,6 +639,7 @@ def test_review_projects_prepared_training_and_task_locks(
     assert review.proposal_advice == "Prefer a small interpretable baseline"
     assert review.facts.training is not None
     assert review.facts.training.healthgate_mode == mode
+    assert review.facts.training.max_rounds == (10 if rounds is None else rounds)
     assert review.facts.training.trial_time_budget_minutes == 7
     assert review.facts.training.formal_time_budget_minutes == 19
     assert review.facts.training.trial_max_epochs == 3
