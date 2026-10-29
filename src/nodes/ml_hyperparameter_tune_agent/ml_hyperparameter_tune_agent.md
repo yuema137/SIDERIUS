@@ -408,7 +408,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `secondary_metric_errors` (per record) | `dict[str, str]` | **Step 10 / P2b** — diagnostic PROVENANCE for a declared secondary whose evaluation CRASHED: metric id → a concise one-line diagnostic, also printed. Deliberately NOT a scientific state — a crash produced no contract verdict, so recording a `NotScoreableResult` would fabricate a measurement. The interpreter projects such a secondary as `unavailable`. A `ScopeViolationError` is NEVER recorded here: it is re-raised so the existing outer handler terminates the run, because "observational" bounds ordinary secondary outcomes, not framework-integrity failures. |
 | `per_sample_evidence` (HealthGate context) | `PerSampleEvidence` | **Step 08b C6 / D18 (2026-08-18)** — whether the round's metric produces per-sample evidence at all, carried into `HealthCheckContext` beside `file_vector` rather than collapsed into it. Derived once, by `PerSampleEvidence.for_per_sample(metric_result.per_sample)`: `None` → `scalar_only`, a list (even an empty one) → `available`, and the default `undeclared` for every pre-scoring gate. Before this, a scalar-only metric presented per-file checks with `[]`, which reads as "no files" and PASSES — inapplicability recorded as health. Health consumes this CAPABILITY only and never the metric scalar. Two of the three executable tracks (Pets accuracy, DAVIS global MSE) are scalar-only; TIDMAD is not, so TIDMAD behaviour is unchanged. |
 | `consecutive_fail_rounds_at_exit` | `int` | Terminal value of the loop's consecutive-failure counter. `0` on a healthy completion; equals `max_fail_rounds` when the loop aborted on the trigger. |
-| `termination_reason` | `Literal["completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]` | Why the loop exited. `"aborted_by_gate"` is HISTORICAL (pre-F-SCANC-1 records only; the SKIP_ITER producer was retired 2026-08-26 and the member stays so old records deserialize). `"infrastructure_abort"` (C9c, 2026-07-30) means the runtime EVIDENCE CHANNEL failed — registry, persistence, schema/protocol, probe executor, telemetry, communication, or a policy invariant. It outranks every other reason and halts the CHAIN: `run_one_iteration.py` writes the `.chain_halted` sentinel with `reason="infrastructure_abort"` and exits 3, so neither the foreground loop nor a queued SDSC `afterany` job runs another candidate on the same broken environment. A candidate-class rejection stays attempt-local. |
+| `termination_reason` | `Literal["completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]` | Why the loop exited. `"aborted_by_gate"` is HISTORICAL (pre-F-SCANC-1 records only; the SKIP_ITER producer was retired 2026-08-26 and the member stays so old records deserialize). `"infrastructure_abort"` (C9c, 2026-07-30) means the runtime EVIDENCE CHANNEL failed or training admission could not establish environment evidence — registry, persistence, schema/protocol, probe executor, telemetry, communication, or a policy invariant. It outranks every other reason and halts the CHAIN: `run_one_iteration.py` writes the `.chain_halted` sentinel with `reason="infrastructure_abort"` and exits 3, so neither the foreground loop nor a queued SDSC `afterany` job runs another candidate on the same broken environment. A candidate-class rejection stays attempt-local. |
 | `started_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` entry. |
 | `finished_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` exit. |
 
@@ -662,8 +662,44 @@ half, which lives in the attempt loop's control flow and is unchanged here.
 pre-flight and admission really ran, and not consuming it risks refusing
 forever while the device stays busy) but is **not** a candidate failure:
 no score, no negative planner evidence, no incumbent update, no retry.
-If every attempt in a round is refused, the round produces no
-authoritative result and no candidate is blamed.
+Training admission refuses with `environment_headroom_unproven`,
+`measurement_unavailable`, or `policy_unavailable` when execution evidence or
+policy cannot establish a runnable environment. `execution.run_training`
+persists the refusal record, then returns its typed `AdmissionDecision` in
+`TrainingOutcome.environment_admission_refusal`. The loop ends immediately:
+one attempted plan, no replans, no further attempts or failed-round increments.
+The existing `infrastructure_abort` termination is used, including its existing
+chain-halt behavior. `HyperparamTuningOutput.environment_admission_refusal`
+retains the original `reason_code`, plain `reason`, and evidence in both normal
+and degraded persistence, so a consumer can explain the absent score. This
+optional additive field defaults to `None` for historical outputs and other exits.
+Earlier successful records, if any, remain available; the refusal adds no score.
+
+Training classifies the normalized decision against the core authority
+`admission.RESOURCE_REJECTIONS`; it does not maintain another stopping-code set.
+`runtime.normalize_training_admission_refusal` defaults a missing/empty reason
+code to `policy_unavailable` before recording or deciding whether to stop. If
+full admission validation fails, it emits a valid refusal with
+the original message and raw payload under `evidence.invalid_admission`. A
+recognized code is retained, including `insufficient_headroom`, whose resource
+record status and retry path remain unchanged despite incomplete evidence.
+Only missing/unknown codes become `policy_unavailable`. An infrastructure refusal
+yields one refusal record and an immediate stop, never a second attempt-failure
+record followed by a retry.
+
+The complete admission vocabulary in `core/runtime_control/admission.py` is
+these three reasons plus `insufficient_headroom`. The latter remains retryable:
+a smaller candidate can change its resource verdict. Ordinary model failures
+(including OOM and non-finite loss) retain their attempt/fail-round behavior.
+`isolated_admission.py` funnels its environment, occupancy, ownership, identity,
+policy and demand-evidence refusals through `environment_headroom_unproven`;
+it declares no additional reason codes. Inference/preflight and provider failure
+retry policies are outside this training-refusal change.
+
+Validation: `test_environment_admission_stop.py` drives the real loop with
+stubbed planner and training/admission, checks one attempt and zero replans for
+all three terminal reasons, verifies persisted reasons, and checks nine attempts
+for ordinary failures and `insufficient_headroom` under a 3-by-3 budget.
 
 ### Pre-phase GPU measurement (V20 PR C2)
 

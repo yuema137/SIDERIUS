@@ -42,6 +42,7 @@ from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
+from core.runtime_control.admission import RESOURCE_REJECTIONS
 from core.training_seeds import TrainingSeedPlan
 from execute_tools.dataset_config import (
     ScopeViolationError,
@@ -973,6 +974,10 @@ def run_training(
     train_time = round(time.time() - t0, 1)
     _raise_if_wall_clock_timeout(train_status, sandbox, run_name)
     _raise_if_evidence_channel_failure(train_status, sandbox, run_name)
+    admission_refusal = None
+    if train_status.get("status") == _records.RESOURCE_ADMISSION_STATUS:
+        admission_refusal = _runtime.normalize_training_admission_refusal(train_status)
+        train_status = {**train_status, "admission": admission_refusal.model_dump(mode="json")}
     if _handle_admission_refusal(
         train_status,
         ordering=prepared.ordering,
@@ -990,6 +995,11 @@ def run_training(
         experiment_arm=agent_input.experiment_arm,
         is_trial=prepared.plan.is_trial,
     ):
+        if (
+            admission_refusal is not None
+            and admission_refusal.reason_code not in RESOURCE_REJECTIONS
+        ):
+            return TrainingOutcome.end_round(environment_admission_refusal=admission_refusal)
         return TrainingOutcome.next_attempt()
     if _handle_in_subprocess_rejection(
         train_status,

@@ -1308,6 +1308,7 @@ def finalize_run_output(
         "max_fail_rounds": max_fail_rounds_setting,
         "consecutive_fail_rounds_at_exit": consecutive_fails,
         "termination_reason": termination_reason,
+        "environment_admission_refusal": exit_snapshot.environment_admission_refusal,
         # Step 09a C2 — the ONE writer of the run's bound MetricSpec. The
         # tuner already resolved it (`ml_hyperparameter_tune_agent.py:541`);
         # this transports THAT value so the interpreter never derives a
@@ -1377,6 +1378,11 @@ def finalize_run_output(
             "started_at": started_at,
             "finished_at": finished_at,
             "termination_reason": termination_reason,
+            "environment_admission_refusal": (
+                exit_snapshot.environment_admission_refusal.model_dump(mode="json")
+                if exit_snapshot.environment_admission_refusal is not None
+                else None
+            ),
             # Step 09a C2 — the same rule the healthgate_mode comment above
             # states: the run's metric binding is a LAUNCH fact and does not
             # stop existing because the tuner later failed. Dumped rather

@@ -57,7 +57,7 @@ from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 # at intake and impossible one layer down -- which is exactly what this
 # field did before. Same layering as proposal.py importing
 # core.hardware_context.
-from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.admission import AdmissionDecision, AdmissionEnforcement
 from core.runtime_control.completion import RuntimeCompletionPolicy
 from core.runtime_control.gpu_execution_evidence import GpuExecutionReceipt
 from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
@@ -4002,12 +4002,21 @@ class HyperparamTuningOutput(BaseModel):
             "executor (non-retryable configuration/invariant failure, "
             "status='failed' — docs/design/enable_partial_file_list.md DS5); "
             "'infrastructure_abort' = the runtime EVIDENCE CHANNEL failed "
+            "or training admission cannot establish environment evidence "
             "(C9c) — registry/persistence/schema/probe-executor/telemetry/"
             "communication failure or a policy invariant breach. Outranks "
-            "every other reason: nothing measured in this run can be "
-            "trusted, and the chain must halt instead of retrying the next "
+            "every other reason: the chain must halt instead of retrying the next "
             "candidate into the same broken environment "
             "(docs/design/runtime_estimation_and_calibration.md §23-C9c)."
+        ),
+    )
+
+    environment_admission_refusal: AdmissionDecision | None = Field(
+        default=None,
+        description=(
+            "Training admission evidence that terminated tuning with infrastructure_abort. "
+            "Carries the original reason_code and plain reason; no model replan can repair "
+            "this environment/evidence refusal. None for legacy outputs and other exits."
         ),
     )
 

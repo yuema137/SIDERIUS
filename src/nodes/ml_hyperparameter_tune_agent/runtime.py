@@ -22,13 +22,14 @@ from importlib import import_module as _import_module
 from pathlib import Path
 from typing import Any
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from agent.schemas.hyperparam_tuning import ExperimentPlan, HyperparamTuningInput
 from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.record_role import observed_attempt_role
+from core.runtime_control.admission import AdmissionDecision, AdmissionReason
 from core.runtime_control.records import AdmissionRecord
 from core.runtime_control.session import RuntimeControlPolicy, WatchdogConfig
 from core.sandbox_executor import TidmadSandbox
@@ -128,6 +129,31 @@ def _time_skip_memory_extra(time_check: dict, plan) -> dict:
     if time_check.get("inference_batch_uncalibrated"):
         extra["inference_batch_uncalibrated"] = True
     return extra
+
+
+def normalize_training_admission_refusal(status: dict) -> AdmissionDecision:
+    """Normalize once for both the refusal record and the training stop decision.
+
+    Preserve recognized reason codes even when the full decision cannot validate.
+    Missing/unknown codes become policy_unavailable; retain raw evidence for diagnosis.
+    """
+    raw = status.get("admission") or {}
+    admission = dict(raw) if isinstance(raw, dict) else {}
+    admission["reason_code"] = admission.get("reason_code") or "policy_unavailable"
+    try:
+        return AdmissionDecision.model_validate(admission)
+    except ValidationError:
+        try:
+            reason_code = TypeAdapter(AdmissionReason).validate_python(admission["reason_code"])
+        except ValidationError:
+            reason_code = "policy_unavailable"
+        return AdmissionDecision(
+            admitted=False,
+            reason_code=reason_code,
+            requirement_source="unavailable",
+            reason=str(status.get("message") or "The environment refused the training phase."),
+            evidence={"invalid_admission": raw},
+        )
 
 
 def _handle_admission_refusal(
@@ -701,7 +727,7 @@ def apply_forecast_time_authority(time_check: dict) -> None:
     """
     breakdown = time_check.get("breakdown")
     over_budget = breakdown.get("over_effective_budget") if isinstance(breakdown, dict) else None
-    if not isinstance(over_budget, bool):
+    if not isinstance(breakdown, dict) or not isinstance(over_budget, bool):
         raise RuntimeEvidenceChannelError(
             "forecast wall-time admission did not produce a boolean over_effective_budget decision"
         )
