@@ -11,10 +11,11 @@ from core.seeding import MissingRunSeed
 from tools.candidate_prepare import prepare_candidate, prepare_reusable_candidate
 from tools.candidate_prepare.reusable_models import ReusablePreparationObservations
 from tools.candidate_worker import launch_candidate
+from tools.candidate_worker.parallel_models import HostGrant
 
 from .cancel import cancel_probe
 from .files import canonical, publish, read_model
-from .host_liveness import PLACEMENT_FILE, SANDBOX_FILE, published_identity
+from .host_liveness import GRANT_FILE, PLACEMENT_FILE, SANDBOX_FILE, published_identity
 from .host_queue import is_queued, wait_for_placement
 from .models import (
     SEEDED_SUBMISSIONS,
@@ -87,6 +88,7 @@ def execute(path: Path) -> int:
             execute_resume(
                 record,
                 cancel_requested=cancel_probe(path, record),
+                host_grant=host_grant(path),
                 **sandbox_observer(record, path),
             )
         else:
@@ -95,6 +97,7 @@ def execute(path: Path) -> int:
                 invocation_id=record.native_id,
                 run_seed=record.run_seed,
                 cancel_requested=cancel_probe(path, record),
+                host_grant=host_grant(path),
                 **sandbox_observer(record, path),
             )
         native = native_receipt(record)
@@ -139,6 +142,13 @@ def host_placement_evidence(record: OperationRecord, path: Path) -> HostPlacemen
         process=current_identity(record),
         sandbox=published_identity(state_root, operation_id, record.request_digest, SANDBOX_FILE),
     )
+
+
+def host_grant(path: Path) -> HostGrant | None:
+    """A placed parallel run's grant (B3-4a); ``None`` for every other operation."""
+    if not os.path.lexists(path / GRANT_FILE):
+        return None
+    return read_model(path / GRANT_FILE, HostGrant, private_file=True)
 
 
 def sandbox_observer(record: OperationRecord, path: Path) -> dict[str, Callable[[int], None]]:

@@ -18,7 +18,9 @@ timing belong to B3-4. Without a
   `gpu_count == 1`), `host_memory_gib`, `cpu_slots`, `wall_seconds` (the
   existing watchdog/timeout owner's value; carried, not used for admission),
   `time_budgeted` (strict bool, default `false`, omitted from serialization
-  when false: the unit runs under a measured time budget, decision B3-Q6).
+  when false: the unit runs under a measured time budget, decision B3-Q6),
+  `unit_slots` (positive, default 1, omitted when 1: the concurrent units a
+  parallel run's envelope may run, B3-4a).
   Requests are derived by the core, never authored by an LLM. Booleans and
   non-finite quantities are refused.
 - `host_memory_gib_from_role(RoleCeiling)` projects a declared positive
@@ -33,7 +35,8 @@ timing belong to B3-4. Without a
   `pair_admission.resolve_gpu_ceiling`.
 - `HostBudget`: `gpus` (declared order is first-fit order; may be empty),
   `host_memory_gib`, `cpu_slots`, `max_concurrent_units`, `source`
-  (`caller` or `file`). There are no defaults: every quantity is an explicit
+  (`caller`, `file`, or `host_reservation` for a run's budget derived from its
+  host-ledger grant, `HostGrant.run_budget`). There are no defaults: every quantity is an explicit
   operator input. Measured capacity alone and `hardware_models._SAFETY_FRACTION`
   are never promoted into a budget. Duplicate slot UUIDs refuse.
   `acknowledge_shared_gpu_time_budget` (strict bool, default `false`, omitted
@@ -63,7 +66,8 @@ default, so every caller states its refusal semantics.
    `running`; a tie refuses rather than being broken by input order.
 3. Ready units are visited in ascending `dispatch_ordinal`:
    - **refused** when the request cannot fit even an idle budget: host
-     memory or CPU slots above the budget total, a GPU unit with no slots, or
+     memory, CPU slots or `unit_slots` above the budget total, a GPU unit with
+     no slots, or
      a VRAM request infeasible alone on every slot. Reasons start with
      `escalated to operator`. Nothing is shrunk, re-batched or re-routed. The
      refusal policy then applies:
@@ -75,7 +79,8 @@ default, so every caller states its refusal semantics.
        units are planned as if it were absent. This is the cross-operation
        mode (B3-5), where operations are independent submissions.
    - **queued** when it would fit an idle budget but the ledger is full in
-     some dimension: `max_concurrent_units`, unreserved host memory,
+     some dimension: `max_concurrent_units` (the ledger's summed `unit_slots`
+     plus the request's), unreserved host memory,
      unreserved CPU slots, or no slot with enough unreserved VRAM that it may
      share. Decision B3-Q6: unless the budget sets
      `acknowledge_shared_gpu_time_budget`, a slot already holding a placed

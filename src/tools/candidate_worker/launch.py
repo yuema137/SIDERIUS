@@ -25,6 +25,7 @@ from tools.workspace_sandbox.runner import (
 from .admission import admit_input_paths
 from .layout import candidate_proposal_dir
 from .models import RECEIPT_IDENTITY_FIELDS, CandidateRunReceipt, CandidateRunRequest
+from .parallel_models import GRANT_CONTROL_FILE, HostGrant, admitted_run_budget
 from .preflight import fresh_preview, require_credentials
 
 
@@ -111,6 +112,7 @@ def launch_candidate(
     run_seed: RunSeedBinding | None = None,
     on_sandbox_spawn: SpawnObserver | None = None,
     cancel_requested: CancelProbe | None = None,
+    host_grant: HostGrant | None = None,
 ) -> CandidateRunReceipt:
     """Run precisely one chain; failures preserve the claimed workspace.
 
@@ -121,8 +123,13 @@ def launch_candidate(
     host reservation ledger binds it); omitted, the launch is unchanged.
     ``cancel_requested`` is polled while the sandbox runs; when it fires the
     sandbox group is terminated and the receipt status is ``cancelled``.
+    ``host_grant`` is a parallel run's host-ledger reservation (B3-4a); it is
+    published as ``candidate_run/host_grant.json`` for the worker.
     """
     request = CandidateRunRequest.model_validate_json(request.model_dump_json())
+    admitted_run_budget(request.parallel, host_grant)
+    if request.parallel is not None and request.preview.execution_profile is None:
+        raise ValueError("parallel dispatch requires a graph execution profile")
     seed = admitted_run_seed(request.run_seed, run_seed)
     identity = (
         uuid4()
@@ -166,6 +173,8 @@ def launch_candidate(
         if any(path != control for path in workspace.iterdir()):
             raise ValueError("workspace became nonempty before exclusive claim")
         publish(control / "request.json", request, bounded=graph)
+        if host_grant is not None:
+            publish_bytes_write_once(str(control / GRANT_CONTROL_FILE), encode_control(host_grant))
         if request.workflow_source is not None:
             publish_bytes_write_once(
                 str(control / "workflow.py.snapshot"),

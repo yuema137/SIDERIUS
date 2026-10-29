@@ -20,6 +20,7 @@ from tools.workspace_sandbox.runner import (
 from .graph_evidence import read_graph_control
 from .loop_models import LoopContinuation
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .parallel_models import GRANT_CONTROL_FILE, HostGrant, admitted_run_budget
 
 if TYPE_CHECKING:
     from core.chain_state import ChainState
@@ -170,6 +171,7 @@ def launch_continuation(
     binding: LoopContinuation,
     *,
     cancel_requested: CancelProbe | None = None,
+    host_grant: HostGrant | None = None,
     on_sandbox_spawn: SpawnObserver | None = None,
 ) -> CandidateRunReceipt:
     """Only operation admission publishes the binding; no fresh-workspace bypass.
@@ -182,6 +184,9 @@ def launch_continuation(
     control = segment_control(initial, binding.operation_id)
     if read_continuation(initial, binding.operation_id) != binding:
         raise ValueError("resume launch binding changed")
+    admitted_run_budget(request.parallel, host_grant)
+    if host_grant is not None:
+        publish_bytes_write_once(str(control / GRANT_CONTROL_FILE), encode_control(host_grant))
     profile = SandboxProfile(
         workspace=Path(initial.workspace),
         read_only=tuple(Path(p) for p in request.read_only),

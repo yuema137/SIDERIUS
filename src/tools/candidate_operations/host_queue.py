@@ -16,13 +16,16 @@ from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import Field
+
 from core.runtime_control.scheduling import HostBudget, Placement
 from core.subprocess_env import CUDA_VISIBLE_DEVICES_ENV_VAR
+from tools.candidate_worker.parallel_models import HostGrant
 from tools.workflow_preview.models import PreviewModel
 
 from .files import publish, read_model
 from .host_ledger import locked_ledger, promote, sweep, without, write_state
-from .host_liveness import PLACEMENT_FILE
+from .host_liveness import GRANT_FILE, PLACEMENT_FILE
 from .models import OperationFailure
 
 #: Written write-once by admission beside a queued operation's record.
@@ -37,6 +40,8 @@ class HostQueueTicket(PreviewModel):
     ledger_root: str
     budget: HostBudget
     placement: Placement
+    #: A parallel run (B3-4a): once placed, the child also publishes its ``HostGrant``.
+    grant: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 def is_queued(path: Path) -> bool:
@@ -62,6 +67,8 @@ def wait_for_placement(
             return None
         if placement is not None:
             publish(path / PLACEMENT_FILE, placement)
+            if ticket.grant:
+                publish(path / GRANT_FILE, HostGrant(budget=ticket.budget, placement=placement))
             if placement.gpu_uuid is not None:
                 os.environ[CUDA_VISIBLE_DEVICES_ENV_VAR] = placement.gpu_uuid
             return placement

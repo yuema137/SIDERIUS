@@ -1588,3 +1588,63 @@ profile" above); readiness consumes its output (skip semantics above).
   `evaluate_route` repeats it as its own precondition for replay.
 
 Tests: `tests/unit/tools/candidate_worker/test_route_eval.py`.
+
+## Parallel dispatch
+
+Design: B3-4 (`advanced/b3-parallel-scheduling.md`; operator decisions of
+2026-10-28: per-capability budgets, no joint budget; parallel runs work under
+the host reservation ledger). Owners: `parallel_models.py` (request, grant,
+run-budget authority), `parallel_envelope.py` (peak concurrent demand).
+Status: B3-4a lands the request, the envelope and the grant. Units still
+dispatch serially (one at a time, within the reserved capacity); concurrent
+dispatch inside the grant is B3-4b.
+
+Request. `CandidateRunRequest.parallel: ParallelDispatch | None`, omitted when
+`None`, so serial request bytes and digests are unchanged.
+`ParallelDispatch.capabilities` maps a node capability (`proposal`,
+`implementation`, `validation`, `literature`, `interpretation`, `tuning`) to
+`CapabilityResources`: `gpu` (bool), `vram_gib` (exactly when `gpu`),
+`host_memory_gib`, `cpu_slots`. Every value is the operator's; nothing is
+guessed. A node whose capability has no entry is not parallelized: it runs alone,
+with today's environment. `ParallelDispatch.budget` (a `HostBudget`, omitted
+when `None`) is the run's own budget for a launch without a host ledger.
+`launch_candidate` refuses `parallel` on a request without a graph execution
+profile.
+
+Budget authority. `admitted_run_budget(parallel, grant)` is the one rule: a
+serial run has no budget and refuses a grant. A parallel run takes exactly one
+of its host-ledger `HostGrant` or `parallel.budget`; both or neither raise
+`ValueError` at the launch boundary (`launch_candidate`, `launch_continuation`).
+
+Envelope (`envelope_request(request, serial)`). Under the host ledger a parallel
+run reserves one entry, its envelope, computed from the graph:
+- two declared units may overlap only when no dependency path joins them
+  (paths through adaptors and undeclared nodes count; dependencies are the
+  profile's `execution_families(...).predecessors`);
+- each quantity (VRAM, host memory, CPU slots, unit count) takes its own peak,
+  the maximum-weight antichain of the declared units
+  (`max_weight_antichain`: weighted Dilworth via exact-rational max-flow). Each
+  peak is reachable, though not necessarily in the same instant as the others;
+- `serial` (the operation's own `resources` declaration) is the floor of every
+  quantity: the run never reserves less than it declared (undeclared units run
+  alone under it). Unit id, ordinal, wall time and `time_budgeted` come from it;
+- the GPU part is one slot holding the peak VRAM sum (`gpu_count=1`,
+  `vram_source="configured_cap"`), so every unit always fits its own envelope.
+  Multi-GPU envelopes are not supported; a peak above every slot's ceiling is
+  refused `resource_refused` like any request;
+- `unit_slots` is the peak unit count, counted against the host's
+  `max_concurrent_units`.
+Route exclusivity is not used: the peak is conservative only where two arms of
+one route can never both run.
+
+Grant. `HostGrant` (`budget`, `placement`) is a placement against its own budget.
+`HostGrant.run_budget()` is what the run schedules against: the reserved slot
+with `operator_ceiling_gib` = the reserved VRAM (the host quota and measured
+capacity still apply), the reserved host memory and CPU slots,
+`max_concurrent_units` = `unit_slots`, `source="host_reservation"`. A unit
+larger than the grant is refused and units that together exceed it queue, so no
+unit can be placed outside the reservation. `launch_candidate(host_grant=...)`
+publishes it write-once as `candidate_run/host_grant.json`;
+`launch_continuation` publishes it in the segment's control directory.
+
+Tests: `tests/unit/tools/candidate_operations/test_parallel_envelope.py`.

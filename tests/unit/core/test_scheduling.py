@@ -302,6 +302,23 @@ def test_time_budgeted_unit_takes_an_unshared_slot_and_queues_only_when_none_is_
     assert _shape(shared) == [("timed", "placed", "GPU-a")]
 
 
+def test_an_envelope_counts_every_unit_it_may_run_against_the_concurrency_limit():
+    """B3-4a: a parallel run is one reservation running ``unit_slots`` units.
+
+    Counting reservations instead would admit two 2-unit envelopes under a
+    3-unit limit, i.e. four concurrent units.
+    """
+    budget = _budget(units=3)
+    envelope = _cpu("run-a", 0).model_copy(update={"unit_slots": 2})
+    running = _running(budget, envelope)
+    second = _cpu("run-b", 1).model_copy(update={"unit_slots": 2})
+    queued = plan_dispatch((second,), running, budget, on_refusal="continue").placements[0]
+    assert (queued.decision, queued.reasons) == ("queued", ("max_concurrent_units 3 reached",))
+    oversized = _cpu("run-c", 2).model_copy(update={"unit_slots": 4})
+    refused = plan_dispatch((oversized,), (), budget, on_refusal="continue").refused
+    assert "max_concurrent_units 3" in refused[0].reasons[1]
+
+
 def test_unset_time_budget_flag_keeps_request_serialization():
     """Recorded placements (placement.json, ledger) predate the field; false is omitted."""
     assert "time_budgeted" not in _gpu("plain", 0, 1.0).model_dump(mode="json")

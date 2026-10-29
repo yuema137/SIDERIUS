@@ -232,6 +232,17 @@ SIDERIUS version cannot read the ledger file (another version wrote it, or it is
 damaged). Wait until the runs it
 lists have ended, move the named `ledger.json` aside, and retry.
 
+A graph run can also run its independent nodes at the same time. To allow it,
+add a `parallel` block to the run request that says what one node of each kind
+needs (`gpu`, `vram_gib`, `host_memory_gib`, `cpu_slots`), for example
+`{"capabilities": {"validation": {"gpu": true, "vram_gib": 2.0, "host_memory_gib": 4.0, "cpu_slots": 1}}}`.
+Kinds you leave out run one at a time, as today. With a ledger, the run reserves
+only what its nodes can use at the same moment (for example, two checks that can
+run together, not every node in the graph), and it waits in the queue like any
+other run until that fits. Without a ledger, the block must also carry its own
+`budget`. The exact rules are in the
+[worker contract](../candidate_worker/candidate-worker-contract.md#parallel-dispatch).
+
 Only waiting runs poll the ledger. A finished run's reservation is returned the
 next time a waiting run polls or any submission uses the ledger. If a crash leaves a reservation behind,
 release it explicitly:

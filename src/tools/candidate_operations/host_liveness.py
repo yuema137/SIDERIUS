@@ -26,6 +26,8 @@ from .models import OperationFailure, ProcessIdentity
 from .process import observe, session_members
 
 PLACEMENT_FILE = "placement.json"
+#: A placed parallel run's ``HostGrant`` (B3-4a): its budget and envelope placement.
+GRANT_FILE = "host_grant.json"
 PROCESS_FILE = "process.json"
 SANDBOX_FILE = "sandbox.json"
 
