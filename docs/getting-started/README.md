@@ -40,14 +40,14 @@ project. These are example names, not a layout the tools require:
 
 ```text
 /absolute/project/                 # outside the SIDERIUS checkout
-  package/task.yaml                # task manifest; references your task plugins
-  package/task_plugins/            # dataset/model/metric implementations
-  data/                            # existing dataset, or configure another external root
+  task.yaml                        # task manifest: ReusableTaskReferences(manifest="task.yaml")
+  task_plugins/                    # dataset/model/metric implementations
+  data/                            # dataset: ReusableTaskReferences(data_root="data")
   workflow.py                      # workflow declaration: steps, advice, budgets, loop
   llm.json                         # saved provider/model profile
   reusable-request.json            # preparation request for one run
   store.json                       # where detached operations keep their records
-/absolute/runs/                    # one folder per prepared run (outside the project)
+/absolute/runs/                    # create it first; one folder per prepared run
 /absolute/operations/              # operation records; created by the first submit
 ```
 
@@ -66,7 +66,7 @@ a task package and an NVIDIA GPU with CUDA for the training step.
    [`examples/workflow_declarations/`](../../examples/workflow_declarations/)
    into your project as `workflow.py`:
    [`reusable_training.py`](../../examples/workflow_declarations/reusable_training.py)
-   runs Propose → Implement → Validate → Train & Tune once;
+   runs Propose → Implement → Validate → Train & tune once;
    [`managed_reusable_candidate.py`](../../examples/workflow_declarations/managed_reusable_candidate.py)
    stops after validation. Point its `ReusableTaskReferences(manifest=...,
    data_root=...)` at your task package and data (relative paths resolve against
@@ -81,6 +81,9 @@ a task package and an NVIDIA GPU with CUDA for the training step.
    [request recipe](../../src/tools/candidate_prepare/candidate-prepare-contract.md#reusable-request-recipe).
    It names `workflow.py`, the LLM profile, a runs folder, the time limits and
    the environment variable names of the provider keys (never the key values).
+   The runs folder (`/absolute/runs` above) must already exist, outside your
+   task and data folders. List it in both `preparation_roots` and
+   `candidate_roots` of `store.json` (step 4) before you launch.
 
 3. **Prepare the run.** This step is offline: no model is called and nothing
    is trained.
@@ -145,6 +148,21 @@ to record the settings for a fresh foreground multi-iteration CLI run before
 explicitly launching it. The original declaration and configuration files remain
 authoritative; capture does not certify scientific success. Follow the linked
 guide for prerequisites and path requirements.
+
+## Check your installation and other routes
+
+The [Quickstart pack](../../examples/quickstart/README.md) offers synthetic data
+preparation and component checks that run on CPU without provider calls. They
+check installation and task contracts, not scientific hardware or model
+performance. A real run, including a Quickstart research chain, needs an NVIDIA
+GPU with CUDA; the chain header and the console run review say so, and a launch
+on a machine without one stops before any model call.
+
+The optional reviewed-launch route covers a fresh standard single iteration.
+For your own caller, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
+Choosing that execution route is separate from choosing Professional or
+Assistant collaboration. See [the documentation map](../README.md) for deeper
+references.
 
 ## Try the browser console (experimental)
 
@@ -336,7 +354,7 @@ you own; the console workspace is created inside it) and
 5. **Build a workflow for it.** On **Task**, select your task and read the panel:
    it shows the splits, model input and output, main score and Health checks
    read from your package. On **Workflow**, select **New setup…**, start from
-   the research-loop template, add your advice, rounds and stop conditions, and
+   the research-loop template, add your advice, tuning rounds per iteration and stop conditions, and
    save a version. [Create an experiment setup and run it](../../src/tools/candidate_console/README.md#create-an-experiment-setup-and-run-it)
    walks through each control.
 
@@ -350,7 +368,7 @@ edit the task's entry in `console.json` and restart the console.
 
 The browser console can prepare, review and launch a saved workflow, from **one
 candidate: Propose → Implement → Validate** up to an interpreted training workflow
-(Interpret → Propose → Implement → Validate → Train & Tune) repeated as a research
+(Interpret → Propose → Implement → Validate → Train & tune) repeated as a research
 loop. Use the [training inspector guide](../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
 to configure the training stage. Completion is not a scientific success verdict.
 Package your task with your coding agent first: the browser creates experiment
@@ -408,16 +426,3 @@ for the second route. Saving and preparation never launch automatically.
 Launching runs code and may make paid calls. Configuration checks and offline
 preparation do not prove provider access or candidate success. Keep the
 operation ID to reopen status and logs without selecting an editor project.
-
-The [Quickstart pack](../../examples/quickstart/README.md) offers synthetic data
-preparation and component checks that run on CPU without provider calls. They
-check installation and task contracts, not scientific hardware or model
-performance. A real run, including a Quickstart research chain, needs an NVIDIA
-GPU with CUDA; the chain header and the console run review say so, and a launch
-on a machine without one stops before any model call.
-
-The optional reviewed-launch route covers a fresh standard single iteration.
-For your own caller, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
-Choosing that execution route is separate from choosing Professional or
-Assistant collaboration. See [the documentation map](../README.md) for deeper
-references.

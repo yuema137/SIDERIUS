@@ -12,7 +12,7 @@ train and evaluate them, and use the results to guide the next attempt.
 
 ![Cancer gene identification: best Formal test AUPRC with adaptive test feedback, against TREE references](docs/assets/results/cancer.svg)
 
-Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
+Sources: [SIDERIUS paper (arXiv:2610.14024)](https://arxiv.org/abs/2610.14024) ·
 [TREE paper](https://doi.org/10.1038/s41551-024-01312-5) ·
 [Comparison data and evaluation conditions](docs/assets/results/provenance.md).
 
@@ -144,8 +144,8 @@ Either collaboration style can use either execution approach:
 
 | Execution | What happens | When to choose it |
 | --- | --- | --- |
-| **Fixed workflow — lightweight starting point** | Research capabilities run in a predefined sequence, without an extra LLM deciding each next call. | Start quickly with lower coordination overhead and a predictable research loop. |
-| **Orchestration — flexible exploration** | An LLM caller chooses and combines capabilities as evidence arrives. | Explore beyond a fixed sequence, with more setup and potentially higher LLM cost. |
+| **Fixed workflow: lightweight starting point** | Research capabilities run in a predefined sequence, without an extra LLM deciding each next call. | Start quickly with lower coordination overhead and a predictable research loop. |
+| **Orchestration: flexible exploration** | An LLM caller chooses and combines capabilities as evidence arrives. | Explore beyond a fixed sequence, with more setup and potentially higher LLM cost. |
 
 **Workflow keeps coordination lightweight; orchestration offers more room to
 adapt the research process.** In the paper's TIDMAD comparison, fixed workflows
@@ -155,9 +155,9 @@ potential, not a guarantee that orchestration wins on every task.
 
 [![Paper Figure 3: valid and non-valid TIDMAD models versus estimated LLM cost](docs/assets/paper/figure3.svg)](docs/assets/paper/figure3.svg)
 
-**Figure 3 — Exploration and LLM cost on TIDMAD.** The left panel counts valid
+**Figure 3. Exploration and LLM cost on TIDMAD.** The left panel counts valid
 models; the right counts non-valid models. Costs are estimates and exclude GPU
-training. See the [paper](https://zenodo.org/records/23071121) for the experimental
+training. See the [paper](https://arxiv.org/abs/2610.14024) for the experimental
 conditions, or the [orchestration setup guide](src/tools/orchestration_setup/README.md)
 to prepare your own caller and sandbox.
 
@@ -236,7 +236,7 @@ and incur API charges.
 
 ## Paper and architecture
 
-Read [Beyond a Better Score: Long-Horizon Agentic ML Development and Evaluation Protocol for Physics Time Series](https://zenodo.org/records/23071121).
+Read [Beyond a Better Score: Long-Horizon Agentic ML Development and Evaluation Protocol for Physics Time Series](https://arxiv.org/abs/2610.14024).
 The paper studies scientifically valid model development on TIDMAD, TESS,
 Project8 and LIGO, combining composable research capabilities, scientific
 checks and exploration within compute budgets.
@@ -245,7 +245,7 @@ checks and exploration within compute budgets.
 
 [![Paper Figure 1: SIDERIUS infrastructure and typed capability contracts](docs/assets/paper/figure1.svg)](docs/assets/paper/figure1.svg)
 
-**Figure 1 — Infrastructure.** A human scientist, a fixed workflow, or an LLM
+**Figure 1. Infrastructure.** A human scientist, a fixed workflow, or an LLM
 orchestrator can call the same scientific capabilities through typed contracts.
 The caller chooses the calls, assembles their inputs, and owns control and
 history. Each capability owns its reasoning and tools, including executable
@@ -253,14 +253,14 @@ Data Analysis.
 
 [![Paper Figure 2: task specification and multilayer evaluation](docs/assets/paper/figure2.svg)](docs/assets/paper/figure2.svg)
 
-**Figure 2 — Evaluation.** The task package separates training objectives,
+**Figure 2. Evaluation.** The task package separates training objectives,
 validation monitoring, scientific ranking, and supporting evidence.
 Scoreability checks whether the declared metric can be computed; Health
 records applicable model/output checks and follows their configured blocking
 or observational policy. Offline behavioral review adds evidence for scientific
 acceptance without feeding its judgments back into search.
 
-These figures are exported from the [paper on Zenodo](https://zenodo.org/records/23071121).
+These figures are exported from the [paper on arXiv](https://arxiv.org/abs/2610.14024).
 Their source and export details are recorded in
 [`docs/assets/paper/README.md`](docs/assets/paper/README.md).
 
@@ -293,8 +293,8 @@ and first-run references.
 | Choice | What it controls |
 | --- | --- |
 | Task package | Data meaning, model input/output, objective, metrics and validity checks |
-| Workflow (`workflow.py`) | Which research steps run, what evidence passes between them, advice, training budgets and loop stop conditions |
-| Experiment settings | Provider/model routing, data scope, iterations, Trial/Formal rounds and resource budgets |
+| Workflow (`workflow.py`) | Which research steps run, what evidence passes between them, advice, the number of iterations and stop conditions of a research loop, tuning rounds per iteration, Trial/Formal tuning rounds and training budgets |
+| Run settings | Provider/model routing (the LLM profile, `llm.json`), plus time limits, network, devices and provider key names (the preparation request) |
 | Workspace | Where the run records its identity, generated models and results |
 
 For example, changing the metric changes the task's scientific meaning.
