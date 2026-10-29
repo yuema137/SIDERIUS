@@ -31,7 +31,8 @@ def test_cli_names_schema_location_without_values(
     args = ("--workspace", str(tmp_path)) if command == "init" else ("--config", str(path))
     code, out, err = _main(monkeypatch, capsys, command, *args)
     assert code == 2
-    assert err == f"console.json is invalid at tasks[0].{field} ({kind})\n"
+    notice = "Nothing was deleted.\n" if command == "init" else ""
+    assert err == f"console.json is invalid at tasks[0].{field} ({kind})\n" + notice
     assert "DUMMY_SECRET_VALUE" not in out + err
     assert str(tmp_path) not in out + err
 
@@ -52,7 +53,7 @@ def test_cli_names_missing_configured_file(resource, console_config, tmp_path, m
                 recovery_directory=str(recovery),
             )
         ]
-        item = "editor project quickstart"
+        item = "experiment setup quickstart"
     else:
         data["tasks"][0][resource] = str(missing)
         item = "task synthetic"
@@ -62,3 +63,28 @@ def test_cli_names_missing_configured_file(resource, console_config, tmp_path, m
     code, _, err = _main(monkeypatch, capsys, "check", "--config", str(path))
     assert code == 2
     assert err == f"{item}: {resource} file {missing} is missing\n"
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "long_" + "field_" * 5,
+        "ghp_dummy_token",
+        "sk-dummy-token",
+        "sk_dummy_token",
+        "AbCdEfGhIjKlMnOp1234",
+        "AbCdEfGhIjKlMnOp_1234",
+    ],
+)
+def test_cli_redacts_token_like_extra_keys(key, console_config, tmp_path, monkeypatch, capsys):
+    """Defect: a pasted token used as an extra JSON key is disclosed as a field location."""
+    data = console_config.model_dump(mode="json")
+    data["tasks"][0][key] = "DUMMY_VALUE"
+    path = tmp_path / "console.json"
+    path.write_text(json.dumps(data))
+    path.chmod(0o600)
+    code, out, err = _main(monkeypatch, capsys, "check", "--config", str(path))
+    assert code == 2
+    assert err == "console.json is invalid at tasks[0].<key> (extra_forbidden)\n"
+    assert key not in out + err
+    assert "DUMMY_VALUE" not in out + err

@@ -102,10 +102,13 @@ def test_registered_task_schema_errors_name_fields_without_values(
     args = ("--workspace", str(root.parent)) if command == "init" else ("--config", str(config))
     code, out, err = _main(monkeypatch, capsys, command, *args)
     assert code == 2
-    assert set(err.splitlines()) == {
+    expected = {
         "console.json is invalid at tasks[0].candidate_network (missing)",
         "console.json is invalid at tasks[0].label (string_type)",
     }
+    if command == "init":
+        expected.add("Nothing was deleted.")
+    assert set(err.splitlines()) == expected
     assert "DUMMY_REGISTERED_TASK_SECRET" not in out + err
     assert str(root) not in out + err
 

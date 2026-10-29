@@ -43,6 +43,17 @@ def _vocabulary() -> tuple[set[str], set[str]]:
     return names, mappings
 
 
+def _safe_extra_name(name: str) -> bool:
+    """Conservatively distinguish short field identifiers from pasted token-like keys."""
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,31}", name):
+        return False
+    if name.lower().startswith(("ghp_", "sk-", "sk_")):
+        return False
+    # Long, mostly alphanumeric strings can be base64/URL-safe token material.
+    # False positives hide a location segment; they never change validation.
+    return not (len(name) >= 16 and sum(c.isalnum() for c in name) / len(name) >= 0.9)
+
+
 def invalid_config_fields(error: ValidationError) -> tuple[str, ...]:
     """One diagnostic per error; arbitrary mapping keys/union labels stay redacted.
 
@@ -61,11 +72,9 @@ def invalid_config_fields(error: ValidationError) -> tuple[str, ...]:
             elif isinstance(part, int):
                 location += f"[{part}]"
                 continue
-            elif part in names or (
-                item["type"] == "extra_forbidden"
-                and index == len(parts) - 1
-                and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,79}", part)
-            ):
+            elif item["type"] == "extra_forbidden" and index == len(parts) - 1:
+                segment = part if _safe_extra_name(part) else "<key>"
+            elif part in names:
                 segment = part
             else:
                 segment = "<key>"

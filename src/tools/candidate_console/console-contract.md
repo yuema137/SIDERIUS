@@ -411,10 +411,14 @@ line per error: `console.json is invalid at <location> (<type>)`, exit 2.
 `config_errors.invalid_config_fields` derives its field vocabulary from
 `ConsoleFile`, `ConsoleConfig` and nested models; list positions use `[index]`.
 Mapping keys and unknown union labels are redacted; extra-field names are shown
-only when identifier-shaped and bounded to 80 characters. Input values, exception
+only when identifier-shaped, bounded to 32 characters and not token-like
+(credential prefixes or long, mostly alphanumeric strings). Input values, exception
 messages and context are never displayed. Document-level failures use `(document)`.
-`MissingConfigFile` names a missing task manifest/LLM file or editor source using
-the validated item ID and configured path (control characters escaped). Other
+`MissingConfigFile` names a missing task manifest/LLM file or experiment setup source using
+the validated item ID and configured path (control characters escaped).
+`check_setup_project` owns missing-source diagnostics for both registry setups and
+legacy editor projects, labelled `experiment setup <id>`. Init schema failures end
+with `Nothing was deleted.`. Other
 filesystem/validation failures retain the generic message and readiness guidance.
 
 **`WorkspaceReadiness`** (`readiness_models.py`, beside `CredentialReadiness`) is an

@@ -134,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         except ValidationError as error:
             for message in invalid_config_fields(error):
                 print(message, file=sys.stderr)
+            print("Nothing was deleted.", file=sys.stderr)
             return 2
         except (OSError, ValueError):
             print(

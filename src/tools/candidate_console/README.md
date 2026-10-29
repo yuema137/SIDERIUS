@@ -194,7 +194,7 @@ overwrites an existing `tasks/` folder.
    ```
 
    Here `tasks[0]` is the first task in the list. Missing configured source or
-   task resource files are reported with the project/task name and file path.
+   task resource files are reported with the experiment setup/task name and file path.
    Only `127.0.0.1` binding is supported.
 4. On your own computer, open the printed console address directly in your browser.
    On a remote server, keep the server session running there and run this SSH

@@ -90,15 +90,7 @@ def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> 
         ):
             raise ValueError("recorded example workspace must be inside a candidate root")
     for project in setup_projects:
-        try:
-            check_setup_project(project, config)
-        except FileNotFoundError:
-            # Report only the configured source, not arbitrary exception text.
-            if not project.source_file.exists():
-                raise MissingConfigFile(
-                    f"editor project {project.project_id}", "source", str(project.source_file)
-                ) from None
-            raise
+        check_setup_project(project, config)
     token(config.auth_token_file)
     if config.credential_file is not None:
         # Validate private file facts and JSON/dotenv shape, without selecting/printing values.
