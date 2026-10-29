@@ -384,7 +384,7 @@ def accepted_binding(task: TaskChoice) -> TaskBinding | None:
     target = task_reference_targets((task,))[0]
     try:
         observed = observe_target(target)
-    except (OSError, ValueError):
+    except Exception:  # any inspection failure is a typed refusal, never a 500
         observed = None
     if observed is not None and identity_matches(observed, target):
         return task.task_revision

@@ -882,7 +882,8 @@ runnable, task_targets)`; bare projects become `SetupRegistry.legacy`.
 
 **Run admission.** `configured_capture` refuses `task_policy` ("experiment setup
 belongs to another task") when a registry setup's run names another `task_id`,
-before the existing reusable-root and `check_request_policy` checks.
+before the existing reusable-root and `check_request_policy` checks;
+`EditedCandidate` applies the same refusal to the prepared context's task.
 `NewRunSelection`, rendered sources and operation records are unchanged.
 
 **Creation policy.** console.json `experiment_setups: {browser_creatable: bool =
@@ -898,7 +899,6 @@ console.json only.
 | --- | --- | --- |
 | `GET /api/tasks/{task_id}/setups` | `{"setups": [SetupView{setup_id, label, runnable, saved_version, refs_match_task}]}` for setups whose task is `task_id`; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
 | `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
-| `GET /api/operations?project_id=` | optional ID filter: rows whose recorded `project_id` equals it, taken from the 200 most recently admitted records, then `limit` | 422 for a malformed ID |
 
 CAS: `SetupStore` holds the sha256 of the bytes it last read or wrote; a write
 from another process (or a hand edit) refuses with `stale` and leaves the file
@@ -1414,8 +1414,7 @@ responses and may inspect it through the existing monitor.
 ## Operation list
 
 `GET /api/operations` lists operations admitted by this console's own operation
-store, most recently admitted first, at most `limit` rows (optional `project_id`
-filter: see "Experiment setups"). The owner is
+store, most recently admitted first, at most `limit` rows. The owner is
 `tools.candidate_operations.list_operations`: it enumerates only
 `{state_root}/operations/<UUID>` entries, verifies each through the same
 `load_record` path as a single read, sorts by the record's `admitted_at`, and

@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.unit.tools.candidate_console.test_http import client
 from tests.unit.tools.candidate_console.test_settings_page import _client, _load
 from tests.unit.tools.candidate_console.test_settings_page import workspace as settings_workspace
 from tools.candidate_console.native_chain import check_editor_separation
@@ -204,24 +203,55 @@ def test_creation_is_refused_unless_console_json_allows_it(workspace, policy):
     assert not _registry(workspace).exists()
 
 
-def test_operations_filter_returns_only_the_setups_runs(prepared, monkeypatch):
-    """Defect: the Run tab of one setup shows another setup's (or a task-only) run."""
-    service, _, _ = prepared
-    from tools.candidate_operations import listing as owner
+def test_labels_never_reuse_an_id_or_escape_projects(workspace):
+    """Defect: a slug collision overwrites a setup, or a label walks out of projects/."""
+    task = _load(workspace).config.tasks[0]
+    root = workspace.parent / "legacy"
+    (root / "recovery").mkdir(parents=True)
+    (root / "recovery").chmod(0o700)
+    references = ReusableTaskReferences(manifest=task.task_manifest, data_root=task.data_root)
+    (root / "workflow.py").write_text(render_shape(None, references))
+    project = {
+        "project_id": "legacy",
+        "project_root": str(root),
+        "source_file": str(root / "workflow.py"),
+        "recovery_directory": str(root / "recovery"),
+    }
+    _edit(workspace, editor_projects=[project])
+    api = _client(_load(workspace))
+    ids = [_create(api, label=label).json()["setup_id"] for label in ("My setup", "my  SETUP!")]
+    ids.append(_create(api, label="Legacy").json()["setup_id"])
+    ids.append(_create(api, label="../x").json()["setup_id"])
+    assert ids == ["my-setup", "my-setup-2", "legacy-2", "x"]
+    assert sorted(p.name for p in (workspace / "projects").iterdir()) == sorted(
+        ["my-setup", "my-setup-2", "legacy-2", "x"]
+    )
+    assert not (workspace / "x").exists() and not (root / "workflow.py.versions.json").exists()
 
-    real = owner.list_operations(service.config.operation_store, 1)
-    entry = real.entries[0]
-    rows = tuple(entry.model_copy(update={"project_id": p}) for p in ("a", "b", None, "a"))
-    seen = []
 
-    def listed(store, limit):
-        seen.append(limit)
-        return real.model_copy(update={"entries": rows})
+def test_task_without_revision_creates_an_unbound_setup(workspace, monkeypatch):
+    """Defect: an unpinned task is inspected or given a fabricated binding."""
+    monkeypatch.setattr(
+        "tools.workflow_authoring.task_observation.observe_target",
+        lambda target: pytest.fail("no revision, nothing to observe"),
+    )
+    response = _create(_client(_load(workspace)), template_id=None)
+    assert response.status_code == 201, response.text
+    source = (workspace / "projects" / "my-setup" / "workflow.py").read_text()
+    assert "task_binding" not in source and "capability='proposal'" in source
 
-    monkeypatch.setattr("tools.candidate_console.service.list_operations", listed)
-    api = client(service.config)
-    body = api.get("/api/operations?project_id=a&limit=1").json()
-    assert [item["project_id"] for item in body["operations"]] == ["a"]
-    assert seen == [owner.MAX_LISTED]  # filtered from the bounded window, then limited
-    assert len(api.get("/api/operations").json()["operations"]) == 4
-    assert api.get("/api/operations?project_id=../x").status_code == 422
+
+def test_unexpected_observation_error_is_a_typed_refusal(workspace, monkeypatch):
+    """Defect: a crashing inspection escapes as a 500 after or before writing files."""
+    document = json.loads(_console_json(workspace).read_text())
+    document["tasks"][0]["task_revision"] = PIN.model_dump(mode="json")
+    _edit(workspace, tasks=document["tasks"])
+
+    def crash(target):
+        raise RuntimeError("sandbox child died")
+
+    monkeypatch.setattr("tools.workflow_authoring.task_observation.observe_target", crash)
+    response = _create(_client(_load(workspace)))
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "inspection_failed"
+    assert list((workspace / "projects").iterdir()) == []

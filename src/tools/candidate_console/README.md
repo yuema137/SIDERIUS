@@ -431,7 +431,9 @@ external runs directory. Include that parent in both
 `operation_store.preparation_roots` and `candidate_roots`. Restart after changing
 configuration. (A workspace console can also create a project for a task, called
 an experiment setup, without editing console.json; see "Experiment setups" in the
-[console contract](console-contract.md). The browser page for it comes later.)
+[console contract](console-contract.md). The browser page for it comes later.
+Setup folders live in `projects/` of the workspace, so `check` refuses a task
+whose `data_root` or `task_read_only` entry is inside that folder.)
 The source task references and output restrictions must agree with
 the configured task; the browser does not rewrite them to match your selection.
 See the [reusable configuration contract](console-contract.md#reusable-capture-consumption).
