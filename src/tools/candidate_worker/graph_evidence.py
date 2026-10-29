@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from agent.schemas.proposal import ProposalOutput
     from workflows.adaptors import AdaptorOutcome
 
+    from .loop_models import ResumeAdvice
+
 
 def expected_nodes(
     request: CandidateRunRequest, initial: CandidateRunReceipt, *, iteration: int = 1
@@ -199,7 +201,9 @@ def verify_graph_trace(
     *,
     iteration: int = 1,
     history: ChainState | None = None,
+    operator_advice: "ResumeAdvice | None" = None,
 ) -> None:
+    """``operator_advice``: the Resume advice of the segment that dispatched this body."""
     if receipt.loop_trace is not None:
         raise ValueError("one-body graph receipt cannot contain loop aggregate evidence")
     if any(
@@ -345,7 +349,12 @@ def verify_graph_trace(
         is not None
     ):
         verify_interpretation_evidence(
-            request, initial, trace, iteration=iteration, history=history
+            request,
+            initial,
+            trace,
+            iteration=iteration,
+            history=history,
+            operator_advice=operator_advice,
         )
 
 
@@ -401,6 +410,7 @@ def verify_interpretation_evidence(
     *,
     iteration: int = 1,
     history: ChainState | None = None,
+    operator_advice: "ResumeAdvice | None" = None,
 ) -> None:
     """Replay the directed protocol, not task composition or native execution."""
     from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
@@ -526,7 +536,11 @@ def verify_interpretation_evidence(
             else WorkflowLLMConfig.default()
         )
         expected = arguments.apply(
-            output, config=config, history=history, feedback=selected.recent_formal_validity
+            output,
+            config=config,
+            history=history,
+            feedback=selected.recent_formal_validity,
+            operator_advice=operator_advice,
         )
         if settings is not None:
             from workflows.candidate_training_settings import (

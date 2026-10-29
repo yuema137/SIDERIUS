@@ -81,6 +81,18 @@ def loop_root_operation(
     return root.submission
 
 
+def loop_segment_advice(config: OperationStoreConfig, operation_id: UUID) -> str | None:
+    """Read-only: the operator advice this operation's Resume admitted, if any.
+
+    Read from the immutable operation record (a root candidate has none); the native
+    binding's copy is compared with it by ``read_segment`` on every readback.
+    """
+    record = load_record(validate_config(config), operation_id)
+    if record.submission.kind != "candidate_loop_resume":
+        return None
+    return record.submission.request.operator_advice
+
+
 def loop_control_requests(config: OperationStoreConfig, operation_id: UUID) -> tuple[bool, bool]:
     """Read-only ``(stop_requested, pause_requested)`` from the durable worker markers.
 
@@ -171,6 +183,7 @@ def read_segment(record: OperationRecord) -> tuple[CandidateRunReceipt, str] | N
             binding.predecessor_segment != expected_segment
             or binding.predecessor_receipt_digest
             != record.submission.request.expected_receipt_digest
+            or binding.operator_advice != record.submission.request.operator_advice
         ):
             raise OperationFailure("integrity", "resume request disagrees with native binding")
     try:
@@ -312,6 +325,7 @@ def reserve(record: OperationRecord) -> None:
         predecessor_segment=native[0].loop_trace.segment_id,
         predecessor_receipt_digest=native[1],
         completed_iterations=native[0].loop_trace.attempted_iterations,
+        operator_advice=record.submission.request.operator_advice,
     )
     # The private operation claim already exists. Any failed publication stays unresolved.
     control = segment_control(initial, binding.operation_id)

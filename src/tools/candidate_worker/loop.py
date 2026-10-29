@@ -104,6 +104,8 @@ def execute_loop(
         last = completed[-1]
         attempted = continuation.completed_iterations
         segment_id = continuation.operation_id
+    # This segment's Resume advice reaches only the proposals of bodies it dispatches.
+    advice = None if continuation is None else continuation.resume_advice()
     resumed_at = attempted
     status = "completed"
     reason = None
@@ -126,8 +128,11 @@ def execute_loop(
             history=history,
             budget=budget,
             host_budget=host_budget,
+            operator_advice=advice,
         )
-        verify_graph_trace(request, initial, last, iteration=iteration, history=history)
+        verify_graph_trace(
+            request, initial, last, iteration=iteration, history=history, operator_advice=advice
+        )
         publish_bytes_write_once(str(control / "body.json"), encode_control(last))
         attempted = iteration
         if last.status != "completed":
