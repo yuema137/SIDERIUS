@@ -1275,8 +1275,18 @@ or a creation), `GET /api/editor/projects` and `GET /api/tasks/<id>/setups` for 
 configured task. It hands `workflowEditor.useSetups(list, preferred)` the selected task's
 setups (option text = `label`), followed by an `optgroup` "Other workflows (no configured
 task)" holding legacy `editor_projects` that match no configured task (compatibility: they
-stay editable; a legacy project matched to another task is not listed). `useSetups` keeps
-the open setup when it is listed, else opens `preferred` or the first entry; pending edits
+stay editable; a legacy project matched to another task is not listed). The controller
+remembers the actual opened setup ID in localStorage at
+`siderius.setup.v1:<operations_store_id>:<task_id>`. On load an explicit preferred ID
+(including a newly created setup) takes precedence. Without an explicit preference,
+the listed open setup is kept; only when it is not listed does the controller consult
+the remembered ID. Thus another tab's stored selection cannot switch this tab's open
+setup on a list refresh. `useSetups` opens the supplied preferred ID only when listed,
+otherwise keeps the listed open setup or falls back to the first entry. Missing or
+unavailable browser storage uses the same fallback. A declined switch never remembers
+the refused destination, and a setup retained from another task never overwrites this
+task's preference. This is
+browser selection state only; no run payload or scientific identity changes. Pending edits
 are dropped only after "Discard pending edits and open another experiment setup?" (if
 declined, the open setup stays in its own group and task, labelled "<label> (unsaved
 edits)", and `experimentSetups.current` still names it). A task change clears the old

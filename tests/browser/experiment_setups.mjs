@@ -149,8 +149,38 @@ try {
   await waitUntil(async () => (await page.locator('#editor-project').inputValue()) === 'blank-one');
   assert.deepEqual(await page.locator('#editor-project option').allTextContents(), ['My loop', 'Blank one']);
 
+  // #1199: creating B after A must keep B open after reload; a later picker
+  // selection must replace that preference. Without persistence reload opens A.
+  async function reloadSetup(expected) {
+    await page.reload();
+    await page.locator('#token').fill(metadata.token);
+    await page.locator('#access-form button').click();
+    await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
+    assert.equal(await page.locator('#editor-project').inputValue(), expected,
+      'Reload restores the last opened setup for this store and task');
+  }
+  await reloadSetup('blank-one');
+  await page.locator('#editor-project').selectOption('my-loop');
+  await page.locator('#editor-status').filter({hasText: 'Opened my-loop'}).waitFor();
+  await reloadSetup('my-loop');
+  await page.locator('#editor-project').selectOption('blank-one');
+  await page.locator('#editor-status').filter({hasText: 'Opened blank-one'}).waitFor();
+  await reloadSetup('blank-one');
+
+  // Another tab can change the shared preference; refreshing this tab must keep
+  // its listed open setup rather than silently opening the other tab's choice.
+  await page.evaluate(async () => {
+    const key = `siderius.setup.v1:${window.consoleSession.operationsStoreId}:${window.consoleTask.selectedId}`;
+    localStorage.setItem(key, 'my-loop');
+    await window.experimentSetups.load(null, true);
+  });
+  assert.equal(await page.locator('#editor-project').inputValue(), 'blank-one',
+    'A forced list refresh preserves the open setup despite another stored choice');
+
   // Pending edits are never dropped silently: declining keeps the open setup, listed as it
   // was (its own label and task, not "Other workflows"); accepting switches.
+  // Reload collapsed Advanced; reopen it so the source field is visible for editing.
+  await page.locator('#editor-advanced').evaluate(element => { element.open = true; });
   await page.locator('#editor-source').fill((await page.locator('#editor-source').inputValue()) + '\n# unsaved blank edit\n');
   await waitUntil(() => page.evaluate(() => window.workflowEditor.state.dirty));
   const confirms = [];
@@ -224,7 +254,7 @@ try {
   await page.locator('#setup-new-dialog .actions button.secondary').click();
   assert.equal(await page.locator('#editor-project option').count(), 2, 'Existing setups stay listed');
   assert.deepEqual(faults, []);
-  console.log('PASS experiment setups: task-scoped list, template and blank creation, save then Run with the task fixed, pending-edit confirm, drift banner, 409 and 403 refusals, creation off');
+  console.log('PASS experiment setups: task-scoped list, template and blank creation, reload remembers creation and selection, save then Run with the task fixed, pending-edit confirm, drift banner, 409 and 403 refusals, creation off');
 } finally {
   await browser?.close();
   server.kill();
