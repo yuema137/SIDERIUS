@@ -27,7 +27,11 @@ def relative_median_change(rates: list[float]) -> float:
 
 
 def find_distribution_shift(
-    rates: list[float], *, steady: SteadyStateConfig, pathological_factor: float
+    rates: list[float],
+    *,
+    steady: SteadyStateConfig,
+    pathological_factor: float,
+    pathological_min_unit_ms: float,
 ) -> DistributionShift | None:
     """Find disjoint rate regimes using positive, validated observations.
 
@@ -38,7 +42,8 @@ def find_distribution_shift(
     across the run. Every later observation remains in the comparison.
 
     Refuse only when ALL observations after a split exceed the earlier observed
-    maximum and the block median exceeds the configured factor. Overlapping
+    maximum and the block median exceeds the configured factor and reaches
+    the absolute slowdown floor. Overlapping
     distributions are inconclusive here; the ordinary detector and budgets
     still apply. This cannot anticipate changes after verification ends.
     """
@@ -67,6 +72,6 @@ def find_distribution_shift(
             continue
         before = statistics.median(rates[start:split])
         after = statistics.median(rates[split:])
-        if after > pathological_factor * before:
+        if after >= pathological_min_unit_ms and after > pathological_factor * before:
             return DistributionShift(start, split, before, after)
     return None

@@ -121,11 +121,17 @@ retain the existing time requirement and detector behavior. Re-arming still
 discards the old plateau's evidence. The wall bound also includes local verifier
 processing.
 Exhausted or unstable traces never become verified by relaxing evidence floors.
-Relative slow observations are recorded in measurement details. A consecutive
-streak of `steady.stable_windows` above `pathological_factor` times the prior
-plateau fails verification; an isolated spike does not. Explicit `max_unit_ms`
-still fails immediately after stabilization. These rules do not change data
-selection, model size, resource budgets or prediction-watchdog enablement.
+Slow observations count toward refusal only when they reach
+`pathological_min_unit_ms` (default 100 ms) and exceed `pathological_factor`
+times the prior plateau. These observations are recorded in measurement details;
+`steady.stable_windows` consecutive qualifying observations fail verification.
+This prevents tiny timing fluctuations from rejecting fast tasks. The final
+comparison of earlier and later timing blocks also requires the later median
+to reach the floor. Configure the floor through `RuntimeControlPolicy.verification`;
+see [slowdown policy and boundaries](../../../docs/reference/training-budget-diagnostics.md#late-stability-and-runtime-refusal-feedback).
+Explicit `max_unit_ms` still fails immediately after stabilization, independently
+of this floor. These rules do not change data selection, model size, resource
+budgets or prediction-watchdog enablement.
 
 ### Calibration across separate passes
 

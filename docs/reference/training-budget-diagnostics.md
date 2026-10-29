@@ -63,7 +63,28 @@ must contain at least `steady.min_steps_to_detect` observations. A sustained
 shift requires every later rate to exceed the earlier observed maximum and the
 later median to exceed `pathological_factor` times the earlier median. Recurrent
 expensive batches therefore remain part of the reference distribution. The
-existing plateau-based slow-streak guard is unchanged and can reject earlier.
+plateau-based slow-streak guard can reject earlier after
+`steady.stable_windows` consecutive slow units.
+
+Both relative-slowdown guards also require an absolute floor:
+`verification.pathological_min_unit_ms` (finite, nonnegative; default **100 ms**).
+A streak observation must reach this floor as well as exceed
+`pathological_factor` times its reference; a below-floor observation resets the
+streak. The distribution check applies the floor to the **later block median**,
+not the earlier reference or individual maximum. Equality meets the floor; the
+ratio comparison remains strict. Sub-floor rates still contribute to stability,
+prediction and evidence requirements.
+
+The default implements the verification goal of "seconds to protect against
+hours": four qualifying observations cost at least 0.4 seconds, and 100 such
+observations cost at least 10 seconds. It prevents microsecond-to-millisecond
+jitter from becoming a relative-slowdown refusal; it does not promise that a
+large workload of fast units is affordable. Existing workload-based admission
+and watchdogs still enforce budgets. This is a generic stopping policy, not a
+hardware speed estimate. Hosts can override the field through the typed
+`RuntimeControlPolicy.verification` surface; setting it to `0` restores
+relative-only checks. `max_unit_ms` and wall caps apply independently and are
+unchanged, even when configured below the slowdown floor.
 
 This check establishes only the stated separation of observed blocks. Overlap
 is inconclusive, not proof of unchanged future runtime. No finite trace can
