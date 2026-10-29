@@ -535,8 +535,32 @@ Notes:
   built. Custom-loss plugin hyperparameters are not transported through
   `loss_config` (the plugin executes its `PLUGIN_LOSS_CONFIG_CLASS`
   defaults), so a rule naming one, such as `loss_config.snr_threshold`, is
-  refused. Model-specific `model_config` paths remain extensible;
-  this fixed-field validation does not close the model plugin's configuration.
+  refused. `model_config` targets are checked against the configuration
+  class of the executed model (a built-in config class or the plugin's
+  `PLUGIN_CONFIG_CLASS`). The executed model is `--force_model` when it is not
+  `auto`, else the plan's top-level `model_type`; the nested
+  `model_config.model_type` is only a mirror that planning overwrites with the
+  executed model. Plugin configs keep Pydantic's default of ignoring unknown
+  keys, so a misspelled lock such as `model_config.segmentaton_size` is
+  refused instead of being dropped; a config declared with `extra="allow"`
+  keeps unknown keys and accepts them. A lock on a field the executed model
+  does not declare refuses that plan. A `model_config.model_type` rule is
+  judged against the executed model: an exact lock that names another model,
+  or an `allowed` list without it, is refused; it never selects the model.
+  With a fixed `--force_model`, the tuner resolves the `model_config` rules
+  once at launch against the forced model, before any LLM call or attempt:
+  an unknown target, a `model_config.model_type` rule of any kind that the
+  forced model cannot satisfy, or an exact value that another declared rule
+  on the same path rejects is refused there. The forced model's own field
+  constraints (for example `ge=1000` on a config field) are not evaluated at
+  launch; they are checked when each attempt builds the config. Rules on
+  values the planner chooses later are still checked per plan.
+  Without a fixed model, the tuner checks each plan and refuses a
+  `model_config` rule when the executed model has no registered config class.
+  A proposal baseline judges `model_config` rules against the proposed model
+  (`model_name`), not a template base the baseline names; that model has no
+  config class before implementation, so its target check is left to the
+  tuner.
 - A workflow may add a second rule set through
   `--workflow_parameter_rules '<json>'`, using the same shape. Task and
   workflow rules are enforced together: the workflow may narrow a task rule

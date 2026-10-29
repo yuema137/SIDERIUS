@@ -77,8 +77,17 @@ no hidden contracts, no silent defaults.
   the consuming `TrainConfig` / `LossConfig` `model_fields` and nested model
   annotations, including optional unions. The shared document resolver
   repeats this check so a mutated rule dictionary cannot introduce a silently
-  ignored execution lock. Exact rules may insert omitted valid leaves; model
-  plugin paths remain extensible.
+  ignored execution lock. Exact rules may insert omitted valid leaves. The
+  resolver also checks `model_config` paths against the executed model's
+  config class (`get_config_class(executed_model_type)`; the caller passes
+  `force_model` or the plan's top-level `model_type`, which is the default).
+  A `model_config.model_type` rule is validated against the executed type and
+  never selects it. The tuner fails closed when the class is unregistered;
+  only proposal-baseline resolution (`defer_unknown_model`, with the proposed
+  model name as `executed_model_type`) defers. `extra="allow"` configs accept
+  unknown keys. `validate_model_parameter_rules` runs the full resolver once at
+  tuner launch for a fixed `force_model`, on an empty model configuration with
+  only planner-chosen values deferred.
   See the [parameter-rule contract](../../../docs/reference/task-composition.md)
   for sampling ownership, composition conflicts and value-validation boundaries.
 

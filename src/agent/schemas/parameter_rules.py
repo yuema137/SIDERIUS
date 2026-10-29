@@ -37,7 +37,10 @@ class ParameterRuleError(ValueError):
 
 
 def _model_path_exists(annotation: Any, parts: list[str]) -> bool:
-    """Recognize fields from their consuming models, including optional unions."""
+    """Recognize fields from their consuming models, including optional unions.
+
+    A model with ``extra="allow"`` keeps unknown keys, so they are consumed.
+    """
     origin = get_origin(annotation)
     if origin is Annotated:
         return _model_path_exists(get_args(annotation)[0], parts)
@@ -47,34 +50,147 @@ def _model_path_exists(annotation: Any, parts: list[str]) -> bool:
         return False
     field = annotation.model_fields.get(parts[0])
     if field is None:
-        return False
+        return annotation.model_config.get("extra") == "allow"
     return len(parts) == 1 or _model_path_exists(field.annotation, parts[1:])
 
 
 def _fixed_rule_schemas() -> dict[str, type[BaseModel]]:
     """Consuming execution schema for each closed rule root.
 
-    ``model_config`` is absent on purpose: model plugins own an extensible
-    configuration, so its leaves cannot be checked against a fixed schema.
-    Custom-loss plugin hyperparameters are not transported through
-    ``loss_config``; ``LossConfig`` is the complete loss-routing surface.
+    ``model_config`` is absent: its consuming schema is the executed model's
+    configuration class, known only per plan (see
+    :func:`_validate_model_rule_paths`). Custom-loss plugin hyperparameters
+    are not transported through ``loss_config``; ``LossConfig`` is the
+    complete loss-routing surface.
     """
     from ml_models.models_format_sandbox import LossConfig, TrainConfig
 
     return {"train_config": TrainConfig, "loss_config": LossConfig}
 
 
-def _validate_fixed_rule_path(path: str, parts: list[str]) -> None:
-    """Keep fixed training and loss targets aligned with their execution schema."""
-    schema = _fixed_rule_schemas().get(parts[0])
-    if schema is None:
-        return
+def _validate_rule_target(path: str, parts: list[str], schema: type[BaseModel]) -> None:
+    """Refuse a rule whose target the consuming schema would silently drop."""
     if not _model_path_exists(schema, parts[1:]):
         raise ParameterRuleError(
             f"unsupported {parts[0]} parameter path {path!r}: target must exist in "
             f"{schema.__name__} or one of its nested configuration models; check the "
             f"{parts[0]} fields in the task-composition parameter-rule contract"
         )
+
+
+def _validate_fixed_rule_path(path: str, parts: list[str]) -> None:
+    """Keep fixed training and loss targets aligned with their execution schema."""
+    schema = _fixed_rule_schemas().get(parts[0])
+    if schema is not None:
+        _validate_rule_target(path, parts, schema)
+
+
+def _validate_model_rule_paths(
+    resolved: dict[str, Any],
+    declarations: tuple[tuple[str, ParameterRules], ...],
+    executed_model_type: Any,
+    *,
+    defer_unknown_model: bool,
+) -> None:
+    """Bind ``model_config`` rules to the model that will actually execute.
+
+    The executed model is chosen by ``force_model`` or the plan's top-level
+    ``model_type``; the planner overwrites the nested ``model_config.model_type``
+    mirror with it before execution. A ``model_config.model_type`` rule is
+    therefore judged against the executed type (an exact lock that disagrees
+    is refused, never silently overwritten), and every other ``model_config``
+    target must exist in that model's configuration class.
+
+    Only a proposal baseline (``defer_unknown_model``) may defer when the
+    model or its config class is not known yet; the tuner fails closed.
+    """
+    paths = sorted(
+        {
+            path
+            for _, rules in declarations
+            for path in rules.rules
+            if path.startswith("model_config.")
+        }
+    )
+    if not paths:
+        return
+    if not isinstance(executed_model_type, str):
+        if defer_unknown_model:
+            return
+        raise ParameterRuleError(
+            f"parameter rules {paths!r} target model_config, but no executed model_type "
+            "is known to check them against"
+        )
+    if "model_config.model_type" in paths:
+        for _, rules in declarations:
+            rule = rules.rules.get("model_config.model_type")
+            if rule is not None and rule.kind == "exact" and rule.exact != executed_model_type:
+                raise ParameterRuleError(
+                    f"exact parameter rule for 'model_config.model_type' locks "
+                    f"{rule.exact!r}, but the executed model is {executed_model_type!r}; the "
+                    "executed model comes from force_model or the plan's model_type"
+                )
+        model_config = resolved.setdefault("model_config", {})
+        if isinstance(model_config, dict):
+            # Mirror the executed type, as the planner does, so non-exact
+            # model_type rules validate the model that will run.
+            model_config["model_type"] = executed_model_type
+    from ml_models.models_format_sandbox import get_config_class
+
+    schema = get_config_class(executed_model_type)
+    if schema is None:
+        if defer_unknown_model:
+            return
+        raise ParameterRuleError(
+            f"parameter rules {paths!r} target model_config, but model_type "
+            f"{executed_model_type!r} has no registered configuration class to check them"
+        )
+    for path in paths:
+        if path != "model_config.model_type":
+            _validate_rule_target(path, path.split("."), schema)
+
+
+def validate_model_parameter_rules(
+    model_type: str,
+    *,
+    task_rules: ParameterRules | None,
+    workflow_rules: ParameterRules | None,
+) -> None:
+    """Launch-time check of ``model_config`` rules against a fixed model.
+
+    With ``force_model`` every attempt executes this model, so a rule that can
+    never pass for it is refused once before any attempt instead of failing
+    each one. The full resolver runs on an empty model configuration for the
+    forced model: targets must exist in its config class, ``model_type``
+    rules of every kind are judged against it, and exact values are applied.
+    Values the planner chooses later stay deferred.
+    """
+    selected = [
+        ParameterRules(
+            rules={
+                path: rule
+                for path, rule in (rules or ParameterRules()).rules.items()
+                if path.startswith("model_config.")
+            }
+        )
+        for rules in (task_rules, workflow_rules)
+    ]
+    model_config: dict[str, Any] = {}
+    for rules in selected:
+        for path, rule in rules.rules.items():
+            if rule.kind != "exact":
+                continue
+            parent = model_config
+            for part in path.split(".")[1:-1]:
+                # A plan supplies nested parents; the launch document must too.
+                parent = parent.setdefault(part, {})
+    resolve_parameter_rule_document(
+        {"model_type": model_type, "model_config": model_config},
+        task_rules=selected[0],
+        workflow_rules=selected[1],
+        defer_missing_non_exact=True,
+        defer_unknown_model=False,
+    )
 
 
 def _validate_parameter_path(path: str) -> None:
@@ -282,12 +398,14 @@ def apply_parameter_rules(
     *,
     task_rules: ParameterRules | None = None,
     workflow_rules: ParameterRules | None = None,
+    executed_model_type: str | None = None,
 ) -> Any:
     """Apply exact locks and validate every task/workflow constraint.
 
     Task and workflow declarations are peers at enforcement time: all rules
     must hold.  A workflow may therefore narrow a task constraint but cannot
-    overwrite or bypass it.
+    overwrite or bypass it. ``executed_model_type`` defaults to the plan's
+    top-level ``model_type``.
     """
     from agent.schemas.hyperparam_tuning import ExperimentPlan
 
@@ -295,6 +413,7 @@ def apply_parameter_rules(
         plan.model_dump(by_alias=True),
         task_rules=task_rules,
         workflow_rules=workflow_rules,
+        executed_model_type=executed_model_type,
     )
     try:
         return ExperimentPlan.model_validate(document)
@@ -310,14 +429,20 @@ def resolve_parameter_rule_document(
     task_rules: ParameterRules | None = None,
     workflow_rules: ParameterRules | None = None,
     defer_missing_non_exact: bool = False,
+    defer_unknown_model: bool = False,
+    executed_model_type: str | None = None,
 ) -> dict[str, Any]:
     """Resolve the same typed rules on a plan or proposal baseline mapping.
 
     The caller owns its resulting schema. This function never mutates the
     authored input: exact rules create effective values in the returned copy,
     while other rule kinds only validate existing values. A proposal baseline
-    may defer an omitted non-exact field until the tuner chooses it; the tuner
-    itself uses the strict default and must validate the effective plan.
+    may defer an omitted non-exact field (``defer_missing_non_exact``) and a
+    model that is not known or registered yet (``defer_unknown_model``) until
+    the tuner chooses them; the tuner itself uses the strict defaults and must
+    validate the effective plan. ``executed_model_type`` is the model that
+    will run (``force_model``, the plan's ``model_type``, or a proposal's
+    model name); it defaults to the document's top-level ``model_type``.
     """
     declarations = (
         ("task", task_rules or ParameterRules()),
@@ -329,6 +454,14 @@ def resolve_parameter_rule_document(
     paths = {path for _, rules in declarations for path in rules.rules}
     for path in paths:
         _validate_parameter_path(path)
+    if executed_model_type is None:
+        executed_model_type = resolved.get("model_type")
+    _validate_model_rule_paths(
+        resolved,
+        declarations,
+        executed_model_type,
+        defer_unknown_model=defer_unknown_model,
+    )
     for path in sorted(paths):
         exact_values = [
             rule.exact
