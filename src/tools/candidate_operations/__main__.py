@@ -7,11 +7,12 @@ from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from core.durable_io import publish_bytes_write_once
 from core.run_seed_lock import run_seed_argument
 from core.runtime_control.budget_intake import HostBudgetFileError, load_host_budget_file
+from tools.candidate_worker.loop_models import OperatorAdvice
 
 from .cancel import request_cancel
 from .files import encode, read_bytes
@@ -68,6 +69,11 @@ def parse_arguments() -> argparse.Namespace:
             command.add_argument("--limit", type=int, default=65536)
         if name == "write-loop-resume":
             command.add_argument("--output", required=True)
+            command.add_argument(
+                "--advice-file",
+                help="UTF-8 text file with your advice for the resumed segment's proposals "
+                "(1 to 4000 characters after trimming surrounding whitespace)",
+            )
         if name == "submit":
             command.add_argument("--host-ledger")
             command.add_argument("--host-budget")
@@ -135,13 +141,24 @@ def read_log(config: OperationStoreConfig, args: argparse.Namespace) -> BaseMode
     )
 
 
+OPERATOR_ADVICE = TypeAdapter(OperatorAdvice)
+
+
 def write_loop_resume(
     config: OperationStoreConfig, args: argparse.Namespace
 ) -> CandidateLoopResumeOperation:
     """Review one paused authored-loop segment and save its Resume request; never launch.
 
-    The file is created once so a lost-response retry resubmits the same request ID.
+    The file is created once so a lost-response retry resubmits the same request ID
+    and the same advice. Invalid advice is refused before any review.
     """
+    advice = (
+        None
+        if args.advice_file is None
+        else OPERATOR_ADVICE.validate_python(
+            Path(args.advice_file).absolute().read_bytes().decode("utf-8")
+        )
+    )
     predecessor = UUID(args.operation_id)
     review = review_loop_resume(config, predecessor)
     if review.receipt_digest is None:
@@ -151,6 +168,7 @@ def write_loop_resume(
         request=CandidateLoopResumeRequest(
             predecessor_operation_id=predecessor,
             expected_receipt_digest=review.receipt_digest,
+            operator_advice=advice,
         ),
     )
     try:

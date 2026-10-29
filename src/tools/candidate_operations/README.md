@@ -376,6 +376,13 @@ browser console offers the same actions in Monitor.
      --output loop-resume.json
    ```
 
+   To give the next iterations your advice, write it as plain text in a file and
+   add `--advice-file advice.txt`. The proposal step of every iteration this
+   resume runs receives it after any advice the workflow already declares. It
+   replaces the advice of an earlier resume. Use at most 4000 characters, with no
+   control characters other than line breaks and tabs. If the advice is refused,
+   nothing is saved and the command exits with status 2.
+
 3. Make the same provider API keys available in this shell as for the original
    launch, then submit:
 
