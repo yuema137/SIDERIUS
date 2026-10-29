@@ -12,6 +12,7 @@ from tools.candidate_prepare import ReusablePreparedSelection
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import AuthoredLoop
 
+from .capture_facts import CaptureFacts
 from .models import CredentialReadiness, RouteView, RunResourcesSelection
 
 
@@ -50,6 +51,8 @@ class ReusableCapturePage(PreviewModel):
 
 
 class ReusableCaptureReview(PreviewModel):
+    facts: CaptureFacts
+
     execution_profile: (
         Literal[
             "native-proposal-fanout/v1",
@@ -89,7 +92,7 @@ class ReusableCaptureReview(PreviewModel):
     devices: tuple[str, ...]
     environment_names: tuple[str, ...]
     read_only: tuple[str, ...]
-    #: ``package_mounts.device_warnings`` for ``devices``/``read_only``, the same
+    #: ``package_mounts.device_warnings`` for ``devices``, the same
     #: wording ``check`` prints; display only, Launch stays enabled.
     device_warnings: tuple[str, ...] = ()
     credential_readiness: CredentialReadiness

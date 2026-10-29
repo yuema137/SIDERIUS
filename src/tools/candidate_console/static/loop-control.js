@@ -101,7 +101,13 @@
     // so a resumed segment says so rather than reading as a segment-local count.
     return segment + outcome(status, loop) + (segment && ' Body numbers count the whole run, including earlier segments.');
   }
+  function endedSentence(status) {
+    if (status?.native_status !== 'paused' || !status.receipt_available || status.successor_operation_id || !status.loop?.stop_requested) return null;
+    return status.loop.attempted_iterations == null ? 'Ended by you at the pause.' : `Ended by you at the pause after body ${status.loop.attempted_iterations}.`;
+  }
   function outcome(status, loop) {
+    const ended = endedSentence(status);
+    if (ended) return ended + ' Completed results are kept; this run cannot be resumed.';
     if (status.native_status === 'cancelled') return 'Research loop stopped by you before it finished. Files written so far stay in the run folder; this run cannot be resumed.';
     if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
     if (status.native_status === 'paused' && loop.input_request) {
@@ -144,7 +150,7 @@
     $('loop-stop-group').hidden = !(running && !stopRecorded(status));
     $('loop-pause-group').hidden = !(running && !stopRecorded(status) && !pauseRecorded(status));
     $('loop-stop').disabled = $('loop-pause').disabled = pending || !connected;
-    $('loop-stop-status').textContent = !running ? '' : request.stop.pending ? 'Submitting Stop request…' : request.pause.pending ? 'Submitting Pause request…' : request.stop.error || request.pause.error;
+    $('loop-stop-status').textContent = !(running || status.native_status === 'paused') ? '' : request.stop.pending ? 'Submitting Stop request…' : request.pause.pending ? 'Submitting Pause request…' : request.stop.error || request.pause.error;
 
     const successor = status.successor_operation_id;
     const link = $('loop-successor');
@@ -158,22 +164,26 @@
     const resumable = status.native_status === 'paused' && !successor && !status.finishing && !stopRecorded(status);
     const resume = request.resume, review = resume.review;
     $('loop-resume-group').hidden = !resumable;
-    $('loop-resume-review').disabled = resume.pending || !connected;
+    $('loop-resume-review').disabled = resume.pending || pending || !connected;
+    $('loop-end').disabled = resume.pending || pending || !connected;
     $('loop-resume').hidden = !review;
     $('loop-resume-advice-group').hidden = !review;
     $('loop-resume-advice').readOnly = !!resume.locked;
-    $('loop-resume').disabled = resume.pending || !connected || !review?.credential_readiness.ready;
+    $('loop-resume').disabled = resume.pending || pending || !connected || !review?.credential_readiness.ready;
     $('loop-resume-summary').textContent = !review ? '' : `Resume continues with body ${review.completed_iterations + 1} of ${review.final_iteration} in a new segment of the same run. ` +
       (review.credential_readiness.ready ? 'Credentials: ready (names only checked).' : 'Credentials not ready; missing: ' + (review.credential_readiness.missing_names.join(', ') || 'none') + '. ' + review.credential_readiness.instructions.join(' '));
     $('loop-resume-status').textContent = !resumable ? '' : resume.pending ? 'Submitting…' : resume.error;
   }
   async function control(kind) {
     const current = request, state = current?.[kind];
-    if (!last || !state || current.stop.pending || current.pause.pending || state.acknowledged || !session().connected) return;
+    if (!last || !state || current.stop.pending || current.pause.pending || current.resume.pending || state.acknowledged || !session().connected) return;
     state.pending = true; current.stop.error = current.pause.error = ''; render(last);
     try {
       await session().request(`operations/${current.id}/loop-${kind}`, {});
       state.acknowledged = true;
+      if (current === request && last.native_status === 'paused') {
+        window.dispatchEvent(new CustomEvent('loop-control-changed', {detail: {operation_id: current.id}}));
+      }
     } catch (error) {
       const name = kind === 'stop' ? 'Stop' : 'Pause';
       if (!error.stale) state.error = `${name} was not recorded: ` + error.message + (error.status ? '' : ' The outcome is unconfirmed; retrying is safe.');
@@ -184,7 +194,7 @@
   }
   async function reviewResume() {
     const current = request, resume = current?.resume;
-    if (!last || !resume || resume.pending || !session().connected) return;
+    if (!last || !resume || resume.pending || current.stop.pending || stopRecorded(last) || !session().connected) return;
     resume.pending = true; resume.error = ''; resume.review = null; render(last);
     try {
       resume.review = await session().request(`operations/${current.id}/loop-resume-review`);
@@ -202,7 +212,7 @@
   }
   async function submitResume() {
     const current = request, resume = current?.resume, review = resume?.review;
-    if (!last || !review || resume.pending || !review.credential_readiness.ready || !session().connected) return;
+    if (!last || !review || resume.pending || current.stop.pending || stopRecorded(last) || !review.credential_readiness.ready || !session().connected) return;
     // The advice is fixed at the first attempt: a retry resends exactly the retained text.
     const typed = $('loop-resume-advice').value.trim();
     resume.pending = true; resume.locked = true; resume.error = ''; render(last);
@@ -228,6 +238,11 @@
       if (current === request) render(last);
     }
   }
+  $('loop-end').addEventListener('click', () => {
+    if (!last || last.native_status !== 'paused' || last.successor_operation_id || last.finishing || stopRecorded(last) || request.stop.pending || request.resume.pending || !session().connected) return;
+    if (window.confirm('End this research loop here? Completed results are kept. This run cannot be resumed.')) void control('stop');
+  });
+  window.loopEndedSentence = endedSentence;
   $('loop-stop').addEventListener('click', () => { void control('stop'); });
   $('loop-pause').addEventListener('click', () => { void control('pause'); });
   $('loop-resume-review').addEventListener('click', () => { void reviewResume(); });

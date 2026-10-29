@@ -77,8 +77,14 @@ def test_template_keeps_project_task_and_passes_preparation_roles(template_id):
 def test_template_shapes_carry_no_scientific_values(template_id):
     """Fails if a template ships advice, output-type restrictions or training values,
     which would become an implicit scientific default for every task. The one declared
-    pair is the launch policy (record-only, diagnostic): without it every template run
-    fails at training admission (L-1), and it claims no scientific standing."""
+    pair is the launch policy (blocking, scientific): without it every template run
+    fails at training admission (L-1); blocking lets the task's own blocking checks
+    invalidate (an observe-only run is refused when the task declares any), and
+    scientific lets Health-valid results be the authoritative score (diagnostic
+    excludes every result). The one
+    declared mode is trial/formal (``is_trial``, the command line's default): without it
+    a composed non-TIDMAD task is refused at Run review because single-file mode cannot
+    train it."""
     shape = template_document(template_id)
     options = shape.preparation_options
     assert (options.proposal_advice, options.implementation_advice, options.validation_advice) == (
@@ -88,7 +94,11 @@ def test_template_shapes_carry_no_scientific_values(template_id):
     )
     assert options.allowed_output_types is None
     assert shape.training_settings == {
-        "launch": {"healthgate_mode": "observe_only", "result_authority": "diagnostic"}
+        "launch": {
+            "healthgate_mode": "blocking",
+            "result_authority": "scientific",
+            "is_trial": True,
+        }
     }
     assert shape.task_binding is None
 
@@ -128,8 +138,9 @@ def test_advice_targets_render_into_their_owning_fields():
     assert rendered.preparation_options.proposal_advice == "advice for proposal"
     assert rendered.training_settings == {
         "launch": {
-            "healthgate_mode": "observe_only",
-            "result_authority": "diagnostic",
+            "healthgate_mode": "blocking",
+            "result_authority": "scientific",
+            "is_trial": True,
             "human_advice_tune": "advice for tuning",
         }
     }
@@ -232,8 +243,8 @@ def test_training_inspector_projects_required_policy_choices():
     shape = template_document("single-research-loop")
     policy = {item.name: item for item in training_inspector(shape).policy}
     assert {name: item.value for name, item in policy.items()} == {
-        "healthgate_mode": "observe_only",
-        "result_authority": "diagnostic",
+        "healthgate_mode": "blocking",
+        "result_authority": "scientific",
     }
     assert [o.value for o in policy["healthgate_mode"].options] == ["observe_only", "blocking"]
     assert all(item.required for item in policy.values())

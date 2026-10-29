@@ -134,7 +134,7 @@ def test_quickstart_counts_describe_the_full_declared_split(tmp_path):
     )
     assert facts.sample_counts is not None
     assert (facts.sample_counts.training, facts.sample_counts.evaluation) == (128, 64)
-    assert facts.scopes.basis.startswith("full task split")
+    assert facts.scopes.basis.startswith("Full task split")
 
 
 def _passed(job: CompositionJob, package: TaskPackageFacts | None) -> CompositionResult:

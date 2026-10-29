@@ -279,7 +279,9 @@ names and bind their values using the credential instructions above.
 
 The sandbox must observe the same hardware facts as the capture. If the reviewed
 runtime requires GPU visibility, select the required character devices under
-`/dev` and read-only `/sys` access. Empty device access works only when that
+`/dev`; a `/dev/nvidia<N>` node makes the sandbox add read-only `/sys` and the
+host's NVIDIA control nodes itself
+([GPU tasks](../workspace_sandbox/README.md#gpu-tasks)). Empty device access works only when that
 captured runtime can be verified without those devices. The operation adapter
 supplies the exact checkout, interpreter and Git metadata access.
 

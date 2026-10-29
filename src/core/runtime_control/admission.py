@@ -24,6 +24,7 @@ registry. It does not retry, wait, or reschedule.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -165,7 +166,9 @@ ACCEPTED_ENFORCEMENT: frozenset[str] = frozenset(
 )
 
 
-def stops_phase(enforcement: str, reason_code: str | None) -> bool:
+def stops_phase(
+    enforcement: str, reason_code: str | None, *, evidence: Mapping[str, Any] | None = None
+) -> bool:
     """Whether an ADVERSE decision stops the phase under this posture.
 
     One home for the enforcement question, so the executor cannot answer
@@ -176,6 +179,9 @@ def stops_phase(enforcement: str, reason_code: str | None) -> bool:
             treated as non-enforcing here **only** because
             `GpuAdmissionPolicy` already refuses it at construction; this
             function is not the validation point.
+        evidence: decision evidence carrying namespace execution conditions. An
+            isolated measured-capacity refusal stops even under observe-only;
+            absent evidence preserves the ordinary enforcement behavior.
         reason_code: the refusal's `AdmissionReason`, typed Optional
             because `AdmissionDecision.reason_code` is — an admitted
             decision carries none. `_a_refusal_must_say_why` makes `None`
@@ -187,6 +193,14 @@ def stops_phase(enforcement: str, reason_code: str | None) -> bool:
     """
     # Explicit isolation conditions precede the ordinary observation policy.
     if reason_code == "environment_headroom_unproven":
+        return True
+    conditions = (evidence or {}).get("effective_execution_conditions")
+    if (
+        reason_code == "insufficient_headroom"
+        and isinstance(conditions, Mapping)
+        and conditions.get("process_visibility") == "namespace_limited"
+        and conditions.get("refusal_enforcement") == "all_phase_modes"
+    ):
         return True
     if enforcement == "enforce":
         return True
@@ -409,6 +423,33 @@ def evaluate_gpu_admission(
             requirement_ownership=requirement_ownership,
             requirement_error=requirement_error,
         )
+
+    return evaluate_ordinary_gpu_admission(
+        snapshot=snapshot,
+        requirement_mib=requirement_mib,
+        requirement_provenance=requirement_provenance,
+        mode=mode,
+        run_name=run_name,
+        ceiling_gib=ceiling_gib,
+        sampling_error=sampling_error,
+        requirement_ownership=requirement_ownership,
+        requirement_error=requirement_error,
+    )
+
+
+def evaluate_ordinary_gpu_admission(
+    *,
+    snapshot: Any,
+    requirement_mib: float | None,
+    requirement_provenance: str | None,
+    mode: str,
+    run_name: str = "candidate",
+    ceiling_gib: float | None = None,
+    sampling_error: str | None = None,
+    requirement_ownership: GpuRequirementOwnership | None = None,
+    requirement_error: str | None = None,
+) -> AdmissionDecision:
+    """Apply ordinary phase posture after the visibility routing decision."""
 
     if mode not in ACCEPTED_MODES:
         # An invalid posture refuses, like formal — but the record must

@@ -12,6 +12,8 @@
   // Fit to view never goes below this zoom (text stays >= ~9px at the 12px label size); larger
   // graphs scroll inside the viewport. Manual zoom out still reaches 40%.
   const FIT_MIN = 0.75;
+  // Empty space kept around the cards when Fit frames the graph (document pixels).
+  const FIT_PAD = 40;
   const geometry = window.editorCircuitGeometry;
   const presentation = window.editorCapabilityPresentation;
   const contracts = window.editorContractPresentation;
@@ -141,15 +143,25 @@
     world.style.transform = scale === 1 ? '' : `scale(${scale})`;
     sizeWorld(); updateVisibility();
   }
-  // Fit the whole graph into the canvas (view only; never below the legibility floor).
+  // Fit the whole graph into the canvas: the union of every card's box plus FIT_PAD on each side,
+  // scrolled to that box's origin (view only; never below the legibility floor FIT_MIN).
   function fit() {
     const viewport = host?.querySelector('.circuit-viewport');
     if (!viewport || !viewport.clientWidth || !projection?.document) return;
     view.fitPending = false;
-    const content = sizeWorld(), max = parseFloat(getComputedStyle(viewport).maxHeight);
+    sizeWorld();
+    const boxes = [...host.querySelectorAll('.circuit-world .circuit-card')].map(card => cardBox(card));
+    const union = boxes.length ? {
+      left: Math.min(...boxes.map(box => box.left)) - FIT_PAD, top: Math.min(...boxes.map(box => box.top)) - FIT_PAD,
+      right: Math.max(...boxes.map(box => box.right)) + FIT_PAD, bottom: Math.max(...boxes.map(box => box.bottom)) + FIT_PAD,
+    } : {left: 0, top: 0, right: 0, bottom: 0};
+    const origin = {x: Math.max(0, union.left), y: Math.max(0, union.top)};
+    const content = {width: union.right - origin.x, height: union.bottom - origin.y};
+    const max = parseFloat(getComputedStyle(viewport).maxHeight);
     const available = {width: viewport.clientWidth - 2, height: (Number.isFinite(max) ? max : viewport.clientHeight) - 2};
-    applyScale(geometry.fitScale(content, available, FIT_MIN));
-    viewport.scrollLeft = 0; viewport.scrollTop = 0; updateVisibility();
+    const scale = geometry.fitScale(content, available, FIT_MIN);
+    applyScale(scale);
+    viewport.scrollLeft = origin.x * scale; viewport.scrollTop = origin.y * scale; updateVisibility();
   }
   function draw() {
     if (!host) return;

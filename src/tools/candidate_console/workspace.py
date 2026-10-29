@@ -434,9 +434,18 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
     import hashlib
 
     with _open_directory(base) as directory:
-        if not _owned(directory):
+        metadata = os.fstat(directory)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise WorkspaceRefused(f"workspace parent {base} is not a directory")
+        if metadata.st_uid != os.getuid():
             raise WorkspaceRefused(
-                "workspace parent must be owned by you without group/other write"
+                f"workspace parent {base} is owned by uid {metadata.st_uid}, not you; "
+                "choose a folder you own"
+            )
+        if stat.S_IMODE(metadata.st_mode) & 0o022:
+            raise WorkspaceRefused(
+                f"workspace parent {base} must not be writable by group or others; "
+                f"fix it with: chmod 700 {base}"
             )
         root = ensure_owned_directory(directory, WORKSPACE_DIRECTORY, WORKSPACE_DIRECTORY)
     opened = {"": root}

@@ -69,7 +69,10 @@
       const title = document.createElement('h3');
       title.textContent = projection.bodies.length > 1 ? `Iteration ${body.iteration}` : 'Workflow body';
       const stage = window.editorCapabilityPresentation?.label('tuning') || 'tuning';
-      group.append(title, facts([[`${stage} state`, body.tuning_state]]));
+      // The node state says only that the node executed; the outcome comes from the tuner record.
+      const rows = [[`${stage} node execution`, body.tuning_state]];
+      if (body.outcome) rows.push([`${stage} outcome`, body.outcome]);
+      group.append(title, facts(rows));
       if (body.skipped?.length) {
         const skipped = document.createElement('p'); skipped.className = 'muted graph-result-skipped';
         skipped.textContent = 'Skipped, not run: ' + body.skipped.map(item => `${item.node_id} (${item.reason.replaceAll('_', ' ')})`).join(', ');

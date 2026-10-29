@@ -308,7 +308,7 @@ def _claim_and_spawn(
 
 
 def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopStop:
-    """Request graceful Stop on one live, already-claimed finite candidate loop.
+    """Request graceful Stop on a live loop or end its clean paused tail.
 
     This acknowledges the request, not termination. The active body finishes;
     read_operation reports whether the finite limit or Stop won the boundary.
@@ -323,7 +323,7 @@ def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopS
     config = validate_config(config)
     with locked_store(config, create=False):
         record = load_record(config, operation_id)
-        from .loop_resume import root_inputs
+        from .loop_resume import review_locked, root_inputs
 
         try:
             root_record, _, initial = root_inputs(record)
@@ -340,7 +340,11 @@ def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopS
                 raise OperationFailure("integrity", "Stop marker identity mismatch")
             return marker
         snapshot = read_operation(config, operation_id)
-        if snapshot.receipt_available or snapshot.process.status != "alive":
+        if snapshot.receipt is not None and snapshot.receipt.status == "paused":
+            # Same lock as Resume admission: only the clean paused tail can end,
+            # never a historical checkpoint whose successor already continues it.
+            review_locked(config, operation_id)
+        elif snapshot.receipt_available or snapshot.process.status != "alive":
             raise OperationFailure("not_running", "candidate is terminal or not confirmed running")
         with directory(control) as descriptor:
             publish_bytes_write_once(

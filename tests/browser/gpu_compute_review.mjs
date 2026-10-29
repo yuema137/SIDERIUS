@@ -4,7 +4,7 @@
  * warns that training runs will be refused, and the warning disappears when one is passed.
  *
  * The review also repeats the server's device warnings (ReusableCaptureReview.device_warnings,
- * the wording `check` prints: a device path missing on this host, GPU nodes without /sys;
+ * the wording `check` prints for a device path the sandbox cannot pass on this host;
  * walkthrough N2); without that, Review enabled Launch with no hint of the refusal to come.
  * Why this fails without the change (reusable-run.js computeReview): the review
  * summary then has no #capture-compute-review line, and a task configured with
@@ -101,8 +101,8 @@ try {
   assert.equal(await page.locator('[id^="capture-device-warning-"]').count(), 0, 'no server warning for this review');
 
   // 4. N2: the server's device warnings (the wording check prints) are repeated in the review.
-  const serverWarnings = ['Device /dev/nvidia1 cannot be passed into the run sandbox (declared path does not exist: /dev/nvidia1); a run given it will be refused.',
-    'GPU devices are passed but /sys is not mounted read-only; CUDA may fail to start inside the run sandbox (see README).'];
+  const serverWarnings = ['Device /dev/nvidia1 cannot be passed into the run sandbox (GPU device /dev/nvidia1 is not present on this machine, so the run cannot use that GPU; list only the /dev/nvidia<N> nodes this machine has (ls /dev/nvidia*) or run on the machine that has it); a run given it will be refused.',
+    'Device /dev/nvidia-uvm cannot be passed into the run sandbox (declared path does not exist: /dev/nvidia-uvm); a run given it will be refused.'];
   await page.unroute('**/reusable-captures/review');
   await page.route('**/reusable-captures/review', async route => {
     const response = await route.fetch(); const body = await response.json();

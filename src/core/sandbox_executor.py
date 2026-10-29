@@ -420,8 +420,9 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     branch, so both launch paths sit behind one gate — a branch outside
     it would be a hole that looks like coverage.
 
-    Explicit namespace-limited execution requires provable headroom for
-    both trial and formal phases, regardless of the observation posture.
+    Explicit namespace-limited execution requires coherent device accounting.
+    With that accounting, missing requirements follow ordinary phase posture;
+    authoritative demand above the ceiling stops even in observe-only mode.
     Missing GPU identity may bypass this check only with a validated CPU
     availability fact. Its policy errors also stop rather than taking the
     legacy trial fallback.
@@ -441,9 +442,9 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     The requirement is whatever the run was given. PR B does not produce
     or promote one (D-B5), so in the default `trial` mode this admits and
     records that it asserted nothing; formal mode refuses until PR C
-    supplies a measurement. Those defaults remain unchanged outside the
-    explicitly selected isolation condition. Inside it, current parent-tree
-    occupancy remains additional to the new worker's measured requirement.
+    supplies a measurement. Those defaults also apply inside the namespace
+    when current device accounting is coherent. Current parent-tree occupancy
+    remains additional to the new worker's measured requirement.
     """
     if active_attempt(sandbox) is not None:
         return admit_phase(sandbox, phase)
@@ -561,7 +562,7 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     # the card. An empty GPU is not required.
     from core.runtime_control.admission import stops_phase
 
-    if not stops_phase(enforcement, decision.reason_code):
+    if not stops_phase(enforcement, decision.reason_code, evidence=decision.evidence):
         # Why this one was observed rather than enforced is itself a fact
         # an audit needs: under `enforce`, "observed" now means the refusal
         # was an evidence gap, not a resource verdict, and a reader must be

@@ -839,6 +839,27 @@ def declares_tidmad_topology(profile: DatasetProfile) -> bool:
     return all(section in profile.topology for section in ("dataset", "channels", "encoding"))
 
 
+def single_file_mode_refusal(profile: DatasetProfile, *, is_trial: bool) -> str | None:
+    """Why a run with ``is_trial`` false cannot train on ``profile``, or ``None``.
+
+    With ``is_trial`` false the tuner runs every round in ``single_file`` mode:
+    no task-owned scopes are acquired and the training child takes its legacy
+    branch, which loads one TIDMAD training file by ``file_index``. A profile
+    without TIDMAD topology therefore has no trainable round in that mode. The
+    review, launch admission and tuner startup ask this one question so each
+    refuses with the same cause before any model call.
+    """
+    if is_trial or declares_tidmad_topology(profile):
+        return None
+    return (
+        "This task's dataset profile declares no TIDMAD topology, so it cannot train "
+        "with is_trial false: that single-file mode loads one TIDMAD training file and "
+        "uses no task-owned data scopes. Use trial/formal mode: set is_trial to true "
+        "in the workflow's Train & tune settings (the command line uses it by default; "
+        "do not pass --no-is_trial)."
+    )
+
+
 def tidmad_topology(profile: DatasetProfile) -> TidmadTopology:
     """Decode ``profile``'s opaque payload as TIDMAD's typed topology.
 

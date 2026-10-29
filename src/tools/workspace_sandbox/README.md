@@ -85,7 +85,7 @@ Edit **your external `sandbox.json`**, then run `check` again:
 | `workspace` | Existing canonical absolute directory where caller code and results may be written. It cannot overlap the installed runtime. |
 | `read_only` | Existing absolute files/directories to expose without write access. A selected task or experiment inside the workspace can be frozen this way. Paths retain their host names inside the sandbox. |
 | `network` | Required explicit boolean. `false` isolates the network; `true` grants host-network access, including provider access. It does not filter destinations or authorize spending. |
-| `devices` | Explicit character-device paths under `/dev`, for example the devices required by your qualified GPU setup. No GPU is exposed by default. This is access, not a GPU allocation or VRAM budget. |
+| `devices` | Explicit character-device paths under `/dev`. No GPU is exposed by default. Listing a `/dev/nvidia<N>` node also mounts read-only `/sys` and the host's NVIDIA control nodes ([GPU tasks](#gpu-tasks)). This is access, not a GPU allocation or VRAM budget. |
 | `environment_names` | Names to copy from the launching shell, such as `OPENAI_API_KEY` or a declared calibration setting. Missing/empty variables are reported by name before launch. Never put key values in this file or the command line. |
 | `timeout_seconds` | Required positive finite wall-clock cap for this invocation. Timeout returns status `timed_out` and exit code 124; cleanup may add a short grace period. This does not reset or replace the experiment's shared API/training budgets. |
 
@@ -115,14 +115,46 @@ transmit values it receives. Child stdout/stderr pass through unchanged. The
 JSON execution summary on stderr contains only status, exit code and elapsed time.
 
 For GPU execution, validate the actual runtime libraries and selected device
-mounts before training. The lightweight `check` does not establish CUDA readiness.
-Host `/sys` is not implicitly exposed. Add `/sys` to `read_only` when your
-hardware runtime needs that metadata. On the checked RTX 5090 host, explicitly
-mounting its device nodes plus read-only `/sys` allowed an `nvidia-smi` device
-query; device nodes alone did not. This is driver visibility evidence, not a
-training qualification. Host `/proc` and its subtrees remain unavailable as
+mounts before training. The lightweight `check` does not establish CUDA readiness;
+see [GPU tasks](#gpu-tasks). Host `/proc` and its subtrees remain unavailable as
 profile mounts; the sandbox retains its private PID view. Do not call a failed
 environment check a model failure.
+
+### GPU tasks
+
+A `/dev/nvidia<N>` device node alone does not let CUDA start: without host
+`/sys`, PyTorch reports `cudaGetDeviceCount` error 304. So when `devices` lists
+at least one `/dev/nvidia<N>` node, the sandbox adds two things itself
+([`gpu.py`](gpu.py)); you do not configure them:
+
+- **All of host `/sys`, read-only.** The process can read the host's hardware
+  and kernel metadata: PCI devices, CPU and NUMA topology, loaded modules and
+  their parameters, block and network device names, cgroup and power
+  information. It cannot change any of it. Docker mounts sysfs read-only in
+  containers and Apptainer binds host `/sys`; Flatpak binds selected `/sys`
+  subdirectories. On the checked RTX 5090 host a smaller set
+  (the GPU's PCI directory plus `/sys/module/nvidia*`) was also enough. The
+  sandbox mounts all of `/sys` so that other drivers and library versions that
+  read more metadata keep working.
+- **The NVIDIA control nodes present on this host**: `/dev/nvidiactl`,
+  `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`, `/dev/nvidia-modeset` and
+  `/dev/nvidia-caps/*` (MIG). Nodes you already listed are not passed twice.
+
+A profile without a `/dev/nvidia<N>` node gets neither, so its sandbox command is
+unchanged. A profile that already lists `/sys` (or a `/sys` subdirectory) in
+`read_only` keeps working; `/sys` is mounted once. A declared
+`/dev/nvidia<N>` that this machine does not have is refused before launch with
+`GPU device /dev/nvidia<N> is not present on this machine`.
+
+The sandbox applies no seccomp filter. The NVIDIA driver uses `memfd_create`
+during CUDA initialization, so a seccomp profile added later must allow it.
+
+To confirm a console task's GPU starts inside this sandbox, run
+`python -m tools.candidate_console check --gpu --config <console.json>` (see the
+[console README](../candidate_console/README.md)). To find which host paths a
+new driver needs, a host qualification can run the same CUDA probe through
+`build_command` with progressively larger read-only sets. Do this by hand on the
+GPU machine; it is not a CI test.
 
 ### GPU headroom and current execution limits
 
@@ -142,24 +174,33 @@ new worker requirement to the full 2779 MiB: the existing parent memory does
 not disappear when that worker starts. Those residual bytes remain
 unattributed in the saved evidence; the calculation does not invent owners.
 
-This explicitly selected isolation condition takes precedence over
-`observe_only`, `enforce_resource_limits`, and `enforce`, for both trial and
-formal phases. Missing, inconsistent, or insufficient headroom evidence stops
-the phase with `environment_headroom_unproven`. The saved decision records
-`effective_execution_conditions`, raw accounting, and the derived bound.
-Repair the missing evidence or retry when the environment has enough headroom;
-this refusal is not advice to shrink the model or batch. Ordinary launches
-outside this declared isolation condition retain their existing policies.
+When the visibility declaration is valid and a current typed GPU snapshot has
+available telemetry, a device UUID, no sampling error, and complete, coherent
+accounting, missing authoritative phase requirements use the ordinary phase
+policy. Trial mode proceeds without a safety claim. Formal mode
+refuses with `policy_unavailable`; `observe_only` records `would_refuse` and
+proceeds, while `enforce` stops. A measured requirement that does not fit returns
+`insufficient_headroom` and stops in every enforcement mode, including
+`observe_only`. This measured-demand rule retains precedence over the phase
+posture. Saved missing-requirement decisions retain `process_visibility` and
+`effective_execution_conditions`; proceeding does not certify a global process view.
 
-**GPU device access alone is not enough to run a native experiment here.**
-Select the [measured GPU execution policy](../../core/runtime_control/README.md#protecting-a-native-gpu-attempt)
-to obtain separate training and inference measurements and enable runtime
-protection. The native tuner accepts this policy in its typed input; the standard
+Missing or inconsistent accounting, invalid visibility declarations, missing GPU
+identity, ceiling-resolution failures, and admission policy exceptions still stop with
+`environment_headroom_unproven`, including in `observe_only`. Only explicit CPU
+availability permits the missing-GPU-identity path to proceed. Repair the
+execution evidence before retrying; this refusal is not advice to shrink the
+model or batch. Unattributed bytes never establish clean process visibility.
+There is no staleness guard beyond sampling immediately before phase admission.
+
+To obtain separate training and inference measurements and enable runtime
+protection, select the
+[measured GPU execution policy](../../core/runtime_control/README.md#protecting-a-native-gpu-attempt).
+The native tuner accepts this policy in its typed input; the standard
 single-iteration CLI accepts `--gpu_execution_policy_json`. Choose its measurement
 budget and other limits for your task and hardware; the sandbox profile does not
 choose them for you.
 
-Without the required phase evidence, native trial training and inference stop.
 Training measurements cannot substitute for inference measurements. The selected
 policy uses bounded preparation to obtain evidence before the corresponding
 phase; it does not prove an upper bound for unmeasured data or guarantee that

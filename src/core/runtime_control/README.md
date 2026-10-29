@@ -44,8 +44,15 @@ setting from another machine. For example, a caller ceiling of 24 GiB on an
 [GPU ceiling configuration](gpu-ceilings.md) for precedence, units and errors.
 
 Ordinary `GpuAdmissionPolicy.enforcement` still determines whether a refusal
-stops execution or is recorded as an observation. Explicit namespace-limited
-execution continues to stop whenever headroom evidence is insufficient.
+stops execution or is recorded as an observation. Namespace-limited execution uses
+that same policy only for missing authoritative phase requirements, when a valid
+declaration and a current typed snapshot provide
+available telemetry, a device UUID, no sampling error, and complete, coherent
+accounting. Authoritative demand above the ceiling stops even in `observe_only`
+with `insufficient_headroom`. Missing or invalid accounting, missing GPU identity, and policy
+exceptions still stop regardless of observation posture. With coherent accounting
+but no authoritative phase requirement, trial proceeds without a safety claim;
+formal records `would_refuse` under `observe_only` and stops under `enforce`.
 These are environment decisions; they do not justify shrinking the model.
 The measured demand is an empirical estimate, not a bound on every later input.
 This check does not add runtime GPU monitoring or supply missing trial/inference

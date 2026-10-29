@@ -5,8 +5,8 @@ The command appends one ``tasks[]`` entry and writes nothing else:
 - the five ``TaskChoice`` fields that have no default, written explicitly:
   ``preparation_timeout_seconds``, ``candidate_timeout_seconds`` and
   ``candidate_network`` from :data:`STARTER_VALUES` unless overridden;
-  ``candidate_devices`` from ``--device`` (otherwise an interactive question
-  about the host's ``/dev/nvidia*`` nodes, or none when stdin is not a TTY);
+  ``candidate_devices`` from ``--device``, none with ``--no-gpu``, otherwise
+  this host's ``/dev/nvidia<N>`` GPU nodes (detected, never asked);
   ``candidate_environment_names`` from the credential requirement owner
   (``candidate_worker.preflight.credential_requirements``) applied to every
   route of the task's resolved LLM profile, plus any ``--env`` names;
@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.candidate_operations.models import OperationFailure
+from tools.workspace_sandbox.gpu import GPU_NODE
 
 from .files import canonical, config_bytes
 from .models import ConsoleConfig
@@ -83,7 +84,7 @@ class AddTaskRequest:
     label: str | None = None
     environment_names: tuple[str, ...] = ()
     network: bool = STARTER_VALUES.candidate_network
-    devices: tuple[str, ...] | None = None  # None: ask (TTY) or none
+    devices: tuple[str, ...] | None = None  # None: this host's GPU nodes
     preparation_timeout_seconds: float = STARTER_VALUES.preparation_timeout_seconds
     candidate_timeout_seconds: float = STARTER_VALUES.candidate_timeout_seconds
     external: bool = False
@@ -102,32 +103,34 @@ class TaskPlan:
 
 
 def host_gpu_devices() -> tuple[str, ...]:
-    """Character devices named ``/dev/nvidia*`` on this host, sorted."""
+    """This host's GPU device nodes (``/dev/nvidia<N>`` character devices), by number.
+
+    Control nodes (``nvidiactl``, ``nvidia-uvm``, ...) are not listed: the run
+    sandbox adds the ones present at launch (``tools.workspace_sandbox.gpu``), and
+    writing them would refuse a run whenever a lazily created node is absent.
+    """
     found = []
     for name in sorted(glob.glob("/dev/nvidia*")):
         path = Path(name)
-        if path.is_char_device() and not path.is_symlink():
+        if GPU_NODE.fullmatch(name) and path.is_char_device() and not path.is_symlink():
             found.append(name)
-    return tuple(found)
+    return tuple(sorted(found, key=lambda name: int(name.removeprefix("/dev/nvidia"))))
 
 
 def choose_devices(devices: tuple[str, ...] | None) -> tuple[str, ...]:
-    """``--device`` wins; otherwise ask on a TTY; a non-interactive run passes none."""
+    """``--device``/``--no-gpu`` win; otherwise this host's GPU nodes, without asking."""
     if devices is not None:
+        print("candidate_devices: " + (", ".join(devices) or "none (--no-gpu)"))
         return devices
     nodes = host_gpu_devices()
-    if nodes and sys.stdin.isatty():
-        print("This host has NVIDIA device nodes: " + ", ".join(nodes))
-        try:
-            answer = input("Pass them to candidate runs of this task? [y/N] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            raise AddTaskRefused(
-                "no answer to the device question; pass --device PATH ... to choose devices"
-            ) from None
-        if answer in ("y", "yes"):
-            return nodes
-    print("candidate_devices: none (pass --device PATH to give runs a GPU device node)")
+    if nodes:
+        print(
+            "candidate_devices: " + ", ".join(nodes) + " (NVIDIA GPU found on this machine; "
+            "runs also get read-only /sys and the NVIDIA control nodes; pass --no-gpu to "
+            "give runs no GPU)"
+        )
+        return nodes
+    print("candidate_devices: none (no NVIDIA GPU device node on this machine)")
     return ()
 
 
@@ -375,8 +378,15 @@ def parser() -> argparse.ArgumentParser:
         default=STARTER_VALUES.candidate_network,
         help=f"candidate network access (starter: {STARTER_VALUES.candidate_network})",
     )
-    cli.add_argument(
-        "--device", nargs="+", metavar="PATH", help="character device passed to candidate runs"
+    gpu = cli.add_mutually_exclusive_group()
+    gpu.add_argument(
+        "--device",
+        nargs="+",
+        metavar="PATH",
+        help="character devices passed to candidate runs (default: this host's /dev/nvidia<N>)",
+    )
+    gpu.add_argument(
+        "--no-gpu", action="store_true", help="pass no device to candidate runs (CPU only)"
     )
     cli.add_argument(
         "--prepare-timeout",
@@ -411,7 +421,7 @@ def _request(
         label=label,
         environment_names=tuple(args.env),
         network=args.network,
-        devices=None if args.device is None else tuple(args.device),
+        devices=() if args.no_gpu else None if args.device is None else tuple(args.device),
         preparation_timeout_seconds=args.prepare_timeout,
         candidate_timeout_seconds=args.candidate_timeout,
         external=args.external,

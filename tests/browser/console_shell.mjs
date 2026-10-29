@@ -89,6 +89,10 @@ try {
   await page.goto(metadata.origin + '/#home');
   assert.equal(await page.locator('#token').isVisible(), true);
   assert.equal(await page.locator('#access-connected').isHidden(), true);
+  // Before connecting, the full-width access banner wraps under the header items: no horizontal overflow at 1280 px.
+  await page.setViewportSize({width: 1280, height: 1000});
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'pre-connect: no horizontal overflow at 1280 px');
+  await page.setViewportSize({width: 1440, height: 1000});
   // Access help occupies its own full row, including with long file paths on narrow screens.
   await page.locator('#access-help summary').click();
   assert.equal(await page.locator('#access-help li').count(), 3);

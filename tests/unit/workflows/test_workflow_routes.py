@@ -450,10 +450,11 @@ EXAMPLE_IDENTITIES = {
         "f0717cfc5640874bcefa38e8e88e1e490189a5099aebbb79b3a17bec42cde53e",
         "f07f0263ece5eb02fa16da9c368f8845c2cf8ee1d700031f8d86dbd803c4c2e8",
     ),
-    # Re-pinned by #983 S3b: the example drops the retired sampling_seed/train_base_seed.
+    # Re-pinned deliberately: the example declares is_trial true (trial/formal mode),
+    # since single_file mode cannot train its non-TIDMAD quickstart task.
     "reusable_training.py": (
-        "f4bc5cc1d0f73048d664b8f8d00fdf74faa3b70e191cf6084e4fcfe0953ff0fc",
-        "401907f9b23dd6722123490b3afaba2f72cda1d6741a3f3bcc1a146ffb40f04d",
+        "5ae0645d827c1aa46ed1f411bee68ce886cd2a998738792fdfb0c46b3fe7a38d",
+        "0a77806bd04d7897c8bc2c09bb33702e91f5ed0afb21ddd8123207e65baaef3d",
     ),
 }
 

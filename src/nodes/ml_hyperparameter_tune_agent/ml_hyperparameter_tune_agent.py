@@ -229,6 +229,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _time_skip_memory_extra,
     _vram_skip_memory_extra,
     is_evidence_refusal,
+    validate_training_mode_startup,
     validate_watchdog_startup,
 )
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
@@ -799,6 +800,9 @@ class HyperparamTuningAgent:
         # it has no failure mode of its own and no phase moved to accommodate
         # it.
         run_profile = resolve_dataset_profile()
+        # Before any planner call: a composed non-TIDMAD run with is_trial false
+        # could only reach single_file rounds, which cannot train it.
+        validate_training_mode_startup(agent_input, run_profile)
 
         # --- The run's ONE Model-I/O declaration (Step 05b) ---
         # Bound here, once, for exactly the same reason the profile above is:
@@ -1371,6 +1375,7 @@ class HyperparamTuningAgent:
         # C9c: set when the runtime EVIDENCE CHANNEL fails. Terminates
         # the chain, not just the attempt (infrastructure class).
         _evidence_channel_failure: str | None = None
+        environment_admission_refusal = None
         # Phase 6.6 WS-B B.3 — per-attempt VRAM-gate rejection buffer.
         # Appended to on every evaluate_vram_skill feasible=False event.
         # Flushed to HyperparamTuningOutput.physical_rejections at run exit.
@@ -1586,6 +1591,10 @@ class HyperparamTuningAgent:
                     )
                     if trained.scope_violation_reason is not None:
                         _scope_violation_reason = trained.scope_violation_reason
+                    if trained.environment_admission_refusal is not None:
+                        environment_admission_refusal = trained.environment_admission_refusal
+                        _evidence_channel_failure = environment_admission_refusal.reason
+                        break
                     if trained.signal is AttemptSignal.NEXT_ATTEMPT:
                         continue
                     if trained.signal is AttemptSignal.END_ROUND:
@@ -1902,6 +1911,7 @@ class HyperparamTuningAgent:
                 skipped_formal_for_no_valid_winner=_skipped_formal_for_no_valid_winner,
                 physical_rejections_buffer=physical_rejections_buffer,
                 last_plan=plan,
+                environment_admission_refusal=environment_admission_refusal,
             ),
         )
         finalize_run_checkpoints(

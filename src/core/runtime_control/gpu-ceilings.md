@@ -56,9 +56,14 @@ CLI exits are 0 feasible, 1 infeasible, 2 invalid configuration. Invalid limits,
 member demands and nonfinite aggregate overflow refuse with a usage error.
 Device-backed ordinary admission converts resolver failures into a
 `policy_unavailable` decision. Existing enforcement posture still determines
-whether it stops execution. Namespace-limited mode retains its unconditional
-`environment_headroom_unproven` refusal; no exception-driven trial bypass is
-introduced.
+whether it stops execution. Namespace-limited execution with a valid
+visibility declaration, available telemetry, a UUID-bound typed snapshot, no
+sampling error, and a complete coherent `OccupancyBound` uses ordinary posture
+only for missing authoritative phase requirements. Authoritative demand above
+the ceiling returns `insufficient_headroom` and stops even in `observe_only`.
+Other isolated evidence failures retain the unconditional
+`environment_headroom_unproven` refusal. Policy exceptions and missing GPU identity remain conservative; only
+explicit CPU availability bypasses the missing-identity check.
 
 ## Scope and historical compatibility
 

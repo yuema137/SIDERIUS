@@ -145,7 +145,20 @@ def main(argv: list[str] | None = None) -> int:
             "recorded as credential_file in a new console.json; values are never printed"
         ),
     )
+    parser.add_argument(
+        "--gpu",
+        action="store_true",
+        help=(
+            "check only: start CUDA inside the run sandbox for each task that lists a "
+            "/dev/nvidia<N> device (no network, no model calls)"
+        ),
+    )
+    parser.add_argument("--task", help="check --gpu only: probe just this task ID")
     args = parser.parse_args(argv)
+    if (args.gpu or args.task is not None) and args.command != "check":
+        parser.error("--gpu and --task are for check only")
+    if args.task is not None and not args.gpu:
+        parser.error("--task requires --gpu")
     if args.command == "init":
         if args.workspace is None or args.config is not None:
             parser.error("init requires --workspace and takes no --config")
@@ -196,6 +209,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     config = resolved.config
     _report(resolved)
+    if args.gpu:
+        from .gpu_check import check_gpu
+
+        return check_gpu(config, args.task)
     if args.command == "serve":
         import uvicorn
 

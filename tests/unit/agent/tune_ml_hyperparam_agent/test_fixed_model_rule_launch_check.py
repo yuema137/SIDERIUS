@@ -59,6 +59,8 @@ with bind_run_task_composition(composition, physical_data_root=str(workspace / "
         task_composition_ref=build_task_composition_ref(composition),
         workflow_parameter_rules=rules,
         max_rounds=1, attempts_per_round=1,
+        # Trial/formal mode: is_trial false is single_file, refused for this non-TIDMAD task.
+        is_trial=True,
     )
     node = HyperparamTuningAgent(bridge_factory=bridge, sandbox_factory=lambda **kwargs: SimpleNamespace(plugin_dir=str(workspace / "plugins")))
     try:

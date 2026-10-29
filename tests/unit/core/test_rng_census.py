@@ -143,6 +143,7 @@ ENTRY_ALLOWLIST: dict[str, str] = {
     "tools/adaptors/__main__.py": _CLI,
     "tools/adaptors/cli.py": _CLI,
     "tools/candidate_console/__main__.py": _CLI,
+    "tools/candidate_console/gpu_check.py": "CUDA availability probe (check --gpu): torch.cuda.is_available/device_count and torch.zeros on cuda; no RNG draws, no model build or training",
     "tools/candidate_operations/__main__.py": _CLI,
     "tools/candidate_operations/child.py": _ORCHESTRATOR,
     "tools/candidate_prepare/__main__.py": _CLI,

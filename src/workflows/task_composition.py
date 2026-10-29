@@ -2427,6 +2427,38 @@ def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
     return metric
 
 
+def _load_declared_dataset_profile(
+    raw: dict[str, Any], resolved_manifest: str
+) -> tuple[DatasetProfile, str, str]:
+    """The manifest's ``dataset_profile`` section as ``(profile, authored ref, path)``."""
+    from execute_tools.dataset_config import load_dataset_profile
+
+    profile_section = _section(raw, "dataset_profile", resolved_manifest)
+    profile_ref = _require(profile_section, "config", "dataset_profile")
+    profile_path = _resolve_path(profile_ref, os.path.dirname(resolved_manifest))
+    try:
+        profile = load_dataset_profile(profile_path)
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"dataset_profile at {profile_path!r} could not be loaded: {type(exc).__name__}: {exc}"
+        ) from exc
+    return profile, profile_ref, profile_path
+
+
+def compose_dataset_profile_from_manifest(manifest_path: str) -> DatasetProfile:
+    """The run's DECLARED dataset profile, read from its manifest.
+
+    The profile half of :func:`compose_run_task_bindings` through the same
+    loader. It reads only the manifest YAML and the profile JSON it names and
+    imports no task code, so a review can ask a topology question in-process.
+
+    Raises:
+        TaskCompositionError: the manifest or its profile could not be read.
+    """
+    resolved_manifest = os.path.abspath(manifest_path)
+    return _load_declared_dataset_profile(_read_manifest(resolved_manifest), resolved_manifest)[0]
+
+
 def compose_task_data_path_from_manifest(manifest_path: str) -> TaskDataPath:
     """The run's DECLARED task data path, composed from its manifest.
 
@@ -2663,17 +2695,7 @@ def _compose_resolved_task_bindings(
     if impl_plugin is not None:
         plugins.append(impl_plugin)
 
-    from execute_tools.dataset_config import load_dataset_profile
-
-    profile_section = _section(raw, "dataset_profile", resolved_manifest)
-    profile_ref = _require(profile_section, "config", "dataset_profile")
-    profile_path = _resolve_path(profile_ref, manifest_dir)
-    try:
-        profile = load_dataset_profile(profile_path)
-    except Exception as exc:
-        raise TaskCompositionError(
-            f"dataset_profile at {profile_path!r} could not be loaded: {type(exc).__name__}: {exc}"
-        ) from exc
+    profile, profile_ref, profile_path = _load_declared_dataset_profile(raw, resolved_manifest)
     source_paths["dataset_profile"] = profile_path
 
     metric_section = _section(raw, "metric", resolved_manifest)

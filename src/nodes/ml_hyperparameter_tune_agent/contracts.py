@@ -37,6 +37,7 @@ from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.planner_timing import PlannerTimingContext
 from core.capability_registry import CapabilityContractSnapshot
 from core.planner_strategy_identity import PlannerStrategyIdentity
+from core.runtime_control.admission import AdmissionDecision
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, NotScoreableResult
 
@@ -327,6 +328,7 @@ class RunExitSnapshot:
     physical_rejections_buffer: list
     last_plan: Any
     """The most recent validated plan, or ``None`` if none ever validated."""
+    environment_admission_refusal: AdmissionDecision | None = None
 
 
 class AttemptSignal(Enum):
@@ -436,6 +438,7 @@ class TrainingOutcome(_PhaseOutcome):
     train_status: Any = None
     train_time: Any = None
     training_results: Any = None
+    environment_admission_refusal: AdmissionDecision | None = None
 
 
 @dataclass(frozen=True)

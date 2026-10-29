@@ -15,7 +15,7 @@
   `SIDERIUS real training needs an NVIDIA GPU with CUDA, and none is visible here (...)`
   and exit code 2. In the browser console, the task's `candidate_devices` must
   also list the GPU device nodes (for example `/dev/nvidia0`) so the GPU reaches
-  the run sandbox. A CPU is enough for installation, focused tests, `--dry-run`,
+  the run sandbox; `add-task` writes this machine's nodes for you. A CPU is enough for installation, focused tests, `--dry-run`,
   pseudo runs (`--is_pseudo_llm`, `--is_pseudo_training`) and the synthetic
   Quickstart's data preparation and component checks
 - At least one LLM API key — OpenAI, Gemini and/or DeepSeek — for **real

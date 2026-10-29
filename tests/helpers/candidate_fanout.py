@@ -257,6 +257,8 @@ def selection_request(request, branches=2, *, bindings=None, node_order=None):
                 "launch": {
                     "healthgate_mode": "observe_only",
                     "result_authority": "diagnostic",
+                    # Trial/formal: single_file (is_trial false) cannot train this task.
+                    "is_trial": True,
                     "allowed_output_types": ["classifier"],
                     "trial_time_budget_minutes": 7,
                     "formal_time_budget_minutes": 19,

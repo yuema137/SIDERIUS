@@ -126,8 +126,12 @@ boundary, and this extraction adds no executable authored-graph topology or
 new setup behavior.
 
 The proposer returns its own candidate ID. The worker checks implementation-bound
-schema eligibility, output types, generated name and unsupported historical
-experiment-source inheritance before implementation. The existing isolation
+schema eligibility, output types and generated name before implementation.
+Experiment-source `inherited_components` claims are kept as the proposer wrote
+them; as in the native exploration loop they are optional reference context.
+The worker loads no earlier experiment's source, and the validator reports a
+claim the implementation does not carry as unverified, so a later loop body
+that names an earlier body's model proceeds. The existing isolation
 policy applies when the native seed requests it. `local_full_spec` constructs
 implementation input; managed model/test/loss directories and task/advice/hardware
 context are added through existing helpers. `local_all_fields` constructs the
@@ -1284,6 +1288,12 @@ construction. Existing task, measurement, hardware, run-invariant and constraint
 owners admit the selected training settings. Explicit interpreter disclosures,
 workflow rules and the structured-Health flag must agree with those owners;
 omitted launch facts are filled. Human advice and explicit history are preserved.
+Right after `run_launch_self_test` and before the run-invariants lock,
+`refuse_untrainable_launch` raises `ValueError` with
+`execute_tools.dataset_config.single_file_mode_refusal`'s message when the launch
+resolves `is_trial` false and the composition's dataset profile declares no TIDMAD
+topology (every round would be `single_file` and none could train); Run review
+refuses the same case earlier.
 The native interpretation adapter still owns the proposal mapping. Its late input
 is serialized with `exclude_unset=True` so schema defaults do not masquerade as
 explicit user choices during `reconcile_proposal`.

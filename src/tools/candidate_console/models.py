@@ -434,6 +434,9 @@ class GraphBodyResult(PreviewModel):
     iteration: int
     tuning_state: GraphState
     result: GraphRunSummary | None
+    #: Plain tuner outcome from the verified record (``graph_results.tuner_outcome``);
+    #: ``tuning_state`` says only that the node executed. Omitted without a record.
+    outcome: str | None = Field(default=None, exclude_if=lambda value: value is None)
     # Route-skipped nodes in declaration order; omitted when none (unrouted bytes).
     skipped: tuple[GraphSkippedNode, ...] = Field(default=(), exclude_if=lambda value: not value)
 

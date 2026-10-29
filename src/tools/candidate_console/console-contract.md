@@ -107,20 +107,36 @@ print `Warning: Task <id>: Device <path> cannot be passed into the run sandbox
 (<reason>); a run given it will be refused.` to stderr. Run admission
 (`SandboxProfile.device_paths` in `candidate_prepare.admission`) stays the hard gate.
 
-GPU prerequisite (#1145 item 5; no `/sys` is added anywhere): when a task's
-`candidate_devices` contains a `/dev/nvidia<N>` node and `"/sys"` is not in its
-`task_read_only`, `check`/`serve` print to stderr, without failing,
-`Warning: Task <id>: GPU devices are passed but /sys is not mounted read-only; CUDA
-may fail to start inside the run sandbox (see README).` One owner,
-`package_mounts.device_warnings(devices, read_only)`, produces both kinds of warning
-(unusable device paths first, then GPU nodes without `/sys`); `check`/`serve` prefix
-each with `Task <id>: `, and Run review shows the same list for the reviewed request.
+GPU passthrough (#1164): the console adds no `/sys` setting. The run sandbox owns
+it (`tools.workspace_sandbox.gpu.passthrough`, applied in `command.command_prefix`):
+a profile whose `devices` contain a `/dev/nvidia<N>` node also gets `--ro-bind /sys
+/sys` and `--dev-bind` of each present, undeclared NVIDIA control node (`nvidiactl`,
+`nvidia-uvm`, `nvidia-uvm-tools`, `nvidia-modeset`, `nvidia-caps/*`). A `"/sys"`
+already in `task_read_only` is mounted once. `package_mounts.device_warnings(devices)`
+reports only device paths the sandbox would refuse; `check`/`serve` prefix each with
+`Task <id>: `, and Run review shows the same list for the reviewed request.
+`SandboxProfile.device_paths` refuses a missing `/dev/nvidia<N>` with `GPU device
+<path> is not present on this machine, ...` (the admission cause).
+
+`check --gpu [--task <id>]` (`gpu_check.check_gpu`) runs, for each task whose
+`candidate_devices` lists a `/dev/nvidia<N>` node, `python -m
+tools.candidate_console.gpu_check <result>` inside `SandboxProfile(workspace=<fresh
+temporary directory>, read_only=data_root + task_manifest + task_read_only,
+network=False, devices=candidate_devices, environment_names=(),
+timeout_seconds=120)` through `workspace_sandbox.runner.run`. The child imports
+PyTorch, checks `torch.cuda.is_available()` (otherwise reports
+`core.gpu_requirement.real_launch_gpu_refusal()`), allocates `torch.zeros(1,
+device="cuda")` and writes `{"passed", "message"}` JSON. The host prints `Task <id>:
+sandbox passes <devices>[ and read-only /sys]`, then `Task <id>: GPU PASS: <message>`
+or `GPU FAIL: <cause>` (profile refusal, sandbox unavailable, timeout, or exit before
+a result). Exit status 0 only when at least one task was probed and all passed;
+otherwise 2. `--gpu`/`--task` are refused for `serve`/`init`; `--task` needs `--gpu`.
 
 ### Registering a task: `add-task`
 
 Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
 <console.json> (--manifest <path> | --from-bundle DIR) [--task-id ID] [--label TEXT]
-[--env NAME ...] [--network|--no-network] [--device PATH ...] [--prepare-timeout S]
+[--env NAME ...] [--network|--no-network] [--device PATH ... | --no-gpu] [--prepare-timeout S]
 [--candidate-timeout S] [--external] [--dry-run]`. Exactly one of `--manifest` and
 `--from-bundle` is required; `--from-bundle` is specified in the next section.
 
@@ -146,11 +162,16 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
   `candidate_timeout_seconds=3600.0` and `candidate_network=true` unless
   `--prepare-timeout`, `--candidate-timeout` or `--no-network` is given; they are
   starting values for the operator to review, not resource limits the framework
-  chooses. `candidate_devices` is `--device` when given; otherwise, when stdin is a
-  TTY and `/dev/nvidia*` character devices exist, the command lists them and asks
-  whether to pass them (no answer, EOF or Ctrl-C refuses with exit 2); else it is
-  `[]` and the command prints
-  `candidate_devices: none (...)`. `candidate_environment_names` is
+  chooses. `candidate_devices` is `--device` when given and `[]` with `--no-gpu`
+  (the two are mutually exclusive); otherwise it is `add_task.host_gpu_devices()`,
+  the host's `/dev/nvidia<N>` character devices (regex
+  `tools.workspace_sandbox.gpu.GPU_NODE`, symlinks excluded), sorted by number, with no
+  prompt on a TTY or elsewhere. Control nodes are never written, because the
+  sandbox passes the present ones at launch and a written, lazily created node
+  (`/dev/nvidia-uvm`) would make admission refuse the run. The command prints
+  `candidate_devices: <paths> (NVIDIA GPU found on this machine; ...)`,
+  `candidate_devices: none (no NVIDIA GPU device node on this machine)`, or the
+  explicit choice. `candidate_environment_names` is
   `credential_requirements(routes, ()).required_names` (the worker preflight owner)
   for every route of the task's resolved LLM profile
   (`setup_review.routes.standard_llm_routes` with literature and analysis enabled,
@@ -314,6 +335,32 @@ ledger's own launch code, so nothing reaches Launch that Launch would refuse or
 silently ignore. `ChoicesView.host_ledger` (omitted when false) tells the browser
 whether a ledger is configured.
 
+Prepared review facts (`capture_facts.py`): `ReusableCaptureReview.facts` carries
+`training` (nullable `TrainingReview`) and `task_parameter_rules` (nullable
+`ParameterRules`). The adapter reads the reviewed request's `proposal.input` external observation,
+or `optional.task-composition-ref` for interpretation-led workflows. Both profiles
+read `native-training.settings` when present. Reads are bounded and recheck SHA-256
+before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
+`CandidateTrainingSettings`. Task locks come from the proposal's
+`task_composition_ref.parameter_rules` or the separate `TaskCompositionRef.parameter_rules`;
+training controls come from the captured settings' native launch schema, including
+its defaults. No task import or current editor/settings lookup occurs. Review
+refuses changed input bytes. The projection does not alter launch or its digest.
+
+The ordinary `#capture-summary` displays all three captured advice strings, Health
+mode (`observe_only`: Record only; `blocking`: Block on failure), trial/formal time
+budgets in minutes, their configured epoch ceilings and the shared ceiling, task
+locks and separate workflow constraints. Null caps/budgets are labeled not set;
+per-role unset caps reference the shared ceiling, without browser default resolution.
+Rule JSON preserves exact null values. A workflow without training states that it
+has no training stage. Idle step 2 distinguishes disconnected, no open setup,
+runs disabled, and ready to prepare/open a run; singular no-improvement text says
+"1 completed body passes", plural says "2 completed bodies pass". The HTML declares
+the existing same-origin logo as favicon to prevent the browser's unsupported `/favicon.ico` fetch.
+Targeted witnesses: `test_review_projects_prepared_training_and_task_locks` and
+`tests/browser/run_page_review.mjs` (real prepared review and launch/list refresh;
+synthetic response variants for plural grammar and blocking Health presentation).
+
 Compute requirement (issue #1136, presentation only). A reviewed run whose
 captured workflow has a `tuning` node (native training, which refuses a sandbox
 without a CUDA device) shows `#capture-compute-review` "Compute: NVIDIA GPU
@@ -326,9 +373,8 @@ with the Task tab's Run policy. A workflow without a `tuning` node says no GPU c
 from `ReusableCaptureReview.nodes`/`devices`. For every workflow the review then shows
 one `#capture-device-warning-<i>` line (class `warning`, prefixed "Warning: ") per
 `ReusableCaptureReview.device_warnings`, which the server computes with
-`package_mounts.device_warnings` from the reviewed request's `devices` and
-`read_only` (walkthrough N2: GPU nodes without `/sys`, or a device path missing on this
-host). Launch stays enabled; nothing is refused in the browser, and the native launch
+`package_mounts.device_warnings` from the reviewed request's `devices`
+(walkthrough N2: a device path the sandbox would refuse on this host). Launch stays enabled; nothing is refused in the browser, and the native launch
 guard remains the authority (browser witness `tests/browser/gpu_compute_review.mjs`).
 
 Browser (B3-4c UI). The Run lane's **Host resources and parallel nodes** panel
@@ -853,6 +899,11 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
   `route_not_selected`). A skipped node is not run and is never shown as a failure;
   a skipped tuner has `tuning_state="skipped"` and `result=null`. The field is
   omitted when empty, so unrouted projections keep their bytes.
+- `outcome` (only with a `result`): `graph_results.tuner_outcome(result)`, one plain
+  sentence from the tuner record's status, termination reason, completed rounds and
+  attempts. `completed_rounds == 0` always reads "No training round completed: …"
+  whatever the status; the word "Completed" is used only for tuner status
+  `completed` with at least one round. `tuning_state` reports node execution only.
 - `GraphRunSummary` is the path-free subset of `RunView`: run name, model type,
   status, termination reason, times, completed rounds, total attempts, `metric`,
   `metric_source`, `ranking_refusal`, declared secondary metric identities, the
@@ -870,7 +921,8 @@ selected operation inside the existing poll, only for `kind == "candidate"` and
 clears the section. 404/409 are final for that selection; other failures retry on
 the next existing poll. Each body is its own section (`Iteration N` for several
 bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
-(`Train & tune`). A body with `skipped` nodes adds one muted line
+(`Train & tune`): the facts list shows `Train & tune node execution` (the
+`tuning_state`) and, when present, `Train & tune outcome` (the `outcome`). A body with `skipped` nodes adds one muted line
 "Skipped, not run: <node> (<reason>), ...". No cross-body score or ordering is
 computed or displayed; route decision details (observable values, case) are
 B1-PR6 monitor work.
@@ -949,6 +1001,11 @@ even when the loop has since become terminal (the backend replays the marker
 before its running check); a 200 is therefore an idempotent acknowledgement,
 never evidence that the loop is still running.
 
+For an exited, verified paused tail, the same route records Stop after the
+operations owner checks its clean pause and absence of a successor under the
+admission lock. No receipt is rewritten and no new operation/status is invented.
+An existing successor refuses the request; a Stop recorded first blocks Resume.
+
 Monitor: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
 **Stop at next boundary** is shown only for a status with `loop` (root or resumed
@@ -1006,14 +1063,24 @@ instead reads "Waiting for your input." followed by what was met in plain words 
 the request (for example "No improvement for 3 bodies (best 0.81 at body 4, higher
 is better). Paused after body 7 of 12."; a judge request adds the rationale of that
 boundary's `judge_verdicts` entry), then "Review and resume to continue with body
-N+1.", "A resumed segment continues this run." with a successor, or "Stop was
-requested; this run cannot continue." when `stop_requested`. The exact recorded
-values stay in the state's tooltip. A paused status with `stop_requested` (either
-pause kind) reads "Stop was requested; this run cannot continue." and offers no
-Resume: the owner refuses a stopped run. Resuming an input
+N+1." or "A resumed segment continues this run." with a successor. A recorded
+Stop without a successor instead uses the ended display below. The exact recorded
+values stay in the state's tooltip. A paused status with `stop_requested` and no successor (either pause kind)
+reads "Ended by you at the pause after body N." and offers no Resume or End:
+the owner refuses a stopped run. This is a terminal display derived from the
+paused receipt and durable Stop marker; the native status remains `paused`. Resuming an input
 request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
 resume** (one GET on click, never polled), then **Resume loop**, disabled unless
-credentials are ready. The client generates one request UUID per reviewed digest
+credentials are ready. **End loop here** is offered beside these actions on a
+paused tail that is no longer finishing. It confirms that completed results are
+kept and the run cannot resume, then posts `{}` to the existing `loop-stop` route.
+Pending Stop and Resume requests disable competing actions. Success triggers a
+fresh Monitor read, including its status sentence and observation label; a
+reload derives the ended display from the durable marker. An unstopped paused
+receipt is labelled "Current status", not "Final status". A continued predecessor
+never offers End, even when a descendant later records Stop.
+
+The client generates one request UUID per reviewed digest
 and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
 the POST; a retry reuses it, and the record is released once status shows the
 successor. After a review, `#loop-resume-advice` (a textarea, `maxlength=4000`) is
@@ -1224,14 +1291,18 @@ next-step lines then say "check the inputs" only. Admission is unchanged
 (`configured_capture` still refuses another task).
 
 **Runs of this setup** (`setup-runs.js`, `#setup-runs`, shown while a setup is open):
-on Run entry, a setup change and Refresh (`#setup-runs-refresh`) it reads
+on Run entry, a setup change, reconnect and Refresh (`#setup-runs-refresh`) it reads
 `GET /api/operations?limit=50&project_id=<setup_id>` and lists each run as a link to
 `#monitor/<UUID>` (run name and local admission time; outcome sentence below). A newer read
 (another setup, Refresh) replaces an in-flight one; only the newest renders. The status
 line counts the runs, "No runs of this setup yet." when none (complete), "No runs found;
 older runs may be missing." when none and `incomplete`, and with runs plus `incomplete`
 says older runs may be missing (the store scan limit), never claiming a complete
-history; unverifiable records are counted.
+history; unverifiable records are counted. The retained candidate controller emits
+`setup-run-observed` when an accepted operation id/state changes (including first
+launch acknowledgement or recovery). The matching setup invalidates its cached list
+and rereads immediately while Run is visible, so the launched operation appears
+without manual Refresh. Existing server attribution/filtering remains authoritative.
 
 **Metric threshold prefill (F11):** `task-tab.js` also reads the selected task's summary
 on Workflow entry and fills `<datalist id="task-metric-ids">` with the declared metric
@@ -2112,7 +2183,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
 - Canvas (at least 900 px wide): the canvas header holds **Templates**; the panel is a
   flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
   `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
-  height; the viewport scrolls and zooms inside it, so Fit fits the visible viewport.
+  height; the viewport scrolls and zooms inside it. Fit frames the union of every card's
+  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin, within the visible viewport.
   Open disclosures in the panel (port-type legend, canvas help and connection
   mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
   and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
@@ -2177,8 +2249,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   connection's reason is kept as `data-refusal` on the dimmed input. Icon-only canvas
   controls get a one-line tooltip from `data-tip-label`.
 - Cards fold every optional input that is not fed by a wire (not connected, or fed by an
-  external input) into one `+N optional` row. Fit to view never zooms below 75%; a larger
-  graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
+  external input) into one `+N optional` row. Fit to view never zooms below 75% (the legibility floor, `FIT_MIN`);
+  a larger graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
   zoom out still reaches 40%.
 - Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
   in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
@@ -2449,6 +2521,17 @@ forwarded verbatim) a workflow whose authored training settings omit
 calls `execute_tools.health_checks.launch_policy.validate_declared_policy` (refusals
 1-3 of `validate_formal_launch`) on the same sparse payload preparation captures
 (`settings_payload`). Config-dependent refusals 4-6 still run at training admission.
+Review then calls `check_trainable_launch`: when the payload resolves `is_trial`
+false, it reads the task manifest's dataset profile
+(`workflows.task_composition.compose_dataset_profile_from_manifest`: manifest YAML
+and profile JSON only, no task imports) and refuses (409 `launch_policy`) with
+`execute_tools.dataset_config.single_file_mode_refusal`'s path-free message when the
+profile declares no TIDMAD topology, because every round would be `single_file` and
+could not train. An unreadable profile is `stale_review`. Training admission
+(`candidate_worker.training_admission.refuse_untrainable_launch`, after
+`run_launch_self_test`) and tuner startup (`validate_training_mode_startup`, composed
+runs only) ask the same owner again. Templates declare `is_trial: true`,
+`healthgate_mode: blocking` and `result_authority: scientific` (`templates.DECLARED_LAUNCH_POLICY`).
 Prepare reuses the same review, so the refusal there carries
 `admission_not_attempted`. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the

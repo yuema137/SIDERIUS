@@ -25,6 +25,7 @@ const judgeStop = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const asking = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const judgeAsking = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const pausedStopped = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const ending = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 let browser;
 try {
   const metadata = await new Promise((accept, reject) => {
@@ -44,7 +45,10 @@ try {
   const page = await browser.newPage(), posts = [], faults = [];
   page.on('pageerror', error => faults.push(error.message));
   let stopRecorded = false, runningTerminal = false, pausingTerminal = false, resumedTerminal = false, resumed = null;
-  const pausePosts = [], resumePosts = [];
+  const pausePosts = [], resumePosts = [], endPosts = [];
+  let ended = false, releaseEndLog, startEndLog;
+  const endLogGate = new Promise(resolve => { releaseEndLog = resolve; });
+  const endLogStarted = new Promise(resolve => { startEndLog = resolve; });
   let askingDropped = false; // The first advised Resume is lost in transit (unconfirmed outcome).
   const status = (operation, fields) => ({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture',
     state: 'active', process: {status: 'alive', reason: 'observed'}, finishing: false, receipt_available: false, native_status: null,
@@ -67,6 +71,10 @@ try {
       }
       assert.equal(request.postData(), '{}');
       if (url.pathname === `/api/operations/${pausing}/loop-pause`) { pausePosts.push(url.pathname); return reply({operation_id: pausing, outcome: 'requested'}); }
+      if (url.pathname === `/api/operations/${ending}/loop-stop`) {
+        endPosts.push(url.pathname); ended = true;
+        return reply({operation_id: ending, outcome: 'requested'});
+      }
       assert.equal(url.pathname, `/api/operations/${running}/loop-stop`, 'Stop is posted only for the running loop');
       posts.push(url.pathname);
       return reply({operation_id: running, outcome: 'requested'});
@@ -81,6 +89,7 @@ try {
     // Monitor lists this console's operations once per connection, also on UUID routes.
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
+    if (url.pathname === `/api/operations/${ending}/log` && !ended) { startEndLog(); await endLogGate; }
     if (url.pathname.endsWith('/log')) return reply({text: '', next_offset: 0, observed_size: 0, truncated: false, missing: false});
     if (url.pathname.endsWith('/graph-results')) {
       const id = url.pathname.split('/')[3], count = id === pausing ? 1 : id === resumed ? 3 : 0;
@@ -115,11 +124,11 @@ try {
         k: 2, non_improving_bodies: 2, last_improvement_iteration: 1, incumbent: 0.75}};
       return reply(value);
     }
-    if (url.pathname === `/api/operations/${asking}`) {
+    if ([`/api/operations/${asking}`, `/api/operations/${ending}`].includes(url.pathname)) {
       // A "Pause and ask me" no-improvement condition paused the loop: no operator Pause marker.
       // A resumed segment that already carries advice: the next Resume is prefilled with it.
-      const value = {...terminal(asking, 'paused', 7), kind: 'candidate_loop_resume'};
-      value.loop = {final_iteration: 12, attempted_iterations: 7, stop_requested: false, pause_requested: false, operator_advice: 'Earlier <b>advice</b>.', input_request: {
+      const value = {...terminal(url.pathname.endsWith(ending) ? ending : asking, 'paused', 7), kind: 'candidate_loop_resume'};
+      value.loop = {final_iteration: 12, attempted_iterations: 7, stop_requested: url.pathname.endsWith(ending) && ended, pause_requested: false, operator_advice: 'Earlier <b>advice</b>.', input_request: {
         reason: {kind: 'no_improvement', condition_index: 0, iteration: 7, k: 3, non_improving_bodies: 3, last_improvement_iteration: 4, incumbent: 0.81},
         summary: {iteration: 7, final_iteration: 12, metric_id: 'accuracy', direction: 'higher', incumbent: 0.81, incumbent_iteration: 4, non_improving_bodies: 3, input_anchor: 0, bodies_since_input: 7}}};
       return reply(value);
@@ -299,12 +308,37 @@ try {
   assert.equal(resumePosts[1].operator_advice, 'Try a smaller hidden width.');
   assert.deepEqual(resumePosts[2], resumePosts[1], 'a retry resends the same request UUID and advice');
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, judgeAsking);
-  await state.filter({hasText: 'Waiting for your input. The judge asked for your input: Scores stopped moving. (no valid score yet). Paused after body 3 of 5. Stop was requested; this run cannot continue.'}).waitFor();
+  await state.filter({hasText: 'Ended by you at the pause after body 3.'}).waitFor();
   assert.ok(await resumeGroup.isHidden(), 'a recorded Stop leaves nothing to resume');
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, pausedStopped);
-  await state.filter({hasText: 'Research loop paused at a completed body boundary after 2 of 3 bodies. Stop was requested; this run cannot continue.'}).waitFor();
+  await state.filter({hasText: 'Ended by you at the pause after body 2.'}).waitFor();
   assert.ok(!(await state.textContent()).includes('can be resumed'), 'a stopped paused run never offers resumption in words');
   assert.ok(await resumeGroup.isHidden(), 'an operator-paused run with a recorded Stop offers no Resume');
+  // End a condition-paused tail through the existing Stop route, with confirmation.
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, ending);
+  await state.filter({hasText: 'Waiting for your input.'}).waitFor();
+  await page.locator('#operation-observed').filter({hasText: 'Current status'}).waitFor();
+  const end = page.locator('#loop-end');
+  await end.waitFor({state: 'visible'});
+  await endLogStarted; // Hold the paused poll open until End is acknowledged.
+  page.once('dialog', dialog => { assert.match(dialog.message(), /cannot be resumed/); void dialog.dismiss(); });
+  await end.click();
+  assert.equal(endPosts.length, 0, 'cancelled confirmation sends no Stop');
+  page.once('dialog', dialog => { void dialog.accept(); });
+  await end.dblclick();
+  await resumeGroup.waitFor({state: 'hidden'});
+  releaseEndLog(); // The stale paused poll must not settle over the new Stop.
+  await state.filter({hasText: 'Ended by you at the pause after body 7.'}).waitFor();
+  assert.equal(endPosts.length, 1, 'confirmed double click records one Stop');
+  assert.ok(await resumeGroup.isHidden(), 'ended loop offers neither Resume nor End again');
+  await page.locator('#operation-observed').filter({hasText: 'Final status'}).waitFor();
+  assert.equal(await page.locator('#monitor-status').textContent(), 'Ended by you at the pause after body 7.');
+  await page.reload();
+  await page.locator('#token').fill(metadata.token);
+  await page.locator('#access-form button').click();
+  await state.filter({hasText: 'Ended by you at the pause after body 7.'}).waitFor();
+  assert.ok(await resumeGroup.isHidden(), 'reload derives ended state from the durable Stop');
+  assert.equal(endPosts.length, 1);
   assert.equal(posts.length, 1);
   assert.deepEqual(faults, []);
   console.log('PASS: Stop and Pause post once and read "requested" until the receipt; a paused loop is resumable after review, Resume posts once with the retained UUID, and the resumed segment shows Stop and its bodies; a receipt stop_reason reads in plain words, with whole-run body numbers on a resumed segment.');

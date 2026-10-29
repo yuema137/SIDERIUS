@@ -90,7 +90,31 @@ def _body_result(iteration: int, tuning: GraphNodeEvidence) -> GraphBodyResult:
     except (OSError, ValueError) as error:
         # ValueError covers JSON syntax and pydantic ValidationError.
         raise OperationFailure("integrity", "verified tuning output is unavailable") from error
-    return GraphBodyResult(iteration=iteration, tuning_state=tuning.state, result=result)
+    return GraphBodyResult(
+        iteration=iteration,
+        tuning_state=tuning.state,
+        result=result,
+        outcome=tuner_outcome(result),
+    )
+
+
+def tuner_outcome(summary: GraphRunSummary) -> str:
+    """One plain sentence of what the tuner achieved, from its own record.
+
+    The graph node state only says the node executed; a tuner that completed no
+    round (every attempt refused or failed) must never read as a success.
+    """
+    rounds = summary.completed_rounds
+    counted = (
+        f"{rounds} completed round{'s' if rounds != 1 else ''} in "
+        f"{summary.total_attempts} attempt{'s' if summary.total_attempts != 1 else ''}"
+    )
+    ending = summary.termination_reason.replace("_", " ")
+    if rounds == 0:
+        return f"No training round completed: {counted} (tuner status {summary.status}; ended by {ending})."
+    if summary.status == "completed":
+        return f"Completed: {counted} (ended by {ending})."
+    return f"Not completed (tuner status {summary.status}): {counted} (ended by {ending})."
 
 
 def _verified_record(path: str, expected_sha256: str) -> HyperparamTuningOutput:

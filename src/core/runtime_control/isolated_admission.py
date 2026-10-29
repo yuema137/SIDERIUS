@@ -54,18 +54,30 @@ def evaluate_isolated_admission(
 ) -> AdmissionDecision:
     """Require new-worker demand plus all retained pre-spawn occupancy to fit.
 
+    Only missing authoritative requirements may use ordinary phase posture,
+    after a valid declaration, UUID-bound coherent accounting, no sampling error,
+    and successful ceiling resolution. Other isolated refusals stop every mode.
+    Immediate sampling is the only freshness guarantee; there is no age guard.
+
     Both production callers sample after the measurement worker exits and
     before the phase worker starts. The requirement describes that new worker;
     the persistent parent's CUDA memory is additional, not replaceable demand.
     """
-    from core.runtime_control.admission import ACCEPTED_MODES, AUTHORITATIVE_PROVENANCE
+    from core.runtime_control.admission import (
+        ACCEPTED_MODES,
+        AUTHORITATIVE_PROVENANCE,
+        evaluate_ordinary_gpu_admission,
+    )
 
     evidence: dict[str, Any] = {
         "mode": mode,
         "effective_execution_conditions": IsolatedHeadroomPolicy().model_dump(mode="json"),
     }
     try:
-        visibility = declared_visibility() or getattr(snapshot, "process_visibility", None)
+        snapshot_visibility = getattr(snapshot, "process_visibility", None)
+        if snapshot_visibility is not None:
+            GpuExecutionConditions.model_validate({"process_visibility": snapshot_visibility})
+        visibility = declared_visibility() or snapshot_visibility
         conditions = GpuExecutionConditions.model_validate({"process_visibility": visibility})
     except ValidationError:
         return environment_refusal(
@@ -77,7 +89,11 @@ def evaluate_isolated_admission(
         return environment_refusal(
             "Obtain a current device occupancy sample before retrying.", evidence
         )
-    if not isinstance(snapshot, GpuAccountingSnapshot) or not snapshot.telemetry_available:
+    if (
+        not isinstance(snapshot, GpuAccountingSnapshot)
+        or not snapshot.telemetry_available
+        or not snapshot.device.uuid
+    ):
         return environment_refusal("A current typed GPU occupancy sample is unavailable.", evidence)
     evidence["observed_accounting"] = snapshot.model_dump(mode="json")
     try:
@@ -91,6 +107,16 @@ def evaluate_isolated_admission(
     evidence["outside_upper_bound_mib"] = bound.outside_upper_bound_mib
     if mode not in ACCEPTED_MODES:
         return environment_refusal("The phase admission mode is invalid.", evidence)
+    try:
+        limits = resolve_gpu_ceiling(
+            ceiling_gib=ceiling_gib, measured_capacity_gib=gib_from_mib(bound.device_total_mib)
+        )
+    except (TypeError, ValueError) as error:
+        return environment_refusal(
+            f"The aggregate GPU ceiling could not be resolved: {error}",
+            evidence,
+            requirement_source=requirement_provenance or "unavailable",
+        )
     if (
         requirement_provenance not in AUTHORITATIVE_PROVENANCE
         or not isinstance(requirement_mib, (int, float))
@@ -98,11 +124,28 @@ def evaluate_isolated_admission(
         or not math.isfinite(requirement_mib)
         or requirement_mib <= 0
     ):
-        return environment_refusal(
-            "An authoritative GPU requirement for this exact phase is missing. "
-            "Provide phase-specific measurement evidence; training evidence cannot substitute "
-            "for inference. The current default trial/inference paths do not supply this evidence.",
-            evidence,
+        decision = evaluate_ordinary_gpu_admission(
+            snapshot=snapshot,
+            requirement_mib=requirement_mib,
+            requirement_provenance=requirement_provenance,
+            mode=mode,
+            ceiling_gib=ceiling_gib,
+            sampling_error=sampling_error,
+            requirement_ownership=requirement_ownership,
+            requirement_error=requirement_error,
+        )
+        return decision.model_copy(
+            update={
+                "evidence": {
+                    **evidence,
+                    **decision.evidence,
+                    "process_visibility": conditions.process_visibility,
+                    "effective_execution_conditions": {
+                        **conditions.model_dump(mode="json"),
+                        "refusal_enforcement": "phase_policy",
+                    },
+                }
+            }
         )
     evidence.update(requirement_mib=requirement_mib, requirement_provenance=requirement_provenance)
     evidence["requirement_ownership"] = (
@@ -121,16 +164,6 @@ def evaluate_isolated_admission(
         evidence["requirement_error"] = ownership_issue
         return environment_refusal(ownership_issue, evidence)
 
-    try:
-        limits = resolve_gpu_ceiling(
-            ceiling_gib=ceiling_gib, measured_capacity_gib=gib_from_mib(bound.device_total_mib)
-        )
-    except (TypeError, ValueError) as error:
-        return environment_refusal(
-            f"The aggregate GPU ceiling could not be resolved: {error}",
-            evidence,
-            requirement_source=str(requirement_provenance),
-        )
     effective = limits.effective_gib
     aggregate = gib_from_mib(requirement_mib + bound.device_used_mib)
     if not math.isfinite(aggregate):
@@ -145,10 +178,14 @@ def evaluate_isolated_admission(
         headroom_gib=effective - aggregate,
     )
     if aggregate > effective:
-        return environment_refusal(
-            f"Measured demand plus current occupancy is {aggregate:.2f} GiB against "
-            f"a {effective:.2f} GiB ceiling. Retry when environment evidence establishes sufficient headroom.",
-            evidence,
+        return AdmissionDecision(
+            admitted=False,
+            reason_code="insufficient_headroom",
+            reason=(
+                f"Measured demand plus current occupancy is {aggregate:.2f} GiB against "
+                f"a {effective:.2f} GiB ceiling. The environment does not currently permit this phase."
+            ),
+            evidence=evidence,
             requirement_source=str(requirement_provenance),
         )
     return AdmissionDecision(
@@ -156,7 +193,10 @@ def evaluate_isolated_admission(
         requirement_source=str(requirement_provenance),
         reason=(
             f"Measured demand plus current occupancy {aggregate:.2f} GiB fits the "
-            f"{effective:.2f} GiB ceiling under namespace-limited visibility."
+            f"{effective:.2f} GiB ceiling under conservative isolated admission. "
+            "Only missing authoritative phase requirements use ordinary admission posture, "
+            "after a valid declaration and current UUID-bound, complete, coherent accounting "
+            "with no sampling error have been established."
         ),
         evidence=evidence,
     )

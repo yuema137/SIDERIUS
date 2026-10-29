@@ -319,9 +319,24 @@ def test_init_refuses_a_directory_owned_by_another_user(tmp_path, monkeypatch):
 
     real = os.getuid()
     monkeypatch.setattr(workspace.os, "getuid", lambda: real + 1)
-    with pytest.raises(WorkspaceRefused, match="owned by you"):
+    with pytest.raises(WorkspaceRefused, match="owned by uid") as refusal:
         init_workspace(str(tmp_path))
+    assert "chmod" not in str(refusal.value)
     assert not (tmp_path / "siderius_workspace").exists()
+
+
+def test_init_refuses_a_group_writable_parent_with_the_chmod_fix(tmp_path):
+    """Defect: a group/other-writable parent is refused without naming the path or the fix."""
+    from tools.candidate_console.workspace import WorkspaceRefused
+
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    os.chmod(parent, 0o775)
+    with pytest.raises(WorkspaceRefused, match="chmod 700") as refusal:
+        init_workspace(str(parent))
+    assert f"workspace parent {parent.resolve()} must not be writable" in str(refusal.value)
+    assert f"chmod 700 {parent.resolve()}" in str(refusal.value)
+    assert not (parent / "siderius_workspace").exists()
 
 
 def test_init_never_follows_a_symlinked_child(tmp_path):

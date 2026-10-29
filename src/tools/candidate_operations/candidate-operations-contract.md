@@ -1058,8 +1058,11 @@ The empty envelope must have been created before capture review. Its native
 workspace remains absent until native shell launch. The explicit 300-second
 timeout and 1 MiB observation budget are example caller choices. Configure
 provider environment names for enabled real routes. Explicit GPU device paths
-and read-only `/sys` may be needed to reproduce captured hardware facts; select
-the actual host paths, never bypass installation/hardware binding. No GUI or automatic capture builder is implied.
+may be needed to reproduce captured hardware facts; select the actual host paths,
+never bypass installation/hardware binding. Native chains run through the same
+`workspace_sandbox.command.command_prefix`, so a `/dev/nvidia<N>` device adds
+read-only `/sys` and the present NVIDIA control nodes automatically
+(`tools.workspace_sandbox.gpu.passthrough`); no `/sys` path is selected. No GUI or automatic capture builder is implied.
 
 ## Captured native continuation
 
@@ -1190,7 +1193,11 @@ changes after review refuse the new operation rather than changing its meaning.
 ### Authored finite-loop Stop
 
 `request_loop_stop(config, operation_id)` is an operation-bound graceful request
-for the candidate worker's declared finite loop. It reuses the store lock,
+for the candidate worker's declared finite loop, including an exited, verified paused
+tail. For a paused receipt it calls `review_locked` under the same store lock as
+Resume admission: clean supervision, bound completion and no successor are required.
+It preserves the paused receipt and writes only the run-wide Stop marker; a stale
+Resume review cannot admit after Stop wins the lock. It reuses the store lock,
 configured-root admission, saved request/run identity checks and current process
 observation. It writes only the already-claimed native control marker, never
 creates a queued candidate workspace, and never sends a signal. Identical marker
