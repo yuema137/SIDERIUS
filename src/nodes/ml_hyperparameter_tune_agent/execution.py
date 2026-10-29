@@ -42,6 +42,7 @@ from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
+from core.runtime_control.admission import AdmissionDecision
 from core.training_seeds import TrainingSeedPlan
 from execute_tools.dataset_config import (
     ScopeViolationError,
@@ -990,6 +991,15 @@ def run_training(
         experiment_arm=agent_input.experiment_arm,
         is_trial=prepared.plan.is_trial,
     ):
+        admission = train_status.get("admission") or {}
+        if admission.get("reason_code") in {
+            "environment_headroom_unproven",
+            "measurement_unavailable",
+            "policy_unavailable",
+        }:
+            return TrainingOutcome.end_round(
+                environment_admission_refusal=AdmissionDecision.model_validate(admission)
+            )
         return TrainingOutcome.next_attempt()
     if _handle_in_subprocess_rejection(
         train_status,
