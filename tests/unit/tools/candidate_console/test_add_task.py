@@ -14,10 +14,6 @@ from tools.candidate_console.settings_models import SETTINGS_SCHEMA, GlobalSetti
 from tools.candidate_console.workspace import init_workspace
 
 REPO = Path(__file__).resolve().parents[4]
-GPU_WARNING = (
-    "GPU devices are passed but /sys is not mounted read-only; CUDA may fail to start "
-    "inside the run sandbox (see README)."
-)
 
 
 def _main(monkeypatch, capsys, *argv):
@@ -238,29 +234,6 @@ def test_check_refuses_a_referenced_plugin_outside_every_mount_and_names_it(
     plugin = root / "tasks/quickstart/examples/quickstart/plugins/_quickstart_task.py"
     assert code == 2
     assert f"names {plugin}, which is outside every mounted path" in err
-
-
-@pytest.mark.parametrize("read_only_sys", [False, True])
-def test_check_warns_when_gpu_devices_are_passed_without_sys(
-    read_only_sys, workspace, monkeypatch, capsys
-):
-    """Defect (#1145 item 5): GPU device nodes without a read-only /sys pass silently.
-
-    The warning must appear (and check still succeed) without /sys, and must
-    not appear when /sys is listed in task_read_only.
-    """
-    _, config, manifest = workspace
-    # The host need not have a GPU: existence is admitted separately (next test).
-    monkeypatch.setattr("tools.candidate_console.package_mounts.device_problem", lambda _: None)
-    argv = ("add-task", "--config", str(config), "--manifest", str(manifest))
-    assert _main(monkeypatch, capsys, *argv, "--device", "/dev/nvidia0", "/dev/nvidiactl")[0] == 0
-    if read_only_sys:
-        document = json.loads(config.read_text())
-        document["tasks"][0]["task_read_only"].append("/sys")
-        config.write_text(json.dumps(document))
-    code, _, err = _main(monkeypatch, capsys, "check", "--config", str(config))
-    assert code == 0, err
-    assert (GPU_WARNING in err) is not read_only_sys
 
 
 def test_add_task_refuses_and_check_warns_about_a_device_the_sandbox_cannot_pass(

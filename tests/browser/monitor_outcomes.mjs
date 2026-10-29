@@ -129,7 +129,7 @@ try {
   await page.locator('#monitor-cause').filter({hasText: 'Cause (from the log): execute_tools.health_checks.launch_policy.FormalLaunchPolicyError: a formal launch must declare'}).waitFor();
   assert.match(await page.locator('#loop-state').textContent(), /after 1 of 1 body\./, 'Singular body');
   // N2: a long cause (the launch guard's GPU refusal) is cut at a word boundary with an ellipsis.
-  const refusal = 'core.runtime_control.launch_guard.LaunchGuardFailure: SIDERIUS real training needs an NVIDIA GPU with CUDA: NVIDIA device nodes were passed, but /sys is not mounted here, so CUDA cannot start (CUDA error 304). The console run sandbox does not mount /sys; see GPU runs in the console README (quickstart: not measurable — no CUDA device is visible: NVIDIA device nodes are present but /sys is not mounted).';
+  const refusal = 'core.runtime_control.launch_guard.LaunchGuardFailure: SIDERIUS real training needs an NVIDIA GPU with CUDA: NVIDIA device nodes were passed, but /sys is not mounted here, so CUDA cannot start (CUDA error 304). The console run sandbox mounts /sys read-only by itself for a task that lists a /dev/nvidia<N> device node; check that the task lists one, then run check --gpu (see GPU runs in the console README) (quickstart: not measurable — no CUDA device is visible: NVIDIA device nodes are present but /sys is not mounted).';
   const shown = await page.evaluate(text => window.operationOutcome.cause('Traceback\n' + text + '\n'), refusal);
   assert.ok(shown.length <= 300 && shown.endsWith('…'), shown);
   const kept = shown.slice(0, -1);

@@ -45,14 +45,17 @@ _FIX: dict[GpuUnavailableCause, str] = {
     ),
     "sys_not_mounted": (
         "NVIDIA device nodes were passed, but /sys is not mounted here, so CUDA cannot "
-        "start (CUDA error 304). The console run sandbox does not mount /sys; see "
-        "GPU runs in the console README"
+        "start (CUDA error 304). The console run sandbox mounts /sys read-only by itself "
+        "for a task that lists a /dev/nvidia<N> device node; check that the task lists "
+        "one, then run check --gpu (see GPU runs in the console README)"
     ),
     "cuda_init_failed": (
         "NVIDIA device nodes and /sys are visible, but CUDA failed to initialize. "
-        "Check the driver on this machine with nvidia-smi, pass /dev/nvidiactl and "
-        "/dev/nvidia-uvm as well as /dev/nvidia<N>, and make sure CUDA_VISIBLE_DEVICES "
-        "is not set to an empty value"
+        "Check the driver on this machine with nvidia-smi. The run sandbox passes the "
+        "NVIDIA control nodes present at launch and cannot create one; if "
+        "/dev/nvidia-uvm is missing on the host, run nvidia-smi (or "
+        "nvidia-modprobe -u -c=0) once on the host, then relaunch. Make sure "
+        "CUDA_VISIBLE_DEVICES is not set to an empty value"
     ),
 }
 

@@ -89,7 +89,7 @@ class ReusableCaptureReview(PreviewModel):
     devices: tuple[str, ...]
     environment_names: tuple[str, ...]
     read_only: tuple[str, ...]
-    #: ``package_mounts.device_warnings`` for ``devices``/``read_only``, the same
+    #: ``package_mounts.device_warnings`` for ``devices``, the same
     #: wording ``check`` prints; display only, Launch stays enabled.
     device_warnings: tuple[str, ...] = ()
     credential_readiness: CredentialReadiness

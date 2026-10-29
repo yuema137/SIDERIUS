@@ -544,33 +544,31 @@ def test_capture_seed_is_bound_by_the_reviewed_digest_and_admitted(captured):
 
 def test_review_repeats_the_device_warnings_for_the_reviewed_request(captured, monkeypatch):
     """Defect (walkthrough N2): Run review said "NVIDIA GPU required" and enabled Launch
-    while the warning check printed (GPU nodes without /sys) never reached the browser.
+    while the warning check printed (a device the sandbox refuses) never reached the browser.
 
     Fails if the review stops carrying ``package_mounts.device_warnings`` of the exact
-    request it reviewed (its devices and read-only mounts), or if those warnings stop
-    naming a device path missing on this host or GPU nodes passed without /sys.
+    devices it reviewed, or if those warnings stop naming a device path the sandbox
+    would refuse on this host.
     """
-    from tools.candidate_console.package_mounts import GPU_WITHOUT_SYS, device_warnings
+    from tools.candidate_console.package_mounts import device_warnings
 
     adapter, project, choice, _ = captured
     seen = []
 
-    def recorded(devices, read_only):
-        seen.append((devices, read_only))
+    def recorded(devices):
+        seen.append(devices)
         return ("fixture warning",)
 
     monkeypatch.setattr("tools.candidate_console.reusable_candidate.device_warnings", recorded)
     review = adapter.review(project.project_id, adapter.select(project.project_id, choice))
     assert review.device_warnings == ("fixture warning",)
-    assert seen == [(review.devices, review.read_only)]
+    assert seen == [review.devices]
 
     monkeypatch.setattr(
         "tools.candidate_console.package_mounts.device_problem",
         lambda device: None if device == "/dev/nvidia0" else "fixture reason",
     )
-    assert device_warnings(("/dev/nvidia0", "/dev/nvidia-uvm"), ()) == (
+    assert device_warnings(("/dev/nvidia0", "/dev/nvidia-uvm")) == (
         "Device /dev/nvidia-uvm cannot be passed into the run sandbox (fixture reason); "
         "a run given it will be refused.",
-        GPU_WITHOUT_SYS,
     )
-    assert device_warnings(("/dev/nvidia0",), ("/sys",)) == ()

@@ -122,10 +122,10 @@ version in the zip's name.
    Restart the console to load the new task.
    ```
 
-   If the output also warns `GPU devices are passed but /sys is not mounted
-   read-only`, read **GPU runs** in the
+   To confirm the GPU starts inside the run sandbox before your first run, see
+   **GPU runs** in the
    [console guide](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#set-up-and-open-the-console)
-   before your first run.
+   (`check --gpu`).
 
    A file that does not match `SHA256SUMS` stops the command before anything
    is copied: unpack the zip again. An existing `tasks/quickstart/` folder is

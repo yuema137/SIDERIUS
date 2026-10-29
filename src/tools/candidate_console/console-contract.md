@@ -107,14 +107,30 @@ print `Warning: Task <id>: Device <path> cannot be passed into the run sandbox
 (<reason>); a run given it will be refused.` to stderr. Run admission
 (`SandboxProfile.device_paths` in `candidate_prepare.admission`) stays the hard gate.
 
-GPU prerequisite (#1145 item 5; no `/sys` is added anywhere): when a task's
-`candidate_devices` contains a `/dev/nvidia<N>` node and `"/sys"` is not in its
-`task_read_only`, `check`/`serve` print to stderr, without failing,
-`Warning: Task <id>: GPU devices are passed but /sys is not mounted read-only; CUDA
-may fail to start inside the run sandbox (see README).` One owner,
-`package_mounts.device_warnings(devices, read_only)`, produces both kinds of warning
-(unusable device paths first, then GPU nodes without `/sys`); `check`/`serve` prefix
-each with `Task <id>: `, and Run review shows the same list for the reviewed request.
+GPU passthrough (#1164): the console adds no `/sys` setting. The run sandbox owns
+it (`tools.workspace_sandbox.gpu.passthrough`, applied in `command.command_prefix`):
+a profile whose `devices` contain a `/dev/nvidia<N>` node also gets `--ro-bind /sys
+/sys` and `--dev-bind` of each present, undeclared NVIDIA control node (`nvidiactl`,
+`nvidia-uvm`, `nvidia-uvm-tools`, `nvidia-modeset`, `nvidia-caps/*`). A `"/sys"`
+already in `task_read_only` is mounted once. `package_mounts.device_warnings(devices)`
+reports only device paths the sandbox would refuse; `check`/`serve` prefix each with
+`Task <id>: `, and Run review shows the same list for the reviewed request.
+`SandboxProfile.device_paths` refuses a missing `/dev/nvidia<N>` with `GPU device
+<path> is not present on this machine, ...` (the admission cause).
+
+`check --gpu [--task <id>]` (`gpu_check.check_gpu`) runs, for each task whose
+`candidate_devices` lists a `/dev/nvidia<N>` node, `python -m
+tools.candidate_console.gpu_check <result>` inside `SandboxProfile(workspace=<fresh
+temporary directory>, read_only=data_root + task_manifest + task_read_only,
+network=False, devices=candidate_devices, environment_names=(),
+timeout_seconds=120)` through `workspace_sandbox.runner.run`. The child imports
+PyTorch, checks `torch.cuda.is_available()` (otherwise reports
+`core.gpu_requirement.real_launch_gpu_refusal()`), allocates `torch.zeros(1,
+device="cuda")` and writes `{"passed", "message"}` JSON. The host prints `Task <id>:
+sandbox passes <devices>[ and read-only /sys]`, then `Task <id>: GPU PASS: <message>`
+or `GPU FAIL: <cause>` (profile refusal, sandbox unavailable, timeout, or exit before
+a result). Exit status 0 only when at least one task was probed and all passed;
+otherwise 2. `--gpu`/`--task` are refused for `serve`/`init`; `--task` needs `--gpu`.
 
 ### Registering a task: `add-task`
 
@@ -326,9 +342,8 @@ with the Task tab's Run policy. A workflow without a `tuning` node says no GPU c
 from `ReusableCaptureReview.nodes`/`devices`. For every workflow the review then shows
 one `#capture-device-warning-<i>` line (class `warning`, prefixed "Warning: ") per
 `ReusableCaptureReview.device_warnings`, which the server computes with
-`package_mounts.device_warnings` from the reviewed request's `devices` and
-`read_only` (walkthrough N2: GPU nodes without `/sys`, or a device path missing on this
-host). Launch stays enabled; nothing is refused in the browser, and the native launch
+`package_mounts.device_warnings` from the reviewed request's `devices`
+(walkthrough N2: a device path the sandbox would refuse on this host). Launch stays enabled; nothing is refused in the browser, and the native launch
 guard remains the authority (browser witness `tests/browser/gpu_compute_review.mjs`).
 
 Browser (B3-4c UI). The Run lane's **Host resources and parallel nodes** panel

@@ -111,7 +111,7 @@
   // Issue #1136: native training (a `tuning` node) needs an NVIDIA GPU and refuses a
   // sandbox without one. Presentation only, from the reviewed nodes and devices, then the
   // server's device warnings (walkthrough N2: the same wording `check` prints, for
-  // example a device path missing on this host or GPU nodes without /sys).
+  // a device path the run sandbox would refuse on this host).
   function computeReview(value) {
     const lines = [];
     if (!value.nodes.some(([, capability]) => capability === 'tuning')) {
