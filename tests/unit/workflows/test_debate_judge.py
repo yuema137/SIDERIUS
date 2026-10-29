@@ -475,3 +475,63 @@ def test_a_growing_transcript_that_would_exceed_the_prompt_budget_ends_the_debat
     assert len(bridge.calls) == 1
     assert (result.outcome.status, result.outcome.failure_code) == ("failed", "prompt_too_large")
     assert replay_llm_strategy(value, ROUTES, expected_sha256=result.evidence_sha256) == result
+
+
+@pytest.fixture
+def over_budget_debate(tmp_path, monkeypatch):
+    prompts: list[tuple[str, str]] = []
+
+    class Measuring(DebateBridge):
+        def generate(self, system_prompt, user_prompt, *, label):
+            prompts.append((system_prompt, user_prompt))
+            return super().generate(system_prompt, user_prompt, label=label)
+
+    strategy = debate(rounds=1, critic=False)
+    run(invocation(tmp_path / "probe", strategy=strategy), Measuring(), tmp_path)
+    for module in ("run", "plan"):
+        monkeypatch.setattr(
+            f"workflows.judge_strategies.{module}.MAX_JUDGE_PROMPT_CHARS",
+            sum(map(len, prompts[0])),
+        )
+    value = invocation(tmp_path, strategy=strategy)
+    bridge = DebateBridge()
+    result = run(value, bridge, tmp_path)
+    assert len(bridge.calls) == 1
+    return value, result, prompts[1]
+
+
+def test_unsent_prompt_measurement_is_recorded(over_budget_debate):
+    """Defect: refusal evidence loses the unsent prompt; compare to the probe's real call."""
+    value, result, (system, user) = over_budget_debate
+    record = json.loads((value.evidence_dir / "strategy.json").read_bytes())
+    assert record["unsent_prompt_chars"] == len(system) + len(user)
+    assert record["unsent_prompt_sha256"] == canonical_sha256({"system": system, "user": user})
+    assert replay_llm_strategy(value, ROUTES, expected_sha256=result.evidence_sha256) == result
+
+
+@pytest.mark.parametrize("field", ["unsent_prompt_chars", "unsent_prompt_sha256"])
+def test_replay_refuses_changed_unsent_prompt_measurement(over_budget_debate, field):
+    """Defect: replay accepts stale refusal measurements even with a valid outer anchor."""
+    value, _, _ = over_budget_debate
+    path = value.evidence_dir / "strategy.json"
+    record = json.loads(path.read_bytes())
+    record[field] = record[field] + 1 if field == "unsent_prompt_chars" else "0" * 64
+    path.write_bytes(canonical_json_bytes(record))
+    with pytest.raises(StrategyError, match="unsent prompt size or digest differs"):
+        replay_llm_strategy(value, ROUTES, expected_sha256=canonical_sha256(record))
+
+
+def test_replay_capacity_refusal_is_strategy_error(tmp_path):
+    """Defect: removing replay's capacity check leaks request-schema ValidationError."""
+    from workflows.judge_strategies.models import invocation_sha256
+
+    value = invocation(tmp_path)
+    run(value, DebateBridge(), tmp_path)
+    wide = invocation(tmp_path, n=17, strategy=debate(max_calls=403))
+    path = value.evidence_dir / "strategy.json"
+    record = json.loads(path.read_bytes())
+    record["invocation_sha256"] = invocation_sha256(wide)
+    record["static_call_bound"] = 2 * (17 + 1) + 1
+    path.write_bytes(canonical_json_bytes(record))
+    with pytest.raises(StrategyError, match="17 items exceed 16 items per call"):
+        replay_llm_strategy(wide, ROUTES, expected_sha256=canonical_sha256(record))
