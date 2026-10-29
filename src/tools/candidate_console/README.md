@@ -21,6 +21,18 @@ console configuration; it does not create a project or edit those task settings.
 Save an explicit [LLM profile](../../../configs/llm/README.md) for the console,
 even when using the default models.
 
+## Start from the example bundle
+
+To see the whole console path once before you package your own task, start from
+the quickstart example bundle. It holds a small synthetic task package and a
+ready experiment setup. Its [README](../../../examples/console_bundle/README.md)
+lists six commands: unpack, `init`, write the data, import with
+`add-task --from-bundle`, `serve`, and open the console. The import checks every
+file against the bundle's `SHA256SUMS`, copies the package to
+`siderius_workspace/tasks/quickstart/`, registers it as step 2 below does, and
+creates the setup `quickstart-research-loop` from a workflow template. It never
+overwrites an existing `tasks/` folder.
+
 ## Set up and open the console
 
 1. Create the console workspace inside a directory you own, for example your

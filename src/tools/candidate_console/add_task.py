@@ -22,6 +22,11 @@ manifest reference must resolve inside the run sandbox mounts
 (``package_mounts``). The write is a compare-and-swap on the bytes read and an
 atomic owner-only (0600) publish; ``--dry-run`` prints the entry and writes
 nothing. Credential values are never read.
+
+``--from-bundle DIR`` imports an unpacked example bundle instead of naming a
+manifest: ``example_bundle`` verifies and copies its package to
+``<workspace>/tasks/<task_id>/``, this module registers it, and the bundle's first
+experiment setup is created through ``SetupStore.create``.
 """
 
 from __future__ import annotations
@@ -344,7 +349,14 @@ def parser() -> argparse.ArgumentParser:
         description="Register one task package in console.json (append to tasks[]).",
     )
     cli.add_argument("--config", required=True, help="console.json path")
-    cli.add_argument("--manifest", required=True, help="the task composition manifest")
+    source = cli.add_mutually_exclusive_group(required=True)
+    source.add_argument("--manifest", help="the task composition manifest")
+    source.add_argument(
+        "--from-bundle",
+        metavar="DIR",
+        help="an unpacked example bundle: verify it, copy its task/ to tasks/<id>/, "
+        "register it and create its first experiment setup",
+    )
     cli.add_argument("--task-id", help="default: the package folder name")
     cli.add_argument("--label", help="default: the task ID")
     cli.add_argument(
@@ -386,14 +398,14 @@ def parser() -> argparse.ArgumentParser:
     return cli
 
 
-def run_command(argv: list[str]) -> tuple[int, str | None]:
-    """Return the exit status and, after a write, the console.json to check."""
-    args = parser().parse_args(argv)
-    request = AddTaskRequest(
+def _request(
+    args: argparse.Namespace, manifest: str, task_id: str | None, label: str | None
+) -> AddTaskRequest:
+    return AddTaskRequest(
         config=args.config,
-        manifest=args.manifest,
-        task_id=args.task_id,
-        label=args.label,
+        manifest=manifest,
+        task_id=task_id,
+        label=label,
         environment_names=tuple(args.env),
         network=args.network,
         devices=None if args.device is None else tuple(args.device),
@@ -401,6 +413,86 @@ def run_command(argv: list[str]) -> tuple[int, str | None]:
         candidate_timeout_seconds=args.candidate_timeout,
         external=args.external,
     )
+
+
+def _from_bundle(args: argparse.Namespace) -> tuple[int, str | None]:
+    """Verify, copy, register, then create the first setup (``example_bundle``)."""
+    from .example_bundle import (
+        BundleRefused,
+        copy_package,
+        create_first_setup,
+        describe,
+        plan_import,
+        read_bundle,
+    )
+    from .setups import SetupRefused
+
+    if args.external:
+        print("add-task refused: --external does not apply to --from-bundle.", file=sys.stderr)
+        return 2, None
+    try:
+        bundle = read_bundle(args.from_bundle)
+        target = plan_import(bundle, args.config, args.task_id)
+        if args.dry_run:
+            print(describe(bundle, target))
+            print("Dry run: nothing was copied and console.json was not changed.")
+            return 0, None
+        manifest = copy_package(bundle, target)
+    except (BundleRefused, AddTaskRefused) as error:
+        print(f"add-task refused: {error}.", file=sys.stderr)
+        return 2, None
+    print(f"Copied the verified task package to {target.package}")
+    left = f" {target.package} was left in place; remove it before running add-task again."
+    try:
+        plan = plan_task(
+            _request(args, str(manifest), target.task_id, args.label or bundle.task.label)
+        )
+        publish_task(plan)
+    except AddTaskRefused as error:
+        print(f"add-task refused: {error}.{left}", file=sys.stderr)
+        return 2, None
+    except (OSError, OperationFailure):
+        print(
+            f"add-task failed: console.json could not be written; it is unchanged.{left}",
+            file=sys.stderr,
+        )
+        return 2, None
+    print(f"Added task {plan.entry['task_id']} to {plan.config_path}:")
+    print(json.dumps(plan.entry, indent=2))
+    try:
+        create_folders(plan)
+    except (OSError, ValueError) as error:
+        print(f"Creating the task's folders stopped: {error}.", file=sys.stderr)
+    try:
+        setup_id = create_first_setup(str(plan.config_path), target.task_id, bundle.setup)
+    except SetupRefused as error:
+        print(
+            f"The task was added, but its first experiment setup was not created: "
+            f"{error.message}. Create one in the Workflow tab instead.",
+            file=sys.stderr,
+        )
+        return 2, None
+    except (OSError, ValueError, OperationFailure):
+        print(
+            "The task was added, but its first experiment setup was not created: the "
+            "console settings could not be read. Run check, then create a setup in the "
+            "Workflow tab.",
+            file=sys.stderr,
+        )
+        return 2, None
+    print(
+        f"Created experiment setup {setup_id!r} ({bundle.setup.label}) from template "
+        f"{bundle.setup.template_id} in {plan.workspace_root / 'projects' / setup_id}"
+    )
+    return 0, str(plan.config_path)
+
+
+def run_command(argv: list[str]) -> tuple[int, str | None]:
+    """Return the exit status and, after a write, the console.json to check."""
+    args = parser().parse_args(argv)
+    if args.from_bundle is not None:
+        return _from_bundle(args)
+    request = _request(args, args.manifest, args.task_id, args.label)
     try:
         plan = plan_task(request)
         if args.dry_run:

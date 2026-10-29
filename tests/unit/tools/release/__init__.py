@@ -1,0 +1,1 @@
+"""Release asset builder tests."""

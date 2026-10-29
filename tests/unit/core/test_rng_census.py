@@ -157,6 +157,7 @@ ENTRY_ALLOWLIST: dict[str, str] = {
     "tools/native_chain/iteration.py": _ORCHESTRATOR,
     "tools/native_chain/resume_entry.py": _CLI,
     "tools/orchestration_setup/__main__.py": _CLI,
+    "tools/release/build_example_bundle.py": "builds a deterministic example-bundle zip from checkout files; no RNG, torch or model build",
     "tools/run_report/__main__.py": _CLI,
     "tools/run_report/cli.py": _CLI,
     "tools/runtime_replay/__main__.py": _CLI,
