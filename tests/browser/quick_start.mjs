@@ -16,7 +16,8 @@ for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWS
 }
 const evidence = process.env.CONSOLE_EVIDENCE_DIR || join(tmpdir(), 'siderius-quick-start');
 await mkdir(evidence, {recursive: true});
-const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
+// One runnable project, listed after edit-only ones in configuration order: Quick start must preselect it.
+const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, EDITOR_RUNNABLE_PROJECTS: 'five_node'}});
 let serverErrors = '';
 server.stderr.on('data', chunk => { serverErrors += chunk; });
 const lines = createInterface({input: server.stdout});
@@ -52,6 +53,10 @@ try {
   await waitUntil(() => dialog.evaluate(el => el.open));
   assert.equal(new URL(page.url()).hash, '#workflow');
   await page.locator('#quick-start-project option[value="reusable"]').waitFor({state: 'attached'});
+  // A new user's first action is runnable: the first runnable project is preselected and listed first.
+  assert.equal(await page.locator('#quick-start-project').inputValue(), 'five_node', 'Quick start preselects a runnable project');
+  assert.equal(await page.locator('#quick-start-project option').first().getAttribute('value'), 'five_node');
+  assert.equal(await page.locator('#quick-start-warning').textContent(), '');
   await page.locator('#quick-start-project').selectOption('reusable');
   await page.screenshot({path: join(evidence, 'quick-start-dialog.png')});
   // L-3: an unopenable project fails in the dialog with its reason and can be retried.

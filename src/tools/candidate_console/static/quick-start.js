@@ -36,7 +36,13 @@
       const option = element('option', item.textContent + (item.dataset.runnable === 'true' ? '' : ' (edit only, not runnable)'));
       option.value = item.value; option.dataset.runnable = item.dataset.runnable; return option;
     }));
-    select.value = source.some(item => item.value === previous) ? previous : $('editor-project').value;
+    // A new user's first action must be runnable: keep an explicit earlier choice, else the
+    // editor's project when it is runnable, else the first runnable one (listed first).
+    const runnable = value => source.some(item => item.value === value && item.dataset.runnable === 'true');
+    const current = $('editor-project').value;
+    select.value = source.some(item => item.value === previous) ? previous
+      : runnable(current) ? current
+      : source.find(item => item.dataset.runnable === 'true')?.value ?? current;
     start.disabled = !source.length || !window.consoleSession.connected;
     state.textContent = source.length ? '' : 'Loading projects…';
     warn();
@@ -45,7 +51,9 @@
   dialog.insertBefore(warning, state);
   function warn() {
     const runnable = select.selectedOptions[0]?.dataset.runnable === 'true';
-    warning.textContent = select.value && !runnable ? 'You can edit this project but not run it from this console.' : '';
+    const none = select.options.length > 0 && ![...select.options].some(option => option.dataset.runnable === 'true');
+    warning.textContent = none ? 'No project on this console can be run from here. You can still open one to edit; ask the console operator to enable runs.'
+      : select.value && !runnable ? 'You can edit this project but not run it from this console.' : '';
   }
   select.addEventListener('change', warn);
   new MutationObserver(options).observe($('editor-project'), {childList: true});

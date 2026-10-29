@@ -1365,7 +1365,10 @@ opening a disclosure, and scrolls to the capture heading only after the
 opens `#quick-start-dialog`, whose **Project (its task and data)** select mirrors the
 editor's own `#editor-project` options, runnable projects first; an edit-only project
 is labelled and warns "You can edit this project but not run it from this console."
-(L-7). **Open research loop** first reads the project (`GET /api/editor/<id>`): a
+(L-7). The preselection keeps an explicit earlier choice, else the editor's project when
+it is runnable, else the first runnable project; when none is runnable the dialog says
+"No project on this console can be run from here. …" (the fixture knob
+`EDITOR_RUNNABLE_PROJECTS` lets `quick_start.mjs` assert the preselection). **Open research loop** first reads the project (`GET /api/editor/<id>`): a
 failure shows "Couldn't open <project>: <reason>" in the dialog and keeps the button
 for a retry; a project that then does not finish loading within 20 s shows the
 editor's status instead of hanging (L-3). After the import, focus moves to the first
