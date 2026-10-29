@@ -159,25 +159,80 @@ def _imports_torch(tree: ast.Module) -> bool:
     return False
 
 
-def _is_entry(tree: ast.Module) -> bool:
+def _is_entry(tree: ast.Module, module: str) -> bool:
+    """A process entry: ``__main__.py``, ``*_main.py``, a top-level ``main`` or a guard."""
+    name = module.rsplit("/", 1)[-1]
+    if name == "__main__.py" or name.endswith("_main.py"):
+        return True
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == "main":
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "main":
             return True
         if isinstance(node, ast.If) and "__name__" in ast.unparse(node.test):
             return True
     return False
 
 
+def _dotted_module(module: str) -> str:
+    parts = module.removesuffix(".py").split("/")
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+def _imported(tree: ast.Module, module: str) -> set[str]:
+    """Every module name ``tree`` imports (relative imports resolved), at any depth."""
+    package = _dotted_module(module).split(".")
+    if not module.endswith("__init__.py"):
+        package = package[:-1]
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                prefix = package[: len(package) - node.level + 1]
+                base = ".".join([*prefix, base] if base else prefix)
+            names.add(base)
+            names.update(f"{base}.{alias.name}" for alias in node.names)
+    return names
+
+
+def _reaches_torch(graph: dict[str, set[str]]) -> set[str]:
+    """Modules that import torch directly or through any chain of ``src`` modules."""
+    reached = {
+        name for name, imports in graph.items() if any(i.split(".")[0] == "torch" for i in imports)
+    }
+    changed = True
+    while changed:
+        changed = False
+        for name, imports in graph.items():
+            if name not in reached and any(
+                target in reached or any(t in reached for t in _parents(target))
+                for target in imports
+            ):
+                reached.add(name)
+                changed = True
+    return reached
+
+
+def _parents(name: str) -> list[str]:
+    parts = name.split(".")
+    return [".".join(parts[:i]) for i in range(1, len(parts))]
+
+
 def census(root: Path = SRC) -> tuple[set[Site], set[str]]:
-    """RNG call sites, and torch-importing process entries that never seed."""
+    """RNG call sites, and process entries reaching torch (directly or through
+    any ``src`` import chain) that never seed."""
     sites: set[Site] = set()
-    entries: set[str] = set()
+    graph: dict[str, set[str]] = {}
+    unseeded_entries: set[str] = set()
     for path in sorted(root.rglob("*.py")):
         module = path.relative_to(root).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         visitor = _Visitor(module, _aliases(tree))
         visitor.visit(tree)
         sites |= visitor.sites
-        if _is_entry(tree) and _imports_torch(tree) and not visitor.calls & _ENTRY_SEEDERS:
-            entries.add(module)
-    return sites, entries
+        graph[_dotted_module(module)] = _imported(tree, module)
+        if _is_entry(tree, module) and not visitor.calls & _ENTRY_SEEDERS:
+            unseeded_entries.add(module)
+    reached = _reaches_torch(graph)
+    return sites, {m for m in unseeded_entries if _dotted_module(m) in reached}

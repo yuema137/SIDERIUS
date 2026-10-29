@@ -114,17 +114,62 @@ ALLOWLIST: dict[Site, str] = {
     ),
 }
 
-#: torch-importing process entries that do not call a process seeder.
+#: Process entries (``__main__.py``, ``*_main.py``, ``main()`` or a ``__main__``
+#: guard) that reach torch, directly or through any ``src`` import chain, and do
+#: not call a process seeder. Enumerated so a new entry must state its reason.
+_CLI = "operator CLI: reaches torch only through imports and builds no model in its own process"
+_ORCHESTRATOR = (
+    "orchestrator: builds models only in seeded probes (seeded_scope / probe worker, S7b); trai"
+    "ners, probe and analysis workers are children that seed their own processes"
+)
+_MEASUREMENT = "exempt: measurement only; its weights never become scientific output"
 ENTRY_ALLOWLIST: dict[str, str] = {
-    "agent/data_analysis/historical_inference_worker_main.py": (
-        "seeds torch itself from the declared inference seed (run_worker)"
-    ),
-    "core/runtime_control/gpu_measurement_worker_main.py": (
-        "exempt: measurement only; its weights never become scientific output"
-    ),
-    "execute_tools/inference_single.py": (
-        "exempt: loads a checkpoint and runs in eval(); initialization is overwritten"
-    ),
+    "agent/data_analysis/historical_inference_worker_main.py": "seeds torch itself from the declared inference seed (run_worker)",
+    "agent/data_analysis/reference_packs/build_manifests.py": "build script for reference-pack manifests; builds no model",
+    "agent/data_analysis/worker_main.py": "analysis skill worker: no torch model build; its sampling uses the executed sampling seed (S7a)",
+    "agent/skills/evaluate_vram_skill/preflight_worker_main.py": _MEASUREMENT
+    + " (VRAM pre-flight)",
+    "core/native_writer/__main__.py": _CLI,
+    "core/runtime_control/checkpoint_identity_worker_main.py": "CPU-only identity reader; no model construction or checkpoint deserialization",
+    "core/runtime_control/gpu_measurement_worker_main.py": _MEASUREMENT,
+    "core/runtime_control/probe_worker_main.py": _MEASUREMENT + " (bounded runtime probe)",
+    "dashboard/main.py": "read-only dashboard server; builds no model",
+    "execute_tools/denoising_score_single.py": "scores a fixed deliverable; builds or trains no model",
+    "execute_tools/inference_single.py": "exempt: loads a checkpoint and runs in eval(); initialization is overwritten",
+    "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py": "tuner CLI entry boundary (S3b): trainers are seeded children",
+    "nodes/ml_literature_review/ml_literature_review.py": _CLI,
+    "nodes/ml_model_proposal_agent/ml_model_proposal_agent.py": _CLI,
+    "nodes/result_interpretation_agent/result_interpretation_agent.py": _CLI,
+    "tools/adaptors/__main__.py": _CLI,
+    "tools/adaptors/cli.py": _CLI,
+    "tools/candidate_console/__main__.py": _CLI,
+    "tools/candidate_operations/__main__.py": _CLI,
+    "tools/candidate_operations/child.py": _ORCHESTRATOR,
+    "tools/candidate_prepare/__main__.py": _CLI,
+    "tools/candidate_prepare/child.py": _ORCHESTRATOR,
+    "tools/candidate_prepare/reusable_child.py": _ORCHESTRATOR,
+    "tools/candidate_worker/__main__.py": _ORCHESTRATOR,
+    "tools/candidate_worker/child.py": _ORCHESTRATOR,
+    "tools/candidate_worker/loop_resume.py": _ORCHESTRATOR,
+    "tools/candidate_worker/unit_child.py": _ORCHESTRATOR,
+    "tools/native_chain/__main__.py": _CLI,
+    "tools/native_chain/check.py": _CLI,
+    "tools/native_chain/iteration.py": _ORCHESTRATOR,
+    "tools/native_chain/resume_entry.py": _CLI,
+    "tools/orchestration_setup/__main__.py": _CLI,
+    "tools/run_report/__main__.py": _CLI,
+    "tools/run_report/cli.py": _CLI,
+    "tools/runtime_replay/__main__.py": _CLI,
+    "tools/setup_review/__main__.py": _CLI,
+    "tools/setup_review/check_task.py": _CLI,
+    "tools/setup_review/composition_child.py": "setup task check: model probes run in the seeded probe worker (S7b)",
+    "tools/setup_review/inspect_environment.py": _CLI,
+    "tools/setup_review/launch.py": _CLI,
+    "tools/setup_review/review.py": _CLI,
+    "tools/workspace_sandbox/__main__.py": _CLI,
+    "workflows/definition/__main__.py": _CLI,
+    "workflows/model_exploration.py": _ORCHESTRATOR,
+    "workflows/run_one_iteration.py": _ORCHESTRATOR,
 }
 
 
@@ -169,3 +214,20 @@ def test_census_sees_each_guarded_defect_class(tmp_path: Path):
         "hash",
     }
     assert entries == {"worker_main.py"}
+
+
+def test_entry_rule_follows_torch_through_src_imports(tmp_path: Path):
+    """Red-team witness (#1122): an entry that reaches torch only through
+    another ``src`` module (and the ``*_main.py`` naming alone) must still be
+    caught. Fails if the entry rule only sees a direct ``import torch``."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "model.py").write_text("import torch\n")
+    (tmp_path / "pkg" / "relay.py").write_text("from . import model\n")
+    (tmp_path / "pkg" / "probe_worker_main.py").write_text("from pkg.relay import model\n")
+    (tmp_path / "pkg" / "seeded_main.py").write_text(
+        "from pkg import model\nfrom x import seed_process\nseed_process(None)\n"
+    )
+    (tmp_path / "pkg" / "plain_main.py").write_text("import json\n")
+    _sites, entries = census(tmp_path)
+    assert entries == {"pkg/probe_worker_main.py"}
