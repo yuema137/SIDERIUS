@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import pytest
 
+from tests.helpers.probe_seed import PROBE_SEED
 from tools.candidate_worker import launch_candidate
 from tools.workspace_sandbox.runner import ExecutionResult
 
@@ -248,7 +249,9 @@ def test_actual_reuse_output_capture_keeps_missing_description_and_test(prepared
     )
     attempt = impl_attempt_storage(str(tmp_path / "attempt"), "reuse", 1)
     agent = MLModelImplementor(
-        bridge_factory=lambda **kwargs: object(), capability_index_path=registry.index_path
+        bridge_factory=lambda **kwargs: object(),
+        capability_index_path=registry.index_path,
+        probe_seed=PROBE_SEED,
     )
     request = ImplementorInput(
         model_name=MODEL_TYPE,

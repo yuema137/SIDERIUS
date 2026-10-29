@@ -36,6 +36,7 @@ from nodes.ml_model_implementor.ml_model_implementor import (
     _render_output_contract,
     _smoke_test_plugin,
 )
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.helpers.step04a_fixtures import (
     CODE_BY_OUTPUT_TYPE,
     MODEL_NAMES,
@@ -181,7 +182,10 @@ def test_the_self_check_accepts_a_16_class_candidate_under_a_16_class_task(tmp_p
     )
     plugin_src = _assemble_plugin(inp, _SIXTEEN_CLASS_CODE)
 
-    assert _smoke_test_plugin(plugin_src, inp.model_name, tidmad_model_io(16)) is None
+    assert (
+        _smoke_test_plugin(plugin_src, inp.model_name, tidmad_model_io(16), probe_seed=PROBE_SEED)
+        is None
+    )
 
 
 def test_the_same_candidate_is_rejected_by_the_legacy_self_check(tmp_path):
@@ -196,7 +200,7 @@ def test_the_same_candidate_is_rejected_by_the_legacy_self_check(tmp_path):
     )
     plugin_src = _assemble_plugin(inp, _SIXTEEN_CLASS_CODE)
 
-    error = _smoke_test_plugin(plugin_src, inp.model_name, None)
+    error = _smoke_test_plugin(plugin_src, inp.model_name, None, probe_seed=PROBE_SEED)
     assert error is not None
 
 
@@ -212,7 +216,9 @@ def test_the_self_check_reports_an_unrealizable_contract_as_an_error(tmp_path):
     inp = implementor_input("classifier", model_io=tidmad_model_io(), workspace=str(tmp_path))
     plugin_src = _assemble_plugin(inp, CODE_BY_OUTPUT_TYPE["classifier"])
 
-    error = _smoke_test_plugin(plugin_src, inp.model_name, regressor_model_io())
+    error = _smoke_test_plugin(
+        plugin_src, inp.model_name, regressor_model_io(), probe_seed=PROBE_SEED
+    )
     assert error is not None
     assert "Refusing to guess" in error
 
@@ -222,5 +228,8 @@ def test_tidmad_self_check_is_unchanged_between_the_two_paths(tmp_path):
     inp = implementor_input("classifier", model_io=tidmad_model_io(), workspace=str(tmp_path))
     plugin_src = _assemble_plugin(inp, CODE_BY_OUTPUT_TYPE["classifier"])
 
-    assert _smoke_test_plugin(plugin_src, inp.model_name, None) is None
-    assert _smoke_test_plugin(plugin_src, inp.model_name, tidmad_model_io()) is None
+    assert _smoke_test_plugin(plugin_src, inp.model_name, None, probe_seed=PROBE_SEED) is None
+    assert (
+        _smoke_test_plugin(plugin_src, inp.model_name, tidmad_model_io(), probe_seed=PROBE_SEED)
+        is None
+    )

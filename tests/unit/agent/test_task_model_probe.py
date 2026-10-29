@@ -17,6 +17,7 @@ from nodes.ml_code_validator_agent.ml_code_validator_agent import (
     _run_tests,
 )
 from nodes.ml_model_implementor.ml_model_implementor import _assemble_test, _smoke_test_plugin
+from tests.helpers.probe_seed import PROBE_SEED
 from workflows.task_composition import build_task_composition_ref, compose_run_task_bindings
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -129,22 +130,36 @@ def test_strict_semantic_models_pass_all_consumers_and_children(tmp_path, body, 
     contract, context, _ = declared_task(tmp_path, body)
     path, source = strict_model(tmp_path, predicate)
     torch.manual_seed(0)
-    assert "invalid task input" in _smoke_test_plugin(source, "strict_fixture_model", contract)
+    assert "invalid task input" in _smoke_test_plugin(
+        source, "strict_fixture_model", contract, probe_seed=PROBE_SEED
+    )
     assert (
-        _smoke_test_plugin(source, "strict_fixture_model", contract, model_probe_context=context)
+        _smoke_test_plugin(
+            source,
+            "strict_fixture_model",
+            contract,
+            model_probe_context=context,
+            probe_seed=PROBE_SEED,
+        )
         is None
     )
     assert all(
-        _check_instantiation_and_gradient(str(path), contract, model_probe_context=context)[:3]
+        _check_instantiation_and_gradient(
+            str(path), contract, model_probe_context=context, probe_seed=PROBE_SEED
+        )[:3]
     )
-    assert all(run_bounded_probe(str(path), contract, model_probe_context=context)[:3])
+    assert all(
+        run_bounded_probe(
+            str(path), contract, model_probe_context=context, seed_context=PROBE_SEED
+        )[:3]
+    )
     tests = tmp_path / "tests"
     tests.mkdir()
     test_file = tests / "test_model.py"
     test_file.write_text(
         _assemble_test("strict_fixture_model", contract, model_probe_context=context)
     )
-    passed, output = _run_tests(str(test_file), context)
+    passed, output = _run_tests(str(test_file), context, probe_seed=PROBE_SEED)
     assert passed, output
 
 
@@ -161,9 +176,17 @@ def test_bad_provider_is_setup_error_instead_of_candidate_repair(tmp_path, body)
     contract, context, _ = declared_task(tmp_path, body)
     path, source = strict_model(tmp_path)
     with pytest.raises(ModelProbeSetupError):
-        _smoke_test_plugin(source, "strict_fixture_model", contract, model_probe_context=context)
+        _smoke_test_plugin(
+            source,
+            "strict_fixture_model",
+            contract,
+            model_probe_context=context,
+            probe_seed=PROBE_SEED,
+        )
     with pytest.raises(ModelProbeSetupError):
-        _check_instantiation_and_gradient(str(path), contract, model_probe_context=context)
+        _check_instantiation_and_gradient(
+            str(path), contract, model_probe_context=context, probe_seed=PROBE_SEED
+        )
 
 
 def test_changed_task_identity_is_rejected_in_pytest_and_worker(tmp_path):
@@ -181,15 +204,17 @@ def test_changed_task_identity_is_rejected_in_pytest_and_worker(tmp_path):
         + "\n# Changed task implementation\n"
     )
     with pytest.raises(ModelProbeSetupError, match="identity"):
-        _run_tests(str(test_file), context)
+        _run_tests(str(test_file), context, probe_seed=PROBE_SEED)
     with pytest.raises(ModelProbeSetupError, match="identity"):
-        run_bounded_probe(str(path), contract, model_probe_context=context)
+        run_bounded_probe(str(path), contract, model_probe_context=context, seed_context=PROBE_SEED)
 
 
 def test_broken_candidate_still_fails_gradient_check(tmp_path):
     contract, context, _ = declared_task(tmp_path)
     path, _ = strict_model(tmp_path, broken=True)
-    verdict = _check_instantiation_and_gradient(str(path), contract, model_probe_context=context)
+    verdict = _check_instantiation_and_gradient(
+        str(path), contract, model_probe_context=context, probe_seed=PROBE_SEED
+    )
     assert verdict[:3] == (True, False, True)
     assert "Backward pass failed" in verdict[3]
 
@@ -224,7 +249,7 @@ def test_setup_failure_stops_validator_before_llm_review(tmp_path):
     description = tmp_path / "description.md"
     description.write_text("A strict model for a deterministic probe setup failure test.")
     bridge = MagicMock()
-    agent = MLCodeValidatorAgent(bridge_factory=lambda **kwargs: bridge)
+    agent = MLCodeValidatorAgent(bridge_factory=lambda **kwargs: bridge, probe_seed=PROBE_SEED)
     inp = ValidatorInput(
         model_type="strict_fixture_model",
         model_file_path=str(path),
@@ -288,17 +313,27 @@ def test_captured_task_helper_is_used_by_parent_and_children(tmp_path):
     )
     path, source = strict_model(tmp_path)
     assert (
-        _smoke_test_plugin(source, "strict_fixture_model", contract, model_probe_context=context)
+        _smoke_test_plugin(
+            source,
+            "strict_fixture_model",
+            contract,
+            model_probe_context=context,
+            probe_seed=PROBE_SEED,
+        )
         is None
     )
-    assert all(run_bounded_probe(str(path), contract, model_probe_context=context)[:3])
+    assert all(
+        run_bounded_probe(
+            str(path), contract, model_probe_context=context, seed_context=PROBE_SEED
+        )[:3]
+    )
     tests = tmp_path / "tests"
     tests.mkdir()
     test_file = tests / "test_model.py"
     test_file.write_text(
         _assemble_test("strict_fixture_model", contract, model_probe_context=context)
     )
-    passed, output = _run_tests(str(test_file), context)
+    passed, output = _run_tests(str(test_file), context, probe_seed=PROBE_SEED)
     assert passed, output
     composition = compose_run_task_bindings(context.manifest_path)
     with bind_code_package(composition.code_package):
@@ -307,7 +342,11 @@ def test_captured_task_helper_is_used_by_parent_and_children(tmp_path):
         )
         assert (
             _smoke_test_plugin(
-                source, "strict_fixture_model", contract, model_probe_context=context
+                source,
+                "strict_fixture_model",
+                contract,
+                model_probe_context=context,
+                probe_seed=PROBE_SEED,
             )
             is None
         )

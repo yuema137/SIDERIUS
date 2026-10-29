@@ -98,6 +98,7 @@ def test_declared_seed_executes_and_renders_exactly_as_declared(tmp_path):
             "invocation_id": "summary-invocation",
             "sampling_seed": PAPER_SEED,
             "sampling_seed_source": "declared",
+            "program_seed": 283021924344702021,
         }
     ]
     prompts = {label: user for label, _system, user in bridge.requests}
@@ -126,6 +127,9 @@ def test_undeclared_seed_is_derived_replaces_the_plan_seed_and_stays_out_of_prom
             "invocation_id": "summary-invocation",
             "sampling_seed": DERIVED[1],
             "sampling_seed_source": "derived",
+            # S7c: the invocation's program seed (run seed 1, no iteration,
+            # plan position 0, attempt 1).
+            "program_seed": 283021924344702021,
             "llm_plan_seed_ignored": 0,
         }
     ]

@@ -330,9 +330,83 @@ which raises `MissingRunSeed` for `None`. Data analysis runs only in the native
 workflow (`model_exploration` → `run_optional_data_analysis`), not in candidate
 preparation.
 
+## Validation probes
+
+Owner: `core.probe_seeds` (torch-free) and `execute_tools.process_seeding`
+(`apply_process_seeds`, `seeded_scope`). A model probe's seeds are the
+`validation.probe` value of a `SeedContext` at
+`(iteration, node_id or None, attempt)`: Python and torch get the 63-bit
+value, legacy NumPy its low 32 bits. `attempt` is the 1-based implementation
+number within the iteration, so a retried implementation draws anew. The fixed
+workflow builds the context from its lock's `run_seed` with `node_id=None`; a
+candidate graph from the admitted run seed and its node's iteration and id.
+`MLModelImplementor(probe_seed=...)` and `MLCodeValidatorAgent(probe_seed=...)`
+carry it (constructor arguments, never prompt input).
+
+- In-process probes (the implementor self-check, the validator's
+  instantiation/gradient check) run inside `seeded_scope`, which restores the
+  caller's Python, NumPy and torch states afterwards.
+- `validator_probe_worker` receives the context through the environment
+  variable `SIDERIUS_PROBE_SEED_CONTEXT` (`probe_seed_env`) and seeds its
+  process before importing the candidate. The validator's pytest child gets
+  the same entry, so a task-owned probe in generated pytest inherits it; the
+  generated test source is not changed.
+- `require_probe_seed` raises `MissingRunSeed` when no context is supplied or
+  inherited. Standalone implementor/validator CLIs are entry boundaries: they bind
+  `--run_seed` or generate a run seed (`core.seeding.resolve_run_seed`) and
+  print the `[seed]` line.
+- `ValidatorOutput.probe_seed` records the context. The legacy generated
+  pytest templates (LLM-visible prompt text with `torch.randint`) are
+  unchanged and run unseeded inside their pytest child.
+
+## Generated code
+
+**Analysis programs.** Every generated analysis program runs seeded: the
+sandbox runner seeds Python `random` and legacy NumPy from the request before
+`analyze` runs (`analysis_code_sandbox.executed_program_seeds`). A
+`deterministic` program keeps the seed it declared (kept as written); its
+declaration refuses a seed above `2**32 - 1`, the NumPy legacy range
+(validator-enforced, so the LLM-visible schema is unchanged). Any other program
+gets `sampling_seed.program_seed` =
+`derive_seed(run_seed, "data_analysis.program",
+SeedCoordinates(iteration, node_id=None, branch=<invocation index in the
+accepted plan>, attempt))`; Python gets the 63-bit value, NumPy its low 32
+bits. Each invocation's value is recorded as
+`InvocationSamplingSeed.program_seed` in the run's `sampling_seeds.json`;
+distinct programs and attempts draw independent streams, and the same plan
+position reproduces on resume. Prompts are unchanged.
+
+**Hard-coded seeds (Q4).** `core.generated_seed_scan.scan_seed_calls` is a
+best-effort scan by call name. It reports calls to `manual_seed`,
+`manual_seed_all`, `seed` and `SeedSequence`, and to `default_rng` /
+`RandomState` with a positional argument, as `GeneratedSeedCall(file, line,
+call)`; call text is bounded to 200 characters. It does not cover seeds passed
+only by keyword, seeding through other libraries, or aliased indirection;
+widening coverage is a follow-up. Source that cannot be parsed (syntax, or
+nesting too deep for the parser) yields nothing. The scan never modifies,
+strips or overrides code and never reaches a prompt. Records:
+`ValidatorOutput.generated_seed_calls` for the generated plugin (omitted when
+empty), and `generated_analysis/seed_calls/{source_sha256}.json` in the
+analysis run store for each persisted analysis program. Such a call reseeds a
+generator with the program's own constant: the one class of seed not derived
+from `run_seed`.
+
+## RNG census guard
+
+`tests/unit/core/test_rng_census.py` (census in `tests/unit/core/rng_census.py`)
+walks every `src/**/*.py` with the AST, resolving import aliases, and flags:
+`random.<draw|seed|Random>`, `np.random.<legacy draw|seed|default_rng|state>`,
+`torch.<rand*|manual_seed|Generator|…>` and `torch.cuda.manual_seed[_all]`,
+any `secrets.*`, `hash(` in `execute_tools/` or `nodes/`, and a
+`DataLoader(shuffle=…)` without `generator=`. A process entry (`__main__.py`,
+`*_main.py`, a top-level `main()` or a `__main__` guard) that reaches torch,
+directly or through any chain of `src` imports, must call `seed_process`,
+`apply_process_seeds` or `seeded_scope`, or be enumerated with a reason. Every remaining site is listed in
+`ALLOWLIST` / `ENTRY_ALLOWLIST`, keyed by `(module, function, call)` with a
+reason; an unlisted site and a stale entry both fail. The exp-side census
+(task data paths) is E3.
+
 ## Not yet provided
 
 These belong to later #983 PRs:
 
-- Validation-probe and generated-program seeding, and the generated-seed scan (S7b).
-- The RNG census guard (S8).

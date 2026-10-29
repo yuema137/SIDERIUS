@@ -37,6 +37,7 @@ from nodes.ml_model_implementor.ml_model_implementor import (
 from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
+from tests.helpers.probe_seed import PROBE_SEED
 
 GOLDENS = Path(__file__).parent / "goldens"
 
@@ -143,6 +144,7 @@ class TestPB5ModelPrompts:
         agent = MLModelImplementor(
             bridge_factory=_AbortingRecorder,
             capability_index_path=str(tmp_path / "idx.json"),
+            probe_seed=PROBE_SEED,
         )
         inp = fixture_input(
             plugin_dir=str(tmp_path / "m"),
@@ -175,6 +177,7 @@ class TestPB5ModelPrompts:
         agent = MLModelImplementor(
             bridge_factory=_AbortingRecorder,
             capability_index_path=str(tmp_path / "idx.json"),
+            probe_seed=PROBE_SEED,
         )
         inp = fixture_input(
             custom_loss_spec=fixture_loss_spec(),

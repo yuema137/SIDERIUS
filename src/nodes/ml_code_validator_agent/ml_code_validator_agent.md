@@ -112,6 +112,7 @@ The CLI takes every required `ValidatorInput` field as an explicit argument — 
 | `--llm_model_id` | `str` | `gemini-3.1-flash-lite-preview` | Specific model id. |
 | `--workspace` | `str` | `./siderius_workspace` | Root directory for the `validation_{run_name}.json` output. |
 | `--run_name` | `str` | `v1` | Filename suffix. |
+| `--run_seed` | `int` in `[0, 2**53 - 1]` | none (generated) | Run seed for the model probes' `validation.probe` stream (issue #983). Omitted: a seed is generated through `core.seeding` and printed as `[seed] run_seed=N source=generated`. |
 
 ## Python API usage
 
@@ -153,6 +154,18 @@ output = agent.run(inp)  # -> ValidatorOutput
 ```
 
 The constructor accepts `bridge_factory` (test injection — defaults to `LLMBridge`) and `max_retries` (defaults to `None`, infinite quota retry per project policy). Note `provider` and `model_id` on the constructor set the LLM that runs check #8 (code review); `inp.llm_provider` / `inp.llm_model_id` are forwarded into `ValidatorInput` for the same purpose — keep them aligned.
+
+**Probe seed (issue #983).** The constructor also takes
+`probe_seed: SeedContext` — the run seed plus `(iteration, node_id or None,
+attempt)`; the fixed workflow passes `node_id=None` and the 1-based
+implementation number within the iteration, a candidate graph its node's
+iteration and id (`phases.context_probe_seed`). `run()` refuses `None`; `ValidatorOutput.probe_seed` records the context (never prompt input). `ValidatorOutput.generated_seed_calls` records seeding calls the generated plugin hard-codes ([generated code](../../../docs/agent-reference/mechanisms/seeding.md#generated-code)); the plugin is never modified. Model probes draw
+from its `validation.probe` stream ([seeding](../../../docs/agent-reference/mechanisms/seeding.md#validation-probes)):
+an in-process probe runs inside `seeded_scope`, a bounded probe child or
+generated pytest receives it through `SIDERIUS_PROBE_SEED_CONTEXT`
+(`core.probe_seeds.PROBE_SEED_ENV`); generated test bytes are unchanged. A
+missing context raises `MissingRunSeed`. The standalone CLI is an entry
+boundary: it binds `--run_seed` or generates a run seed (`core.seeding.resolve_run_seed`) and prints the `[seed]` line.
 
 ## Storage outputs
 

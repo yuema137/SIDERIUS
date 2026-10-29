@@ -38,7 +38,7 @@ Node contract:
   run(input: ValidatorInput) -> ValidatorOutput
   CLI: --model_type, --model_file_path, --test_file_path, --description_file_path,
        --config_fields (JSON), --model_description, --mathematical_definition,
-       --llm_provider, --llm_model_id, --workspace, --run_name
+       --llm_provider, --llm_model_id, --workspace, --run_name, --run_seed
 """
 
 from __future__ import annotations
@@ -71,8 +71,18 @@ from agent.skills.model_io_probe_skill import (
     probe_config_kwargs,
 )
 from core.generated_artifact_name import validate_generated_artifact_name
+from core.generated_seed_scan import scan_seed_calls
 from core.local_code.failure import raise_if_code_package_failure
+from core.probe_seeds import (
+    probe_process_seeds,
+    probe_seed_env,
+    require_probe_seed,
+    standalone_probe_seed,
+)
+from core.run_seed_lock import run_seed_argument
 from core.subprocess_env import subprocess_env
+from core.training_seeds import SeedContext
+from execute_tools.process_seeding import seeded_scope
 from ml_models.plugin_loader import PLUGIN_LEGAL_OUTPUT_TYPES
 from nodes.llm_settings import VALIDATE, node_bridge_kwargs
 from nodes.ml_code_validator_agent.input_contract import render_input_contract
@@ -342,9 +352,13 @@ def _run_tests(
     model_probe_context: ModelProbeContext | None = None,
     *,
     test_limit: PytestLimit | None = None,
+    probe_seed: SeedContext,
 ) -> tuple[bool, str]:
     """
     Run pytest on ``test_file_path``.
+
+    ``probe_seed`` reaches the pytest child only through its environment
+    (``core.probe_seeds.PROBE_SEED_ENV``), so generated test bytes are unchanged.
 
     Branch B model reuse produces no new test file — the implementor's
     Branch B short-circuit (``ml_model_implementor.run`` early return) emits
@@ -374,8 +388,12 @@ def _run_tests(
     if model_probe_context is not None:
         from agent.skills.task_model_validation import run_task_model_tests
 
-        return run_task_model_tests(test_file_path, limit=test_limit)
-    return run_generated_pytest(test_file_path, subprocess_env(), limit=test_limit)
+        return run_task_model_tests(
+            test_file_path, limit=test_limit, seed_env=probe_seed_env(probe_seed)
+        )
+    env = subprocess_env()
+    env.update(probe_seed_env(probe_seed))
+    return run_generated_pytest(test_file_path, env, limit=test_limit)
 
 
 def _check_description(description_file_path: str) -> tuple[bool, str | None]:
@@ -444,6 +462,7 @@ def _check_instantiation_and_gradient(
     _isolated_worker: bool = False,
     _gradients: bool = True,
     model_probe_context: ModelProbeContext | None = None,
+    probe_seed: SeedContext | None = None,
 ) -> tuple[bool, bool, bool, str | None, int | None, int | None]:
     """
     Load plugin, instantiate config + model, run a dummy forward + backward pass,
@@ -493,8 +512,23 @@ def _check_instantiation_and_gradient(
         model_io_contract: the normalized Step-03 declaration this candidate
             was generated against, mapped in by the impl->valid protocol, or
             ``None`` on the legacy path.
+
+    Issue #983: ``probe_seed`` is this probe's ``validation.probe``
+    :class:`SeedContext` (``MissingRunSeed`` when absent). An in-process
+    probe runs inside ``seeded_scope``; a bounded child receives the context
+    through its environment and seeds its own process at entry
+    (``_isolated_worker=True``, which therefore needs no context).
     """
-    if model_probe_context is not None and not _isolated_worker:
+    if _isolated_worker:
+        return _probe_in_process(
+            model_file_path,
+            model_io_contract,
+            gradients=_gradients,
+            model_probe_context=model_probe_context,
+            seed=None,
+        )
+    seed = require_probe_seed(probe_seed)
+    if model_probe_context is not None:
         from agent.skills.task_model_probe_contract import task_probe_declaration
 
         if task_probe_declaration(model_probe_context, model_io_contract) is not None:
@@ -505,7 +539,27 @@ def _check_instantiation_and_gradient(
                 model_io_contract,
                 model_probe_context=model_probe_context,
                 gradients=_gradients,
+                seed_context=seed,
             )
+    with seeded_scope(probe_process_seeds(seed)):
+        return _probe_in_process(
+            model_file_path,
+            model_io_contract,
+            gradients=_gradients,
+            model_probe_context=model_probe_context,
+            seed=seed,
+        )
+
+
+def _probe_in_process(
+    model_file_path: str,
+    model_io_contract: ModelIOContract | None,
+    *,
+    gradients: bool,
+    model_probe_context: ModelProbeContext | None,
+    seed: SeedContext | None,
+) -> tuple[bool, bool, bool, str | None, int | None, int | None]:
+    """The probe body; ``seed`` is ``None`` only inside an isolated probe child."""
     try:
         module = captured_plugin(model_file_path)
     except Exception as e:
@@ -569,7 +623,7 @@ def _check_instantiation_and_gradient(
     # tensors during backward. Run generated code in a bounded child before
     # constructing the model; an OOM must reject this candidate, not the chain.
     if (
-        not _isolated_worker
+        seed is not None
         and probe_extent is not None
         and probe_extent >= 8192
         and captured_plugin(model_file_path) is None
@@ -582,8 +636,9 @@ def _check_instantiation_and_gradient(
                 model_file_path,
                 model_io_contract,
                 model_probe_context=model_probe_context,
+                seed_context=seed,
             )
-        return run_bounded_probe(model_file_path, model_io_contract)
+        return run_bounded_probe(model_file_path, model_io_contract, seed_context=seed)
 
     try:
         model = module.PLUGIN_MODEL_CLASS(config)
@@ -638,7 +693,7 @@ def _check_instantiation_and_gradient(
             model_io_contract,
             model_probe_context,
             declared_type,
-            gradients=_gradients,
+            gradients=gradients,
         )
         return (*verdict, realized_total, realized_trainable)
 
@@ -754,8 +809,12 @@ class MLCodeValidatorAgent:
         reasoning_effort: str | None = VALIDATE.reasoning_effort,
         bridge_factory=None,
         max_output_tokens: int | None = None,
+        probe_seed: SeedContext | None = None,
         **kwargs,
     ):
+        # Issue #983: this validation's ``validation.probe`` SeedContext (run
+        # seed plus iteration, node id, attempt); run() refuses None.
+        self._probe_seed = probe_seed
         self._bridge_factory = bridge_factory or LLMBridge
         bridge_kwargs = node_bridge_kwargs(
             provider=provider,
@@ -776,6 +835,7 @@ class MLCodeValidatorAgent:
             validate_generated_artifact_name(
                 inp.storage.local.run_name, field="storage.local.run_name"
             )
+        probe_seed = require_probe_seed(self._probe_seed)
         # 1. Plugin load
         plugin_ok, plugin_err = _check_plugin(inp.model_file_path)
 
@@ -786,7 +846,7 @@ class MLCodeValidatorAgent:
             else {}
         )
         tests_ok, test_output = _run_tests(
-            inp.test_file_path, **probe_options, test_limit=test_limit
+            inp.test_file_path, **probe_options, test_limit=test_limit, probe_seed=probe_seed
         )
 
         # 3. Description
@@ -805,6 +865,15 @@ class MLCodeValidatorAgent:
             forbid_ok, forbid_err = _check_forbidden_patterns(inp.model_file_path)
         else:
             forbid_ok, forbid_err = False, "Skipped — plugin file not found"
+        # Issue #983 (Q4): record seeds the generated plugin hard-codes; never
+        # modifies the source and never reaches a prompt.
+        seed_calls = (
+            scan_seed_calls(
+                read_source(inp.model_file_path, captured_entry), file=inp.model_file_path
+            )
+            if captured_entry is not None or os.path.isfile(inp.model_file_path)
+            else ()
+        )
 
         # 6 + 7 + (output-type). Long temporal probes use a bounded child;
         # small probes preserve the existing in-process path.
@@ -824,6 +893,7 @@ class MLCodeValidatorAgent:
                 # probe geometry.
                 model_io_contract=inp.model_io_contract,
                 **probe_options,
+                probe_seed=probe_seed,
             )
         else:
             inst_ok, grad_ok, otype_ok, inst_err = (
@@ -952,6 +1022,8 @@ class MLCodeValidatorAgent:
 
         out = ValidatorOutput(
             passed=passed,
+            probe_seed=probe_seed,
+            generated_seed_calls=list(seed_calls),
             # V21 PR E: explicit echo beside the existing hand-echoed
             # model_type; persisted in validation_{run_name}.json, which is
             # what makes a died-at-validation candidate joinable.
@@ -1041,6 +1113,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--llm_model_id", default=None)
     p.add_argument("--workspace", default="./siderius_workspace")
     p.add_argument("--run_name", default="v1")
+    p.add_argument(
+        "--run_seed",
+        type=run_seed_argument,
+        default=None,
+        help="Run seed for model probes (issue #983); generated and printed when omitted.",
+    )
     return p
 
 
@@ -1065,7 +1143,11 @@ def main() -> None:
             local=LocalStorageConfig(workspace=args.workspace, run_name=args.run_name),
         ),
     )
-    agent = MLCodeValidatorAgent(provider=args.llm_provider, model_id=args.llm_model_id)
+    agent = MLCodeValidatorAgent(
+        provider=args.llm_provider,
+        model_id=args.llm_model_id,
+        probe_seed=standalone_probe_seed(args.run_seed),
+    )
     out = agent.run(inp)
     print(json.dumps(out.model_dump(), indent=2))
 

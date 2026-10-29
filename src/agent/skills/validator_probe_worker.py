@@ -15,7 +15,9 @@ from pydantic import BaseModel, Field
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_probe import ModelProbeContext, ModelProbeSetupError
 from core.local_code.child import prepare_child
+from core.probe_seeds import probe_process_seeds, probe_seed_env, require_probe_seed
 from core.subprocess_env import subprocess_env
+from core.training_seeds import SeedContext
 
 ProbeResult = tuple[bool, bool, bool, str | None, int | None, int | None]
 
@@ -76,8 +78,16 @@ def run_bounded_probe(
     *,
     model_probe_context: ModelProbeContext | None = None,
     gradients: bool = True,
+    seed_context: SeedContext | None = None,
 ) -> ProbeResult:
-    """Return a failed candidate verdict if its isolated check exceeds resources."""
+    """Return a failed candidate verdict if its isolated check exceeds resources.
+
+    Issue #983: ``seed_context`` is the probe's ``validation.probe`` context;
+    when omitted it is inherited from this process's environment (a generated
+    pytest child). Neither present raises ``MissingRunSeed``. The child seeds
+    its process from it before importing the candidate.
+    """
+    seed = require_probe_seed(seed_context, os.environ)
     with tempfile.TemporaryDirectory(prefix="siderius-validator-") as directory:
         request = Path(directory) / "request.json"
         result = Path(directory) / "result.json"
@@ -91,9 +101,11 @@ def run_bounded_probe(
             ).model_dump_json(),
             encoding="utf-8",
         )
+        env = subprocess_env(plugin_dir=str(Path(model_file_path).parent))
+        env.update(probe_seed_env(seed))
         invocation = prepare_child(
             [sys.executable, "-m", "agent.skills.validator_probe_worker", str(request)],
-            subprocess_env(plugin_dir=str(Path(model_file_path).parent)),
+            env,
         )
         with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as output:
             try:
@@ -137,15 +149,14 @@ def main() -> None:
     # allocation now fails here instead of taking down the chain process.
     limit = _worker_address_space_limit()
     resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+    # Issue #983: seed every process generator before the candidate is imported.
+    from execute_tools.process_seeding import apply_process_seeds
+
+    apply_process_seeds(probe_process_seeds(require_probe_seed(None, os.environ)))
     from nodes.ml_code_validator_agent.ml_code_validator_agent import (
         _check_instantiation_and_gradient,
     )
 
-    options = (
-        {"model_probe_context": request.model_probe_context}
-        if request.model_probe_context is not None
-        else {}
-    )
     setup_error = None
     try:
         verdict = _check_instantiation_and_gradient(
@@ -153,7 +164,7 @@ def main() -> None:
             request.model_io_contract,
             _isolated_worker=True,
             _gradients=request.gradients,
-            **options,
+            model_probe_context=request.model_probe_context,
         )
     except ModelProbeSetupError as error:
         setup_error = str(error)

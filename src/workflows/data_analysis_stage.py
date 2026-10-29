@@ -214,6 +214,7 @@ def run_optional_data_analysis(
         historical_model_inference_capability=historical_model_inference_capability,
         bridge_factory=bridge_factory,
         run_seed=run_seed,
+        analysis_iteration=iteration,
         **llm_kwargs,
     ).run(analysis_input)
     relative = Path("data_analysis") / storage.local.run_name / request_id / "report.json"

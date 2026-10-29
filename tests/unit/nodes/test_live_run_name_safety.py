@@ -17,6 +17,7 @@ from nodes.ml_literature_review import MLLiteratureReviewAgent
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.result_interpretation_agent import ResultInterpretationAgent
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.unit.agent.ml_code_validator_agent.test_validator_agent import (
     make_input as validator_input,
 )
@@ -43,11 +44,13 @@ def _entry(kind, tmp_path, monkeypatch):
         inp = request(tmp_path, custom_loss_spec=loss_spec("safe_loss"))
         inp.storage = StorageConfig(local=LocalStorageConfig(workspace=str(tmp_path)))
         agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent._probe_seed = PROBE_SEED
         agent._generate_loss = first
         agent.bridge = MagicMock()
     elif kind == "validator":
         inp = validator_input(tmp_path)
         agent = validator.MLCodeValidatorAgent.__new__(validator.MLCodeValidatorAgent)
+        agent._probe_seed = PROBE_SEED
         monkeypatch.setattr(validator, "_check_plugin", first)
     elif kind == "interpreter":
         inp = _cold_input(tmp_path, requested=True)

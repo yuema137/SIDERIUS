@@ -9,6 +9,7 @@ from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.validator import ValidatorInput
 from nodes.ml_code_validator_agent.input_contract import render_input_contract
 from nodes.ml_code_validator_agent.ml_code_validator_agent import MLCodeValidatorAgent
+from tests.helpers.probe_seed import PROBE_SEED
 
 
 def contract(axes, dtypes=("float32",)):
@@ -65,7 +66,7 @@ def test_complete_review_discloses_fixed_input_with_errors_advice_and_constraint
         human_advice="fixture human guidance",
         constraint_context=ConstraintContext(known_sections=("task_rules",)),
     )
-    agent = MLCodeValidatorAgent(bridge_factory=Recorder)
+    agent = MLCodeValidatorAgent(bridge_factory=Recorder, probe_seed=PROBE_SEED)
     result = agent._llm_review(
         inp,
         "# fixture plugin",

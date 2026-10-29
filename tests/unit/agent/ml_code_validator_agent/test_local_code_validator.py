@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import sys
 from unittest.mock import MagicMock
 
@@ -15,6 +16,7 @@ from core.local_code import (
 )
 from nodes import ml_code_validator_agent as validator
 from tests.helpers.local_code_model import MODEL_TYPE, make_package
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.unit.agent.ml_code_validator_agent.test_validator_agent import (
     FAKE_LLM_REVIEW,
     make_input,
@@ -57,7 +59,9 @@ def test_actual_validator_executes_and_reviews_captured_entry_after_disk_changes
         )
     bridge = MagicMock()
     bridge.generate.return_value = FAKE_LLM_REVIEW
-    agent = validator.MLCodeValidatorAgent(bridge_factory=lambda **kw: bridge)
+    agent = validator.MLCodeValidatorAgent(
+        bridge_factory=lambda **kw: bridge, probe_seed=PROBE_SEED
+    )
     inherited_sources = []
     original_check = validator._check_inherited_components
 
@@ -68,7 +72,7 @@ def test_actual_validator_executes_and_reviews_captured_entry_after_disk_changes
     monkeypatch.setattr(validator, "_check_inherited_components", check_inheritance)
     with bind_code_package(package):
         assert validator._check_plugin(str(entry)) == (True, None)
-        assert validator._check_instantiation_and_gradient(str(entry)) == (
+        assert validator._check_instantiation_and_gradient(str(entry), probe_seed=PROBE_SEED) == (
             True,
             True,
             True,
@@ -85,7 +89,14 @@ def test_actual_validator_executes_and_reviews_captured_entry_after_disk_changes
 
 
 @pytest.mark.parametrize(
-    "consumer", [validator._check_plugin, validator._check_instantiation_and_gradient]
+    "consumer",
+    [
+        validator._check_plugin,
+        pytest.param(
+            functools.partial(validator._check_instantiation_and_gradient, probe_seed=PROBE_SEED),
+            id="_check_instantiation_and_gradient",
+        ),
+    ],
 )
 def test_missing_package_metadata_rolls_back_helper_modules(tmp_path, consumer):
     marker = tmp_path / "helper-imported"
@@ -133,4 +144,6 @@ def test_validator_never_downgrades_late_package_refusal(tmp_path, phase):
         bind_code_package(package),
         pytest.raises(LocalCodeError, match="undeclared relative import"),
     ):
-        validator._check_instantiation_and_gradient(str(package.root / "model.py"))
+        validator._check_instantiation_and_gradient(
+            str(package.root / "model.py"), probe_seed=PROBE_SEED
+        )

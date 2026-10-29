@@ -112,6 +112,10 @@ class InvocationSamplingSeed(FrozenModel):
     invocation_id: NonEmptyStr
     sampling_seed: int = Field(ge=0)
     sampling_seed_source: Literal["declared", "derived"]
+    #: The seed this invocation's generated program runs under when it is
+    #: declared ``nondeterministic`` (``data_analysis.program`` at the
+    #: invocation's coordinates); a ``deterministic`` program keeps its own.
+    program_seed: int = Field(ge=0)
     #: The plan's own seed, replaced by the derived one; absent when declared.
     llm_plan_seed_ignored: int | None = Field(default=None, exclude_if=lambda value: value is None)
 
@@ -128,3 +132,7 @@ class AnalysisSamplingSeeds(FrozenModel):
     run_seed: RunSeed
     derivation: Literal["siderius-seed/v1"] = "siderius-seed/v1"
     invocations: tuple[InvocationSamplingSeed, ...]
+
+    def program_seed(self, invocation_id: str) -> int:
+        """The recorded program seed of one invocation."""
+        return next(i.program_seed for i in self.invocations if i.invocation_id == invocation_id)

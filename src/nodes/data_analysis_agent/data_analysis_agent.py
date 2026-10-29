@@ -128,11 +128,14 @@ class DataAnalysisAgent:
         max_output_tokens: int | None = None,
         historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
         run_seed: int | None = None,
+        analysis_iteration: int | None = None,
     ) -> None:
         # Issue #983: the run's seed, run-scoped context like the capabilities.
         # It is deliberately not a DataAnalysisInput field: the input's canonical
         # digest is rendered into the plan prompt, which must stay seed-free.
         self._run_seed = run_seed
+        # The caller's iteration (the fixed workflow's), a program-seed coordinate.
+        self._analysis_iteration = analysis_iteration
         self._capability = task_analysis_capability
         self._provider = provider
         self._model_id = model_id
@@ -386,7 +389,10 @@ class DataAnalysisAgent:
                 semantic_projection=self._plan_semantics,
             )
             resolved, sampling_seeds = apply_sampling_seed(
-                resolved, envelope=inp.resource_envelope, run_seed=run_seed
+                resolved,
+                envelope=inp.resource_envelope,
+                run_seed=run_seed,
+                iteration=self._analysis_iteration,
             )
         except DataAnalysisStructuredOutputError as exc:
             # Only LLM representation failures before plan publication are local.
@@ -418,6 +424,7 @@ class DataAnalysisAgent:
                 inference_capability=self._historical_inference_capability,
                 control_root=control_root,
                 deadline_monotonic_s=deadline,
+                program_seed=sampling_seeds.program_seed(item.invocation.invocation_id),
             )
             for receipt in outcome.inference_receipts:
                 store.append_inference_receipt(receipt)
