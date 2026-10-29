@@ -1007,13 +1007,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--trial_vram_budget_gb",
         type=float,
         default=None,
-        help="Per-mode VRAM ceiling (GB) for trial rounds. None uses free×0.8.",
+        help=(
+            "Per-mode VRAM ceiling (GB) for trial rounds; must be finite and "
+            "positive. Omit (None) to use free×0.8."
+        ),
     )
     parser.add_argument(
         "--formal_vram_budget_gb",
         type=float,
         default=None,
-        help="Per-mode VRAM ceiling (GB) for formal rounds. None uses free×0.8.",
+        help=(
+            "Per-mode VRAM ceiling (GB) for formal rounds; must be finite and "
+            "positive. Omit (None) to use free×0.8."
+        ),
     )
     parser.add_argument(
         "--vram_probe_step_timeout_seconds",

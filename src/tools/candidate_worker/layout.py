@@ -33,6 +33,8 @@ _PER_NODE_PROPOSAL_PROFILES = (
     "native-interpretation-candidate/v1",
     "native-literature-collection/v1",
     "native-literature-split/v1",
+    "native-literature-judged/v1",
+    "native-proposal-judged/v1",
 )
 
 
