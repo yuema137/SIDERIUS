@@ -7,7 +7,7 @@
  *    revealing gated sections at once; the choice survives reload and can be turned off.
  * 3. Tour: four steps, each anchored to a visible real element that the card does not cover;
  *    the page stays usable while it is open; Back/Next/OK; Skip and Esc close it; outcome is
- *    stored; Help reopens it (also from another page); Home "Start from a template" opens it.
+ *    stored; Help reopens it (also from another page); Home "Quick start" opens its chooser, not the tour.
  * 4. Layout at 1440x1100 and 1024x768, light and dark, every page: no overlapping cards, every
  *    top-level block on the page grid, no horizontal overflow, header logo visible without
  *    overlapping header controls, and the docked editor frame (rail | canvas | Selection with
@@ -170,12 +170,12 @@ try {
   await page.locator('#onboarding-close').click();
   assert.equal(await tourOpen(), false);
   await page.locator('#theme-preference').selectOption('light');
-  // Home "Start from a template" opens the template gallery on Workflow (not the tour).
+  // Home "Quick start" opens its task chooser on Workflow (not the tour).
   await page.locator('nav a[href="#home"]').click();
-  await page.locator('#home-start-template').click();
-  await waitUntil(async () => new URL(page.url()).hash === '#workflow' && await page.locator('#editor-template-gallery').evaluate(dialog => dialog.open), 'gallery from Home template');
+  await page.locator('#home-quick-start').click();
+  await waitUntil(async () => new URL(page.url()).hash === '#workflow' && await page.locator('#quick-start-dialog').evaluate(dialog => dialog.open), 'Quick start from Home');
   assert.equal(await tourOpen(), false);
-  await page.locator('#editor-template-close').click();
+  await page.locator('#quick-start-dialog button.secondary').click();
   await page.reload();
   assert.equal(await tourOpen(), false, 'The tour does not reopen itself after reload');
   await connect();

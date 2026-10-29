@@ -51,11 +51,15 @@
   <script src="/editor-advice.js" defer></script>
   <script src="/editor.js" defer></script>
   <script src="/editor-templates.js" defer></script>
+  <script src="/quick-start.js" defer></script>
   <script src="/navigation.js" defer></script>
   <script src="/recorded-example.js" defer></script>
+  <script src="/operation-outcome.js" defer></script>
   <script src="/reusable-intents.js" defer></script>
+  <script src="/run-steps.js" defer></script>
   <script src="/reusable-run.js" defer></script>
   <script src="/new-run.js" defer></script>
+  <script src="/browser-data.js" defer></script>
   <script src="/native-chain.js" defer></script>
   <script src="/onboarding.js" defer></script>
   <script src="/page-guidance.js" defer></script>
@@ -80,6 +84,7 @@
     <h2>Settings</h2>
     <label class="setting"><input type="checkbox" data-ui-setting="advanced"><span><strong>Show advanced tools</strong><span>Source editor, references, version history, mapping details and contract ids, native chains and recorded examples.</span></span></label>
     <label class="setting"><input type="checkbox" data-ui-setting="developer"><span><strong>Show developer details</strong><span>Operation facts, raw token tables, captured resources and save internals.</span></span></label>
+    <div class="setting" data-ui-flag="advanced"><button id="forget-browser-data" type="button" class="secondary">Forget this browser's console data</button><span id="forget-browser-data-status" class="muted" role="status"></span></div>
   </section>
 </header>
 <nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#monitor">Monitor</a><a href="#settings">Settings</a></nav>
@@ -96,7 +101,7 @@
 <section class="home-entries" aria-labelledby="journey-heading">
   <h2 id="journey-heading">Where to start</h2>
   <ul class="entry-cards">
-    <li class="card entry-card"><h3>Start from a template</h3><p>Pick a ready-made research loop, then add your advice.</p><a class="button-link" id="home-start-template" href="#workflow">Start from a template</a></li>
+    <li class="card entry-card"><h3>Quick start</h3><p>Choose a task and open its ready-made research loop to edit and run.</p><a class="button-link" id="home-quick-start" href="#workflow">Choose a task</a></li>
     <li class="card entry-card"><h3>Open a workflow</h3><p>Edit, save and run a workflow you already have.</p><a class="button-link" href="#workflow">Open a workflow</a></li>
     <li class="card entry-card"><h3>Monitor runs</h3><p>Follow a running experiment and read its results.</p><a class="button-link" href="#monitor">Monitor runs</a></li>
   </ul>
@@ -125,7 +130,7 @@
           <details><summary>Configured paths</summary><dl id="configured-paths" class="facts"></dl></details>
           <p>Prepare creates separate child paths under these output parents. Review the resolved workspace before Launch.</p>
           <label for="run-name">Run name</label><input id="run-name" required maxlength="128" autocomplete="off">
-          <details><summary>Optional stage advice</summary>
+          <details><summary>Optional stage advice</summary><p class="muted">Advice is sent to the model provider and kept in run records; don't paste secrets.</p>
             <label for="proposal-advice">Proposal advice</label><textarea id="proposal-advice" maxlength="32768" rows="3"></textarea>
             <label for="implementation-advice">Implementation advice</label><textarea id="implementation-advice" maxlength="32768" rows="3"></textarea>
             <label for="validation-advice">Validation advice</label><textarea id="validation-advice" maxlength="32768" rows="3"></textarea>
@@ -231,43 +236,57 @@
   </details>
 </section>
 <section id="view-run" data-view="run" hidden><h1 tabindex="-1">Run</h1>
+  <ol class="run-stepper" id="run-stepper" aria-label="Run steps">
+    <li data-run-step="prepare"><span class="run-step-number" aria-hidden="true">1</span>Prepare</li>
+    <li data-run-step="launch"><span class="run-step-number" aria-hidden="true">2</span>Review and launch</li>
+    <li data-run-step="follow"><span class="run-step-number" aria-hidden="true">3</span>Follow in Monitor</li>
+  </ol>
+  <p id="run-next" class="run-next" role="status">Connect to start.</p>
   <section class="card run-source" aria-labelledby="run-source-heading">
     <p class="eyebrow">Saved workflow version</p><h2 id="run-source-heading">What this run uses</h2>
     <p id="run-source-state" role="status">Connect to see which saved workflow version a run uses.</p>
     <div class="actions"><a href="#workflow">Back to workflow</a></div>
   </section>
-  <section class="card run-step" aria-labelledby="new-run-heading">
-    <p class="eyebrow">1 · Prepare</p><h2 id="new-run-heading">New run</h2>
+  <!-- Step 1 entry: the saved-workflow preparation. Another entry (for example a task's
+       default template) replaces this one section; steps 2-3 read only its handoff. -->
+  <section class="card run-step" id="run-entry" data-run-entry="saved-workflow" aria-labelledby="new-run-heading">
+    <p class="eyebrow">1 · Prepare</p><h2 id="new-run-heading">Prepare the saved workflow</h2>
     <p id="new-run-prerequisites">Select a runnable project and save source edits.</p>
-    <label for="new-run-task">Configured task and resources</label><select id="new-run-task"><option value="">Choose task and resources</option></select>
-    <label for="new-run-name">Run name</label><input id="new-run-name" type="text" value="candidate" maxlength="128">
-    <button id="new-run-review" class="secondary" disabled>Review preparation</button>
-    <p id="new-run-status" role="status"></p><details open><summary>Selected source, inputs and resource limits</summary><pre id="new-run-details"></pre></details>
-    <button id="new-run-prepare" disabled>Prepare saved source</button>
-    <section id="new-run-intent" hidden aria-label="Retained preparation operation">
-      <p id="new-run-operation-status" role="status"></p><p id="new-run-operation-id" class="mono"></p>
-      <div class="actions"><button id="new-run-check" disabled>Check status</button><button id="new-run-retry" disabled>Retry same preparation</button><a id="new-run-monitor">Monitor preparation</a><button id="new-run-open" disabled>Open prepared run</button><button id="new-run-dismiss" disabled>Dismiss terminal or refused preparation</button></div>
+    <label for="new-run-task">Task and resources</label><select id="new-run-task"><option value="">Choose task and resources</option></select>
+    <label for="new-run-name">Run name</label><input id="new-run-name" type="text" value="" maxlength="128" autocomplete="off">
+    <p id="new-run-credentials" class="run-credentials" hidden></p>
+    <div class="actions"><button id="new-run-review" disabled>Check inputs</button><button id="new-run-prepare" hidden disabled>Prepare</button></div>
+    <p id="new-run-status" role="status"></p>
+    <details><summary>Source, inputs and resource limits</summary><pre id="new-run-details"></pre></details>
+    <section id="new-run-intent" class="run-operation" hidden aria-label="Preparation operation">
+      <p id="new-run-operation-status" role="status"></p>
+      <div class="actions"><button id="new-run-open" disabled>Open prepared run</button><button id="new-run-retry" class="secondary" hidden disabled>Retry same preparation</button><a id="new-run-monitor">Watch in Monitor</a><button id="new-run-dismiss" class="secondary" hidden disabled>Start over</button><button id="new-run-check" class="secondary" data-ui-flag="developer" disabled>Check status now</button></div>
+      <p class="mono" data-ui-flag="developer">Operation <span id="new-run-operation-id"></span></p>
     </section>
   </section>
   <section class="card run-step" aria-labelledby="capture-heading">
     <p class="eyebrow">2 · Review and launch</p><h2 id="capture-heading">Prepared run</h2>
-    <p>Open a prepared capture, review its saved inputs, then start a candidate. Current workflow edits apply only to future captures.</p>
-    <label for="capture-task">Configured task</label><select id="capture-task" disabled></select>
-    <div class="actions"><button id="capture-refresh" class="secondary" disabled>Refresh prepared runs</button><button id="capture-more" hidden disabled>More runs</button></div>
-    <p id="capture-guidance">Use New run above to prepare the saved version, or refresh existing prepared runs.</p>
-    <label for="capture-run">Prepared capture</label><select id="capture-run" disabled><option value="">Choose a prepared run</option></select>
-    <button id="capture-open" class="secondary" disabled>Open prepared run</button>
     <p id="capture-status" role="status">Connect and select a runnable project.</p>
     <p id="capture-source"></p>
-    <button id="capture-review" class="secondary" disabled>Review capture</button>
+    <button id="capture-prepare-current" type="button" class="secondary" hidden>Prepare the current version instead</button>
     <div id="capture-summary"></div>
+    <p id="capture-credentials" class="run-credentials" hidden></p>
+    <div class="actions"><button id="capture-review" class="secondary" disabled>Review prepared run</button><button id="capture-launch" disabled>Launch run</button></div>
+    <p id="capture-launch-reason" class="muted"></p>
     <details data-ui-flag="developer"><summary>Captured resources and version</summary><pre id="capture-details"></pre></details>
-    <button id="capture-launch" disabled>Launch captured run</button>
-    <section id="capture-intent" hidden aria-label="Retained candidate operation">
-      <p id="capture-operation-status" role="status"></p><p id="capture-operation-id" class="mono"></p>
-      <div class="actions"><button id="capture-check" disabled>Check status</button><button id="capture-retry" disabled>Retry same operation</button><a id="capture-monitor" hidden>Monitor operation</a><button id="capture-finish" hidden>Dismiss completed operation</button></div>
+    <section id="capture-intent" class="run-operation" hidden aria-label="Run operation">
+      <p id="capture-operation-status" role="status"></p>
+      <div class="actions"><a id="capture-monitor" class="button-link" hidden>Watch in Monitor</a><button id="capture-retry" class="secondary" hidden disabled>Retry same launch</button><button id="capture-finish" class="secondary" hidden>Start another run</button><button id="capture-check" class="secondary" data-ui-flag="developer" disabled>Check status now</button></div>
+      <p class="mono" data-ui-flag="developer">Operation <span id="capture-operation-id"></span></p>
       <div id="capture-stop-group" class="actions" hidden><button id="capture-stop-button" type="button">Stop run</button></div><p id="capture-stop-status" role="status"></p>
     </section>
+    <details class="run-earlier" id="capture-earlier"><summary>Run an earlier prepared run instead</summary>
+      <label for="capture-task">Task</label><select id="capture-task" disabled></select>
+      <div class="actions"><button id="capture-refresh" class="secondary" disabled>Refresh prepared runs</button><button id="capture-more" class="secondary" hidden disabled>More runs</button></div>
+      <p id="capture-guidance" class="muted">Earlier preparations of this project, newest first.</p>
+      <label for="capture-run">Prepared run</label><select id="capture-run" disabled><option value="">Choose a prepared run</option></select>
+      <button id="capture-open" class="secondary" disabled>Open this prepared run</button>
+    </details>
   </section>
 </section>
 <section id="view-monitor" data-view="monitor" hidden><h1 tabindex="-1">Monitor</h1>
@@ -276,13 +295,14 @@
     <p class="eyebrow">This console's operations</p><h2 id="operations-heading">Recent operations</h2>
     <div class="actions operations-actions"><button id="operations-refresh" type="button" class="secondary" disabled>Refresh list</button></div>
     <p id="operations-status" role="status">Connect to list operations.</p>
+    <p id="operations-unreadable" class="muted" data-ui-flag="advanced" hidden>Unverified records stay in this console's operation store under <code>operations/&lt;UUID&gt;/</code>. Inspect one with <code>python -m tools.candidate_operations status --store-config &lt;store.json&gt; --operation-id &lt;UUID&gt;</code>.</p>
     <ol id="operations-list" class="operations-list" aria-labelledby="operations-heading"></ol>
   </section>
   <section class="card" aria-labelledby="monitor-heading">
     <p class="eyebrow">Observe an operation</p><h2 id="monitor-heading">Status and logs</h2>
     <p class="muted">Choose an operation from the list. Reading it never launches, restarts or stops it; closing the page does not stop an admitted operation.</p>
     <form id="monitor-form" class="actions manual-operation" data-ui-flag="advanced"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" class="secondary" disabled>Read operation</button></form>
-    <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="operation-observed" class="muted"></p><details data-ui-flag="developer"><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
+    <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="monitor-cause" class="monitor-cause" hidden></p><p id="operation-observed" class="muted"></p><details data-ui-flag="developer"><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
     <div id="operation-stop-group" class="actions" hidden><button id="operation-stop-button" type="button">Stop run</button><p class="muted">Ends the run now, including any model call in progress. It cannot be resumed and produces no candidate result; files written so far stay in the run folder.</p></div>
     <p id="operation-stop-status" role="status"></p>
     <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p>
@@ -302,7 +322,7 @@
     </div>
     </details><p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
     <details><summary>Activity and logs</summary><div class="actions"><label for="log-kind">Log source</label><select id="log-kind"><option value="native">Native</option><option value="operation">Operation</option></select></div>
-    <p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre></details>
+    <p id="log-notice" class="muted">Logs are shown exactly as native code and plugins wrote them; they are not redacted. Don't share them without checking for secrets.</p><p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre></details>
   </section>
 </div>
   <section class="card" aria-labelledby="recorded-example-heading" data-ui-flag="advanced">

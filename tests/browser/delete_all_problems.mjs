@@ -53,7 +53,13 @@ try {
     for (const text of await problems()) assert.ok(!deleted.some(gone => text.includes(gone)), `no problem names a deleted module: ${text}`);
   }
   await waitUntil(async () => JSON.stringify(await problems()) === JSON.stringify(['Add at least one module.']), 'empty canvas: one problem');
-  assert.equal(await page.locator('#editor-loop-broken').count(), 1, 'the loop panel says its feedback modules are deleted');
+  // B8-5: one count everywhere; the loop panel notes the waiting loop without a second
+  // problem, and the status line names the empty workflow (nothing is red).
+  assert.equal(await page.locator('#editor-loop-broken').count(), 0, 'an empty canvas has one problem, not a second loop problem');
+  assert.equal(await page.locator('#editor-loop-waiting').count(), 1);
+  assert.match(await page.locator('#problems-chip').textContent(), /^1 problem$/);
+  assert.match(await page.locator('#editor-status').textContent(), /The workflow is empty/);
+  assert.doesNotMatch(await page.locator('#editor-status').textContent(), /marked in red/);
   assert.equal(await page.locator('#editor-loop-add-metric-threshold').count(), 0, 'no stop-condition edits on a broken loop');
   assert.equal(await page.locator('#editor-loop-remove').isEnabled(), true, 'the loop can still be removed');
 

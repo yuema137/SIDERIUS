@@ -93,11 +93,18 @@ try {
   assert.equal(await readFile(file, 'utf8'), checked);
 
   // S-2: the save succeeds, the reload after it fails: "Saved as", and no false conflict next time.
-  let reloadFailed = false;
-  await page.route('**/api/editor/five_node', route => { if (route.request().method() === 'GET' && !reloadFailed) { reloadFailed = true; return route.abort('connectionreset'); } return route.continue(); });
+  // Deterministic: the read block is armed only once the save POST's response has arrived,
+  // and every GET of the source inside that window fails, so no unrelated earlier reader
+  // can consume it (a parallel-load flake when only the first GET was blocked).
+  let reloadArmed = false;
+  await page.route('**/api/editor/five_node/save', async route => {
+    const response = await route.fetch(); reloadArmed = true; await route.fulfill({response});
+  }, {times: 1});
+  await page.route('**/api/editor/five_node', route => (route.request().method() === 'GET' && reloadArmed ? route.abort('connectionreset') : route.continue()));
   await page.locator('#editor-version-name').fill('moved');
   await saveButton.click();
   await waitUntil(async () => (await status()).startsWith('Saved as "moved". Reloading the file afterwards failed'), 'saved, reload failed');
+  reloadArmed = false;
   await page.unroute('**/api/editor/five_node');
   assert.doesNotMatch(await readFile(file, 'utf8'), /# my note/, 'The warned comment is gone after Save');
   await waitUntil(async () => (await page.locator('#editor-version-tag .version-tag-name').textContent()) === 'moved', 'version tag');

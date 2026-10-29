@@ -186,6 +186,14 @@
     window.addEventListener('workflow-editor-state', () => { if (dialog.open) renderDetail(); });
     enable();
   }
-  window.editorTemplates = Object.freeze({open});
+  // Quick start reuses this one import path; it resolves true once the draft is imported.
+  async function importById(id) {
+    await load();
+    const template = catalog?.find(item => item.id === id);
+    if (!template) { status(`Template ${id} is unavailable.`); return false; }
+    await importTemplate(template);
+    return document.getElementById('editor-template-status')?.textContent.startsWith('Imported') === true;
+  }
+  window.editorTemplates = Object.freeze({open, importById});
   mount();
 })();

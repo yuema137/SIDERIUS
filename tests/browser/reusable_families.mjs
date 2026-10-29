@@ -63,10 +63,10 @@ try {
   await page.locator('#workflow-next-run').click(); await page.locator('#view-run').waitFor(); // Saved version hands off to Run.
   await page.locator('#new-run-task').selectOption('synthetic');
   await page.locator('#new-run-review').click();
-  await page.locator('#new-run-status').filter({hasText: 'Preparation reviewed'}).waitFor();
+  await page.locator('#new-run-status').filter({hasText: 'Inputs checked'}).waitFor();
   await page.locator('#new-run-prepare').click();
-  await until(async () => {if (await page.locator('#new-run-check').isVisible()) await page.locator('#new-run-check').click(); return (await page.locator('#new-run-operation-status').textContent()).includes('Native prepared');}, 90000);
-  const intent = await page.evaluate(() => JSON.parse(localStorage.getItem('siderius.reusable-preparation.v1')));
+  await page.locator('#new-run-operation-status').filter({hasText: 'Prepared.'}).waitFor({timeout: 90000}); // Polled by the page (R-1).
+  const intent = await page.evaluate(() => JSON.parse(localStorage.getItem(window.reusableIntents.key('preparation'))));
   const envelope = join(root, 'runs', intent.payload.selection.run_id);
   const native = JSON.parse(await readFile(join(envelope, 'inputs/preparation/receipt.json')));
   assert.equal(native.status, 'prepared'); assert.equal(native.proposal_path, null);
@@ -74,15 +74,15 @@ try {
   assert.equal(index.files.length, 10);
   await until(() => page.locator('#new-run-open').isEnabled()); await page.locator('#new-run-open').click();
   await page.locator('#capture-status').filter({hasText: 'Prepared run opened'}).waitFor();
-  await page.locator('#capture-review').click(); await page.locator('#capture-status').filter({hasText: 'Capture reviewed'}).waitFor();
+  await page.locator('#capture-review').click(); await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
   const summary = await page.locator('#capture-summary').textContent();
   assert.match(summary, /Independent proposal instances executed serially/);
   assert.ok(!await page.locator('#capture-summary').evaluate(element => element.firstChild.textContent.includes('→'))); assert.match(summary, /alternate/);
   await page.screenshot({path: join(evidence, 'family-review.png'), fullPage: true});
-  await until(async () => {await page.locator('#new-run-check').click(); return page.locator('#capture-launch').isEnabled();});
+  await until(() => page.locator('#capture-launch').isEnabled()); // No manual status check (R-2).
   await page.locator('#capture-launch').click();
-  await until(async () => {if (await page.locator('#capture-check').isVisible()) await page.locator('#capture-check').click(); return (await page.locator('#capture-operation-status').textContent()).includes('completed');}, 120000);
-  assert.match(await page.locator('#capture-operation-status').textContent(), /Native accepted/);
+  await page.locator('#capture-operation-status').filter({hasText: 'Finished'}).waitFor({timeout: 120000});
+  assert.match(await page.locator('#capture-operation-status').textContent(), /passed validation/);
   const operationId = (await page.locator('#capture-operation-id').textContent()).trim();
   await page.close(); // Independent HTTP observation has no editor/browser page authority.
   const response = await fetch(origin + '/api/operations/' + operationId, {headers: {Authorization: 'Bearer ' + metadata.token}});

@@ -79,6 +79,14 @@ def _readiness(ready=True):
     )
 
 
+def without_requests(loop):
+    """Request flags are covered against real markers in test_loop_resume; drop them here."""
+    if loop is None:
+        return None
+    assert (loop.pop("stop_requested"), loop.pop("pause_requested")) == (False, False)
+    return loop
+
+
 def test_pause_route_delegates_once_and_acknowledges_only_a_request(console_config, monkeypatch):
     """Fails if Pause skips the owner, calls it twice, takes a body, or claims paused."""
     calls = []
@@ -317,6 +325,8 @@ def test_status_projects_resume_segment_bound_and_successor(
     """Fails if a resume segment loses its root bound (hiding Stop/Pause) or the
     successor link is dropped or breaks the strict status view."""
     operation_id = uuid4()
+    monkeypatch.setattr(SERVICE + "operation_admitted", lambda config, value: True)
+    monkeypatch.setattr(SERVICE + "loop_control_requests", lambda config, value: (False, False))
     monkeypatch.setattr(
         SERVICE + "read_operation",
         lambda config, value: _snapshot(value, kind=kind, receipt=receipt, successor=successor),
@@ -326,5 +336,5 @@ def test_status_projects_resume_segment_bound_and_successor(
     assert response.status_code == 200, response.text
     status = response.json()
     assert status["kind"] == kind
-    assert status["loop"] == expected_loop
+    assert without_requests(status["loop"]) == expected_loop
     assert status.get("successor_operation_id") == (None if successor is None else str(successor))

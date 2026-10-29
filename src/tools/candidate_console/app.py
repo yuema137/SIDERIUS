@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
 from tools.candidate_operations import LogReadRequest
-from tools.candidate_operations.models import OperationFailure
+from tools.candidate_operations.models import OperationFailure, UnknownOperation
 
 from .boundary import RequestBoundary
 from .edited_routes import edited_router
@@ -120,10 +120,11 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
 
     @app.exception_handler(OperationFailure)
     async def operation_error(request: Request, error: OperationFailure):
-        # Only credential name diagnostics are safe to forward; native errors may carry paths.
+        # Only credential names and the launch-policy owner's fixed refusal text are
+        # forwarded; other native errors may carry paths.
         message = (
             error.detail.message
-            if error.detail.code == "credentials"
+            if error.detail.code in ("credentials", "launch_policy")
             else {
                 "native_chain_policy": "native chain choice is unavailable or overlaps editor writes",
                 "not_supported": "native-chain token aggregation is not supported",
@@ -139,6 +140,10 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
                 "not_prepared": "preparation has no verified candidate to review",
             }.get(error.detail.code, "native operation could not be verified")
         )
+        if isinstance(error, UnknownOperation):
+            # Typed absence after a successful store read; the only code that may
+            # justify forgetting a retained intent. Plain 404 ``not_found`` never does.
+            return error_response(404, "unknown_operation", error.detail.message)
         response = error_response(409, error.detail.code, message)
         if isinstance(error, ReusableAdmissionNotAttempted):
             return JSONResponse(
@@ -159,7 +164,7 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
 
     @app.get("/api/choices")
     def choices():
-        return service.choices()
+        return service.choices_view()
 
     @app.post("/api/preparations", status_code=202)
     async def prepare(request: Request):
@@ -269,6 +274,10 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
             "session.js": "text/javascript",
             "number-format.js": "text/javascript",
             "operations-list.js": "text/javascript",
+            "operation-outcome.js": "text/javascript",
+            "run-steps.js": "text/javascript",
+            "quick-start.js": "text/javascript",
+            "browser-data.js": "text/javascript",
             "navigation.js": "text/javascript",
             "editor-entry.js": "text/javascript",
             "styles.css": "text/css",

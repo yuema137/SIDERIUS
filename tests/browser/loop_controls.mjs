@@ -39,7 +39,7 @@ try {
   showAllConsoleSections(browser);
   const page = await browser.newPage(), posts = [], faults = [];
   page.on('pageerror', error => faults.push(error.message));
-  let runningTerminal = false, pausingTerminal = false, resumedTerminal = false, resumed = null;
+  let stopRecorded = false, runningTerminal = false, pausingTerminal = false, resumedTerminal = false, resumed = null;
   const pausePosts = [], resumePosts = [];
   const status = (operation, fields) => ({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture',
     state: 'active', process: {status: 'alive', reason: 'observed'}, finishing: false, receipt_available: false, native_status: null,
@@ -65,7 +65,8 @@ try {
       return reply({operation_id: running, outcome: 'requested'});
     }
     assert.equal(request.method(), 'GET');
-    if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    if (url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
     // Monitor lists this console's operations once per connection, also on UUID routes.
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
@@ -79,7 +80,7 @@ try {
     if (url.pathname === `/api/operations/${pausing}`) return reply(!pausingTerminal ? status(pausing, {loop: {final_iteration: 3, attempted_iterations: null}})
       : {...terminal(pausing, 'paused', 1), ...(resumed ? {successor_operation_id: resumed} : {})});
     if (resumed && url.pathname === `/api/operations/${resumed}`) return reply({...(resumedTerminal ? terminal(resumed, 'completed', 3) : status(resumed, {loop: {final_iteration: 3, attempted_iterations: null}})), kind: 'candidate_loop_resume'});
-    if (url.pathname === `/api/operations/${running}`) return reply(runningTerminal ? terminal(running, 'stopped', 1) : status(running, {loop: {final_iteration: 3, attempted_iterations: null}}));
+    if (url.pathname === `/api/operations/${running}`) return reply(runningTerminal ? terminal(running, 'stopped', 1) : status(running, {loop: {final_iteration: 3, attempted_iterations: null, stop_requested: stopRecorded, pause_requested: false}}));
     if (url.pathname === `/api/operations/${fixed}`) return reply(status(fixed, {}));
     if (url.pathname === `/api/operations/${finished}`) return reply(terminal(finished, 'completed', 3));
     if (url.pathname === `/api/operations/${thresholdStop}`) {
@@ -121,6 +122,16 @@ try {
   assert.match(requested, /Not yet stopped\./);
   assert.ok(!/stopped at/i.test(requested), 'acknowledgement alone never reads as stopped');
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-stop-requested.png'), fullPage: true});
+  // M-1: the recorded Stop comes from server status, so a reload still shows it and
+  // offers neither Stop nor Pause again (no second control POST).
+  stopRecorded = true;
+  await page.reload();
+  await page.locator('#token').fill(metadata.token);
+  await page.locator('#access-form button').click();
+  await state.filter({hasText: 'Stop requested'}).waitFor();
+  assert.ok(await stop.isHidden(), 'reload keeps Stop hidden once recorded');
+  assert.ok(await page.locator('#loop-pause-group').isHidden(), 'Pause is hidden once a Stop is recorded');
+  assert.equal(posts.length + pausePosts.length, 1, 'no further control request after reload');
 
   runningTerminal = true;
   await state.filter({hasText: 'Research loop stopped at a completed body boundary after 1 of 3 bodies.'}).waitFor();
@@ -128,8 +139,8 @@ try {
   assert.equal(posts.length, 1);
 
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, fixed);
-  await page.locator('#monitor-status').filter({hasText: 'State: active'}).waitFor();
-  await page.locator('#operation-observed').filter({hasText: fixed}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Run in progress.'}).waitFor();
+  await page.locator(`#operation-observed[title*="${fixed}"]`).waitFor({state: 'attached'});
   assert.ok(await page.locator('#loop-control').isHidden(), 'a candidate without a declared loop has no loop control');
 
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, finished);
@@ -171,7 +182,7 @@ try {
   assert.deepEqual(Object.keys(resumePosts[0]).sort(), ['expected_receipt_digest', 'predecessor_operation_id', 'request_id']);
   assert.equal(resumePosts[0].predecessor_operation_id, pausing);
   assert.equal(resumePosts[0].expected_receipt_digest, digest);
-  const retainedId = await page.evaluate(id => JSON.parse(localStorage.getItem('siderius.loop-resume.v1:' + id)).request_id, pausing);
+  const retainedId = await page.evaluate(id => JSON.parse(localStorage.getItem(`siderius.loop-resume.v2/${window.consoleSession.operationsStoreId}/${id}`)).request_id, pausing);
   assert.equal(retainedId, resumePosts[0].request_id, 'the request UUID is retained before submission');
   assert.equal(await page.evaluate(() => location.hash), '#monitor/' + resumed);
 
@@ -189,7 +200,7 @@ try {
   await page.locator('#loop-continued').filter({hasText: 'Continued by ' + resumed}).waitFor();
   assert.equal(await page.locator('#loop-successor').getAttribute('href'), '#monitor/' + resumed);
   assert.ok(await resumeGroup.isHidden(), 'a continued segment offers no second Resume');
-  assert.equal(await page.evaluate(id => localStorage.getItem('siderius.loop-resume.v1:' + id), pausing), null, 'retained intent released once the successor is observed');
+  assert.equal(await page.evaluate(id => localStorage.getItem(`siderius.loop-resume.v2/${window.consoleSession.operationsStoreId}/${id}`), pausing), null, 'retained intent released once the successor is observed');
 
   // A declared stop condition completed the loop early: the receipt's reason reads in plain words.
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, thresholdStop);

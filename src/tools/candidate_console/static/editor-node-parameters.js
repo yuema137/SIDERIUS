@@ -36,8 +36,39 @@
    * training_settings.launch, saved the loaded source's. actions: {supply(name, value),
    * unset(name, rerender), invalid(name, raw), openSource()}; each records one draft edit.
    */
+  // Required run-policy choices (L-1b): plain labels from the server projection; unset is
+  // shown as a problem on the field, and the Run page's review refuses it.
+  function renderPolicy(parent, state, actions) {
+    const choices = state.training.policy || [];
+    if (!choices.length) return;
+    const group = node('fieldset', '', parent, 'training-policy'); group.id = 'editor-training-policy';
+    node('legend', 'Run policy (required)', group);
+    for (const control of choices) {
+      const row = node('div', '', group, 'training-choice'); row.dataset.trainingChoiceField = control.name;
+      const label = node('label', control.label, row);
+      const select = node('select', '', label); select.dataset.trainingChoice = control.name;
+      node('option', 'Choose…', select).value = '';
+      for (const option of control.options) node('option', option.label, select).value = option.value;
+      const current = state.launch()[control.name];
+      select.value = control.options.some(option => option.value === current) ? current : '';
+      const problem = node('small', '', row, 'field-error'); problem.id = `editor-training-choice-error-${control.name}`; problem.setAttribute('role', 'status');
+      const help = node('small', control.explanation, row, 'field-help'); help.id = `editor-training-choice-help-${control.name}`;
+      select.setAttribute('aria-describedby', `${problem.id} ${help.id}`);
+      const mark = () => {
+        const missing = control.required && !select.value;
+        row.dataset.problem = String(missing); select.setAttribute('aria-invalid', String(missing));
+        problem.textContent = missing ? 'Required: choose one. A run cannot start without it.' : '';
+      };
+      select.addEventListener('change', () => {
+        if (select.value) actions.supply(control.name, select.value); else actions.unset(control.name, false);
+        mark();
+      });
+      mark();
+    }
+  }
   function render(parent, state, actions) {
     const {training, saved, drafts} = state;
+    renderPolicy(parent, state, actions);
     const group = node('details', '', parent, 'training-settings'); group.open = trainingOpen;
     group.id = 'editor-training-settings';
     group.addEventListener('toggle', () => { trainingOpen = group.open; });

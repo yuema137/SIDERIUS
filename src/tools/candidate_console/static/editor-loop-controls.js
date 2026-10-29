@@ -123,7 +123,11 @@
     // A deleted feedback module leaves the loop pointing at nothing: say so, and offer only
     // Remove (Undo brings the module back). The problems list carries the same problem.
     const present = new Set(state.nodes.map(item => item.id)), edge = state.loop.feedback;
-    if (!present.has(edge.source.node) || !present.has(edge.target)) {
+    if (!present.size) {
+      // An emptied canvas counts one problem (add a module); the loop problem returns with
+      // the first module, so it is a note here, not a second problem (B8-5).
+      node('p', 'The research loop is kept and needs its modules again: add them back or Undo.', parent).id = 'editor-loop-waiting';
+    } else if (!present.has(edge.source.node) || !present.has(edge.target)) {
       const broken = node('p', 'The research loop feeds back between deleted modules. Undo the delete, or remove the research loop.', parent);
       broken.id = 'editor-loop-broken'; broken.className = 'field-problem-text';
     } else for (const section of sections) section(parent, state, actions);
