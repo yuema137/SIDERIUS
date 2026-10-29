@@ -64,7 +64,10 @@ def run_proposal(
 
         refuse_builtin_proposal_under_isolation(proposal, baseline_isolation=True)
     if any(item.source_type == "experiment" for item in proposal.inherited_components):
-        raise ValueError("fresh candidate worker cannot restore inherited experiment source")
+        # As in the native exploration loop, an experiment claim is optional reference
+        # context: the worker loads no earlier source, keeps the claim, and the
+        # validator reports it if the implementation does not carry it.
+        print("    Inherited experiment components: no reference source is loaded in this worker.")
     proposal_path = proposal_dir / f"proposal_{context.run_name}.json"
     capture_record(proposal_path, proposal)
     return proposal, proposal_path
