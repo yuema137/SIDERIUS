@@ -88,3 +88,63 @@ def test_cli_redacts_token_like_extra_keys(key, console_config, tmp_path, monkey
     assert err == "console.json is invalid at tasks[0].<key> (extra_forbidden)\n"
     assert key not in out + err
     assert "DUMMY_VALUE" not in out + err
+
+
+@pytest.mark.parametrize("error_type", [ValueError, OSError])
+def test_manifest_inspection_error_does_not_echo_input(
+    error_type, console_config, tmp_path, monkeypatch, capsys
+):
+    """Defect: nested manifest errors disclose arbitrary input in check stderr."""
+
+    def fail(_path):
+        raise error_type("DUMMY_NESTED_SECRET")
+
+    monkeypatch.setattr("tools.candidate_console.package_mounts.manifest_references", fail)
+    path = tmp_path / "console.json"
+    path.write_text(console_config.model_dump_json())
+    path.chmod(0o600)
+    code, out, err = _main(monkeypatch, capsys, "check", "--config", str(path))
+    assert code == 2
+    assert "DUMMY_NESTED_SECRET" not in out + err
+    assert "task synthetic: cannot inspect manifest references at task_manifest" in err
+
+
+def test_resolved_validation_names_settings_source(console_config, tmp_path, monkeypatch, capsys):
+    """Defect: validation after settings resolution blames only console.json."""
+    from tools.candidate_console.models import ConsoleConfig
+
+    path = init_workspace(str(tmp_path))
+    data = json.loads(path.read_text())
+    task = console_config.tasks[0].model_dump(mode="json")
+    del task["llm_config_file"]
+    data["tasks"] = [task]
+    path.write_text(json.dumps(data))
+    validate = ConsoleConfig.model_validate_json
+
+    def fail_resolved(payload):
+        resolved = json.loads(payload)
+        assert "/library/llm/default-" in resolved["tasks"][0]["llm_config_file"]
+        resolved["tasks"][0]["llm_config_file"] = {"secret": "DUMMY_SETTINGS_SECRET"}
+        return validate(json.dumps(resolved))
+
+    monkeypatch.setattr(ConsoleConfig, "model_validate_json", fail_resolved)
+    code, out, err = _main(monkeypatch, capsys, "check", "--config", str(path))
+    assert code == 2
+    assert "resolved console configuration (console.json, global settings, workspace layout)" in err
+    assert "tasks[0].llm_config_file (string_type)" in err
+    assert "DUMMY_SETTINGS_SECRET" not in out + err
+
+
+def test_missing_config_file_keeps_readiness(console_config, tmp_path, monkeypatch, capsys):
+    """Defect: a missing task file suppresses the missing workspace folder listing."""
+    path = init_workspace(str(tmp_path))
+    data = json.loads(path.read_text())
+    data.update(console_config.model_dump(mode="json"))
+    data["tasks"][0]["task_manifest"] = str(tmp_path / "missing.yaml")
+    path.write_text(json.dumps(data))
+    (path.parent.parent / "projects").rmdir()
+    code, _, err = _main(monkeypatch, capsys, "check", "--config", str(path))
+    assert code == 2
+    assert "task_manifest file" in err
+    assert "Workspace projects: missing" in err
+    assert "Create missing workspace folders with:" in err
