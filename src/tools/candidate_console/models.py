@@ -22,6 +22,7 @@ from tools.candidate_operations.native_chain_models import NativeChainObservatio
 from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.graph_models import GraphReason, GraphState, GraphTrace
+from tools.candidate_worker.loop_models import OperatorAdvice
 from tools.candidate_worker.loop_stop import LoopInputRequest, StopReason
 from tools.candidate_worker.parallel_models import ParallelDispatch
 from tools.workflow_authoring.models import Project
@@ -300,6 +301,9 @@ class LoopStatusView(PreviewModel):
     input_request: LoopInputRequest | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # The advice this segment's Resume admitted (status only); absent for a root segment
+    # or an advice-free Resume, so their status bytes are unchanged.
+    operator_advice: str | None = Field(default=None, exclude_if=lambda value: value is None)
     # Durable Stop/Pause requests recorded for this run (Stop) or segment (Pause), read
     # from the worker's own marker files; the receipt still decides what took effect.
     stop_requested: bool = False
@@ -355,11 +359,19 @@ class LoopResumeReview(PreviewModel):
 
 
 class LoopResumeSelection(PreviewModel):
-    """Client-retained request UUID plus the reviewed paused receipt digest."""
+    """Client-retained request UUID plus the reviewed paused receipt digest.
+
+    ``operator_advice`` is optional untrusted text for the resumed segment's proposals,
+    validated by the operations owner's ``OperatorAdvice`` (422 when invalid). A retry
+    must resend the same advice with the same UUID, else the owner reports a conflict.
+    """
 
     request_id: UUID
     predecessor_operation_id: UUID
     expected_receipt_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    operator_advice: OperatorAdvice | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class StatusView(PreviewModel):

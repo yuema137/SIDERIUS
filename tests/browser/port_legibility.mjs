@@ -12,6 +12,7 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {showAllConsoleSections} from './console_view_flags.mjs';
+import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[key], `Set ${key}`);
 await mkdir(process.env.CONSOLE_EVIDENCE_DIR, {recursive: false});
@@ -34,6 +35,7 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
+  chooseFirstConfiguredTask(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}}), faults = [];
   page.on('pageerror', error => faults.push(error.message));
   page.setDefaultTimeout(30000);
@@ -41,7 +43,9 @@ try {
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
   await waitUntil(async () => page.evaluate(() => document.querySelector('#editor-source').value.length > 0 && document.querySelector('#editor-task-choice').options.length === 3));
-  await page.locator('#editor-task-choice').selectOption('old');
+  // The Task version card lives on the Task tab; the canvas stays on the Workflow page.
+  const tab = async view => { await page.evaluate(name => { location.hash = name; }, view); await page.locator('#view-' + view).waitFor(); };
+  await tab('task'); await page.locator('#editor-task-choice').selectOption('old'); await tab('workflow');
   assert.equal(await page.locator('.editor-node').count(), 8);
   const original = await readFile(metadata.source, 'utf8');
   const output = name => page.locator(`#circuit-output-${name}`);

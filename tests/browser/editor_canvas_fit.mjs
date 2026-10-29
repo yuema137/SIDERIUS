@@ -57,9 +57,13 @@ try {
   page.on('request', request => { if (request.method() === 'POST') posts.push(new URL(request.url()).pathname); });
   await page.goto(metadata.origin + '/editor.html');
 
-  // Task panel before connecting: an explicit state, never an empty box.
-  await page.locator('#editor-task-state').waitFor();
+  // Task panel before connecting: an explicit state, never an empty box. The Task version
+  // card lives on the Task tab; the canvas stays on the Workflow page.
+  const tab = async view => { await page.evaluate(name => { location.hash = name; }, view); await page.locator('#view-' + view).waitFor(); };
+  await page.locator('#view-workflow').waitFor();
+  await tab('task'); await page.locator('#editor-task-state').waitFor();
   assert.match(await page.locator('#editor-task-state').textContent(), /Connect/);
+  await tab('workflow');
 
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
@@ -176,6 +180,7 @@ try {
 
   // 3. Task panel: explicit state text and either version controls or an explanation, light and dark.
   const theme = page.getByRole('combobox', {name: 'Color theme', exact: true});
+  await tab('task');
   for (const mode of ['light', 'dark']) {
     await theme.selectOption(mode);
     const panel = page.locator('#editor-task-controls');
@@ -195,6 +200,7 @@ try {
     await page.locator('.workflow-task-details').screenshot({path: join(evidence, `task-panel-${mode}.png`)});
   }
   await theme.selectOption('light');
+  await tab('workflow');
 
   // 4. Interpretation fixture: complete disjoint saved layout, every wire routed, all in view.
   const interpretationBytes = await readFile(metadata.interpretation_source, 'utf8');

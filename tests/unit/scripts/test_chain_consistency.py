@@ -580,6 +580,24 @@ class TestDryRunSmoke:
         assert rc == 0, stderr
         assert "--scientific_evidence_order literature_then_analysis" in stdout
 
+    def test_header_states_the_gpu_requirement_before_any_iteration(self, workspace, seed_path):
+        """Issue #1136: an operator on a CPU-only host learned a GPU was required
+        only from a LaunchGuardFailure after launch. The header (printed for real
+        and dry runs alike) must say so; a pseudo chain must not claim a check
+        it does not make. Fails if either line is dropped or swapped."""
+        rc, stdout, stderr = _run_dry("lilab", workspace, 1, seed_path)
+        assert rc == 0, stderr
+        header = stdout.split("[DRY-RUN] would exec", 1)[0]
+        assert (
+            "Compute device   : NVIDIA GPU with CUDA required (checked before any model call)"
+            in header
+        )
+
+        rc, stdout, stderr = _run_dry("lilab", workspace, 1, seed_path, "--is_pseudo_training")
+        assert rc == 0, stderr
+        assert "Compute device   : not checked (pseudo-mode" in stdout
+        assert "CUDA required (checked" not in stdout
+
     def test_scientific_evidence_order_refuses_unknown_value(self, workspace, seed_path):
         rc, _stdout, stderr = _run_dry(
             "lilab", workspace, 1, seed_path, "--scientific_evidence_order", "unknown"

@@ -923,6 +923,36 @@ def resolve_task_scope_capability(impl: TaskDataPath) -> TaskScopeCapability:
     return cast("TaskScopeCapability", impl)
 
 
+def build_full_declared_split(impl: TaskDataPath) -> tuple[object, object]:
+    """The task's full declared training and evaluation scopes, before run sampling.
+
+    Read-only description callers (the console Task panel) need the split the
+    task DECLARES, not one run's sampled workload: ``formal`` round,
+    ``snapshot`` strategy, portion 1.0, no seed, no subset and no task
+    parameters. A task declaring a frozen training pool returns its parent pool
+    through :func:`~execute_tools.training_pool.select_training_scope`, exactly
+    as a formal round does. Run code does not call this; run scopes keep their
+    own acquisition path.
+
+    Raises:
+        TaskScopeCapabilityError: The task builds no scopes of its own.
+    """
+    from execute_tools.training_pool import (
+        resolve_frozen_training_pool_capability,
+        select_training_scope,
+    )
+
+    capability = resolve_task_scope_capability(impl)
+    request = ScopeBuildRequest(round_kind="formal", selection_strategy="snapshot", portion=1.0)
+    pool = resolve_frozen_training_pool_capability(impl)
+    training = (
+        capability.build_training_scope(request)
+        if pool is None
+        else select_training_scope(pool, request, serialize_scope=capability.serialize_scope)
+    )
+    return training, capability.build_eval_scope(request)
+
+
 # ---------------------------------------------------------------------------
 # Registry — fail-closed at every edge
 # ---------------------------------------------------------------------------

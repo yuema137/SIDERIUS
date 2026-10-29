@@ -36,9 +36,15 @@ _UNREADABLE = (OSError, ValueError, ValidationError)
 
 
 def _labels(config: OperationStoreConfig, record: OperationRecord) -> tuple[str | None, str | None]:
-    """Run name and editor project id; generated names and ids only, never paths."""
+    """Run name and setup (editor project) id; generated names and ids only, never paths.
+
+    The id is the recorded ``setup_id`` of a reusable preparation or candidate (a loop
+    resume uses its root candidate's), else a reviewed edited run's ``project_id``.
+    """
     submission = record.submission
-    if isinstance(submission, (PrepareOperation, ReusablePrepareOperation)):
+    if isinstance(submission, ReusablePrepareOperation):
+        return submission.request.run_name, submission.request.setup_id
+    if isinstance(submission, PrepareOperation):
         return submission.request.run_name, None
     if isinstance(submission, NativeChainOperation):
         admission = record.native_chain_admission
@@ -52,11 +58,14 @@ def _labels(config: OperationStoreConfig, record: OperationRecord) -> tuple[str 
         root = loop_root_operation(config, submission.request_id)
         if root is None:
             return None, None
-        request = root.request
+        candidate = root
     else:
-        request = submission.request
+        candidate = submission
+    request = candidate.request
     source = request.workflow_source
     context = source.reviewed_context if source else None
+    if candidate.setup_id is not None:
+        return request.run_name, candidate.setup_id
     return request.run_name, (context.project_id if context else None)
 
 
@@ -64,8 +73,15 @@ def _admitted(record: OperationRecord) -> datetime:
     return datetime.fromisoformat(record.admitted_at)
 
 
-def list_operations(config: OperationStoreConfig, limit: int = 50) -> OperationListing:
-    """Most recently admitted operations first, at most ``limit`` (1..MAX_LISTED)."""
+def list_operations(
+    config: OperationStoreConfig, limit: int = 50, project_id: str | None = None
+) -> OperationListing:
+    """Most recently admitted operations first, at most ``limit`` (1..MAX_LISTED).
+
+    ``project_id`` keeps only records attributed to that setup; it is applied to
+    every verified record before ``limit``, so older matching runs are not lost to
+    newer unrelated ones. ``incomplete`` still reports a store beyond ``SCAN_LIMIT``.
+    """
     if not 0 < limit <= MAX_LISTED:
         raise OperationFailure("limit", f"limit must be between 1 and {MAX_LISTED}")
     config = validate_config(config)
@@ -95,10 +111,21 @@ def list_operations(config: OperationStoreConfig, limit: int = 50) -> OperationL
             continue
         records.append(record)
     records.sort(key=lambda r: (_admitted(r), str(r.submission.request_id)), reverse=True)
-    entries: list[OperationListEntry] = []
-    for record in records[:limit]:
+    labelled: list[tuple[OperationRecord, str | None, str | None]] = []
+    # Unfiltered: the newest ``limit`` records, as before. Filtered: newest matches.
+    for record in records if project_id is not None else records[:limit]:
+        if len(labelled) == limit:
+            break
         try:
-            run_name, project_id = _labels(config, record)
+            run_name, recorded = _labels(config, record)
+        except _UNREADABLE:
+            unreadable += 1
+            continue
+        if project_id is None or recorded == project_id:
+            labelled.append((record, run_name, recorded))
+    entries: list[OperationListEntry] = []
+    for record, run_name, recorded in labelled:
+        try:
             snapshot = read_operation(config, record.submission.request_id)
         except _UNREADABLE:
             unreadable += 1
@@ -107,7 +134,7 @@ def list_operations(config: OperationStoreConfig, limit: int = 50) -> OperationL
             OperationListEntry(
                 admitted_at=record.admitted_at,
                 run_name=run_name,
-                project_id=project_id,
+                project_id=recorded,
                 snapshot=snapshot,
             )
         )

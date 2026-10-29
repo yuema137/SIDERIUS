@@ -458,3 +458,16 @@ header.console-header { position: relative; min-height: var(--bar-height); }
 .quick-start h2 { margin-top: 0; }
 /* L-2: one cause line for a failed run, taken from its log. */
 .monitor-cause { padding: var(--space-2) var(--space-3); border-left: 3px solid var(--error); overflow-wrap: anywhere; }
+/* "New setup…" dialog (experiment-setups.js); same frame as Quick start. */
+.setup-new { width: min(560px, calc(100vw - 32px)); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); color: var(--text); }
+.setup-new::backdrop { background: rgb(0 0 0 / 45%); }
+.setup-new h2 { margin-top: 0; }
+.setup-new-shapes { display: grid; gap: var(--space-2); margin: 0 0 var(--space-4); padding: 0; border: 0; }
+.setup-new-shapes legend { font-weight: 600; margin-bottom: var(--space-2); }
+.setup-new-shape { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-2) var(--space-3); border: 1px solid var(--control-border); border-radius: var(--radius-2); cursor: pointer; }
+.setup-new-shape:has(input:checked) { border-color: var(--primary); box-shadow: inset 3px 0 0 var(--primary); }
+.setup-new-shape input { width: auto; margin-top: 3px; }
+.setup-new-shape span { display: grid; gap: 2px; font-size: var(--font-body); }
+.setup-new-shape span span { color: var(--muted); font-size: var(--font-help); }
+#setup-new-label { width: 100%; }
+.run-setup-header { margin: 0 0 var(--space-4); max-width: none; font-weight: 600; }

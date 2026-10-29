@@ -80,6 +80,12 @@ class GlobalSettingsPolicy(PreviewModel):
     browser_writable: bool = False
 
 
+class ExperimentSetupsPolicy(PreviewModel):
+    """console.json ``experiment_setups``: may the browser create setups (``setups.py``)?"""
+
+    browser_creatable: bool = False
+
+
 class AllowlistRef(PreviewModel):
     source: Literal["allowlist"] = "allowlist"
     id: Id
@@ -126,8 +132,15 @@ ConsoleFile = _relaxed(
     advice_files=(tuple[AdviceFileChoice, ...], ()),
     data_roots=(tuple[DataRootChoice, ...], ()),
     global_settings=(GlobalSettingsPolicy | None, None),
+    experiment_setups=(ExperimentSetupsPolicy | None, None),
 )
-ALLOWLIST_FIELDS = ("llm_profiles", "advice_files", "data_roots", "global_settings")
+ALLOWLIST_FIELDS = (
+    "llm_profiles",
+    "advice_files",
+    "data_roots",
+    "global_settings",
+    "experiment_setups",
+)
 
 
 @dataclass(frozen=True)
@@ -153,6 +166,7 @@ class SettingsContext:
     settings_sha256: str | None = None
     from_settings: frozenset[tuple[str, str]] = frozenset()  # (task_id, field)
     console_path: Path | None = None  # the console.json this snapshot was loaded from
+    setups_policy: ExperimentSetupsPolicy | None = None  # console.json ``experiment_setups``
 
     def origin(self, task_id: str | None, field: str) -> Origin:
         if task_id is not None and (task_id, field) in self.from_settings:

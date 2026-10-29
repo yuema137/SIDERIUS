@@ -287,7 +287,8 @@ def protected_paths(config: ConsoleConfig, workspace: Path | None = None) -> tup
         if task.reusable_runs_root is not None:
             paths.append(Path(task.reusable_runs_root))
     if workspace is not None:
-        paths += [workspace / "settings", workspace / "library"]
+        # Authored experiment setup folders are never read-only run inputs.
+        paths += [workspace / "settings", workspace / "library", workspace / "projects"]
     return tuple(dict.fromkeys(paths))
 
 

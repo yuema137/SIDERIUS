@@ -12,6 +12,7 @@ from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.output_types import OutputTypeName
 from agent.schemas.task_config import ForwardContract
+from execute_tools.health_checks.roster_projection import HealthRosterProjection
 from tools.setup_review.models import SetupDeclarationReport, SetupReviewRequest
 from tools.setup_review.task_settings_models import TaskSettingsInputs, TaskSettingsSummary
 from tools.workspace_sandbox.profile import SandboxProfile
@@ -30,6 +31,7 @@ FailureStage = Literal[
     "sandbox",
     "stale_manifest",
     "candidate_check",
+    "package_facts",
 ]
 
 
@@ -63,6 +65,13 @@ class CandidateCheckFacts(CheckModel):
     )
 
 
+class TaskSummaryRequest(CheckModel):
+    """Read-only Task-panel facts; ``data_root`` is mounted read-only for scope facts."""
+
+    data_root: str
+    count_samples: bool = Field(default=False, exclude_if=lambda value: not value)
+
+
 class TaskCheckRequest(CheckModel):
     setup: SetupReviewRequest
     scratch: Path
@@ -86,6 +95,7 @@ class CompositionJob(CheckModel):
     candidate_check: CandidateCheckOptions | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    summary: TaskSummaryRequest | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @property
     def digest(self) -> str:
@@ -117,6 +127,54 @@ class TaskCompositionSummary(CheckModel):
     task_health_declaration: str
 
 
+class ScopeVolume(CheckModel):
+    file_count: int = Field(ge=0)
+    expected_on_disk_bytes: int = Field(ge=0)
+
+
+class DataScopeFacts(CheckModel):
+    """Task-owned storage volume of the default formal scopes, never a guessed zero.
+
+    ``not_declared`` means the task implements no scope capability or no
+    ``storage_read_scope``; volumes are then absent, not 0.
+    """
+
+    state: Literal["declared", "not_declared", "failed"]
+    basis: str
+    training: ScopeVolume | None = None
+    evaluation: ScopeVolume | None = None
+    message: str | None = Field(default=None, max_length=FAILURE_MESSAGE_MAX_CHARS)
+
+
+class SampleCountFacts(CheckModel):
+    state: Literal["counted", "not_countable", "failed"]
+    training: int | None = Field(default=None, ge=0)
+    evaluation: int | None = Field(default=None, ge=0)
+    message: str | None = Field(default=None, max_length=FAILURE_MESSAGE_MAX_CHARS)
+
+
+class ModelPluginFact(CheckModel):
+    model_type: str
+    path: str
+    content_sha256: Digest
+
+
+class TaskPackageFacts(CheckModel):
+    """Owner projections for the read-only Task panel; ``None`` means not declared."""
+
+    health: HealthRosterProjection
+    objective: dict[str, JsonValue] | None
+    deliverable: dict[str, JsonValue] | None
+    model_plugins: tuple[ModelPluginFact, ...]
+    #: Role -> source file of the resolved implementation object, matched to
+    #: provenance plugins by exact path (never by name).
+    implementation_sources: dict[str, str]
+    scopes: DataScopeFacts
+    sample_counts: SampleCountFacts | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
 class CheckFailure(CheckModel):
     stage: FailureStage
     exception_type: str
@@ -136,6 +194,7 @@ class CompositionResult(CheckModel):
     candidate_check: CandidateCheckFacts | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    package: TaskPackageFacts | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @classmethod
     def failed(

@@ -239,3 +239,88 @@ def test_interpretation_binding_refusal_precedes_provider(
         "iteration": "iteration disagrees",
         "constraints": "objective disagrees",
     }[defect] in receipt.error
+
+
+def test_resume_advice_composes_after_declared_advice_and_is_absent_without_it():
+    """Fails if a resume without operator advice changes the proposer's ``human_advice``
+    (or the binding/request bytes that carry advice), or if operator advice replaces the
+    declared advice instead of following it under its "after body N" header."""
+    from uuid import UUID
+
+    from agent.schemas.hyperparam_tuning import ExpertAdvice
+    from tools.candidate_operations.models import CandidateLoopResumeRequest
+    from tools.candidate_worker.interpretation import compose_proposal_advice
+    from tools.candidate_worker.loop_models import LoopContinuation, ResumeAdvice
+
+    structured = ExpertAdvice(focus_areas=["depth first"], freeform_notes="keep logits")
+    for declared in (None, "Keep both logits.", structured):
+        assert compose_proposal_advice(declared, None) is declared
+    advice = ResumeAdvice(after_body=2, text="Try a smaller hidden width.")
+    assert compose_proposal_advice(None, advice) == (
+        "Operator advice after body 2:\nTry a smaller hidden width."
+    )
+    assert compose_proposal_advice("Keep both logits.", advice) == (
+        "Keep both logits.\n\nOperator advice after body 2:\nTry a smaller hidden width."
+    )
+    assert compose_proposal_advice(structured, advice) == (
+        "Focus areas: depth first\nNotes: keep logits\n\n"
+        "Operator advice after body 2:\nTry a smaller hidden width."
+    )
+    identity = {"run_id": "a" * 32, "declaration_digest": "d" * 64}
+    binding = LoopContinuation(
+        **identity,
+        operation_id=UUID(int=1),
+        predecessor_segment=None,
+        predecessor_receipt_digest="c" * 64,
+        completed_iterations=2,
+    )
+    assert "operator_advice" not in binding.model_dump_json()
+    assert binding.resume_advice() is None
+    advised = binding.model_copy(update={"operator_advice": advice.text})
+    assert advised.resume_advice() == advice
+    request = CandidateLoopResumeRequest(
+        predecessor_operation_id=UUID(int=1), expected_receipt_digest="c" * 64
+    )
+    assert request.model_dump_json() == (
+        '{"predecessor_operation_id":"00000000-0000-0000-0000-000000000001",'
+        '"expected_receipt_digest":"' + "c" * 64 + '"}'
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "accepted"),
+    [
+        ("  Try a smaller width.\n", "Try a smaller width."),
+        ("line one\n\tline two", "line one\n\tline two"),
+        ("", None),
+        ("   \n", None),
+        ("x" * 4001, None),
+        ("nul\x00byte", None),
+        ("carriage\rreturn", None),
+        ("escape\x1b[31m", None),
+        ("c1 csi\x9b2J", None),
+        ("bidi \u202eoverride", None),
+        ("bom\ufeffinside", None),
+    ],
+)
+def test_operator_advice_is_trimmed_bounded_and_free_of_control_characters(raw, accepted):
+    """Fails if advice text with terminal/control characters, no content, or more than
+    4000 characters reaches a binding, or if trimming makes retries differ."""
+    from uuid import UUID
+
+    from pydantic import ValidationError
+
+    from tools.candidate_operations.models import CandidateLoopResumeRequest
+
+    def build():
+        return CandidateLoopResumeRequest(
+            predecessor_operation_id=UUID(int=1),
+            expected_receipt_digest="c" * 64,
+            operator_advice=raw,
+        )
+
+    if accepted is None:
+        with pytest.raises(ValidationError):
+            build()
+    else:
+        assert build().operator_advice == accepted

@@ -11,7 +11,11 @@ button[data-icon] { justify-content: center; }
 /* Connection (L6): a full-width banner under the header items until connected, then one chip. */
 .access-section { order: 99; flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); }
 .access-section #access-heading { margin: 0; font-size: var(--font-heading); white-space: nowrap; }
-.access-section .access-help { margin: 0; font-size: var(--font-label); }
+.access-section .access-help { flex: 1 0 100%; order: 1; min-width: 0; margin: 0; font-size: var(--font-help); text-align: left; overflow-wrap: anywhere; }
+.access-section .access-help ul { margin: var(--space-2) 0; padding-left: var(--space-5); }
+.access-section .access-help li + li { margin-top: var(--space-2); }
+.access-section .access-help p { margin: var(--space-2) 0 0; }
+#access-section.access-collapsed .access-help { display: none; }
 .access-section #access-form { flex: 1 1 420px; margin: 0; align-items: center; }
 .access-section #access-form label { margin: 0; font-size: var(--font-label); }
 .access-section #access-status { flex: 1 1 220px; margin: 0; font-size: var(--font-help); }
@@ -140,3 +144,7 @@ button[data-icon] { justify-content: center; }
 #editor-version-problem { flex: 1 0 100%; margin: 0; font-size: var(--font-help); }
 #editor-check-again { min-height: 28px; }
 #editor-conflict pre { max-height: 18rem; overflow: auto; }
+/* Task reference review (editor-task-controls.js renderReview) beside the diff and Save. */
+.save-confirm .editor-task-review { flex: 1 0 100%; padding-top: var(--space-2); border-top: 1px solid var(--border); font-size: var(--font-help); }
+.save-confirm .editor-task-review h3 { margin: 0 0 var(--space-2); }
+.save-confirm .editor-task-review p, .save-confirm .editor-task-review ol { margin: 0 0 var(--space-2); }

@@ -238,8 +238,11 @@ try {
   const reviewedBeforeDisconnect = await editorSnapshot();
   // Optional task metadata failure must not discard an ordinary unbound review.
   await page.route('**/api/editor/task-choices', route => route.fulfill({status: 503, json: {error: {message: 'Fixture catalog unavailable'}}}));
+  // The Task version card lives on the Task tab; the editor keeps its review meanwhile.
+  await page.evaluate(() => { location.hash = 'task'; }); await page.locator('#view-task').waitFor();
   await page.locator('#editor-task-refresh').click();
   await page.locator('#editor-task-message').filter({hasText: 'Task choices unavailable'}).waitFor();
+  await page.evaluate(() => { location.hash = 'workflow'; }); await page.locator('#view-workflow').waitFor();
   assert.deepEqual(await editorSnapshot(), reviewedBeforeDisconnect, 'Metadata failure preserves legacy reviewed source, diff and Save readiness');
   await page.unroute('**/api/editor/task-choices');
   await page.route('**/api/choices', route => route.fulfill({status: 401, json: {error: {message: 'Expired fixture'}}}));

@@ -26,6 +26,7 @@ from .models import CandidateRunRequest
 from .record_json import artifact_json
 
 if TYPE_CHECKING:
+    from .loop_models import ResumeAdvice
     from .training_admission import TrainingAdmission
 
 
@@ -39,7 +40,9 @@ def materialize_fanout(
     interpretation_output: InterpretationOutput | None = None,
     admitted: "TrainingAdmission | None" = None,
     history: ChainState | None = None,
+    operator_advice: "ResumeAdvice | None" = None,
 ) -> dict[str, NativeInputs | LiteratureReviewInput | InterpretationInput]:
+    """``operator_advice`` is this body's segment Resume advice (proposal only)."""
     definition = request.preview.document.definition
     shape = execution_families(definition, request.preview.execution_profile)
     nodes = {node.id: node for node in definition.nodes}
@@ -95,6 +98,7 @@ def materialize_fanout(
             config=config,
             history=history,
             feedback=selected.recent_formal_validity,
+            operator_advice=operator_advice,
         )
         # Composition owns these task facts, as in the fixed native workflow.
         proposal.task_description = composition.task_description

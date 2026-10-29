@@ -21,6 +21,18 @@ console configuration; it does not create a project or edit those task settings.
 Save an explicit [LLM profile](../../../configs/llm/README.md) for the console,
 even when using the default models.
 
+## Start from the example bundle
+
+To see the whole console path once before you package your own task, start from
+the quickstart example bundle. It holds a small synthetic task package and a
+ready experiment setup. Its [README](../../../examples/console_bundle/README.md)
+lists six commands: unpack, `init`, write the data, import with
+`add-task --from-bundle`, `serve`, and open the console. The import checks every
+file against the bundle's `SHA256SUMS`, copies the package to
+`siderius_workspace/tasks/quickstart/`, registers it as step 2 below does, and
+creates the setup `quickstart-research-loop` from a workflow template. It never
+overwrites an existing `tasks/` folder.
+
 ## Set up and open the console
 
 1. Create the console workspace inside a directory you own, for example your
@@ -40,17 +52,25 @@ even when using the default models.
    | `operations/`, `preparations/`, `candidates/`, `runs/` | console state and run outputs |
    | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile as `library/llm/default-<12 hex characters>.json` |
    | `projects/` | a conventional place for workflow editor projects |
+   | `tasks/` | one folder per task package, `tasks/<name>/`: its manifest, plugins and declarations |
 
-   On success it prints two lines, the configuration file and the browser
-   address with the token file:
+   On success it prints the configuration file, browser address, token file
+   and connection instructions:
 
    ```text
    Workspace configuration: /absolute/project/siderius_workspace/settings/console.json
-   Console: http://127.0.0.1:8740; access token file: /absolute/project/siderius_workspace/settings/console-token
+   Console address: http://127.0.0.1:8740
+   Access token file: /absolute/project/siderius_workspace/settings/console-token
+     The console asks for this token when you connect, on this machine or remotely.
+     Show it with: cat /absolute/project/siderius_workspace/settings/console-token
+     On this machine: open the console address in your browser.
+     On a remote server: first run on your own computer
+       ssh -N -L 127.0.0.1:8740:127.0.0.1:8740 YOUR_HOST
+     then open the console address there.
    ```
 
-   The token unlocks the console;
-   it is separate from any model provider API key. Follow [Credentials](#credentials)
+   The token locks the console against other users and programs on the machine;
+   it is not a model provider API key. Follow [Credentials](#credentials)
    below to bind provider keys before Launch.
 
    `init` is safe to run again. It only creates what is missing; it never
@@ -60,8 +80,54 @@ even when using the default models.
    `settings/console.json` or library file that is a symlink or has unexpected
    content. Each refusal names the folder or file, exits with status 2 and
    changes nothing that already exists.
-2. Add your task to `siderius_workspace/settings/console.json`. A task needs its
-   `task_id`, `label`, `task_manifest`, resource policy and time limits; the
+2. Register your task. A task package is a folder holding the task composition
+   manifest together with the plugins and declarations it names. Copy it to
+   `siderius_workspace/tasks/<name>/` (for example `tasks/my-task/task.yaml` and
+   `tasks/my-task/plugins/`), put the task data in `siderius_workspace/data/<task_id>/`
+   (the folder name, unless you pass `--task-id`), then run:
+
+   ```bash
+   .venv/bin/python -m tools.candidate_console add-task \
+     --config /absolute/project/siderius_workspace/settings/console.json \
+     --manifest /absolute/project/siderius_workspace/tasks/my-task/task.yaml
+   ```
+
+   `add-task` adds one entry to `tasks` in `console.json` and changes nothing
+   else there. The entry contains:
+
+   | Field | Value written |
+   | --- | --- |
+   | `task_id`, `label` | the folder name (`my-task`); change them with `--task-id` and `--label` |
+   | `task_read_only` | the package folder, so the run sandbox can read the plugins and declarations beside the manifest |
+   | `preparation_timeout_seconds`, `candidate_timeout_seconds` | starting values 300 and 3600 seconds; change them with `--prepare-timeout` and `--candidate-timeout` |
+   | `candidate_network` | `true`; use `--no-network` to run candidates offline |
+   | `candidate_devices` | the devices you pass with `--device`, for example `--device /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm`. Without `--device` in a terminal, it lists the machine's `/dev/nvidia*` devices and asks whether to pass them; in a script it passes none and says so |
+   | `candidate_environment_names` | the API key names your selected model profile needs (for example `OPENAI_API_KEY`), plus names you add with `--env` |
+
+   Read the printed entry and edit `console.json` if a starting value does not
+   fit your task. Add `--dry-run` to print the entry without writing anything. A
+   manifest outside `tasks/` is refused unless you add `--external`; then the
+   folders holding the files the manifest names are listed in `task_read_only`
+   instead; a folder that is `/`, your home folder or one holding the console's
+   settings, token or credentials is refused, so move such files into
+   `tasks/<name>/`. A task ID that already exists is refused. If someone else changes
+   `console.json` while `add-task` runs, it writes nothing and asks you to run it
+   again.
+
+   After writing, `add-task` creates the task's output folders and runs the same
+   check as step 3. It ends with `Restart the console to load the new task.`: a
+   running console reads `console.json` only when it starts.
+
+   **GPU runs.** Passing `/dev/nvidia*` devices alone may not be enough: CUDA can
+   also need `/sys` mounted read-only inside the run sandbox, which `add-task` does
+   not add. `check` then prints `GPU devices are passed but /sys is not mounted
+   read-only; CUDA may fail to start inside the run sandbox (see README).` If your
+   runs fail to find CUDA, adding `"/sys"` to the task's `task_read_only` is the
+   setting that warning refers to; decide whether exposing `/sys` is acceptable on
+   your machine.
+
+   You can also write the task entry yourself. A task needs its `task_id`,
+   `label`, `task_manifest`, resource policy and time limits; the
    [configuration example](console-contract.md#configuration) shows every field.
    You can leave out:
 
@@ -110,32 +176,50 @@ even when using the default models.
    .venv/bin/python -m tools.candidate_console serve --config /absolute/project/siderius_workspace/settings/console.json
    ```
 
-   A successful check prints the browser address and token file location. It
-   checks configuration paths, file shape and permissions, without proving task
+   A successful check and `serve` print the same access instructions as step 1,
+   starting with `Console address:` and `Access token file:`. The check
+   validates configuration paths, file shape and permissions, without proving task
    composition, required key presence, sandbox availability or provider access.
    When a required field has no value, the check names it, for example
-   `task my-task needs llm_config_file`. When a workspace folder is missing or
+   `task my-task needs llm_config_file`. When the manifest names a file the run
+   sandbox cannot read (outside the manifest, the data folder, `task_read_only`,
+   this checkout and the system folders such as `/usr`), the check names that file; add its package folder to
+   `task_read_only`. When a workspace folder is missing or
    unusable, it lists the folder (for example `data/my-task: missing`) and, if
    `init` can create it, prints the `init` command to run.
    Only `127.0.0.1` binding is supported.
-4. For a remote host, keep the server session running and open an SSH tunnel:
+4. On your own computer, open the printed console address directly in your browser.
+   On a remote server, keep the server session running there and run this SSH
+   tunnel command on your own computer first:
 
    ```bash
    ssh -N -L 127.0.0.1:8740:127.0.0.1:8740 YOUR_HOST
    ```
 
-   Open `http://127.0.0.1:8740`. If the local forwarding port differs, configure
-   `browser_origin` to that exact local address before starting the server.
-5. Open **Home**, paste the console token, and select **Connect**. The connection
-   stays available while you switch between Home, Workflow Editor, Run and Monitor,
+   Then open `http://127.0.0.1:8740` on your own computer. The first port is the
+   one your browser uses (`browser_origin`); the last is the server's `port` on the
+   remote machine. If you forward a different local port, set `browser_origin` to that
+   exact local address before starting the server; `check` and `serve` print the
+   matching tunnel command.
+5. On the machine running the console, view the token with:
+
+   ```bash
+   cat /absolute/project/siderius_workspace/settings/console-token
+   ```
+
+   Open **Home**, paste the console token, and select **Connect**. The token is
+   required whether you connect on the same machine or through an SSH tunnel.
+   The connection stays available while you switch between Home, Task, Workflow, Run and Monitor,
    and the connect card shrinks to a **Connected** line with **Change token** and
    **Disconnect console**. Reloading or opening a new tab requires Connect again;
    the password field clears immediately and the token stays only in this
    document's memory. Home offers three starting points: **Quick start** (choose a
-   task; its ready-made research loop opens in Workflow as an unsaved draft where you
-   set rounds, stop conditions and training settings; the first round starts cold,
-   so you need no earlier results), **Open a workflow** and **Monitor runs**.
-   On **Run**, a stepper shows where you are: check the inputs and
+   task, then create an experiment setup from the ready-made research loop or open an
+   existing one; it opens in Workflow, where you set rounds, stop conditions and
+   training settings; the first round starts cold, so no earlier results are needed),
+   **Open a workflow** and
+   **Monitor runs**. Before Workflow and Run open, choose a task on **Task**
+   (see [Choose a task](#choose-a-task)). On **Run**, a stepper shows where you are: check the inputs and
    prepare, then review and launch; the page updates the status by itself.
    **Help** in the header reopens the tour at any time.
    Tools a first-time user does not need stay hidden until you turn them on in
@@ -153,7 +237,7 @@ even when using the default models.
    workspace, task, models, credential blockers and resource policy before
    **Launch candidate**, which starts code execution and may call paid APIs.
    Native Prepare generates its configured candidate independently of the declaration
-   selected in Workflow Editor. Preparation never launches automatically.
+   selected in Workflow. Preparation never launches automatically.
 7. To observe an existing operation, choose **Monitor** and select it under
    **Recent operations** (operations this console admitted, newest first), or
    enter its complete operation UUID (Settings › Show advanced tools). You can also open a link such as
@@ -167,13 +251,18 @@ even when using the default models.
    A running authored research loop shows **Stop at next boundary**: the current
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
-   resumed as a new segment of the same run, which shows its own results.
+   resumed, optionally with your advice, as a new segment of the same run, which
+   shows its own results.
    A loop ended early by a declared stop condition says why, in plain words.
    A condition set to **Pause and ask me** pauses the loop instead and reads
    "Waiting for your input", followed by what was met, for example "No improvement
    for 3 bodies (best 0.81 at body 4, higher is better). Paused after body 7 of 12."
    Check the per-iteration results, then choose **Review resume** and **Resume loop**
-   to continue with the next body. If you pressed Stop while it was waiting, the run
+   to continue with the next body. After **Review resume** you can type advice for
+   the next bodies (up to 4000 characters). Their proposal step receives it, and it
+   replaces any advice an earlier resume gave. The box starts with this segment's
+   advice. It locks once you select **Resume loop**, so a retry sends the same text.
+   The resumed segment then shows "Resumed with your advice: …". If you pressed Stop while it was waiting, the run
    cannot continue and no Resume is offered.
    A loop with a judge stop condition lists each judge decision under it, with
    the judge's own reason when the call decided.
@@ -193,7 +282,7 @@ even when using the default models.
    under `operation_store.candidate_roots`, with the expected native run ID.
    The view has no operation import or execution controls, and a missing saved
    source is shown as unavailable.
-8. To author a configured declaration, choose **Workflow Editor**. Select a node
+8. To author a configured declaration, choose **Workflow**. Select a node
    to inspect its supported bindings. With **Show advanced tools** on, expand
    **References** for task and external locations, or **Advanced source** for
    exact Python bytes. Review opens the
@@ -293,7 +382,7 @@ On **Settings**, **Export a workflow** copies three plain files into
 | --- | --- | --- |
 | `llm.json` | the model profile the selected task uses | the command-line `--llm_config` |
 | `advice.json` | the advice written in the workflow itself (proposal, implementation, validation and tuning advice), in the command-line advice format | the command-line `--advice` |
-| `workflow.py` | the workflow exactly as last saved in Workflow Editor | no command-line flag; keep it as a record or copy it into an editor project |
+| `workflow.py` | the workflow exactly as last saved in Workflow | no command-line flag; keep it as a record or copy it into an editor project |
 
 A workflow without advice of its own gets no `advice.json`. Credentials, the
 console token and the credential file path are never exported. The export uses
@@ -370,16 +459,91 @@ In a reusable workflow there is no path to type: the run supplies the input when
 is prepared (reusable preparation accepts only such managed inputs). Then click
 **Create and connect**. Undo, Redo and Revert to saved cover all of these edits.
 
+## Choose a task
+
+A task is your scientific problem as a package: its data, the model's input and
+output, the training objective, the main score, its Health checks and the settings
+it locks. Every workflow and run belongs to one task, so the console asks for the
+task first. The Task tab only shows the package; you change the package with your
+coding agent, then press **Refresh**.
+
+1. Connect, then open **Task** in the navigation bar (or the first step of the
+   Task › Workflow › Run › Results bar).
+2. The left list shows every task in your console configuration with its version
+   (`task_revision`) or **unversioned**. With exactly one task, the console selects
+   it for you. Otherwise select one. The browser remembers your choice for this
+   console.
+   - **No task is configured** means `siderius_workspace/settings/console.json`
+     lists no task. Add your task there as described in step 2 of
+     [Set up and open the console](#set-up-and-open-the-console), then restart the
+     console.
+   - **Tasks could not be loaded** shows the reason; select **Retry**.
+3. The right panel reads the package in the workspace sandbox. While it reads,
+   it says **Reading the task package in the sandbox…**; the page updates itself.
+   When it is ready, the panel shows these sections:
+
+   | Section | What it tells you |
+   | --- | --- |
+   | Identity | Label, task id and version. **Fingerprint** (collapsed) holds the package's exact identity. A warning appears when the configured version no longer matches the package on disk. |
+   | Data | The data folder, how many files it holds and their total size. The training and evaluation split sizes appear when the task declares them, otherwise "not declared by this task". **Count samples** asks the task to count its samples in the sandbox; this can take a while. |
+   | Model input and output | The tensor shapes and meanings a model must accept and produce. |
+   | Objective | The training loss the task fixes, or that the planner chooses it. |
+   | Main score | The metric that ranks candidates, whether higher or lower is better, and how it is aggregated. Metrics marked **Recording** are only measured and stored. |
+   | Health checks | Each gate, its checks and its effect: **Blocking** makes a failing candidate invalid; **Recording** only records the result. |
+   | Evaluation and model plugins | The task's code files, their symbols and what each one does. |
+   | Locked parameters | Settings no workflow can change, for example a fixed batch size. |
+   | Deliverable | How the task names its output files, when it declares this. |
+   | Run policy | Time limits, network access, the devices passed into the run sandbox (with a warning when no GPU is passed), and the names of the credentials a run receives. Credential values never appear. |
+
+   If the panel says the package **could not be read**, it names the stage and the
+   error: fix the package with your coding agent and press **Refresh**. If it says
+   the summary is **not available** (for example, the sandbox or the data folder is
+   missing), follow the hint shown and press **Refresh**.
+4. Open **Workflow**. Until a task is selected, Workflow and Run are greyed out
+   ("Choose a task first") and their pages show a **Choose a task** button.
+
+## Create an experiment setup and run it
+
+An experiment setup is one workflow for one task. A task can have several setups (for
+example a research loop and a single step); every run belongs to one setup.
+
+1. Choose the task on **Task**, then open **Workflow**. The select in the page bar lists
+   this task's setups. Older workflows from `console.json` that match no configured task
+   appear under **Other workflows (no configured task)**.
+2. Select **New setup…**. Choose how it starts: a template (the research loop with your
+   own advice is preselected) or **Blank**. Enter a label and select **Create setup**.
+   The console writes `siderius_workspace/projects/<setup id>/workflow.py` and opens it.
+   If the dialog says creating setups is turned off, the console operator adds
+   `"experiment_setups": {"browser_creatable": true}` to
+   `siderius_workspace/settings/console.json` and restarts the console.
+3. Edit the workflow and select **Save**, name the version and **Save version**.
+4. Select **Next: Run**. The Run page names the setup and its task ("Setup: … · Task:
+   …"); the task is fixed by the setup, so you only check the inputs and prepare.
+5. **Runs of this setup** at the bottom of the Run page lists this setup's runs, newest
+   first; select one to follow it in **Monitor**.
+
+When you add a **Metric threshold** stop condition, the metric field starts with the
+task's main score and suggests the task's other metrics, once the Task tab has read the
+task package.
+
+If a setup's task references no longer match its task, the Workflow page shows a
+warning with a button that opens **Task version** on the Task tab, where you update them.
+**Quick start** on Home does steps 1 and 2 for you with the research-loop template.
+
+The **Task version** card below the panel is where you switch the task version an
+open workflow uses; its findings then open in the Workflow save step. See
+[Bind a task version](#bind-a-task-version).
+
 ## Bind a task version
 
 The task chip in the Workflow page bar shows the task package and version; click it
-to open the **Task package and version** card below the canvas. That card always states which task package and
+to open the **Task version** card on the **Task** tab. That card states which task package and
 version the open workflow uses. Versions are offered only for configured tasks
 that declare `task_revision`; otherwise the panel says that none are configured.
 
-In Workflow builder, explicitly choose a configured task package/version and
-**Update workflow references**. Inspect the Python diff and task findings, confirm
-them and **Save version**. An unbound reusable workflow requires a separate
+In the **Task version** card, explicitly choose a configured task package/version and
+**Update workflow references**. The console returns to **Workflow**, where the save
+step shows the Python diff and the task findings; confirm them and **Save version**. An unbound reusable workflow requires a separate
 confirmation to adopt its currently observed snapshot; save that binding before
 editing its scientific settings.
 
@@ -405,11 +569,16 @@ Configure the authored project in `editor_projects`, enable its ID in
 `runnable_editor_projects`, and set the task's `reusable_runs_root` to an existing
 external runs directory. Include that parent in both
 `operation_store.preparation_roots` and `candidate_roots`. Restart after changing
-configuration. The source task references and output restrictions must agree with
+configuration. (A workspace console can also create a project for a task, called
+an experiment setup, without editing console.json; see "Experiment setups" in the
+[console contract](console-contract.md). The browser page for it comes later.
+Setup folders live in `projects/` of the workspace, so `check` refuses a task
+whose `data_root` or `task_read_only` entry is inside that folder.)
+The source task references and output restrictions must agree with
 the configured task; the browser does not rewrite them to match your selection.
 See the [reusable configuration contract](console-contract.md#reusable-capture-consumption).
 
-1. Connect and open **Workflow Editor**. Review and **Save** your source edits.
+1. Connect, choose the task on **Task**, and open **Workflow**. Review and **Save** your source edits.
    An already saved supported reusable declaration needs no extra Save. Resolve
    any source conflict before continuing. Select **Next: Run**; the
    **Run** page states which saved version it will use.
@@ -623,7 +792,7 @@ task; choose an installed planner strategy explicitly in the external LLM profil
 (for example the native `tune.planner_strategy: native-timing-v1`). The example's
 budgets and diagnostic settings are demonstration choices, not scientific defaults.
 
-Select **fit / tuning** in Workflow Editor. The small inspector edits trial/formal
+Select **fit / tuning** in Workflow. The small inspector edits trial/formal
 budget minutes, epoch ceilings, portions and retention flags. Open **Training
 settings** (collapsed, with the number of changed fields). **Default** removes the
 key; **None** explicitly stores null where supported. Empty numbers block review;

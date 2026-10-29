@@ -8,15 +8,16 @@
   const session = window.consoleSession, onboarding = window.consoleOnboarding;
   function blocked(state) {
     if (!session.connected) return 'Connect to see which saved workflow version a run uses.';
-    if (!state.projectId) return 'Open a workflow project on the Workflow page first.';
+    if (!state.projectId) return 'Open an experiment setup on the Workflow page first.';
     if (!state.sourceAvailable) return 'The selected workflow source is not open.';
-    if (!state.candidateEnabled) return 'This project is editable but not enabled for runs.';
+    if (!state.candidateEnabled) return 'Runs are not enabled for this setup.';
     if (!state.reusableSource) return 'This workflow source is not a supported reusable declaration, so it cannot be prepared as a run.';
     if (state.conflict) return 'Resolve the source conflict on the Workflow page first.';
     if (state.saving) return 'Saving the workflow.';
     if (state.dirty || state.sourceDirty) return 'Save first: the workflow has unsaved edits. Review and save them on the Workflow page.';
     return 'Save the reviewed workflow first.';
   }
+  const setupName = () => window.experimentSetups?.current?.label || window.workflowEditor.state.projectId;
   function render() {
     // The gate's own editor snapshot can trail the live state by one event (a run-step-state
     // render fires inside the editor's own event): a live source with no saved SHA is never ready.
@@ -25,8 +26,8 @@
     // Only bytes a console Save recorded are a "saved version" (red-team A-6/A-7).
     const name = ready ? window.editorVersions?.nameFor(state.savedSha256) : null;
     const message = !ready ? blocked(state)
-      : name ? `Saved version "${name}" of project ${state.projectId} is ready to run.`
-      : `The current file of project ${state.projectId} (version ${state.savedSha256.slice(0, 12)}) is ready to run.`;
+      : name ? `Saved version "${name}" of setup ${setupName()} is ready to run.`
+      : `The current file of setup ${setupName()} (version ${state.savedSha256.slice(0, 12)}) is ready to run.`;
     $('workflow-next-run').disabled = !ready;
     $('workflow-next-run').title = ready ? message : `${message} Run is enabled only for a saved version.`;
     $('workflow-next-state').textContent = ready ? message : `${message} Run is enabled only for a saved version.`;
@@ -40,7 +41,7 @@
       : message;
     // Empty canvas (CSS hides it once a capability card is drawn): one sentence, one action.
     $('workflow-start-state').textContent = !session.connected ? 'Connect with your console token at the top, then start from a template.'
-      : !state.projectId ? 'Choose a workflow project in the bar above, or ask the console operator to configure one.'
+      : !state.projectId ? 'Choose an experiment setup in the bar above, or create one with New setup….'
       : !opened ? 'This workflow source is not open.'
       : 'Add a module from the list on the left.';
     // Problems chip in the page bar mirrors the count editor-problems.js renders.
@@ -49,8 +50,8 @@
     $('problems-chip').replaceChildren(window.consoleIcons?.make('circle-alert', 16) || '', `${count} problem${count === 1 ? '' : 's'}`);
     if (!count) setProblemsOpen(false);
     const view = window.consoleNavigation.view;
-    const current = {workflow: opened ? 'workflow' : 'task', run: 'run', monitor: 'results'}[view] || null;
-    const done = {task: opened, workflow: ready};
+    const current = {task: 'task', workflow: 'workflow', run: 'run', monitor: 'results'}[view] || null;
+    const done = {task: !!window.consoleTask?.selectedId, workflow: ready};
     $('step-indicator').hidden = !current;
     for (const item of $('step-indicator').querySelectorAll('[data-step]')) {
       const step = item.dataset.step, link = item.querySelector('a');
@@ -77,7 +78,7 @@
     if ($('editor-problems').classList.contains('open') && !$('editor-problems').contains(event.target) && !$('problems-chip').contains(event.target)) setProblemsOpen(false);
   });
   new MutationObserver(render).observe($('editor-problems'), {attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true});
-  for (const name of ['workflow-editor-state', 'new-run-gate', 'console-view', 'console-onboarding', 'editor-versions', 'run-step-state']) window.addEventListener(name, render);
+  for (const name of ['workflow-editor-state', 'new-run-gate', 'console-view', 'console-onboarding', 'editor-versions', 'run-step-state', 'console-task']) window.addEventListener(name, render);
   session.subscribe(render);
   render();
 })();

@@ -5,6 +5,7 @@
  * Required: EDITOR_PYTHON, CONSOLE_PLAYWRIGHT_MODULE, CONSOLE_BROWSER_EXECUTABLE. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
+import {mkdir} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -53,6 +54,13 @@ try {
     const reply = (json, status = 200) => route.fulfill({status, json});
     if (url.pathname.startsWith('/api/editor/')) return reply({error: {message: 'Fixture project unavailable'}}, 409);
     if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    // One configured task: selected automatically, so Workflow and Run stay open.
+    // The selected task's experiment setups (Workflow and Run read them): none.
+    if (url.pathname.endsWith('/setups') && url.pathname.startsWith('/api/tasks/')) return reply({setups: []});
+    if (url.pathname === '/api/tasks/synthetic/summary') return reply({task_id: 'synthetic', label: 'Synthetic task', state: 'unavailable', data_root: '/fixture/data',
+      run_policy: {preparation_timeout_seconds: 300, candidate_timeout_seconds: 3600, candidate_network: false, candidate_devices: [], candidate_environment_names: [], allowed_output_types: null},
+      unavailable: {reason: 'sandbox_missing', hint: 'Fixture hint.'}});
+    if (url.pathname === '/api/tasks') return reply({tasks: [{task_id: 'synthetic', label: 'Synthetic task', revision: null}]});
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') {
       assert.equal(url.searchParams.get('limit'), '50');
@@ -81,6 +89,37 @@ try {
   await page.goto(metadata.origin + '/#home');
   assert.equal(await page.locator('#token').isVisible(), true);
   assert.equal(await page.locator('#access-connected').isHidden(), true);
+  // Access help occupies its own full row, including with long file paths on narrow screens.
+  await page.locator('#access-help summary').click();
+  assert.equal(await page.locator('#access-help li').count(), 3);
+  const helpText = await page.locator('#access-help').textContent();
+  for (const text of ['What it is:', 'not a model provider API key', 'Where to find it:',
+    'siderius_workspace/settings/console-token', 'Local or remote:',
+    'ssh -N -L 127.0.0.1:PORT:127.0.0.1:PORT YOUR_HOST', 'kept only in this page’s memory']) {
+    assert.ok(helpText.includes(text), text);
+  }
+  if (process.env.CONSOLE_EVIDENCE_DIR) await mkdir(process.env.CONSOLE_EVIDENCE_DIR, {recursive: true});
+  for (const theme of ['light', 'dark']) {
+    await page.locator('#theme-preference').selectOption(theme);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({width, height: 1000});
+      const layout = await page.locator('#access-help').evaluate(el => {
+        const rect = el.getBoundingClientRect(), parent = el.parentElement;
+        const section = parent.getBoundingClientRect(), style = getComputedStyle(parent);
+        const heading = document.getElementById('access-heading').getBoundingClientRect();
+        return {width: rect.width, expected: section.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+          - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth), top: rect.top, headingBottom: heading.bottom,
+          textAlign: getComputedStyle(el.querySelector('ul')).textAlign, scroll: el.scrollWidth, client: el.clientWidth};
+      });
+      assert.ok(Math.abs(layout.width - layout.expected) < 2, `${theme}/${width}: help takes a full row`);
+      assert.ok(layout.top >= layout.headingBottom, `${theme}/${width}: help follows heading`);
+      assert.equal(layout.textAlign, 'left');
+      assert.ok(layout.scroll <= layout.client + 1, `${theme}/${width}: help does not overflow`);
+      if (process.env.CONSOLE_EVIDENCE_DIR) await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, `access-${theme}-${width}.png`), fullPage: true});
+    }
+  }
+  await page.setViewportSize({width: 1440, height: 1000});
+  await page.locator('#theme-preference').selectOption('light');
   const order = await page.evaluate(() => [...document.querySelectorAll('#view-home h2')].map(h => h.id || h.textContent));
   assert.ok(order.indexOf('journey-heading') === 0 && order.indexOf('journey-heading') < order.indexOf('native-chain-heading'), 'Entry cards precede the native chain: ' + order);
   // Home leads with at most three entry cards (template, workflow, monitor).
@@ -94,6 +133,7 @@ try {
   for (const view of ['home', 'workflow', 'run', 'monitor']) {
     await page.locator(`nav a[href="#${view}"]`).click();
     assert.equal(await page.locator('#token').isHidden(), true, `${view}: token field collapses after connecting`);
+    assert.equal(await page.locator('#access-help').isHidden(), true, `${view}: expanded help hides after connecting`);
     assert.equal(await page.locator('#access-heading').isHidden(), true, `${view}: connect heading collapses`);
     assert.equal(await page.locator('#access-change').isVisible(), true, `${view}: Change token available`);
     assert.equal(await page.locator('#access-disconnect').isVisible(), true, `${view}: Disconnect available`);

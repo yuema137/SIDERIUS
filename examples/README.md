@@ -11,6 +11,11 @@ SIDERIUS ships two lightweight synthetic examples:
   explicit local-package members and shared helper-class identity while reusing
   the same synthetic implementation files.
 
+[`console_bundle/`](console_bundle/README.md) holds the sources of the quickstart
+example bundle, a release zip that packages the quickstart task with a ready
+experiment setup for the browser console; it is built from `quickstart/`, not a
+separate pack.
+
 These packages are executable framework specifications. Their offline checks
 are small, CPU-friendly and credential-free, and make no scientific-performance
 claim. Separately recorded real-resource receipts retain their original scope

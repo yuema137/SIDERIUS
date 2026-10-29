@@ -9,15 +9,19 @@ from tools.candidate_prepare.reusable_models import ReusableBindingInspection
 from tools.workflow_authoring.models import Project
 
 from .files import canonical
-from .models import ConsoleConfig, TaskChoice
+from .models import TaskChoice
+from .setups import SetupRegistry
 
 
 def configured_capture(
-    config: ConsoleConfig, project_id: str, task_id: str
+    setups: SetupRegistry, project_id: str, task_id: str
 ) -> tuple[Project, TaskChoice, Path]:
-    if project_id not in config.runnable_editor_projects:
-        raise OperationFailure("editor_policy", "project is not enabled for candidate runs")
-    project = next(p for p in config.editor_projects if p.project_id == project_id)
+    config = setups.config
+    setup = setups.runnable(project_id)
+    # A console-created setup is bound to one task; a run may not borrow another's policy.
+    if setup.task_id is not None and setup.task_id != task_id:
+        raise OperationFailure("task_policy", "experiment setup belongs to another task")
+    project = setup.project
     task = next((t for t in config.tasks if t.task_id == task_id), None)
     if task is None or task.reusable_runs_root is None:
         raise OperationFailure("task_policy", "task has no configured reusable runs root")

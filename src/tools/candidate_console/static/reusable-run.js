@@ -35,7 +35,7 @@
   const status = message => { $('status').textContent = message; };
   // The reason a project cannot run outlives later task/list refreshes, which never apply to it.
   const notEnabled = () => !!editor.projectId && !editor.candidateEnabled;
-  const NOT_ENABLED = 'This project is editable but not enabled for candidate runs.';
+  const NOT_ENABLED = 'Runs are not enabled for this setup.';
   const api = (suffix, body, project = editor.projectId) => session.request(`editor/${encodeURIComponent(project)}/reusable-captures${suffix}`, body);
   const current = (version, revision) => generation === version && session.revision === revision;
   const option = (value, text) => { const el = document.createElement('option'); el.value = value; el.textContent = text; return el; };
@@ -61,7 +61,7 @@
   // Why Launch is disabled, in one inline sentence beside it (R-2); never a tooltip.
   function launchReason(enabled) {
     if (!session.connected) return session.reachable === false ? 'Can\'t check: the server is unreachable.' : 'Connect to launch.';
-    if (!enabled) return busy ? 'Working…' : 'Open a runnable project first.';
+    if (!enabled) return busy ? 'Working…' : 'Open an experiment setup whose runs are enabled first.';
     if (intent) return '';
     if (storageProblem) return 'This browser\'s saved run state is unreadable; clear this site\'s storage, then reload.';
     if (!selected) return '';
@@ -106,6 +106,18 @@
     line.textContent = readiness.ready
       ? 'Credentials ready (names only checked; no value is shown or sent to this page).'
       : `Credentials not ready${missing.length ? ': missing ' + missing.join(', ') : ''}. ${readiness.instructions.join(' ')}`;
+  }
+  // Issue #1136: native training (a `tuning` node) needs an NVIDIA GPU and refuses a
+  // sandbox without one. Presentation only, from the reviewed nodes and devices.
+  function computeReview(value) {
+    if (!value.nodes.some(([, capability]) => capability === 'tuning')) {
+      return [['capture-compute-review', 'Compute: this workflow has no training node, so no GPU check applies.']];
+    }
+    const lines = [['capture-compute-review', 'Compute: NVIDIA GPU required']];
+    if (!window.consoleCompute.gpuDevices(value.devices).length) {
+      lines.push(['capture-compute-warning', window.consoleCompute.gpuWarning]);
+    }
+    return lines;
   }
   function invalidate() { generation++; selected = null; review = null; handedVersion = null; $('summary').replaceChildren(); $('details').textContent = ''; credentials(null); controls(); }
   function showIntent() {
@@ -197,7 +209,7 @@
         $('run').value = previous;
       }
       cursor = page.next_cursor; $('more').hidden = !cursor;
-      $('guidance').textContent = page.captures.length ? 'Earlier preparations of this project, newest first. Listing does not verify them.' : 'No earlier prepared runs for this task.';
+      $('guidance').textContent = page.captures.length ? 'Earlier preparations of this experiment setup, newest first. Listing does not verify them.' : 'No earlier prepared runs for this task.';
       if (!selected && !intent) status('Prepare a run in step 1, or open an earlier prepared run below.');
     } catch (error) { if (!error.stale && current(version, revision)) status(error.message); }
     controls();
@@ -283,6 +295,7 @@
       const seedLine = document.createElement('p'); seedLine.textContent = value.seed; $('summary').append(seedLine);
       const workspace = document.createElement('p'); workspace.textContent = 'Output workspace: ' + value.workspace; $('summary').append(workspace);
       const loop = document.createElement('p'); loop.id = 'capture-loop'; loop.textContent = researchLoop(value); $('summary').append(loop);
+      for (const [id, text] of computeReview(value)) { const line = document.createElement('p'); line.id = id; line.textContent = text; if (id === 'capture-compute-warning') line.className = 'warning'; $('summary').append(line); }
       const hostSummary = document.createElement('p'); hostSummary.id = 'capture-scheduling-review'; hostSummary.textContent = 'Host resources: ' + window.runScheduling.describe(value.selection); $('summary').append(hostSummary);
       const routeSummary = document.createElement('p'); routeSummary.textContent = 'Model routes: ' + value.routes.map(route => `${route.node_id} → ${route.provider || '?'} / ${route.model || '?'}`).join('; '); $('summary').append(routeSummary);
       status(value.credential_readiness.ready

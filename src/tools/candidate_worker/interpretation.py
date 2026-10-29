@@ -9,7 +9,11 @@ from pydantic import BaseModel, ConfigDict
 
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.health_feedback import FormalValidityFeedback
-from agent.schemas.hyperparam_tuning import ExpertAdviceInput, TaskCompositionRef
+from agent.schemas.hyperparam_tuning import (
+    ExpertAdviceInput,
+    TaskCompositionRef,
+    serialize_expert_advice,
+)
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ExpertContextItem, ProposalInput
@@ -33,11 +37,27 @@ from .artifacts import capture_record
 from .inputs import check_constraints, require_storage
 from .invocation import FixedInvocationContext
 from .layout import graph_instance_dir, interpretation_input_path
+from .loop_models import ResumeAdvice
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .record_json import artifact_json
 
 if TYPE_CHECKING:
     from .training_admission import TrainingAdmission
+
+
+def compose_proposal_advice(
+    declared: ExpertAdviceInput | None, advice: ResumeAdvice | None
+) -> ExpertAdviceInput | None:
+    """The proposer's ``human_advice``: the declared advice, plus operator Resume advice.
+
+    Without operator advice the declared value is returned unchanged (same object), so
+    proposal inputs of runs and segments without advice keep their bytes.
+    """
+    if advice is None:
+        return declared
+    note = f"Operator advice after body {advice.after_body}:\n{advice.text}"
+    prior = "" if declared is None else serialize_expert_advice(declared)
+    return f"{prior}\n\n{note}" if prior else note
 
 
 class InterpretationArguments(BaseModel):
@@ -59,9 +79,12 @@ class InterpretationArguments(BaseModel):
         config: WorkflowLLMConfig,
         history: ChainState | None = None,
         feedback: list[FormalValidityFeedback] | None = None,
+        operator_advice: ResumeAdvice | None = None,
     ) -> ProposalInput:
         # Keep nested native models and omit unsupplied optional arguments.
         values = {name: getattr(self, name) for name in self.model_fields_set}
+        if operator_advice is not None:
+            values["human_advice"] = compose_proposal_advice(self.human_advice, operator_advice)
         if history is not None:
             values.update(
                 expert_context=prior_findings(history) + list(self.expert_context or []),

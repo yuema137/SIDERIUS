@@ -58,9 +58,19 @@
   async function storeId() {
     return session().operationsStoreId || (await session().choices()).operations_store_id;
   }
-  function retained(review, store) {
+  // The retained record for a reviewed paused receipt, or null. It holds the request UUID and
+  // the advice sent with it, so a retry after an unconfirmed outcome is byte-identical.
+  function retainedRecord(review, store) {
+    try {
+      const value = JSON.parse(localStorage.getItem(retainedKey(store, review.predecessor_operation_id)) || 'null');
+      if (value?.origin === location.origin && value.expected_receipt_digest === review.expected_receipt_digest) return value;
+    } catch (_) { /* An unreadable record is replaced on submission. */ }
+    return null;
+  }
+  function retained(review, store, advice) {
     // One client-generated request UUID per reviewed paused receipt survives reloads, so a retry
-    // after an unconfirmed outcome reuses it and the owner replays instead of reserving twice.
+    // after an unconfirmed outcome reuses it (and its advice) and the owner replays instead of
+    // reserving twice.
     const key = retainedKey(store, review.predecessor_operation_id);
     try {
       const legacy = JSON.parse(localStorage.getItem(legacyKey(review.predecessor_operation_id)) || 'null');
@@ -69,13 +79,11 @@
         localStorage.removeItem(legacyKey(review.predecessor_operation_id));
       }
     } catch (_) { /* An unreadable legacy record is ignored. */ }
-    try {
-      const value = JSON.parse(localStorage.getItem(key) || 'null');
-      if (value?.origin === location.origin && value.expected_receipt_digest === review.expected_receipt_digest) return value.request_id;
-    } catch (_) { /* An unreadable record is replaced below. */ }
-    const value = {origin: location.origin, expected_receipt_digest: review.expected_receipt_digest, request_id: crypto.randomUUID()};
+    const prior = retainedRecord(review, store);
+    if (prior) return prior;
+    const value = {origin: location.origin, expected_receipt_digest: review.expected_receipt_digest, request_id: crypto.randomUUID(), ...(advice ? {operator_advice: advice} : {})};
     localStorage.setItem(key, JSON.stringify(value));
-    return value.request_id;
+    return value;
   }
   const stopRecorded = status => !!(request?.stop.acknowledged || status.loop?.stop_requested);
   const pauseRecorded = status => !!(request?.pause.acknowledged || status.loop?.pause_requested);
@@ -114,10 +122,15 @@
     if (!status?.loop) { panel.hidden = true; return; }
     if (request?.id !== status.operation_id) {
       const blank = () => ({pending: false, acknowledged: false, error: ''});
-      request = {id: status.operation_id, stop: blank(), pause: blank(), resume: {...blank(), review: null}};
+      request = {id: status.operation_id, stop: blank(), pause: blank(), resume: {...blank(), review: null, locked: false}};
+      $('loop-resume-advice').value = '';
     }
     panel.hidden = false;
     $('loop-state').textContent = describe(status);
+    // Untrusted operator text: rendered as text only, never as markup.
+    const given = status.loop.operator_advice;
+    $('loop-advice').hidden = !given;
+    $('loop-advice').textContent = given ? 'Resumed with your advice: ' + given : '';
     const verdicts = status.receipt_available ? verdictLines(status.loop) : [];
     $('loop-judge').hidden = !verdicts.length;
     $('loop-judge').replaceChildren(...verdicts.map(text => { const item = document.createElement('li'); item.textContent = text; return item; }));
@@ -147,6 +160,8 @@
     $('loop-resume-group').hidden = !resumable;
     $('loop-resume-review').disabled = resume.pending || !connected;
     $('loop-resume').hidden = !review;
+    $('loop-resume-advice-group').hidden = !review;
+    $('loop-resume-advice').readOnly = !!resume.locked;
     $('loop-resume').disabled = resume.pending || !connected || !review?.credential_readiness.ready;
     $('loop-resume-summary').textContent = !review ? '' : `Resume continues with body ${review.completed_iterations + 1} of ${review.final_iteration} in a new segment of the same run. ` +
       (review.credential_readiness.ready ? 'Credentials: ready (names only checked).' : 'Credentials not ready; missing: ' + (review.credential_readiness.missing_names.join(', ') || 'none') + '. ' + review.credential_readiness.instructions.join(' '));
@@ -173,6 +188,11 @@
     resume.pending = true; resume.error = ''; resume.review = null; render(last);
     try {
       resume.review = await session().request(`operations/${current.id}/loop-resume-review`);
+      // Prefill: a retained (possibly already sent) request's advice, else this segment's own.
+      const kept = retainedRecord(resume.review, await storeId());
+      const box = $('loop-resume-advice');
+      if (kept) { box.value = kept.operator_advice || ''; resume.locked = true; }
+      else if (!resume.locked) box.value = last.loop?.operator_advice || '';
     } catch (error) {
       if (!error.stale) resume.error = 'Resume review refused: ' + error.message;
     } finally {
@@ -183,12 +203,24 @@
   async function submitResume() {
     const current = request, resume = current?.resume, review = resume?.review;
     if (!last || !review || resume.pending || !review.credential_readiness.ready || !session().connected) return;
-    resume.pending = true; resume.error = ''; render(last);
+    // The advice is fixed at the first attempt: a retry resends exactly the retained text.
+    const typed = $('loop-resume-advice').value.trim();
+    resume.pending = true; resume.locked = true; resume.error = ''; render(last);
+    const store = await storeId();
     try {
-      const handle = await session().request('loop-resumes', {request_id: retained(review, await storeId()), predecessor_operation_id: review.predecessor_operation_id, expected_receipt_digest: review.expected_receipt_digest});
+      const kept = retained(review, store, typed);
+      $('loop-resume-advice').value = kept.operator_advice || '';
+      const body = {request_id: kept.request_id, predecessor_operation_id: review.predecessor_operation_id, expected_receipt_digest: review.expected_receipt_digest};
+      if (kept.operator_advice) body.operator_advice = kept.operator_advice;
+      const handle = await session().request('loop-resumes', body);
       if (current === request) location.hash = 'monitor/' + handle.operation_id;
     } catch (error) {
       if (error.stale) return;
+      if (error.status === 422) {
+        // Refused before admission: nothing was reserved, so the advice may be edited again.
+        localStorage.removeItem(retainedKey(store, review.predecessor_operation_id));
+        resume.locked = false;
+      }
       if (error.status) resume.review = null;
       resume.error = 'Resume was not submitted: ' + error.message + (error.status ? ' Review again before retrying.' : ' The outcome is unconfirmed; retrying reuses the same request.');
     } finally {

@@ -20,6 +20,7 @@ from tools.candidate_prepare.reusable_models import (
     ReusablePreparationReceipt,
     ReusablePreparedSelection,
 )
+from tools.candidate_worker.loop_models import OperatorAdvice
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.workflow_preview.models import FileObservation, PreviewModel
 
@@ -105,11 +106,21 @@ class CandidateOperation(PreviewModel):
     resources: OperationResources | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    #: Console experiment setup of a reusable run (attribution only); omitted when
+    #: ``None`` so older records and their digests are unchanged.
+    setup_id: str | None = Field(
+        default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$", exclude_if=lambda value: value is None
+    )
 
 
 class CandidateLoopResumeRequest(PreviewModel):
     predecessor_operation_id: UUID
     expected_receipt_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # Untrusted operator text for the resumed segment's proposals (not a reviewed input).
+    # Omitted when absent, so advice-free requests keep their bytes and request digest.
+    operator_advice: OperatorAdvice | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class CandidateLoopResumeOperation(PreviewModel):

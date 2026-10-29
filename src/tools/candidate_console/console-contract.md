@@ -61,6 +61,194 @@ Undeclared entries are ignored and never logged. Parse refusals are raised
 outside the parser's exception handler, so neither message nor chained cause
 quotes bytes or values; missing declared names are reported by name only.
 
+### Task package mounts (`check`)
+
+Owners: `package_mounts.py` (console admission), `workflows/task_package_refs.py`
+(manifest reference listing; `task_composition._resolve_path` delegates to its
+`resolve_manifest_ref`, so both resolve a ref against the manifest directory).
+
+A reference must be visible to both sandboxed stages. Both mount the manifest
+file, `data_root` and `task_read_only` (preparation also mounts `llm_config_file`;
+the candidate run in `candidate_prepare/bundle.py` does not, so it does not count),
+plus what `workspace_sandbox/command.py` binds for every profile: the serving
+checkout (`runtime_roots()`), `SYSTEM_DIRECTORIES` and `SYSTEM_FILES` (imported
+from `workspace_sandbox.profile`; network files are excluded because preparation
+is offline). `validate_config` (so `check`, `serve` and `CandidateConsole`) calls
+`check_package_mounts(task)` for every task. `manifest_references` reads the
+manifest as YAML without importing task code and lists only what the composition
+resolves: a string `file`, `declaration`, `dir` or `config` value at any depth;
+inside a `config` mapping (task-owned constructor arguments, passed unchanged by
+`_validated_task_config_mapping`) only exact `{ref: <str>}` envelope values, never
+other keys at any depth; and `code_package.root` plus its `files`. A `dir` must
+exist as a directory and the other keys as files; an envelope path has no
+existence requirement (composition only resolves it, so it may be a directory or
+not exist yet). Every listed path's real path (`Path.resolve()`) must equal or lie
+inside the real path of a mounted path. With `--external`, an envelope contributes
+its folder when it is an existing directory, otherwise its parent. Otherwise a
+`SettingsInvalid` names the task, the manifest location and the path, for example
+`task quickstart manifest task_data_path.file names /abs/plugins/_task.py, which is
+outside every mounted path (manifest, data folder, task_read_only, serving
+checkout, system directories); add its package directory to task_read_only`. A manifest that is not a
+YAML mapping is refused the same way. Limits: references inside referenced files
+(for example a Health config naming another file) are not followed; composition
+validity is still decided only by the composition child. The sandbox profile is
+unchanged.
+
+GPU prerequisite (#1145 item 5; no `/sys` is added anywhere): when a task's
+`candidate_devices` contains a `/dev/nvidia<N>` node and `"/sys"` is not in its
+`task_read_only`, `check`/`serve` print to stderr, without failing,
+`Warning: Task <id>: GPU devices are passed but /sys is not mounted read-only; CUDA
+may fail to start inside the run sandbox (see README).`
+
+### Registering a task: `add-task`
+
+Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
+<console.json> (--manifest <path> | --from-bundle DIR) [--task-id ID] [--label TEXT]
+[--env NAME ...] [--network|--no-network] [--device PATH ...] [--prepare-timeout S]
+[--candidate-timeout S] [--external] [--dry-run]`. Exactly one of `--manifest` and
+`--from-bundle` is required; `--from-bundle` is specified in the next section.
+
+- `--config` and `--manifest` must be absolute, normalized and canonical (no
+  symlinks); a relative path is refused with its absolute spelling as a hint.
+- Requires a `console.json` with `workspace_root` that validates as `ConsoleFile`.
+- Package location: without `--external` the canonical manifest must be inside
+  `<workspace_root>/tasks/<name>/` (a manifest directly in `tasks/` is refused);
+  `task_read_only` becomes `[<workspace_root>/tasks/<name>]`. With `--external` any
+  canonical manifest is accepted and `task_read_only` becomes the outermost set of
+  directories holding its referenced files (`dir` references count as themselves),
+  sorted; a missing referenced file is refused. A folder that is `/`, is or
+  contains the home folder (`Path.home()`), or overlaps a console private path
+  (`settings_file.protected_paths`: token, credential file, `settings/`,
+  `library/`, `projects/`, operation and output roots) is refused with
+  `--external would mount <folder>, which ...; move the package files into
+  <workspace>/tasks/<name>/ instead`.
+- `task_id` defaults to `<name>` (external: the manifest's directory name) and must
+  match `^[a-zA-Z0-9_-]{1,80}$`; an existing `task_id` is refused. `label` defaults
+  to `task_id`.
+- The five `TaskChoice` fields without defaults are always written explicitly.
+  `STARTER_VALUES` (one constant) supplies `preparation_timeout_seconds=300.0`,
+  `candidate_timeout_seconds=3600.0` and `candidate_network=true` unless
+  `--prepare-timeout`, `--candidate-timeout` or `--no-network` is given; they are
+  starting values for the operator to review, not resource limits the framework
+  chooses. `candidate_devices` is `--device` when given; otherwise, when stdin is a
+  TTY and `/dev/nvidia*` character devices exist, the command lists them and asks
+  whether to pass them (no answer, EOF or Ctrl-C refuses with exit 2); else it is
+  `[]` and the command prints
+  `candidate_devices: none (...)`. `candidate_environment_names` is
+  `credential_requirements(routes, ()).required_names` (the worker preflight owner)
+  for every route of the task's resolved LLM profile
+  (`setup_review.routes.standard_llm_routes` with literature and analysis enabled,
+  since a task cannot know which nodes its workflows will select), followed by any
+  `--env` names, de-duplicated. No credential value is read.
+- Location fields (`data_root`, `llm_config_file`, output roots) stay omitted, so
+  the layout and global settings fill them. Before writing, the resolved console
+  must validate and `check_package_mounts` must pass for the new task.
+- Write: the new entry is appended to `tasks[]` of the parsed document (other keys
+  keep their order), serialized with `json.dumps(indent=2)`. `publish_task` re-reads
+  the file and refuses when its bytes differ from the bytes read
+  (`console.json changed since add-task read it; nothing was written`), then
+  publishes through `settings_service._publish_private` (temp file 0600, fsync,
+  `os.replace` inside a no-follow parent). `--dry-run` prints the entry and writes
+  nothing.
+- After the write: `init` on the workspace parent creates the task's derived output
+  roots (never `data/<task_id>`) when the file is `<workspace_root>/settings/console.json`;
+  then the same load and report as `check` run, and the command prints
+  `Restart the console to load the new task.` (exit 0). Refusals before the write
+  exit 2 with `add-task refused: ...` and leave the file unchanged; a failing check
+  after the write exits 2 and says the task was added.
+
+### Example bundles: `add-task --from-bundle`
+
+Owners: `example_bundle.py` (format, verification, copy, first setup) and
+`tools.release.build_example_bundle` (the zip). `--from-bundle DIR` takes an
+unpacked bundle folder and reuses every other `add-task` option except
+`--external` (refused) and `--manifest` (derived).
+
+**Bundle layout** (zip `siderius-example-quickstart-<version>.zip`, one top folder
+`siderius-example-quickstart-<version>/`):
+
+| Path | Content |
+| --- | --- |
+| `task/task.yaml` | the task composition manifest; every reference package-relative |
+| `task/declared/*`, `task/plugins/*` | the package files the manifest names |
+| `setup/setup.json` | `BundleSetup{schema_version: "siderius.example-bundle-setup/v1", template_id: TemplateId, label: Label}` (`PreviewModel`: strict, extra fields refused) |
+| `console-task.json` | `BundleTask{schema_version: "siderius.example-bundle-task/v1", task_id: Id, label: Label, preparation_timeout_seconds, candidate_timeout_seconds, candidate_network}`; import reads only `task_id` and `label` (defaults for `--task-id`/`--label`); the resource values are informational and equal `STARTER_VALUES` at build |
+| `fetch_data.py`, `README.md` | data writer and human instructions |
+| `SHA256SUMS` | `<64 hex>  <path>` per line (`sha256sum -c` format), sorted by path, unique, every file except itself; paths must be relative POSIX without `.`, `..` or empty parts |
+
+**Verification** (`read_bundle`, before any write): `DIR` absolute, normalized and
+canonical; `SHA256SUMS` must list `task/task.yaml`, `setup/setup.json` and
+`console-task.json`; each listed file is opened component by component with
+`O_NOFOLLOW`, must be a regular file of at most 16 MiB, and its sha256 must match.
+The verified bytes are kept in memory and are the only bytes used later; files
+not listed are ignored and never copied. Errors: `<path> does not match
+SHA256SUMS; download and unpack the bundle again`, `<path> is missing, a symlink or
+unreadable`, `SHA256SUMS line N is not '<sha256>  <path>'`, and invalid
+descriptors (`setup/setup.json is not a valid ... descriptor`).
+
+**Pre-copy checks** (`plan_import`): console.json validates and resolves, has
+`workspace_root`, and `experiment_setups.browser_creatable` is true (else
+refused: the first setup could not be created); `task_id` (`--task-id`, else
+`console-task.json`) matches `^[a-zA-Z0-9_-]{1,80}$`, is not configured, and
+`<workspace>/tasks/<task_id>` does not exist (`lexists`). `--dry-run` stops here:
+it prints the bundle, destination, file list and setup descriptor as JSON and
+writes nothing.
+
+**Effects, in order** (each refusal exits 2 with `add-task refused: ...`):
+
+1. `copy_package`: `tasks/` via `ensure_owned_directory`; `mkdir tasks/<task_id>`
+   0700 (an existing folder refuses with `already exists; nothing was copied`);
+   subfolders 0700 via `ensure_owned_directory`; every verified `task/` file
+   write-once 0600 (`O_CREAT|O_EXCL|O_NOFOLLOW`).
+2. `plan_task` + `publish_task` with `--manifest <workspace>/tasks/<task_id>/task.yaml`
+   and the bundle label, i.e. exactly the `add-task` contract above (starter
+   values, devices, credential names, package mount, CAS, 0600 publish).
+3. `create_folders` (as `add-task`).
+4. `create_first_setup`: `resolve_console` of the written console.json,
+   `SetupStore.load(config, workspace, setups_policy)`, then
+   `SetupStore.create(config, task_id, SetupCreate(label, template_id))`, the owner
+   behind `POST /api/tasks/{task_id}/setups` (render through
+   `templates.render_shape`, folder and registry write as specified in
+   "Experiment setups"). The setup ID is the label slug.
+5. The same load and report as `check`, then `Restart the console to load the new
+   task.` (exit 0).
+
+The first setup is created by the CLI, not deferred to the console's first
+start: one creation owner and no pending state to persist. A running console
+holds the registry digest it loaded, so its next browser creation refuses
+`stale` until restarted, which the restart message already requires.
+
+Nothing is deleted. A refusal after step 1 says `<workspace>/tasks/<task_id> was
+left in place; remove it before running add-task again`. A setup refusal after
+step 2 exits 2 with `The task was added, but its first experiment setup was not
+created: <message>. Create one in the Workflow tab instead.`
+
+**Build** (`python -m tools.release.build_example_bundle --output-dir DIR
+[--version V]`, version default `pyproject.toml`): `task/task.yaml` is
+`configs/task_composition/quickstart.yaml` loaded with `yaml.safe_load`, every
+string starting `../../examples/quickstart/` made package-relative and any other
+absolute or `..` string refused, dumped with `sort_keys=False` under a generated
+header; `task/declared` and `task/plugins` are the `.py`/`.json`/`.yaml` files of
+`examples/quickstart/{declared,plugins}` (READMEs excluded: their links are
+checkout-relative); `setup/setup.json`, `fetch_data.py`, `README.md` come from
+`examples/console_bundle/`; `console-task.json` from `TASK_ID`, `TASK_LABEL` and
+`STARTER_VALUES`. Zip entries are sorted, `ZIP_STORED`, mtime 1980-01-01 00:00:00,
+Unix mode 0644; an existing output file is refused. Tests:
+`tests/unit/tools/release/test_build_example_bundle.py` (byte determinism;
+the bundle files in the checkout layout compose to the shipped manifest's
+`semantic_fingerprint`, and the bundle manifest composes on its own) and
+`tests/unit/tools/candidate_console/test_bundle_import.py`.
+
+**`fetch_data.py`** (run with the checkout's `.venv/bin/python`): loads
+`task/plugins/_quickstart_task.py` by file (bytecode writing disabled), renders the
+shards, and refuses unless every sha256 equals `task/declared/data_manifest.json`;
+then opens `--workspace` no-follow (`files.open_directory`), refuses it unless
+owned with no group/other write, opens `data/` and `data/<task_id>/` through
+`ensure_owned_directory` (created 0700), and writes each shard write-once 0600. An
+identical existing shard is kept; a different, symlinked or non-regular one is
+refused and left unchanged. `task_id` is `--task-id`, else `console-task.json`.
+Exit 0 on success, 2 on refusal.
+
 ### Host reservation ledger (B3-4c)
 
 Optional `host_ledger` (`ConsoleHostLedger`: `ledger_root`, `budget_file`;
@@ -108,6 +296,19 @@ ledger's own launch code, so nothing reaches Launch that Launch would refuse or
 silently ignore. `ChoicesView.host_ledger` (omitted when false) tells the browser
 whether a ledger is configured.
 
+Compute requirement (issue #1136, presentation only). A reviewed run whose
+captured workflow has a `tuning` node (native training, which refuses a sandbox
+without a CUDA device) shows `#capture-compute-review` "Compute: NVIDIA GPU
+required"; when the reviewed `devices` (the task's `candidate_devices`) contain no
+`/dev/nvidia<N>` node, `#capture-compute-warning` adds "This task does not pass a
+GPU into the run sandbox; runs that train a model will be refused." (`/dev/nvidiactl`
+alone is not a GPU node). The sentence and the device test have one browser owner,
+`compute-requirement.js` (`window.consoleCompute.gpuWarning`, `gpuDevices`), shared
+with the Task tab's Run policy. A workflow without a `tuning` node says no GPU check applies. Read
+from `ReusableCaptureReview.nodes`/`devices`; nothing is refused in the browser,
+and the native launch guard remains the authority (browser witness
+`tests/browser/gpu_compute_review.mjs`).
+
 Browser (B3-4c UI). The Run lane's **Host resources and parallel nodes** panel
 (`run-scheduling.js`, `#scheduling`) is shown only when `/api/choices` reports
 `host_ledger` (`consoleSession.hostLedger`); otherwise `#scheduling-unavailable`
@@ -135,7 +336,8 @@ work tracked with #1074. Tests: `tests/unit/tools/candidate_console/test_host_le
 ### Workspace layout and `init`
 
 Owners: `settings_models.py` (file schema), `workspace.py` (derivation,
-readiness, `init`), `config.load_console`, `__main__` (`check`, `serve`, `init`).
+readiness, `init`), `config.load_console`, `__main__` (`check`, `serve`, `init`,
+`add-task` dispatch).
 
 **File schema.** `ConsoleFile`/`TaskEntry` are generated from `ConsoleConfig`/`TaskChoice`
 with `pydantic.create_model`; every field keeps its owner's annotation and
@@ -177,7 +379,7 @@ an existing canonical directory. The command walks from `/` with
 created workspace directory to satisfy the ownership predicate: a directory,
 `st_uid == os.getuid()`, no group/other write bit. It creates only missing
 children with `mkdir(name, 0o700, dir_fd=…)` and `fchmod 0700`:
-`operations`, `preparations`, `candidates`, `runs`, `projects`, `library`,
+`operations`, `preparations`, `candidates`, `runs`, `projects`, `tasks`, `library`,
 `library/llm`, `library/advice`, `settings`, `data` (`exported_configs` is created
 lazily by its writer). It creates `settings/console-token` with
 `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0600, 32 random bytes URL-safe encoded;
@@ -188,7 +390,8 @@ export expression of [LLM defaults](../../../docs/reference/llm-defaults.md)
 bytes are refused. It writes `settings/global_settings.json` write-once only when
 absent, selecting that library profile as `llm_profile`, and `settings/console.json`
 write-once only when absent: `workspace_root`, `port` (default 8740, `--port`),
-`browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`.
+`browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`,
+`experiment_setups: {"browser_creatable": true}` (see "Experiment setups").
 When `console.json` exists and names this workspace, `init` also creates the missing
 derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
 them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
@@ -289,7 +492,9 @@ inputs, protected)` refuses an input that contains or lies inside a protected
 path (`overlap`, beside `validate_destination_overlap`). `settings_file.
 protected_paths(config, workspace)` is `auth_token_file`, `credential_file`,
 `operation_store.state_root`, every preparation and candidate root, every task
-output and reusable runs root, and, with a workspace, `settings/` and `library/`.
+output and reusable runs root, and, with a workspace, `settings/`, `library/` and
+`projects/` (experiment setup folders). `tasks/` is not protected: a task package
+there may legitimately be a `task_read_only` dependency.
 `validate_config(config, workspace=…)` applies it to every task `data_root` and
 `task_read_only` entry; `validate_settings` applies it to every `data_roots` entry.
 `admit(request, *, protected=())` applies it to `(data_root, *task_read_only)`; the
@@ -720,7 +925,11 @@ route-local fixed messages; others the generic message.
 `LoopResumeReview`: the predecessor UUID, the owner's `receipt_digest` as
 `expected_receipt_digest`, completed bodies, the root bound and name-only
 `credential_readiness` for the root request (no values). `resume_loop` submits
-`CandidateLoopResumeOperation` through `submit_operation`. If the request UUID is
+`CandidateLoopResumeOperation` through `submit_operation`. `LoopResumeSelection`
+accepts optional `operator_advice`, validated by the worker's `OperatorAdvice`
+(invalid advice is a 422 that never echoes the text), and passes it unchanged into
+`CandidateLoopResumeRequest.operator_advice`. A retried UUID with different advice is
+the owner's `conflict`. If the request UUID is
 already admitted it replays with an empty environment before any root or credential
 read, so a retry after an unconfirmed outcome returns the same operation. Otherwise
 the root's `environment_names` are read from the configured `credential_file` with
@@ -729,6 +938,12 @@ the same `credentials` helper as Launch. Refusals on both routes: `loop_resume`
 digest), `kind`, `not_ready` and `runtime` 409 with route-local fixed messages;
 `credentials` 409 carrying missing names only; `busy`/`conflict` use the global
 messages. Unknown predecessor 404.
+
+`StatusView.loop.operator_advice` (status and list; omitted when absent) is the
+advice the selected resume segment was admitted with
+(`candidate_operations.loop_segment_advice`, read from the immutable operation
+record). Monitor shows it as "Resumed with your advice: <text>" in `#loop-advice`,
+set with `textContent` only.
 
 Monitor shows **Pause at next boundary** beside Stop for an active loop
 segment with no receipt; after acknowledgement it reads "Pause requested … Not yet
@@ -748,7 +963,13 @@ resume** (one GET on click, never polled), then **Resume loop**, disabled unless
 credentials are ready. The client generates one request UUID per reviewed digest
 and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
 the POST; a retry reuses it, and the record is released once status shows the
-successor. A 409 clears the review. On success the monitor selects the resumed
+successor. After a review, `#loop-resume-advice` (a textarea, `maxlength=4000`) is
+shown. It is prefilled with the retained record's advice when one exists, otherwise
+with this paused segment's own `operator_advice`. The first Resume attempt trims the
+text and fixes it: the retained record stores the request UUID together with
+`operator_advice` (omitted when empty), and the textarea becomes read-only, so a
+retry is byte-identical. Only a 422 (refused before admission) clears the record and
+unlocks the textarea. Empty advice sends no `operator_advice` key. A 409 clears the review. On success the monitor selects the resumed
 segment, which reads "Resumed segment." and shows Stop and Pause while active and
 its per-body results once completed. A continued predecessor shows "Continued by
 <UUID>" (a Slow-control link) and no Resume. Witnesses:
@@ -819,6 +1040,152 @@ remain separate work. The browser witness checks GET-only requests, forbids
 credential and submission calls, and verifies the configured record files remain
 unchanged.
 
+
+## Experiment setups
+
+An experiment setup is one workflow project bound to one task (`setups.py`).
+`SetupRegistry(config, store)` is the single reader; it merges two sources:
+
+- **Legacy** `ConsoleConfig.editor_projects` (+ `runnable_editor_projects` for the
+  runnable flag), unchanged in meaning. Its task is resolved from the saved
+  source: the resolved `definition.task.manifest` and `data_root`
+  (`resolve_location` against `project_root`) must equal exactly one
+  `TaskChoice`'s resolved `task_manifest` and `data_root`; otherwise it has no
+  matching task and is listed under none. Run admission stays unbound (any
+  configured task's policy applies, as before).
+- **Registry** `<workspace>/settings/experiment_setups.json`
+  (`SetupsFile`, `schema_version: "siderius.console-experiment-setups/v1"`,
+  mode 0600, absent = no entries) with entries `SetupEntry{setup_id, task_id,
+  label, origin: {template_id} | "blank", created_at}` (unique IDs, aware
+  timestamp). Paths are derived, never stored: `projects/<setup_id>/workflow.py`
+  and the 0700 recovery directory `projects/<setup_id>/.recovery`. Registry
+  setups are runnable and bound to their `task_id`.
+
+`SetupStore.load(config, workspace, policy)` reads the file through
+`files.private_bytes`; a non-private file, invalid JSON, an entry naming an
+unknown task, or a `setup_id` equal to an `editor_projects` ID raises
+`SettingsInvalid`, so `check`/`serve` fail at startup (`validate_config(...,
+workspace=…)`). Every setup project (both sources) passes
+`check_setup_project`: `WorkflowAuthoring(project)` path checks and recovery
+separate from every run output root.
+
+**Readers.** All seven former `editor_projects` readers go through the registry:
+`app.create_app` (one `SetupStore` given to `CandidateConsole`; `console.setups`
+is a live `SetupRegistry` view of the current config and store), `editor.
+editor_router` (startup setups opened eagerly; the `WorkflowAuthoring` service
+dict is lock-guarded and extended on first use, so a created setup is editable
+without restart; `GET /api/editor/projects` lists both sources),
+`reusable_policy.configured_capture(setups, project_id, task_id)`,
+`edited_candidate.EditedCandidate.project`, `settings_export.export(setups, …)`,
+`native_chain.check_editor_separation` (reads the live registry at review and
+launch, so a runtime setup is protected like a configured one) and
+`config.validate_config`. Code callers may still pass `editor_router((project,),
+runnable, task_targets)`; bare projects become `SetupRegistry.legacy`.
+
+**Run admission.** `configured_capture` refuses `task_policy` ("experiment setup
+belongs to another task") when a registry setup's run names another `task_id`,
+before the existing reusable-root and `check_request_policy` checks;
+`EditedCandidate` applies the same refusal to the prepared context's task.
+`NewRunSelection`, rendered sources and operation records are unchanged.
+
+**Creation policy.** console.json `experiment_setups: {browser_creatable: bool =
+false}` (`ExperimentSetupsPolicy`, a `ConsoleFile`-only field popped by
+`resolve_console` into `SettingsContext.setups_policy`; it requires
+`workspace_root`). Creation is refused (403 `read_only`) when the block is absent,
+false, or the console has no workspace. `init` writes `true` into a new
+console.json only.
+
+**Routes.** They sit beside the read-only task summary routes (`GET /api/tasks`,
+`GET /api/tasks/{task_id}/summary`, see "Task summary"); the paths do not overlap.
+
+| Route | Behaviour | Refusals |
+| --- | --- | --- |
+| `GET /api/tasks/{task_id}/setups` | `SetupList{setups: [SetupView{setup_id, label, runnable, saved_version, refs_match_task}], browser_creatable}` for setups whose task is `task_id`; `browser_creatable` is `SetupStore.creatable`, the predicate `POST` enforces; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
+| `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
+
+**Run attribution.** The console records the selected setup on reusable runs:
+`ReusableCandidatePreparationRequest.setup_id` (set by `ReusablePreparation` to the
+setup `configured_capture` admitted: it exists, is runnable and matches the task)
+and `CandidateOperation.setup_id` (set by `ReusableCandidate` after the same
+check). Both are optional, `^[a-zA-Z0-9_-]{1,80}$`, and omitted when `None`, so
+older records and their request digests are byte-identical. When present they are
+bound into the operation request digest (the prepare one through its request; the
+candidate one by `store.digest`), so a replay with another attribution is a
+conflict. Legacy `editor_projects` runs are attributed too.
+
+| `GET /api/operations?project_id=` | rows attributed to that setup | 422 for a malformed ID |
+|---|---|---|
+
+`list_operations(config, limit, project_id)` applies the setup predicate to every
+verified record (newest first) before `limit`; the unfiltered list is unchanged
+(the newest `limit` records). The recorded id is `OperationListItemView.project_id`:
+a reusable preparation's `request.setup_id`, a candidate's `setup_id` (a loop
+resume uses its root candidate's), else an edited run's reviewed `project_id`.
+Records without attribution have `project_id: null` and appear only unfiltered.
+`incomplete` still reports a store beyond the 4096-entry scan limit, so a filtered
+list never claims completeness the scan did not have.
+
+CAS: `SetupStore` holds the sha256 of the bytes it last read or wrote; a write
+from another process (or a hand edit) refuses with `stale` and leaves the file
+unchanged. `add-task --from-bundle` is the one other caller of
+`SetupStore.create` (see "Example bundles"). Templates for an opened project keep using `instantiate`, which now
+delegates to `render_shape`.
+
+### Experiment setups in the browser
+
+`experiment-setups.js` (presentation only; `editor.js` owns the open project) reads, on
+Workflow or Run entry for the selected task (and again after a reconnect, a task change
+or a creation), `GET /api/editor/projects` and `GET /api/tasks/<id>/setups` for every
+configured task. It hands `workflowEditor.useSetups(list, preferred)` the selected task's
+setups (option text = `label`), followed by an `optgroup` "Other workflows (no configured
+task)" holding legacy `editor_projects` that match no configured task (compatibility: they
+stay editable; a legacy project matched to another task is not listed). `useSetups` keeps
+the open setup when it is listed, else opens `preferred` or the first entry; pending edits
+are dropped only after "Discard pending edits and open another experiment setup?" (if
+declined, the open setup stays in its own group and task, labelled "<label> (unsaved
+edits)", and `experimentSetups.current` still names it). A task change clears the old
+task's list before the new one loads. `useSetups` returns the list it shows. An empty list says
+"This task has no experiment setup yet. Create one with New setup…."; a failed read shows
+`#setup-state` and `#setup-retry`.
+
+**New setup…** (`#setup-new`) opens `#setup-new-dialog`: radio cards for every
+`GET /api/editor/templates` entry (the research loop with advice preselected) and
+**Blank**, a required **Label** (`#setup-new-label`, ≤160 characters) and
+**Create setup** (`#setup-new-create`) → `POST /api/tasks/<id>/setups`
+`{label, template_id | null}`; on 201 the list reloads with the new `setup_id` preferred
+and the page shows Workflow. When the list says `browser_creatable: false`, `#setup-new` carries the explanation as its
+title and the dialog shows it ("…You can still open existing setups.") with
+**Create setup** disabled, before any click; Enter in the label field submits; the
+"Enter a label" hint clears once a label is typed. A refusal stays in `#setup-new-status`: 403 explains that the
+console operator turns on `"experiment_setups": {"browser_creatable": true}` in
+`settings/console.json` and restarts; 409 shows the server message and any `finding`.
+A listed setup with `refs_match_task: false` shows `#setup-drift` with
+`#setup-drift-update`, which opens the Task version card (the existing reference
+update). `experiment-setup` events carry `{setup, task}`.
+
+Run page: `#run-setup-header` reads "Setup: <label> · Task: <label of the setup's own task>" ("not bound to a
+configured task" for an "other" project). For a setup of the selected task, `new-run.js`
+hides `#new-run-task` and its label, shows `#new-run-task-fact` "Task: <label>" and keeps
+the select's value on that task (a retained preparation keeps its own task); the
+next-step lines then say "check the inputs" only. Admission is unchanged
+(`configured_capture` still refuses another task).
+
+**Runs of this setup** (`setup-runs.js`, `#setup-runs`, shown while a setup is open):
+on Run entry, a setup change and Refresh (`#setup-runs-refresh`) it reads
+`GET /api/operations?limit=50&project_id=<setup_id>` and lists each run as a link to
+`#monitor/<UUID>` (run name and local admission time; outcome sentence below). A newer read
+(another setup, Refresh) replaces an in-flight one; only the newest renders. The status
+line counts the runs, "No runs of this setup yet." when none (complete), "No runs found;
+older runs may be missing." when none and `incomplete`, and with runs plus `incomplete`
+says older runs may be missing (the store scan limit), never claiming a complete
+history; unverifiable records are counted.
+
+**Metric threshold prefill (F11):** `task-tab.js` also reads the selected task's summary
+on Workflow entry and fills `<datalist id="task-metric-ids">` with the declared metric
+ids (main score first, then observational metrics) when the summary is `ready`
+(`window.consoleTaskSummary.mainMetricId`). A newly added metric-threshold stop starts with
+that main score id (no draft, since it is a valid value) and its `#editor-loop-stop-metric-id`
+field suggests the datalist; without a ready summary it starts empty as before.
 
 ## Optional ordinary-file Editor
 
@@ -1329,7 +1696,8 @@ responses and may inspect it through the existing monitor.
 ## Operation list
 
 `GET /api/operations` lists operations admitted by this console's own operation
-store, most recently admitted first, at most `limit` rows. The owner is
+store, most recently admitted first, at most `limit` rows (optional `project_id`
+setup filter, applied before `limit`: see "Experiment setups"). The owner is
 `tools.candidate_operations.list_operations`: it enumerates only
 `{state_root}/operations/<UUID>` entries, verifies each through the same
 `load_record` path as a single read, sorts by the record's `admitted_at`, and
@@ -1380,11 +1748,30 @@ is unchanged) and `#log-notice` states that logs are shown as written and not re
 
 ## Persistent views, routing and session
 
-`index.html` owns a single document with persistent Home, Workflow, Run and Slow
-control sections. `navigation.js` owns `/#home`, `/#workflow`, `/#run`,
+`index.html` owns a single document with persistent Home, Task, Workflow, Run and Slow
+control sections. `navigation.js` owns `/#home`, `/#task`, `/#workflow`, `/#run`,
 `/#monitor` and `/#monitor/<UUID>` (the former `#slow-control[/<UUID>]` is rewritten to the matching
-`#monitor` route with `history.replaceState` before routing, so old links keep working); `document.title` names Workflow and
-Run. Empty fragments use Home. Complete UUID validation
+`#monitor` route with `history.replaceState` before routing, so old links keep working); `document.title` names Task, Workflow and
+Run. Navigation reads Home · Task · Workflow · Run · Monitor · Settings; the step bar
+`#step-indicator` reads Task (`#task`) › Workflow (`#workflow`) › Run (`#run`) ›
+Results (`#monitor`), its current step follows the view and Task is marked done
+when a task is selected.
+
+Task selection (`task-selection.js`, `window.consoleTask`) is browser session state:
+after each Connect (new session revision) it reads `GET /api/tasks`
+(`state` `loading` → `ready` | `error`), keeps a still-configured earlier choice,
+else the choice remembered under `siderius.selected-task.v1/<operations_store_id>`,
+else selects the only task when exactly one is configured. `select(id)`
+persists the choice for that store; `reload()` re-reads the list; every change
+dispatches `console-task`. `gated` is true while connected, the list was read
+(`ready` or `error`) and no task is selected. While gated, `navigation.js` sets
+`aria-disabled="true"` and `title="Choose a task first"` on the nav and step-bar
+links to `#workflow` and `#run` (a click on such a link does nothing), and those
+routes show the `task-required` panel (`#task-required-heading` names the view,
+`#task-required-state` with the `#task-required-choose` link to `#task`) instead of
+their section. Before Connect and while the list loads nothing is gated. The gate
+is presentation only: the editor and Run controllers keep their state and requests
+underneath, and no request carries the selection. Empty fragments use Home. Complete UUID validation
 precedes operation selection; invalid routes show a local error and suspend
 operation polling without mutating a native request. Bare Monitor retains
 selection; repeated identical UUIDs do not reset the monitor epoch/log cursor.
@@ -1464,8 +1851,9 @@ It infers neither scientific success nor complete billing.
 
 | Route | Primary content and action | Secondary content (Settings-gated unless noted) |
 | --- | --- | --- |
-| `#home` | Hero (theme-matched logo + one sentence); entry cards **Quick start** (`#home-quick-start`, see below), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** (the configured-task quick Prepare form; not a beginner entry, API unchanged for CLI/compatibility) |
-| `#workflow` | Page bar (title + dirty badge, project select, task chip, problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Task package and version, Version history (collapsed cards below the frame); Exact Python changes, References, Advanced source, Reload from disk, canvas help, connection mappings (advanced); Details (developer) |
+| `#home` | Hero (theme-matched logo + one sentence); entry cards **Quick start** (`#home-quick-start`, see below: task, then a setup), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** (the configured-task quick Prepare form; not a beginner entry, API unchanged for CLI/compatibility) |
+| `#task` | Intro line; `#task-list` (task buttons `.task-item[data-task-id]`, `aria-pressed` on the selected one, label and `Version <revision>` or `unversioned`; loading, `#task-list-error` + `#task-list-retry`, `#task-list-empty`); `#task-panel` with the read-only summary (see [Task panel](#task-panel-browser)) and footer (`#task-refresh`) | **Task version** card `#editor-task-panel` (version switch for the open workflow; **Update workflow references** returns to `#workflow`, whose save step shows the review, only once a review exists (`updateTask` resolves true for a passed or blocked review); a refused request stays on `#task` with "Workflow references were not updated: <reason>" in `#editor-task-message`) |
+| `#workflow` | Page bar (title + dirty badge, experiment setup select + **New setup…**, task chip (read-only; opens the Task version card on `#task`), problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Version history (collapsed card below the frame); Exact Python changes, References, Advanced source, Reload from disk, canvas help, connection mappings (advanced); Details (developer) |
 | `#run` | Stepper `#run-stepper` (Prepare · Review and launch · Follow in Monitor) and one next-step line `#run-next`; saved-version state; **1 · Prepare** entry `#run-entry[data-run-entry="saved-workflow"]` (**Check inputs** then **Prepare**); **2 · Review and launch** (**Review prepared run** then **Launch run**, inline `#capture-launch-reason`) | Back to workflow; **Run an earlier prepared run instead** (collapsed list); Check status now, operation UUIDs and captured resources (developer) |
 | `#monitor` | Recent operations; Status and logs; loop controls; results; token summary | Operation UUID form, Recorded example (advanced); operation facts, token table (developer) |
 
@@ -1488,27 +1876,29 @@ on Workflow or Run entry. For a project that is not enabled for candidate runs,
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
 
-**Quick start** (`quick-start.js`): Home `#home-quick-start` routes to `#workflow` and
-opens `#quick-start-dialog`, whose **Project (its task and data)** select mirrors the
-editor's own `#editor-project` options, runnable projects first; an edit-only project
-is labelled and warns "You can edit this project but not run it from this console."
-(L-7). The preselection keeps an explicit earlier choice, else the editor's project when
-it is runnable, else the first runnable project; when none is runnable the dialog says
-"No project on this console can be run from here. …" (the fixture knob
-`EDITOR_RUNNABLE_PROJECTS` lets `quick_start.mjs` assert the preselection). **Open research loop** first reads the project (`GET /api/editor/<id>`): a
-failure shows "Couldn't open <project>: <reason>" in the dialog and keeps the button
-for a retry; a project that then does not finish loading within 20 s shows the
-editor's status instead of hanging (L-3). After the import, focus moves to the first
-advice field (L-6); the bounded re-focus stops at the author's first click or key, so a
-module they select is not reselected over.
-**Open research loop** selects that project through the editor's ordinary project
-change (its pending-edits confirmation applies), waits for the saved source, then calls
-`editorTemplates.importById('single-loop-with-advice')`, the gallery's existing import
-path: an unsaved draft, nothing written before Save. No task declares its own template
-yet, so that catalog entry is the default for every task. It is the loop whose Propose
-model `human_advice` socket is connected (managed `advice`), so the advice field Quick
-start focuses reaches the proposal agent; templates that leave the socket unconnected
-show the existing `.advice-warning` under that field. Rounds, stop conditions and
+**Quick start** (`quick-start.js`): Home `#home-quick-start` opens `#quick-start-dialog`
+on Home. **Choose a task** (`#quick-start-task`, from `consoleTask`) has four states in
+`#quick-start-task-state`: "Loading tasks…" while the list is read, "Tasks could not be
+loaded: <reason>" with `#quick-start-task-retry` (`consoleTask.reload()`), "No task is
+configured. …" with a link to the README setup step, or the list (#1131 items 1 and 3;
+never a permanent loading line). **Experiment setup** (`#quick-start-setup`, from
+`GET /api/tasks/<id>/setups`; loading/failure in `#quick-start-setup-state`, a failure with
+`#quick-start-setup-retry`) offers
+"Create a setup from the research-loop template" first, then the task's setups (a setup
+whose runs are off says "Runs are not enabled for this setup"). Creating needs a label
+(`#quick-start-label`, prefilled "<task label> research loop"); **Create and open** selects
+the task, POSTs `{label, template_id: "single-loop-with-advice"}` through
+`experimentSetups.create` (a refusal, including 403 `read_only`, stays in
+`#quick-start-status` with the dialog open) and opens the created setup; choosing an
+existing setup opens it without a request. With `browser_creatable: false` the create
+option is disabled ("turned off on this console"), the dialog says who turns it on, and an
+existing setup is preselected. When an existing setup does not open, the dialog names the
+real reason: the setups read failed, or the open setup's unsaved edits were kept. Then the dialog routes to `#workflow`, waits up
+to 20 s for the saved source (else shows the editor's status, L-3) and focuses the first
+advice field (L-6) through `editorAdvice.focusSettled()`, the bounded re-focus the
+gallery's template import also uses; it stops at the author's first click or key. The
+template is the loop whose Propose model `human_advice` socket is connected (managed
+`advice`), so that advice reaches the proposal agent. Rounds, stop conditions and
 training settings are then edited in the ordinary panel. The Run page's step-1 entry is
 one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
 handoff, so another entry can replace it. When this page created a preparation, the
@@ -1604,9 +1994,10 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
 - Page bar, left to right: `h1` + `#editor-dirty`; `#editor-project` (label visually
   hidden); `#editor-task-chip` (`Task: <package_id> · <revision>`, `Task: not bound` or
   `Task: not open`; `needs-attention` while a bound workflow has no selected configured
-  version or task findings are pending; click opens `#editor-task-panel`, a collapsed
-  `details.card` below the frame holding the unchanged `editor-task-controls.js` panel,
-  open by default when advanced tools are on); `#problems-chip`; `#editor-edit-actions`
+  version; read-only: a click navigates to `#task` and opens `#editor-task-panel` there,
+  the **Task version** `details.card` holding the `editor-task-controls.js` `render`
+  view (version switch), open by default when advanced tools are on; the `⋯` item does
+  the same); `#problems-chip`; `#editor-edit-actions`
   (Undo `undo-2`, Redo `redo-2` icon buttons created by `editor-draft.js`, names via
   `aria-label`; **Revert to saved** keeps a visible label beside its `rotate-ccw` icon so
   it never reads as a second Undo, red-team A-5); Reload from disk (advanced);
@@ -1614,15 +2005,20 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   open bytes, or "Not saved here yet" for a file without a console-saved row, plus a
   dirty dot while edits are unsaved;
   primary **Save** (`#editor-review`); **Next: Run** (`#workflow-next-run`); `⋯`
-  (`details.overflow-menu`: New from template…, Take the tour, Task package and version,
+  (`details.overflow-menu`: New from template…, Take the tour, Task version,
   Version history, Advanced source (advanced only), Settings…).
 - Save step: **Save** is the ordinary editor Review (unchanged request and gating).
+  A pending task reference review renders in `#editor-task-review` inside the save
+  step (`editor-task-controls.js` `renderReview`, from the same `editor.js` state as
+  the Task tab's version switch): target identity, findings `#editor-task-findings`,
+  and the `#editor-task-acknowledge` / `#editor-task-adopt` checkboxes that gate
+  **Save version**.
   When a check succeeds (`state.reviewed` turns true) the in-flow
   `#editor-save-confirm` row opens under the page bar with `#editor-version-name`,
   **Cancel** and **Save version** (`#editor-save`, unchanged: it posts exactly the
   checked `reviewed.source` bytes with their sha256). It closes on Cancel/Esc, on any
-  edit (the check is invalidated) and after Save. A pending task review adds
-  **Show task findings** (opens the task card for the acknowledgement). The diff
+  edit (the check is invalidated) and after Save. A pending task review shows its
+  findings and acknowledgements in the row (`#editor-task-review`, below). The diff
   (`#editor-review-disclosure` › `#editor-diff`) is an Advanced disclosure in the row.
   Template imports run inside `editorPageBar.quietly()` and do not open it.
   `workflowEditor.state` gained presentation fields `reviewed`, `taskReview`,
@@ -1807,7 +2203,7 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Workflow | Problems list (`#editor-problems`) | Beginner | shown | Required inputs to fix before saving |
 | Workflow | Source conflict card (Reload from disk / Reapply my changes onto latest; whole current file advanced) | Beginner | shown when a conflict exists | Must stay reachable to resolve a conflict safely |
 | Workflow | Workflow project select and task chip (page bar) | Beginner | shown | Choose a task |
-| Workflow | Task package and version details (choose version, update references, findings) | Beginner | collapsed card below the frame; open by default with advanced tools | Opened from the task chip when a version must be chosen |
+| Task | Task version card (choose version, update references) for the open workflow | Beginner | collapsed card below the task panel; open by default with advanced tools | Opened from the Workflow task chip when a version must be chosen; findings and acknowledgements render in the Workflow save step (`#editor-task-review`) |
 | Workflow | Module rail (palette) | Beginner | shown | Add modules |
 | Workflow | Canvas, bottom-right controls (Fit, zoom, Check the workflow, Tidy up), `+` add-handles, empty-canvas start state, Skip to canvas | Beginner | shown | Build and connect |
 | Workflow | Canvas controls help (keyboard-move hints) | Advanced | gated | Long control reference; the tour covers first use |
@@ -2194,7 +2590,7 @@ does not inspect files, compose/import tasks or start native observations; inter
 resource paths/settings and credentials are absent. Metadata is configured intent,
 not verification of current task contents or execution readiness.
 
-The Task package and version panel is always visible and never empty: it states
+The Task version panel (Task tab) is never empty: it states
 the saved binding (`This workflow uses task package …, version …`) or that the
 workflow is unbound, then either the version selector with Update workflow
 references (when choices exist) or `#editor-task-unavailable`, which explains that
@@ -2220,3 +2616,116 @@ metadata without replacing drafts, retaining a selection only while choice ID an
 full binding still match. Changed native identity uses the authoring owner’s
 [fresh-candidate and native-profile checks](../workflow_authoring/authoring-contract.md#changed-task-versions-for-fresh-candidates);
 `execution_ready` remains false. No existing run/capture is rewritten.
+
+## Task summary (read-only Task panel)
+
+Owners: `task_summary.py` (`TaskSummaries`, `TaskSummaryView`, `walk_data_root`),
+`task_summary_routes.py`; package facts come from the sandboxed composition child
+(`tools/setup_review/package_facts.py`). Task code never runs in the console process.
+
+Routes (authenticated, `RequestBoundary`):
+
+- `GET /api/tasks` -> `{tasks: [{task_id, label, revision}]}` from configured `TaskChoice`s
+  (`revision` is `task_revision.revision` or `null`).
+  Experiment-setup counts are omitted until a setup registry exists.
+- `GET /api/tasks/{task_id}/summary[?refresh=1][&count_samples=1]` ->
+  `TaskSummaryView` (`schema_version: siderius.console-task-summary/v1`); 404 for an
+  unknown task. Prerequisite and observation failures are states, never HTTP 500.
+
+States: `observing` (child running; poll the same URL), `ready`, `failed`
+(`failure: {stage, message}`; `stage` is a `CheckFailure` stage such as
+`composition`, `planner_strategy`, `package_facts`, `sandbox`, `transport`,
+`stale_manifest`, or `console` for an unexpected console-side error) and
+`unavailable` (`unavailable: {reason, hint}`; `reason` is `sandbox_missing`,
+`data_root_missing`, `manifest_missing` or `llm_config_unreadable`). The model
+profile is read because the child resolves its planner strategy exactly as the
+editor's task observation does.
+
+Observation: the request thread reads the manifest digest and model profile, then
+builds `CompositionJob(summary=TaskSummaryRequest(data_root, count_samples))` with
+the task's `preparation_timeout_seconds`. A background thread walks `data_root`
+and runs `observe_composition` under `preparation_root/<uuid4>` with the task's
+`task_read_only` sources; `data_root` is mounted read-only only for summary jobs.
+`SandboxUnavailable` from the sandbox owner maps to `unavailable/sandbox_missing`.
+Cache: in memory, keyed by `(task_id, manifest sha256, digest of the job with an
+empty scratch)`; a changed manifest yields a new key and drops that task's old
+entries; `refresh=1` re-observes unless an observation is in flight. Sample counts
+are a separate key and run only when `count_samples=1` is requested.
+Only the manifest bytes enter the key: after editing any other package file
+(plugins, declarations, Health config, task code) the operator must Refresh
+(`refresh=1`) to see the change.
+
+View fields:
+
+- `data_root`, `run_policy` (`TaskChoice` timeouts, network, devices,
+  `candidate_environment_names` as names only, `allowed_output_types`). No credential
+  file is read; no secret value can appear.
+- `data_volume`: `{files, bytes, complete, entry_cap}` from a no-follow walk
+  (`os.scandir`, symlinks counted as entries and never followed), capped at
+  100 000 entries; `complete=false` when the cap was reached.
+- `package` (only when `ready`): `identity` (`semantic_fingerprint`,
+  `task_data_path_id`, configured `task_revision`, `revision_matches`),
+  `description` and `model_io` (the composed `task_description` and
+  `forward_contract`), `partition_count`, `main_score` (primary metric `id`,
+  `direction`, `aggregation` from the metric declaration),
+  `observational_metrics` (secondary metrics), `locked_parameters`
+  (`ParameterRules` path -> its single serialized kind `exact`/`range`/`allowed`/`predicate` and value; `{"exact": null}` is a lock of null),
+  `objective` (`LossConfig` dump) with `objective_source` `task` or
+  `planner_chooses`, `deliverable` (`DeliverableNaming` dump or `null` when not
+  declared), `health` (`project_health_roster`: `declaration` and per gate
+  `gate_id`, `checks`, declared `role` `blocking`/`observational`), `plugins`
+  (`configured_ref`, `symbol`, `roles`), `model_types`, `scopes`, `sample_counts`.
+- Plugin `roles` come only from exact file identity: the source files of the
+  resolved task data path and metric implementations, the model-plugin binding's
+  plugin paths, and `source_paths` keys whose value equals the plugin path;
+  otherwise `["unrecorded"]`. Names are never interpreted.
+- `scopes` (`DataScopeFacts`): the task's full declared split, before any
+  run-level sampling: built by `task_data_path.build_full_declared_split` (`formal`,
+  `snapshot`, portion 1.0, a declared frozen training pool's parent pool), no sampling
+  seed and no planner task parameters (`basis` states this). A run's own portions and seeds
+  select a subset of it. `declared` carries per-leg
+  `{file_count, expected_on_disk_bytes}` from the task's `storage_read_scope`;
+  `not_declared` (no scope capability or no `storage_read_scope`) carries no
+  volumes, never 0; `failed` carries the task's message. There is no test-split
+  concept: only training and evaluation scopes are shown.
+- `sample_counts` (`SampleCountFacts`, only with `count_samples=1`): `len()` of the
+  task's `training_dataset` (`train_portion=1.0`) and
+  `validation_dataset` over those scopes; `not_countable` when the task builds no
+  scopes or its datasets have no length. Counting may read the data; it runs in the
+  same sandbox and timeout.
+
+### Task panel (browser)
+
+`task-tab.js` renders the selected task's `TaskSummaryView` into `#task-panel-body`
+(presentation only; every server string is written with `textContent`). It requests
+`tasks/<id>/summary` when the Task view is shown with a selected task and polls the
+plain URL every second while `state` is `observing` (only while the Task view is
+shown). `#task-summary-state[data-state]` carries the state: `observing` says the
+package is being read; `failed` shows the stage and message and asks for a fix and
+Refresh; `unavailable` shows a sentence for the `reason` and the server `hint`.
+Console facts (identity, data folder and volume, run policy) render in every state;
+package sections render only when `ready`. Section ids in order: `#task-identity`
+(label, task id, `package_id · revision` or unversioned, a warning when
+`revision_matches` is false, description, collapsed fingerprint/data path),
+`#task-data` (data folder, files, decimal KB/MB/GB size with exact bytes in the title,
+"(at least)" when `complete` is false, partitions, training/evaluation split
+`file_count · expected_on_disk_bytes` or "not declared by this task", the `basis`
+sentence, `#task-count-samples` → `?count_samples=1`, polled until not observing,
+result in `#task-sample-counts`), `#task-model-io` (non-empty `forward_contract`
+fields), `#task-objective` (non-null `LossConfig` fields, or "the planner chooses"),
+`#task-main-score` (metric id, `higher`/`lower` shown as "Higher/Lower is better",
+aggregation; `#task-observational-metrics` labels secondary metrics **Recording**),
+`#task-health` (`#task-health-gates`: gate, checks, Blocking/Recording/Undeclared from
+the declared `role`; "This task declares no Health checks" for zero gates),
+`#task-plugins` (`#task-plugin-table`: configured ref, symbol, roles; model types),
+`#task-locked` (`#task-locked-table`: path, rule, JSON value), `#task-deliverable`
+and `#task-run-policy` (timeouts, network, devices, GPU: the passed `/dev/nvidia<N>`
+nodes or the shared #1148 sentence "This task does not pass a GPU into the run sandbox;
+runs that train a model will be refused." from `compute-requirement.js`, credential names, allowed output types). `#task-refresh`
+requests `?refresh=1` and is disabled while observing. `GET /api/tasks` items carry
+`revision` (the configured `task_revision.revision`, `null` when unversioned).
+
+`CompositionJob.summary` and `CompositionResult.package` are excluded when absent,
+so existing check/editor job digests and observations are byte-identical. The
+transport refuses a passed result whose `package`/`sample_counts` presence does not
+match the request.

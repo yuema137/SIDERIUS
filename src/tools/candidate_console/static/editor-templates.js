@@ -127,7 +127,7 @@
   function editorBlock() {
     const state = window.workflowEditor?.state;
     if (!window.consoleSession.connected) return 'Connect first.';
-    if (!state?.projectId || !state.sourceAvailable) return 'Open a workflow project first: a template keeps that project\'s task and data references.';
+    if (!state?.projectId || !state.sourceAvailable) return 'Open an experiment setup first: a template keeps that setup\'s task and data references.';
     if (state.saving) return 'Saving the workflow.';
     if (state.conflict) return 'Resolve the source conflict first.';
     // Typed Python is not a draft state: an import would drop it beyond Undo (like restoring a version).
@@ -205,8 +205,8 @@
       if (reviewed) {
         $('editor-template-gallery').close();
         status(`Imported ${template.title} as an unsaved draft.`);
-        // Human advice is the first thing to write (canvas-study T5).
-        void window.editorAdvice?.focusFirst();
+        // Human advice is the first thing to write (canvas-study T5); bounded re-focus (L-6).
+        void window.editorAdvice?.focusSettled();
       } else {
         status(`Not imported: ${document.getElementById('editor-status')?.textContent || 'Review refused the template.'}`);
       }

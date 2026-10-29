@@ -56,4 +56,12 @@ def read_composition_result(job: CompositionJob) -> CompositionResult:
         job.candidate_check is not None
     ):
         raise ValueError("Child result does not match the requested candidate checks")
+    if result.outcome == "passed" and (result.package is not None) != (job.summary is not None):
+        raise ValueError("Child result does not match the requested task summary")
+    if (
+        result.package is not None
+        and job.summary is not None
+        and (result.package.sample_counts is not None) != job.summary.count_samples
+    ):
+        raise ValueError("Child result does not match the requested sample count")
     return result

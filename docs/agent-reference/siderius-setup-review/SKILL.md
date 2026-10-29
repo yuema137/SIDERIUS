@@ -40,6 +40,16 @@ references below. A described task is not authorization for unbounded API/GPU wo
    named dataset does not guarantee matching labels, splits or objectives.
    Implement its required adapters through the published contracts. Explain the
    resulting scientific choices without asking the user to handwrite schemas.
+   For the local console, keep one package per folder under the console
+   workspace, `siderius_workspace/tasks/<name>/` (manifest, plugins and
+   declarations together; data stays in `siderius_workspace/data/<task_id>/`), and
+   register it with `python -m tools.candidate_console add-task --config <console.json>
+   --manifest <manifest>`. It writes the task entry with
+   `task_read_only=[<package folder>]` and explicit starter resource values, then
+   runs `check`, which refuses a manifest-referenced file outside the run sandbox
+   mounts and names it. Show the user the printed entry for review and tell them to
+   restart the console. A package elsewhere needs `--external`. See the
+   [add-task contract](../../../src/tools/candidate_console/console-contract.md#registering-a-task-add-task).
 4. Prepare the experiment separately: model routing, workflow, data exposure,
    iterations, budgets and output workspace. Recommend the
    [Luna test profile](../../../configs/llm/README.md) for an initial process check,

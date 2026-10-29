@@ -38,6 +38,7 @@ from .settings_models import (
     AdviceFileChoice,
     ConsoleFile,
     DataRootChoice,
+    ExperimentSetupsPolicy,
     GlobalSettings,
     GlobalSettingsPolicy,
     LibraryRef,
@@ -58,6 +59,7 @@ INIT_CHILDREN = (
     "candidates",
     "runs",
     "projects",
+    "tasks",
     "library",
     "library/llm",
     "library/advice",
@@ -106,6 +108,12 @@ def resolve_console(payload: bytes, *, settings: GlobalSettings | None = None) -
     )
     policy_value = document.pop("global_settings", None)
     policy = None if policy_value is None else GlobalSettingsPolicy.model_validate(policy_value)
+    setups_value = document.pop("experiment_setups", None)
+    setups_policy = (
+        None if setups_value is None else ExperimentSetupsPolicy.model_validate(setups_value)
+    )
+    if setups_policy is not None and workspace is None:
+        raise SettingsInvalid("experiment_setups requires workspace_root")
     path = digest = None
     if policy is not None:
         if workspace is None:
@@ -176,6 +184,7 @@ def resolve_console(payload: bytes, *, settings: GlobalSettings | None = None) -
         settings=settings,
         settings_sha256=digest,
         from_settings=frozenset(from_settings),
+        setups_policy=setups_policy,
     )
     return ResolvedConsole(config, context)
 
@@ -430,6 +439,7 @@ def _init(base: Path, workspace: Path, port: int) -> Path:
                 "browser_origin": f"http://127.0.0.1:{port}",
                 "tasks": [],
                 "global_settings": {"browser_writable": True},
+                "experiment_setups": {"browser_creatable": True},
             }
             _write_once(
                 console, (json.dumps(skeleton, indent=2) + "\n").encode(), label="console.json"

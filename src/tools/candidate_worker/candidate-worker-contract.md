@@ -1411,7 +1411,9 @@ lease on Linux; callers ignoring the context value retain their behavior. Guarde
 Pause is unavailable without that lease. Fixed profiles reject loop control statuses.
 
 A continuation has a distinct operation/segment UUID but preserves the original
-run_id, task/source/input snapshots, routes, finite limit, advice and token ledger.
+run_id, task/source/input snapshots, routes, finite limit, declared advice and token
+ledger. The only new input a Resume may add is operator advice ("Resume advice"
+below).
 Its controls live at `candidate_run/continuations/<operation-id>/`; the original
 request, receipts and completed body records are never rewritten. Each segment owns
 its Pause marker, so an old Pause never pauses the successor; Pause the successor by
@@ -1548,12 +1550,50 @@ request" otherwise); and every other checkpoint to hold an operator Pause marker
 and record no request ("predecessor lacks Pause request"). A dropped, added or
 edited `input_request` refuses ("disagrees"). Stop recorded while waiting makes the
 run terminal: the paused receipt stays valid, and Review refuses Resume ("loop is
-terminal"). Resume is the existing reviewed Resume; operator advice on resume is not
-part of this version.
+terminal"). Resume is the existing reviewed Resume, optionally with operator advice
+("Resume advice" below).
 
 Byte compatibility: `on_met="stop"` and an absent `input_request` are omitted from
 serialization, so declarations, digests, canonical source, receipts and judge
 request digests of loops without `request_input` are unchanged.
+
+### Resume advice
+
+A Resume may carry operator advice: untrusted text, typed `loop_models.OperatorAdvice`
+(surrounding whitespace removed; 1..4000 characters; no `Cc`/`Cf` (control or format, e.g. C1, bidi overrides, BOM) characters except
+newline and tab). It is not a reviewed captured input: root captured inputs stay
+unchanged, and the advice travels in the operations request and in the immutable
+`LoopContinuation.operator_advice` (omitted when absent, so advice-free bindings keep
+their bytes). `LoopContinuation.resume_advice()` gives
+`ResumeAdvice(after_body=completed_iterations, text)`.
+
+Delivery. Only the proposer receives it, and only for the bodies of the segment whose
+Resume gave it. Each Resume's advice replaces the previous segment's; a Resume
+without advice gives none. `execute_loop` passes it to `execute_fanout`
+(`GraphBody.operator_advice`), and `materialize_fanout` passes it to
+`InterpretationArguments.apply(..., operator_advice=)`. That sets the proposal's
+`human_advice` to `compose_proposal_advice(declared, advice)`:
+`serialize_expert_advice(declared)` when advice was declared, then `"\n\nOperator
+advice after body N:\n" + text` (just the header and text when nothing was
+declared). The native protocol wraps the result as one
+`ExpertContextItem(source="human", source_ref="human:human_advice")`. Without
+operator advice, `compose_proposal_advice` returns the declared value unchanged, so
+proposal inputs are byte-identical. Interpretation, implementation, validation,
+tuning and judge inputs never receive it.
+
+Readback. `segment_advice(initial, segment_id)` reads the ancestry's verified
+continuation bindings into `(resume point, advice)` pairs. `replay_completed(...,
+advice=)` passes each body the advice of the segment that dispatched it
+(`body_advice`) into `verify_graph_trace(..., operator_advice=)`, which replays the
+proposal input with it. A binding whose advice was edited no longer replays the
+recorded proposal input and refuses ("proposal input does not match the declared
+interpretation edge"). The operations owner separately compares the binding's
+advice with the admitted request (`read_segment`, `integrity`).
+
+Tests: `test_interpretation.py` (composition, identity without advice, absent
+binding/request key, advice validation) and `test_loop_resume.py` (process-separated
+real store: advice reaches body 2's proposal only, a same-ID retry with different
+advice conflicts, an edited binding is refused).
 
 Tests: `test_loop_stop.py` (precedence in both declared orders, re-fire from the
 anchor, anchored judge eligibility, summary), `test_finite_loop.py` (driver pause,

@@ -161,7 +161,16 @@ def test_init_output_passes_check_with_owner_only_folders(tmp_path, monkeypatch,
     workspace = tmp_path / "siderius_workspace"
     config = workspace / "settings" / "console.json"
     assert f"Workspace configuration: {config}" in out
-    for name in ("", "operations", "preparations", "candidates", "runs", "library/llm", "data"):
+    for name in (
+        "",
+        "operations",
+        "preparations",
+        "candidates",
+        "runs",
+        "tasks",
+        "library/llm",
+        "data",
+    ):
         assert _mode(workspace / name) == 0o700
     assert not (workspace / "exported_configs").exists()  # created lazily by its writer
     assert _mode(workspace / "settings" / "console-token") == 0o600
@@ -174,6 +183,36 @@ def test_init_output_passes_check_with_owner_only_folders(tmp_path, monkeypatch,
     resolved = load_console(str(config))
     readiness = workspace_readiness(resolved)
     assert readiness is not None and readiness.ready and readiness.init_command is None
+
+
+@pytest.mark.parametrize("command", ["init", "check", "serve"])
+def test_cli_explains_token_and_access_with_browser_port(command, tmp_path, monkeypatch, capsys):
+    """Defect: access guidance omits the token, or the tunnel does not map the browser port to the server port."""
+    config = init_workspace(str(tmp_path), port=8741)
+    data = json.loads(config.read_text())
+    data["browser_origin"] = "http://127.0.0.1:9842"
+    config.write_text(json.dumps(data))
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
+    argv = ("--workspace", str(tmp_path)) if command == "init" else ("--config", str(config))
+    code, out, err = _main(monkeypatch, capsys, command, *argv)
+    token_file = config.parent / "console-token"
+    expected = (
+        "Console address: http://127.0.0.1:9842\n"
+        f"Access token file: {token_file}\n"
+        "  The console asks for this token when you connect, on this machine or remotely.\n"
+        f"  Show it with: cat {token_file}\n"
+        "  On this machine: open the console address in your browser.\n"
+        "  On a remote server: first run on your own computer\n"
+        "    ssh -N -L 127.0.0.1:9842:127.0.0.1:8741 YOUR_HOST\n"
+        "  then open the console address there.\n"
+    )
+    if command == "init":
+        expected = f"Workspace configuration: {config}\n" + expected
+    assert code == 0, err
+    assert out == expected
+    assert token_file.read_text().strip() not in out
 
 
 def test_init_rerun_never_overwrites_console_json_token_or_library(tmp_path):

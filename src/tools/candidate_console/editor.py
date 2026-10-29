@@ -1,5 +1,6 @@
 """Optional declaration editor routes, independent of native console execution."""
 
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from workflows.definition import TaskBinding
 from workflows.definition.source import WorkflowSourceError
 
 from .models import TaskChoice
+from .setups import SetupRegistry
 from .template_routes import add_template_routes
 
 
@@ -60,19 +62,36 @@ def task_reference_targets(tasks: tuple[TaskChoice, ...]) -> tuple[TaskReference
 
 
 def editor_router(
-    projects: tuple[Project, ...],
+    setups: SetupRegistry | tuple[Project, ...],
     runnable_projects: tuple[str, ...] = (),
     task_targets: tuple[TaskReferenceTarget, ...] = (),
 ) -> APIRouter:
+    """``setups``: the console registry, or bare projects (legacy code callers)."""
+    registry = (
+        setups
+        if isinstance(setups, SetupRegistry)
+        else SetupRegistry.legacy(setups, runnable_projects)
+    )
     router = APIRouter(prefix="/api/editor")
+    # Startup setups are opened eagerly (as before); a setup created later is opened on
+    # first use, so it is editable without a restart.
     services = {
-        project.project_id: WorkflowAuthoring(project, task_targets) for project in projects
+        project.project_id: WorkflowAuthoring(project, task_targets)
+        for project in registry.projects()
     }
+    lock = threading.Lock()
 
     def selected(project_id: str) -> WorkflowAuthoring:
-        if project_id not in services:
-            raise HTTPException(404)
-        return services[project_id]
+        with lock:
+            if project_id not in services:
+                setup = registry.get(project_id)
+                if setup is None:
+                    raise HTTPException(404)
+                try:
+                    services[project_id] = WorkflowAuthoring(setup.project, task_targets)
+                except (OSError, ValueError):
+                    raise HTTPException(404) from None
+            return services[project_id]
 
     def perform(
         action: Callable[[], BaseModel], *, writing: bool = False
@@ -115,10 +134,10 @@ def editor_router(
     def choices():
         return [
             {
-                "project_id": project.project_id,
-                "candidate_run_enabled": project.project_id in runnable_projects,
+                "project_id": setup.project.project_id,
+                "candidate_run_enabled": setup.runnable,
             }
-            for project in projects
+            for setup in registry.setups()
         ]
 
     @router.get("/task-choices", response_model=EditorTaskChoices)

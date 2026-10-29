@@ -37,6 +37,11 @@ class ReusableCandidatePreparationRequest(PreviewModel):
     #: Issue #983 — the operator's explicit seed for this preparation run; never
     #: copied into the captured native request. Omitted when ``None``.
     run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: The console experiment setup this run belongs to (run attribution only; never
+    #: read by preparation). Omitted when ``None``, so older requests keep their bytes.
+    setup_id: str | None = Field(
+        default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$", exclude_if=lambda value: value is None
+    )
 
     @field_validator("run_name")
     @classmethod
