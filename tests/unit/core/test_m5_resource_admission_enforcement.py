@@ -73,9 +73,15 @@ class _Decision:
         self.admitted = False
         self.reason_code = reason_code
         self.reason = f"synthetic {reason_code}"
+        self.evidence: dict[str, object] = {}
 
     def model_dump(self, mode: str = "python"):
-        return {"admitted": False, "reason_code": self.reason_code, "reason": self.reason}
+        return {
+            "admitted": False,
+            "reason_code": self.reason_code,
+            "reason": self.reason,
+            "evidence": self.evidence,
+        }
 
 
 class _Sandbox:
