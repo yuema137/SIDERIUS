@@ -111,6 +111,7 @@ def _apply_effective_parameter_rules(
     composition_ref: TaskCompositionRef | None,
     workflow_rules: ParameterRules | None,
     epoch_cap: EpochCapResolution,
+    executed_model_type: str,
 ) -> ExperimentPlan:
     """Apply task rules without bypassing other effective-plan authorities.
 
@@ -130,6 +131,7 @@ def _apply_effective_parameter_rules(
         plan,
         task_rules=task_rules,
         workflow_rules=workflow_rules,
+        executed_model_type=executed_model_type,
     )
     if epoch_cap.cap is not None and effective.train_cfg.get("epochs", 1) > epoch_cap.cap:
         raise ParameterRuleError(
@@ -604,11 +606,18 @@ def prepare_attempt(
     _apply_epoch_bound(plan.train_cfg, epoch_cap.cap, source=epoch_cap.source or "max_epochs")
     resolution.record(plan, "max_epochs_bound")
 
+    # The effective model type (the `force_model` override), resolved ONCE and
+    # early: parameter rules check `model_config` targets against the model
+    # that will execute, and `_resolve_declared_segmentation_size` below asks
+    # the same config class. Rules never change the top-level `model_type`.
+    model_type = model_type_setting if model_type_setting != "auto" else plan.model_type
+
     plan = _apply_effective_parameter_rules(
         plan,
         composition_ref=agent_input.task_composition_ref,
         workflow_rules=agent_input.workflow_parameter_rules,
         epoch_cap=epoch_cap,
+        executed_model_type=model_type,
     )
     resolution.record(plan, "parameter_rules")
     if attempt_role is not None:
@@ -744,13 +753,8 @@ def prepare_attempt(
     # a 37-way image classifier and a frame-window predictor do not have. The
     # D-BC-8 precedent — the partition bound is generic identity and is always
     # checked; the per-partition bound is task topology and is skipped.
-    # The effective model type (the `force_model` override), resolved ONCE and
-    # early. It used to be computed ~120 lines below, next to `exp_id`; hoisting
-    # a pure expression over two values in scope since the unpack changes no
-    # behaviour, and it is what lets the resolution below ask the RIGHT config
-    # class. See `_resolve_declared_segmentation_size`.
-    model_type = model_type_setting if model_type_setting != "auto" else plan.model_type
-
+    # `model_type` (the executed model) is resolved once, before parameter
+    # rules; see there.
     declared_segmentation_size = _resolve_declared_segmentation_size(model_type, plan.model_cfg)
     if topology_facts.declares_physical_geometry and declared_segmentation_size is not None:
         _validate_data_config(

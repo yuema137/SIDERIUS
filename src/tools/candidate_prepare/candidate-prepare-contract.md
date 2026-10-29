@@ -47,6 +47,12 @@ Paths must be canonical absolute local paths. Manifest/profile are existing
 regular files; data is an existing directory. Output and future workspace must
 be absent (including symlinks), with existing directory parents. They cannot
 overlap each other, input data/files/source mounts or protected runtime roots.
+Read-only inputs (data and `task_read_only`) cannot contain or lie inside a
+caller-protected path: `admit(request, *, protected=())`, through
+`capture`/`preflight_reusable_candidate(..., protected=())`, calls
+`validate_read_only_exclusion((data, *sources), protected)`. The default is empty,
+so CLI and subprocess admission are unchanged; the candidate console passes its
+token, credential, store and output roots.
 Sandbox device/environment-name and mount rules apply before ownership claim;
 preparation does not require values for future environment names.
 

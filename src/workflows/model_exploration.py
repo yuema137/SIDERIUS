@@ -195,7 +195,7 @@ from workflows.run_bindings import WorkflowRunBindings
 from workflows.run_config import (
     WorkflowLaunchConfig,
     active_vram_budget,
-    validate_launch_trial_overrides,
+    validate_launch_admission,
 )
 from workflows.run_context import bind_agent_run_context, contextual_bridge_factory
 from workflows.strategy_modes import (
@@ -1656,7 +1656,7 @@ def run_workflow(
 
     launch = bind_runtime_verifier_launch(launch)
 
-    validate_launch_trial_overrides(launch)
+    validate_launch_admission(launch)
 
     if llm_config is None:
         llm_config = WorkflowLLMConfig.default()

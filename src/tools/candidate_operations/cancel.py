@@ -29,6 +29,8 @@ from .store import load_record, locked_store, now, operation_path, validate_conf
 CANCEL_FILE = "cancel.json"
 #: Kinds whose single sandbox the operation child supervises with a cancel probe.
 CANCELLABLE_KINDS = frozenset({"candidate", "candidate_loop_resume"})
+#: Snapshot states with a live operation child that polls the cancel marker.
+LIVE_STATES = frozenset({"active", "queued"})
 
 
 def read_cancel(path: Path, record: OperationRecord) -> CancelRequest | None:
@@ -60,8 +62,9 @@ def request_cancel(config: OperationStoreConfig, operation_id: UUID) -> CancelRe
     """Record cancel for one live candidate operation; idempotent, never a termination claim.
 
     A repeated call returns the first recorded request unchanged. Only a verified
-    ``active`` snapshot (live wrapper, no completion, readable records) records a
-    new request. Refusals: a native receipt or failed admission is ``terminal``; an
+    ``active`` or ``queued`` snapshot (live wrapper, no completion, readable
+    records; ``cancel.LIVE_STATES``) records a new request. A queued operation's
+    waiting child then leaves the host-ledger queue without running (B3-5b). Refusals: a native receipt or failed admission is ``terminal``; an
     integrity failure is ``integrity`` (a later intent must never vouch for an
     unverified receipt); no published process identity yet is ``starting``; any
     other wrapper that is not alive is ``not_running``. Read ``read_operation`` for
@@ -87,8 +90,12 @@ def request_cancel(config: OperationStoreConfig, operation_id: UUID) -> CancelRe
 
 
 def refuse_inactive(snapshot: OperationSnapshot) -> None:
-    """Raise the typed refusal for any snapshot that is not a verified live run."""
-    if snapshot.state == "active":
+    """Raise the typed refusal for any snapshot that is not a verified live run.
+
+    A ``queued`` operation is live: its child waits for a host place, and a
+    recorded cancel removes it from the queue without running it (B3-5b).
+    """
+    if snapshot.state in LIVE_STATES:
         return
     if snapshot.receipt_available or snapshot.state == "operation_failed":
         raise OperationFailure("terminal", "operation already finished; nothing to cancel")
@@ -100,6 +107,7 @@ def refuse_inactive(snapshot: OperationSnapshot) -> None:
 
 
 def cancellable(kind: str, state: str, requested: bool) -> bool:
-    """Whether a new cancel would be recorded: a cancellable kind, verified active, no
-    intent yet. ``OperationSnapshot.cancellable`` carries it; the console reads only that."""
-    return kind in CANCELLABLE_KINDS and state == "active" and not requested
+    """Whether a new cancel would be recorded: a cancellable kind, verified active or
+    queued, no intent yet. ``OperationSnapshot.cancellable`` carries it; the console
+    reads only that."""
+    return kind in CANCELLABLE_KINDS and state in LIVE_STATES and not requested

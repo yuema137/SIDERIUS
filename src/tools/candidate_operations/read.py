@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
 
+from core.runtime_control.scheduling import Placement
 from core.seeding import RunSeedBinding
 from tools.candidate_prepare.models import CandidatePreparationReceipt, PreparationControl
 from tools.candidate_prepare.reusable_models import (
@@ -20,6 +21,8 @@ from tools.candidate_worker.records import verify_candidate_records
 from .cancel import CANCELLABLE_KINDS, cancellable, read_cancel, require_cancel_evidence
 from .expectation import compare_reusable_expectation
 from .files import read_bytes, read_model
+from .host_liveness import PLACEMENT_FILE
+from .host_queue import is_queued
 from .models import (
     Completion,
     NativeReceipt,
@@ -153,6 +156,8 @@ def _read_record(
         for marker in (identity, failure, completion):
             if marker is not None:
                 bound(record, marker)
+        if completion is not None and completion.host_placement is not None:
+            _require_recorded_placement(path, completion)
         if identity is not None:
             process = observe(identity)
         if failure is not None:
@@ -217,20 +222,22 @@ def _read_record(
                 reason=completion.reason,
                 cancel_requested=cancel is not None,
             )
+        waiting = is_queued(path) and not os.path.lexists(path / PLACEMENT_FILE)
+        state = "unknown" if process.status != "alive" else "queued" if waiting else "active"
         return OperationSnapshot(
             operation_id=operation_id,
             kind=record.submission.kind,
             request_digest=record.request_digest,
             observed_at=observed_at,
-            state="active" if process.status == "alive" else "unknown",
+            state=state,
             process=process,
             cancel_requested=cancel is not None,
-            cancellable=cancellable(
-                record.submission.kind,
-                "active" if process.status == "alive" else "unknown",
-                cancel is not None,
-            ),
-            reason="observed_wrapper" if process.status == "alive" else "outcome_unresolved",
+            cancellable=cancellable(record.submission.kind, state, cancel is not None),
+            reason="outcome_unresolved"
+            if state == "unknown"
+            else "host_queued"
+            if state == "queued"
+            else "observed_wrapper",
         )
     except (OSError, ValueError, ValidationError):
         return OperationSnapshot(
@@ -242,6 +249,14 @@ def _read_record(
             process=process,
             reason="integrity_failure",
         )
+
+
+def _require_recorded_placement(path: Path, completion: Completion) -> None:
+    """The completion's host evidence must be the published placement it names."""
+    evidence = completion.host_placement
+    assert evidence is not None
+    if read_model(path / PLACEMENT_FILE, Placement, private_file=True) != evidence.placement:
+        raise OperationFailure("integrity", "completion placement disagrees with placement.json")
 
 
 def releasable(config: OperationStoreConfig, operation_id: UUID) -> bool:

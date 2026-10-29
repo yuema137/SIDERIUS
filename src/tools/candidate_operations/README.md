@@ -215,18 +215,36 @@ the reservation back when its processes, including training, have ended.
 
 A placed submission returns `starting`, the same as before, and its operation
 directory gains `placement.json`, which names the GPU it was given. If the budget
-is currently full, the submission is refused with `host_capacity` and nothing
-starts. Submit it again after a running operation ends. A run that could never
-fit is refused with `resource_refused`. Two runs sharing one GPU slow each other
-down, which can change what a time budget admits. So a `time_budgeted` run is not
-placed on a GPU another run is using; it is refused with
-`shared_gpu_time_budget`. If you accept that contention, set
+is currently full, the submission returns `queued`: it waits its turn, in the
+order submissions arrived, and starts by itself once earlier runs end (status
+shows `queued` until then). To drop a waiting run, cancel it; it is removed from
+the queue without running. Each waiting run keeps a process of about 0.56 GiB of
+memory open while it waits, and nothing limits how many can wait, so do not
+queue more runs than the host's memory can hold. A run that could never fit is refused with
+`resource_refused`. Two runs sharing one GPU slow each other
+down, which can change what a time budget admits. So a `time_budgeted` run is only
+placed on a GPU no other run is using, and no run is placed beside it. If every
+GPU is in use, it waits in the queue. If you accept that contention, set
 `"acknowledge_shared_gpu_time_budget": true` in the budget file before the first
 submission. Changing the budget file while runs hold reservations is refused with
-`budget_mismatch`.
+`budget_mismatch`. If a submission or a release reports `ledger_format`, this
+SIDERIUS version cannot read the ledger file (another version wrote it, or it is
+damaged). Wait until the runs it
+lists have ended, move the named `ledger.json` aside, and retry.
 
-Nothing polls in the background. A finished run's reservation is returned the
-next time any submission uses the ledger. If a crash leaves a reservation behind,
+A graph run can also run its independent nodes at the same time. To allow it,
+add a `parallel` block to the run request that says what one node of each kind
+needs (`gpu`, `vram_gib`, `host_memory_gib`, `cpu_slots`), for example
+`{"capabilities": {"validation": {"gpu": true, "vram_gib": 2.0, "host_memory_gib": 4.0, "cpu_slots": 1}}}`.
+Kinds you leave out run one at a time, as today. With a ledger, the run reserves
+only what its nodes can use at the same moment (for example, two checks that can
+run together, not every node in the graph), and it waits in the queue like any
+other run until that fits. Without a ledger, the block must also carry its own
+`budget`. The exact rules are in the
+[worker contract](../candidate_worker/candidate-worker-contract.md#parallel-dispatch).
+
+Only waiting runs poll the ledger. A finished run's reservation is returned the
+next time a waiting run polls or any submission uses the ledger. If a crash leaves a reservation behind,
 release it explicitly:
 
 ```sh
@@ -304,7 +322,9 @@ Professional, Assistant and GUI use this same reader.
 
 Use this when a candidate run is still `active` and you want it to stop at once,
 for example because it is spending paid API calls. It works for `candidate`
-operations and resumed loop segments.
+operations and resumed loop segments. A run that is still `queued` for a GPU
+is removed from the queue and never starts; its status then reads
+`operation_failed` with reason `cancelled_while_queued`.
 
 ```sh
 .venv/bin/python -m tools.candidate_operations cancel \

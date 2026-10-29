@@ -20,15 +20,32 @@ def canonical(value: str) -> Path:
     return path
 
 
-def _file_bytes(value: str, *, owner_only: bool) -> bytes:
-    path = canonical(value)
+def open_directory(path: Path) -> int:
+    """Open an absolute directory by walking no-follow descriptors from ``/``; caller closes."""
     directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
-    descriptor = None
     try:
-        for part in path.parts[1:-1]:
+        for part in path.parts[1:]:
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
             os.close(directory)
             directory = child
+    except BaseException:
+        os.close(directory)
+        raise
+    return directory
+
+
+def write_all(descriptor: int, payload: bytes) -> None:
+    """Write every byte; ``os.write`` may return a short count."""
+    view = memoryview(payload)
+    while view:
+        view = view[os.write(descriptor, view) :]
+
+
+def _file_bytes(value: str, *, owner_only: bool) -> bytes:
+    path = canonical(value)
+    directory = open_directory(path.parent)
+    descriptor = None
+    try:
         descriptor = os.open(
             path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
         )

@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -31,6 +32,16 @@ from .test_interpretation import interpretation_provider as interpretation_provi
 from .test_native import native_runner as native_runner
 from .test_training import training_runner as training_runner
 
+#: Names the offline fixtures bind in the test process that a real launcher would
+#: provide some other way; every other inherited name is dropped like Popen(env=...).
+FIXTURE_ENVIRONMENT = (
+    "HOME",
+    "TMPDIR",
+    "SIDERIUS_GENERATED_LIBRARY_DIR",
+    "SIDERIUS_CHAIN_WORKSPACE",
+    "PYTHONPATH",
+)
+
 
 @pytest.fixture
 def process_segments(monkeypatch):
@@ -43,6 +54,11 @@ def process_segments(monkeypatch):
     operations = []
 
     def observed(profile, argv, *, cancel_requested=None, **_supervision):
+        from tools.workspace_sandbox.command import child_environment
+
+        # The real sandbox owner: a declared name missing from the operation child's
+        # environment (e.g. an unset placed device selector) refuses the launch.
+        child_environment(profile, os.environ)
         # Like the runner, poll a supplied probe first: a fired probe ends the segment as
         # cancelled before any body runs. Without a recorded intent the probe is False.
         if cancel_requested is not None and cancel_requested():
@@ -79,13 +95,21 @@ def process_segments(monkeypatch):
     def spawn(path, env):
         pid = os.fork()
         if pid == 0:
-            # Production Popen(close_fds=True) does not inherit the admission lock.
+            # Production Popen(close_fds=True) inherits neither the admission lock nor
+            # the host ledger lock held across admission and spawn.
             for descriptor in Path("/proc/self/fd").iterdir():
                 try:
-                    if os.readlink(descriptor).endswith("/admission.lock"):
+                    if os.readlink(descriptor).endswith(("/admission.lock", "/ledger.lock")):
                         os.close(int(descriptor.name))
                 except FileNotFoundError:
                     pass
+            # Like Popen(env=..., start_new_session=True): the child's environment is
+            # replaced by the spawn environment, plus only the names this test's
+            # fixtures bind in place of a real launcher, and it leads its own session.
+            os.setsid()
+            fixture = {key: os.environ[key] for key in FIXTURE_ENVIRONMENT if key in os.environ}
+            os.environ.clear()
+            os.environ.update({**fixture, **env})
             try:
                 code = operation(path)
             except BaseException:
@@ -95,6 +119,8 @@ def process_segments(monkeypatch):
                 os._exit(1)
             os._exit(code)
         operations.append(pid)
+        # Like Popen: a host-ledger slot binds the unreaped child's identity.
+        return SimpleNamespace(pid=pid)
 
     monkeypatch.setattr(
         importlib.import_module("tools.candidate_worker.launch"), "run_observed", observed
@@ -827,3 +853,177 @@ def test_resumed_segment_bounds_validator_pytest_by_its_own_worker_budget(
         and 0 < row["limit"]["seconds"] <= request.timeout_seconds
         for row in rows
     )
+
+
+@pytest.mark.parametrize("queued", [False, True])
+def test_budgeted_resume_reaches_its_segment_placed_or_queued(
+    prepared,
+    loop_tuner,
+    interpretation_provider,
+    process_segments,
+    monkeypatch,
+    tmp_path,
+    queued,
+):
+    """B3-5b: a host-ledger Resume reserves with its root's declaration and runs placed.
+
+    The launch environment carries no ``CUDA_VISIBLE_DEVICES``: placed, the slot
+    overlay supplies it; queued, admission must defer the name (otherwise the
+    Resume is refused ``credentials``) and the waiting child sets it once placed.
+    Either way the segment's supervisor must receive ``on_sandbox_spawn``, or the
+    placed segment never publishes ``sandbox.json`` and its release evidence is
+    missing.
+    """
+    import subprocess
+
+    from core.runtime_control.pair_admission import ResolvedGpuCeiling
+    from core.runtime_control.scheduling import (
+        GpuHardwareClass,
+        GpuSlot,
+        HostBudget,
+        plan_dispatch,
+    )
+    from tools.candidate_operations.host_ledger import (
+        HostReservation,
+        HostScheduling,
+        locked_ledger,
+        read_state,
+        write_state,
+    )
+    from tools.candidate_operations.models import OperationResources
+    from tools.candidate_operations.process import identity_of
+    from tools.candidate_operations.store import operation_path
+    from tools.candidate_worker import loop_resume as worker_loop_resume
+    from tools.candidate_worker import training
+
+    monkeypatch.setattr("tools.candidate_operations.host_queue.QUEUE_POLL_SECONDS", 0.05)
+    slot = "GPU-aaaa"
+    budget = HostBudget(
+        gpus=(
+            GpuSlot(
+                uuid=slot,
+                hardware_class=GpuHardwareClass(
+                    device_name="NVIDIA H100",
+                    total_memory_bytes=80 * 1024**3,
+                    compute_capability=(9, 0),
+                ),
+                ceiling=ResolvedGpuCeiling(
+                    operator_ceiling_gib=4.0,
+                    operator_source="caller",
+                    host_quota_gib=None,
+                    measured_capacity_gib=80.0,
+                ),
+            ),
+        ),
+        host_memory_gib=64.0,
+        cpu_slots=16,
+        max_concurrent_units=4,
+        source="file",
+    )
+    ledger = tmp_path / "ledger"
+    ledger.mkdir(mode=0o700)
+    host = HostScheduling(ledger_root=str(ledger), budget=budget)
+    request = loop_request(prepared, final_iteration=2)
+    request = request.model_copy(
+        update={"environment_names": (*request.environment_names, "CUDA_VISIBLE_DEVICES")}
+    )
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    first_id, next_id = uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_after_body_one(self, value):
+        output = real_tune(self, value)
+        if "iteration_001" in value.storage.local.workspace:
+            request_loop_pause(config, first_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_after_body_one)
+    supervised = worker_loop_resume.run_observed
+
+    def spy(profile, argv, **supervision):
+        # Forked operation child: report the sandbox through whatever hook arrived.
+        if supervision.get("on_spawn") is not None:
+            supervision["on_spawn"](os.getpid())
+        return supervised(profile, argv, **supervision)
+
+    monkeypatch.setattr(worker_loop_resume, "run_observed", spy)
+    resources = OperationResources(
+        gpu_count=1,
+        vram_gib=3.0,
+        vram_source="configured_cap",
+        host_memory_gib=4.0,
+        cpu_slots=1,
+        time_budgeted=False,
+    )
+    submit_operation(
+        config,
+        CandidateOperation(request_id=first_id, request=request, resources=resources),
+        launch_environment=env,
+        host=host,
+    )
+    process_segments()
+    review = review_loop_resume(config, first_id)
+    holder = None
+    if queued:
+        holder = subprocess.Popen(["sleep", "60"], start_new_session=True)
+        owner = SimpleNamespace(
+            submission=SimpleNamespace(request_id=uuid4()), request_digest="0" * 64
+        )
+        reserved = resources.request(
+            unit_id=str(owner.submission.request_id), dispatch_ordinal=0, wall_seconds=60.0
+        )
+        with locked_ledger(str(ledger)) as root:
+            state = read_state(root)
+            placed = plan_dispatch(
+                (reserved.model_copy(update={"dispatch_ordinal": state.next_ordinal}),),
+                (),
+                budget,
+                on_refusal="continue",
+            ).placed[0]
+            write_state(
+                root,
+                state.model_copy(update={"next_ordinal": state.next_ordinal + 1}).replacing(
+                    (
+                        HostReservation(
+                            operation_id=owner.submission.request_id,
+                            request_digest=owner.request_digest,
+                            state_root=str(tmp_path / "elsewhere"),
+                            placement=placed,
+                            process=identity_of(owner, holder.pid),
+                        ),
+                    )
+                ),
+            )
+    handle = submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=first_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment=env,
+        host=host,
+    )
+    assert handle.observation == ("queued" if queued else "starting")
+    if holder is not None:
+        import time
+
+        deadline = time.monotonic() + 30
+        while read_operation(config, next_id).process.reason == "missing_identity":
+            assert time.monotonic() < deadline, "waiting child never published itself"
+            time.sleep(0.05)
+        assert read_operation(config, next_id).state == "queued"
+        holder.kill()
+        holder.wait()
+    process_segments()
+    path = operation_path(config, next_id)
+    assert json.loads((path / "placement.json").read_text())["gpu_uuid"] == slot
+    assert (path / "sandbox.json").exists(), "on_sandbox_spawn never reached the segment"
+    resumed = read_operation(config, next_id)
+    assert resumed.receipt is not None and resumed.receipt.status == "completed", resumed

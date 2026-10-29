@@ -414,6 +414,18 @@ def test_real_trial_schedule_validator_refuses_discarded_overrides(setup):
     assert not operation.output.exists()
 
 
+@pytest.mark.parametrize("value", ["0", "-5"])
+def test_console_preview_refuses_malformed_time_budget(setup, value):
+    """#828: the preview reported a nonpositive budget as a valid launch setting.
+
+    Non-finite values are already refused earlier by the inspection JSON owner.
+    """
+    operation, _ = setup[0](f"--formal_time_budget_minutes={value}")
+    with pytest.raises(ValueError, match="formal_time_budget_minutes must be a finite positive"):
+        inspect_environment(operation)
+    assert not operation.output.exists()
+
+
 def test_aggregate_ceiling_uses_full_capacity_and_independent_quota(setup, monkeypatch):
     from core.runtime_control.pair_admission import (
         HOST_VRAM_QUOTA_MIB_ENV,

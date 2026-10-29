@@ -10,11 +10,17 @@ from uuid import UUID
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
 from tools.workspace_sandbox.profile import SandboxProfile
-from tools.workspace_sandbox.runner import CancelProbe, ObservedExecutionResult, run_observed
+from tools.workspace_sandbox.runner import (
+    CancelProbe,
+    ObservedExecutionResult,
+    SpawnObserver,
+    run_observed,
+)
 
 from .graph_evidence import read_graph_control
 from .loop_models import LoopContinuation
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .parallel_models import GRANT_CONTROL_FILE, HostGrant, admitted_run_budget
 
 if TYPE_CHECKING:
     from core.chain_state import ChainState
@@ -165,16 +171,22 @@ def launch_continuation(
     binding: LoopContinuation,
     *,
     cancel_requested: CancelProbe | None = None,
+    host_grant: HostGrant | None = None,
+    on_sandbox_spawn: SpawnObserver | None = None,
 ) -> CandidateRunReceipt:
     """Only operation admission publishes the binding; no fresh-workspace bypass.
 
-    ``cancel_requested`` has the ``launch_candidate`` meaning for this segment.
+    ``cancel_requested`` and ``on_sandbox_spawn`` have the ``launch_candidate``
+    meaning for this segment.
     """
     from .launch import bounded_terminal, publish, reconcile
 
     control = segment_control(initial, binding.operation_id)
     if read_continuation(initial, binding.operation_id) != binding:
         raise ValueError("resume launch binding changed")
+    admitted_run_budget(request.parallel, host_grant)
+    if host_grant is not None:
+        publish_bytes_write_once(str(control / GRANT_CONTROL_FILE), encode_control(host_grant))
     profile = SandboxProfile(
         workspace=Path(initial.workspace),
         read_only=tuple(Path(p) for p in request.read_only),
@@ -188,6 +200,7 @@ def launch_continuation(
             profile,
             [sys.executable, "-m", __name__, str(control / "continuation.json")],
             cancel_requested=cancel_requested,
+            on_spawn=on_sandbox_spawn,
         )
         publish_bytes_write_once(str(control / "supervision.json"), encode_control(observed))
         terminal = reconcile(
