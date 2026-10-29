@@ -20,43 +20,54 @@
     parent.append(value); return value;
   };
   const label = capability => window.editorCapabilityPresentation?.label(capability) || capability;
-  const NODE_W = 220, NODE_H = 64;
+  const NODE_W = 220, NODE_H = 64, FONT = 20, MIN_FONT_PX = 13.5;
 
-  /** Thumbnail of the template graph from the server preview (positions, edges, loop). */
+  /** Thumbnail of the template graph from the server preview (positions, edges, loop).
+   * The viewBox holds every drawn mark: skipping-edge arcs get room above the row and the loop
+   * label sits below the lowest point of the dashed feedback curve, never on it. */
   function thumbnail(preview, large) {
     const xs = preview.nodes.map(n => n.x), ys = preview.nodes.map(n => n.y);
-    const minX = Math.min(...xs), minY = Math.min(...ys), pad = 24, loopPad = preview.loop ? 70 : 0;
-    const width = Math.max(...xs) - minX + NODE_W + 2 * pad, height = Math.max(...ys) - minY + NODE_H + 2 * pad + loopPad;
+    const minX = Math.min(...xs), minY = Math.min(...ys), pad = 24;
+    const raw = Object.fromEntries(preview.nodes.map(n => [n.id, n]));
+    // One line per connected pair; several arguments between the same nodes draw once.
+    // Skipping edges arc above the row, longer skips higher, so neighbouring arcs stay apart.
+    const lines = [...new Set(preview.edges.map(edge => `${edge.source}>${edge.target}`))].map(pair => {
+      const [source, target] = pair.split('>'), span = Math.abs(raw[target].x - raw[source].x);
+      return {source, target, lift: span <= NODE_W + 120 ? 0 : 24 + 0.05 * span};
+    });
+    // A cubic whose two control points sit `lift` above its ends rises 0.75 * lift; +8 for stroke and arrow.
+    const arcRoom = Math.max(0, ...lines.map(line => line.lift ? 0.75 * line.lift + 8 : 0));
+    // Loop: the dashed curve dips 0.75 * 50 below the cards; the label sits under it (FONT high, 8 gap, 6 descent).
+    const dip = 0.75 * 50, loopRoom = preview.loop ? dip + 8 + FONT + 6 : 0;
+    const width = Math.max(...xs) - minX + NODE_W + 2 * pad, height = Math.max(...ys) - minY + NODE_H + 2 * pad + arcRoom + loopRoom;
     const svg = document.createElementNS(svgNs, 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('class', `template-thumbnail${large ? ' large' : ''}`);
+    // The large preview never shrinks its text below MIN_FONT_PX; a narrower frame scrolls instead.
+    if (large) svg.style.minWidth = `${Math.ceil(width * MIN_FONT_PX / FONT)}px`;
     svg.setAttribute('role', 'img');
     const steps = preview.nodes.map(n => label(n.capability)).join(' → ');
     svg.setAttribute('aria-label', preview.loop ? `${steps}, repeated up to ${preview.loop.final_iteration} time(s) from ${preview.loop.source} back to ${preview.loop.target}` : steps);
-    const at = Object.fromEntries(preview.nodes.map(n => [n.id, {x: n.x - minX + pad, y: n.y - minY + pad}]));
+    const at = Object.fromEntries(preview.nodes.map(n => [n.id, {x: n.x - minX + pad, y: n.y - minY + pad + arcRoom}]));
     const defs = svgElement('defs', {}, svg), marker = svgElement('marker', {id: `arrow-${large ? 'l' : 's'}`, viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse'}, defs);
     svgElement('path', {d: 'M0 0 10 5 0 10z', class: 'template-arrow'}, marker);
     const arrow = `url(#arrow-${large ? 'l' : 's'})`;
-    // One line per connected pair; several arguments between the same nodes draw once.
-    const pairs = new Set(preview.edges.map(edge => `${edge.source}>${edge.target}`));
-    for (const pair of pairs) {
-      const [source, target] = pair.split('>'), a = at[source], b = at[target];
-      const straight = Math.abs(b.x - a.x) <= NODE_W + 120;
+    for (const {source, target, lift} of lines) {
+      const a = at[source], b = at[target];
       const y1 = a.y + NODE_H / 2, y2 = b.y + NODE_H / 2, x1 = a.x + NODE_W, x2 = b.x;
-      // Skipping edges arc above the row so they do not hide the cards they pass.
-      const d = straight ? `M${x1} ${y1} L${x2} ${y2}` : `M${x1 - 30} ${a.y} C${x1} ${a.y - 40}, ${x2 + 30} ${b.y - 40}, ${x2 + 30} ${b.y}`;
+      const d = lift ? `M${x1 - 30} ${a.y} C${x1} ${a.y - lift}, ${x2 + 30} ${b.y - lift}, ${x2 + 30} ${b.y}` : `M${x1} ${y1} L${x2} ${y2}`;
       svgElement('path', {d, class: 'template-edge', 'marker-end': arrow}, svg);
     }
     if (preview.loop) {
-      const s = at[preview.loop.source], t = at[preview.loop.target], bottom = Math.max(s.y, t.y) + NODE_H + 50;
+      const s = at[preview.loop.source], t = at[preview.loop.target], base = Math.max(s.y, t.y) + NODE_H, bottom = base + 50;
       svgElement('path', {d: `M${s.x + NODE_W / 2} ${s.y + NODE_H} C${s.x + NODE_W / 2} ${bottom}, ${t.x + NODE_W / 2} ${bottom}, ${t.x + NODE_W / 2} ${t.y + NODE_H}`,
         class: 'template-loop', 'marker-end': arrow}, svg);
-      const text = svgElement('text', {x: String((s.x + t.x + NODE_W) / 2), y: String(bottom - 4), 'text-anchor': 'middle', class: 'template-loop-label'}, svg);
+      const text = svgElement('text', {x: String((s.x + t.x + NODE_W) / 2), y: String(base + dip + 8 + FONT), 'text-anchor': 'middle', class: 'template-loop-label'}, svg);
       text.textContent = `feedback · up to ${preview.loop.final_iteration} iteration${preview.loop.final_iteration === 1 ? '' : 's'}`;
     }
     for (const n of preview.nodes) {
       const {x, y} = at[n.id], group = svgElement('g', {class: `template-node capability-${n.capability}`}, svg);
       svgElement('rect', {x: String(x), y: String(y), width: String(NODE_W), height: String(NODE_H), rx: '12'}, group);
-      const text = svgElement('text', {x: String(x + NODE_W / 2), y: String(y + NODE_H / 2 + 8), 'text-anchor': 'middle'}, group);
+      const text = svgElement('text', {x: String(x + NODE_W / 2), y: String(y + NODE_H / 2 + 7), 'text-anchor': 'middle'}, group);
       text.textContent = label(n.capability);
     }
     return svg;
@@ -98,7 +109,8 @@
     if (!template) { element('p', 'Choose a template to preview its workflow.', detail, 'muted'); return; }
     element('h3', template.title, detail);
     element('p', template.description, detail, 'muted');
-    detail.append(thumbnail(template.preview, true));
+    // Own frame: a preview wider than the dialog scrolls inside it instead of widening the dialog.
+    element('div', '', detail, 'template-preview').append(thumbnail(template.preview, true));
     if (template.preview.loop) {
       // Template-specific loop details stay collapsed; the Research loop panel edits them after import.
       const more = element('details', '', detail, 'template-advanced'); element('summary', 'Loop details', more);

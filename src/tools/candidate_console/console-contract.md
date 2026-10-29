@@ -1244,11 +1244,17 @@ Templates and advice (`editor-templates.js`, `editor-advice.js`,
 `tools/workflow_authoring/authoring-contract.md`): the gallery opens from the canvas
 header **Templates** button (`#editor-template-open`), the empty-canvas primary action
 (`#workflow-start-template`), Home **Start from a template** and the page-bar `⋯` menu
-(`window.editorTemplates.open()`). Its dialog lists compact cards (icon, title, one
-sentence), first **Blank workflow** (`data-template="blank"`: changes nothing, closes
-the dialog and focuses the module search), then the server templates with the graph
+(`window.editorTemplates.open()`). Its dialog (`min(1200px, 96vw)`) lists compact
+cards (icon, title, one sentence) in one wrapping row, first **Blank workflow**
+(`data-template="blank"`: changes nothing, closes the dialog and focuses the module
+search), then the server templates; below them, at full dialog width, the graph
 preview of the chosen one and loop details collapsed, before **Use template**
-(`#editor-template-import`). Use calls `window.workflowEditor.importSource(source,
+(`#editor-template-import`). The preview's viewBox holds every mark (room above the
+row for skipping-edge arcs, which rise higher the longer they skip; the loop label
+below the lowest point of the dashed feedback curve). Its svg has an inline
+`min-width` so node and loop labels never render below 13.5 CSS px; the
+`.template-preview` frame scrolls horizontally when narrower (below about 1080 px
+viewport for the five-node loop) instead of widening the dialog. Use calls `window.workflowEditor.importSource(source,
 label)` inside `editorPageBar.quietly(...)`, which runs the ordinary source check
 without opening the save step; the result folds into the draft as one undoable step
 and Save is still required. Typed Advanced source is not a draft state, so while it is
@@ -1264,7 +1270,11 @@ coalesced undo step per node, disabled while a palette node is pending.
 `tests/browser/scenario_template_parameters.mjs` (import refused over typed source,
 import loop, edit a training parameter, review, save) and `tests/browser/scenario_template_advice.mjs` (import
 the advice loop, write advice, review, save; contrast warning on the plain loop;
-documents the B6-blocked three-review aggregation scenario) use the same variables.
+documents the B6-blocked three-review aggregation scenario) use the same variables;
+`tests/browser/template_preview_legibility.mjs` checks the "Single research loop"
+preview at 1920, 1280 and 900 px, light and dark: no horizontal dialog overflow, frame
+and **Use template** inside the dialog, all marks inside the viewBox, the loop path
+clear of its label, labels >= 13 CSS px, and the last node reachable by scrolling.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
