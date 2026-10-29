@@ -37,6 +37,8 @@ from .settings_file import protected_paths
 from .settings_models import SettingsContext
 from .settings_routes import settings_router
 from .settings_service import ConsoleSettings
+from .setup_routes import setups_router
+from .setups import SetupStore
 
 
 def error_response(status: int, code: str, message: str) -> JSONResponse:
@@ -85,16 +87,17 @@ def refusal(table: dict[str, str], error: OperationFailure) -> JSONResponse:
 def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -> FastAPI:
     """``settings`` is the startup snapshot's context (``load_console(...).settings``);
     absent, the Settings page is read-only."""
-    service = CandidateConsole(config)
     workspace = None if settings is None else settings.workspace_root
+    service = CandidateConsole(
+        config,
+        SetupStore.load(config, workspace, None if settings is None else settings.setups_policy),
+    )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.console = service
+    # One registry for the editor, run admission, export and native-chain separation.
+    app.include_router(setups_router(service))
     app.include_router(
-        editor_router(
-            service.config.editor_projects,
-            service.config.runnable_editor_projects,
-            task_reference_targets(service.config.tasks),
-        )
+        editor_router(service.setups, task_targets=task_reference_targets(config.tasks))
     )
     app.include_router(edited_router(service))
     app.include_router(reusable_router(service))
@@ -104,7 +107,9 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
     )
     app.include_router(
         settings_router(
-            ConsoleSettings(service.config, settings or SettingsContext(None, frozenset()))
+            ConsoleSettings(
+                service.config, settings or SettingsContext(None, frozenset()), service.setups
+            )
         )
     )
     app.add_middleware(RequestBoundary, config=service.config, token=token(config.auth_token_file))
@@ -185,8 +190,11 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
         return await run_in_threadpool(service.launch, selection)
 
     @app.get("/api/operations")
-    def operations(limit: int = Query(50, gt=0, le=200)):
-        return service.operations(limit)
+    def operations(
+        limit: int = Query(50, gt=0, le=200),
+        project_id: str | None = Query(None, pattern=r"^[a-zA-Z0-9_-]{1,80}$"),
+    ):
+        return service.operations(limit, project_id)
 
     @app.get("/api/operations/{operation_id}")
     def status(operation_id: UUID):

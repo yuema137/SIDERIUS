@@ -88,12 +88,7 @@ class EditedCandidate:
         self.console = console
 
     def project(self, project_id: str):
-        config = self.console.config
-        if project_id not in config.runnable_editor_projects:
-            raise OperationFailure("editor_policy", "project is not enabled for candidate runs")
-        return next(
-            project for project in config.editor_projects if project.project_id == project_id
-        )
+        return self.console.setups.runnable(project_id).project
 
     def review(self, project_id: str, selection: EditedRunSelection) -> EditedRunReview:
         self.console.require_reviewable_resources(selection)

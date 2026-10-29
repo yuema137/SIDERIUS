@@ -33,6 +33,7 @@ from tools.candidate_operations import (
     submit_operation,
 )
 from tools.candidate_operations.files import canonical
+from tools.candidate_operations.listing import MAX_LISTED
 from tools.candidate_operations.models import (
     OperationFailure,
     OperationSubmission,
@@ -77,6 +78,7 @@ from .models import (
 from .readiness import credential_readiness
 from .recorded_examples import read_recorded_example
 from .seed_labels import CHAIN_CONTRADICTED, readback_label
+from .setups import SetupRegistry, SetupStore
 
 
 def seed_readback(snapshot: OperationSnapshot) -> str:
@@ -195,9 +197,16 @@ def with_run_resources(
 
 
 class CandidateConsole:
-    def __init__(self, config: ConsoleConfig):
+    def __init__(self, config: ConsoleConfig, setup_store: SetupStore | None = None):
+        """``setup_store``: the workspace registry (``create_app``); absent, legacy only."""
         self.config = validate_config(config)
         self.host = host_scheduling(self.config)
+        self.setup_store = SetupStore() if setup_store is None else setup_store
+
+    @property
+    def setups(self) -> SetupRegistry:
+        """Every experiment setup: this config's editor_projects plus live registry entries."""
+        return SetupRegistry(self.config, self.setup_store)
 
     def require_reviewable_resources(self, selection: RunResourcesSelection) -> None:
         """Refuse at review what the launch would refuse or silently ignore (B3-4c).
@@ -387,12 +396,19 @@ class CandidateConsole:
         request_cancel(self.config.operation_store, operation_id)
         return OperationCancelAcknowledgement(operation_id=operation_id)
 
-    def operations(self, limit: int = 50) -> OperationListView:
-        """Read-only list of this store's verified records; receipts and paths stay out."""
+    def operations(self, limit: int = 50, project_id: str | None = None) -> OperationListView:
+        """Read-only list of this store's verified records; receipts and paths stay out.
+
+        ``project_id`` keeps only runs of that experiment setup, chosen from the
+        ``MAX_LISTED`` most recently admitted records, at most ``limit`` of them.
+        """
         store = self.config.operation_store
-        listing = list_operations(store, limit)
+        listing = list_operations(store, limit if project_id is None else MAX_LISTED)
+        entries = listing.entries
+        if project_id is not None:
+            entries = tuple(e for e in entries if e.project_id == project_id)[:limit]
         items = []
-        for entry in listing.entries:
+        for entry in entries:
             snapshot = entry.snapshot
             try:
                 loop = loop_status(store, snapshot)

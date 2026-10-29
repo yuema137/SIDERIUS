@@ -57,6 +57,7 @@ from .settings_views import (
     SettingsWrite,
     TaskCard,
 )
+from .setups import SetupRegistry
 
 MAX_LISTED = 200
 SCAN_LIMIT = 4096  # directory entries examined per listing, as in operations listing
@@ -142,8 +143,11 @@ def _publish_private(path: Path, payload: bytes) -> bool:
 
 
 class ConsoleSettings:
-    def __init__(self, config: ConsoleConfig, context: SettingsContext):
+    def __init__(
+        self, config: ConsoleConfig, context: SettingsContext, setups: SetupRegistry | None = None
+    ):
         self.config, self.context = config, context
+        self.setups = SetupRegistry(config) if setups is None else setups
         self._lock = threading.Lock()
 
     @property
@@ -374,7 +378,7 @@ class ConsoleSettings:
         if not self.writable or workspace is None:
             raise SettingsRefusal(403, "read_only", "global settings are read-only on this console")
         try:
-            return export(self.config, workspace, request)
+            return export(self.setups, workspace, request)
         except ExportRefused as error:
             raise SettingsRefusal(error.status, error.code, error.message) from None
 

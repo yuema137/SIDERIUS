@@ -188,7 +188,8 @@ export expression of [LLM defaults](../../../docs/reference/llm-defaults.md)
 bytes are refused. It writes `settings/global_settings.json` write-once only when
 absent, selecting that library profile as `llm_profile`, and `settings/console.json`
 write-once only when absent: `workspace_root`, `port` (default 8740, `--port`),
-`browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`.
+`browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`,
+`experiment_setups: {"browser_creatable": true}` (see "Experiment setups").
 When `console.json` exists and names this workspace, `init` also creates the missing
 derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
 them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
@@ -289,7 +290,9 @@ inputs, protected)` refuses an input that contains or lies inside a protected
 path (`overlap`, beside `validate_destination_overlap`). `settings_file.
 protected_paths(config, workspace)` is `auth_token_file`, `credential_file`,
 `operation_store.state_root`, every preparation and candidate root, every task
-output and reusable runs root, and, with a workspace, `settings/` and `library/`.
+output and reusable runs root, and, with a workspace, `settings/`, `library/` and
+`projects/` (experiment setup folders). `tasks/` is not protected: a task package
+there may legitimately be a `task_read_only` dependency.
 `validate_config(config, workspace=…)` applies it to every task `data_root` and
 `task_read_only` entry; `validate_settings` applies it to every `data_roots` entry.
 `admit(request, *, protected=())` applies it to `(data_root, *task_read_only)`; the
@@ -820,6 +823,72 @@ credential and submission calls, and verifies the configured record files remain
 unchanged.
 
 
+## Experiment setups
+
+An experiment setup is one workflow project bound to one task (`setups.py`).
+`SetupRegistry(config, store)` is the single reader; it merges two sources:
+
+- **Legacy** `ConsoleConfig.editor_projects` (+ `runnable_editor_projects` for the
+  runnable flag), unchanged in meaning. Its task is resolved from the saved
+  source: the resolved `definition.task.manifest` and `data_root`
+  (`resolve_location` against `project_root`) must equal exactly one
+  `TaskChoice`'s resolved `task_manifest` and `data_root`; otherwise it has no
+  matching task and is listed under none. Run admission stays unbound (any
+  configured task's policy applies, as before).
+- **Registry** `<workspace>/settings/experiment_setups.json`
+  (`SetupsFile`, `schema_version: "siderius.console-experiment-setups/v1"`,
+  mode 0600, absent = no entries) with entries `SetupEntry{setup_id, task_id,
+  label, origin: {template_id} | "blank", created_at}` (unique IDs, aware
+  timestamp). Paths are derived, never stored: `projects/<setup_id>/workflow.py`
+  and the 0700 recovery directory `projects/<setup_id>/.recovery`. Registry
+  setups are runnable and bound to their `task_id`.
+
+`SetupStore.load(config, workspace, policy)` reads the file through
+`files.private_bytes`; a non-private file, invalid JSON, an entry naming an
+unknown task, or a `setup_id` equal to an `editor_projects` ID raises
+`SettingsInvalid`, so `check`/`serve` fail at startup (`validate_config(...,
+workspace=…)`). Every setup project (both sources) passes
+`check_setup_project`: `WorkflowAuthoring(project)` path checks and recovery
+separate from every run output root.
+
+**Readers.** All seven former `editor_projects` readers go through the registry:
+`app.create_app` (one `SetupStore` given to `CandidateConsole`; `console.setups`
+is a live `SetupRegistry` view of the current config and store), `editor.
+editor_router` (startup setups opened eagerly; the `WorkflowAuthoring` service
+dict is lock-guarded and extended on first use, so a created setup is editable
+without restart; `GET /api/editor/projects` lists both sources),
+`reusable_policy.configured_capture(setups, project_id, task_id)`,
+`edited_candidate.EditedCandidate.project`, `settings_export.export(setups, …)`,
+`native_chain.check_editor_separation` (reads the live registry at review and
+launch, so a runtime setup is protected like a configured one) and
+`config.validate_config`. Code callers may still pass `editor_router((project,),
+runnable, task_targets)`; bare projects become `SetupRegistry.legacy`.
+
+**Run admission.** `configured_capture` refuses `task_policy` ("experiment setup
+belongs to another task") when a registry setup's run names another `task_id`,
+before the existing reusable-root and `check_request_policy` checks.
+`NewRunSelection`, rendered sources and operation records are unchanged.
+
+**Creation policy.** console.json `experiment_setups: {browser_creatable: bool =
+false}` (`ExperimentSetupsPolicy`, a `ConsoleFile`-only field popped by
+`resolve_console` into `SettingsContext.setups_policy`; it requires
+`workspace_root`). Creation is refused (403 `read_only`) when the block is absent,
+false, or the console has no workspace. `init` writes `true` into a new
+console.json only.
+
+**Routes.**
+
+| Route | Behaviour | Refusals |
+| --- | --- | --- |
+| `GET /api/tasks/{task_id}/setups` | `{"setups": [SetupView{setup_id, label, runnable, saved_version, refs_match_task}]}` for setups whose task is `task_id`; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
+| `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
+| `GET /api/operations?project_id=` | optional ID filter: rows whose recorded `project_id` equals it, taken from the 200 most recently admitted records, then `limit` | 422 for a malformed ID |
+
+CAS: `SetupStore` holds the sha256 of the bytes it last read or wrote; a write
+from another process (or a hand edit) refuses with `stale` and leaves the file
+unchanged. Templates for an opened project keep using `instantiate`, which now
+delegates to `render_shape`.
+
 ## Optional ordinary-file Editor
 
 `ConsoleConfig.editor_projects` defaults to an empty tuple. Each typed `Project`
@@ -1329,7 +1398,8 @@ responses and may inspect it through the existing monitor.
 ## Operation list
 
 `GET /api/operations` lists operations admitted by this console's own operation
-store, most recently admitted first, at most `limit` rows. The owner is
+store, most recently admitted first, at most `limit` rows (optional `project_id`
+filter: see "Experiment setups"). The owner is
 `tools.candidate_operations.list_operations`: it enumerates only
 `{state_root}/operations/<UUID>` entries, verifies each through the same
 `load_record` path as a single read, sorts by the record's `admitted_at`, and
