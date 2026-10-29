@@ -521,10 +521,8 @@ def test_native_tuning_transports_explicit_iteration_and_incumbent(
 
 def test_nonfinite_tuning_score_crosses_the_tuning_unit(prepared, training_runner, monkeypatch):
     """Fails if the unit boundary refuses a -inf tuning score sentinel, which would
-    fail a tuning node whose in-process output was valid. (A -inf
-    `skip_formal_min_delta` is refused earlier, by training admission's own JSON
-    round trip, independently of units; its transport is covered directly in
-    test_unit_process.)"""
+    fail a tuning node whose in-process output was valid. (Nonfinite settings
+    transport is covered directly in test_unit_process.)"""
     from tools.candidate_worker import training
     from tools.candidate_worker.graph_evidence import read_graph_control
     from tools.candidate_worker.unit_models import NodeUnitResult
@@ -576,3 +574,65 @@ def test_unadapted_training_trace_bytes_are_unchanged(
     verify_graph_trace(
         request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
     )
+
+
+def test_graph_training_refuses_an_infinite_penalty_before_tuning(prepared, training_runner):
+    """#1045: an infinite degenerate_penalty_score reached the graph tuning
+    input (and, before #1012, was reread as None). Its owner now refuses it at
+    training admission: no tuning input is written and the tuner never runs."""
+    request = graph_training_request(prepared)
+    path = Path(request.preview.project_root) / "training.json"
+    settings = json.loads(path.read_text())
+    settings["launch"]["degenerate_penalty_score"] = "-inf"
+    path.write_text(json.dumps(settings))
+    request = refresh(request)
+    receipt = launch_candidate(request)
+    assert receipt.status == "failed"
+    assert "degenerate_penalty_score" in (receipt.error or "")
+    assert not tuning_input_path(Path(receipt.workspace), "train").exists()
+    assert not any(name == "tuner" for name, _ in training_runner)
+
+
+def test_native_run_output_with_nonfinite_scores_is_not_a_disagreement(
+    prepared, training_runner, monkeypatch
+):
+    """#1046: the native writer stores run_output through the storage owner
+    (inf/NaN -> null), and capture_record then compared that record with the
+    returned output (-inf, NaN) and raised "native record disagrees", failing a
+    real graph training run. The record must keep the storage owner's strict
+    JSON, and the in-memory output must keep -inf for the next phase."""
+    from nodes.ml_hyperparameter_tune_agent.records import publish_run_output
+    from tools.candidate_worker import training
+    from tools.candidate_worker.graph_evidence import read_graph_control
+    from tools.candidate_worker.unit_models import NodeUnitResult
+    from tools.candidate_worker.unit_transport import decode_transport
+
+    tuner = training.HyperparamTuningAgent
+    real = tuner.run
+
+    def native_run(self, value):
+        output = real(self, value).model_copy(
+            update={
+                "best_denoising_score": float("-inf"),
+                "best_formal_denoising_score": float("nan"),
+            }
+        )
+        local = value.storage.local
+        publish_run_output(str(Path(local.workspace) / f"run_output_{local.run_name}.json"), output)
+        return output
+
+    monkeypatch.setattr(tuner, "run", native_run)
+    receipt = launch_candidate(graph_training_request(prepared))
+    assert receipt.status == "completed", receipt.error
+    (path,) = Path(receipt.workspace).rglob("run_output_*.json")
+    raw = path.read_text()
+    assert "Infinity" not in raw and "NaN" not in raw
+    saved = training.HyperparamTuningOutput.model_validate_json(raw)
+    assert saved.best_denoising_score is None and saved.best_formal_denoising_score is None
+    result = decode_transport(
+        NodeUnitResult,
+        read_graph_control(Path(receipt.workspace) / "candidate_run/units/train/result.json"),
+    )
+    assert result.output is not None
+    returned = decode_transport(training.HyperparamTuningOutput, result.output.encode())
+    assert returned.best_denoising_score == float("-inf")

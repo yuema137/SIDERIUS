@@ -271,8 +271,9 @@ def _should_skip_formal(
     behaves exactly as before — including running formal with no valid
     winner — because the deltas are not consumed at all.
 
-    The disabled sentinel is the ORDER's worst value (``-inf`` under a
-    ``higher`` metric): a threshold nothing can be worse than can never skip.
+    The ORDER's worst value (``-inf`` under a ``higher`` metric) never skips:
+    nothing can be worse than it. It is reached through the worst-value
+    bootstrap; operator deltas are finite whenever the gates are on.
     """
 
     if not gates_enabled:
@@ -298,8 +299,9 @@ def _should_bypass_formal_time_budget(
     so the first valid trial always clears it and establishes the chain's
     first formal baseline.
 
-    The disabled sentinel is the order's BEST value: a threshold nothing can
-    reach can never bypass.
+    The order's BEST value can never be reached, so it never bypasses. No
+    resolved threshold produces it: operator deltas are finite whenever the
+    gates are on (``validate_formal_launch``); this is a defensive guard.
     """
 
     if winner is None:
@@ -394,9 +396,10 @@ def _resolve_formal_comparison_thresholds(
     # The two margins are DECLARED by the operator in the golden metric's own
     # units (§3.3 row 1) and are coordinates on the better-direction axis:
     # positive tightens the threshold, negative loosens it, under BOTH
-    # directions. That is what preserves the documented disable convention —
-    # skip `delta=-inf` and bypass `delta=+inf` still resolve to this metric's
-    # worst and best sentinels rather than swapping meaning under `lower`.
+    # directions. They are finite here: `validate_formal_launch` refuses
+    # nonfinite deltas while the gates are on. The gates are off by default;
+    # to keep them off, omit `--enable_chain_incumbent_formal_gates` (or set
+    # `enable_chain_incumbent_formal_gates=false`).
     return (
         reference_score,
         order.toward_better(reference_score, skip_min_delta),

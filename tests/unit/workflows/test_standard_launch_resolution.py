@@ -116,26 +116,28 @@ def test_production_passes_shared_projection_to_workflow(tmp_path, monkeypatch, 
         with pytest.raises(SystemExit) as exit_info:
             run_one_iteration.main()
     assert exit_info.value.code == 0
-    assert len(projected) == 1
-    assert run.call_args.kwargs["launch"] is projected[0]
-    assert projected[0].data_dir == str(dataset.resolve())
-    assert projected[0].runtime_completion_policy == "verified-prediction-v1"
+    # main() also projects once, before workspace binding, for the launch
+    # admission check (#1045); the run receives the post-resolution projection.
+    assert len(projected) == 2
+    assert run.call_args.kwargs["launch"] is projected[-1]
+    assert projected[-1].data_dir == str(dataset.resolve())
+    assert projected[-1].runtime_completion_policy == "verified-prediction-v1"
     assert expected_locks[0].runtime_completion_policy == "verified-prediction-v1"
-    assert projected[0].runtime_watchdog_deadline_policy == deadline_policy
+    assert projected[-1].runtime_watchdog_deadline_policy == deadline_policy
     assert expected_locks[0].runtime_watchdog_deadline_policy == deadline_policy
     from workflows.llm_config import WorkflowLLMConfig
     from workflows.model_exploration import _workflow_lock_identity
 
     assert (
         _workflow_lock_identity(
-            projected[0], WorkflowLLMConfig(tune={"planner_strategy": "native-timing-v1"})
+            projected[-1], WorkflowLLMConfig(tune={"planner_strategy": "native-timing-v1"})
         ).runtime_watchdog_deadline_policy
         == deadline_policy
     )
-    assert projected[0].max_rounds == 7
-    assert projected[0].trial_time_budget_minutes == 1.5
-    assert projected[0].formal_time_budget_minutes == 9
-    assert projected[0].validation_max_samples == 137
+    assert projected[-1].max_rounds == 7
+    assert projected[-1].trial_time_budget_minutes == 1.5
+    assert projected[-1].formal_time_budget_minutes == 9
+    assert projected[-1].validation_max_samples == 137
     assert run_one_iteration.resolve_launch_identity is launch_identity.resolve_launch_identity
     assert (
         run_one_iteration.parse_allowed_output_types is standard_launch.parse_allowed_output_types

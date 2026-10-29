@@ -46,8 +46,10 @@ must satisfy the existing saved-report reader/output-claim contracts.
 6. `build_standard_launch_config` projects the fresh normalized arguments after
    data/watchdog resolution, with empty restored-source paths and no fixed plan,
    as required by the supported scope. `validate_launch_admission` checks
-   the actual transit object: the trial-override schedule and the tuner-owned
-   time-budget rule (finite positive minutes, or null). All transit fields are serialized; only the two
+   the actual transit object: the trial-override schedule and every
+   non-null launch value against its owner annotation (the same-named
+   `HyperparamTuningInput` field, `ResearchPolicy.minimum_boldness`, or
+   `run_config.FiniteTargetScore`). All transit fields are serialized; only the two
    existing `FORMAL_DELTA_FIELDS` use lossless nonfinite strings. Other numeric
    serialization retains existing finite-value validation.
 7. `claim_snapshot_output` claims a new directory. Existing write-once durable

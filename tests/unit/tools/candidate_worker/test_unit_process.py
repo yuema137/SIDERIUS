@@ -31,7 +31,7 @@ from tools.candidate_worker import launch_candidate
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.candidate_worker.unit_runner import spawn_unit as real_spawn_unit
 
-from .conftest import REPO, _prepare_request
+from .conftest import QUICKSTART, REPO, _prepare_request
 from .test_graph import initial
 from .test_native import Provider, native_runner
 from .test_training import training_runner
@@ -327,11 +327,12 @@ def test_unit_transport_keeps_nonfinite_floats_and_validator_filled_fields_set()
     nested = output.metric_spec.scoreability
     assert decoded.metric_spec.scoreability.model_fields_set == nested.model_fields_set
     assert decoded.metric_spec.scoreability == nested
-    settings = CandidateTrainingSettings.model_validate_json(
-        '{"launch": {"skip_formal_min_delta": -Infinity}}'
-    )
-    restored = decode_transport(type(settings), encode_transport(settings))
-    assert restored.launch.skip_formal_min_delta == float("-inf")
+    # #1045: the settings a unit transports cannot carry an infinite penalty;
+    # its owner refuses it before any transport (fails without allow_inf_nan).
+    with pytest.raises(ValueError, match="degenerate_penalty_score"):
+        CandidateTrainingSettings.model_validate_json(
+            '{"launch": {"degenerate_penalty_score": -Infinity}}'
+        )
     # NaN is not equal to itself; the round-trip check must still accept it.
     nan = decode_transport(
         type(output),

@@ -157,12 +157,12 @@ class TestMovementAlongTheAxis:
         assert LOWER.toward_worse(10.0, 0.5) == 10.5
 
     @pytest.mark.parametrize("order", [HIGHER, LOWER], ids=["higher", "lower"])
-    def test_the_disable_convention_survives_both_directions(self, order):
-        """The operator disables the skip gate with ``delta = -inf`` and the
-        bypass gate with ``delta = +inf``. Under ``lower`` those become
-        ``ref - (-inf) = +inf`` and ``ref - inf = -inf`` — which are exactly
-        that direction's worst and best sentinels, so the gates stay disabled
-        without the operator learning a second convention."""
+    def test_infinite_deltas_resolve_to_the_direction_sentinels(self, order):
+        """Defensive arithmetic, not an operator setting (launch refuses
+        infinite deltas while the gates are on). Under ``lower``,
+        ``ref - (-inf) = +inf`` and ``ref - inf = -inf`` are that direction's
+        worst and best sentinels, which the gate helpers treat as inert;
+        raw addition would instead yield the BEST value for skip."""
         assert order.toward_better(-2.5, float("-inf")) == order.worst_sentinel
         assert order.toward_better(-2.5, float("inf")) == order.best_sentinel
 

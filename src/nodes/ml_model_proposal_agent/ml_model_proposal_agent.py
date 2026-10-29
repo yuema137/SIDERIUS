@@ -25,7 +25,6 @@ Node contract:
 import argparse
 import json
 import os
-import uuid
 from functools import lru_cache
 from typing import Any
 
@@ -49,6 +48,7 @@ from agent.schemas.proposal import (
     FalsifiablePrediction,
     ProposalInput,
     ProposalOutput,
+    mint_candidate_id,
 )
 from agent.schemas.proposer_evidence import (
     build_proposer_evidence,
@@ -1672,7 +1672,7 @@ class MLModelProposalAgent:
         # Unconditional assignment: even if a raw payload smuggled an id past
         # a parser whitelist, the system's mint overwrites it — the id is
         # never LLM-generated and never derived from model_name.
-        output.candidate_id = f"cand_{uuid.uuid4().hex}"
+        output.candidate_id = mint_candidate_id()
         prediction = output.falsifiable_prediction
         reference = observed_prediction_reference(inp, prediction.metric) if prediction else None
         # Unconditional overwrite: this provenance is framework-owned, like

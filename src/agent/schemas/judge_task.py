@@ -18,28 +18,24 @@ rubric and any content digest mismatch.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Annotated, Any, Literal, Self
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
 
-Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-Identifier = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$", max_length=100)]
-Version = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$", max_length=40)]
-
+# Re-exported: declarations import the pydantic-only ``judge_refs`` directly.
+from agent.schemas.judge_refs import MAX_DEBATE_ROUNDS as MAX_DEBATE_ROUNDS
+from agent.schemas.judge_refs import Digest as Digest
+from agent.schemas.judge_refs import Identifier as Identifier
+from agent.schemas.judge_refs import RubricRef as RubricRef
+from agent.schemas.judge_refs import StrictJudgeModel as _StrictModel
+from agent.schemas.judge_refs import Version as Version
 
 #: Bounds keep judge payloads and rubric arithmetic small and reviewable.
 MAX_RUBRIC_CRITERIA = 32
 MAX_RUBRIC_WEIGHT = 100.0
 MAX_RUBRIC_SCALE_SPAN = 100
-#: Debate rounds a ``debate-judge/v1`` declaration may request (declaration and
-#: debate call schemas share it; kept here because declarations import only this module).
-MAX_DEBATE_ROUNDS = 4
-
-
-class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True, allow_inf_nan=False)
 
 
 class JudgeTaskBlocks(BaseModel):
@@ -101,14 +97,6 @@ class RubricSpec(_StrictModel):
                 f"{MAX_RUBRIC_SCALE_SPAN}"
             )
         return self
-
-
-class RubricRef(_StrictModel):
-    """Exact reference to a rubric: identity plus the content digest it was declared with."""
-
-    id: Identifier
-    version: Version
-    sha256: Digest
 
 
 def rubric_sha256(spec: RubricSpec) -> str:

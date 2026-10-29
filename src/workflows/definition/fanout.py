@@ -7,10 +7,14 @@ from .adaptor_strategies import (
     CollectCombine,
     FirstAdmissibleSelect,
     PassCombine,
+    PerItemDistribute,
     SingleDistribute,
     SplitItemsDistribute,
+    derive_cardinality,
 )
+from .adaptor_validation import check_strategies, output_contract
 from .candidate import check_tuning_edge, refuse_declaration_only
+from .llm_strategies import LLM_STRATEGY_TYPES
 from .models import (
     AdaptorInstance,
     AdaptorSource,
@@ -93,11 +97,25 @@ LITERATURE_COLLECTION_PROFILE = "native-literature-collection/v1"
 # S3 (B6-4): one review -> split-items/v1 into M outputs -> M proposals through
 # literature-to-proposal -> one complete family each.
 LITERATURE_SPLIT_PROFILE = "native-literature-split/v1"
+# B6-8a: N reviews -> one LLM COMBINE kind (B2) -> single/v1 or per-item/v1(M) -> one
+# proposal per output through literature-to-proposal -> its complete branches. The
+# only profile that executes an LLM COMBINE kind.
+LITERATURE_JUDGED_PROFILE = "native-literature-judged/v1"
+# B6-8b: N external proposals -> one LLM COMBINE over proposal.output -> single/v1 or
+# per-item/v1(M) -> M branches whose implementation (and validation) consume the
+# adaptor output ``i`` instead of a proposal node result.
+PROPOSAL_JUDGED_PROFILE = "native-proposal-judged/v1"
 ADAPTOR_PROFILES = (
     SELECTION_PROFILE,
     ROUTED_PROFILE,
     LITERATURE_COLLECTION_PROFILE,
     LITERATURE_SPLIT_PROFILE,
+    LITERATURE_JUDGED_PROFILE,
+    PROPOSAL_JUDGED_PROFILE,
+)
+LLM_PROFILES = (LITERATURE_JUDGED_PROFILE, PROPOSAL_JUDGED_PROFILE)
+LLM_COMBINE_NOT_ADMITTED = (
+    f"an LLM COMBINE kind executes only under the {' / '.join(LLM_PROFILES)} profiles"
 )
 
 
@@ -110,6 +128,29 @@ class AdaptorSelection:
 
 
 @dataclass(frozen=True)
+class JudgedBranch:
+    """One branch fed by adaptor output ``index`` (``None`` for ``single/v1``)."""
+
+    index: int | None
+    implementation: str
+    validation: str
+
+
+@dataclass(frozen=True)
+class ProposalSelection:
+    """B6-8b: the LLM adaptor over every proposal and the branches its outputs feed."""
+
+    adaptor: str
+    branches: tuple[JudgedBranch, ...]
+
+    def branch(self, node_id: str) -> JudgedBranch | None:
+        return next(
+            (item for item in self.branches if node_id in (item.implementation, item.validation)),
+            None,
+        )
+
+
+@dataclass(frozen=True)
 class ProposalFamilies:
     families: tuple[ProposalFanout, ...]
     predecessors: tuple[tuple[str, frozenset[str]], ...]
@@ -118,10 +159,22 @@ class ProposalFamilies:
     tuning: str | None = None
     selection: AdaptorSelection | None = None
     literature_adaptor: LiteratureAdaptorEdges | None = None
+    proposal_selection: ProposalSelection | None = None
 
     @property
     def branches(self) -> tuple[tuple[str, str], ...]:
-        return tuple(branch for family in self.families for branch in family.branches)
+        judged = () if self.proposal_selection is None else self.proposal_selection.branches
+        return tuple(branch for family in self.families for branch in family.branches) + tuple(
+            (item.implementation, item.validation) for item in judged
+        )
+
+    def judged_source(self, node_id: str) -> AdaptorSource | None:
+        """The adaptor output a judged branch node consumes as its proposal, else ``None``."""
+        selection = self.proposal_selection
+        branch = None if selection is None else selection.branch(node_id)
+        if selection is None or branch is None:
+            return None
+        return AdaptorSource(adaptor=selection.adaptor, index=branch.index)
 
     @property
     def literature_reviews(self) -> tuple[str, ...]:
@@ -158,6 +211,16 @@ def execution_families(
         admits_adaptors=profile in ADAPTOR_PROFILES,
         admits_routes=profile == ROUTED_PROFILE,
     )
+    if profile not in LLM_PROFILES and any(
+        isinstance(adaptor.combine, LLM_STRATEGY_TYPES) for adaptor in definition.adaptors
+    ):
+        raise ValueError(LLM_COMBINE_NOT_ADMITTED)
+    if profile == LITERATURE_JUDGED_PROFILE:
+        return literature_judged_candidate(definition)
+    if profile == PROPOSAL_JUDGED_PROFILE:
+        from .proposal_judged import proposal_judged_candidate
+
+        return proposal_judged_candidate(definition)
     if profile == SELECTION_PROFILE:
         return selection_candidate(definition)
     if profile == LITERATURE_COLLECTION_PROFILE:
@@ -457,6 +520,61 @@ def literature_split_candidate(
     if len(indices) != len(edges.proposals) or indices != list(range(distribute.count)):
         raise ValueError("literature split requires one proposal per adaptor output index")
     return shape
+
+
+def literature_judged_candidate(
+    definition: WorkflowDefinition | ReusableWorkflowDefinition,
+) -> ProposalFamilies:
+    """N reviews -> one LLM COMBINE -> one proposal per output index (B6-8a).
+
+    ``single/v1`` feeds one proposal (``index`` absent); ``per-item/v1(M)`` feeds M
+    proposals, indices ``0..M-1`` each bound once. The LLM kind's own static rules
+    (``admit_llm_strategy``) are applied here, at profile admission.
+    """
+    adaptor, reviews = _literature_adaptor(definition)
+    if not isinstance(adaptor.combine, LLM_STRATEGY_TYPES):
+        raise ValueError("literature judged profile requires an LLM COMBINE kind")
+    distribute = adaptor.distribute
+    if not isinstance(distribute, SingleDistribute | PerItemDistribute):
+        raise ValueError("literature judged profile requires single/v1 or per-item/v1")
+    edges, shape = _literature_proposals(
+        definition, adaptor, reviews, "literature-to-proposal", "output"
+    )
+    indices = [item.index for item in edges.proposals]
+    expected = [None] if isinstance(distribute, SingleDistribute) else list(range(distribute.count))
+    if sorted(indices, key=lambda index: -1 if index is None else index) != expected:
+        raise ValueError("literature judged profile requires one proposal per adaptor output")
+    admit_llm_combine(adaptor)
+    return shape
+
+
+def admit_llm_combine(adaptor: AdaptorInstance) -> None:
+    """Refuse an LLM COMBINE kind ``admit_llm_strategy`` does not admit for this adaptor."""
+    from workflows.judge_strategies import admit_llm_strategy
+
+    strategy = adaptor.combine
+    assert isinstance(strategy, LLM_STRATEGY_TYPES)
+    admission = admit_llm_strategy(
+        strategy,
+        inputs=adaptor.inputs,
+        output_contract=output_contract(adaptor),
+        select=adaptor.select,
+        cardinality=derive_cardinality(adaptor.select, adaptor.distribute),
+    )
+    if not admission.admitted:
+        reasons = "; ".join(f"{item.code}: {item.message}" for item in admission.refusals)
+        raise ValueError(f"adaptor {adaptor.id}: {strategy.kind} is not admitted: {reasons}")
+    if strategy.on_failure != "fail":
+        # The fallback replaces only COMBINE: the same deterministic validation table
+        # must admit it with this adaptor's SELECT and DISTRIBUTE.
+        fallback = adaptor.model_copy(update={"combine": strategy.on_failure.combine})
+        try:
+            check_strategies(fallback)
+        except ValueError as error:
+            raise ValueError(
+                f"adaptor {adaptor.id}: fallback {strategy.on_failure.combine.kind} is not "
+                f"admitted with {adaptor.select.kind} and {adaptor.distribute.kind}: {error}"
+            ) from error
 
 
 def _literature_adaptor(

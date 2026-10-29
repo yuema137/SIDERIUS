@@ -28,7 +28,7 @@ def refuse_declaration_only(
     """Routes and adaptors run only where a profile admits them.
 
     Only the adaptor profiles (``fanout.ADAPTOR_PROFILES``: selection, routed and
-    the two literature profiles) pass ``admits_adaptors=True``; only the routed
+    the three literature profiles) pass ``admits_adaptors=True``; only the routed
     profile passes ``admits_routes=True``. The adaptor format gate guarantees
     ``adaptor_format`` is set iff an adaptor is used.
     """

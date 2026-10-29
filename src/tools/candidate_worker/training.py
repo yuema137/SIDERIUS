@@ -20,6 +20,7 @@ from workflows.tuner_preparation import prepare_native_tuner_input
 from .artifacts import capture_record
 from .invocation import FixedInvocationContext, invocation_from_storage
 from .models import CandidateRunReceipt, tuning_seed_scope
+from .record_json import artifact_json
 from .training_admission import TrainingAdmission
 from .training_evidence import capture_training_evidence
 
@@ -153,7 +154,9 @@ def run_training(
     )
     if input_path is not None:
         input_path.parent.mkdir(parents=True, exist_ok=True)
-        publish_bytes_write_once(str(input_path), tune_input.model_dump_json(indent=2).encode())
+        publish_bytes_write_once(
+            str(input_path), artifact_json(tune_input, kind="internal", indent=2)
+        )
     agent = HyperparamTuningAgent()
     context.bind(agent)
     output = HyperparamTuningOutput.model_validate(agent.run(tune_input))
