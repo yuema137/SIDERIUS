@@ -31,7 +31,12 @@ PROGRAM_SEED = 13
 
 
 def _persist_program(
-    tmp_path: Path, source: str, *, keys: tuple[str, ...], determinism: str = "deterministic"
+    tmp_path: Path,
+    source: str,
+    *,
+    keys: tuple[str, ...],
+    determinism: str = "deterministic",
+    seed: int = 7,
 ):
     measurements = [
         {
@@ -62,7 +67,7 @@ def _persist_program(
             "max_artifact_bytes": 0,
         },
         determinism=determinism,
-        seed=7 if determinism == "deterministic" else None,
+        seed=seed if determinism == "deterministic" else None,
         rationale="Exercise the sandbox boundary.",
     )
     provenance = GeneratedProgramGenerationProvenance(

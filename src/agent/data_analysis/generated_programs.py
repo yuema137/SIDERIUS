@@ -29,6 +29,7 @@ from agent.schemas.data_analysis.generated_program import (
     GeneratedMeasurementDeclaration,
     GeneratedParameterDeclaration,
     GeneratedProgramResourceRequest,
+    require_declared_seed_range,
     validate_generated_input_formats,
 )
 from agent.schemas.data_analysis.skills import SkillInputSlot
@@ -62,6 +63,7 @@ class GeneratedProgramDraft(FrozenModel):
             raise ValueError("generated program determinism posture is invalid")
         if self.determinism == "deterministic" and self.seed is None:
             raise ValueError("deterministic generated programs require an explicit seed")
+        require_declared_seed_range(self.seed)
         try:
             tree = ast.parse(self.source_code, filename=f"{self.program_id}.py", mode="exec")
         except SyntaxError as exc:

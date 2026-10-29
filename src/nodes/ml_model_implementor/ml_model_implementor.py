@@ -16,7 +16,7 @@ The LLM writes only the marked sections; all plugin boilerplate is fixed.
 
 Node contract:
   run(input: ImplementorInput) -> ImplementorOutput
-  CLI: --workspace, --run_name, --provider, --model_id
+  CLI: --workspace, --run_name, --provider, --model_id, --run_seed
 """
 
 import argparse

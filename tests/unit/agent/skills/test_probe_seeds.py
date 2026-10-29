@@ -145,3 +145,22 @@ def test_candidate_node_probes_at_its_iteration_node_and_attempt():
     )
     with pytest.raises(MissingRunSeed):
         context_probe_seed(context, SimpleNamespace(run_seed=None))
+
+
+def test_seeded_scope_never_touches_a_cuda_device(monkeypatch):
+    """Fails if seeded_scope forks CUDA RNG state: that creates a CUDA context
+    (about 0.5 GB) on every visible GPU inside the orchestrator or a worker,
+    competing with parallel training. Probes run on CPU."""
+    import execute_tools.process_seeding as seeding
+
+    calls = []
+    real = torch.random.fork_rng
+
+    def recording(*args, **kwargs):
+        calls.append(kwargs.get("devices", args[0] if args else None))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(seeding.torch.random, "fork_rng", recording)
+    with seeded_scope(probe_process_seeds(_context(1))):
+        torch.rand(1)
+    assert calls == [[]]

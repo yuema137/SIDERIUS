@@ -45,7 +45,9 @@ def seeded_scope(record: ProcessSeedRecord) -> Iterator[ProcessSeedRecord]:
     """
     python_state = random.getstate()
     numpy_state = np.random.get_state()
-    with torch.random.fork_rng():
+    # devices=[]: probes run on CPU; forking CUDA state would create a context
+    # on every visible GPU inside the orchestrator or worker.
+    with torch.random.fork_rng(devices=[]):
         try:
             yield apply_process_seeds(record)
         finally:

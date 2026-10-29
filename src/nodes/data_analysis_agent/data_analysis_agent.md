@@ -125,6 +125,8 @@ report = DataAnalysisAgent(
     # Required: the run's RunSeed (the fixed workflow passes its lock's seed).
     # run() raises MissingRunSeed before any LLM call when it is None.
     run_seed=run_seed,
+    # Optional caller iteration, a generated-program seed coordinate.
+    analysis_iteration=iteration,
 ).run(inp)
 ```
 

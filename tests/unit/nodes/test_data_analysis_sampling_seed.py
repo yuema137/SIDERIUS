@@ -98,6 +98,7 @@ def test_declared_seed_executes_and_renders_exactly_as_declared(tmp_path):
             "invocation_id": "summary-invocation",
             "sampling_seed": PAPER_SEED,
             "sampling_seed_source": "declared",
+            "program_seed": 283021924344702021,
         }
     ]
     prompts = {label: user for label, _system, user in bridge.requests}
@@ -121,13 +122,14 @@ def test_undeclared_seed_is_derived_replaces_the_plan_seed_and_stays_out_of_prom
     assert report.findings[0].coverage.sampling_seed == DERIVED[1]
     recorded = json.loads((root / "sampling_seeds.json").read_text())
     assert recorded["run_seed"] == 1
-    # Issue #983 S7c: the seed a nondeterministic generated program runs under.
-    assert recorded["program_seed"] == 2013549691816282667
     assert recorded["invocations"] == [
         {
             "invocation_id": "summary-invocation",
             "sampling_seed": DERIVED[1],
             "sampling_seed_source": "derived",
+            # S7c: the invocation's program seed (run seed 1, no iteration,
+            # plan position 0, attempt 1).
+            "program_seed": 283021924344702021,
             "llm_plan_seed_ignored": 0,
         }
     ]

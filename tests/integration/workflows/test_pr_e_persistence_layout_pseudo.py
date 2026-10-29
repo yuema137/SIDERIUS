@@ -47,6 +47,7 @@ from agent.schemas.task_config import ForwardContract
 from agent.schemas.validator import ValidatorOutput
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from tests.helpers.probe_seed import PROBE_SEED
 
 # Reuse the canonical node fixtures rather than fork them — an established
 # pattern in this suite (e.g. test_health_evidence_pipeline imports from
@@ -117,6 +118,7 @@ class TestNodePersistence:
 
     def test_implementor_persists_implementor_json(self, tmp_path):
         agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = IMPL_REASONING
@@ -147,6 +149,8 @@ class TestNodePersistence:
         from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 
         agent = MLCodeValidatorAgent.__new__(MLCodeValidatorAgent)
+
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent.bridge.generate.return_value = {
             "passed": True,
@@ -173,6 +177,7 @@ class TestNodePersistence:
         """
         for name in ("first_try", "second_try"):
             agent = MLModelImplementor.__new__(MLModelImplementor)
+            agent._probe_seed = PROBE_SEED
             agent.bridge = MagicMock()
             agent._registry = MagicMock()
             agent.bridge.generate_text.return_value = IMPL_REASONING
