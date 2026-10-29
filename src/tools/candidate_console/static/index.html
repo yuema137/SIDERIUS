@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="/onboarding.css">
   <link rel="stylesheet" href="/editor-page-bar.css">
   <link rel="stylesheet" href="/editor-canvas-ui.css">
+  <link rel="stylesheet" href="/task-tab.css">
   <script src="/number-format.js" defer></script>
   <script src="/session.js" defer></script>
   <script src="/icons.js" defer></script>
@@ -52,6 +53,9 @@
   <script src="/editor.js" defer></script>
   <script src="/editor-templates.js" defer></script>
   <script src="/quick-start.js" defer></script>
+  <script src="/compute-requirement.js" defer></script>
+  <script src="/task-selection.js" defer></script>
+  <script src="/task-tab.js" defer></script>
   <script src="/navigation.js" defer></script>
   <script src="/recorded-example.js" defer></script>
   <script src="/operation-outcome.js" defer></script>
@@ -95,11 +99,11 @@
     <div class="setting" data-ui-flag="advanced"><button id="forget-browser-data" type="button" class="secondary">Forget this browser's console data</button><span id="forget-browser-data-status" class="muted" role="status"></span></div>
   </section>
 </header>
-<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#monitor">Monitor</a><a href="#settings">Settings</a></nav>
+<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#task">Task</a><a href="#workflow">Workflow</a><a href="#run">Run</a><a href="#monitor">Monitor</a><a href="#settings">Settings</a></nav>
 <main>
 <p id="route-status" role="status"></p>
   <div class="step-indicator" id="step-indicator" role="navigation" aria-label="Workflow steps" hidden><ol>
-    <li data-step="task"><a href="#workflow">Task</a></li><li data-step="workflow"><a href="#workflow">Workflow</a></li><li data-step="run"><a href="#run">Run</a></li><li data-step="results"><a href="#monitor">Results</a></li>
+    <li data-step="task"><a href="#task">Task</a></li><li data-step="workflow"><a href="#workflow">Workflow</a></li><li data-step="run"><a href="#run">Run</a></li><li data-step="results"><a href="#monitor">Results</a></li>
   </ol></div>
   <section id="view-home" data-view="home"><h1 tabindex="-1">Home</h1>
 <section class="home-intro" aria-label="About SIDERIUS">
@@ -159,6 +163,25 @@
     </section>
   </div>
   </details></div></section>
+<section id="view-task" data-view="task" hidden><h1 tabindex="-1">Task</h1>
+  <p class="task-intro">A task is your scientific problem: its data, model input and output, main score and checks. Choose one to see its details; Workflow and Run open once a task is chosen.</p>
+  <div class="task-layout">
+    <section class="card task-list-card" aria-labelledby="task-list-heading"><h2 id="task-list-heading">Tasks</h2>
+      <div id="task-list" aria-live="polite"><p class="muted">Connect to see the configured tasks.</p></div>
+    </section>
+    <section class="card task-panel" id="task-panel" aria-labelledby="task-panel-heading" aria-live="polite"><h2 id="task-panel-heading">Task details</h2>
+      <div id="task-panel-body"><p class="muted">Connect, then choose a task to see its details.</p></div>
+      <footer class="task-panel-footer"><p>The task package is edited with your coding agent, not here.</p><button id="task-refresh" type="button" class="secondary" disabled>Refresh</button></footer>
+    </section>
+  </div>
+  <details class="card workflow-task-details" id="editor-task-panel"><summary>Task version</summary>
+    <p class="muted">Switch the task version the open workflow uses. Update workflow references opens the findings in the Workflow save step, where you confirm and save them.</p>
+    <section class="editor-task-controls" id="editor-task-controls" aria-label="Task package and version"><h2>Task package and version</h2><p id="editor-task-state">Connect to see which task package and version this workflow uses.</p></section>
+  </details>
+</section>
+<section id="view-task-required" data-view="task-required" hidden><h1 tabindex="-1" id="task-required-heading">Workflow</h1>
+  <p class="empty-state task-required" id="task-required-state">Choose a task first: workflows and runs belong to one task. <a class="button-link" id="task-required-choose" href="#task">Choose a task</a></p>
+</section>
 <section id="view-workflow" data-view="workflow" hidden>
   <div class="page-bar workflow-actions" aria-label="Workflow actions">
     <h1 tabindex="-1">Workflow</h1>
@@ -185,6 +208,7 @@
     <button id="editor-save-cancel" type="button" class="secondary">Cancel</button>
     <button id="editor-save" disabled data-icon="save">Save version</button>
     <p id="editor-version-help" class="muted">Each save is listed under this name in Version history.</p>
+    <section id="editor-task-review" class="editor-task-controls editor-task-review" aria-label="Task reference review" hidden></section>
     <details id="editor-review-disclosure" data-ui-flag="advanced"><summary>Exact Python changes</summary>
       <pre id="editor-diff"></pre>
       <p class="muted">Every edit invalidates the check. Save writes exactly these bytes.</p>
@@ -227,9 +251,6 @@
       <section class="workflow-loop-panel inspector-section" id="editor-loop" aria-label="Research loop"></section>
     </section>
   </div>
-  <details class="card workflow-task-details" id="editor-task-panel"><summary>Task package and version</summary>
-    <section class="editor-task-controls" id="editor-task-controls" aria-label="Task package and version"><h2>Task package and version</h2><p id="editor-task-state">Connect to see which task package and version this workflow uses.</p></section>
-  </details>
   <details class="card" data-ui-flag="advanced"><summary>References</summary><div id="editor-references"></div></details>
   <details class="card" id="editor-advanced" data-ui-flag="advanced"><summary>Advanced source</summary>
     <p id="editor-path" class="mono"></p><p id="editor-revision" class="mono"></p>

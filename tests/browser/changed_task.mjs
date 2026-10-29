@@ -11,6 +11,7 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {showAllConsoleSections} from './console_view_flags.mjs';
+import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[key], `Set ${key}`);
 await mkdir(process.env.CONSOLE_EVIDENCE_DIR, {recursive: false});
@@ -31,6 +32,7 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
+  chooseFirstConfiguredTask(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}}), faults = [], requests = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => {if (request.method() === 'POST') requests.push({path: new URL(request.url()).pathname, body: request.postDataJSON()});});
@@ -41,9 +43,13 @@ try {
   await page.locator('#editor-source').waitFor({state: 'attached'});
   await waitUntil(async () => (await page.locator('#editor-source').inputValue()).length > 0 && await page.locator('#editor-task-choice option').count() === 3);
   const choice = page.locator('#editor-task-choice'), save = page.locator('#editor-save');
+  // The version switch lives on the Task tab; findings, acknowledgement and Save on Workflow.
+  const taskTab = async () => { await page.evaluate(() => { location.hash = 'task'; }); await page.locator('#view-task').waitFor(); };
+  const workflowTab = async () => { await page.evaluate(() => { location.hash = 'workflow'; }); await page.locator('#view-workflow').waitFor(); };
   page.setDefaultTimeout(30000);
   const original = await readFile(metadata.source, 'utf8');
   const inspectTraining = async () => {
+    await workflowTab();
     const tuning = page.locator('[data-node="fit"].editor-node');
     await tuning.click();
     assert.equal(await page.locator('[data-training="trial_max_epochs"]').inputValue(), '3');
@@ -51,14 +57,14 @@ try {
     assert.equal(await page.locator('[data-training-mode="trial_max_epochs"]').inputValue(), 'supplied');
   };
   if (metadata.training) await inspectTraining();
-  await choice.selectOption('new');
+  await taskTab(); await choice.selectOption('new');
   assert.equal(await readFile(metadata.source, 'utf8'), original);
-  await page.locator('#editor-task-update').click();
-  await page.locator('#editor-task-acknowledge').waitFor();
+  await page.locator('#editor-task-update').click(); // returns to Workflow
+  await page.locator('#view-workflow').waitFor(); await page.locator('#editor-task-acknowledge').waitFor();
   if (metadata.training) await inspectTraining();
   assert.ok(await save.isDisabled());
   assert.match(await page.locator('#editor-task-message').textContent(), /reviewed, not saved/);
-  assert.match(await page.locator('#editor-task-controls').textContent(), /fresh candidate|fresh target proposal/);
+  assert.match(await page.locator('#editor-task-review').textContent(), /fresh candidate|fresh target proposal/);
   if (metadata.profile === 'families') {
     assert.match(await page.locator('#editor-task-findings').textContent(), /2 proposal families and 3 implementation branches/);
   }

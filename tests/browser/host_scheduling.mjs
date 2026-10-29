@@ -49,6 +49,8 @@ try {
     if (url.pathname.startsWith('/api/editor/')) return reply({error: {message: 'Fixture project unavailable'}}, 409);
     if (url.pathname.startsWith('/api/settings')) return reply({error: {message: 'Fixture settings unavailable'}}, 409);
     if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: [], ...(hostLedger ? {host_ledger: true} : {})});
+    // One configured task: selected automatically, so Workflow and Run stay open.
+    if (url.pathname === '/api/tasks') return reply({tasks: [{task_id: 'synthetic', label: 'Synthetic task', revision: null}]});
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') {
       lists.push(Date.now());

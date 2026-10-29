@@ -238,7 +238,7 @@ try {
     await page.setViewportSize({width, height});
     for (const theme of ['light', 'dark']) {
       await page.locator('#theme-preference').selectOption(theme);
-      for (const view of ['home', 'workflow', 'run', 'monitor']) {
+      for (const view of ['home', 'task', 'workflow', 'run', 'monitor']) {
         await page.locator(`nav a[href="#${view}"]`).click(); await page.locator(`#view-${view}`).waitFor();
         await page.waitForTimeout(100);
         const label = `${view}-${width}-${theme}`, result = await measure();

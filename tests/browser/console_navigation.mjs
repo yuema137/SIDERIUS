@@ -38,6 +38,8 @@ try {
   const page = await context.newPage(), faults = [], requests = [], offsets = [], logReads = [];
   page.on('pageerror', error => faults.push(error.message));
   let failEditor = true, unauthorized = false, unavailable = true;
+  const synthetic = {task_id: 'synthetic', label: 'Synthetic task', revision: null};
+  let tasks = [synthetic];
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url());
     requests.push({path: url.pathname, method: request.method(), body: request.postData()});
@@ -51,6 +53,10 @@ try {
       return route.continue();
     }
     if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    if (url.pathname === '/api/tasks') return reply({tasks});
+    if (url.pathname.startsWith('/api/tasks/')) return reply({task_id: 'synthetic', label: 'Synthetic task', state: 'unavailable', data_root: '/fixture/data',
+      run_policy: {preparation_timeout_seconds: 300, candidate_timeout_seconds: 3600, candidate_network: false, candidate_devices: [], candidate_environment_names: [], allowed_output_types: null},
+      unavailable: {reason: 'sandbox_missing', hint: 'Fixture hint.'}});
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     assert.ok(url.pathname.startsWith('/api/operations/' + operation), 'URL UUID wins over remembered ID');
@@ -108,6 +114,29 @@ try {
   await page.locator('#view-monitor').waitFor();
   await page.goForward();
   await page.locator('#view-home').waitFor();
+  // Task route; without a selected task Workflow and Run are closed (aria-disabled links,
+  // and a typed route shows the "Choose a task" state instead of a task-less editor).
+  tasks = []; await page.evaluate(() => window.consoleTask.reload());
+  await waitUntil(async () => (await page.locator('nav a[href="#workflow"]').getAttribute('aria-disabled')) === 'true');
+  for (const link of ['nav a[href="#workflow"]', 'nav a[href="#run"]', '#step-indicator a[href="#run"]']) {
+    assert.equal(await page.locator(link).getAttribute('title'), 'Choose a task first', link);
+  }
+  await page.locator('nav a[href="#workflow"]').dispatchEvent('click');
+  assert.equal(new URL(page.url()).hash, '#home', 'A disabled link does not navigate');
+  await page.evaluate(() => {location.hash = 'run';});
+  await page.locator('#task-required-state').waitFor();
+  assert.equal(await page.locator('#task-required-heading').textContent(), 'Run');
+  assert.equal(await page.locator('#view-run').isHidden(), true);
+  await page.locator('#task-required-choose').click();
+  assert.equal(new URL(page.url()).hash, '#task');
+  assert.equal(await page.title(), 'SIDERIUS · Task');
+  assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Task');
+  assert.equal(await page.locator('#step-indicator li[data-step="task"] a').getAttribute('aria-current'), 'step');
+  // Exactly one configured task is selected automatically and reopens Workflow and Run.
+  tasks = [synthetic]; await page.evaluate(() => window.consoleTask.reload());
+  await page.locator('.task-item[aria-pressed="true"]').waitFor();
+  assert.equal(await page.locator('nav a[href="#workflow"]').getAttribute('aria-disabled'), null);
+  await page.locator('#task-summary-state[data-state="unavailable"]').waitFor();
   await page.locator('nav a[href="#workflow"]').click();
   await page.locator('#editor-status').filter({hasText: 'Fixture project unavailable'}).waitFor();
   // Run preparation has its own route; an unavailable project keeps its handoff closed.

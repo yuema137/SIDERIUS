@@ -49,8 +49,8 @@
     $('problems-chip').replaceChildren(window.consoleIcons?.make('circle-alert', 16) || '', `${count} problem${count === 1 ? '' : 's'}`);
     if (!count) setProblemsOpen(false);
     const view = window.consoleNavigation.view;
-    const current = {workflow: opened ? 'workflow' : 'task', run: 'run', monitor: 'results'}[view] || null;
-    const done = {task: opened, workflow: ready};
+    const current = {task: 'task', workflow: 'workflow', run: 'run', monitor: 'results'}[view] || null;
+    const done = {task: !!window.consoleTask?.selectedId, workflow: ready};
     $('step-indicator').hidden = !current;
     for (const item of $('step-indicator').querySelectorAll('[data-step]')) {
       const step = item.dataset.step, link = item.querySelector('a');
@@ -77,7 +77,7 @@
     if ($('editor-problems').classList.contains('open') && !$('editor-problems').contains(event.target) && !$('problems-chip').contains(event.target)) setProblemsOpen(false);
   });
   new MutationObserver(render).observe($('editor-problems'), {attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true});
-  for (const name of ['workflow-editor-state', 'new-run-gate', 'console-view', 'console-onboarding', 'editor-versions', 'run-step-state']) window.addEventListener(name, render);
+  for (const name of ['workflow-editor-state', 'new-run-gate', 'console-view', 'console-onboarding', 'editor-versions', 'run-step-state', 'console-task']) window.addEventListener(name, render);
   session.subscribe(render);
   render();
 })();

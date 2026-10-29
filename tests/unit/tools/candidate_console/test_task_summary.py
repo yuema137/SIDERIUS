@@ -13,6 +13,7 @@ from tools.candidate_console.task_summary import TaskSummaries, walk_data_root
 from tools.setup_review.composition_models import CompositionJob, CompositionObservation
 from tools.workspace_sandbox.command import SandboxUnavailable
 from tools.workspace_sandbox.runner import ExecutionResult
+from workflows.definition import TaskBinding
 
 REPO = Path(__file__).resolve().parents[4]
 SECRET = "sk-test-secret-value-never-shown"
@@ -154,11 +155,23 @@ def test_unavailable_prerequisites_return_a_state_with_a_hint_not_a_500(
 
 
 def test_unknown_task_is_404_and_list_names_configured_tasks(console_config):
+    """Defect: the Task list shows a version the console configuration does not declare,
+    or hides the configured ``task_revision`` the Task tab labels each task with."""
     client = _client(console_config)
     assert client.get("/api/tasks/nope/summary").status_code == 404
     assert client.get("/api/tasks").json() == {
-        "tasks": [{"task_id": "synthetic", "label": "Synthetic task"}]
+        "tasks": [{"task_id": "synthetic", "label": "Synthetic task", "revision": None}]
     }
+    pin = TaskBinding(
+        package_id="synthetic-task",
+        revision="r2",
+        task_data_path_id="synthetic-data",
+        semantic_fingerprint="a" * 64,
+    )
+    versioned = console_config.model_copy(
+        update={"tasks": (console_config.tasks[0].model_copy(update={"task_revision": pin}),)}
+    )
+    assert _client(versioned).get("/api/tasks").json()["tasks"][0]["revision"] == "r2"
 
 
 def test_data_walk_cap_reports_an_incomplete_volume(tmp_path):

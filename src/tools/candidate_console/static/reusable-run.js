@@ -114,8 +114,8 @@
       return [['capture-compute-review', 'Compute: this workflow has no training node, so no GPU check applies.']];
     }
     const lines = [['capture-compute-review', 'Compute: NVIDIA GPU required']];
-    if (!value.devices.some(device => /^\/dev\/nvidia\d+$/.test(device))) {
-      lines.push(['capture-compute-warning', 'This task does not pass a GPU into the run sandbox; the run will be refused.']);
+    if (!window.consoleCompute.gpuDevices(value.devices).length) {
+      lines.push(['capture-compute-warning', window.consoleCompute.gpuWarning]);
     }
     return lines;
   }

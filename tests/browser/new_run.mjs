@@ -11,6 +11,7 @@ import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {showAllConsoleSections} from './console_view_flags.mjs';
+import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 const training = process.env.CONSOLE_TRAINING === '1';
 // Deliberately differ from both fixture settings and native defaults.
 const editedTraining = {
@@ -47,6 +48,7 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
+  chooseFirstConfiguredTask(browser);
   let context = await browser.newContext(), page = await context.newPage();
   const connect = async () => { if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click(); await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor(); };
   // Run preparation lives on its own #run page; authoring stays on #workflow.
