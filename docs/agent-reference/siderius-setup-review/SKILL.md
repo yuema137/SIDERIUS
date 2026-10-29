@@ -58,8 +58,13 @@ references below. A described task is not authorization for unbounded API/GPU wo
 4. Prepare the experiment separately: model routing, workflow, data exposure,
    iterations, budgets and output workspace. Recommend the
    [Luna test profile](../../../configs/llm/README.md) for an initial process check,
-   while honoring an explicitly chosen model. Keep keys external. Save a launch
-   script and settings in the project; do not reimplement framework training.
+   while honoring an explicitly chosen model. Keep keys external. For v1.1.0 the
+   recommended route is a saved workflow declaration, `workflow.py` in the external
+   project, prepared with `.venv/bin/python -m tools.candidate_prepare --reusable-request PATH`
+   and launched with `.venv/bin/python -m tools.candidate_operations submit --store-config FILE --request FILE`
+   (see [Reusable candidates and native training](#reusable-candidates-and-native-training)).
+   A saved `run_chain.sh` launch script and its settings remain supported for
+   companion and paper tasks. Either way, do not reimplement framework training.
 5. Run the applicable [offline checks and command preview](../../getting-started/first-run.md)
    in the selected environment, resolve actual failures, and give the user the
    saved task/experiment paths, important effective settings, exact command and
@@ -248,7 +253,7 @@ merged review.
   route needs an explicit provider and model and a bounded output budget. Declare
   `judge.max_judge_calls`; launch refuses a run whose static call bound exceeds it,
   and refuses this profile when it is absent. Do not declare a route or cap the
-  user has not chosen; the bound is `rounds × (N + critic) + 1` for `debate-judge/v1`
+  user has not chosen; the bound is `rounds × (N + critic) + 1` for `debate-judge/v1`, where `rounds` is the API field for debate rounds, not loop iterations
   ([judge strategies contract](../../../src/workflows/judge_strategies/judge-strategies-contract.md)).
 - Network: remote paper roots, or enabled dynamic search, need an explicit
   `network=true` on the review request. Provider calls remain subject to the

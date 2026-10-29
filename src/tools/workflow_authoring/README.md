@@ -65,7 +65,7 @@ Use trusted local project directories. A lost connection leaves a save unconfirm
 until you inspect disk again. See the [authoring contract](authoring-contract.md)
 for exact limits, refusals and concurrency behavior.
 
-## View a hand-written workflow.py in the candidate console
+## View a hand-written workflow.py in the experimental console
 
 Use this to look at a `workflow.py` your coding agent wrote, as a canvas of nodes
 and their ports. Viewing alone does not change the file, but the editor can save.
