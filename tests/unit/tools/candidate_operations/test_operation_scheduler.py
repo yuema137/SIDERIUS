@@ -665,7 +665,12 @@ def test_a_ledger_from_an_earlier_revision_is_refused_with_one_typed_reason(
         launch()
     assert refused.value.detail.code == "ledger_format"
     assert str(path) in str(refused.value) and "move" in str(refused.value)
+    assert "unreadable by this SIDERIUS revision" in str(refused.value)
     released = lambda: release_reservation(host.ledger_root, first.request_id)  # noqa: E731
     assert _code(released) == "ledger_format"
     assert path.read_bytes() == before  # never rewritten
     assert _claims(_store(tmp_path, "b")) == []
+    # A truncated (corrupt) ledger is refused the same way, never repaired.
+    publish_encoded(path, before[: len(before) // 2], replace=True)
+    assert _code(launch) == "ledger_format"
+    assert _code(released) == "ledger_format"
