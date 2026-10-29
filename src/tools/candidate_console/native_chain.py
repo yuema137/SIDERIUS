@@ -33,7 +33,8 @@ def check_editor_separation(
     """Protect pinned inputs and output directories from actual authoring write targets."""
     inputs = [Path(choice.request.capture_path), *(Path(f.path) for f in admission.input_files)]
     destinations = [Path(choice.request.envelope), Path(admission.workspace)]
-    for project in console.config.editor_projects:
+    # Read live: a setup created after startup is protected like a configured one.
+    for project in console.setups.projects():
         source = project.source_file
         files = (
             source,

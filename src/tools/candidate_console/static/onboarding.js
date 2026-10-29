@@ -8,8 +8,8 @@
   const KEY = 'siderius.console.tour.v1';
   // Heading <= 4 words, body <= 120 characters (spec §7.3).
   const STEPS = [
-    {title: 'Choose a task', anchors: ['#editor-project', '.page-bar-project'],
-      text: 'Pick a workflow project. The chip beside it shows its task package and version.'},
+    {title: 'Choose a setup', anchors: ['#editor-project', '.page-bar-project'],
+      text: "Pick an experiment setup of your task, or create one with New setup…."},
     {title: 'Pick a module', anchors: ['#editor-palette'],
       text: 'Each module in the list is one research step. Click it or drag it onto the canvas.'},
     {title: 'Match connector names', anchors: ['.circuit-viewport', '.workflow-canvas-panel'],
@@ -78,6 +78,8 @@
   }
   function open(index = 0) {
     opener = document.activeElement;
+    // Workflow is closed until a task is chosen: the tour starts at the Task tab instead.
+    if (window.consoleTask?.gated) { location.hash = 'task'; return; }
     if (window.consoleNavigation?.view !== 'workflow') {
       // The tour explains the Workflow page; show it once that view is visible.
       window.addEventListener('console-view', () => requestAnimationFrame(() => show(index)), {once: true});

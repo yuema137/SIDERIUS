@@ -1,7 +1,7 @@
 /** Run lane review states the GPU requirement (issue #1136), real Chromium against a
  * real console. A prepared run whose workflow trains shows "Compute: NVIDIA GPU
  * required"; when the task passes no /dev/nvidia<N> node into the sandbox it also
- * warns that the run will be refused, and the warning disappears when one is passed.
+ * warns that training runs will be refused, and the warning disappears when one is passed.
  *
  * Why this fails without the change (reusable-run.js computeReview): the review
  * summary then has no #capture-compute-review line, and a task configured with
@@ -73,7 +73,7 @@ try {
   assert.deepEqual(reviewed.devices, []);
   assert.equal(await page.locator('#capture-compute-review').textContent(), 'Compute: NVIDIA GPU required');
   assert.equal(await page.locator('#capture-compute-warning').textContent(),
-    'This task does not pass a GPU into the run sandbox; the run will be refused.');
+    'This task does not pass a GPU into the run sandbox; runs that train a model will be refused.');
   await page.screenshot({path: join(evidence, 'compute-warning.png'), fullPage: true});
 
   // 2. Same review with a GPU node in the sandbox devices: the requirement stays, the warning goes.

@@ -51,19 +51,20 @@ try {
   assert.equal(await page.locator('#view-workflow #new-run-task, #view-workflow #capture-run').count(), 0, 'Workflow page carries no run preparation');
   assert.equal(await page.locator('#view-run #new-run-task').count(), 1);
   assert.equal(await page.locator('#view-run #capture-launch').count(), 1);
-  assert.deepEqual(await page.locator('nav.actions a').allTextContents(), ['Home', 'Workflow Editor', 'Run', 'Monitor', 'Settings']);
+  assert.deepEqual(await page.locator('nav.actions a').allTextContents(), ['Home', 'Task', 'Workflow', 'Run', 'Monitor', 'Settings']);
   // The global Settings page is not a journey step: the step indicator hides there.
   await nav('settings');
   assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Settings');
   assert.equal(await page.locator('#step-indicator').isHidden(), true, 'No journey step on Settings');
   await nav('workflow');
 
-  // First run, before Connect: the task-example guide and the Task step lead.
+  // First run, before Connect: the task-example guide leads; no task is chosen yet.
   assert.equal(await page.locator('#workflow-start-guide').isVisible(), true);
   assert.match(await page.locator('#start-guide-heading').textContent(), /Build your research loop/);
   assert.deepEqual(await page.locator('#workflow-start-guide button:not(.link-button)').evaluateAll(items => items.map(item => item.id)), ['workflow-start-template'], 'The empty canvas offers one primary action');
   assert.match(await page.locator('#workflow-start-state').textContent(), /Connect/);
-  assert.equal(await current(), 'Task');
+  assert.equal(await current(), 'Workflow');
+  assert.doesNotMatch(await page.locator('#step-indicator li[data-step="task"]').getAttribute('class') || '', /done/, 'No task is selected before Connect');
   assert.equal(await next.isDisabled(), true);
 
   // Secondary detail is collapsed; Save (check, then confirm) is the only primary editor action.
@@ -78,10 +79,11 @@ try {
   await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   assert.equal(await page.locator('#workflow-start-guide').isHidden(), true, 'The empty-canvas start state yields to the workflow');
   assert.equal(await current(), 'Workflow');
+  // The fixture configures exactly one task: it is selected automatically, so Task is done.
   assert.match(await page.locator('#step-indicator li[data-step="task"]').getAttribute('class') || '', /done/);
   // The first project is not runnable: the handoff stays closed and says why.
   assert.equal(await next.isDisabled(), true);
-  assert.match(await page.locator('#workflow-next-state').textContent(), /not enabled for runs.*saved version/);
+  assert.match(await page.locator('#workflow-next-state').textContent(), /Runs are not enabled for this setup.*saved version/);
   assert.equal(await page.evaluate(() => window.newRunGate.ready), false);
 
   // A runnable, saved, unchanged reusable workflow opens the gate; Next goes to #run.
@@ -89,7 +91,7 @@ try {
   await waitUntil(async () => !(await next.isDisabled()));
   assert.equal(await page.evaluate(() => window.newRunGate.ready), true, 'Next follows the New run gate');
   const saved = await page.evaluate(() => window.workflowEditor.state.savedSha256);
-  assert.match(await page.locator('#workflow-next-state').textContent(), new RegExp(`The current file of project reusable \\(version ${saved.slice(0, 12)}\\) is ready to run`));
+  assert.match(await page.locator('#workflow-next-state').textContent(), new RegExp(`The current file of setup reusable \\(version ${saved.slice(0, 12)}\\) is ready to run`));
   await next.click(); await page.locator('#view-run').waitFor();
   assert.equal(new URL(page.url()).hash, '#run');
   assert.equal(await page.title(), 'SIDERIUS · Run');

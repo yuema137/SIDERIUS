@@ -358,6 +358,46 @@ def template_document(template_id: TemplateId) -> ReusableWorkflowDocument:
     return next(document for key, _, _, document in _SHAPES if key == template_id)
 
 
+def blank_document() -> ReusableWorkflowDocument:
+    """The smallest valid reusable shape: one Propose node fed by its managed input.
+
+    A declaration needs at least one node, so a "blank" experiment setup starts
+    from the first node every template shares and nothing else.
+    """
+    return ReusableWorkflowDocument(
+        definition=ReusableWorkflowDefinition(
+            task=_SHAPE_TASK,
+            externals=_managed(("initial", "proposal.input")),
+            nodes=(
+                NodeInstance(
+                    id="propose", capability="proposal", request=ExternalRequest(binding="initial")
+                ),
+            ),
+        ),
+        positions=_positions("propose"),
+    )
+
+
+def render_shape(
+    template_id: TemplateId | None,
+    references: ReusableTaskReferences,
+    binding: TaskBinding | None = None,
+) -> str:
+    """Render a template (``None``: the blank shape) with explicit task references.
+
+    The caller owns the references and the accepted binding; the shape never
+    chooses a task or data location.
+    """
+    shape = blank_document() if template_id is None else template_document(template_id)
+    document = shape.model_copy(
+        update={
+            "definition": shape.definition.model_copy(update={"task": references}),
+            "task_binding": binding,
+        }
+    )
+    return render_workflow_source(document)
+
+
 def instantiate(template_id: TemplateId, current: AuthoredWorkflowDocument | None) -> str:
     """Render the template with the opened project's own task references and binding.
 
@@ -375,11 +415,4 @@ def instantiate(template_id: TemplateId, current: AuthoredWorkflowDocument | Non
     else:
         references = ReusableTaskReferences.model_validate(task.model_dump())
         binding = current.task_binding
-    shape = template_document(template_id)
-    document = shape.model_copy(
-        update={
-            "definition": shape.definition.model_copy(update={"task": references}),
-            "task_binding": binding,
-        }
-    )
-    return render_workflow_source(document)
+    return render_shape(template_id, references, binding)

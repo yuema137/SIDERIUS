@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests.unit.tools.candidate_console.conftest import copy_quickstart_package
 from tests.unit.tools.candidate_prepare.test_reusable_preparation import reusable
 from tools.candidate_console.reusable_preparation import (
     NewRunIntent,
@@ -20,10 +21,12 @@ from tools.workflow_authoring.models import Project
 @pytest.fixture
 def selection(selection, tmp_path):
     # These tests exercise inert admission, not task imports. All mutable input
-    # bytes belong to this test, including the otherwise checkout-owned manifest.
-    manifest = tmp_path / "task.yaml"
-    manifest.write_bytes(Path(selection.task_manifest).read_bytes())
-    return selection.model_copy(update={"task_manifest": str(manifest)})
+    # bytes belong to this test, including the otherwise checkout-owned manifest;
+    # its package is copied and mounted so every manifest reference resolves.
+    manifest, package = copy_quickstart_package(tmp_path / "task")
+    return selection.model_copy(
+        update={"task_manifest": str(manifest), "task_read_only": (str(package),)}
+    )
 
 
 @pytest.fixture

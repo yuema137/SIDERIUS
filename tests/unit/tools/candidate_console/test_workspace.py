@@ -161,7 +161,16 @@ def test_init_output_passes_check_with_owner_only_folders(tmp_path, monkeypatch,
     workspace = tmp_path / "siderius_workspace"
     config = workspace / "settings" / "console.json"
     assert f"Workspace configuration: {config}" in out
-    for name in ("", "operations", "preparations", "candidates", "runs", "library/llm", "data"):
+    for name in (
+        "",
+        "operations",
+        "preparations",
+        "candidates",
+        "runs",
+        "tasks",
+        "library/llm",
+        "data",
+    ):
         assert _mode(workspace / name) == 0o700
     assert not (workspace / "exported_configs").exists()  # created lazily by its writer
     assert _mode(workspace / "settings" / "console-token") == 0o600

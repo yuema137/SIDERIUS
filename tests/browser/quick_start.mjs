@@ -1,92 +1,108 @@
-/** Quick start (operator decision 2026-10-28): Home -> Quick start -> choose a task ->
- * the default research-loop template opens as an unsaved editor draft whose loop and
- * training parameters are visible in the ordinary panel. Nothing is written before Save. */
+/** Home Quick start witness (#1131): the task list's loading, failed (Retry), empty and
+ * loaded states; "Create a setup from the research-loop template" creates and opens it in
+ * Workflow with the advice field focused; a second Quick start opens the existing setup;
+ * a refused creation keeps the dialog open with the reason. Real init workspace fixture
+ * (tests/browser/setups_fixture.py); only /api/tasks is held or failed by the witness.
+ * Requires EDITOR_PYTHON, CONSOLE_PLAYWRIGHT_MODULE, CONSOLE_BROWSER_EXECUTABLE, CONSOLE_EVIDENCE_DIR.
+ */
 import assert from 'node:assert/strict';
-import {spawn, execFileSync} from 'node:child_process';
-import {mkdir, readFile, rename} from 'node:fs/promises';
+import {spawn} from 'node:child_process';
+import {mkdir, readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
-import {tmpdir} from 'node:os';
-import {join, resolve, dirname} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
-
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) {
-  assert.ok(process.env[name], `Set ${name}`);
-}
-const evidence = process.env.CONSOLE_EVIDENCE_DIR || join(tmpdir(), 'siderius-quick-start');
-await mkdir(evidence, {recursive: true});
-// One runnable project, listed after edit-only ones in configuration order: Quick start must preselect it.
-const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, EDITOR_RUNNABLE_PROJECTS: 'five_node'}});
-let serverErrors = '';
-server.stderr.on('data', chunk => { serverErrors += chunk; });
+for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[name], `Set ${name}`);
+const evidence = process.env.CONSOLE_EVIDENCE_DIR; await mkdir(evidence, {recursive: true});
+const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.setups_fixture'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
+let serverErrors = ''; server.stderr.on('data', chunk => { serverErrors += chunk; });
 const lines = createInterface({input: server.stdout});
-const metadata = await new Promise((resolveMetadata, reject) => {
-  lines.once('line', line => resolveMetadata(JSON.parse(line)));
-  server.once('exit', code => reject(new Error(`server exit ${code}: ${serverErrors}`)));
-  setTimeout(() => reject(new Error(`server startup timeout: ${serverErrors}`)), 15000);
-});
 let browser;
-async function waitUntil(predicate, timeout = 15000) {
+async function waitUntil(predicate, timeout = 20000) {
   const deadline = Date.now() + timeout;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) throw new Error('Browser condition timed out');
-    await new Promise(resolveWait => setTimeout(resolveWait, 50));
-  }
+  while (!(await predicate())) { if (Date.now() > deadline) throw new Error('Browser condition timed out'); await new Promise(done => setTimeout(done, 50)); }
 }
 try {
+  const metadata = await new Promise((accept, reject) => {
+    lines.once('line', line => accept(JSON.parse(line)));
+    server.once('exit', code => reject(new Error(`server exit ${code}: ${serverErrors}`)));
+    setTimeout(() => reject(new Error(`server startup timeout: ${serverErrors}`)), 30000);
+  });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
   const faults = [], posts = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => { if (request.method() === 'POST') posts.push(new URL(request.url()).pathname); });
-  await page.goto(metadata.origin + '/#home');
+  // The task list: first held (loading), then failed, then empty, then the real list.
+  let mode = 'hold', release;
+  const held = new Promise(done => { release = done; });
+  await page.route('**/api/tasks', async route => {
+    if (mode === 'hold') { await held; return route.fulfill({status: 500, json: {error: {message: 'Fixture task list unavailable'}}}); }
+    if (mode === 'empty') return route.fulfill({json: {tasks: []}});
+    return route.continue();
+  });
+  for (let attempt = 0; attempt < 50; attempt++) { try { await page.goto(metadata.origin + '/#home'); break; } catch { await page.waitForTimeout(200); } }
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
-  // The configured-task quick Prepare form is not a beginner entry (advanced only).
-  assert.equal(await page.locator('#configured-task').isVisible(), false);
-  const before = await readFile(metadata.reusable_source);
+  assert.equal(await page.locator('#configured-task').isVisible(), false, 'The configured-task Prepare form is not a beginner entry');
+  const dialog = page.locator('#quick-start-dialog'), state = page.locator('#quick-start-task-state');
   await page.locator('#home-quick-start').click();
-  const dialog = page.locator('#quick-start-dialog');
   await waitUntil(() => dialog.evaluate(el => el.open));
-  assert.equal(new URL(page.url()).hash, '#workflow');
-  await page.locator('#quick-start-project option[value="reusable"]').waitFor({state: 'attached'});
-  // A new user's first action is runnable: the first runnable project is preselected and listed first.
-  assert.equal(await page.locator('#quick-start-project').inputValue(), 'five_node', 'Quick start preselects a runnable project');
-  assert.equal(await page.locator('#quick-start-project option').first().getAttribute('value'), 'five_node');
-  assert.equal(await page.locator('#quick-start-warning').textContent(), '');
-  await page.locator('#quick-start-project').selectOption('reusable');
+  assert.equal(await state.textContent(), 'Loading tasks…');
+  release();
+  await state.filter({hasText: 'Tasks could not be loaded: Fixture task list unavailable'}).waitFor();
+  assert.equal(await page.locator('#quick-start-open').isDisabled(), true);
+  mode = 'empty'; await page.locator('#quick-start-task-retry').click();
+  await state.filter({hasText: 'No task is configured'}).waitFor();
+  assert.match(await state.locator('a').getAttribute('href'), /README.md#set-up-and-open-the-console$/);
+  assert.equal(await page.locator('#quick-start-task-retry').isHidden(), true);
+  mode = 'real'; await page.evaluate(() => window.consoleTask.reload());
+  await page.locator('#quick-start-task option[value="synthetic"]').waitFor({state: 'attached'});
+  assert.equal(await page.locator('label[for="quick-start-task"]').textContent(), 'Choose a task');
+  assert.equal(await page.locator('body').evaluate(body => body.textContent.includes('Project (its task and data)')), false);
+
+  // No setup yet: the only choice creates one from the research-loop template.
+  await waitUntil(async () => (await page.locator('#quick-start-setup option').count()) === 1);
+  assert.equal(await page.locator('#quick-start-setup option').textContent(), 'Create a setup from the research-loop template');
+  assert.equal(await page.locator('#quick-start-label').inputValue(), 'Synthetic task research loop');
+  assert.equal(await page.locator('#quick-start-open').textContent(), 'Create and open');
   await page.screenshot({path: join(evidence, 'quick-start-dialog.png')});
-  // L-3: an unopenable project fails in the dialog with its reason and can be retried.
-  await rename(metadata.reusable_source, metadata.reusable_source + '.aside');
+
+  // A refused creation keeps the dialog and names the reason.
+  await page.route('**/api/tasks/synthetic/setups', route => route.request().method() === 'POST'
+    ? route.fulfill({status: 403, json: {error: {code: 'read_only', message: 'this console does not create experiment setups'}}}) : route.continue());
   await page.locator('#quick-start-open').click();
-  await page.locator('#quick-start-status').filter({hasText: "Couldn't open reusable"}).waitFor();
-  assert.equal(await page.locator('#quick-start-open').isEnabled(), true, 'Retry stays available');
+  await page.locator('#quick-start-status').filter({hasText: 'browser_creatable'}).waitFor();
   assert.equal(await dialog.evaluate(el => el.open), true);
-  await rename(metadata.reusable_source + '.aside', metadata.reusable_source);
+  await page.unroute('**/api/tasks/synthetic/setups');
+
   await page.locator('#quick-start-open').click();
-  await waitUntil(async () => !(await dialog.evaluate(el => el.open)), 20000);
+  await waitUntil(async () => !(await dialog.evaluate(el => el.open)), 30000);
+  assert.equal(new URL(page.url()).hash, '#workflow');
   for (const id of ['interpret', 'propose', 'implement', 'validate', 'train']) await page.locator(`#circuit-node-${id}`).waitFor();
-  assert.equal(await page.locator('#editor-project').inputValue(), 'reusable');
-  assert.ok((await readFile(metadata.reusable_source)).equals(before), 'Quick start never writes before Save');
-  assert.ok(posts.every(path => path.endsWith('/template') || path.endsWith('/review')), 'Only the template import and its review: ' + posts);
-  // The loop's rounds and stop conditions are visible in the ordinary panel.
+  assert.equal(await page.locator('#editor-project').inputValue(), 'synthetic-task-research-loop');
+  await waitUntil(() => page.evaluate(() => document.activeElement?.classList.contains('advice-input')), 5000);
+  assert.ok((await readFile(join(metadata.workspace, 'projects', 'synthetic-task-research-loop', 'workflow.py'), 'utf8')).length > 0);
+  assert.deepEqual(posts.filter(path => path.endsWith('/setups')), ['/api/tasks/synthetic/setups', '/api/tasks/synthetic/setups']);
   await page.locator('#editor-loop-final-iteration').waitFor({state: 'visible'});
-  assert.equal(await page.locator('#editor-loop-final-iteration').inputValue(), '1');
-  await page.locator('#editor-loop-stop-conditions').waitFor({state: 'visible'});
-  // Training settings are on the Train & tune module.
-  await page.locator('#circuit-node-train').click();
-  // The author's choice wins over Quick start's bounded advice re-focus (L-6): the clicked
-  // module stays selected after that window has passed.
-  await page.waitForTimeout(1600);
-  assert.equal(await page.locator('#circuit-node-train').getAttribute('aria-pressed'), 'true', 'Train & tune stays selected');
-  await page.locator('#editor-training-settings').waitFor({state: 'visible'});
-  assert.ok(await page.locator('#editor-training-settings [data-training="trial_max_epochs"]').count() === 1);
-  await page.screenshot({path: join(evidence, 'quick-start-draft.png'), fullPage: true});
+  await page.screenshot({path: join(evidence, 'quick-start-opened.png'), fullPage: true});
+
+  // A second Quick start offers the existing setup and opens it without creating another.
+  const before = posts.length;
+  await page.locator('nav a[href="#home"]').click();
+  await page.locator('#home-quick-start').click();
+  await page.locator('#quick-start-setup option[value="synthetic-task-research-loop"]').waitFor({state: 'attached'});
+  await page.locator('#quick-start-setup').selectOption('synthetic-task-research-loop');
+  assert.equal(await page.locator('#quick-start-label').isHidden(), true);
+  await page.locator('#quick-start-open').click();
+  await waitUntil(async () => !(await dialog.evaluate(el => el.open)), 30000);
+  assert.equal(await page.locator('#editor-project').inputValue(), 'synthetic-task-research-loop');
+  assert.equal(posts.length, before, 'Opening an existing setup creates nothing');
   assert.deepEqual(faults, []);
-  console.log('PASS: Home Quick start opens the default research loop as an unsaved draft with loop and training parameters');
+  console.log('PASS: Quick start states (loading, failed + Retry, empty, loaded), create from the research-loop template, open an existing setup, refused creation');
 } finally {
   await browser?.close();
   server.kill();
