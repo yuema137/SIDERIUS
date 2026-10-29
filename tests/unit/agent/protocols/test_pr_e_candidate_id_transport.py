@@ -46,6 +46,7 @@ from agent.schemas.task_config import ForwardContract
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.helpers.tuner_source import tuner_node_source
 from tests.unit.agent.ml_code_validator_agent.test_validator_agent import (
     make_input as make_validator_input,
@@ -146,6 +147,8 @@ class TestTransportThroughRealHops:
         impl_input.test_dir = str(tmp_path / "tests")
 
         impl_agent = MLModelImplementor.__new__(MLModelImplementor)
+
+        impl_agent._probe_seed = PROBE_SEED
         impl_agent.bridge = MagicMock()
         impl_agent._registry = MagicMock()
         impl_agent.bridge.generate_text.return_value = IMPL_REASONING
@@ -161,6 +164,7 @@ class TestTransportThroughRealHops:
         fixture_input = make_validator_input(tmp_path, run_name=run_name)
         fixture_input.candidate_id = valid_input.candidate_id
         valid_agent = MLCodeValidatorAgent.__new__(MLCodeValidatorAgent)
+        valid_agent._probe_seed = PROBE_SEED
         valid_agent.bridge = MagicMock()
         valid_agent.bridge.generate.return_value = {
             "passed": True,
@@ -212,6 +216,7 @@ class TestTransportThroughRealHops:
         fixture_input = make_validator_input(tmp_path, run_name="legacy")
         assert fixture_input.candidate_id is None
         valid_agent = MLCodeValidatorAgent.__new__(MLCodeValidatorAgent)
+        valid_agent._probe_seed = PROBE_SEED
         valid_agent.bridge = MagicMock()
         valid_agent.bridge.generate.return_value = {
             "passed": True,
@@ -263,6 +268,7 @@ class TestBranchBReuseEcho:
             )
         )
         agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent._registry = registry
         out = agent.run(
@@ -297,6 +303,7 @@ class TestBehaviouralInertness:
             inp = make_validator_input(d, run_name="inert")
             inp.candidate_id = cid
             agent = MLCodeValidatorAgent.__new__(MLCodeValidatorAgent)
+            agent._probe_seed = PROBE_SEED
             agent.bridge = MagicMock()
             agent.bridge.generate.return_value = {
                 "passed": True,

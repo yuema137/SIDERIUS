@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from nodes.ml_code_validator_agent import _check_instantiation_and_gradient
+from tests.helpers.probe_seed import PROBE_SEED
 
 _PLUGIN = """
 import torch
@@ -34,7 +35,14 @@ def test_long_temporal_probe_passes_in_isolated_worker(tmp_path) -> None:
     path = tmp_path / "valid_model.py"
     path.write_text(_PLUGIN.format(allocation=""), encoding="utf-8")
 
-    assert _check_instantiation_and_gradient(str(path)) == (True, True, True, None, 1, 1)
+    assert _check_instantiation_and_gradient(str(path), probe_seed=PROBE_SEED) == (
+        True,
+        True,
+        True,
+        None,
+        1,
+        1,
+    )
 
 
 def test_excessive_allocation_rejects_candidate_without_killing_parent(tmp_path) -> None:
@@ -45,7 +53,7 @@ def test_excessive_allocation_rejects_candidate_without_killing_parent(tmp_path)
     )
 
     instantiated, gradient, output_type, error, total, trainable = (
-        _check_instantiation_and_gradient(str(path))
+        _check_instantiation_and_gradient(str(path), probe_seed=PROBE_SEED)
     )
     assert (instantiated, gradient, output_type, total, trainable) == (
         False,
