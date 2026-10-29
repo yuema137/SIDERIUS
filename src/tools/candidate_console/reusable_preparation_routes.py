@@ -1,5 +1,7 @@
 """Authenticated transport for the code-callable saved-source preparation adapter."""
 
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -7,9 +9,11 @@ from .reusable_preparation import NewRunIntent, NewRunSelection, ReusablePrepara
 from .service import CandidateConsole
 
 
-def reusable_preparation_router(console: CandidateConsole) -> APIRouter:
+def reusable_preparation_router(
+    console: CandidateConsole, *, protected: tuple[Path, ...] | None = None
+) -> APIRouter:
     router = APIRouter(prefix="/api/editor/{project_id}/reusable-preparations")
-    service = ReusablePreparation(console)
+    service = ReusablePreparation(console, protected=protected)
 
     @router.post("/review")
     async def review(project_id: str, request: Request):

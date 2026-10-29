@@ -278,9 +278,11 @@ Those defaults do not activate omitted phases or outer retries. Tuning advice,
 ordinary budgets, epoch limits, typed frozen portions, retention, parameter
 rules and runtime controls use the native owners. `data_dir` must match the
 selected root; `require_probe_runner` resolves to true and explicit false is
-refused. Trial/formal time budgets are finite positive minutes or null. Zero
-is refused at this ingress because the historical forecast/measured paths do
-not share zero semantics; their existing behavior is unchanged.
+refused. Trial/formal/bypass time budgets are finite positive minutes or
+null; the rule is the tuner schema's `OperatorTimeBudgetMinutes`, applied by
+`run_config.validate_launch_admission` on this ingress and on the standard CLI,
+direct workflow and setup-preview paths alike (issue #828). Null disables a
+budget; zero, negative and non-finite values are refused before model work.
 
 Known native scalar, schedule, formal-policy, scope, order and deadline checks
 run before proposer construction. Runtime-verifier identity, measurement
@@ -324,6 +326,38 @@ or loss sources refuse before construction/staging. The shared construction
 owner admits the model; `stage_native_plugins` stages only the native tuner
 destination. No global capability publication or model/loss promotion occurs.
 The public tuner owns its entire training/scoring/Health lifecycle.
+
+### Run seed and tuner coordinates (issue #983)
+
+`CandidateRunRequest.run_seed: RunSeed | None` is the operator's explicit seed
+(omitted when `None`, so seedless request bytes and digests are unchanged).
+`launch_candidate(request, *, invocation_id=None, run_seed=None, ...)` is an
+entry boundary: it executes the `RunSeedBinding` an operation admission bound
+(`run_seed=`), or, called directly, binds `request.run_seed` or generates one
+(`core.seeding.admitted_run_seed`, which refuses a binding that contradicts the
+request). The initial receipt `launch.json` records `run_seed` and
+`run_seed_source` before the workspace claim is used by any node; every child,
+body and terminal receipt must keep them (`RECEIPT_IDENTITY_FIELDS`), and
+`verify_candidate_records` refuses a launch seed that contradicts the request.
+A receipt without a seed predates the contract and stays readable.
+
+`admit_training` never generates a seed. `admitted_workspace_seed(initial)` reads
+the launch receipt's binding; a pre-seed receipt raises `MissingRunSeed`. The first
+admission locks the binding (with its source) through `prepare_training_run`;
+later bodies and resumed segments find it locked (`adopt_bound_run_seed`), and a
+different locked seed raises `RunInvariantsViolation`. Admission prints
+`[seed] run_seed=N source=operator|generated|locked`.
+
+`TrainingAdmission.iteration` (transported by `AdmittedTraining.iteration`) is the
+body's global loop iteration, continued from `LoopContinuation.completed_iterations`
+by a resumed segment, and `1` outside a loop. The tuner receives
+`HyperparamTuningInput.seed_coordinates = tuning_seed_scope(iteration, node_id)`
+= `SeedCoordinates(iteration=…, node_id=<authored tuning node>)`, so loop bodies
+and segments derive distinct attempt seeds from the one run seed (fixes F-SEED-2:
+before, every body used empty coordinates). `run_name` never enters. Graph readback
+(`verify_graph_training`) refuses a persisted tuning input whose `run_seed` or
+`seed_coordinates` differ from the launch receipt's seed at that body's
+coordinates; a pre-seed receipt skips the check.
 
 The first three `native_output_paths` retain their legacy ordering. The fourth
 is `<workspace>/<run_name>/iteration_001/<model_name>/run_output_<run_name>.json`.
@@ -1357,8 +1391,9 @@ metric_spec)` from 1 to now, and the reconciled run `metric`) returning a typed
 `StopEvaluationOutput(decision="continue"|"stop", reason)`. `BodyScore` is projected
 from each verified body's committed tuning record; the evaluator never reads or
 mutates `ChainState` or native history. The metric is reconciled once over the
-captured seed metric and every body stamp. A future judge implements the same
-contract.
+captured seed metric and every body stamp. A declared `JudgeStop` enters the same
+contract as an input (`StopEvaluationInput.judge_verdict`), never as an effect
+inside it ("Judge stop condition" below).
 
 The score is the loop incumbent: the best HealthGate-valid Formal score
 (`best_valid_formal_denoising_score`) over all completed bodies, advanced only by a
@@ -1367,7 +1402,8 @@ history fold). `metric_threshold` stops once the incumbent exists and is at leas
 the threshold (ties stop); `no_improvement` stops after `completed_bodies`
 consecutive bodies that did not strictly improve the incumbent (a body without a
 valid Formal score is non-improving; the first valid value is an improvement).
-Conditions are any-of in declared order; the first met condition wins.
+Deterministic conditions are any-of in declared order; the first met condition
+wins. `incumbent_fold` is the one fold every decision and judge request reads.
 
 Evaluation happens once per completed-body boundary, after the body is verified,
 published and folded. Precedence: a body that is not completed ends the loop with
@@ -1393,6 +1429,131 @@ A resumed segment rebuilds its score carrier from the same whole-run replay, so 
 incumbent and the no-improvement window span segments. A condition-completed run is
 `completed`, not a resumable checkpoint. Receipts and source without conditions are
 byte-identical to those before this feature.
+
+### Judge stop condition
+
+`JudgeStop(criterion, min_completed_bodies=1, on_failure="fail")` (declaration:
+workflow definition contract) adds an LLM-judged stop after the deterministic
+conditions. Owners: the pure decision is `loop_stop` (`needs_stop_judge`,
+`evaluate_stop`, `JudgeStopReason`, `JudgeBoundaryVerdict`); the effect, projection
+and replay are `loop_judge`; the call, evidence and readback core is `agent/judge/`
+(judge contract); the route is the run lock's `judge_routes.stop` (persistence
+contract).
+
+Admission and call cap (decision Q-B2-10). With a `JudgeStop` declared,
+`execute_loop` refuses with `StopConditionError` before any body
+(`admit_judge_route`) when `WorkflowLLMConfig.judge.stop` is absent, when the
+run-level `WorkflowLLMConfig.judge.max_judge_calls` is absent, or when the static
+judge call bound `judge_call_bound(loop) = final_iteration - min_completed_bodies`
+(one call per judgeable boundary; no LLM adaptor strategies exist yet to add to it)
+exceeds that cap. The route and the cap are resolved from the workspace run lock
+(`RunInvariants.judge_routes`, canonical) at call and readback time. Before each
+call, `call_stop_judge` re-checks the run's calls so far plus one against the locked
+cap and raises `StopConditionError` before any provider contact if it would be
+exceeded (the run fails; with a consistent lock admission makes this unreachable).
+Readback (`require_judge_cap`) refuses a run whose recorded judge verdicts exceed
+the locked cap. Showing the bound before launch belongs to the B2-5 GUI.
+
+Precedence at a completed-body boundary `N` (`needs_stop_judge` is the one pure
+predicate; the worker calls iff it is true, readback requires evidence iff it is true):
+
+1. a body that is not completed ends the loop with its status; no evaluation, no call;
+2. `N == final_iteration` completes at the limit without a reason; no call;
+3. deterministic conditions decide first, whatever the judge's declared position; a
+   met condition stops with its reason and the judge is not called. When the judge
+   would otherwise have been consulted there (`N >= min_completed_bodies`,
+   `skipped_stop_judge`), `mark_skipped_stop_judge` records a usage marker row
+   through the bridge's `emit_marker` (label `judge.stop.skipped`, extra `reason=
+   "deterministic_stop"`, `judge_condition_index`, `deciding_condition_index`); no
+   call and no evidence. The marker is best-effort telemetry: `emit_judge_marker`
+   checks no execution deadline, and a failure to build or bind the bridge (for
+   example a missing credential) or to write the row is reported on stderr and
+   never changes the loop's outcome;
+4. otherwise, when `N >= min_completed_bodies`, `call_stop_judge` makes exactly one
+   call (`run_judge_call`, template `judge.stop/v1`, usage label `judge.stop`,
+   `max_calls=1`, run context `(workspace, N, run_name, run_id)`) and publishes
+   write-once evidence at `candidate_control_dir(workspace, iteration=N) /
+   "judge/stop.json"` (`candidate_run/judge/stop.json` for body 1); the evaluator
+   then decides from the verdict: `stop` completes with `JudgeStopReason(kind="judge",
+   condition_index, iteration, evidence_path, evidence_sha256, request_sha256)`
+   (`evidence_path` relative to the workspace); `continue` proceeds;
+5. pending Stop/Pause are read afterwards, unchanged: a judge `stop` wins over them
+   like any condition; a `continue` leaves them in force.
+
+Request projection (`project_stop_request`, pure over verified records): every
+completed body `1..N` as `JudgeBodyFacts(iteration, value, rank, health)` with
+`value` = `BodyScore.valid_formal`, `rank` = `MetricOrder.rank` among the valid
+values (both only for a valid body), and `health` = `valid` when the tuner committed
+a best valid Formal score, else `invalid` when every Formal record classifies INVALID
+under the commit-time policy (`core.resume.classify_committed_record`), else
+`unknown`; the incumbent, its iteration and the non-improving count from
+`incumbent_fold`; `metric_id` and `DirectionWords` from `MetricOrder.direction_words`;
+per body the SHA-256 of its verified interpretation record and the first 2000
+characters of its `take_home_message`; the declared `criterion`.
+`task_guidance_sha256` is always `None` in this version: `judge.stop/v1` renders no
+task `judge_blocks` text, and readback has no composition to re-derive a guidance
+digest from, so the request claims no guidance. Rendering task guidance requires a
+new template version (tracked as a follow-up).
+
+Failure. Provider error, deadline, invalid payload or inadmissible choice is recorded
+as evidence (`status` `failed`/`timed_out`) before the policy applies. Under
+`on_failure="fail"` the loop raises `JudgeStopError` (a `StopConditionError`) and
+the run ends `failed` (not resumable); under `"continue"` the verdict is a recorded
+abstention (`decision=None`) and the loop proceeds, still bounded by the
+deterministic conditions and `final_iteration`. A `JudgeCallRefused` (for example an
+unconstructible bridge) or `JudgeEvidenceConflict` raises and fails the run.
+
+Readback. `derive_stop` re-runs the evaluator at every boundary with
+`replay_stop_judge`, which never calls a provider: it re-projects the request from the
+verified body records, reads the evidence (missing evidence refuses), and requires
+canonical bytes and equality of the recorded request, `PromptIdentity` (template,
+prompt and response-schema digests), usage label and the locked route. A failure
+recorded under `on_failure="fail"` on a loop that continued past it refuses ("loop
+continued after a failed judge"). `verify_loop` refuses every file under a judge
+slot (`candidate_run/judge/`, `candidate_run/iteration_NNN/judge/`) that the
+replayed verdicts do not account for, whether or not a judge is declared and at any
+boundary; only a paused segment with a reserved successor may hold later
+boundaries' evidence (its successor's readback accounts for it).
+
+Failed-loop limitation. A loop that ended `failed` (including through a
+`fail`-policy judge failure) has no `loop_trace`, so `verify_loop` returns before
+any replay: its judge evidence (the failed record) is inspectable but is not anchored
+by a digest in the receipt and is not verified.
+
+Anchoring. `LoopTrace.judge_verdicts` records every judged boundary's verified
+`JudgeBoundaryVerdict(iteration, decision, evidence_path, evidence_sha256,
+request_sha256)` in order (`continue`, `stop` and abstentions alike), and
+`LoopTrace.judge_abstentions` counts the abstentions (`decision=None`; the model
+requires the count to match). Both are omitted when empty/zero, so judge-free traces
+keep their bytes. `verify_loop` requires `judge_verdicts` to equal exactly the
+verdicts `derive_stop` re-derives from the evidence, and `stop_reason` to equal the
+re-derived reason, so any edit to any judged boundary's evidence (a `continue`
+rationale included) changes its digest and refuses. A continuation takes the
+predecessor's verdicts from its verified trace and appends its own, so a resumed
+trace anchors the whole run.
+
+Resume. A paused boundary already holds its judge evidence; `resume_history` returns
+every completed body receipt with the score carrier, the continuation starts at the
+next boundary, and write-once evidence refuses a second call at a boundary. A
+judge request after resume covers bodies of every segment.
+
+Cost bound: at most `final_iteration - min_completed_bodies` judge calls per run, one
+per judged boundary, and never more than the locked `max_judge_calls`; usage rows land
+in the run's `token_usage.jsonl` under label `judge.stop` (skips under
+`judge.stop.skipped`).
+
+Limitations: the GUI does not yet offer or render the judge condition or show the
+static call bound before launch (B2-5).
+
+Tests: `tests/unit/tools/candidate_worker/test_loop_stop.py` (pure precedence and
+verdict rules), `tests/unit/tools/candidate_worker/test_loop_judge.py` (stub bridge
+through real bodies: anchored reason, replay without a call, tamper/missing/orphan/
+route refusals, multi-boundary verdict reconstruction and an edited `continue`
+rationale refused, cap readback and unaccounted (also judge-free and out-of-range)
+evidence refused, deterministic-first skip marker and final-boundary zero calls, both
+failure policies with the abstention count and a fail-policy replay refusal, route/cap
+admission refusals, body Health classes, Pause precedence and resume without
+re-judging).
 
 ## Route evaluator (pure)
 

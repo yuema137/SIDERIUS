@@ -41,7 +41,6 @@
 .circuit-disconnect { margin: .35rem 0; }
 .circuit-port-unbound-label { font-weight: 700; }
 .circuit-port.is-unbound[data-required="true"] { border-color: var(--warning); }
-#editor-cancel-binding-draft { margin-left: .5rem; }
 .circuit-pending { fill: none; stroke: var(--focus); stroke-width: 2; stroke-dasharray: 6 4; opacity: .6; }
 .circuit-port.compatible { outline: 2px solid var(--focus); outline-offset: -3px; }
 .circuit-port.incompatible { opacity: .6; }
@@ -151,9 +150,6 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
   overflow: auto;
   padding: 16px;
 }
-.workflow-run-details { margin-top: 16px; }
-.workflow-run-details[open] { display: grid; gap: 14px; }
-.workflow-run-details > section { min-width: 0; padding-top: 8px; border-top: 1px solid var(--border); }
 .connection-list { margin: 8px 0 0; font-size: .82rem; }
 .connection-list ul { margin: 8px 0 0; padding-left: 1.25rem; }
 .connection-list li { overflow-wrap: anywhere; margin: 4px 0; }
@@ -214,3 +210,9 @@ body:has(#view-workflow:not([hidden])) #access-status { flex: 1 1 260px; margin:
 .workflow-loop-panel input[type="number"] { max-width: 10rem; }
 .workflow-loop-panel .editor-loop-stop { display: grid; gap: 4px; margin: 0 0 10px; }
 .workflow-loop-panel .editor-loop-stop button { justify-self: start; }
+/* Named versions (editor-versions.js) */
+#editor-version-name { max-width: 14rem; }
+.editor-history-list { display: grid; gap: 6px; padding-left: 1.4rem; }
+.editor-history-list li.current { font-weight: 600; }
+.editor-history-list button { margin-left: 8px; }
+.editor-history-detail pre { max-height: 24rem; overflow: auto; }

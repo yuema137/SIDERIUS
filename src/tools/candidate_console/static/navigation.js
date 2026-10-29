@@ -6,11 +6,11 @@
   function route(focus = false) {
     const fragment = location.hash.slice(1) || 'home';
     const parts = fragment.split('/');
-    const valid = ['home', 'workflow', 'slow-control'].includes(parts[0]) &&
+    const valid = ['home', 'workflow', 'run', 'slow-control', 'settings'].includes(parts[0]) &&
       (parts.length === 1 || (parts.length === 2 && parts[0] === 'slow-control' && uuid.test(parts[1])));
     document.getElementById('route-status').textContent = valid ? '' : 'Invalid console route or operation UUID. Enter a complete operation UUID in Slow control.';
     view = valid ? parts[0] : 'slow-control'; operation = valid && parts.length === 2 ? parts[1] : null;
-    document.title = view === 'workflow' ? 'SIDERIUS · Workflow' : 'SIDERIUS · Candidate console';
+    document.title = {workflow: 'SIDERIUS · Workflow', run: 'SIDERIUS · Run', settings: 'SIDERIUS · Settings'}[view] || 'SIDERIUS · Candidate console';
     for (const panel of document.querySelectorAll('[data-view]')) panel.hidden = panel.dataset.view !== view;
     for (const link of document.querySelectorAll('nav a')) {
       if (link.hash === '#' + view) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');

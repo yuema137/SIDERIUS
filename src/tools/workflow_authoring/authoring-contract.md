@@ -4,7 +4,8 @@
 `AuthoredWorkflowDocument` (v1 or reusable v2), its native catalog and the source bridge own declaration
 semantics. Unbound source/document operations never resolve or import referenced files.
 Explicit task-reference selection enables the separate bounded inspection below. Recovery copies do
-not authorize execution and are never a source revision/publication system.
+not authorize execution and are never a source revision/publication system;
+named-version history only reads them.
 
 `Project` selects an explicit normalized absolute project root, source file and
 existing 0700 recovery directory. Source/recovery are strict descendants of the
@@ -61,6 +62,50 @@ through other edits. Unbound review/save remain inert declaration operations
 without explicit task-reference selection;
 reusable preparation/launch retain their candidate preparation/operation owners.
 
+## Named versions
+
+`versions.py` owns the version record, a sibling of the source named
+`<source name>.versions.json` (for `workflow.py`: `workflow.py.versions.json`),
+validated by `VersionRecord` (`schema_id="siderius.workflow-versions/v1"`,
+`source_name`, ordered `versions`). Each `RecordedVersion` holds `sha256` of the
+exact source bytes, `name`, timezone-aware `recorded_at` and `origin`: `saved` (a
+named Save) or `observed` (unnamed base bytes first seen at a later Save: a
+pre-record workflow or an external edit). Names are 1-64 characters without
+control characters or surrounding whitespace and unique within the record. No Git
+dependency exists. Names are presentation metadata only: they never enter source
+bytes, declaration digests, preparation requests or run identity; the source
+SHA-256 remains the version identity, and A → B → A records a third row with A's SHA.
+
+`SaveRequest.version_name` is optional and omitted from serialization when absent;
+absent means the next unused `vN`, where N starts at one more than the number of
+named Saves. Under the existing source lock and before any recovery copy or source
+write, Save reads and validates the record (regular owned single-link file, no
+symlink, at most 512 KiB, matching `source_name`, at most 1000 rows), refuses a used
+name and prepares the appended record; any such refusal is `version_record` and
+writes nothing. The byte cap is sized so 1000 worst-case rows (64 four-byte UTF-8
+name characters) always fit, so the row cap is the operative Save limit; either
+refusal message names both limits. If the last recorded SHA differs from the base,
+an `observed` row precedes the `saved` row. After the source is atomically replaced,
+the record is published by temp file + fsync + rename, keeping its permission bits
+(a new record takes the source's bits). If that write fails, Save returns the
+distinct code `version_record_not_updated` with the saved `current` view: the source
+is saved, the old record is intact, and the next Save records these bytes as an
+`observed` row. Identical bytes record nothing.
+`SaveView.version_name` reports the recorded name.
+
+Without a record, workflows keep working: `GET /versions` lists the current bytes
+as one `unrecorded` current row and the first Save creates the record. `versions()`
+returns `VersionList` (record path/presence, current SHA, suggested `next_name`,
+chronological `VersionEntry` rows with list `index`, `current` and
+`bytes_available`). Current bytes that are not the last recorded SHA appear as a
+final `unrecorded` row. Version bytes are the existing write-once `SHA256.py`
+recovery copies, read only when owned, regular, single-link and hash-equal; no
+second byte store exists. `version(index, sha256)` returns `VersionDetail` with
+read-only source and a unified diff against the preceding row when both byte sets
+are available, otherwise source/diff are null (SHA only). A stale index/SHA pair
+is `conflict`. An invalid record blocks history and Save until it is repaired or
+moved aside; `recorded_name` (run-preparation display) treats it as unnamed.
+
 ## Non-executable binding drafts
 
 `workflows.definition.draft.WorkflowDraft` holds a validated base document and
@@ -87,7 +132,56 @@ lists `problems` and never derives one itself. The normal review route
 also accepts `DraftProposal(kind="draft")` and promotes it before the existing
 source review, task acceptance and Save boundary. Neither draft route changes
 preparation or launch admission. A stale base refuses and leaves the caller's draft
-intact. Drafts are not persisted by this API.
+intact. Drafts are not persisted by this API. `base_document` is any validated
+document, not necessarily the saved one: only `expected_sha256` binds the saved
+source. The console's unified draft relies on this to review layout and inspector
+edits together with binding patches in one `DraftProposal`.
+
+## Node add/remove proposals and catalog projection
+
+`GET /api/editor/node-catalog` returns `NodeCatalog` (`options.node_catalog`), a
+read-only projection of the native catalog: one `CatalogEntry` per capability per
+protocol whose output is that capability's input (with owner and ordered
+`CatalogArgument` name/contract/required), plus one external-request route
+(`protocol=null`) per capability. The browser palette lists only these entries.
+
+`AddNodeProposal(kind="add_node", source, node, capability, protocol, binding,
+arguments, x, y)` and `RemoveNodeProposal(kind="remove_node", source, nodes)` are
+`ReviewRequest` proposals applied to the exact proposal source (like
+`LoopProposal`, so a previously reviewed unsaved source can carry them), but as
+targeted byte edits (`workflows.definition.source_edits`), not canonical
+re-rendering: comments and every unaffected byte survive. The request schema
+refuses (422 `validation`) a capability outside `CAPABILITIES`, a protocol that does
+not produce the capability's input, a binding on a protocol route, arguments on an
+external route, and unknown or duplicate sockets. Review then refuses with 409:
+`node_edit` (duplicate node id, unknown node, non-literal source shape),
+`draft_incomplete` (one diagnostic line per unbound required input),
+`draft_invalid` (a bound source the catalog projection does not offer for that
+socket), or `node_dependants`. The edited source then passes the ordinary
+`reviewed_source` parse/validation, task-reference and Save boundary; a successful
+review adds `node_edit: NodeEditSummary` (`added`, `removed`, `disconnected` input
+connections of removed nodes, and a `message`). The diff remains the authority.
+
+Removal deletes each node, its own request bindings and its layout position.
+It refuses (`node_dependants`, nothing written) when a remaining node reads a
+removed result through any argument, when the research-loop feedback names a removed
+node, or when no capability would remain; it never rewires or disconnects other
+nodes implicitly. Removing a dependent chain together is allowed. The edited source
+is then re-parsed and validated before it is returned: a removal that leaves another
+reference dangling (a route source or target, a `SelectedSource` merge candidate, an
+adaptor input) is refused as `node_dependants` with the validator's diagnostics
+("Cannot remove <ids>: ..."), never returned as source. Those consumers are not yet
+named individually like ResultSource readers are.
+
+A node with unbound required inputs is a draft-only state. `POST
+/api/editor/{project_id}/node-draft` accepts `NodeDraftRequest(expected_sha256,
+proposal)` and returns `NodeDraftView(proposal, status, diagnostics, ports)`:
+`incomplete`/`invalid`/`complete` with the same messages Review would give, and
+`ports` in the ordinary `PortInventoryEntry` shape (choices are the base
+document's contract-matching externals and node results). It checks the saved
+digest, renders nothing for publication and writes no recovery copy; a stale base
+is a conflict. Only a complete add can be reviewed, so a saved document is always
+valid. Constructor imports added by an insertion are kept by a later removal.
 
 ## Native training inspector
 
@@ -97,7 +191,8 @@ ingress projection own values; the inspector only names supported presentation
 controls. `document.training_settings` remains sparse. Unset removes a key, null
 is explicit, and a supplied value remains authored. Numeric blanks block review
 without becoming zero/null. Epoch controls are ceilings, independent of parameter
-rules and native planning. Sampling and training base seeds have separate controls.
+rules and native planning. There is no seed control: the retired `sampling_seed` /
+`train_base_seed` pins are refused, and the run seed is chosen at launch.
 Each `TrainingControl.help` (`TrainingControlHelp`) projects the field's entry in
 `CandidateTrainingSettings.model_json_schema()` for `WorkflowLaunchConfig`:
 `description`, `unit`, `minimum`/`maximum`, `exclusive_minimum`/`exclusive_maximum`

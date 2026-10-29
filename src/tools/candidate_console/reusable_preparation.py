@@ -1,5 +1,6 @@
 """Saved-source review and recovery-first preparation through native owners."""
 
+from pathlib import Path
 from uuid import UUID
 
 from pydantic import Field, field_validator
@@ -19,11 +20,13 @@ from tools.candidate_prepare import (
     inspect_reusable_source,
     preflight_reusable_candidate,
 )
+from tools.workflow_authoring.versions import recorded_name
 from tools.workflow_preview.models import PreviewModel
 
 from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_policy import check_request_policy, configured_capture
 from .service import CandidateConsole
+from .settings_file import protected_paths
 
 
 class NewRunSelection(PreviewModel):
@@ -58,12 +61,17 @@ class NewRunReview(NewRunIntent):
     devices: tuple[str, ...]
     environment_names: tuple[str, ...]
     read_only: tuple[str, ...]
+    # Display-only Save name of expected_source_sha256; the SHA-256 stays the bound identity.
+    source_version_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
     effects: str = "Prepare captures saved source and creates inputs; candidate launch is separate."
 
 
 class ReusablePreparation:
-    def __init__(self, console: CandidateConsole):
+    def __init__(self, console: CandidateConsole, *, protected: tuple[Path, ...] | None = None):
+        """``protected``: paths no read-only input may overlap at admission; by default
+        derived from the config alone (``create_app`` adds the workspace settings/library)."""
         self.console = console
+        self.protected = protected_paths(console.config) if protected is None else protected
 
     def _review(
         self, project_id: str, selection: NewRunSelection
@@ -89,7 +97,7 @@ class ReusablePreparation:
         try:
             inspected = inspect_reusable_source(request)
             check_request_policy(task, inspected.request)
-            plan = preflight_reusable_candidate(request)
+            plan = preflight_reusable_candidate(request, protected=self.protected)
             check_request_policy(task, plan.binding.request)
         except OperationFailure:
             raise
@@ -120,6 +128,9 @@ class ReusablePreparation:
             devices=native.candidate_devices,
             environment_names=native.candidate_environment_names,
             read_only=native.task_read_only,
+            source_version_name=recorded_name(
+                project.source_file, selection.expected_source_sha256
+            ),
         ), operation
 
     def review(self, project_id: str, selection: NewRunSelection) -> NewRunReview:

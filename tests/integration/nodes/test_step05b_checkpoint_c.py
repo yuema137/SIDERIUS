@@ -102,6 +102,11 @@ def _preflight(contract, workspace: str, label: str, loss_type: str = "smooth_l1
         hardware_context=SNAPSHOT,
         workspace=workspace,
         label=label,
+        # No run-scoped plugin/loss directory: this harness probes the built-in
+        # punet, so an explicit None (the global-directory path) is the truth
+        # here, not an omission. The production entrypoint requires the kwargs.
+        plugin_dir=None,
+        loss_dir=None,
         deadline_seconds=600.0,
         model_io_contract=contract,
     )

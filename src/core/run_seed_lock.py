@@ -25,7 +25,13 @@ from core.run_invariants import (
     pre_seed_lock_violation,
     run_seed_lock_fields,
 )
-from core.seeding import RUN_SEED_MAX, RunSeed, format_seed_line, resolve_run_seed
+from core.seeding import (
+    RUN_SEED_MAX,
+    RunSeed,
+    RunSeedBinding,
+    format_seed_line,
+    resolve_run_seed,
+)
 
 SeedOrigin = Literal["operator", "generated", "locked"]
 _RUN_SEED = TypeAdapter(RunSeed)
@@ -89,6 +95,21 @@ def continuation_run_seed(workspace: str, explicit: int | None) -> int | None:
     """
     locked = _locked_seed(workspace, explicit)
     return explicit if locked is None else locked
+
+
+def adopt_bound_run_seed(workspace: str, binding: RunSeedBinding) -> WorkspaceRunSeed:
+    """The seed of a run whose entry boundary already bound ``binding``; never generates.
+
+    The first execution against the workspace records ``binding`` (with its
+    source); a later one (a loop iteration, a resumed segment) must find the
+    same value locked.
+
+    Raises:
+        RunInvariantsViolation: see :func:`_locked_seed`.
+    """
+    if _locked_seed(workspace, binding.value) is not None:
+        return WorkspaceRunSeed(value=binding.value, origin="locked")
+    return WorkspaceRunSeed(value=binding.value, origin=binding.source)
 
 
 def resolve_workspace_run_seed(workspace: str, explicit: int | None) -> WorkspaceRunSeed:

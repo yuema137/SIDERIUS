@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Self, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
+from agent.schemas.judge_task import MAX_DEBATE_ROUNDS, JudgeTaskBlocks, RubricSpec
 from execute_tools.evaluation_metric import MetricDirection, MetricIdentityKey
 from execute_tools.metric_order import MetricOrder
 
@@ -114,10 +115,238 @@ class StopJudgeRequest(JudgeModel):
             raise ValueError("the incumbent must be a rank-1 body with the same value")
 
 
-# Role content kind -> the call roles that may carry it. Strategy content kinds
-# join the CallContent union and this table in their own changes.
-CallContent = Annotated[StopJudgeRequest, Field(discriminator="kind")]
-_ROLES_BY_CONTENT: dict[str, frozenset[str]] = {"stop": frozenset({"stop"})}
+#: Deterministic projection bounds: one item never dominates a prompt.
+MAX_PROJECTED_FIELDS = 64
+MAX_PROJECTED_CHARS = 4000
+#: Items any one judge call may list (rubric batch scoring, merge, revision, debate),
+#: so every prompt that lists all items has a fixed size bound.
+MAX_SCORED_ITEMS_PER_CALL = 16
+#: Turns one debate transcript may hold: every round's advocates plus a critic.
+#: With ``DebateTurn.argument`` ≤ 3000 characters and ``cites`` ≤ the item cap,
+#: a transcript is bounded at 68 turns × ~3.3k characters.
+MAX_DEBATE_TURNS = MAX_DEBATE_ROUNDS * (MAX_SCORED_ITEMS_PER_CALL + 1)
+#: Rendered characters (system + user) one judge call may send. No context-size owner
+#: exists in the LLM bridge or ``WorkflowLLMConfig``, so this is declared here: about
+#: 100k tokens at ~4 characters per token, which leaves output room in the 128k-token
+#: windows of the routed judge models. It counts everything rendered, including the
+#: task's ``JudgeTaskBlocks`` guidance; a call over it is never sent.
+MAX_JUDGE_PROMPT_CHARS = 400_000
+
+
+class ProjectedField(JudgeModel):
+    name: str = Field(min_length=1, max_length=100)
+    text: str = Field(max_length=MAX_PROJECTED_CHARS)
+
+
+class ItemProjection(JudgeModel):
+    """Bounded, deterministic view of one verified value, built by its contract's projector."""
+
+    contract: str = Field(min_length=1)
+    fields: tuple[ProjectedField, ...] = Field(min_length=1, max_length=MAX_PROJECTED_FIELDS)
+
+
+class JudgedItem(JudgeModel):
+    """One admissible item as a judge sees it; ``item_id`` is the adaptor's ``<port>:<position>``."""
+
+    item_id: str = Field(min_length=1)
+    projection: ItemProjection
+
+
+class RubricScoringRequest(JudgeModel):
+    """One ``rubric-rank/v1`` scoring call: score ``items`` on every rubric criterion.
+
+    ``repeat`` distinguishes the declared repeats of the same scoring call; it is
+    hashed but not rendered.
+    """
+
+    kind: Literal["rubric_scoring"] = "rubric_scoring"
+    rubric: RubricSpec
+    criterion: str = Field(min_length=1, max_length=2000)
+    repeat: int = Field(ge=0)
+    items: tuple[JudgedItem, ...] = Field(min_length=1, max_length=MAX_SCORED_ITEMS_PER_CALL)
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def distinct_items(self) -> Self:
+        ids = [item.item_id for item in self.items]
+        if len(set(ids)) != len(ids):
+            raise ValueError("a scoring call lists each item once")
+        return self
+
+
+def _distinct_items(items: tuple[JudgedItem, ...]) -> None:
+    ids = [item.item_id for item in items]
+    if len(set(ids)) != len(ids):
+        raise ValueError("a judge call lists each item once")
+
+
+class MergeRequest(JudgeModel):
+    """One ``judge-merge/v1`` call: synthesize ``synthesize_count`` new values from ``items``.
+
+    ``output_contract`` names the catalogue contract every synthesized value must
+    satisfy; each value cites at least ``min_parents`` distinct listed items.
+    """
+
+    kind: Literal["merge"] = "merge"
+    criterion: str = Field(min_length=1, max_length=2000)
+    output_contract: str = Field(min_length=1)
+    synthesize_count: int = Field(ge=1)
+    min_parents: int = Field(ge=2)
+    items: tuple[JudgedItem, ...] = Field(min_length=2, max_length=MAX_SCORED_ITEMS_PER_CALL)
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        _distinct_items(self.items)
+        if self.min_parents > len(self.items):
+            raise ValueError("min_parents cannot exceed the listed items")
+        return self
+
+
+# Role content kind -> the call roles that may carry it. Further strategy content
+# kinds join the CallContent union and this table in their own changes.
+class AdviceRequest(JudgeModel):
+    """One ``primary-advisors-llm/v1`` advisor call: what ``advisor`` suggests for ``primary``."""
+
+    kind: Literal["advice"] = "advice"
+    criterion: str = Field(min_length=1, max_length=2000)
+    output_contract: str = Field(min_length=1)
+    primary: JudgedItem
+    advisor: JudgedItem
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        _distinct_items((self.primary, self.advisor))
+        return self
+
+
+class AdvisoryNote(JudgeModel):
+    """An advisor call's verdict; also carried, verbatim, into the revision request."""
+
+    kind: Literal["advice"]
+    advisor_item: str = Field(min_length=1)
+    suggestions: tuple[Annotated[str, Field(min_length=1, max_length=1000)], ...] = Field(
+        min_length=1, max_length=12
+    )
+
+
+class RevisionRequest(JudgeModel):
+    """The ``primary-advisors-llm/v1`` reviser call: revise ``primary`` using ``advisors``.
+
+    ``notes`` is empty for ``advice="single_call"`` and holds one advisor call's note
+    per advisor, in advisor order, for ``advice="per_advisor"``.
+    """
+
+    kind: Literal["revision"] = "revision"
+    criterion: str = Field(min_length=1, max_length=2000)
+    output_contract: str = Field(min_length=1)
+    primary: JudgedItem
+    # The primary and its advisors share the per-call item cap.
+    advisors: tuple[JudgedItem, ...] = Field(min_length=1, max_length=MAX_SCORED_ITEMS_PER_CALL - 1)
+    notes: tuple[AdvisoryNote, ...] = Field(max_length=MAX_SCORED_ITEMS_PER_CALL - 1)
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        _distinct_items((self.primary, *self.advisors))
+        noted = tuple(note.advisor_item for note in self.notes)
+        if noted and noted != tuple(item.item_id for item in self.advisors):
+            raise ValueError("revision notes are absent or one per advisor in advisor order")
+        return self
+
+
+class DebateTurn(JudgeModel):
+    """One advocate or critic turn; also carried, verbatim, in later debate requests.
+
+    An advocate argues for ``item_id``; a critic (``item_id`` None) weighs every
+    argument of its round. ``cites`` names listed item ids the argument relies on.
+    """
+
+    kind: Literal["debate_turn"]
+    round: int = Field(ge=1, le=MAX_DEBATE_ROUNDS)
+    role: Literal["advocate", "critic"]
+    item_id: str | None
+    argument: str = Field(min_length=1, max_length=3000)
+    cites: tuple[str, ...] = Field(max_length=MAX_SCORED_ITEMS_PER_CALL)
+
+    @model_validator(mode="after")
+    def advocate_names_item(self) -> Self:
+        if (self.role == "advocate") != (self.item_id is not None):
+            raise ValueError("an advocate turn names its item; a critic turn names none")
+        if len(set(self.cites)) != len(self.cites):
+            raise ValueError("a turn cites each item at most once")
+        return self
+
+
+class _DebateContent(JudgeModel):
+    """What every ``debate-judge/v1`` call sees: the items and every earlier turn."""
+
+    criterion: str = Field(min_length=1, max_length=2000)
+    items: tuple[JudgedItem, ...] = Field(min_length=2, max_length=MAX_SCORED_ITEMS_PER_CALL)
+    transcript: tuple[DebateTurn, ...] = Field(max_length=MAX_DEBATE_TURNS)
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        _distinct_items(self.items)
+        return self
+
+
+class AdvocacyRequest(_DebateContent):
+    """An advocate's turn in ``round``: argue for ``item_id``."""
+
+    kind: Literal["advocacy"] = "advocacy"
+    round: int = Field(ge=1, le=MAX_DEBATE_ROUNDS)
+    item_id: str = Field(min_length=1)
+
+
+class CritiqueRequest(_DebateContent):
+    """The critic's turn closing ``round``."""
+
+    kind: Literal["critique"] = "critique"
+    round: int = Field(ge=1, le=MAX_DEBATE_ROUNDS)
+
+
+class DebateVerdictRequest(_DebateContent):
+    """The final judge call: rank every item, or synthesize ``synthesize_count`` values."""
+
+    kind: Literal["debate_verdict"] = "debate_verdict"
+    judge_output: Literal["rank", "synthesize"]
+    synthesize_count: int | None = Field(ge=1)
+    output_contract: str | None = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def synthesis_fields(self) -> Self:
+        synthesize = self.judge_output == "synthesize"
+        if synthesize != (self.synthesize_count is not None) or synthesize != (
+            self.output_contract is not None
+        ):
+            raise ValueError("a synthesizing verdict names its count and output contract")
+        return self
+
+
+CallContent = Annotated[
+    StopJudgeRequest
+    | RubricScoringRequest
+    | MergeRequest
+    | AdviceRequest
+    | RevisionRequest
+    | AdvocacyRequest
+    | CritiqueRequest
+    | DebateVerdictRequest,
+    Field(discriminator="kind"),
+]
+_ROLES_BY_CONTENT: dict[str, frozenset[str]] = {
+    "stop": frozenset({"stop"}),
+    "rubric_scoring": frozenset({"scorer"}),
+    "merge": frozenset({"merger"}),
+    "advice": frozenset({"advisor"}),
+    "revision": frozenset({"reviser"}),
+    "advocacy": frozenset({"advocate"}),
+    "critique": frozenset({"critic"}),
+    "debate_verdict": frozenset({"judge"}),
+}
 
 
 class CallRequest(JudgeModel):
@@ -150,8 +379,54 @@ class StopVerdict(JudgeModel):
     confidence: Literal["low", "medium", "high"]
 
 
-# Strategy payload kinds join this as a discriminated union in their own PRs.
-CallPayload = StopVerdict
+class CriterionScore(JudgeModel):
+    criterion: str = Field(min_length=1)
+    score: int
+
+
+class ItemCriterionScores(JudgeModel):
+    item_id: str = Field(min_length=1)
+    scores: tuple[CriterionScore, ...] = Field(min_length=1)
+
+
+class RubricVerdict(JudgeModel):
+    """Per-criterion integers only; the weighted mean is computed by framework code."""
+
+    kind: Literal["rubric"]
+    item_scores: tuple[ItemCriterionScores, ...] = Field(min_length=1)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class SynthesizedDraft(JudgeModel):
+    """One synthesized value as the LLM wrote it, before contract validation and stamping.
+
+    ``value`` is checked against the request's output contract by the consumer's
+    ``check_payload``; ``parents`` are the listed item ids it draws on.
+    """
+
+    parents: tuple[str, ...] = Field(min_length=1)
+    value: dict[str, JsonValue]
+
+
+class SynthesisVerdict(JudgeModel):
+    kind: Literal["synthesis"]
+    items: tuple[SynthesizedDraft, ...] = Field(min_length=1)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+# Further strategy payload kinds join this union in their own changes.
+class RankVerdict(JudgeModel):
+    """An ordinal ranking: every listed item id once, best first; no values."""
+
+    kind: Literal["rank"]
+    order: tuple[str, ...] = Field(min_length=1)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+CallPayload = Annotated[
+    StopVerdict | RubricVerdict | SynthesisVerdict | AdvisoryNote | DebateTurn | RankVerdict,
+    Field(discriminator="kind"),
+]
 
 
 class PromptIdentity(JudgeModel):
@@ -169,6 +444,20 @@ class JudgeRoute(JudgeModel):
     reasoning_effort: str | None
     max_output_tokens: int = Field(gt=0)
     max_retries: int = Field(ge=0)
+
+
+class JudgeRoutes(JudgeModel):
+    """The judge routes and run-level call cap one run resolved; the run lock compares them.
+
+    Built from ``WorkflowLLMConfig.judge`` by ``workflows.llm_config.locked_judge_routes``;
+    a recorded call's ``JudgeCallEvidence.route`` must equal its family's route, and a
+    run's judge calls never exceed ``max_judge_calls`` (Q-B2-10).
+    """
+
+    stop: JudgeRoute | None = None
+    aggregate: JudgeRoute | None = None
+    debate: JudgeRoute | None = None
+    max_judge_calls: int | None = Field(default=None, gt=0)
 
 
 FailureCode = Literal["provider_error", "invalid_payload", "inadmissible_choice", "deadline"]

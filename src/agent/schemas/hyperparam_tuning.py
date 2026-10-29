@@ -14,7 +14,15 @@ from __future__ import annotations
 import math
 from typing import Annotated, Any, Literal, NamedTuple
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
@@ -22,6 +30,7 @@ from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
+from agent.schemas.judge import JudgeRoutes
 from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.model_io_contract import TensorContract
 from agent.schemas.model_probe import ModelProbeContext
@@ -76,6 +85,23 @@ from ml_models.model_descriptions import DescriptionSourcePolicy
 from ml_models.models_format_sandbox import LossConfig
 
 TrainingValidationPortion = Annotated[float, Field(gt=0, le=1)]
+
+
+#: An operator-configured wall-time budget in minutes: finite and positive.
+#: ``None`` (on the fields that use it) is the only way to disable a budget;
+#: zero and non-finite values are malformed configuration, refused by every
+#: launch entry path before model execution (``validate_launch_admission``)
+#: rather than reinterpreted by forecast or measured admission.
+def _finite_in_seconds(minutes: float) -> float:
+    """Consumers multiply by 60; a finite minute count must stay finite there."""
+    if not math.isfinite(minutes * 60.0):
+        raise ValueError("time budget is too large to express in seconds")
+    return minutes
+
+
+OperatorTimeBudgetMinutes = Annotated[
+    float, Field(gt=0.0, allow_inf_nan=False), AfterValidator(_finite_in_seconds)
+]
 
 
 #: What a HealthGate verdict DOES in this run: enforce, or only record.
@@ -2079,9 +2105,8 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
-    bypass_formal_time_budget_minutes: float | None = Field(
+    bypass_formal_time_budget_minutes: OperatorTimeBudgetMinutes | None = Field(
         default=None,
-        gt=0.0,
         description=(
             "Lane F3 / F-BYPASS-WD-1: the ELEVATED wall-time ceiling (minutes) "
             "a score-QUALIFIED bypass formal attempt may use — ONE resolved "
@@ -2230,6 +2255,16 @@ class HyperparamTuningInput(BaseModel):
             "Every attempt seed derives from it; None is refused (MissingRunSeed)."
         ),
     )
+    # --- Judge routes (B2-4) ---
+    judge_routes: JudgeRoutes | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "B2-4 — the run lock's judge routes, echoed so the tuner's lock "
+            "validation agrees with the workflow's. Never read for behaviour; "
+            "None (no judge block) keeps the input and lock bytes."
+        ),
+    )
     retired_seed_pins: RetiredSeedPins | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
@@ -2271,7 +2306,7 @@ class HyperparamTuningInput(BaseModel):
     # the validator→tuner protocol. Each is independently optional: setting
     # only the trial budget gates trial rounds and skips formal rounds, and
     # vice versa. The tuner picks the right one each round via plan.is_trial.
-    trial_time_budget_minutes: float | None = Field(
+    trial_time_budget_minutes: OperatorTimeBudgetMinutes | None = Field(
         default=None,
         description=(
             "Wall-time budget in minutes against which evaluate_time_skill "
@@ -2292,7 +2327,7 @@ class HyperparamTuningInput(BaseModel):
             "may record observations but cannot reject the attempt."
         ),
     )
-    formal_time_budget_minutes: float | None = Field(
+    formal_time_budget_minutes: OperatorTimeBudgetMinutes | None = Field(
         default=None,
         description=(
             "Wall-time budget in minutes against which evaluate_time_skill "

@@ -135,9 +135,13 @@ from workflows.launch_identity import (
 from workflows.launch_identity import (
     resolve_lit_review_enabled as resolve_lit_review_enabled,
 )
-from workflows.llm_config import WorkflowLLMConfig, resolve_standard_llm_config
+from workflows.llm_config import (
+    WorkflowLLMConfig,
+    locked_judge_routes,
+    resolve_standard_llm_config,
+)
 from workflows.native_chain_binding import NativeChainCaptureRefusal
-from workflows.run_config import WorkflowLaunchConfig, validate_launch_trial_overrides
+from workflows.run_config import WorkflowLaunchConfig, validate_launch_admission
 from workflows.runtime_settings import (
     build_required_profile_binding as build_required_profile_binding,
 )
@@ -931,17 +935,23 @@ class _InvariantLaunchInputs:
 _UNRESOLVED_LAUNCH_INPUTS = _InvariantLaunchInputs()
 
 
+def _launch_llm_config(
+    args: argparse.Namespace, llm_config: WorkflowLLMConfig | None
+) -> WorkflowLLMConfig:
+    """The launch's resolved routing, or the ``--llm_config`` file a direct caller names."""
+    if llm_config is not None:
+        return llm_config
+    config_path = getattr(args, "llm_config", None)
+    return WorkflowLLMConfig.from_json(config_path) if config_path else WorkflowLLMConfig()
+
+
 def _resolve_launch_planner_identity(
     args: argparse.Namespace, llm_config: WorkflowLLMConfig | None
 ) -> PlannerStrategyIdentity:
     """Resolve the configured strategy before computing or mutating run locks."""
     from agent.planner_strategy import resolve_planner_strategy
 
-    if llm_config is None:
-        config_path = getattr(args, "llm_config", None)
-        llm_config = (
-            WorkflowLLMConfig.from_json(config_path) if config_path else WorkflowLLMConfig()
-        )
+    llm_config = _launch_llm_config(args, llm_config)
     return resolve_planner_strategy(llm_config.get("tune").get("planner_strategy")).identity
 
 
@@ -985,7 +995,8 @@ def compute_expected_invariants(
     their existing authorities, so direct callers lock the same values as the
     workflow; an undeclared planner still requires an installed default provider.
     """
-    planner_identity = _resolve_launch_planner_identity(args, launch.llm_config)
+    llm_config = _launch_llm_config(args, launch.llm_config)
+    planner_identity = _resolve_launch_planner_identity(args, llm_config)
     identity = launch.identity if launch.identity is not None else resolve_launch_identity(args)
     run_scope = args.data_scope if args.data_scope is not None else DataScope.default()
     # Step 12 / PR-12a **F-12-1** — resolve against the RUN's topology.
@@ -1078,6 +1089,8 @@ def compute_expected_invariants(
             ),
             runtime_completion_policy=args.runtime_completion_policy,
             runtime_verifier_identity=identity.runtime_verifier_identity,
+            # B2-4 — the judge routes `run_workflow` locks for this workspace too.
+            judge_routes=locked_judge_routes(llm_config.judge),
             # Issue #983 — the locked seed (refusing a pre-seed lock or a
             # conflicting --run_seed), else the flag; generation stays with
             # the workflow startup, which locks the same value.
@@ -1173,9 +1186,10 @@ def main(
     expectations = chain_capture if chain_capture is not None else reviewed_setup
     if expectations is not None:
         expectations.check_entry(args)
-    # Validate the resolved schedule before workspace binding, task imports or LLM work.
+    # Validate the resolved schedule and time budgets before workspace binding,
+    # task imports or LLM work.
     try:
-        validate_launch_trial_overrides(
+        validate_launch_admission(
             WorkflowLaunchConfig(
                 max_rounds=args.max_rounds,
                 is_trial=args.is_trial,
@@ -1185,6 +1199,9 @@ def main(
                 trial_portion=args.trial_portion,
                 train_portion=args.train_portion,
                 eval_portion=args.eval_portion,
+                trial_time_budget_minutes=args.trial_time_budget_minutes,
+                formal_time_budget_minutes=args.formal_time_budget_minutes,
+                bypass_formal_time_budget_minutes=args.bypass_formal_time_budget_minutes,
             )
         )
     except ValueError as exc:

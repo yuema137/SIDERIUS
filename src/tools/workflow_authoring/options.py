@@ -10,13 +10,47 @@ from workflows.definition import (
 from workflows.definition.catalog import CAPABILITIES, CONTRACTS, PROTOCOLS
 
 from .models import (
+    AddNodeProposal,
     BindingChoice,
     BindingOptions,
+    CatalogArgument,
+    CatalogEntry,
     NativeContract,
+    NodeCatalog,
     PortChoice,
     PortInventoryEntry,
     ProtocolMapping,
 )
+
+
+def contract_info(contract_id: str) -> NativeContract:
+    return NativeContract(id=contract_id, native_type=CONTRACTS[contract_id])
+
+
+def port_choices(
+    document: AuthoredWorkflowDocument, contract_id: str, results: bool
+) -> tuple[PortChoice, ...]:
+    """Declared externals (and node results) whose catalog contract matches exactly."""
+    definition = document.definition
+    externals = tuple(
+        PortChoice(
+            label=item.id,
+            source=ExternalSource(binding=item.id),
+            contract=contract_info(item.contract),
+        )
+        for item in definition.externals
+        if item.contract == contract_id
+    )
+    nodes = tuple(
+        PortChoice(
+            label=item.id + ".result",
+            source=ResultSource(node=item.id),
+            contract=contract_info(CAPABILITIES[item.capability].output),
+        )
+        for item in definition.nodes
+        if CAPABILITIES[item.capability].output == contract_id
+    )
+    return externals + (nodes if results else ())
 
 
 def binding_projection(
@@ -25,29 +59,8 @@ def binding_projection(
     """Project catalog ports and preserve the legacy bound-option wire shape/order."""
     definition = document.definition
 
-    def contract_info(contract_id: str) -> NativeContract:
-        return NativeContract(id=contract_id, native_type=CONTRACTS[contract_id])
-
     def choices(contract_id: str, results: bool) -> tuple[PortChoice, ...]:
-        externals = tuple(
-            PortChoice(
-                label=item.id,
-                source=ExternalSource(binding=item.id),
-                contract=contract_info(item.contract),
-            )
-            for item in definition.externals
-            if item.contract == contract_id
-        )
-        nodes = tuple(
-            PortChoice(
-                label=item.id + ".result",
-                source=ResultSource(node=item.id),
-                contract=contract_info(CAPABILITIES[item.capability].output),
-            )
-            for item in definition.nodes
-            if CAPABILITIES[item.capability].output == contract_id
-        )
-        return externals + (nodes if results else ())
+        return port_choices(document, contract_id, results)
 
     inventory: list[PortInventoryEntry] = []
     for node in definition.nodes:
@@ -124,3 +137,77 @@ def binding_projection(
                 )
             )
     return tuple(legacy), ports
+
+
+def node_catalog() -> NodeCatalog:
+    """Every addable capability route: one per producing protocol, plus external."""
+    entries: list[CatalogEntry] = []
+    for name, capability in CAPABILITIES.items():
+        common = {
+            "capability": name,
+            "input_contract": contract_info(capability.input),
+            "output_contract": contract_info(capability.output),
+        }
+        for protocol_id, protocol in PROTOCOLS.items():
+            if protocol.output == capability.input:
+                entries.append(
+                    CatalogEntry(
+                        **common,
+                        protocol=protocol_id,
+                        owner=protocol.owner,
+                        arguments=tuple(
+                            CatalogArgument(
+                                name=item.name,
+                                contract=contract_info(item.contract),
+                                required=item.required,
+                            )
+                            for item in protocol.arguments
+                        ),
+                    )
+                )
+        entries.append(CatalogEntry(**common, protocol=None, owner=None, arguments=()))
+    return NodeCatalog(entries=tuple(entries))
+
+
+def pending_node_ports(
+    document: AuthoredWorkflowDocument, proposal: AddNodeProposal
+) -> tuple[PortInventoryEntry, ...]:
+    """Inventory entries for a node that is not yet part of a valid document."""
+    capability = CAPABILITIES[proposal.capability]
+    node_input, node_output = contract_info(capability.input), contract_info(capability.output)
+    if proposal.protocol is None:
+        source = None if proposal.binding is None else ExternalSource(binding=proposal.binding)
+        return (
+            PortInventoryEntry(
+                node=proposal.node,
+                argument=None,
+                choices=port_choices(document, capability.input, False),
+                socket_contract=node_input,
+                required=True,
+                bound=source is not None,
+                source=source,
+                node_input_contract=node_input,
+                node_output_contract=node_output,
+                protocol_mapping=None,
+            ),
+        )
+    protocol = PROTOCOLS[proposal.protocol]
+    mapping = ProtocolMapping(
+        id=proposal.protocol, owner=protocol.owner, output_contract=contract_info(protocol.output)
+    )
+    bound = {item.name: item.source for item in proposal.arguments}
+    return tuple(
+        PortInventoryEntry(
+            node=proposal.node,
+            argument=item.name,
+            choices=port_choices(document, item.contract, True),
+            socket_contract=contract_info(item.contract),
+            required=item.required,
+            bound=item.name in bound,
+            source=bound.get(item.name),
+            node_input_contract=node_input,
+            node_output_contract=node_output,
+            protocol_mapping=mapping,
+        )
+        for item in protocol.arguments
+    )

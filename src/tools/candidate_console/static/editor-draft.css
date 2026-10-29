@@ -1,0 +1,15 @@
+/* Unified-draft controls (editor-draft.js): dirty badge in the Workflow heading. */
+.editor-dirty {
+  display: inline-block;
+  margin-left: .6rem;
+  padding: 1px 8px;
+  border: 1px solid var(--warning);
+  border-radius: 999px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: .72rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.editor-dirty[hidden] { display: none; }
+#editor-undo { margin-left: 8px; }

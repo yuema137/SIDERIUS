@@ -54,6 +54,7 @@ def test_committed_prior_registry_restores_as_typed_workflow_input(
         }
     )
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **kwargs: _Bridge(analysis_input=prior_input, **kwargs),
         provider="test",
@@ -232,6 +233,7 @@ def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
 
     output = run_optional_data_analysis(
         interpretation,
+        run_seed=11,
         binding=binding,
         iteration=1,
         run_name="workflow-run",
@@ -273,6 +275,7 @@ def test_missing_brief_stops_at_typed_edge_without_invoking_agent(tmp_path) -> N
 
     output = run_optional_data_analysis(
         _interpretation(None),
+        run_seed=11,
         binding=binding,
         iteration=1,
         run_name="workflow-run",
@@ -335,6 +338,7 @@ def test_inline_lock_reaches_same_standalone_input_contract(tmp_path) -> None:
 
     output = run_optional_data_analysis(
         interpretation,
+        run_seed=11,
         binding=binding,
         iteration=1,
         run_name="workflow-run",
@@ -406,6 +410,7 @@ def test_rejected_analysis_plan_recovers_through_workflow_proposer_handoff(tmp_p
         bridge = bridge_class(analysis_input=expected)
         output = run_optional_data_analysis(
             interpretation,
+            run_seed=11,
             binding=binding,
             iteration=iteration,
             run_name="workflow-run",
@@ -488,6 +493,7 @@ def test_native_stage_usage_is_recorded_only_with_explicit_chain_context(
     )
     output = run_optional_data_analysis(
         _interpretation(template.analysis_brief),
+        run_seed=11,
         binding=binding,
         iteration=4,
         run_name="native",

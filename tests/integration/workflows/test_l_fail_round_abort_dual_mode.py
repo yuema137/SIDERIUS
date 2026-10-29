@@ -118,8 +118,8 @@ def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkey
                 OOM-skip); all 9 OOM records carry round_index=2 (Phase L
                 success-counter-derived index).
       Layer 3 — gate_exhaustion summary (pseudo only): Trigger B framing
-                ("Model too large", "3 consecutive rounds", "after 1
-                successful round").
+                ("exhausted attempts at resource preflight", "3 consecutive
+                rounds", "after 1 successful round").
       Layer 4 — best score still populated from the canned round 1 success.
     """
     from agent.llm_bridge import LLMBridge
@@ -284,11 +284,17 @@ def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkey
         "Abort path should populate gate_exhaustion for the next proposer."
     )
     summary = output.gate_exhaustion.summary_message
-    # Trigger B lead phrasing per §11.4 — verifies we hit the
-    # "model too large after K successful rounds" branch, not Trigger A's
-    # no-successes branch.
-    assert "Model too large" in summary, (
-        f"Expected Trigger B lead phrase in summary; got: {summary!r}"
+    # Trigger B framing per §11.4 — verifies we hit the fail-round-burst branch
+    # after K successful rounds, not Trigger A's no-successes branch. The burst
+    # here is VRAM-gated (resource-preflight refusals), and for that axis the
+    # production lead is the non-"Model too large" wording: a static refusal
+    # does not establish measured GPU excess (see
+    # tests/unit/agent/tune_ml_hyperparam_agent/test_build_gate_exhaustion.py).
+    assert "Model too large" not in summary, (
+        f"A VRAM-gated burst must not claim the model is too large; got: {summary!r}"
+    )
+    assert "exhausted attempts at resource preflight" in summary, (
+        f"Expected Trigger B resource-preflight lead phrase in summary; got: {summary!r}"
     )
     assert "3 consecutive rounds" in summary, (
         f"Summary should cite consecutive_fail_rounds_at_exit=3; got: {summary!r}"

@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, TypeAdapter
 
 from core.durable_io import publish_bytes_write_once
+from core.seeding import RunSeedBinding, admitted_run_seed
 from tools.workflow_preview import WorkflowPreview
 from tools.workspace_sandbox.profile import SandboxProfile
 from tools.workspace_sandbox.runner import ExecutionResult, run
@@ -57,10 +58,18 @@ def reconcile(
 
 
 def prepare_candidate(
-    request: CandidatePreparationRequest, *, invocation_id: UUID | None = None
+    request: CandidatePreparationRequest,
+    *,
+    invocation_id: UUID | None = None,
+    run_seed: RunSeedBinding | None = None,
 ) -> CandidatePreparationReceipt:
-    """Prepare one fresh bundle; preserve partial files on failure and never launch it."""
+    """Prepare one fresh bundle; preserve partial files on failure and never launch it.
+
+    ``run_seed`` is the seed an operation admission bound (issue #983); a direct
+    call omits it and this entry boundary binds ``request.run_seed`` or generates.
+    """
     request = CandidatePreparationRequest.model_validate_json(request.model_dump_json())
+    seed = admitted_run_seed(request.run_seed, run_seed)
     identity = (
         uuid4()
         if invocation_id is None
@@ -79,6 +88,8 @@ def prepare_candidate(
         request_path=str(control_dir / "request.json"),
         log_path=str(control_dir / "worker.log"),
         source_observations=control.sources,
+        run_seed=seed.value,
+        run_seed_source=seed.source,
     )
     output.mkdir()  # The losing caller must not publish any record.
     try:

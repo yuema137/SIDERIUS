@@ -22,10 +22,37 @@ The request is strict, frozen and rejects extra fields. Required selections:
 Optional `allowed_output_types` is the native nonempty classifier/regressor tuple;
 None leaves output policy unconstrained. Timeouts are finite positive seconds.
 
+Optional `run_seed` (`RunSeed`, issue #983) is the operator's explicit seed for
+this preparation run; `None` is omitted from serialization, so seedless request
+bytes are unchanged. `prepare_candidate(request, *, invocation_id=None,
+run_seed=None)` and `prepare_reusable_candidate(..., run_seed=None)` take the
+`RunSeedBinding` an operation admission bound; a direct call omits it and the
+function binds `request.run_seed` or generates one (`core.seeding.admitted_run_seed`,
+which refuses a binding that contradicts the request). The binding is recorded
+from the first receipt on as `run_seed` / `run_seed_source` on
+`CandidatePreparationReceipt` and, for reusable preparation, on both
+`ReusablePreparationReceipt` and its native receipt; terminal and retained-selection
+verification require the two to agree. `ReusableCandidatePreparationRequest.run_seed`
+is never copied into the captured native request (`captured_request`). The
+prepared `CandidateRunRequest` carries no seed: a candidate built from a
+preparation admits its own seed and records the preparation's only as
+`OperationRecord.preparation_run_seed`
+([operations contract](../candidate_operations/candidate-operations-contract.md#run-seed-issue-983)).
+Preparation never runs Data Analysis and consumes no seed itself. Data-analysis
+sampling runs only in the native workflow and derives from that run's lock
+(`node_id=None`;
+[seeding](../../../docs/agent-reference/mechanisms/seeding.md#data-analysis-sampling)).
+
 Paths must be canonical absolute local paths. Manifest/profile are existing
 regular files; data is an existing directory. Output and future workspace must
 be absent (including symlinks), with existing directory parents. They cannot
 overlap each other, input data/files/source mounts or protected runtime roots.
+Read-only inputs (data and `task_read_only`) cannot contain or lie inside a
+caller-protected path: `admit(request, *, protected=())`, through
+`capture`/`preflight_reusable_candidate(..., protected=())`, calls
+`validate_read_only_exclusion((data, *sources), protected)`. The default is empty,
+so CLI and subprocess admission are unchanged; the candidate console passes its
+token, credential, store and output roots.
 Sandbox device/environment-name and mount rules apply before ownership claim;
 preparation does not require values for future environment names.
 
@@ -420,12 +447,14 @@ returns unchanged `REUSABLE_FILES` for three-stage mode and adds only that setti
 file for four-stage mode. Child and parent use the same census; parent independently
 regenerates settings bytes and expected proposal facts from retained source.
 
-Native-owned `proposal_training_values` projects budgets, rules, sampling seed,
+Native-owned `proposal_training_values` projects budgets, rules,
 trial identity, output types, baseline isolation, supplied/default data scope,
 portions, structured Health feedback and active VRAM. Managed seeds explicitly
 serialize these, including null, while omitting runtime hardware and constraint
 context. Worker reconciliation remains authoritative and rejects explicit v1
-conflicts. Training base seed stays in settings and reaches the native tuner.
+conflicts. Settings carry no seed: the retired `sampling_seed` /
+`train_base_seed` pins are refused (seeding.md "Retired seed pins"), and every
+tuner and trainer seed derives from the candidate's own `run_seed`.
 Retained selection repeats these checks without needing current source. Child
 hash repair cannot legitimize substituted settings/seed facts. Terminal operation
 reads verify the native output digest and identity, not every checkpoint or
