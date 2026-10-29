@@ -53,3 +53,5 @@ class NativeChainReviewView(PreviewModel):
         default=None, exclude_if=lambda value: value is None
     )
     credential_readiness: CredentialReadiness
+    #: ``seed_labels.review_label`` wording of the capture's declared seed.
+    seed: str

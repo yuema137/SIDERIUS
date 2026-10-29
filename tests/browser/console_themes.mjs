@@ -12,6 +12,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -38,6 +39,7 @@ try {
   const require = createRequire(import.meta.url);
   const {chromium} = require(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const context = await browser.newContext({colorScheme: 'dark', viewport: {width: 1440, height: 1000}});
   // Count actual timer creation, not timer firings: toggling must not add polling.
   await context.addInitScript(() => {
@@ -156,7 +158,7 @@ try {
 
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await page.getByText('Opened supported declaration.', {exact: false}).waitFor();
+  await page.locator('#editor-status').filter({hasText: /^Opened /}).waitFor();
   await page.locator('#editor-inspector select').selectOption({label: 'other'});
   // Selecting a binding starts an asynchronous draft check (POST editor/<project>/draft);
   // snapshot only the settled state, never the transient 'checking' label.
@@ -203,7 +205,7 @@ try {
     let body;
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(path)) body = [];
     else if (path === '/api/operations') body = {operations: [], unreadable: 0, examined: 0, incomplete: false};
-    else if (path === '/api/choices') body = [{task_id: 'synthetic', label: 'Synthetic theme fixture', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300}];
+    else if (path === '/api/choices') body = {operations_store_id: '0123456789abcdef0123456789abcdef', tasks: [{task_id: 'synthetic', label: 'Synthetic theme fixture', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300}]};
     else if (path.endsWith('/tokens')) {
       if (tokenError) return route.fulfill({status: 409, json: {error: {code: 'integrity', message: 'Synthetic token read error'}}});
       body = {run_id: operation, availability: 'available', reason: 'reported_responses', quality: {partial: true}, observed_at: 'fixture', groups: [{provider: 'fixture', requested_model: 'offline', served_model: null, response_rows: 1, reported_input_tokens: 12, reported_output_tokens: null, reported_total_tokens: null, missing_input_rows: 0, missing_output_rows: 1, missing_total_rows: 1}]};
@@ -212,9 +214,9 @@ try {
     await route.fulfill({json: body});
   });
   await page.locator('#token').fill('theme-fixture'); await page.locator('#access-form button').click();
-  await page.getByText('Connected. Observations', {exact: false}).waitFor();
+  await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
   await page.locator('#run-name').fill('unsaved-run-fixture');
-  await page.locator('nav a[href="#slow-control"]').click();
+  await page.locator('nav a[href="#monitor"]').click();
   await page.locator('details', {has: page.locator('#tokens-table')}).getByText('Reported token table', {exact: true}).click(); // Recorded example has its own table.
   await page.locator('#operation-id').fill(operation); await page.locator('#monitor-button').click();
   await page.locator('#tokens-status').filter({hasText: 'Partial evidence'}).waitFor();

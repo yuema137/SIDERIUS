@@ -21,7 +21,7 @@
   function renderReview(result) {
     const dl = document.createElement('dl'); dl.className = 'facts';
     const a = result.admission, r = result.credential_readiness;
-    const rows = [['Run', a.run_name], ['Recipe', a.recipe], ['Final iteration', a.final_iteration], ['Workspace', a.workspace],
+    const rows = [['Run', a.run_name], ['Seed', result.seed], ['Recipe', a.recipe], ['Final iteration', a.final_iteration], ['Workspace', a.workspace],
       ['Capture', result.capture_path], ['Capture identity', a.capture_sha256], ['Request identity', result.request_digest],
       ['Checkout', a.checkout], ['Git directory', a.git_directory], ['Git common directory', a.git_common_directory],
       ['Original input identities', a.input_files.map(f => `${f.path}\n${f.sha256} · ${f.size_bytes} bytes`).join('\n') || '(none)'],
@@ -47,7 +47,7 @@
       choices = result; $('native-chain-choice').replaceChildren(new Option('Choose a native capture', ''));
       for (const choice of choices) $('native-chain-choice').append(new Option(choice.label, choice.choice_id));
       if (choices.some(c => c.choice_id === selected)) $('native-chain-choice').value = selected;
-      if (!choices.length) say('No native captures configured. Known operation UUIDs remain available in Slow control.');
+      if (!choices.length) say('No native captures configured. Known operation UUIDs remain available in Monitor.');
     } catch (error) { if (current(version, revision)) say('Native choices unavailable: ' + error.message); }
     finally { loading = false; controls(); }
   }
@@ -72,7 +72,7 @@
       if (status.kind !== 'native_chain' || status.request_digest !== intent.payload.expected_request_digest) {
         say('UUID identifies different content. Retain this UUID and inspect the operation; no new launch will be created.'); return;
       }
-      intent.accepted = true; say('Admission observed. State: ' + status.state + '. Open Slow control for independent evidence.');
+      intent.accepted = true; say('Admission observed. State: ' + status.state + '. Open Monitor for independent evidence.');
     } catch (error) {
       if (pending === intent && revision === session.revision && !error.stale) say('Admission remains unconfirmed: ' + error.message + '. Retry only this same retained request.');
     } finally { controls(); }
@@ -84,7 +84,7 @@
     try {
       const handle = await session.request('native-chain/launch', intent.payload);
       if (revision !== session.revision || intent !== pending) return;
-      intent.accepted = true; say('Native admission observed: ' + handle.observation + '. Open Slow control.');
+      intent.accepted = true; say('Native admission observed: ' + handle.observation + '. Open Monitor.');
     } catch (error) {
       if (revision === session.revision && !error.stale) { say('Submission unconfirmed or refused: ' + error.message); await check(); }
     } finally { submitting = false; controls(); }
@@ -94,14 +94,14 @@
     pending = {accepted: false, payload: {choice_id: review.choice_id, operation_id: crypto.randomUUID(), expected_request_digest: review.request_digest}};
     const id = pending.payload.operation_id;
     $('native-chain-operation-id').textContent = 'Operation UUID: ' + id;
-    $('native-chain-monitor').href = '#slow-control/' + id;
+    $('native-chain-monitor').href = '#monitor/' + id;
     try { localStorage.setItem('siderius.operation_id', id); } catch { /* URL remains available. */ }
     void submit();
   });
   $('native-chain-new').addEventListener('click', () => {
     if (!session.connected || !pending?.accepted || submitting) return;
     pending = null; invalidate();
-    say('Previous admission confirmed. Its UUID remains available in Slow control. Select and review another fresh capture.');
+    say('Previous admission confirmed. Its UUID remains available in Monitor. Select and review another fresh capture.');
   });
   $('native-chain-check').addEventListener('click', () => void check());
   $('native-chain-retry').addEventListener('click', () => void submit());

@@ -54,3 +54,11 @@
 .circuit-adapter-fields li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 2px 0; overflow-wrap: anywhere; }
 .circuit-adapter-fields code { color: var(--muted); font-size: .66rem; }
 .circuit-adapter-owner { margin: 4px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+/* Direction lives on the socket, never in a type name: an incoming arrow precedes an
+ * input's label, an outgoing arrow follows an output's (both in the contract colour). */
+/* Sockets: absolutely placed inside the port's side padding, between the socket and the
+ * label, so the arrow adds neither width nor height and card sizes stay unchanged. */
+.circuit-port > .circuit-port-direction { position: absolute; top: 50%; left: 9px; transform: translateY(-50%); font-size: .7rem; line-height: 1; pointer-events: none; }
+.circuit-output > .circuit-port-direction { left: auto; right: 9px; }
+.circuit-port-direction { color: var(--contract-colour, var(--text)); font-weight: 700; }
+.circuit-contract-legend-direction .circuit-port-direction { margin: 0 .2rem; }

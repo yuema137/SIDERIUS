@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 const checkout = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const evidence = process.env.CONSOLE_EVIDENCE_DIR || await mkdtemp(join(tmpdir(), 'siderius-literature-browser-'));
@@ -35,11 +36,12 @@ try {
   await until(async () => {try {return (await fetch(origin + '/')).ok;} catch {return false;}});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const context = await browser.newContext(), page = await context.newPage();
   page.on('pageerror', error => faults.push(error.message));
   await page.goto(origin + '/#workflow');
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
-  await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
   assert.equal(await page.locator('.editor-node').count(), 4);
   await page.locator('[data-node="hypothesis"].editor-node').click();
   assert.match(await page.locator('#editor-edges').textContent(), /review.result → hypothesis.output/);
@@ -48,23 +50,23 @@ try {
   assert.match(before, /native-literature-candidate\/v1/);
   await page.locator('#editor-source').fill(before.replace('Prefer a small interpretable baseline', 'Preserve explicit proposal advice').replace("'strict'", "'liberal'"));
   await page.locator('#editor-review').click(); await page.locator('#editor-save').click();
-  await page.locator('#editor-status').filter({hasText: 'Saved reviewed bytes'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Saved as "'}).waitFor();
   const inspect = () => JSON.parse(execFileSync(process.env.EDITOR_PYTHON, ['-c', 'import sys; from pathlib import Path; from workflows.definition import parse_workflow_source; print(parse_workflow_source(Path(sys.argv[1]).read_text()).model_dump_json())', metadata.source], {cwd: checkout, encoding: 'utf8'}));
   const saved = inspect();
   assert.equal(saved.execution_profile, 'native-literature-candidate/v1');
   assert.equal(saved.definition.nodes.length, 4);
   assert.equal(saved.preparation_options.proposal_advice, 'Preserve explicit proposal advice');
   await page.locator('#editor-refresh').click();
-  await page.locator('#editor-status').filter({hasText: 'Opened supported declaration'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
   assert.equal(await page.locator('.editor-node').count(), 4);
   assert.match(await page.locator('#editor-source').inputValue(), /native-literature-candidate\/v1/);
   await page.locator('#workflow-next-run').click(); await page.locator('#view-run').waitFor(); // Saved version hands off to Run.
   await page.locator('#new-run-task').selectOption('synthetic');
   await page.locator('#new-run-review').click();
-  await page.locator('#new-run-status').filter({hasText: 'Preparation reviewed'}).waitFor();
+  await page.locator('#new-run-status').filter({hasText: 'Inputs checked'}).waitFor();
   await page.locator('#new-run-prepare').click();
-  await until(async () => {if (await page.locator('#new-run-check').isVisible()) await page.locator('#new-run-check').click(); return (await page.locator('#new-run-operation-status').textContent()).includes('Native prepared');}, 90000);
-  const intent = await page.evaluate(() => JSON.parse(localStorage.getItem('siderius.reusable-preparation.v1')));
+  await page.locator('#new-run-operation-status').filter({hasText: 'Prepared.'}).waitFor({timeout: 90000}); // Polled by the page (R-1).
+  const intent = await page.evaluate(() => JSON.parse(localStorage.getItem(window.reusableIntents.key('preparation'))));
   const envelope = join(root, 'runs', intent.payload.selection.run_id);
   const native = JSON.parse(await readFile(join(envelope, 'inputs/preparation/receipt.json')));
   assert.equal(native.status, 'prepared'); assert.equal(native.proposal_path, join(envelope, 'inputs/proposal.json'));
@@ -72,7 +74,7 @@ try {
   assert.equal(index.files.length, 8);
   await until(() => page.locator('#new-run-open').isEnabled()); await page.locator('#new-run-open').click();
   await page.locator('#capture-status').filter({hasText: 'Prepared run opened'}).waitFor();
-  await page.locator('#capture-review').click(); await page.locator('#capture-status').filter({hasText: 'Capture reviewed'}).waitFor();
+  await page.locator('#capture-review').click(); await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
   const summary = await page.locator('#capture-summary').textContent();
   assert.match(summary, /Native literature review feeds one proposal/);
   assert.ok(!await page.locator('#capture-summary').evaluate(element => element.firstChild.textContent.includes('→'))); assert.match(summary, /review/);
@@ -84,10 +86,10 @@ try {
   assert.equal(reviewInput.dynamic_search.enabled, false);
   await page.locator('#capture-details').evaluate(el => {el.parentElement.open = true;});
   await page.screenshot({path: join(evidence, 'literature-review.png'), fullPage: true});
-  await until(async () => {await page.locator('#new-run-check').click(); return page.locator('#capture-launch').isEnabled();});
+  await until(() => page.locator('#capture-launch').isEnabled()); // No manual status check (R-2).
   await page.locator('#capture-launch').click();
-  await until(async () => {if (await page.locator('#capture-check').isVisible()) await page.locator('#capture-check').click(); return (await page.locator('#capture-operation-status').textContent()).includes('completed');}, 120000);
-  assert.match(await page.locator('#capture-operation-status').textContent(), /Native accepted/);
+  await page.locator('#capture-operation-status').filter({hasText: 'Finished'}).waitFor({timeout: 120000});
+  assert.match(await page.locator('#capture-operation-status').textContent(), /passed validation/);
   const operationId = (await page.locator('#capture-operation-id').textContent()).trim();
   await page.close(); // Independent HTTP observation has no editor/browser page authority.
   const response = await fetch(origin + '/api/operations/' + operationId, {headers: {Authorization: 'Bearer ' + metadata.token}});

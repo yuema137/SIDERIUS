@@ -10,7 +10,13 @@ declaration validator, so an edit here can never admit an invalid document.
 import ast
 from collections.abc import Iterable
 
-from .models import DeclarationModel, NodeInstance, NodePosition
+from .models import (
+    DeclarationModel,
+    ExternalBinding,
+    ManagedCandidateBinding,
+    NodeInstance,
+    NodePosition,
+)
 from .source import _render_value, parse_workflow_source
 
 
@@ -244,6 +250,21 @@ def insert_node(source: str, node: NodeInstance, position: NodePosition) -> str:
         else:
             edits.append((text.end(last.value), text.end(last.value), b", " + block))
     if (imports := _import_edit(text, module, _constructors(node) | {"NodePosition"})) is not None:
+        edits.append(imports)
+    return _apply(text.data, edits)
+
+
+def insert_external(source: str, external: ExternalBinding | ManagedCandidateBinding) -> str:
+    """Append one external binding; the result is not yet validated (the caller re-parses)."""
+    module = ast.parse(source)
+    text = _Bytes(source)
+    definition = _call_keyword(_root(module), "definition")
+    externals = _tuple_keyword(definition, "externals")
+    if externals is None:
+        # A valid declaration always has one: every graph starts from an external input.
+        raise SourceEditError("definition has no externals tuple")
+    edits = _append(text, externals, external)
+    if (imports := _import_edit(text, module, _constructors(external))) is not None:
         edits.append(imports)
     return _apply(text.data, edits)
 
