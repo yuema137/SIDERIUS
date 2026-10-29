@@ -42,6 +42,7 @@ from agent.schemas.proposal import FalsifiablePrediction, ProposalOutput
 from agent.schemas.telemetry import LLMBridgeContextError
 from agent.schemas.validator import LLMCodeReview
 from tests.helpers.metric_fixtures import accuracy_like_spec
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.helpers.tuner_prompt_fixtures import TASK_RENDER
 
 # ===================================================================
@@ -480,7 +481,7 @@ def test_implementor_code_assembles_to_valid_plugin():
             "loss_config": {"loss_type": "ce"},
         },
     )
-    err = MLModelImplementor._validate_code(code, inp)
+    err = MLModelImplementor._validate_code(code, inp, PROBE_SEED)
     assert err is None, f"_validate_code returned: {err!r}"
 
     # AST sanity on the assembled source — _validate_code already does

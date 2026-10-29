@@ -25,6 +25,7 @@ from agent.schemas.data_analysis.skills import SkillPayload
 from core.campaign_identity import validate_path_component
 from core.durable_io import publish_bytes_write_once
 from core.runtime_control.process_group import process_group_alive
+from core.training_seeds import NUMPY_SEED_MASK
 
 SANDBOX_PROTOCOL_ID = "siderius.generated-analysis-sandbox.v1"
 MAX_GENERATED_PAYLOAD_BYTES = 1024 * 1024
@@ -176,6 +177,22 @@ def _output_tree_exceeds(
             except FileNotFoundError:
                 continue
     return False
+
+
+def executed_program_seeds(program: GeneratedAnalysisProgram, program_seed: int) -> tuple[int, int]:
+    """The (Python, NumPy) seeds a generated program runs under (issue #983).
+
+    A ``deterministic`` program keeps the seed it declared (kept as written,
+    Q4; its schema bounds it to the NumPy range, so both generators get it
+    unchanged). Any other program gets the derived ``data_analysis.program``
+    seed: Python the 63-bit value, legacy NumPy its low 32 bits
+    (``NUMPY_SEED_MASK``), the same reduction the trainer uses.
+    """
+    if program.determinism == "deterministic":
+        if program.seed is None:
+            raise AnalysisCodeSandboxError("deterministic generated program lacks its seed")
+        return program.seed, program.seed
+    return program_seed, program_seed & NUMPY_SEED_MASK
 
 
 class AnalysisCodeSandbox:
@@ -337,6 +354,7 @@ class AnalysisCodeSandbox:
         control_directory: Path,
         timeout_s: float,
         max_host_memory_gb: float,
+        program_seed: int,
     ) -> SandboxExecutionReceipt:
         capability = self.probe()
         if not capability.available:
@@ -347,6 +365,7 @@ class AnalysisCodeSandbox:
         ):
             if path.is_symlink() or not path.is_file():
                 raise AnalysisCodeSandboxError(f"{label} must be a regular non-symlink file")
+        python_seed, numpy_seed = executed_program_seeds(program, program_seed)
         source_bytes = source_path.read_bytes()
         if len(source_bytes) != program.source_ref.byte_size:
             raise AnalysisCodeSandboxError("generated source byte size differs from declaration")
@@ -384,7 +403,8 @@ class AnalysisCodeSandbox:
                     "inputs": sandbox_inputs,
                     "parameters": parameters,
                     "determinism": program.determinism,
-                    "seed": program.seed,
+                    "seed": python_seed,
+                    "numpy_seed": numpy_seed,
                     "output_directory": "/output",
                 }
             ),

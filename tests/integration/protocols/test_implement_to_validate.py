@@ -31,6 +31,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_model_implementor import MLModelImplementor
+from tests.helpers.probe_seed import PROBE_SEED
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
@@ -159,7 +160,9 @@ class TestImplementToValidateGemini:
 
         # Step 1: run implementor (real LLM)
         impl_input = _make_implementor_input(provider, tmp_path)
-        impl_output = MLModelImplementor(provider=provider, model_id=model_id).run(impl_input)
+        impl_output = MLModelImplementor(
+            provider=provider, model_id=model_id, probe_seed=PROBE_SEED
+        ).run(impl_input)
         assert isinstance(impl_output, ImplementorOutput)
         assert impl_output.model_type == "gated_dilated_tcn"
 
@@ -174,7 +177,7 @@ class TestImplementToValidateGemini:
 
         # Step 3: run validator (with LLM review)
         val_output = MLCodeValidatorAgent(
-            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
         ).run(val_input)
 
         # Step 4: validate
@@ -204,14 +207,18 @@ class TestImplementToValidateOpenAI:
 
         # Step 1: run implementor
         impl_input = _make_implementor_input(provider, tmp_path)
-        impl_output = MLModelImplementor(provider=provider, model_id=model_id).run(impl_input)
+        impl_output = MLModelImplementor(
+            provider=provider, model_id=model_id, probe_seed=PROBE_SEED
+        ).run(impl_input)
         assert isinstance(impl_output, ImplementorOutput)
 
         # Step 2: apply protocol
         val_input = local_all_fields(impl_output, storage)
 
         # Step 3: run validator
-        val_output = MLCodeValidatorAgent(provider="openai", model_id="gpt-5-mini").run(val_input)
+        val_output = MLCodeValidatorAgent(
+            provider="openai", model_id="gpt-5-mini", probe_seed=PROBE_SEED
+        ).run(val_input)
 
         # Step 4: validate
         _assert_validator_output(val_output, impl_output.model_type, tmp_path)

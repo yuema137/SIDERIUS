@@ -28,6 +28,7 @@ from agent.schemas.implementor import ImplementorInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
+from tests.helpers.probe_seed import PROBE_SEED
 
 
 @pytest.fixture
@@ -46,6 +47,7 @@ def index_path(tmp_path: Path) -> str:
 @pytest.fixture
 def agent_with_mocks(index_path):
     agent = MLModelImplementor.__new__(MLModelImplementor)
+    agent._probe_seed = PROBE_SEED
     agent.bridge = MagicMock()
     agent._registry = CapabilityRegistry(index_path=index_path)
     return agent

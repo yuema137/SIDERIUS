@@ -194,8 +194,13 @@ def execute_resolved_action(
     inference_capability: HistoricalModelInferenceCapability | None,
     control_root: Path,
     deadline_monotonic_s: float,
+    program_seed: int,
 ) -> AnalysisActionExecutionOutcome:
-    """Materialize, execute through the origin-owned path, and clean private copies."""
+    """Materialize, execute through the origin-owned path, and clean private copies.
+
+    ``program_seed`` seeds a generated program declared ``nondeterministic``
+    (issue #983; ``AnalysisSamplingSeeds.program_seed``).
+    """
 
     started_at = utc_now()
     started_monotonic = time.monotonic()
@@ -397,6 +402,7 @@ def execute_resolved_action(
                     ),
                     max_host_memory_gb=max_memory,
                     sandbox=sandbox,
+                    program_seed=program_seed,
                 )
             except (AnalysisCodeSandboxUnavailable, AnalysisCodeSandboxError) as exc:
                 result = _pre_execution_result(

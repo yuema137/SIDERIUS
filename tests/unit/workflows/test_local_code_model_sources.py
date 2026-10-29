@@ -25,6 +25,7 @@ from ml_models.plugin_binding import bind_run_model_plugins
 from ml_models.plugin_loader import preload_global_models, register_model_in_memory
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
 from tests.helpers.local_code_model import MODEL_TYPE, make_package
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.unit.agent.ml_model_implementor.test_model_branch_b import _branch_b_input
 from tests.unit.core.test_local_code_transport import bind_workspace
 from tests.unit.core.test_resume import _plugin_src, isolated_registries
@@ -125,6 +126,7 @@ def test_existing_index_row_uses_relocated_declaration_without_rewrite_or_new_of
     )
     before = (tmp_path / "index.json").read_bytes()
     agent = MLModelImplementor.__new__(MLModelImplementor)
+    agent._probe_seed = PROBE_SEED
     agent.bridge, agent._registry = MagicMock(), registry
     storage = StorageConfig(
         backend="local", local=LocalStorageConfig(workspace=str(tmp_path / "ws"), run_name="reuse")

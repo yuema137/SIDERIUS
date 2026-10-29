@@ -20,6 +20,8 @@ from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_probe import ModelProbeContext
 from agent.schemas.proposal import InheritedComponent
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.generated_seed_scan import GeneratedSeedCall
+from core.training_seeds import SeedContext
 
 
 class LLMCodeReview(BaseModel):
@@ -256,6 +258,23 @@ class ValidatorOutput(BaseModel):
         "the plugin source. Structured for downstream consumers (e.g. the "
         "interpretation agent can avoid awarding confirmation credit for these "
         "components). Empty when all claims verified or inherited_components is empty.",
+    )
+    probe_seed: SeedContext | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Issue #983: the validation.probe SeedContext (run seed and "
+            "iteration/node/attempt coordinates) the instantiation and gradient "
+            "probes ran under. Record only; never prompt input."
+        ),
+    )
+    generated_seed_calls: list[GeneratedSeedCall] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+        description=(
+            "Issue #983 (Q4): seeding calls the generated plugin hard-codes "
+            "(file, line, call), recorded as written. Record only; never prompt input."
+        ),
     )
     test_output: str | None = Field(
         default=None,

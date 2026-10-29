@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -80,12 +81,17 @@ def raise_child_setup_failure(path: Path) -> None:
 
 
 def run_task_model_tests(
-    test_file_path: str, *, limit: PytestLimit | None = None
+    test_file_path: str,
+    *,
+    limit: PytestLimit | None = None,
+    seed_env: Mapping[str, str],
 ) -> tuple[bool, str]:
     """Preserve task setup failures across pytest without parsing its prose.
 
     ``limit`` is the caller's declared limit; ``None`` runs the
     group-supervised child without a deadline (see ``generated_pytest``).
+    ``seed_env`` (``core.probe_seeds.probe_seed_env``) hands the probe's
+    SeedContext to the generated test's ``run_bounded_probe``.
     """
     from agent.skills.generated_pytest import run_generated_pytest
     from core.subprocess_env import subprocess_env
@@ -94,6 +100,7 @@ def run_task_model_tests(
         failure_path = Path(directory) / "setup-failure.json"
         env = subprocess_env()
         env[FAILURE_PATH_ENV] = str(failure_path)
+        env.update(seed_env)
         passed, output = run_generated_pytest(test_file_path, env, limit=limit)
         raise_child_setup_failure(failure_path)
         return passed, output

@@ -30,6 +30,7 @@ from agent.schemas.implementor import ImplementorInput, ImplementorOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.plugin_loader import _load_plugin
 from nodes.ml_model_implementor import MLModelImplementor
+from tests.helpers.probe_seed import PROBE_SEED
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
@@ -167,7 +168,9 @@ class TestMLModelImplementorGemini:
         _skip_if_no_key("gemini")
 
     def test_implementation(self, tmp_path):
-        agent = MLModelImplementor(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+        agent = MLModelImplementor(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        )
         output = agent.run(_make_input(tmp_path))
 
         _assert_output(output, tmp_path)
@@ -183,7 +186,7 @@ class TestMLModelImplementorOpenAI:
         _skip_if_no_key("openai")
 
     def test_implementation(self, tmp_path):
-        agent = MLModelImplementor(provider="openai", model_id="gpt-5-mini")
+        agent = MLModelImplementor(provider="openai", model_id="gpt-5-mini", probe_seed=PROBE_SEED)
         output = agent.run(_make_input(tmp_path))
 
         _assert_output(output, tmp_path)

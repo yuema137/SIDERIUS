@@ -45,6 +45,7 @@ from agent.schemas.model_io_contract import (
     TensorContract,
     load_model_io_contract,
 )
+from core.probe_seeds import probe_seed_env
 from execute_tools.model_input_dtype import (
     INFERENCE_SITE_DTYPE,
     RUNTIME_SUPPORTED_DTYPES,
@@ -56,6 +57,7 @@ from execute_tools.model_input_dtype import (
     resolve_model_input_dtype,
 )
 from ml_models.models_sandbox import BUILTIN_INPUT_DTYPES, BUILTIN_OUTPUT_TYPES
+from tests.helpers.probe_seed import PROBE_SEED
 
 
 def _axis(role: AxisRole | None = None, **dim) -> TensorAxis:
@@ -143,7 +145,7 @@ PLUGIN_OUTPUT_TYPE = "classifier"
         tests.mkdir()
         generated = tests / "test_dtype_probe.py"
         generated.write_text(_assemble_test("dtype_probe", contract))
-        passed, output = run_task_model_tests(str(generated))
+        passed, output = run_task_model_tests(str(generated), seed_env=probe_seed_env(PROBE_SEED))
         assert passed, output
         assert training_dtype is expected
         assert live_probe.dtype is expected

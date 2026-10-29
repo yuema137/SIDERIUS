@@ -20,6 +20,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.models_format_sandbox import AEConfig
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from tests.helpers.probe_seed import PROBE_SEED
 
 from .test_pipeline_runner import (
     FAKE_COMPARISON_OUTPUT,
@@ -61,6 +62,7 @@ def test_live_generation_rejects_structured_defaults_but_archives_remain_readabl
     implementor = MLModelImplementor(
         bridge_factory=lambda **kw: bridge,
         capability_index_path=str(tmp_path / "capabilities.json"),
+        probe_seed=PROBE_SEED,
     )
     implementor._generate_loss = MagicMock()
     before = sorted(tmp_path.rglob("*"))

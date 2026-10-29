@@ -55,10 +55,10 @@ def main() -> int:
     args = parser.parse_args()
 
     request = json.loads(Path(args.request).read_text(encoding="utf-8"))
-    if request["determinism"] == "deterministic":
-        seed = request["seed"]
-        random.seed(seed)
-        np.random.seed(seed)
+    # Issue #983: every program runs seeded. The parent supplies both seeds
+    # (``executed_program_seeds``); nothing is reduced or aliased here.
+    random.seed(request["seed"])
+    np.random.seed(request["numpy_seed"])
     analyze = _load_analyze(Path(args.source))
     payload = analyze(
         _load_inputs(request["inputs"]),
