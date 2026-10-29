@@ -334,6 +334,7 @@ content-pinned or turn the consumer repository into an installed package.
 
 The `id:` on `task_data_path` is optional and is only a cross-check: if given, it
 must equal the implementation's own declared id, and a mismatch is refused.
+For an already registered task data path, differing loader module names are accepted only when the defining class name, resolved source path (`Path.resolve()`) and captured content digest match; registered identities and fingerprint serialization remain unchanged.
 
 ## Shared task-local Python code
 

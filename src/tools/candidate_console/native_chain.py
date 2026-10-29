@@ -24,6 +24,7 @@ from .native_chain_models import (
     NativeChainReviewView,
 )
 from .readiness import named_credential_readiness
+from .seed_labels import review_label
 from .service import CandidateConsole
 
 
@@ -87,6 +88,7 @@ class NativeChainConsole:
                 choice.request.environment_names,
                 self.console.config.credential_file,
             ),
+            seed=review_label(admission.run_seed),
         )
 
     def launch(self, selection: NativeChainLaunchSelection) -> OperationHandle:

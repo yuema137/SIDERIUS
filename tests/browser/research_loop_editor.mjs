@@ -115,7 +115,7 @@ try {
   // Stop conditions: add both kinds, incomplete values block Review, review shows them.
   const loopedBytes = await readFile(metadata.interpretation_source);
   await page.locator('#editor-loop-stop-conditions').filter({hasText: 'None. The loop runs until its iteration limit.'}).waitFor();
-  assert.equal(await page.locator('#editor-loop-add-judge').count(), 0, 'judge stopping is never offered');
+  assert.equal(await page.locator('#editor-loop-add-judge').count(), 1, 'a judge stop is offered (B2-5)');
   await page.locator('#editor-loop-add-metric-threshold').click();
   assert.equal(await page.locator('#editor-loop-add-metric-threshold').count(), 0, 'one condition per kind');
   assert.equal(await page.locator('#editor-review').isDisabled(), true, 'an incomplete threshold blocks Review');
@@ -160,9 +160,28 @@ try {
   ]);
   await page.screenshot({path: join(evidence, 'research-loop-stop-conditions-reopened.png'), fullPage: true});
 
+  // B2-5: a judge stop carries only JudgeStop's declared fields; an empty criterion blocks Review.
+  await page.locator('#editor-loop-add-judge').click();
+  assert.equal(await page.locator('#editor-loop-add-judge').count(), 0, 'one judge per loop');
+  assert.equal(await page.locator('#editor-review').isDisabled(), true, 'an empty judge criterion blocks Review');
+  assert.match(await page.locator('[data-stop-kind="judge"]').textContent(), /set by the console operator/);
+  await page.locator('#editor-loop-stop-criterion').fill('Stop once a body adds no new insight.');
+  assert.equal(await page.locator('#editor-loop-stop-min-completed-bodies').inputValue(), '1');
+  await page.locator('#editor-loop-stop-on-failure').selectOption('continue');
+  const judgeDiff = await reviewAndSave();
+  assert.match(judgeDiff, /JudgeStop\(/);
+  assert.match(judgeDiff, /criterion='Stop once a body adds no new insight\.'/);
+  assert.match(judgeDiff, /on_failure='continue'/);
+  await reopen();
+  assert.equal(await page.locator('#editor-loop-stop-criterion').inputValue(), 'Stop once a body adds no new insight.');
+  assert.equal(await page.locator('#editor-loop-stop-on-failure').inputValue(), 'continue');
+  assert.deepEqual(parsed().definition.loop.stop_conditions.at(-1),
+    {kind: 'judge', criterion: 'Stop once a body adds no new insight.', min_completed_bodies: 1, on_failure: 'continue'});
+
   // Remove both conditions: the condition-free loop bytes return exactly.
   await page.locator('#editor-loop-remove-metric-threshold').click();
   await page.locator('#editor-loop-remove-no-improvement').click();
+  await page.locator('#editor-loop-remove-judge').click();
   await page.locator('#editor-loop-add-metric-threshold').waitFor();
   const unstopDiff = await reviewAndSave();
   assert.match(unstopDiff, /-\s+MetricThresholdStop\(/);

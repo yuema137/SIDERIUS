@@ -40,6 +40,10 @@
   const STOP_KINDS = Object.freeze({
     metric_threshold: {title: 'Metric threshold', add: 'Add metric threshold', initial: () => ({kind: 'metric_threshold', metric_id: '', threshold: 0}), drafts: {metric_id: '', threshold: ''}},
     no_improvement: {title: 'No improvement', add: 'Add no-improvement stop', initial: () => ({kind: 'no_improvement', completed_bodies: 1}), drafts: {}},
+    // JudgeStop (B2-5): only the declared fields (JudgeStop: criterion, min_completed_bodies,
+    // on_failure). The judge route and max_judge_calls are operator-owned in the run's
+    // WorkflowLLMConfig.judge, never declared in the workflow.
+    judge: {title: 'Judge', add: 'Add judge stop', initial: () => ({kind: 'judge', criterion: '', min_completed_bodies: 1, on_failure: 'fail'}), drafts: {criterion: ''}},
   });
   const STOP_FIELDS = Object.freeze({
     metric_id: {hint: 'Enter the task metric id exactly as declared (no surrounding spaces).',
@@ -48,15 +52,20 @@
       parse: input => input.value.trim() !== '' && Number.isFinite(input.valueAsNumber) ? input.valueAsNumber : undefined},
     completed_bodies: {hint: 'Enter a whole number of at least 1, below the final iteration.',
       parse: input => input.value.trim() !== '' && Number.isInteger(input.valueAsNumber) && input.valueAsNumber >= 1 ? input.valueAsNumber : undefined},
+    criterion: {hint: 'Write what the judge should look for (1 to 2000 characters).',
+      parse: input => input.value.trim() !== '' && input.value.length <= 2000 ? input.value : undefined},
+    min_completed_bodies: {hint: 'Enter a whole number of at least 1, below the final iteration.',
+      parse: input => input.value.trim() !== '' && Number.isInteger(input.valueAsNumber) && input.valueAsNumber >= 1 ? input.valueAsNumber : undefined},
   });
   const draftKey = (kind, field) => `stop.${kind}.${field}`;
   const forgetDrafts = (drafts, kind) => { for (const key of [...drafts.keys()]) if (key.startsWith(`stop.${kind}.`)) drafts.delete(key); };
   function stopField(row, condition, field, label, state, actions) {
     const wrapper = node('label', label + ' ', row);
-    const input = control(node('input', '', wrapper));
+    const input = control(node(field === 'criterion' ? 'textarea' : 'input', '', wrapper));
     input.id = `editor-loop-stop-${field.replaceAll('_', '-')}`; input.required = true;
     if (field === 'metric_id') { input.type = 'text'; input.placeholder = 'for example accuracy'; input.spellcheck = false; }
-    else { input.type = 'number'; input.step = field === 'threshold' ? 'any' : '1'; if (field === 'completed_bodies') input.min = '1'; }
+    else if (field === 'criterion') { input.rows = 3; input.maxLength = 2000; input.placeholder = 'for example: stop once the last two bodies add no new insight'; }
+    else { input.type = 'number'; input.step = field === 'threshold' ? 'any' : '1'; if (field !== 'threshold') input.min = '1'; }
     const key = draftKey(condition.kind, field), draft = state.drafts.get(key);
     input.value = draft ?? String(condition[field]);
     if (draft !== undefined) input.setCustomValidity(STOP_FIELDS[field].hint);
@@ -70,6 +79,18 @@
     }, STOP_FIELDS[field].parse(input) === undefined
       ? `Incomplete stop conditions are not reviewed. ${STOP_FIELDS[field].hint}`
       : 'Stop condition changed locally. Review and save to update the source.'));
+  }
+  function onFailure(row, condition, actions) {
+    const wrapper = node('label', 'If the judge call fails ', row);
+    const select = control(node('select', '', wrapper)); select.id = 'editor-loop-stop-on-failure';
+    for (const [value, text] of [['fail', 'End the loop as failed'], ['continue', 'Record an abstention and continue']]) {
+      const option = node('option', text, select); option.value = value;
+    }
+    select.value = condition.on_failure;
+    select.addEventListener('change', () => actions.edit(loop => {
+      const target = loop.stop_conditions?.find(item => item.kind === 'judge');
+      if (target) target.on_failure = select.value;
+    }, 'Stop condition changed locally. Review and save to update the source.'));
   }
   function stopConditions(parent, state, actions) {
     const group = node('fieldset', '', parent); group.id = 'editor-loop-stop-conditions'; node('legend', 'Stop conditions', group);
@@ -87,6 +108,11 @@
       } else if (condition.kind === 'no_improvement') {
         stopField(row, condition, 'completed_bodies', 'Completed bodies', state, actions);
         node('small', 'Stops after this many consecutive completed bodies leave the best valid Formal score unimproved. Must be below the final iteration.', row);
+      } else if (condition.kind === 'judge') {
+        stopField(row, condition, 'criterion', 'What the judge looks for', state, actions);
+        stopField(row, condition, 'min_completed_bodies', 'First judged after bodies', state, actions);
+        onFailure(row, condition, actions);
+        node('small', 'A language-model judge decides at each completed body boundary, after the other conditions continue, never at the final iteration. The judge model and the maximum number of judge calls are set by the console operator in the run\'s model settings, not here.', row);
       }
       const remove = control(node('button', 'Remove', row));
       remove.type = 'button'; remove.id = `editor-loop-remove-${condition.kind.replaceAll('_', '-')}`;
@@ -96,7 +122,7 @@
         forgetDrafts(state.drafts, condition.kind);
       }, `${STOP_KINDS[condition.kind]?.title ?? condition.kind} stop removed locally. Review and save to update the source.`, true));
     }
-    // At most one condition per kind; judge-based stopping is not offered.
+    // At most one condition per kind (the declaration also admits at most one judge).
     for (const [kind, spec] of Object.entries(STOP_KINDS)) {
       if (conditions.some(item => item.kind === kind)) continue;
       const add = control(node('button', spec.add, group));
@@ -144,6 +170,6 @@
       element.disabled = !enabled || element.dataset.loopUnavailable !== undefined;
     }
   }
-  const refusalHint = 'Stop conditions need a non-empty metric id, a finite threshold, at most one condition per kind, and no-improvement bodies below the final iteration.';
+  const refusalHint = 'Stop conditions need a non-empty metric id, a finite threshold, a judge criterion, at most one condition per kind, and no-improvement or judge bodies below the final iteration.';
   window.editorLoopControls = Object.freeze({render, setEnabled, refusalHint});
 })();
