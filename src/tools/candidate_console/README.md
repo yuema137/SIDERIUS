@@ -371,8 +371,10 @@ overwrites an existing `tasks/` folder.
    unsaved-change guard. Saving does not run the declaration.
    Moving a card or editing a setting rewrites the whole Python file. If that would
    remove comments you wrote by hand, the Save step says how many and which ones
-   before you confirm. Saving into a read-only file is refused ("This file is
+   before you confirm. Saving changes into a read-only file is refused ("This file is
    read-only on disk"); make the file writable, then select **Save version** again.
+   If the content already matches the file on disk, saving shows **Nothing to save**,
+   even when the file is read-only.
    If the file changed on disk while you edited (for example, you saved it from
    another tab), the page shows **This workflow changed on disk** with what changed.
    Choose **Reapply my changes onto latest** to keep your edits, or **Reload from
@@ -395,7 +397,7 @@ overwrites an existing `tasks/` folder.
    Show developer details). After a successful save, **Next: Run** opens the **Run**
    page; it stays disabled, with the reason in its tooltip, while edits are unsaved or
    the project is not enabled for runs.
-   A step line (Task › Workflow › Run › Results) shows where you are.
+   A step line (Task › Workflow › Run › Monitor) shows where you are.
 
 The entry URLs are `/#home`, `/#workflow`, `/#run` and `/#monitor`. Old
 `/#slow-control` links (the page's former name) open Monitor, and an old
@@ -542,7 +544,7 @@ task first. The Task tab only shows the package; you change the package with you
 coding agent, then press **Refresh**.
 
 1. Connect, then open **Task** in the navigation bar (or the first step of the
-   Task › Workflow › Run › Results bar).
+   Task › Workflow › Run › Monitor bar).
 2. The left list shows every task in your console configuration with its version
    (`task_revision`) or **unversioned**. With exactly one task, the console selects
    it for you. Otherwise select one. The browser remembers your choice for this
