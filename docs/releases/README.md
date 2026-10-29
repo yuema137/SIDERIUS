@@ -1,8 +1,8 @@
 # Releases
 
-- [v1.1.0](v1.1.0.md) — task, experiment setup and run in the console, an example
-  bundle and CSV task template, pause-and-ask loops with resume advice, judged
-  strategies, recorded run seeds, host scheduling; real runs need an NVIDIA GPU.
+- [v1.1.0](v1.1.0.md) — a new browser console, an example bundle and CSV task
+  template, research loops you can pause and resume with advice, recorded run
+  seeds and more LLM providers; real runs need an NVIDIA GPU.
 - [v0.2.1](v0.2.1.md) — bounded HDF5 reads, loader-inclusive timing and
   explicit cooperative training allocation.
 
