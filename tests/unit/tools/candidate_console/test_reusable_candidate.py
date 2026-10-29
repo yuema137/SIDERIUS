@@ -104,7 +104,10 @@ def test_policy_selection_curated_review_and_native_builder_parity(captured):
     native = build_reusable_operation(
         adapter.console.config.operation_store, selected.preparation, uuid4()
     )
-    assert review.request_digest == operation_request_digest(native)
+    # The console attributes the run to its setup; the digest binds that attribution.
+    attributed = native.model_copy(update={"setup_id": project.project_id})
+    assert review.request_digest == operation_request_digest(attributed)
+    assert review.request_digest != operation_request_digest(native)
     assert review.nodes[0] == ("hypothesis", "proposal")
     assert review.proposal_advice == "Prefer a small interpretable baseline"
     assert (
@@ -527,7 +530,7 @@ def test_capture_seed_is_bound_by_the_reviewed_digest_and_admitted(captured):
     seeded = adapter.review(project.project_id, chosen.model_copy(update={"run_seed": SEED}))
     native = build_reusable_operation(
         adapter.console.config.operation_store, chosen.preparation, uuid4(), SEED
-    )
+    ).model_copy(update={"setup_id": project.project_id})
     assert seeded.request_digest == operation_request_digest(native) != blank.request_digest
     assert (blank.seed, seeded.seed) == ("Seed: generated at launch", f"Seed: {SEED} (you set)")
     handle = adapter.launch(project.project_id, launch_payload(seeded))

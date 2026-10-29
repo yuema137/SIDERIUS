@@ -16,15 +16,17 @@ import json
 import os
 import stat
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 
 from tools.workflow_preview.models import PreviewModel
 
 from .files import config_bytes, open_directory, write_all
-from .models import ConsoleConfig
 from .settings_models import Id
+
+if TYPE_CHECKING:
+    from .setups import SetupRegistry
 
 EXPORT_DIRECTORY = "exported_configs"
 ExportFile = Literal["workflow.py", "llm.json", "advice.json"]
@@ -106,13 +108,15 @@ def _free_name(exports: int, name: str) -> str:
     return name[:76] + "-new"
 
 
-def export(config: ConsoleConfig, workspace: Path, request: ExportRequest) -> ExportResult:
+def export(setups: SetupRegistry, workspace: Path, request: ExportRequest) -> ExportResult:
     from tools.workflow_authoring.service import AuthoringError, WorkflowAuthoring
 
     from .workspace import ensure_owned_directory
 
     request = ExportRequest.model_validate_json(request.model_dump_json())
-    project = next((p for p in config.editor_projects if p.project_id == request.project_id), None)
+    config = setups.config
+    setup = setups.get(request.project_id)
+    project = None if setup is None else setup.project
     task = next((t for t in config.tasks if t.task_id == request.task_id), None)
     if project is None or task is None:
         raise ExportRefused(404, "not_found", "project or task is not configured")

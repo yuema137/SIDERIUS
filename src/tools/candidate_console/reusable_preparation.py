@@ -116,11 +116,13 @@ class ReusablePreparation:
     def _review(
         self, project_id: str, selection: NewRunSelection
     ) -> tuple[NewRunReview, ReusablePrepareOperation]:
-        project, task, root = configured_capture(self.console.config, project_id, selection.task_id)
+        project, task, root = configured_capture(self.console.setups, project_id, selection.task_id)
         request = ReusableCandidatePreparationRequest(
             source_path=str(project.source_file),
             project_root=str(project.project_root),
             runs_root=str(root),
+            # Attribution to the setup configured_capture just admitted for this task.
+            setup_id=project.project_id,
             **selection.model_dump(exclude={"task_id", "preparation_operation_id"}),
             **task.model_dump(
                 include={
