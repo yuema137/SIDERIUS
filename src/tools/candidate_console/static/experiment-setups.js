@@ -18,6 +18,18 @@
   const say = text => { $('setup-state').textContent = text; $('setup-state').hidden = !text; };
   const openId = () => window.workflowEditor.state.projectId;
   const current = () => list.find(item => item.id === openId()) || null;
+  const selectionKey = () => session.operationsStoreId && tasks.selectedId
+    ? `siderius.setup.v1:${session.operationsStoreId}:${tasks.selectedId}` : null;
+  function remembered() {
+    try { const key = selectionKey(); return key ? localStorage.getItem(key) : null; }
+    catch (_) { return null; }
+  }
+  function remember(item) {
+    if (!session.connected || loadedKey !== `${session.revision}/${tasks.selectedId}` ||
+        !item || (item.taskId && item.taskId !== tasks.selectedId)) return;
+    try { const key = selectionKey(); if (key) localStorage.setItem(key, item.id); }
+    catch (_) { /* Storage may be disabled; opening a setup still works. */ }
+  }
 
   // --- List -------------------------------------------------------------------------
   async function load(preferred = null, force = false) {
@@ -40,7 +52,7 @@
       ];
       loadedKey = key; error = ''; say('');
       // The editor returns what it shows (a declined switch keeps the open setup listed).
-      list = window.workflowEditor.useSetups(list, preferred);
+      list = window.workflowEditor.useSetups(list, preferred ?? remembered());
     } catch (failure) {
       if (failure.stale || revision !== session.revision) return;
       error = failure.message; say(`Experiment setups could not be loaded: ${failure.message}`);
@@ -49,6 +61,7 @@
   }
   function render() {
     const item = current(), task = tasks.selected;
+    remember(item);
     $('setup-drift').hidden = !(item && item.refsMatchTask === false);
     $('setup-new').disabled = !session.connected || !task;
     $('setup-new').title = creatable === false ? CREATION_OFF : '';
