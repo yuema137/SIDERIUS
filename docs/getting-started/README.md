@@ -128,9 +128,12 @@ Launching runs code and may make paid calls. Configuration checks and offline
 preparation do not prove provider access or candidate success. Keep the
 operation ID to reopen status and logs without selecting an editor project.
 
-The [Quickstart pack](../../examples/quickstart/README.md) offers a synthetic CPU
-check without provider calls. It checks installation and task contracts, not
-scientific hardware or model performance.
+The [Quickstart pack](../../examples/quickstart/README.md) offers synthetic data
+preparation and component checks that run on CPU without provider calls. They
+check installation and task contracts, not scientific hardware or model
+performance. A real run, including a Quickstart research chain, needs an NVIDIA
+GPU with CUDA; the chain header and the console run review say so, and a launch
+on a machine without one stops before any model call.
 
 The optional reviewed-launch route covers a fresh standard single iteration.
 For your own caller, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).

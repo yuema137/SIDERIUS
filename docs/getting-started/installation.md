@@ -9,8 +9,15 @@
 - **Python 3.12+** (the repo pins `3.12`; the system `python3` on several lab
   machines is 3.8 and will fail)
 - **[uv](https://docs.astral.sh/uv/)** package manager
-- An **NVIDIA GPU with CUDA** — required for the supported real scientific
-  training path, not for synthetic CPU examples or focused tests
+- An **NVIDIA GPU with CUDA** for every real (non-pseudo) run. There is no CPU
+  training mode: a real launch on a machine where PyTorch sees no CUDA device is
+  refused before any iteration directory or model call, with
+  `SIDERIUS real training needs an NVIDIA GPU with CUDA, and none is visible here (...)`
+  and exit code 2. In the browser console, the task's `candidate_devices` must
+  also list the GPU device nodes (for example `/dev/nvidia0`) so the GPU reaches
+  the run sandbox. A CPU is enough for installation, focused tests, `--dry-run`,
+  pseudo runs (`--is_pseudo_llm`, `--is_pseudo_training`) and the synthetic
+  Quickstart's data preparation and component checks
 - At least one LLM API key — OpenAI, Gemini and/or DeepSeek — for **real
   runs only**: the full unit suite runs with no key at all
 - Optional: a Semantic Scholar key, only for the literature-review stage
@@ -45,8 +52,9 @@ you plan to run the contributor gate (`make check`, see
 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)).
 
 Supported interpreter and accelerator, today: **Python 3.12** (the version CI
-installs) and **CUDA GPUs** for the supported real scientific training path.
-Synthetic examples and focused tests can run on CPU. GPU discovery does not
+installs) and **CUDA GPUs** for every real training run.
+Synthetic data preparation, component checks, pseudo runs and focused tests can
+run on CPU. GPU discovery does not
 restrict NVIDIA devices to a model-name list; the installed PyTorch build,
 driver and selected execution path must actually support the device.
 

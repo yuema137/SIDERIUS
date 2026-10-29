@@ -92,6 +92,7 @@ markers = [
     "real_run: requires an external provider. Skipped unless a real-LLM flag is passed. Run locally only with: pytest -m real_run --real-llm",
     "allow_real_subprocess: this unit test intentionally launches a real training/inference/scoring script. Without it, tests/unit/conftest.py fails fast rather than letting a missing stub start real work.",
     "allow_checkout_writes(reason): this test intentionally mutates a git-tracked checkout file. Without it, tests/conftest.py fails the test on the first write, removal or rename of a tracked path (tests/helpers/checkout_write_guard.py).",
+    "real_gpu_preflight: this test exercises the real-launch CUDA preflight. Without it, tests/conftest.py stubs core.gpu_requirement.real_launch_gpu_refusal to report a visible GPU.",
 ]
 
 [tool.ruff]

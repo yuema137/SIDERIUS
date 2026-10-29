@@ -848,6 +848,13 @@ print_chain_header() {
     echo "  Required profile : ${REQUIRED_RUNTIME_PROFILE:-(none — measured > shipped > uncalibrated ladder)}${REQUIRED_RUNTIME_PROFILE:+ sha256=${REQUIRED_RUNTIME_PROFILE_SHA256:-(unset)} artifact=${REQUIRED_RUNTIME_PROFILE_PATH:-(unset)}}"
     echo "  Data scope       : ${DATA_SCOPE:-(complete dataset)}"
     echo "  HealthGate       : enabled=$HEALTH_GATE_ENABLED monitored=${HEALTH_GATE_FILES:-(YAML defaults)}"
+    # Issue #1136 — always-print: a real chain refuses a host without a CUDA GPU
+    # (run_one_iteration's preflight), so say so before the first iteration.
+    if [ "$IS_PSEUDO_LLM" -eq 1 ] || [ "$IS_PSEUDO_TRAINING" -eq 1 ]; then
+        echo "  Compute device   : not checked (pseudo-mode; a real chain needs an NVIDIA GPU with CUDA)"
+    else
+        echo "  Compute device   : NVIDIA GPU with CUDA required (checked before any model call)"
+    fi
     if [ -n "$MODE" ]; then
         echo "  Mode             : $MODE"
     fi
