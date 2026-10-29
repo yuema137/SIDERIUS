@@ -396,10 +396,12 @@ verified configured/prepared association (edited review also verifies saved sour
 and bindings). This ephemeral projection reuses worker `credential_requirements`
 and the strict selected private JSON reader. It returns required/omitted provider
 names, unresolved route node names, present/missing required or declared names,
-`file_status` (`not_needed`, `not_selected`, `readable`, `unavailable`), a `ready`
+`file_status` (`not_needed`, `not_selected`, `readable`, `missing` for a configured
+file that does not exist, `unavailable` for one that exists but cannot be read or
+parsed), a `ready`
 boolean and bounded repair instructions. No file is read when there are no names
 to check. Missing/empty extra declared names also block readiness. Invalid or
-removed files after startup remain reviewable with unavailable status; startup
+removed files after startup remain reviewable with `unavailable`/`missing` status; startup
 `check` still validates configured credential file shape (JSON or dotenv) and
 permissions.
 
@@ -422,12 +424,12 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 
 | Method/path | Input/output |
 | --- | --- |
-| GET /api/choices | ChoiceView array |
+| GET /api/choices | `ChoicesView` `{operations_store_id, tasks: ChoiceView[]}`; `operations_store_id` is 32 lowercase hex, a domain-separated SHA-256 prefix (`siderius-operation-store/v2`) of the canonical `OperationStoreConfig.state_root` only (never a path; editing the preparation/candidate output roots keeps it, so a retained unresolved launch stays visible); browsers key retained operation intents by it and the project id |
 | POST /api/preparations | PrepareSelection → OperationHandle, 202 |
 | GET /api/preparations/{UUID}/review | PreparedReview |
 | POST /api/candidates | LaunchSelection → OperationHandle, 202 |
 | GET /api/operations | `limit=1..200` (default 50) → `OperationListView`, read-only; see "Operation list" |
-| GET /api/operations/{UUID} | StatusView |
+| GET /api/operations/{UUID} | StatusView; 404 `unknown_operation` only after the private store root was opened and lists no such operation (`operation_admitted`); any other missing file stays 404 `not_found`, which never proves absence |
 | GET /api/operations/{UUID}/tokens | CandidateTokenSnapshot, read-only fixed native projection |
 | GET /api/operations/{UUID}/graph-results | GraphResultsView, read-only per-body native tuning report projection |
 | GET /api/operations/{UUID}/log | kind=native or operation, offset>=0, max_bytes=1..65536 → LogChunk |
@@ -452,7 +454,7 @@ inputs. Unexpected failures log exception class only and return secured generic5
 inside the boundary; arbitrary native/plugin logs are not universally redacted.
 
 Responses carry no-store, nosniff, no-referrer, frame denial and self-only external
-script/style CSP. Token is memory-only in the browser; IDs may persist. Page uses
+script/style/image CSP. Token is memory-only in the browser; IDs may persist. Page uses
 textContent, explicit mutation buttons, retained UUID/payload for retries, visible
 polling and stale observation on disconnection. Known-ID monitoring is independent
 of draft/review. Server termination does not cancel detached native operations;
@@ -578,14 +580,14 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
   `OperationFailure("integrity", ...)` → HTTP 409 with the generic sanitized
   message; an unknown operation is 404.
 
-Slow control: `graph-results-monitor.js` owns `window.renderGraphResults` and the
+Monitor: `graph-results-monitor.js` owns `window.renderGraphResults` and the
 `#graph-results-observation` section. `app.js` requests the route once per
 selected operation inside the existing poll, only for `kind == "candidate"` and
 `state == "completed"`; the existing monitor epoch fences replies and selection
 clears the section. 404/409 are final for that selection; other failures retry on
 the next existing poll. Each body is its own section (`Iteration N` for several
 bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
-(`TRAIN & TUNE`). A body with `skipped` nodes adds one muted line
+(`Train & tune`). A body with `skipped` nodes adds one muted line
 "Skipped, not run: <node> (<reason>), ...". No cross-body score or ordering is
 computed or displayed; route decision details (observable values, case) are
 B1-PR6 monitor work.
@@ -614,14 +616,22 @@ declaration (`candidate_operations.loop_root_operation`, which follows immutable
 only from this segment's native receipt `loop_trace` (`null` while no receipt
 exists; counts are cumulative over the run). `stop_reason` is the receipt's
 verified `loop_trace.stop_reason`, present only when a declared stop condition
-completed the loop early; Slow control renders it in plain words ("Research loop
+completed the loop early; Monitor renders it in plain words ("Research loop
 stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
 higher is better; best at body 3)", or "… no improvement for 2 bodies …") from
 the existing status poll, with recorded values unrounded. The receipt's body
 numbers (`attempted_iterations`, `stop_reason.iteration` and its incumbent
 iterations) are whole-run indices, so a resumed segment's line says "Body numbers
 count the whole run, including earlier segments." The console never
-infers per-body progress from an active process. Fixed and non-candidate
+infers per-body progress from an active process. `stop_requested` and
+`pause_requested` (status only; `false` in the operation list) are read by
+`candidate_operations.loop_control_requests` from the worker's own durable markers
+with the worker's scoping: Stop is run-wide (`candidate_run/stop.json`), Pause belongs
+to this operation's segment only (root `candidate_run/pause.json` or
+`continuations/<segment>/pause.json`). They report recorded requests, never their
+effect; the receipt still decides whether a Stop or Pause took effect. Monitor renders
+the Stop/Pause controls from these fields, so a reload or another tab shows a pending
+Stop and hides Pause once a Stop is recorded. Fixed and non-candidate
 operations omit the field. `StatusView.successor_operation_id` forwards the
 operations readback for a segment that a Resume has continued; the segment keeps
 its own receipt.
@@ -643,7 +653,7 @@ even when the loop has since become terminal (the backend replays the marker
 before its running check); a 200 is therefore an idempotent acknowledgement,
 never evidence that the loop is still running.
 
-Slow control: `loop-control.js` owns `window.renderLoopControl` and
+Monitor: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
 **Stop at next boundary** is shown only for a status with `loop` (root or resumed
 segment), state `active` and no receipt. A click disables the button for the pending request, so
@@ -682,7 +692,7 @@ digest), `kind`, `not_ready` and `runtime` 409 with route-local fixed messages;
 `credentials` 409 carrying missing names only; `busy`/`conflict` use the global
 messages. Unknown predecessor 404.
 
-Slow control shows **Pause at next boundary** beside Stop for an active loop
+Monitor shows **Pause at next boundary** beside Stop for an active loop
 segment with no receipt; after acknowledgement it reads "Pause requested … Not yet
 paused." A `paused` receipt reads "paused at a completed body boundary after N of M
 bodies" and is resumable, never "ended". Without a successor it offers **Review
@@ -724,7 +734,7 @@ kind or state list of its own.
 Browser: `operation-stop.js` owns `window.operationStop.mount(prefix)`, which
 binds `#<prefix>-group`, `#<prefix>-button` and `#<prefix>-status` and returns
 `render(status | null)`. It is mounted twice and draws only from statuses the page
-already reads (no extra polling): Slow control (`operation-stop`, every monitor
+already reads (no extra polling): Monitor (`operation-stop`, every monitor
 poll) and the Run page retained candidate intent (`capture-stop`, on Check status
 or launch). **Stop run** is shown only while the latest status has `cancellable`
 true and no acknowledgement is held. A click opens `window.confirm` stating that the
@@ -749,7 +759,7 @@ so far stay in the run folder; this run cannot be resumed." Witnesses:
 
 `ConsoleConfig.recorded_examples` defaults to empty. The authenticated
 `GET /api/recorded-examples` lists only configured entries; the detail GET takes
-an allowlist ID, never a browser-supplied filesystem path. Slow control presents
+an allowlist ID, never a browser-supplied filesystem path. Monitor presents
 the captured three-stage proposal/implementation/validation result, labelled with
 the editor's paper capability names, and reads
 reported provider usage through the existing candidate-token owner and shared
@@ -780,12 +790,26 @@ returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
 `/api/editor/{project_id}/versions` returns `VersionList` and GET
 `/versions/{index}?sha256=` returns read-only `VersionDetail` (see named versions
 in the authoring contract); `editor-versions.js` renders the Save name field and
-Version history panel and owns no record policy. Save error `version_record`
-means nothing was written (the reviewed proposal is retained); the distinct
-`version_record_not_updated` means the source was saved but its record was not, so
-`editor.js` adopts the returned saved `current` view. `GET /api/editor/node-catalog`
-and `POST /api/editor/{project_id}/node-draft` serve the node palette (a project
-named `node-catalog`, like `projects`, is shadowed by the fixed route). The existing console
+Version history panel and owns no record policy. History is a beginner surface
+(`⋯` › Version history, red-team A-3): rows show name, time and Current; SHA-256,
+the record path and the whole saved Python are advanced detail. **View** opens a row;
+**Restore this version as a draft** (`#editor-history-restore`, not offered for the
+current row or a row without kept bytes) hands its bytes to
+`workflowEditor.restoreVersion`, an ordinary `source` review folded into the draft as
+one undoable step: nothing is written until **Save version**, and Undo brings back the
+replaced edits. It refuses, with a status sentence, while an invalid field draft,
+typed Python text or a conflict is pending. A file without a console-saved row is
+"Current file (not saved in the console yet)", never a saved version. The name field
+refuses, as typed, invisible characters (the categories `NewVersionName` refuses) and
+a name already in the loaded history (`#editor-version-problem`, Save disabled); no
+other naming rule. Save error `version_record` means nothing was written (the
+reviewed proposal is retained); the distinct `version_record_not_updated` means the
+source was saved but its record was not, so `editor.js` adopts the returned saved
+`current` view. `GET /api/editor/node-catalog`
+and `POST /api/editor/{project_id}/nodes-draft` serve the node palette, and
+`GET /api/editor/external-inputs` serves the inspector's input creation (projects
+named `node-catalog` or `external-inputs`, like `projects`, are shadowed by the
+fixed routes; the older single-node `node-draft` route remains for API clients). The existing console
 Bearer token, origin, host and 256 KiB wire-body admission apply to every API
 route. Browser requests select project IDs and never filesystem destinations.
 The [authoring contract](../workflow_authoring/authoring-contract.md) owns source
@@ -793,7 +817,11 @@ limits, exact-byte review/save, mode preservation, recovery and race boundaries.
 Domain conflicts return bounded current source/diagnostics and, on a stale
 Review, the rendered pending proposal/diff. Unsupported-source and parser
 failures do not execute selected Python. Unexpected filesystem failures report
-an unavailable resource without forwarding exception text.
+an unavailable resource without forwarding exception text: on a read, "The
+workflow file or its project folder is unavailable on disk"; on Save, "Not saved:
+the project folder or its recovery copies could not be written". Typed open
+refusals (`not_found`, `not_readable`, `limit`) and the Save refusal `read_only`
+name the configured path (authoring contract).
 
 Editor task/external fields and existing request/protocol argument choices use
 the native declaration document and a typed projection of the existing catalog.
@@ -816,76 +844,138 @@ no chip.
 
 Port legibility is presentation keyed on the server-sent contract id
 (`editor-contract-presentation.js`, styles in `editor-contract-presentation.css`).
-A table gives each catalog contract a readable name, a colour token
+Names, descriptions and kinds are not owned by the browser: every projected
+contract object carries `name`, `description` and `kind` from the single server
+owner ([contract schema names](../../workflows/definition/contract-names.md)),
+and the module learns them from those objects. Its table gives each catalog
+contract only a colour token
 (`--contract-<colour>`, defined for both themes) and a socket shape (`circle` for
 `<capability>.input`, `square` for `<capability>.output`, `diamond` for
 `optional.*`, `capsule` for other contracts); a unit census binds the table to
-`CONTRACTS` and requires distinct (colour, shape) pairs and names. An id missing
-from the table (a newer server catalog) gets a stable hash-derived token. Port
+`CONTRACTS` and requires distinct (colour, shape) pairs. An id missing
+from the table (a newer server catalog) gets a stable hash-derived token, and an
+id without a server name shows id-derived words. A name names the schema only;
+each canvas socket carries a direction arrow (before an input's label, after an
+output's; `data-contract-direction` `receives`/`sends`, accessible name and
+tooltip prefixed "Receives <name>." / "Sends <name>."), and the legend note explains
+both arrows; each legend row's tooltip is the type's server description (rows stay one line). Port
 pills show the readable name (the id stays in the tooltip), wires take the colour of
 the result they carry, required inputs and outputs have filled sockets and optional
-inputs hollow ones, and a closed "Port types (N)" legend lists the contracts present
+inputs hollow ones, and a closed "Connector types (N)" legend (two-column popover) lists the contracts present
 in the opened graph. The table never decides compatibility. Connection preview
 reads only the server's `port_inventory` choices: hovering an output highlights
 offered inputs and dims the rest without selecting; pressing an output and releasing
 over an input binds exactly as output-then-input clicks do. A refused or dimmed
-input states `<input> expects <socket contract> (<name>), but <source> provides
-<output contract> (<name>)`, or that the server does not offer the source although
-both contracts match.
+input states (spec K10) `Can't connect: <source module> sends <name>; this input
+receives <name>.`, or that the source module is not offered for this input although
+both contracts match; a refused drop also shows that sentence anchored under the
+input (`.circuit-anchor-note`, removed by the next gesture or render).
 External source chips remain inspector bindings. Omitted optional ports and argument
 creation/deletion are not graphical controls in this slice.
 
 The node palette (`editor-palette.js`, `editor-palette.css`; presentation only,
-`editor.js` owns the draft) is a sticky side rail left of the canvas
-(`.editor-canvas-layout`; own scroll, at most the viewport height) so a drag
-source and the canvas share the screen; under 900px it collapses to a drawer opened
-by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
+`editor.js` owns the draft) is the docked rail of the editor workspace
+(`.editor-workspace` in `editor.css`: `--rail-width`, own scroll, sized with the
+`theme.css` layout tokens) so a drag source and the canvas share the screen; under
+900px it collapses to a drawer opened
+by its "Modules" toggle. Entries are focusable `div[role=button]` (click,
 Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
 drag payload. It lists
 `GET /api/editor/node-catalog` entries (fetched once per connection, only while the
-Workflow view is shown; other pages never request it) grouped by capability with a text search,
-and adds one by click (placed right of the existing cards) or by dragging an entry
+Workflow view is shown; other pages never request it) as a compact, aligned stack
+of one uniform-height collapsed `details.palette-category` row per capability (icon,
+display name from `editorCapabilityPresentation.label` on one line with
+ellipsis and a full-title tooltip, a dot marker with accessible text and tooltip for
+"Start here" on `guide.chain[0]` / "Optional context" on `guide.context`; no
+step-number badge, the stack is already in stage order) in `guide` stage order, with a text search (matching rows open). Above the
+stack a one-sentence start guide renders `guide.chain` (emphasised while the canvas
+has no card) with a "Using this list" disclosure naming `guide.context` (the header
+Help opens the tour; there is no second, look-alike help entry). Expanding a row (accordion, open state kept across re-renders) shows the
+server description, the sent type, connects-from/to and one addable `.palette-entry`
+per route with contract chips: "→ <name>" for each received (required) type and
+"<name> →" for the sent type (`data-direction` receives/sends, accessible text
+"receives"/"sends"; optional ones counted). Type names, colour and shape come from
+`editor-contract-presentation.js` `describe()`, which learns the server contract `name`
+(owner `workflows/definition/contract_names.py`) from the catalog contract objects. Hover or keyboard focus on a route shows
+one shared `#palette-popover` (`role=tooltip`, `aria-describedby`; Escape, blur or
+leaving dismisses it): description, request route, every received argument with
+type, required/optional and origin (`produced_by` capabilities or external input),
+the sent type and connects-from/to. While shown, canvas ports get
+`palette-compatible` when an output carries a contract the route reads from another
+capability or an input's socket contract equals the route's output contract
+(presentation only; binding still uses server `port_inventory` choices). The
+presentation lives in `editor-palette-guidance.js`. The palette adds one by click (placed right of the existing cards) or by dragging an entry
 onto the canvas (dropped at that world position). It proposes an unused instance
-id (`<capability>`, `<capability>2`, ...). The pending node is the unified
-draft's `node` field (AddNodeProposal fields without `source`; `editorDraft.proposal`
-turns it into `add_node` on `anchor.source`), so it is part of the dirty flag,
-undo/redo and Discard. The canvas and Selection draw it from the proposal plus the
-server's `node-draft` ports (`editor.js` caches each inspected view by proposal, so
-undo/redo redraw without a request), its required inputs show as unbound, and
-binding them goes through the same canvas/inspector gestures, each one draft
-operation (other nodes cannot be rewired or moved, and inspector, reference and
-loop edits are disabled, until it is reviewed, cancelled, undone or discarded).
-Review is disabled until `node-draft` reports `complete`; "Cancel new node" is an
-undoable draft operation and sends no request. Adding or removing requires a draft
-with no structured edits over its anchor (Review/save or discard them first); the
-anchor may be a reviewed, unsaved Source edit or an earlier reviewed node add/remove.
-A successful `add_node`/`remove_node` review becomes the draft's new anchor (one
-undo step, like a reviewed Source edit), so several node edits can be reviewed in
-sequence and saved together.
-Removal is offered by Delete/Backspace on a focused capability heading, its
-context menu and "Remove capability" in Selection; it sends a `remove_node` review
-directly (Review is the explanation: refusal text or `node_edit.message` plus the
-exact diff). Removing several nodes at once asks for confirmation; the canvas has
-no multi-selection yet, so current gestures remove one node without a prompt.
+id (`<capability>`, `<capability>2`, ...). Pending nodes are the unified draft's
+`nodes` list and new external inputs its `externals` list (`editor-node-drafts.js`,
+`window.editorNodeDrafts`, holds their projection and list edits; `editorDraft.proposal`
+turns them into one `node_drafts` proposal on `anchor.source`, see the authoring
+contract). Any number of nodes may be pending beside moves, wiring, inspector,
+reference and loop edits; everything is part of the dirty flag, undo/redo and Discard.
+Every card, pending or saved, can be moved at any time. Moving only pending cards
+records only their positions, so the review stays a byte-preserving insertion. The
+canvas and Selection draw the edited document plus pending nodes. Ports come from
+`POST …/nodes-draft`, which covers the whole projected graph; its choices include
+pending results and new inputs. `editor.js` caches views by `editorNodeDrafts.key`
+(layout excluded, so moves never re-inspect) and reuses the last view while checking.
+Unbound required inputs show red (P2) and are wired with the ordinary
+canvas/inspector gestures, saved -> pending and pending -> pending included. While
+anything is pending, Review is disabled until the current view is `complete`. The
+binding-only `…/draft` inspection is then not used, because `nodes-draft` also
+applies the binding patches. Removing a pending node ("Cancel new node" for the
+newest, Delete, context menu or Selection) is an undoable draft operation and sends
+no request. Sockets that read it are disconnected (pending) or return to their saved
+source (patches); the status line names them. Removing a *saved* node still needs a
+draft with no structured edits over its anchor. A successful `node_drafts` or
+`remove_node` review becomes the draft's new anchor (one undo step, like a reviewed
+Source edit).
+
+Inspector input creation (`editor-external-inputs.js`, `editor-external-inputs.css`).
+Under each unbound socket whose contract `GET /api/editor/external-inputs` lists,
+Selection shows one line: the contract name (`editorContractPresentation.describe`,
+the `contract_names.py` owner), the server `summary`, and whether
+existing inputs of that contract are offered in the select above. A collapsed
+"Create external input…" form asks for an input id (suggested `<node>_<argument>`,
+de-duplicated). In a version 1 document it also asks for the project-relative file
+path; the path is never prefilled, only an `e.g. inputs/<id>.json` placeholder. A
+reusable (schema 2) document never offers a file (red-team SEC-6: reusable preparation
+accepts only managed inputs): a `managed` contract creates a `managed_candidate`
+binding with no path, and a contract without a managed form shows the form disabled
+with that reason. "Create and connect" validates the id (identifier, unused) and, for
+a file input, a non-empty path. It then adds the binding to the draft's
+`externals` and connects the socket as one undoable operation ("Create input …").
+The server validates the result.
+Deletion is offered by Delete/Backspace on a focused module heading (a mouse click
+focuses the clicked heading after the select re-render, so click-then-Delete works),
+its context menu ("Delete module") and the trash icon in the Selection header
+(`aria-label` `Delete <id>`). It always succeeds in the draft with no confirmation
+(`removed` in the node-drafts proposal); readers become "not connected" problems and
+Undo restores everything. Problems name only modules that remain: the server reports
+removal, remaining-reader and pending-module problems together, an emptied canvas has
+the single problem `workflow_empty` ("add at least one module"), and
+`loop_feedback_missing` stays while either loop endpoint is deleted, even after new
+modules are added. The browser also drops located problems whose module is no longer
+displayed and re-diagnoses from a cached inspection on every edit; the Research loop
+section shows `#editor-loop-broken` (only Remove research loop) instead of
+stop-condition edits while the loop points at a deleted module.
 Required and bound inputs always render as card rows; optional unbound inputs fold
 into one `.circuit-optional` disclosure per card ("N optional inputs"), expandable
 and remembered across re-renders of the same graph. While an output is pending,
 the summary is highlighted when a folded input is type-compatible.
 
-Canvas view state (zoom, scroll, Arrange view, expanded optional rows) is owned by
+Canvas view state (zoom, scroll, expanded optional rows) is owned by
 `editor-circuit.js`, keyed by project and node IDs, and never reaches a document:
 viewing sends no request and cannot change saved bytes. The canvas is a CSS
 `transform: scale()` of the world, with positions kept in document pixels
 (drags divide screen deltas by the zoom). On opening a graph it fits once
 (`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
-canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size and
-Arrange view. The canvas grows with its zoomed content up to
-`clamp(420px, 100vh - 200px, 860px)`, shows edge shadows toward unseen content,
-and a note states how many capabilities are partly outside the view. Arrange view
-displays `geometry.place` with no stored positions (display only); a move made
-there records the displayed layout as an ordinary local edit and leaves Arrange
-view. Overlapping saved cards (`geometry.overlaps`) and unrouteable wires are
-reported with that display-only way out.
+canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size, Check
+the loop and Tidy up (the one layout tool; the former display-only Arrange view was
+removed because a drag in it saved the arranged layout, red-team A-1). The canvas
+grows with its zoomed content up to `clamp(420px, 100vh - 200px, 860px)`, shows edge
+shadows toward unseen content, and a note states how many modules are partly outside
+the view. Overlapping saved cards (`geometry.overlaps`) and unrouteable wires are
+reported with Tidy up (undoable) as the way out.
 
 The workflow-level Research loop panel (`editor-loop-controls.js`, view only;
 `editor.js` owns the draft) shows "No research loop declared" with an Add action
@@ -918,16 +1008,21 @@ The Selection inspector groups one node's parameters (`editor-node-parameters.js
 view only; `editor.js` owns every mutation): **Inputs** (one binding select per
 socket, required/optional and bound state in its label; a required unbound one is
 marked `.field-problem`), **Training settings** on a tuning node (a
-`#editor-training-settings` disclosure, open on selection, listing every
-`TrainingInspector` control with its mode select, value, a per-field "Reset to
-default" that removes the authored key, a `Default` / `Modified` / `Changed, not
-saved` badge against the native default and the loaded source, and inline help
-from `TrainingControl.help` plus the native preview), **Loop and stop settings**
+`#editor-training-settings` disclosure, collapsed by default (an opened one stays
+open across re-renders) with summary `Training settings · N of M changed`, listing every
+`TrainingInspector` control with its mode select (`Default` / `Set value` / `None`),
+value, a per-field reset icon (`[data-training-reset]`, shown and enabled only when the
+field is changed) that removes the authored key, a `Default` / `Modified` / `Changed, not
+saved` badge against the native default and the loaded source, an invalid-number
+message under the field (`.field-error`), and inline help from `TrainingControl.help`;
+the schema default / native preview, epoch-ceiling prose, output restriction and
+parameter-rules JSON are advanced detail), **Loop and stop settings**
 on a feedback endpoint (a summary and a button to the workflow-level Research loop
 panel) and **Model hyperparameters** on a tuning node (read-only: they are owned
 by the task manifest, shown as `definition.task.manifest` and any task binding;
 no control edits them). A card whose server inventory has a required unbound input
-gets `.has-required-unbound` (red outline/glow) and a `.circuit-problem-badge`.
+gets `.has-required-unbound` and a small `.circuit-problem-badge` count; the soft red
+ring is on the unconnected socket itself.
 `#editor-problems` (`editor-problems.js`, beside Review) lists "N problems" from
 server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
 (`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
@@ -938,16 +1033,17 @@ Witness: `tests/browser/required_defaults.mjs`.
 
 Unified draft (`editor-draft.js`, `window.editorDraft`; `editor.js` delegates).
 Wiring, disconnection, layout moves, inspector, training, research-loop edits and
-a pending palette node are operations on one draft state `{document, bindings,
-anchor, node, training, loopTemplate}`: `document` is the edited authored document, `bindings` are
+pending palette nodes and new external inputs are operations on one draft state
+`{document, bindings, anchor, nodes, externals, training, loopTemplate}`: `document` is the edited authored document, `bindings` are
 `BindingPatch` values relative to `anchor.inventory`, and `anchor` is the last
 server projection the draft starts from (`{source, document, inventory}` of the
 loaded source, or of a reviewed Source/task-reference update). There is no edit
 mode: any mix accumulates, with one dirty flag (`workflowEditor.state.dirty`,
-true while the draft identity `{document, bindings, anchor.source, node}` differs from
+true while the draft identity `{document, bindings, anchor.source, nodes, externals}` differs from
 the loaded state, or while Source text is dirty). Review selects the existing
-typed proposal from the draft: a pending node → `AddNodeProposal` on
-`anchor.source` (see the node palette below); patches present → `DraftProposal` whose
+typed proposal from the draft: pending nodes or new inputs → `NodeDraftsProposal`
+on `anchor.source`, which carries `document` only when the saved content was edited
+and the binding patches (see the node palette below); patches present → `DraftProposal` whose
 `base_document` is the edited document (layout and inspector edits travel with
 the patches); otherwise document changes outside the loop → `DocumentProposal`;
 loop-only changes → `LoopProposal` on `anchor.source`; no change →
@@ -962,18 +1058,25 @@ Training-settings actions from `editor-node-parameters.js` (value, mode, per-fie
 Reset) are draft operations too: typing in one field coalesces, each Reset is its
 own undo step, and undo/redo re-render the badges from the restored document.
 History: every operation records one undo step (consecutive typing in one field
-coalesces, limit 200). Secondary **Undo**/**Redo** buttons (Save stays the one
-primary editor action) and Ctrl/Cmd+Z,
-Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only) restore
-earlier states and invalidate any review. **Discard changes** restores the loaded
+coalesces, limit 200). **Undo**/**Redo** buttons and Ctrl/Cmd+Z,
+Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only, and never
+while a `dialog[open]` exists or a `[role=dialog]` / `[popover]` element holds focus,
+red-team A-4) restore
+earlier states and invalidate any review. **Revert to saved** (`#editor-discard-draft`,
+visible label beside its icon, red-team A-5) restores the loaded
 state without reading disk and is itself undoable, including dirty Source text:
 the discard step carries the typed text (`sourceText`) and Undo restores it as
-dirty Source text (invalid training/loop field text is not kept). **Refresh from
-disk** re-reads and asks first when dirty. Undo/Redo are disabled while Source
+dirty Source text (invalid training/loop field text is not kept). While typed Source
+text (dirty, or checked from typed text) is pending and advanced tools are off,
+`#editor-hidden-source` says "You have unsaved Python edits from advanced mode" with
+Show (turns advanced tools on and focuses the source) and Revert to saved, and the Save step
+says it writes the typed Python text (red-team A-2). **Reload from
+disk** (`#editor-refresh`, advanced; and `#editor-discard` on the conflict card) is the
+only action that re-reads the file; the toolbar one asks first when dirty. Undo/Redo are disabled while Source
 text is dirty or an invalid training/loop field draft is pending (Ctrl/Cmd+Z
 then reports why and keeps the typed text); Undo/Redo/Discard are disabled
 during Save and while a conflict is shown (the conflict panel's own
-Discard/Rebase apply). Rebase stays disabled while binding patches are pending;
+**Reload from disk** / **Reapply my changes onto latest** apply). Rebase stays disabled while binding patches are pending;
 it makes the current disk version Discard's target and restarts history there.
 Structured edits are re-applied onto the disk projection by a three-way merge
 (`editorDraft.reapply`, ancestor = the previous base document; arrays merge by
@@ -999,8 +1102,10 @@ partial code-authored set never overlaps. A pointer drag and Alt + arrows call t
 same move: it records every displayed position, the moved one updated, so the next
 open shows the same layout; a save without a move keeps positions unchanged.
 Keyboard buttons share pointer actions; Escape/right-click cancels a pending wire.
-Card headings use the paper capability names (`INTERPRET`, `LITERATURE`, `PROPOSE`,
-`IMPLEMENT`, `VALIDATE`, `TRAIN & TUNE`) from `editor-capability-presentation.js`;
+Card headings, palette, loop, run and result views use one sentence-case display
+name per capability (`Interpret results`, `Literature review`, `Propose model`,
+`Implement`, `Validate`, `Train & tune`; the paper figure's stages in plain words)
+from `editor-capability-presentation.js`, their single owner;
 a unit census binds that table to the catalog. Shared semantic theme tokens own colors.
 
 Source/form/base changes invalidate Review. Unreviewed inspector edits disable
@@ -1012,8 +1117,35 @@ loading; reconnect retains pending drafts and reviewed bytes. Failed loads canno
 adopt an old project conflict.
 Async replies are fenced by selected project and local edit generation; Save sends exact reviewed bytes/hash.
 Conflict handling preserves the pending proposal and requires explicit discard
-or new-base selection followed by review. A connection failure retains proposal
-and reports unconfirmed save. Source/labels/diffs render as text.
+or new-base selection followed by review. The conflict card (red-team S-5) states
+in one sentence that the workflow was saved from another tab or changed on disk
+(with the time noticed) and that unsaved changes are kept; **What changed on disk**
+is a unified line diff (`editor-save-outcome.js` `lineDiff`, three context lines)
+from the version the page opened to the file now; **Your unsaved changes** lists
+binding/node drafts or a line diff of the proposal; the whole current file is
+advanced detail.
+
+Save outcomes (`editor-save-outcome.js`, red-team S-2..S-4) are one plain
+sentence each. A 4xx refusal wrote nothing: "Not saved: …" with the refusal's own
+reason (busy, read-only file, version name, filesystem, task sources …), and the
+checked proposal and open Save step stay ready for another try (a `proposal` hash
+refusal drops the check). A 5xx, an unreadable reply or no reply leaves the outcome
+unknown: the editor re-reads the file and reports "Saved (confirmed from disk)" when
+it holds the checked bytes, "Not saved: … The file on disk is unchanged" when it
+holds the base, and the conflict card otherwise. A save whose follow-up reload
+fails reports "Saved as "<name>". Reloading the file afterwards failed: …" and
+adopts the checked review projection as the saved state, so the next save is no
+false conflict; a save conflict whose disk bytes equal the checked bytes is adopted
+as already saved. When the review's `removed_comments` is non-empty, the Save step
+(`#editor-save-comments`, beginner view) says "Saving rewrites the file: N comment(s)
+will be removed (…)", also after **Reapply my changes onto latest** (red-team S-1).
+A server check of a binding or node draft that fails (e.g. a non-JSON 5xx) puts
+that draft state in `check failed` with **Check again** (`#editor-check-again`)
+instead of "checking" forever; the failed state is not re-sent automatically, and
+any edit (a new draft key) is checked as usual (red-team E-5). Status sentences are
+plain: "Opened <project>.", "Checked. Name the version, then save.", "Saved as
+"<name>".", "Reverted to the saved version. Undo brings your changes back.", and
+"Can't open <project>: <reason and path>." Source/labels/diffs render as text.
 
 The editor source owner only reviews/saves files. The adjacent New run controller
 uses the saved-source preparation adapter described below; declaration saves
@@ -1037,7 +1169,7 @@ and dark themes, and full-layout persistence for pointer and keyboard moves;
 and overlap detection without a browser. `tests/browser/editor_canvas_fit.mjs`
 (same variables) checks at 1440x900 that all five cards are in view after
 fit-on-open, that view controls send nothing and keep bytes, folded optional
-inputs, the disjoint fully wired interpretation fixture, Arrange view on an
+inputs, the disjoint fully wired interpretation fixture, Tidy up and Undo on an
 overlapping layout, zoomed drag arithmetic and a non-empty task panel. `tests/browser/port_legibility.mjs` (same variables) opens the
 eight-node families fixture and checks one distinct colour+shape token and readable
 pill name per contract, filled/hollow sockets, wire colour, the legend, hover
@@ -1050,6 +1182,45 @@ new node, review/save keeping author comments, drag source and canvas centre bot
 in view before the drag, refused removal of a node others
 read (Delete key), the context menu, byte-identical inspector removal of the added
 node, Discard and Undo of a pending dragged node, and cancelling it.
+`tests/browser/free_node_drafts.mjs` (same fixture; unit owner
+`tests/unit/tools/test_workflow_node_drafts.py`) adds two pending nodes and moves
+both (pointer and Alt+Arrow). It wires saved -> pending and pending -> pending,
+explains and creates the missing `storage` input in Selection (empty path refused,
+undo/redo), and reuses it from the second node's select. It checks that Review stays
+blocked while incomplete, then reviews one `node_drafts` proposal with
+`document: null` and only inserted lines and saves it with author comments kept.
+`tests/browser/palette_guidance.mjs` (same variables and fixture) checks the
+stage-ordered compact stack (aligned, touching rows, badges, start guide), accordion
+details and typed route chips with receive/send arrows, hover and keyboard popover
+content, compatible-port highlighting and its removal, Escape, light/dark text
+contrast >= 4.5:1, the narrow drawer, and that nothing is posted or written.
+
+Templates and advice (`editor-templates.js`, `editor-advice.js`,
+`editor-templates.css`; server contract in
+`tools/workflow_authoring/authoring-contract.md`): the gallery opens from the canvas
+header **Templates** button (`#editor-template-open`), the empty-canvas primary action
+(`#workflow-start-template`), Home **Start from a template** and the page-bar `⋯` menu
+(`window.editorTemplates.open()`). Its dialog lists compact cards (icon, title, one
+sentence), first **Blank workflow** (`data-template="blank"`: changes nothing, closes
+the dialog and focuses the module search), then the server templates with the graph
+preview of the chosen one and loop details collapsed, before **Use template**
+(`#editor-template-import`). Use calls `window.workflowEditor.importSource(source,
+label)` inside `editorPageBar.quietly(...)`, which runs the ordinary source check
+without opening the save step; the result folds into the draft as one undoable step
+and Save is still required. Typed Advanced source is not a draft state, so while it is
+unsaved **Use template** is disabled and `importSource` itself refuses ("Save or revert
+your typed Python text first, then use a template."), as restoring a version does;
+Quick start's import goes through the same path. Afterwards `editorAdvice.focusFirst()` selects the first
+canvas module whose capability has an advice target and focuses its advice field. The node inspector calls `window.editorAdvice.render` directly
+after the node heading, so "Your advice to the agents" (multi-line, help,
+example placeholder, and under it `.advice-privacy`: "Advice is sent to the model
+provider and kept in version history; don't paste secrets.", red-team SEC-2) is its
+first input; edits are draft document edits with one
+coalesced undo step per node, disabled while a palette node is pending.
+`tests/browser/scenario_template_parameters.mjs` (import refused over typed source,
+import loop, edit a training parameter, review, save) and `tests/browser/scenario_template_advice.mjs` (import
+the advice loop, write advice, review, save; contrast warning on the plain loop;
+documents the B6-blocked three-review aggregation scenario) use the same variables.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
@@ -1101,21 +1272,47 @@ most 4096 directory entries are examined per request; a larger store reports
 status. Receipts, digests, workspace/log/output paths and credentials are not
 part of the projection.
 
-Slow control: `operations-list.js` renders the list as links to
-`#slow-control/<UUID>`, so selecting a row uses the existing route and Status and
-logs owner. It loads once per connection (session revision) when any Slow control
-route is shown while connected, including `#slow-control/<UUID>`, again whenever the
-bare `#slow-control` route is entered, and on **Refresh list**; it adds no timer, and list states are a snapshot (open an
-operation for live status). Manual UUID entry remains available.
+Monitor: `operations-list.js` renders the list as links to
+`#monitor/<UUID>`, so selecting a row uses the existing route and Status and
+logs owner. It loads once per connection (session revision) when any Monitor
+route is shown while connected, including `#monitor/<UUID>`, again whenever the
+bare `#monitor` route is entered, on **Refresh list**, and every 10 s while Monitor is
+visible, the tab is shown and a listed operation is neither `completed` nor
+`operation_failed` (M-4). Each row reads `<project> · <run name> · <local admitted
+time>` (ISO and UUID on hover) and states its outcome with the shared
+`operationOutcome.sentence`. With advanced tools on, unverified records get a next
+step (`python -m tools.candidate_operations status --store-config … --operation-id …`).
+Manual UUID entry remains available.
+
+Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
+(M-2; native `failed`, `timed_out` and `interrupted` read "Failed: …" in plain words,
+native `cancelled` (Stop run, #1027) reads "Stopped on request before finishing; no
+candidate result was produced.", and a store `unknown` state whose process reason is
+`missing_identity` reads "… is starting."). For a failed operation `#monitor-cause` shows "Cause (from the
+log): <last exception line>" (`operationOutcome.cause`, the last line shaped like
+`Name(Error|Exception|Failure|Refusal): …`) from the log text already displayed; the
+Run page reads the last 64 KiB of the native, then operation, log once and appends the
+same line. Loop body counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
+Operation facts. `#operation-observed` shows local time (ISO and UUID in its title).
+After a terminal state (`completed`/`operation_failed`, process `exited`, not
+`finishing`) has been read and its log drained to `observed_size`, the operation is
+no longer polled (status, log, tokens) and
+the line reads `Final status · observed …` (M-5); a 404 `unknown_operation` reads "This
+console has no operation with this ID…" and also stops polling (M-3). Re-entering
+Monitor or an explicit **Read operation** reads it again. Network failures keep the
+"stale" wording. Displayed log text has ANSI CSI sequences removed (M-6; the source log
+is unchanged) and `#log-notice` states that logs are shown as written and not redacted
+(SEC-1).
 
 ## Persistent views, routing and session
 
 `index.html` owns a single document with persistent Home, Workflow, Run and Slow
 control sections. `navigation.js` owns `/#home`, `/#workflow`, `/#run`,
-`/#slow-control` and `/#slow-control/<UUID>`; `document.title` names Workflow and
+`/#monitor` and `/#monitor/<UUID>` (the former `#slow-control[/<UUID>]` is rewritten to the matching
+`#monitor` route with `history.replaceState` before routing, so old links keep working); `document.title` names Workflow and
 Run. Empty fragments use Home. Complete UUID validation
 precedes operation selection; invalid routes show a local error and suspend
-operation polling without mutating a native request. Bare Slow control retains
+operation polling without mutating a native request. Bare Monitor retains
 selection; repeated identical UUIDs do not reset the monitor epoch/log cursor.
 Back/Forward and internal links hide inactive sections with `hidden`, update
 `aria-current`, and focus the active heading on explicit fragment changes.
@@ -1126,14 +1323,32 @@ link fallback and no credential form.
 
 `session.js` exclusively owns the Bearer token in closure memory. It exposes
 same-origin API requests and connection/revision notifications, never a token
-getter. The single `access-form` captures and immediately clears the password
+getter. Responses are parsed as JSON only when `content-type` is JSON; a non-JSON
+error becomes `Server error (<status>).` and a non-JSON success is refused. A
+failed fetch or a non-JSON 502/503/504 marks the console **unreachable** without
+disconnecting (token, drafts and intents stay): the collapsed status reads
+`Server unreachable. Retrying…` (`.access-unreachable`), a 5 s read-only
+`GET /api/choices` probe runs while the page is visible, and the next response of
+any kind restores `Connected.`; `console-reachability` events carry
+`{reachable}`. `consoleSession.choices()` is the one reader of `/api/choices` and
+retains `operationsStoreId`. The single `access-form` captures and immediately clears the password
 input. Requests use Authorization, cache no-store and credentials omit; POST
 payloads retain their existing owners. No cookie, storage, URL, history payload,
 event, cross-tab channel or document-transfer mechanism carries credentials.
 Theme enum, optional last-operation UUID and the versioned exact reusable launch
 intent are persisted. The launch intent contains only origin/project navigation
 context, retained preparation identity, request digest and operation UUID; never
-source bytes, native requests or credentials.
+source bytes, native requests or credentials. Operation-bearing records are keyed by the
+opaque operations store id: reusable intents (`…v2/<store>/<project>`) and loop
+Resume request ids (`siderius.loop-resume.v2/<store>/<predecessor UUID>`; a legacy
+`siderius.loop-resume.v1:<UUID>` with the same receipt digest is moved on first use).
+Preferences (theme, view flags, tour) and the last-opened operation UUID stay per
+origin because they are read before connecting. Settings (advanced) **Forget this
+browser's console data** (`browser-data.js`) removes every `siderius.*` key except
+records that may name an unfinished operation (reusable intents of other stores or
+projects, loop Resume ids); it is disabled while the open project's own retained run is
+unreleased (`reusableIntents.clearable()`), asks for confirmation, changes nothing on
+the server and reloads the page.
 Reload/new tab requires Connect again. Once connected, the access card collapses
 on every view to one status line with **Change token** (reopens the form; the
 current connection stays until a new Connect) and **Disconnect console** (clears the
@@ -1167,26 +1382,30 @@ Workflow references, **Advanced source** and **Details** (save behavior and
 concurrent-writer notes) start collapsed; successful Review opens the exact diff. Disclosure toggles do not change edit mode or reviewed bytes.
 Unsupported-source status and Inspect source remain visible; conflicts retain
 visible summary/actions. A `beforeunload` guard applies only to a real document
-exit with pending editor changes. Slow control shows operation identity, native
+exit with pending editor changes. Monitor shows operation identity, native
 state, observed time and token quality; facts, token rows and logs are disclosures.
 It infers neither scientific success nor complete billing.
 
 ### Page inventory and guidance
 
-| Route | Primary content and action | Secondary content |
+| Route | Primary content and action | Secondary content (Settings-gated unless noted) |
 | --- | --- | --- |
-| `#home` | Workflow journey; **Open workflow** | **Advanced**: native chain card; collapsed **Prepare configured task** |
-| `#workflow` | Project, task package/version, canvas + Selection; **Save reviewed source** (Refresh and Review are secondary buttons); **Next: prepare a run** | Research loop panel; collapsed References, Advanced source, Review exact Python changes, Details |
-| `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; collapsed captured resources |
-| `#slow-control` | Recent operations; Status and logs | Loop controls, observations, token table, logs, Recorded example |
+| `#home` | Hero (theme-matched logo + one sentence); entry cards **Quick start** (`#home-quick-start`, see below), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** (the configured-task quick Prepare form; not a beginner entry, API unchanged for CLI/compatibility) |
+| `#workflow` | Page bar (title + dirty badge, project select, task chip, problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Task package and version, Version history (collapsed cards below the frame); Exact Python changes, References, Advanced source, Reload from disk, canvas help, connection mappings (advanced); Details (developer) |
+| `#run` | Stepper `#run-stepper` (Prepare · Review and launch · Follow in Monitor) and one next-step line `#run-next`; saved-version state; **1 · Prepare** entry `#run-entry[data-run-entry="saved-workflow"]` (**Check inputs** then **Prepare**); **2 · Review and launch** (**Review prepared run** then **Launch run**, inline `#capture-launch-reason`) | Back to workflow; **Run an earlier prepared run instead** (collapsed list); Check status now, operation UUIDs and captured resources (developer) |
+| `#monitor` | Recent operations; Status and logs; loop controls; results; token summary | Operation UUID form, Recorded example (advanced); operation facts, token table (developer) |
 
 `page-guidance.js` is presentation only and owns no request or draft state. It reads
 `window.workflowEditor.state` and `window.newRunGate.ready`. `new-run.js` remains the
 single Run gate: it exports `newRunGate.ready` (its existing `ready()` predicate) and
-dispatches `new-run-gate` from its `controls()`. **Next: prepare a run** is enabled
-exactly when that gate is open and only sets `location.hash = 'run'`; its text and
-the Run page's `#run-source-state` show `Saved version <sha256[:12]> of <project> is
-ready to run.` or the first closing reason (not connected, no project, source not
+dispatches `new-run-gate` from its `controls()`. **Next: Run** is enabled
+exactly when that gate is open and only sets `location.hash = 'run'`; its tooltip, the
+visually hidden `#workflow-next-state` (its `aria-describedby`) and
+the Run page's `#run-source-state` show `Saved version "<name>" of project <project> is
+ready to run.` when a console Save recorded the open bytes (`editorVersions.nameFor`),
+otherwise `The current file of project <project> (version <sha256[:12]>) is ready to
+run.` (a never-saved file is never called a saved version, red-team A-6/A-7), or the
+first closing reason (not connected, no project, source not
 open, project not runnable, not a reusable declaration, conflict, saving, unsaved
 edits). Those reasons explain a closed gate and never open it. The New run and
 Prepared run controllers keep their element IDs and behavior; their task loaders run
@@ -1195,12 +1414,362 @@ on Workflow or Run entry. For a project that is not enabled for candidate runs,
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
 
-When the connection is absent or no workflow source is open, Workflow shows
-**Start from a task example** (select a task, edit, save, run) with a one-line state.
-A step line (`#step-indicator`, `role="navigation"`, not a `<nav>` element) shows
-Task › Workflow › Run › Results on Workflow (Task until a source is open), Run and
-Slow control, with `aria-current="step"` and a done mark for completed steps; it is
-hidden on Home. Witness: `tests/browser/page_guidance.mjs`.
+**Quick start** (`quick-start.js`): Home `#home-quick-start` routes to `#workflow` and
+opens `#quick-start-dialog`, whose **Project (its task and data)** select mirrors the
+editor's own `#editor-project` options, runnable projects first; an edit-only project
+is labelled and warns "You can edit this project but not run it from this console."
+(L-7). The preselection keeps an explicit earlier choice, else the editor's project when
+it is runnable, else the first runnable project; when none is runnable the dialog says
+"No project on this console can be run from here. …" (the fixture knob
+`EDITOR_RUNNABLE_PROJECTS` lets `quick_start.mjs` assert the preselection). **Open research loop** first reads the project (`GET /api/editor/<id>`): a
+failure shows "Couldn't open <project>: <reason>" in the dialog and keeps the button
+for a retry; a project that then does not finish loading within 20 s shows the
+editor's status instead of hanging (L-3). After the import, focus moves to the first
+advice field (L-6); the bounded re-focus stops at the author's first click or key, so a
+module they select is not reselected over.
+**Open research loop** selects that project through the editor's ordinary project
+change (its pending-edits confirmation applies), waits for the saved source, then calls
+`editorTemplates.importById('single-loop-with-advice')`, the gallery's existing import
+path: an unsaved draft, nothing written before Save. No task declares its own template
+yet, so that catalog entry is the default for every task. It is the loop whose Propose
+model `human_advice` socket is connected (managed `advice`), so the advice field Quick
+start focuses reaches the proposal agent; templates that leave the socket unconnected
+show the existing `.advice-warning` under that field. Rounds, stop conditions and
+training settings are then edited in the ordinary panel. The Run page's step-1 entry is
+one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
+handoff, so another entry can replace it. When this page created a preparation, the
+first observed `prepared` status opens it in step 2 once (a read-only `/select`); Review
+and Launch stay explicit. A store `unknown` state without a receipt reads "Preparing…"
+(process reason `missing_identity`) or "Checking status…", never as a finished failure
+(B8-2). Step 2 names the version its prepared run holds (`ReusableCaptureReview.
+source_version_name`, display-only `recorded_name` of `source_sha256`, or before review
+the preparation intent's `source_version` handed over by `openPrepared`); when it is not
+the current saved version, `#capture-source`, the top `#run-source-state` and `#run-next`
+say so and `#capture-prepare-current` ("Prepare the current version instead") starts
+step 1 over (B8-3). Step 1's Start over (and that button) dispatches `run-start-over`,
+which clears step 2's selection and review unless a launch is retained, so an older
+capture is never left ready to launch (B8-4).
+
+Until the canvas draws a capability card, the canvas panel shows the empty start state
+`#workflow-start-guide` (spec §7.2): title **Build your research loop**, one sentence from
+`page-guidance.js` (`#workflow-start-state`: connect, choose a project, source not open, or
+add a module), one primary action **Start from a template** (`#workflow-start-template`,
+opens the gallery; disabled until connected) and the tour as a secondary link
+(`#onboarding-start.link-button`). CSS hides it with
+`.workflow-canvas-panel:has(.circuit-card)`. The Selection panel shows `.inspector-empty`
+until `.inspector-capability-heading` exists. The page-bar `#problems-chip` mirrors the
+`.editor-problem` count that `editor-problems.js` renders (MutationObserver; hidden at 0)
+and focuses the first problem. A step line (`#step-indicator`, `role="navigation"`, not a
+`<nav>` element) shows Task › Workflow › Run › Results on Workflow (Task until a source is
+open), Run and Monitor, with `aria-current="step"` and a done mark for completed steps; it
+is hidden on Home and on the global Settings page. Witness: `tests/browser/page_guidance.mjs`.
+
+### Layout system, Settings and onboarding
+
+Owner of tokens: `theme.css`, adopted from `ui-design-spec.md` §1–§2: spacing
+`--space-1..7` (4/8/12/16/24/32/48 px), `--bar-height` 48 px, `--control-height` 36 px,
+radii `--radius-1/2/pill` (4/8/999 px), `--elev-0/1/2` (elevation only for overlays and
+movable canvas cards), type `--font-title` 20, `--font-heading`/`--font-body` 14,
+`--font-label`/`--font-help` 12 px (`--font-prose` 16 px for the Home sentence), no
+all-caps labels. Light accents (`--primary #2e6da6`, `--secondary #0f7672`,
+`--error #c4304a`, `--warning #85600c`) keep 4.5:1 text on the page, panels and every
+capability tint. `styles.css` owns the shell and card component: header, nav and content
+share `--shell-pad`; every view is one grid column with `--space-4` gaps; a `.card` is
+bordered (`--radius-2`, no shadow) and a direct `h2` is its header above a divider;
+`details.card` summaries are equal-height header bars whose divider appears only when
+open. `editor.css` owns the Workflow frame: page bar, then the docked
+`.editor-workspace` grid `var(--rail-width) 272px | canvas | var(--inspector-width) 352px`
+(320 px below 1280 px), height `--workspace-height` (set by `editor-page-bar.js`: window
+height minus the frame's top when scrolled to the top, minus 16 px, at least 480 px; the
+open save step is not subtracted), 1 px dividers and no gutters; rail and Selection
+scroll independently under a sticky 48 px header; the canvas panel does not scroll, its
+`.circuit-viewport` fills the remaining height and scrolls (`editor-page-bar.css`). Below 900 px the panels
+stack at natural height and the rail is `editor-palette.js`'s drawer. The rail column is
+`--rail-width`; s9's collapsed icon rail may set it to 48 px.
+
+Logo: `siderius-logo-light.svg` (navy wordmark) and `siderius-logo-dark.svg` (white
+wordmark) are exact-allowlisted `image/svg+xml` assets (shapes plus an embedded PNG, no
+script) rendered only through `<img alt="SIDERIUS">`. Each place carries both images;
+CSS shows the variant matching `data-theme` (theme.js resolves System). The header logo
+is 30 px high; the Home hero logo 72 px. The response CSP adds `img-src 'self'` for them.
+
+Settings (`ui-settings.js`, loaded in `<head>` before styles so the first paint is
+already filtered): flags `advanced` ("Show advanced tools") and `developer` ("Show
+developer details"), default off, stored as `siderius.console.ui.<flag> = "on"`
+(storage denial keeps the page default). The module sets `data-ui-<flag>="on"` on the
+root; `styles.css` hides any `[data-ui-flag~="<flag>"]` element otherwise. API:
+`window.uiSettings.isEnabled(flag)`, `.set(flag, enabled)`, `.flags`; event
+`ui-settings-change` `{flag, enabled}`. The header **Settings** button opens a
+non-modal panel with the two checkboxes (Esc closes). Flags change visibility only: no
+request, draft or run state; hidden sections keep their state. Witnesses that exercise
+gated sections call `showAllConsoleSections(browser)` from
+`tests/browser/console_view_flags.mjs`.
+
+Tour (`onboarding.js`, spec §7.3 within its 3–4 step limit): opt-in only, from the empty
+canvas link, the header **Help** button or the page-bar `⋯` menu; from another page it
+switches to `#workflow` first. Four steps, each highlighting a visible element with an
+outline ring and a non-modal card placed beside it (right, below, left, above, clamped;
+no backdrop, the page stays usable): **Choose a task** (`#editor-project`), **Pick a
+module** (`#editor-palette`), **Match connector names** (`.circuit-viewport`), **Save a
+version** (`#editor-review`, the page-bar Save). Buttons Skip · Back · Next / OK; Esc = Skip; focus returns
+to the opener. Outcome `done`/`dismissed` is stored as `siderius.console.tour.v1`; it
+never reopens itself. Witness: `tests/browser/layout_onboarding.mjs` (defaults, Settings
+toggles and persistence, tour anchoring/non-blocking/reopen, logo per theme, docked frame
+geometry at 1440×1100 and 1024×768 in both themes, card disjointness, page-grid edges,
+text ≥ 4.5:1 and ≥ 12 px outside the canvas, rail and inspector internals).
+
+#### Workflow page bar, save step and canvas controls
+
+Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
+`window.workflowEditor.state`, never mutates a draft or sends a request).
+
+- Connection (spec L6): `#access-section` lives in the header. Disconnected it is a
+  full-width banner (heading, token form, status); connected (`session.js`
+  `.access-collapsed`) it is one chip: `#access-status` **Connected.** (tooltip: the
+  2 s observation refresh), **Change token**, **Disconnect console**.
+- Page bar, left to right: `h1` + `#editor-dirty`; `#editor-project` (label visually
+  hidden); `#editor-task-chip` (`Task: <package_id> · <revision>`, `Task: not bound` or
+  `Task: not open`; `needs-attention` while a bound workflow has no selected configured
+  version or task findings are pending; click opens `#editor-task-panel`, a collapsed
+  `details.card` below the frame holding the unchanged `editor-task-controls.js` panel,
+  open by default when advanced tools are on); `#problems-chip`; `#editor-edit-actions`
+  (Undo `undo-2`, Redo `redo-2` icon buttons created by `editor-draft.js`, names via
+  `aria-label`; **Revert to saved** keeps a visible label beside its `rotate-ccw` icon so
+  it never reads as a second Undo, red-team A-5); Reload from disk (advanced);
+  `#editor-version-tag` beside the project select (tour #18): the version name of the
+  open bytes, or "Not saved here yet" for a file without a console-saved row, plus a
+  dirty dot while edits are unsaved;
+  primary **Save** (`#editor-review`); **Next: Run** (`#workflow-next-run`); `⋯`
+  (`details.overflow-menu`: New from template…, Take the tour, Task package and version,
+  Version history, Advanced source (advanced only), Settings…).
+- Save step: **Save** is the ordinary editor Review (unchanged request and gating).
+  When a check succeeds (`state.reviewed` turns true) the in-flow
+  `#editor-save-confirm` row opens under the page bar with `#editor-version-name`,
+  **Cancel** and **Save version** (`#editor-save`, unchanged: it posts exactly the
+  checked `reviewed.source` bytes with their sha256). It closes on Cancel/Esc, on any
+  edit (the check is invalidated) and after Save. A pending task review adds
+  **Show task findings** (opens the task card for the acknowledgement). The diff
+  (`#editor-review-disclosure` › `#editor-diff`) is an Advanced disclosure in the row.
+  Template imports run inside `editorPageBar.quietly()` and do not open it.
+  `workflowEditor.state` gained presentation fields `reviewed`, `taskReview`,
+  `taskSelected` and `taskBinding` (`{package_id, revision}` or null).
+- Canvas (at least 900 px wide): the canvas header holds **Templates**; the panel is a
+  flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
+  `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
+  height; the viewport scrolls and zooms inside it, so Fit fits the visible viewport.
+  Open disclosures in the panel (port-type legend, canvas help and connection
+  mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
+  and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
+  workspace height, panel `scrollTop` 0. The circuit toolbar sits bottom-right of
+  the canvas and the connector legend bottom-left. The wire layer is the world's own
+  child `<svg>` (`.circuit-world > svg`; never the first `svg` of the canvas, which may be
+  a toolbar icon) with `pointer-events: none`; only `.circuit-wire-target` strokes take
+  pointer hits, so cards and ports stay hoverable and wires stay clickable. A drag
+  released over an input binds the input whose own box holds the release point,
+  preferring a highlighted (compatible) one, then swallows the browser's own click that
+  follows the release; contract pills are clipped to their port. Rows above the viewport
+  have a fixed height (the status message is always two clipped lines and Disconnect
+  shares its row), so a new message never moves the ports under the pointer mid-drag. Below 900 px the panels keep
+  their natural height (no `--workspace-height`). **Tidy up** (`#circuit-tidy`,
+  `layout-grid`) places every module with `editorCircuitGeometry.tidy`: columns by
+  longest result-input path from a source, rows by the mean row of the sources (ties
+  by pipeline stage: literature, interpretation, proposal, implementation, validation,
+  tuning, then id); modules with no wire take the next column in stage order, and with
+  no wire anywhere they form one row in stage order; steps = largest card + 80/32 px
+  rounded up to 16 px, all on the 16 px grid. It is one draft edit through the
+  ordinary `move` callback (label `Tidy up layout`, undoable, saved only with Save).
+- Check the workflow (`#circuit-check`, `repeat-2`; `editor-circuit-walk.js`): `plan`
+  orders the displayed nodes sources-first and lists one step per result-fed input,
+  then the loop feedback; the first required, non-framework-supplied, unbound input
+  (or a loop whose endpoint is gone, or an empty canvas) is the break. `run` moves an
+  HTML token (`.circuit-walk-token`) along each drawn wire path (220-900 ms per wire),
+  then marks the break socket `.walk-break` (soft red halo, three gentle pulses, a few
+  px around the 12 px socket, never larger than the card) with one sentence
+  `#circuit-walk-note` under the card ("Implement can't start: Model plan is not
+  connected."). `prefers-reduced-motion: reduce` skips the token and the pulse; the
+  halo and note show at once. The viewport carries `data-walk-state` running /
+  complete / break; any re-render clears it. It derives no validity of its own.
+- The research loop's feedback is drawn as a dashed display-only path
+  (`.circuit-feedback`) from the feedback module's output over the cards to the target
+  module's heading.
+- Keyboard and screen readers (red-team E-7): `#skip-to-canvas` is the first Tab stop
+  on the Workflow view (hidden on other views) and focuses the selected (else first)
+  module heading or the viewport without changing the route. Wire targets are named
+  `<module> sends <connector> to <module>`, are in the Tab order only with advanced tools
+  on (`tabindex -1` for beginners) and show a soft focus halo along the stroke. Unknown
+  hash routes are replaced by `#home` (navigation.js); a malformed `#monitor/<id>` stays
+  on Monitor with "Invalid operation UUID".
+- `+` add-handle (`editor-canvas-add.js`, canvas-study V5): an output whose card feeds
+  no wire, and whose contract at least one catalog route accepts, shows a 20 px `+` 8 px
+  outside the card while the card is hovered, focused or selected (no dead `+`; the
+  handles re-sync on the `editor-node-catalog` event after the catalog loads). It opens a search popover of catalog routes that have an argument with the
+  output's contract id (`editorNodePalette.connectable`, presentation filter only).
+  Choosing one calls `editorNodePalette.addConnected`, which adds a pending node 80 px
+  right of the source with that argument (required first) bound to
+  `{kind: 'result', node, port: 'result'}` as ONE draft edit (`Add module <id>`);
+  the server node inspection decides completeness as for palette adds. Esc closes.
+- Research loop is a section of the Selection panel (`#editor-loop.inspector-section`).
+- Sockets (tour review batch 1): the visible socket label is the connector (schema) name
+  from the server catalog in 12px label style (`.circuit-port-contract`), followed by
+  `Required`/`Optional` and ` · Not connected` when unbound; protocol field names appear
+  only in the advanced Mapping details and as an advanced `code` chip in inspector rows,
+  which read `[swatch] <connector name> · Required` (`editor-inspector-rows.js`). Sockets
+  carry no `title`; `editor-circuit-tooltip.js` shows the §6.3 socket tooltip (swatch +
+  name, the server description, "Connects with: <module names>" from the server-offered
+  choices, "Required." when unbound) after 300 ms or on keyboard focus, hides on leave
+  (150 ms), blur, Esc, scroll or re-render, and never takes pointer events. A refused
+  connection's reason is kept as `data-refusal` on the dimmed input. Icon-only canvas
+  controls get a one-line tooltip from `data-tip-label`.
+- Cards fold every optional input that is not fed by a wire (not connected, or fed by an
+  external input) into one `+N optional` row. Fit to view never zooms below 75%; a larger
+  graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
+  zoom out still reaches 40%.
+- Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
+  in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
+  chip whose content opens as a two-column popover above it.
+- Problems (spec §9): `#problems-chip` (`circle-alert` + "N problems") toggles the 320px
+  `#editor-problems` popover under it; it never takes space in the page. Each row is one
+  sentence `<module name>: <connector name> is not connected` (other codes:
+  `<module name>: <server message>`; source diagnostics `Python source line N: …`), with
+  the raw located diagnostic as an advanced `code`. Row click closes the popover and
+  selects the node and field. Esc or an outside click closes it. Status lines are one
+  plain sentence and never repeat the problem list. After undo, redo and Discard the
+  problems are recomputed from the restored state's cached server inspection (or
+  re-inspected).
+- Unconnected required input (operator rule 2026-10-28): the socket itself shows a soft
+  red ring (`--error`, 28% ring) and its `Required · Not connected` text is `--error`; the
+  card keeps its normal outline and carries only a count badge (`.circuit-problem-badge`,
+  text = count, `aria-label` "N required input(s) not connected"). Connector labels wrap
+  inside the card; the requirement text is its own line. Instance ids show only with
+  advanced tools. Wire and card drags suppress text selection (`body.circuit-gesture`,
+  `preventDefault` on pointerdown, selection cleared at the end).
+- Framework-supplied inputs (operator rule 2026-10-28): `PortInventoryEntry.framework_supplied`
+  marks a socket bound to a `ManagedCandidateBinding` in a role candidate preparation
+  generates (`candidate_prepare.resolution.managed_argument_roles` /
+  `managed_request_supported`: per-node `storage`, tuning `settings`, a proposal's
+  `proposal.input` request; for `native-interpretation-candidate/v1` also `data_dir`,
+  `task_composition_ref`, `human_advice`, `expert_context`, `constraint_context`,
+  `workflow_parameter_rules` and the interpretation request). Such sockets get no canvas
+  socket, inspector row, problem, walk-through stop or "Create external input"; the
+  advanced Mapping details still list them. `SourceView`/`ReviewView.managed_roles` lists
+  the required roles a new node gets: any add (palette, `+`, template) binds them in the
+  same draft edit as the shipped examples do (`editor-managed-inputs.js`):
+  `ManagedCandidateBinding(id="<node>_store", contract="storage")`,
+  `id="training"` for `native-training.settings`, `id="initial"` for `proposal.input`
+  (a taken id falls back to `<node>_training` / `<node>_initial`, then a number). v1
+  sources have no managed roles: their storage is a real input the author supplies.
+  Deleting a node also drops managed bindings only it read (preparation refuses unused
+  bindings). Gallery **Blank workflow** deletes every module in the draft (undoable)
+  and shows the empty state. Witness: `tests/browser/managed_storage.mjs` (Blank on
+  the reusable project, Propose/Implement/Validate without any storage input, saved
+  binding shape equal to `examples/workflow_declarations/reusable_candidate.py`).
+- Delete (operator rule 2026-10-28) always succeeds in the draft, with no confirmation:
+  Delete key, context menu or Remove in Selection adds saved nodes to the draft's
+  `removed` list (pending nodes are cancelled), disconnects every socket that read them
+  (binding patches / pending bindings; a required one becomes a `required_unbound`
+  problem), and Undo restores everything. The draft is inspected as a `node_drafts`
+  proposal with `removed` (`workflow_authoring.models.NodeDraftsProposal`); the server
+  adds `loop_feedback_missing` when a loop endpoint is deleted and `workflow_empty` when
+  no module is left, and Review/Save refuse (`draft_incomplete`) until no problem
+  remains, so the saved file is never invalid. A deletion nobody reads, with no other
+  edits, is a targeted byte-preserving removal; otherwise the combined document is
+  rendered canonically. Deleting every module shows the §7.2 empty state.
+- Disabled Save shows `#editor-save-reason` inline ("Fix N problems to save",
+  "Checking…", "Saving…"); disabled Next: Run shows `#workflow-next-reason` ("Save a
+  version to run" or "Not set up for runs").
+- 900–1279 px: the module rail is a 48 px column with one icon button; it opens the full
+  272 px rail as an overlay over the canvas.
+- Templates are complete fixed shapes. Every template renders a reusable document whose
+  execution profile admits no extra module (the interpretation loop requires "one
+  interpreter and complete candidate"; the single step "exactly one proposal,
+  implementation and validation"). Their only free output is Train & tune, which no
+  catalog route accepts, so a template shows no `+`; its next step is advice and
+  parameters. `+` adds modules in free-form (schema 1) workflows. Adding modules to a
+  template shape needs a server-side profile change (not in this change).
+- Icons (spec §3): vendored Lucide sprite `static/icons.svg` (47 `<symbol id="i-NAME">`,
+  shapes only, licence `static/icons-LICENSE.txt`, ISC + MIT for Feather-derived
+  icons), exact-allowlisted as `image/svg+xml`. `icons.js` fetches it once, adopts only
+  its `<symbol>` elements into a hidden in-document `<svg>` and exposes
+  `consoleIcons.make(name, size)` / `.decorate(root)` (`data-icon="NAME"`); icons are
+  `aria-hidden`; if the sprite cannot load, controls keep their text. Capability icons
+  (`editor-capability-presentation.js`) use §3.3: literature `book-open-text`, proposal
+  `lightbulb`, implementation `code-xml`, validation `shield-check`, tuning
+  `sliders-horizontal`, interpretation `chart-spline`, fallback `shapes`.
+- The page footer line was removed.
+
+Witnesses: `tests/browser/first_use_journey.mjs` (beginner first use at 1440×1100:
+Home → connect → Home template → Blank workflow first → module search focused → `+`
+adds Implement wired → drag and Tidy up without overlap → Create external input → Save
+step (Cancel, Save version); then the runnable project: Templates → Use template →
+advice focused → no `+` on the fixed shape → Tidy up → Save version → Next: Run; canvas
+visible without page scroll),
+`page_guidance.mjs`, `layout_onboarding.mjs`; `circuit_geometry.mjs` covers `tidy`
+in Node.
+
+#### Feature inventory (Beginner / Advanced / Developer)
+
+Default view = Beginner. `data-ui-flag="advanced"` sections appear with Settings ›
+**Show advanced tools**; `data-ui-flag="developer"` with **Show developer details**.
+These view flags live in the header Settings panel (`#settings-toggle`, browser-local);
+the Settings page (`#settings` in the navigation, `settings.js`) is the separate
+server-side global settings view described above.
+"Gated" = gated in this change (s11-owned markup); "Hook" = sibling-owned content for
+the spec conformance pass to gate with the same attribute or `uiSettings.isEnabled()`.
+
+| Page | Control / section | Class | Status | Reason |
+| --- | --- | --- | --- | --- |
+| Shell | Logo, nav, Connect / Connected line, theme, Help, Settings | Beginner | shown | Needed to reach any page and to get help |
+| Shell | About this console | Beginner | shown | One-line orientation, collapsed |
+| Shell | Step line Task › Workflow › Run › Results | Beginner | shown | Tells a new user where they are |
+| Home | Hero: logo + one sentence | Beginner | shown | Says what SIDERIUS does |
+| Home | Entry cards: Start from a template, Open a workflow, Monitor runs | Beginner | shown | The three first actions |
+| Home | Run a configured native chain | Advanced | gated | Externally reviewed captures; not a first-use path |
+| Home | Prepare configured task (native Prepare / Launch candidate) | Advanced | gated | Server-configured route independent of the editor |
+| Workflow | Page bar: title, project select, version tag + dirty dot, task chip, problems chip, Undo/Redo icons, Revert to saved, Save, Next: Run, `⋯` | Beginner | shown | Edit → save → run loop |
+| Workflow | Version history (View, Restore this version as a draft) | Beginner | collapsed card; `⋯` › Version history | Go back to an earlier saved version |
+| Workflow | Save step: version name, Save version | Beginner | shown after Save | Confirms a named version of the checked bytes |
+| Workflow | Reload from disk (toolbar) | Advanced | gated | Only for external edits to the source file |
+| Workflow | Status line (editor status, pending edits); Run gate reason as the Next: Run tooltip | Beginner | shown | Explains what happened and why Run is closed |
+| Workflow | Problems list (`#editor-problems`) | Beginner | shown | Required inputs to fix before saving |
+| Workflow | Source conflict card (Reload from disk / Reapply my changes onto latest; whole current file advanced) | Beginner | shown when a conflict exists | Must stay reachable to resolve a conflict safely |
+| Workflow | Workflow project select and task chip (page bar) | Beginner | shown | Choose a task |
+| Workflow | Task package and version details (choose version, update references, findings) | Beginner | collapsed card below the frame; open by default with advanced tools | Opened from the task chip when a version must be chosen |
+| Workflow | Module rail (palette) | Beginner | shown | Add modules |
+| Workflow | Canvas, bottom-right controls (Fit, zoom, Check the workflow, Tidy up), `+` add-handles, empty-canvas start state, Skip to canvas | Beginner | shown | Build and connect |
+| Workflow | Canvas controls help (keyboard-move hints) | Advanced | gated | Long control reference; the tour covers first use |
+| Workflow | Connection mappings list | Advanced | gated | Protocol detail per binding |
+| Workflow | Templates button and gallery (Blank workflow first, Use template) | Beginner | shown | One-click start from a simple closed loop |
+| Workflow | Module rail start guide, stage stack, row details, hover/focus popover | Beginner | shown | Where to start and what connects to what |
+| Workflow | Contract legend (swatch + name, arrow key) | Beginner | shown | Same name = connectable |
+| Workflow | Raw contract ids in the legend | Advanced | gated (`editor-contract-presentation.js`) | Catalog identity, not needed to connect |
+| Workflow | Mapping chips ("adapter") on cards, card Mapping details | Advanced | gated (`editor-contract-presentation.js`, `editor-circuit.js`; flag change re-renders the canvas) | Protocol field mapping |
+| Workflow | Selection inspector, in order: advice (`editor-advice.js`), inputs with contract names, "Create external input" (`editor-external-inputs.js`), training and loop settings | Beginner | shown | Configure the selected module |
+| Workflow | Inspector Mapping details, model-hyperparameter owner (`editor-node-parameters.js`) | Advanced | gated (`editor.js`, `editor-node-parameters.js`) | Protocol / task-manifest detail |
+| Workflow | Delete module (trash icon in the Selection header) | Beginner | shown | Undo a placement |
+| Workflow | Research loop (Selection section) | Beginner | shown | Iteration limit and stop conditions |
+| Workflow | References (task / external locations) | Advanced | gated | Paths owned by the task configuration |
+| Workflow | Advanced source (Python editor) | Advanced | gated | Direct source editing |
+| Workflow | Exact Python changes (in the save step) | Advanced | gated | Byte-level review of what Save writes |
+| Workflow | Version history SHA-256, record path, whole saved Python | Advanced | gated | Byte-level identity of each version |
+| Workflow | Details (save behavior, concurrent writers) | Developer | gated | Implementation notes |
+| Run | Saved-version state, New run (task, name, Review preparation, Prepare saved source) | Beginner | shown | Prepare the run |
+| Run | Selected source, inputs and resource limits | Beginner | shown | What will run |
+| Run | Prepared run (open, review, Launch captured run) | Beginner | shown | Start the run |
+| Run | Captured resources and version | Developer | gated | Raw capture record |
+| Monitor | Recent operations, Status, loop Stop/Pause/Resume, training results | Beginner | shown | Follow a run and read results |
+| Monitor | Activity and logs | Beginner | shown | Explains failures |
+| Monitor | Reported LLM tokens summary | Beginner | shown | Cost awareness |
+| Monitor | Operation UUID form, remembered ID | Advanced | gated | Opening an operation not in the list |
+| Monitor | Operation facts | Developer | gated | Raw native/operation fields |
+| Monitor | Reported token table | Developer | gated | Raw per-model rows |
+| Monitor | Native chain observation details | Advanced | hook (native-chain-monitor.js) | Native recipe internals |
+| Monitor | Recorded example | Advanced | gated | Read-only validation evidence |
+
+Not yet adopted from the spec (follow-up, not in this change): Help menu (§7.4 shows
+only the tour), Lucide icons for the header gear/help and the step line, project/task in
+an inspector Workflow tab (L5; the task details are a card below the frame), tour
+backdrop (omitted so the page never blocks), canvas internals below 12 px, minimap,
+connection snap radius, palette click-to-add auto-wiring (P6) and Connection view (R3).
 
 Navigation qualification: `tests/browser/console_navigation.mjs` uses the same
 explicit environment as the editor gate. Its temporary synthetic observations
@@ -1266,10 +1835,18 @@ receiving this signal. Restored, retried, conflicted or ambiguous requests never
 become dismissible through it. No operation-owner semantics or registry changes.
 
 `reusable-run.js` retains one exact launch intent in localStorage before POST and
-checks readback. Failure prevents POST. Pending intent is independent of current
-project/task/selection, so switching cannot overwrite it. Check/retry is explicit;
-reconnect never submits automatically. Completed or eligible initial refused intent
-requires explicit dismissal and storage readback confirmation. Monitor uses existing
+checks readback. Failure prevents POST. Pending intent is keyed by store and project
+(below), so switching task/selection cannot overwrite it. While the Run view is
+visible and connected, both Run controllers read their retained operation every 2 s
+(paused while the tab is hidden) and once on load, reconnect and Run entry; polling
+stops on release, on an initial refusal and on `unknown_operation` (Retry restarts
+it). `reusable-run.js` also reads the retained preparation's status on load/connect so
+Launch eligibility never waits for a manual check (R-2); a disabled Launch shows its
+first reason inline in `#capture-launch-reason`. Retry is the only re-dispatch and is
+offered only for an unresolved or unknown outcome; reconnect never submits.
+Completed or eligible initial refused intent requires explicit dismissal and storage
+readback confirmation. Operation sentences come from `operation-outcome.js`
+(`operationOutcome.sentence`), shared with Monitor. Monitor uses existing
 Slow-control status/log/token routes and native accepted/rejected states.
 
 Editor projects/source state are exposed through a read-only projection/event:
@@ -1305,7 +1882,19 @@ flow. The New run adapter below consumes this monitor without adding job persist
 POST `/api/editor/{project_id}/reusable-preparations/review` returns `NewRunReview`;
 POST `/prepare` returns existing `OperationHandle` with HTTP 202. `NewRunReview.source_version_name`
 (omitted when absent) is the recorded Save name of `expected_source_sha256`,
-display-only and outside the expectation and native request; the browser keeps it
+display-only and outside the expectation and native request. `NewRunReview.credential_readiness`
+is a name-only precheck read in the server process before Prepare: it checks only the
+task's configured `candidate_environment_names` against `credential_file`
+(`named_credential_readiness((), names, path)`); provider-derived requirements exist
+only after preparation, so capture review and launch recheck them. It is outside the
+expectation and never blocks Prepare. Review also refuses (409 `launch_policy`, the owner's message
+forwarded verbatim) a workflow whose authored training settings omit
+`healthgate_mode` or `result_authority` or declare `observe_only` + `scientific`: it
+calls `execute_tools.health_checks.launch_policy.validate_declared_policy` (refusals
+1-3 of `validate_formal_launch`) on the same sparse payload preparation captures
+(`settings_payload`). Config-dependent refusals 4-6 still run at training admission.
+Prepare reuses the same review, so the refusal there carries
+`admission_not_attempted`. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the
 same authentication/origin/body boundary and threadpool transport as capture APIs.
 Selection accepts only task_id, run_name, run_id, preparation_operation_id and
@@ -1338,16 +1927,29 @@ Editor projection adds `reusableSource` and `saving`. Generation/project/session
 fences invalidate stale task/review responses. Pending intent survives form/source
 changes. Successful preparation is not automatic candidate dispatch.
 
-`reusable-intents.js` coordinates only the candidate and preparation keys:
-`siderius.reusable-candidate.v1` (compatible payload) and
-`siderius.reusable-preparation.v1` (version/origin/project/exact NewRunIntent).
+`reusable-intents.js` coordinates only the candidate and preparation records, keyed
+by the opaque operations store id from `/api/choices` and the editor project:
+`siderius.reusable-{candidate,preparation}.v2/<operations_store_id>/<project>`
+(payload unchanged: version/origin/project/exact intent). A record of another store or
+project is never read, checked or blocking here (`eligible()` covers only the current
+pair). A legacy per-origin `…v1` record whose `project` equals the current project is
+moved once under the current store's key on first context; it is then checked
+against this store like any other record. Without a known store id and project no
+record is read and Prepare/Launch stay disabled.
 Before dispatch/retry/state update/dismissal, stored serialization must equal the
 retained record. Readback failure prevents POST. Release evidence is in memory,
 requires matching kind/UUID/request digest, and is cleared by storage events.
 Completed/operation_failed plus exited process, or confirmed spawn_failed, permits
 release; finishing/unknown/alive does not. Only initial live pre-submit refusal
-permits refused-intent dismissal. Restored/retried/404/transport outcomes retain
-identity. Explicit removal rereads identity and confirms absence. This is advisory
+permits refused-intent dismissal. Restored/retried/404 `not_found`/transport
+outcomes retain identity. **Forget** (R-3): `dispatching(kind, record)` is recorded
+before every POST of the record in this page; a later status read answering typed
+`unknown_operation` (`observeUnknown`) starts a confirmation: the page keeps polling,
+and the record becomes forgettable only when a second typed-unknown read arrives at
+least 5 s after the first (L-5: a single read can precede an admission whose response
+the network lost). Forget is therefore offered only after this page's own Retry (or
+first dispatch) was followed by two such reads. Forget asks for confirmation, is never offered while the operation is
+known and unreleased, and only removes the browser record. Explicit removal rereads identity and confirms absence. This is advisory
 coordination, not atomic localStorage locking; the native store serializes effects.
 
 An inspected released preparation history may coexist with candidate launch.

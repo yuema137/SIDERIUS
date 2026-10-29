@@ -1,0 +1,10 @@
+/* Inspector help and "Create external input" form (editor-external-inputs.js). */
+.external-input-help { margin: 2px 0 4px; font-size: .78rem; color: var(--muted); }
+.external-input-create { margin: 0 0 10px; padding: 4px 8px; border: 1px dashed var(--border); border-radius: 6px; }
+.external-input-create > summary { cursor: pointer; font-size: .82rem; }
+.external-input-create label { display: block; margin: 6px 0; font-size: .8rem; }
+.external-input-create input, .external-input-create select { display: block; width: 100%; box-sizing: border-box; }
+.external-input-create label[hidden] { display: none; }
+.external-input-note { font-size: .74rem; margin: 4px 0; }
+.external-input-error { color: var(--error); font-size: .76rem; margin: 2px 0; }
+.external-input-error:empty { display: none; }
