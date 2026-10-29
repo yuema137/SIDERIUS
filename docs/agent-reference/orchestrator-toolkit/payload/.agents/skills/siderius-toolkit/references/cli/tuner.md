@@ -4,6 +4,8 @@ Source inventory at SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. Argumen
 copied from the existing parser declarations; evaluate dynamic defaults with
 the selected executable’s `--help`. These are not an orchestrator launch recipe.
 Read the [capability guide](../agents/tuner.md) for Python/CLI differences.
+The time-budget and VRAM-budget help texts were synced by hand to the landed
+parser after that inventory (issues #828, #1044).
 
 Public module: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent`.
 
@@ -40,8 +42,8 @@ Public module: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent`
 | --cleanup_denoised | 'store_true' | False | None (argparse default unless action changes it) | — | 'Legacy cleanup request; incompatible with --retain_model_outputs.' |
 | --retain_model_outputs | 'store_true' | False | None (argparse default unless action changes it) | — | 'Keep per-sample model outputs after scoring and Health (default: retire them).' |
 | --retain_training_checkpoints | 'store_true' | False | None (argparse default unless action changes it) | — | 'Keep training checkpoint originals (default: retire after their consumers finish).' |
-| --trial_time_budget_minutes | float | False | None | — | 'Trial wall-time budget in minutes. None disables Trial time admission.' |
-| --formal_time_budget_minutes | float | False | None | — | 'Formal wall-time budget in minutes. None disables Formal time admission.' |
+| --trial_time_budget_minutes | float | False | None | — | 'Trial wall-time budget in minutes; must be finite and positive. Omit (None) to disable Trial time admission.' |
+| --formal_time_budget_minutes | float | False | None | — | 'Formal wall-time budget in minutes; must be finite and positive. Omit (None) to disable Formal time admission.' |
 | --data_dir | str | True | None (argparse default unless action changes it) | — | 'Physical data directory for the declared task. ' |
 | --health_checks_config | str | False | None | — | 'Optional external HealthGate YAML override; omitted uses the packaged generic policy.' |
 | --data_scope | str | False | None | — | "Restrict the run to a file subset: '4-9', '4,5,6,7,8,9', or mixed '0-3,7'. Omitted = complete dataset. Under a partial scope only 'snapshot' sampling is legal and --health_gate_files is required when gates are enabled. See docs/design/enable_partial_file_list.md." |
@@ -50,8 +52,8 @@ Public module: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent`
 | --health_gate_enabled | argparse.BooleanOptionalAction | False | True | — | 'HealthGate subsystem switch (default: enabled). --no-health_gate_enabled disables gate evaluation entirely; successful finite-score records then count as valid candidates.' |
 | --health_gate_files | str | False | None | — | 'Run-level shared monitored-file list for ALL HealthGate checks (same spec format as --data_scope). Omitted + full scope = YAML defaults; omitted + partial scope = startup error.' |
 | --resume | 'store_true' | False | None (argparse default unless action changes it) | — | 'Resume from validated completed rounds already in this workspace.' |
-| --trial_vram_budget_gb | float | False | None | — | 'Per-mode VRAM ceiling (GB) for the evaluate_vram_skill gate on rounds where plan.is_trial=True. None → skill uses free×0.8 defensive limit.' |
-| --formal_vram_budget_gb | float | False | None | — | 'Per-mode VRAM ceiling (GB) for the evaluate_vram_skill gate on rounds where plan.is_trial=False. None → skill uses free×0.8 defensive limit. Sized independently from the trial budget because formal rounds often use larger batch_size / segmentation_size.' |
+| --trial_vram_budget_gb | float | False | None | — | 'Per-mode VRAM ceiling (GB) for the evaluate_vram_skill gate on rounds where plan.is_trial=True; finite and positive. None → skill uses free×0.8 defensive limit.' |
+| --formal_vram_budget_gb | float | False | None | — | 'Per-mode VRAM ceiling (GB) for the evaluate_vram_skill gate on rounds where plan.is_trial=False; finite and positive. None → skill uses free×0.8 defensive limit. Sized independently from the trial budget because formal rounds often use larger batch_size / segmentation_size.' |
 | --attempts_per_round | int | False | 3 | — | 'Inner attempt budget for trial rounds (default 3). Each round runs up to N attempts; success → break + reset the consecutive-fail counter, exhaustion → bump it. See docs/resource_estimator_implement.md §11.' |
 | --attempts_per_formal_round | int | False | 5 | — | 'Inner attempt budget for the formal-promotion round (default 5, intentionally higher than --attempts_per_round). Formal is the only cross-architecture comparable measurement, so an iteration with no formal score is wasted entirely — extra attempts are worth the cost.' |
 | --max_fail_rounds | int | False | 3 | — | "Consecutive-failure brake (default 3). The outer loop aborts with termination_reason='aborted_fail_rounds' after this many consecutive rounds exhaust their inner attempt budget." |

@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import OrderStrategy
-from agent.schemas.proposal import ProposalInput
 from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 from core.runtime_control.validation_limits import validate_phase_deadline
 from execute_tools.dataset_config import DataScope
@@ -27,7 +26,6 @@ SUPPORTED_LAUNCH_FIELDS = frozenset(
         "attempts_per_formal_round",
         "attempts_per_round",
         "baseline_isolation",
-        "bypass_formal_time_budget_min_delta",
         "bypass_formal_time_budget_minutes",
         "cleanup_denoised",
         "degenerate_penalty_score",
@@ -74,7 +72,6 @@ SUPPORTED_LAUNCH_FIELDS = frozenset(
         "runtime_watchdog_enabled",
         "runtime_watchdog_floor_seconds",
         "runtime_watchdog_safety_factor",
-        "skip_formal_min_delta",
         "train_portion",
         "train_validation_align",
         "training_validation_portion",
@@ -102,6 +99,9 @@ INACTIVE_LAUNCH_FIELDS = frozenset(
         "data_analysis_enabled",
         "debug_dump_prompts",
         "enable_chain_incumbent_formal_gates",
+        # #1012: consumed only by the chain-incumbent gates, inactive above.
+        "skip_formal_min_delta",
+        "bypass_formal_time_budget_min_delta",
         "exploration_mode",
         "human_advice_analysis",
         "human_advice_implement",
@@ -141,7 +141,12 @@ MANAGED_LAUNCH_FIELDS = frozenset(
 class CandidateTrainingSettings(BaseModel):
     """Child-validated native launch and the seven run-level startup controls."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, revalidate_instances="always")
+    # An accepted nonfinite value (for example ``degenerate_penalty_score``)
+    # must survive this document's own JSON round trip: the default "null"
+    # turned it into a silent None at admission (#1012).
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, revalidate_instances="always", ser_json_inf_nan="strings"
+    )
     launch: WorkflowLaunchConfig = Field(default_factory=WorkflowLaunchConfig)
     # These seven defaults follow run_workflow's public startup signature.
     data_scope: DataScope | None = None
@@ -184,22 +189,12 @@ class CandidateTrainingSettings(BaseModel):
         )
         if unsupported:
             raise ValueError(f"unsupported fresh training controls: {unsupported}")
-        for name in SUPPORTED_LAUNCH_FIELDS:
-            value = getattr(self.launch, name)
-            # Native transit portions resolve None later; optionality is retained.
-            if value is not None and name in HyperparamTuningInput.model_fields:
-                annotation = HyperparamTuningInput.model_fields[name].rebuild_annotation()
-                TypeAdapter(annotation).validate_python(value)
         for name in type(self).model_fields.keys() & HyperparamTuningInput.model_fields.keys():
             value = getattr(self, name)
             if value is not None:
                 TypeAdapter(
                     HyperparamTuningInput.model_fields[name].rebuild_annotation()
                 ).validate_python(value)
-        for value in (self.launch.trial_vram_budget_gb, self.launch.formal_vram_budget_gb):
-            TypeAdapter(
-                ProposalInput.model_fields["vram_budget_gb"].rebuild_annotation()
-            ).validate_python(value)
         validate_launch_admission(self.launch)
         validate_phase_deadline(
             self.launch.validation_max_phase_seconds,

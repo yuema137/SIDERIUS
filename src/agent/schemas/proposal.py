@@ -23,6 +23,7 @@ from agent.schemas.hyperparam_tuning import (
     ExpertAdviceInput,
     GateExhaustionInfo,
     OperatorTimeBudgetMinutes,
+    OperatorVramBudgetGb,
     TaskCompositionRef,
 )
 from agent.schemas.output_types import OutputTypeName as OutputTypeName
@@ -1034,9 +1035,8 @@ class ProposalInput(BaseModel):
             "usable_cap_gb."
         ),
     )
-    vram_budget_gb: float | None = Field(
+    vram_budget_gb: OperatorVramBudgetGb | None = Field(
         default=None,
-        ge=0.0,
         description=(
             "Active operator-defined VRAM ceiling (GB) for the upcoming "
             "tuning iteration. Workflow picks trial_vram_budget_gb if "

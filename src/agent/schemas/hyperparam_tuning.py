@@ -103,6 +103,14 @@ OperatorTimeBudgetMinutes = Annotated[
     float, Field(gt=0.0, allow_inf_nan=False), AfterValidator(_finite_in_seconds)
 ]
 
+#: An operator-configured VRAM ceiling in GB: finite and positive. ``None``
+#: (on the fields that use it) means "no operator ceiling" and leaves the
+#: physical cap in charge; zero, negative and non-finite values are malformed
+#: and refused at launch (issue #1044). Zero is not a disable value: the VRAM
+#: gate read it as "reject every model" while planner feedback read it as
+#: "no budget".
+OperatorVramBudgetGb = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+
 
 #: What a HealthGate verdict DOES in this run: enforce, or only record.
 #:
@@ -2078,9 +2086,12 @@ class HyperparamTuningInput(BaseModel):
             "Default ``-1.0``: only skip formal when trial is more than "
             "1.0 unit worse than the current best formal score. Set to "
             "``0.0`` to skip formal whenever trial does not beat current "
-            "best. Set to ``float('-inf')`` to disable this gate entirely — "
-            "that resolves to the metric's WORST value under either "
-            "direction, so the disable convention needs no second form."
+            "best. Must be finite while ``enable_chain_incumbent_formal_gates`` "
+            "is on (``validate_formal_launch`` refuses inf/NaN); there is no "
+            "per-gate disable value. The chain-incumbent formal gates are off "
+            "by default; to keep them off, omit "
+            "``--enable_chain_incumbent_formal_gates`` (or set "
+            "``enable_chain_incumbent_formal_gates=false``)."
         ),
     )
     bypass_formal_time_budget_min_delta: float = Field(
@@ -2095,9 +2106,10 @@ class HyperparamTuningInput(BaseModel):
             "gate never fires. Default ``0.0``: "
             "bypass the time gate whenever trial sets a new run best. "
             "Set to ``0.5`` to only bypass when trial beats current "
-            "best by >= 0.5 units. Set to ``float('inf')`` to disable "
-            "bypass entirely — that resolves to the metric's BEST value "
-            "under either direction."
+            "best by >= 0.5 units. Must be finite while the chain-incumbent "
+            "gates are on. The gates are off by default; to keep them off, "
+            "omit ``--enable_chain_incumbent_formal_gates`` (or set "
+            "``enable_chain_incumbent_formal_gates=false``)."
         ),
     )
 
@@ -2217,6 +2229,7 @@ class HyperparamTuningInput(BaseModel):
 
     degenerate_penalty_score: float | None = Field(
         default=None,
+        allow_inf_nan=False,
         description=(
             "Operator policy for the agent's reaction when "
             "``execute_tools.scoring_utils.score_vector`` flags a degenerate "
@@ -2225,7 +2238,7 @@ class HyperparamTuningInput(BaseModel):
             "* ``None`` (default) — null the ``denoising_score`` so the round "
             "  cannot be picked as 'best'. Conservative; preserves prior "
             "  behaviour from the legacy zero-output sanity check.\n"
-            "* float (typically large negative, e.g. ``-5.0``) — use the value "
+            "* finite float (typically large negative, e.g. ``-5.0``) — use the value "
             "  as the round's ``denoising_score``. Lets the planner's "
             "  best-tracking still rank the round, but pushes it strictly below "
             "  any healthy success.\n"
@@ -2409,6 +2422,7 @@ class HyperparamTuningInput(BaseModel):
     runtime_safety_factor: float = Field(
         default=1.0,
         ge=1.0,
+        allow_inf_nan=False,
         description=(
             "§2.10 safety multiplier applied to the known-cost sum at "
             "admission time and to the verified estimate in the legacy watchdog "
@@ -2423,6 +2437,7 @@ class HyperparamTuningInput(BaseModel):
     runtime_trial_safety_factor: float | None = Field(
         default=None,
         ge=1.0,
+        allow_inf_nan=False,
         description=(
             "§2.10 phase-specific safety factor for TRIAL attempts. "
             "Precedence: this value when provided → runtime_safety_factor "
@@ -2435,6 +2450,7 @@ class HyperparamTuningInput(BaseModel):
     runtime_formal_safety_factor: float | None = Field(
         default=None,
         ge=1.0,
+        allow_inf_nan=False,
         description=(
             "§2.10 phase-specific safety factor for FORMAL attempts. "
             "Precedence: this value when provided → runtime_safety_factor "
@@ -2445,6 +2461,7 @@ class HyperparamTuningInput(BaseModel):
     runtime_watchdog_safety_factor: float | None = Field(
         default=None,
         ge=1.0,
+        allow_inf_nan=False,
         description=(
             "Forecast multiplier only for explicit forecast-tightening-v1. "
             "None uses the phase-effective admission factor. Native "
@@ -2454,6 +2471,7 @@ class HyperparamTuningInput(BaseModel):
     runtime_watchdog_floor_seconds: float = Field(
         default=60.0,
         ge=0.0,
+        allow_inf_nan=False,
         description=(
             "Deadline floor only for explicit forecast-tightening-v1. "
             "Native budget-ceiling-v1 never raises an explicit ceiling."
@@ -2462,6 +2480,7 @@ class HyperparamTuningInput(BaseModel):
     runtime_verification_max_wall_seconds: float | None = Field(
         default=None,
         gt=0.0,
+        allow_inf_nan=False,
         description=(
             "Optional wall-time ceiling for adaptive in-subprocess runtime "
             "verification. None preserves AdaptiveVerificationConfig's "
@@ -2517,7 +2536,7 @@ class HyperparamTuningInput(BaseModel):
             "The declared host quota independently constrains the result."
         ),
     )
-    trial_vram_budget_gb: float | None = Field(
+    trial_vram_budget_gb: OperatorVramBudgetGb | None = Field(
         default=None,
         description=(
             "VRAM budget in GB against which evaluate_vram_skill gates rounds "
@@ -2528,7 +2547,7 @@ class HyperparamTuningInput(BaseModel):
             "models that exceed it even when raw free-VRAM is plentiful."
         ),
     )
-    formal_vram_budget_gb: float | None = Field(
+    formal_vram_budget_gb: OperatorVramBudgetGb | None = Field(
         default=None,
         description=(
             "VRAM budget in GB against which evaluate_vram_skill gates rounds "
@@ -2542,6 +2561,7 @@ class HyperparamTuningInput(BaseModel):
     vram_probe_step_timeout_seconds: float = Field(
         default=180.0,
         gt=0.0,
+        allow_inf_nan=False,
         description=(
             "Maximum wall time for one training-mode or inference VRAM "
             "footprint forward. This is not an epoch, optimizer step, or "
@@ -2553,6 +2573,7 @@ class HyperparamTuningInput(BaseModel):
     vram_preflight_total_timeout_seconds: float = Field(
         default=900.0,
         gt=0.0,
+        allow_inf_nan=False,
         description=(
             "Maximum wall time for the complete isolated VRAM preflight "
             "worker, including model construction, training-footprint "
@@ -2563,6 +2584,7 @@ class HyperparamTuningInput(BaseModel):
     vram_preflight_host_memory_limit_gb: float | None = Field(
         default=None,
         gt=0.0,
+        allow_inf_nan=False,
         description=(
             "Optional maximum resident host memory in GiB for the complete isolated "
             "VRAM-preflight process tree. This is a workflow-owned safety "
@@ -2799,6 +2821,7 @@ class HyperparamTuningInput(BaseModel):
     validation_max_phase_seconds: float | None = Field(
         default=None,
         gt=0.0,
+        allow_inf_nan=False,
         description=(
             "VALIDATION POSTURE ONLY. Absolute wall-clock ceiling for one "
             "execution phase, enforced by the EXISTING runtime watchdog "

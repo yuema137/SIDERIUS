@@ -16,7 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.generated_model_config import validate_implementation_baseline
-from agent.schemas.hyperparam_tuning import ExpertAdviceInput, TaskCompositionRef
+from agent.schemas.hyperparam_tuning import (
+    ExpertAdviceInput,
+    OperatorVramBudgetGb,
+    TaskCompositionRef,
+)
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_probe import ModelProbeContext
 from agent.schemas.output_types import OutputTypeName
@@ -328,9 +332,8 @@ class ImplementorInput(BaseModel):
         "the workflow; the capacity bullet then renders its defined "
         "magnitude-free form rather than a stale ceiling.",
     )
-    vram_budget_gb: float | None = Field(
+    vram_budget_gb: OperatorVramBudgetGb | None = Field(
         default=None,
-        ge=0.0,
         description="Active operator-defined VRAM ceiling (GB) for this "
         "iteration, threaded from the workflow exactly as for the proposer. "
         "Combined with ``hardware_context`` through "
