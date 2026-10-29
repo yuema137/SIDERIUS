@@ -107,24 +107,25 @@ try {
   assert.ok(await stop.isHidden(), 'no second Stop run control after acknowledgement');
   await page.waitForTimeout(2500); // At least one further poll still reads an active operation.
   assert.equal(await said.textContent(), 'Stopping the run…');
+  // A failed poll keeps the last line but marks it as an old observation. Monitor stops
+  // polling an operation once it is settled (M-4), so this is shown while it still runs.
+  unreachable = true;
+  await said.filter({hasText: 'Last observed: Stopping the run…'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Last displayed facts are retained'}).waitFor();
+  unreachable = false;
+  await said.filter({hasText: /^Stopping the run…/}).waitFor();
   await page.screenshot({path: resolve(tmpdir(), 'siderius-operation-stopping.png'), fullPage: true});
   runningTerminal = true;
   await said.filter({hasText: 'Run stopped. Files written so far stay in the run folder; no candidate result is produced.'}).waitFor();
-  await page.locator('#monitor-status').filter({hasText: 'Native: cancelled'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Stopped on request before finishing'}).waitFor();
   assert.ok(await stop.isHidden());
   await page.screenshot({path: resolve(tmpdir(), 'siderius-operation-stopped.png'), fullPage: true});
-  // A failed poll keeps the last line but marks it as an old observation.
-  unreachable = true;
-  await said.filter({hasText: 'Last observed: Run stopped.'}).waitFor();
-  await page.locator('#monitor-status').filter({hasText: 'Observation stale or unavailable'}).waitFor();
-  unreachable = false;
-  await said.filter({hasText: /^Run stopped\./}).waitFor();
 
   // Operations the server marks not cancellable offer no Stop run; state does not leak across operations.
   for (const id of [finished, preparing]) {
     await page.evaluate(value => { location.hash = 'slow-control/' + value; }, id);
-    await page.locator('#operation-observed').filter({hasText: id}).waitFor();
-    await page.locator('#monitor-status').filter({hasText: 'State:'}).waitFor();
+    await page.locator(`#operation-observed[title*="${id}"]`).waitFor(); // M-2: the UUID is in the observed line's title
+    await page.locator('#monitor-status').filter({hasText: /in progress\.|^Finished/}).waitFor();
     await page.waitForTimeout(300);
     assert.ok(await stop.isHidden(), `no Stop run for ${id}`);
     assert.equal(await said.textContent(), '');

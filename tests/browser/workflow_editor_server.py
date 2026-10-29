@@ -1,6 +1,7 @@
 """Offline real-API browser fixture; start with this checkout's frozen Python."""
 
 import json
+import os
 import socket
 import tempfile
 from pathlib import Path
@@ -261,6 +262,13 @@ def main() -> None:
             update={
                 "port": port,
                 "browser_origin": origin,
+                # A witness may mark configured projects runnable (comma-separated ids);
+                # by default none is, as before.
+                "runnable_editor_projects": tuple(
+                    item
+                    for item in os.environ.get("EDITOR_RUNNABLE_PROJECTS", "").split(",")
+                    if item
+                ),
                 "editor_projects": (
                     Project(
                         project_id="example",

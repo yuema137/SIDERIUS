@@ -8,6 +8,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
@@ -27,6 +28,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const context = await browser.newContext();
   await context.addInitScript(id => {
     localStorage.setItem('siderius.operation_id', id);
@@ -48,7 +50,8 @@ try {
       if (failEditor) return reply({error: {message: 'Fixture project unavailable'}}, 409);
       return route.continue();
     }
-    if (['/api/choices', '/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     assert.ok(url.pathname.startsWith('/api/operations/' + operation), 'URL UUID wins over remembered ID');
     if (unavailable) return reply({error: {message: 'Fixture unavailable operation'}}, 404);
@@ -59,7 +62,7 @@ try {
       offsets.push(offset); logReads.push({kind, offset});
       return reply({text: offset === 0 ? `${kind} stream\n` : '', next_offset: 73, observed_size: 73, truncated: false, missing: false});
     }
-    return reply({operation_id: operation, kind: 'candidate', state: 'running', observed_at: 'fixture observation', process: {status: 'alive'}, receipt_available: false});
+    return reply({operation_id: operation, kind: 'candidate', state: 'active', observed_at: 'fixture observation', process: {status: 'alive'}, receipt_available: false});
   });
   const connect = async () => {
     // Connected pages collapse the token form; reconnecting reopens it explicitly.
@@ -68,21 +71,24 @@ try {
     await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
     assert.equal(await page.locator('#token').inputValue(), '');
   };
+  // The former Slow control route is a bookmark-compatible alias: it is rewritten to Monitor.
   await page.goto(metadata.origin + '/#slow-control/' + operation);
+  assert.equal(new URL(page.url()).hash, '#monitor/' + operation, 'Old #slow-control/<UUID> redirects to #monitor/<UUID>');
+  assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Monitor');
   assert.equal(await page.locator('#operation-id').inputValue(), operation);
   assert.equal(await page.locator('#editor-source').isVisible(), false);
   assert.equal(requests.length, 0, 'Fresh routes do not request before Connect');
-  await page.locator('nav a[href="#slow-control"]').focus();
+  await page.locator('nav a[href="#monitor"]').focus();
   for (let step = 0; step < 20; step++) {
     await page.keyboard.press('Tab');
     const focusedView = await page.evaluate(() => document.activeElement.closest('[data-view]')?.dataset.view);
-    assert.ok(!focusedView || focusedView === 'slow-control', 'Inactive views cannot receive keyboard focus');
+    assert.ok(!focusedView || focusedView === 'monitor', 'Inactive views cannot receive keyboard focus');
   }
   await connect();
   assert.equal(requests.some(item => item.path.startsWith('/api/editor') || item.path === '/api/choices'), false);
   assert.match(await page.locator('#monitor-status').textContent(), /unavailable/);
   unavailable = false;
-  await page.locator('#monitor-status').filter({hasText: 'State: running'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Run in progress.'}).waitFor();
   await waitUntil(() => offsets.includes(73));
   await page.getByText('Activity and logs', {exact: true}).click();
   assert.equal(await page.locator('#log').textContent(), 'native stream\n');
@@ -99,7 +105,7 @@ try {
   const routeOffset = offsets.length;
   await page.locator('nav a[href="#home"]').click();
   await page.goBack(); // Return to explicit operation route without resetting its cursor.
-  await page.locator('#view-slow-control').waitFor();
+  await page.locator('#view-monitor').waitFor();
   await page.goForward();
   await page.locator('#view-home').waitFor();
   await page.locator('nav a[href="#workflow"]').click();
@@ -110,14 +116,16 @@ try {
   assert.equal(await page.locator('#view-workflow').isHidden(), true);
   assert.equal(await page.locator('#view-run').isVisible(), true);
   assert.equal(await page.locator('#workflow-next-run').isDisabled(), true);
-  await page.locator('nav a[href="#slow-control"]').click();
+  await page.locator('nav a[href="#monitor"]').click();
   await waitUntil(() => offsets.length > routeOffset);
   assert.ok(offsets.slice(routeOffset).every(value => value === 73), 'Same UUID/back-forward must retain log cursor');
   assert.equal(await page.locator('#log-kind').inputValue(), 'operation');
   assert.equal(await page.locator('#log').textContent(), 'operation stream\n');
   assert.equal(await page.evaluate(() => window.documentId), documentId);
-  assert.equal(await page.evaluate(() => window.pollTimers), 1);
-  assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Slow control');
+  // Monitor status poll, operation-list refresh, Run preparation and launch polls (each idle
+  // unless its condition holds); no reachability probe since the server stayed reachable.
+  assert.equal(await page.evaluate(() => window.pollTimers), 4);
+  assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Monitor');
   assert.equal(await page.locator('#view-workflow').isHidden(), true);
   assert.equal(await page.evaluate(secret => document.body.textContent.includes(secret) || location.href.includes(secret) || JSON.stringify({...localStorage, ...sessionStorage}).includes(secret), metadata.token), false);
   // A later 401 disables effectful controls; reconnect preserves the selected ID.
@@ -125,7 +133,7 @@ try {
   await page.locator('#access-status').filter({hasText: 'Connection unavailable'}).waitFor();
   assert.equal(await page.locator('#prepare-button').isDisabled(), true);
   unauthorized = false;
-  await page.evaluate(id => {location.hash = 'slow-control/' + id;}, operation);
+  await page.evaluate(id => {location.hash = 'monitor/' + id;}, operation);
   await connect();
   assert.equal(await page.locator('#operation-id').inputValue(), operation);
   assert.equal(await page.locator('#log-kind').inputValue(), 'operation');
@@ -133,16 +141,16 @@ try {
   await page.reload();
   assert.equal(await page.locator('#token').inputValue(), '');
   assert.equal(await page.locator('#monitor-button').isDisabled(), true);
-  await page.goto(metadata.origin + '/#slow-control/not-a-uuid');
+  await page.goto(metadata.origin + '/#monitor/not-a-uuid');
   const beforeInvalid = requests.length;
-  await page.locator('#route-status').filter({hasText: 'Invalid console route'}).waitFor();
+  await page.locator('#route-status').filter({hasText: 'Invalid operation UUID'}).waitFor();
   await connect();
   assert.ok(requests.slice(beforeInvalid).every(item => !item.path.startsWith('/api/operations/')), 'Invalid UUID never reaches operation API');
   console.log('PASS: direct monitor, history, isolation, invalid route and reconnect witnesses');
   await page.locator('#operation-id').fill(operation);
   await page.locator('#monitor-button').click();
-  await page.locator('#monitor-status').filter({hasText: 'State: running'}).waitFor();
-  assert.equal(new URL(page.url()).hash, '#slow-control/' + operation, 'Valid form repairs an invalid route');
+  await page.locator('#monitor-status').filter({hasText: 'Run in progress.'}).waitFor();
+  assert.equal(new URL(page.url()).hash, '#monitor/' + operation, 'Valid form repairs an invalid route');
   // Initial editor project list in flight across reconnect: old 401 cannot revoke
   // the new session, and the new connection must load without another view change.
   await page.goto(metadata.origin + '/#workflow');
@@ -159,7 +167,7 @@ try {
   });
   await connect(); await Promise.race([seen, new Promise((_, reject) => setTimeout(() => reject(new Error('Initial projects request not observed')), 15000))]);
   await connect();
-  await page.locator('#editor-status').filter({hasText: 'Opened supported'}).waitFor();
+  await page.locator('#editor-status').filter({hasText: 'Opened '}).waitFor();
   console.log('PASS: current project loaded while old response pending');
   releaseOld(); await page.waitForTimeout(100);
   assert.ok(lists >= 2);
