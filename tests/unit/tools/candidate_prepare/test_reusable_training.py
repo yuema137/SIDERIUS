@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from execute_tools import task_data_path as tdp
 from tests.unit.tools.candidate_prepare.test_reusable_preparation import (
     direct_child as direct_child,
 )
@@ -45,6 +46,20 @@ SETTINGS = {
         },
     }
 }
+
+
+@pytest.fixture(autouse=True)
+def _restore_task_registry(monkeypatch):
+    """Keep this module's task-data-path registrations out of later tests.
+
+    These runs compose a modified copy of the quickstart plugin in-process,
+    registering ``quickstart_tabular`` with that content. Left behind, it makes
+    any later test that composes the checkout quickstart fail the registry's
+    different-content refusal. Each test works on copies of the inherited
+    registry; monkeypatch restores the originals afterwards.
+    """
+    monkeypatch.setattr(tdp, "_REGISTRY", dict(tdp._REGISTRY))
+    monkeypatch.setattr(tdp, "_CONTENT", dict(tdp._CONTENT))
 
 
 def add_training(request):
