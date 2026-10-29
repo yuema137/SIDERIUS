@@ -131,8 +131,8 @@ class AdaptiveVerificationConfig(BaseModel):
         ge=0.0,
         allow_inf_nan=False,
         description=(
-            "Minimum observed unit / later-block median for relative slowdown refusal. "
-            "Below this floor, timing jitter cannot count as pathological. "
+            "Minimum observation wall time / later-block median wall time for relative slowdown refusal. "
+            "Below this floor, timing jitter cannot count as pathological; rates stay normalized. "
             "Environment-scopeable via runtime policy; zero restores relative-only checks."
         ),
     )
@@ -303,6 +303,7 @@ class AdaptiveUnitVerification:
         """Do not let an accepted suffix hide a distinct earlier rate regime."""
         shift = find_distribution_shift(
             self._all_times_ms,
+            elapsed_ms=self._elapsed_times_ms,
             steady=self.config.steady,
             pathological_factor=self.config.pathological_factor,
             pathological_min_unit_ms=self.config.pathological_min_unit_ms,
@@ -400,7 +401,7 @@ class AdaptiveUnitVerification:
             reference = statistics.median(prior_steady)
         if reference is not None:
             if (
-                unit_ms >= self.config.pathological_min_unit_ms
+                self._elapsed_times_ms[-1] >= self.config.pathological_min_unit_ms
                 and unit_ms > self.config.pathological_factor * reference
             ):
                 self._slow_reference_ms = reference

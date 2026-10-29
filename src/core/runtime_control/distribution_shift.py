@@ -29,6 +29,7 @@ def relative_median_change(rates: list[float]) -> float:
 def find_distribution_shift(
     rates: list[float],
     *,
+    elapsed_ms: list[float],
     steady: SteadyStateConfig,
     pathological_factor: float,
     pathological_min_unit_ms: float,
@@ -42,8 +43,9 @@ def find_distribution_shift(
     across the run. Every later observation remains in the comparison.
 
     Refuse only when ALL observations after a split exceed the earlier observed
-    maximum and the block median exceeds the configured factor and reaches
-    the absolute slowdown floor. Overlapping
+    maximum and the normalized block median exceeds the configured factor.
+    The later block's median observation wall time must reach the absolute
+    slowdown floor. Rates and elapsed times are aligned, validated observations. Overlapping
     distributions are inconclusive here; the ordinary detector and budgets
     still apply. This cannot anticipate changes after verification ends.
     """
@@ -72,6 +74,9 @@ def find_distribution_shift(
             continue
         before = statistics.median(rates[start:split])
         after = statistics.median(rates[split:])
-        if after >= pathological_min_unit_ms and after > pathological_factor * before:
+        if (
+            after > pathological_factor * before
+            and statistics.median(elapsed_ms[split:]) >= pathological_min_unit_ms
+        ):
             return DistributionShift(start, split, before, after)
     return None

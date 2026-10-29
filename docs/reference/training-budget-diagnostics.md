@@ -68,11 +68,15 @@ plateau-based slow-streak guard can reject earlier after
 
 Both relative-slowdown guards also require an absolute floor:
 `verification.pathological_min_unit_ms` (finite, nonnegative; default **100 ms**).
-A streak observation must reach this floor as well as exceed
-`pathological_factor` times its reference; a below-floor observation resets the
-streak. The distribution check applies the floor to the **later block median**,
-not the earlier reference or individual maximum. Equality meets the floor; the
-ratio comparison remains strict. Sub-floor rates still contribute to stability,
+A streak observation's **wall time** must reach this floor, while its normalized
+unit rate must exceed `pathological_factor` times the reference rate; a
+below-floor observation resets the streak. The distribution check applies the
+floor to the **later block median observation wall time**, not its normalized
+rate, earlier reference or individual maximum. Callers supply batch wall time
+as `elapsed_ms`; omitting it retains one-unit timing semantics. For example,
+40 ms/sample at batch 64 means 2560 ms of observation wall time, so it is not
+exempt from relative-slowdown checks. Equality meets the floor; the ratio
+comparison remains strict. Sub-floor observations still contribute to stability,
 prediction and evidence requirements.
 
 The default implements the verification goal of "seconds to protect against
