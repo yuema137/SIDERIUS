@@ -2,6 +2,7 @@
 
 import importlib
 import secrets
+import shutil
 import subprocess
 from pathlib import Path
 from uuid import uuid4
@@ -14,6 +15,23 @@ from tools.candidate_operations import OperationStoreConfig
 from tools.candidate_operations.store import load_record
 from tools.candidate_prepare import prepare_candidate
 from tools.workspace_sandbox.runner import ExecutionResult
+
+REPO = Path(__file__).resolve().parents[4]
+
+
+def copy_quickstart_package(parent: Path) -> tuple[Path, Path]:
+    """The quickstart manifest and the package folder it references, copied under ``parent``.
+
+    Keeps the checkout layout (``configs/task_composition/`` pointing at
+    ``examples/quickstart/``) so every manifest reference still resolves.
+    Returns ``(manifest, package_directory)``.
+    """
+    package = parent / "examples" / "quickstart"
+    shutil.copytree(REPO / "examples" / "quickstart", package)
+    manifest = parent / "configs" / "task_composition" / "quickstart.yaml"
+    manifest.parent.mkdir(parents=True)
+    shutil.copyfile(REPO / "configs" / "task_composition" / "quickstart.yaml", manifest)
+    return manifest, package
 
 
 @pytest.fixture

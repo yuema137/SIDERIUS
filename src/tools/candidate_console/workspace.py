@@ -59,6 +59,7 @@ INIT_CHILDREN = (
     "candidates",
     "runs",
     "projects",
+    "tasks",
     "library",
     "library/llm",
     "library/advice",

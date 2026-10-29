@@ -48,8 +48,51 @@ def _load(path: str) -> ResolvedConsole | None:
     return None
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Local configured candidate console")
+def _report(resolved: ResolvedConsole) -> None:
+    """Access instructions, workspace readiness and GPU prerequisite warnings."""
+    from .package_mounts import gpu_warnings
+
+    config = resolved.config
+    browser_port = urlsplit(config.browser_origin).port
+    print(f"Console address: {config.browser_origin}")
+    print(f"Access token file: {config.auth_token_file}")
+    print("  The console asks for this token when you connect, on this machine or remotely.")
+    print(f"  Show it with: cat {config.auth_token_file}")
+    print("  On this machine: open the console address in your browser.")
+    print("  On a remote server: first run on your own computer")
+    print(f"    ssh -N -L 127.0.0.1:{browser_port}:127.0.0.1:{config.port} YOUR_HOST")
+    print("  then open the console address there.")
+    _print_readiness(workspace_readiness(resolved))
+    for warning in gpu_warnings(config):
+        print(f"Warning: {warning}", file=sys.stderr)
+
+
+def _add_task(argv: list[str]) -> int:
+    from .add_task import run_command as add_task
+
+    status, config_path = add_task(argv)
+    if config_path is None:
+        return status
+    resolved = _load(config_path)
+    if resolved is None:
+        print(
+            "The task was added, but check failed: fix the problem above, run check again, "
+            "then restart the console to load the new task.",
+            file=sys.stderr,
+        )
+        return 2
+    _report(resolved)
+    print("Restart the console to load the new task.")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["add-task"]:
+        return _add_task(argv[1:])
+    parser = argparse.ArgumentParser(
+        description="Local configured candidate console; register a task with: add-task --help"
+    )
     parser.add_argument("command", choices=("check", "serve", "init"))
     parser.add_argument("--config", help="console.json path (check, serve)")
     parser.add_argument(
@@ -57,7 +100,7 @@ def main() -> int:
         help="existing parent directory for siderius_workspace/ (init only; no default)",
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="init only")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command == "init":
         if args.workspace is None or args.config is not None:
             parser.error("init requires --workspace and takes no --config")
@@ -95,16 +138,7 @@ def main() -> int:
     if resolved is None:
         return 2
     config = resolved.config
-    browser_port = urlsplit(config.browser_origin).port
-    print(f"Console address: {config.browser_origin}")
-    print(f"Access token file: {config.auth_token_file}")
-    print("  The console asks for this token when you connect, on this machine or remotely.")
-    print(f"  Show it with: cat {config.auth_token_file}")
-    print("  On this machine: open the console address in your browser.")
-    print("  On a remote server: first run on your own computer")
-    print(f"    ssh -N -L 127.0.0.1:{browser_port}:127.0.0.1:{config.port} YOUR_HOST")
-    print("  then open the console address there.")
-    _print_readiness(workspace_readiness(resolved))
+    _report(resolved)
     if args.command == "serve":
         import uvicorn
 
