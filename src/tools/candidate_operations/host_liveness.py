@@ -55,6 +55,11 @@ class ReservationEvidence(PreviewModel):
 
     child: SessionEvidence | None
     sandbox: SessionEvidence | None
+    #: Leader status of the submitting process that wrote the entry, read only
+    #: when no child identity exists. Omitted otherwise.
+    submitter: Literal["alive", "exited", "unknown"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     def parts(self) -> tuple[SessionEvidence, ...]:
         return tuple(part for part in (self.child, self.sandbox) if part is not None)
@@ -67,7 +72,12 @@ class ReservationEvidence(PreviewModel):
         sandbox is started with ``--die-with-parent``, so it cannot outlive a
         child that died before publishing it.
         """
-        return self.child is not None and all(part.ended for part in self.parts())
+        if self.child is None:
+            # No child ever bound or published itself: the entry is abandoned once
+            # the submitter that wrote it has positively exited (it was killed
+            # between writing the entry and spawning or binding a child).
+            return self.submitter == "exited" and self.sandbox is None
+        return all(part.ended for part in self.parts())
 
     @property
     def appears_live(self) -> bool:
@@ -134,8 +144,13 @@ def reservation_evidence(
     operation_id: UUID,
     request_digest: str,
     bound: ProcessIdentity | None,
+    submitter: ProcessIdentity | None = None,
 ) -> ReservationEvidence:
-    """Evidence from the bound child identity (or its own ``process.json``) and sandbox."""
+    """Evidence from the bound child identity (or its own ``process.json``) and sandbox.
+
+    Without any child identity, the recorded submitter's own status is read: a
+    submitter that positively exited never produced a child for this entry.
+    """
     child = bound or published_identity(state_root, operation_id, request_digest, PROCESS_FILE)
     sandbox = published_identity(state_root, operation_id, request_digest, SANDBOX_FILE)
     return ReservationEvidence(
@@ -143,4 +158,5 @@ def reservation_evidence(
         sandbox=None
         if sandbox is None
         else session_evidence(sandbox, may_be_hidden=sandbox_may_be_hidden()),
+        submitter=None if child is not None or submitter is None else observe(submitter).status,
     )

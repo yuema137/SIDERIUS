@@ -267,7 +267,7 @@ class StatusView(PreviewModel):
     kind: OperationKind
     request_digest: str
     observed_at: str
-    state: Literal["active", "completed", "operation_failed", "unknown"]
+    state: Literal["queued", "active", "completed", "operation_failed", "unknown"]
     process: ProcessObservation
     successor_operation_id: UUID | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -335,7 +335,7 @@ class OperationListItemView(PreviewModel):
     run_name: str | None
     project_id: str | None
     admitted_at: str
-    state: Literal["active", "completed", "operation_failed", "unknown"]
+    state: Literal["queued", "active", "completed", "operation_failed", "unknown"]
     native_status: str | None
     loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
 

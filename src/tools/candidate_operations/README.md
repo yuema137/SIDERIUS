@@ -215,13 +215,16 @@ the reservation back when its processes, including training, have ended.
 
 A placed submission returns `starting`, the same as before, and its operation
 directory gains `placement.json`, which names the GPU it was given. If the budget
-is currently full, the submission is refused with `host_capacity` and nothing
-starts. Submit it again after a running operation ends. A run that could never
-fit is refused with `resource_refused`. Two runs sharing one GPU slow each other
+is currently full, the submission returns `queued`: it waits its turn, in the
+order submissions arrived, and starts by itself once earlier runs end (status
+shows `queued` until then). To drop a waiting run, cancel it; it is removed from
+the queue without running. Each waiting run keeps a process of about 0.56 GiB of
+memory open while it waits, and nothing limits how many can wait, so do not
+queue more runs than the host's memory can hold. A run that could never fit is refused with
+`resource_refused`. Two runs sharing one GPU slow each other
 down, which can change what a time budget admits. So a `time_budgeted` run is only
 placed on a GPU no other run is using, and no run is placed beside it. If every
-GPU is in use, it is refused with `host_capacity`, and the message says a
-time-budgeted run would share the GPU. If you accept that contention, set
+GPU is in use, it waits in the queue. If you accept that contention, set
 `"acknowledge_shared_gpu_time_budget": true` in the budget file before the first
 submission. Changing the budget file while runs hold reservations is refused with
 `budget_mismatch`. If a submission or a release reports `ledger_format`, this
@@ -229,8 +232,8 @@ SIDERIUS version cannot read the ledger file (another version wrote it, or it is
 damaged). Wait until the runs it
 lists have ended, move the named `ledger.json` aside, and retry.
 
-Nothing polls in the background. A finished run's reservation is returned the
-next time any submission uses the ledger. If a crash leaves a reservation behind,
+Only waiting runs poll the ledger. A finished run's reservation is returned the
+next time a waiting run polls or any submission uses the ledger. If a crash leaves a reservation behind,
 release it explicitly:
 
 ```sh
@@ -308,7 +311,9 @@ Professional, Assistant and GUI use this same reader.
 
 Use this when a candidate run is still `active` and you want it to stop at once,
 for example because it is spending paid API calls. It works for `candidate`
-operations and resumed loop segments.
+operations and resumed loop segments. A run that is still `queued` for a GPU
+is removed from the queue and never starts; its status then reads
+`operation_failed` with reason `cancelled_while_queued`.
 
 ```sh
 .venv/bin/python -m tools.candidate_operations cancel \

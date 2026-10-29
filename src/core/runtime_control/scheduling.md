@@ -2,10 +2,11 @@
 
 Owner: `scheduling.py`. Scope: typed resource requests, an explicit host
 budget, and the pure `plan_dispatch` decision that places, queues or refuses
-ready units against a reservation ledger. Its first production
-caller is the cross-operation host ledger (B3-5a); budget intake, the run-invariant fields and the child
-environment projection are below; process dispatch, receipts and timing are
-later owners (B3-4, B3-5b). Without a
+ready units against a reservation ledger. Its production caller is the
+cross-operation host ledger (B3-5a admission; B3-5b queued operations and their
+waiting children); budget intake, the run-invariant fields and the child
+environment projection are below. In-run graph dispatch, unit receipts and
+timing belong to B3-4. Without a
 `HostBudget`, execution remains serial and nothing here is consulted.
 
 ## Inputs

@@ -208,10 +208,11 @@ are not promised. Missing usage evidence is unknown, never zero billing.
 
 ## Host reservation ledger
 
-Owners: `host_ledger.py` (state, lock, sweep, release), `host_liveness.py`
-(child and sandbox session evidence), `host_admission.py` (per-submission
-admission around claim and spawn). Design: B3-5a (decisions B3-5 D1-D6, B3-Q4,
-B3-Q6). Placement arithmetic is
+Owners: `host_ledger.py` (state, lock, sweep, promotion, release),
+`host_liveness.py` (child and sandbox session evidence), `host_admission.py`
+(per-submission admission around claim and spawn), `host_queue.py` (a queued
+child's wait for its place). Design: B3-5a and B3-5b (decisions B3-5 D1-D6,
+B3-Q4, B3-Q6). Placement arithmetic is
 `core.runtime_control.scheduling.plan_dispatch` with `on_refusal="continue"`;
 this layer adds no second resource authority. The budget is the operator's
 `HostBudget` file (`budget_intake.load_host_budget_file`); nothing is
@@ -234,7 +235,7 @@ candidate workspace and every `request.read_only` path; violations refuse
 ```
 DIR/
   ledger.lock    exclusive flock; held from admission through spawn and bind
-  ledger.json    HostLedgerState: version=1, next_ordinal, reservations[]
+  ledger.json    HostLedgerState: version=1, next_ordinal, reservations[], queued[]
 ```
 
 The lock is taken with `LOCK_NB` and retried every 50 ms for at most
@@ -246,9 +247,12 @@ lock; the ledger never takes a store lock.
 `HostReservation`: `operation_id`, `request_digest`, `state_root`, `placement`
 (the placed `Placement`; `unit_id` = operation UUID; its
 `reserved.time_budgeted` carries the declaration), and
-`process` (`ProcessIdentity`, bound after spawn). All live reservations share
-one budget digest; `dispatch_ordinal` is the host-level submission order
-(`next_ordinal`, incremented per reservation).
+`process` (`ProcessIdentity`, bound after spawn). `QueuedOperation` has the same
+fields with a `queued` `Placement` (B3-5b); `queued` is omitted from
+`ledger.json` when empty, so a ledger that never queued keeps the B3-5a bytes.
+All live entries (reservations and queued) share one budget digest and distinct
+operation IDs; `dispatch_ordinal` is the host-level submission order
+(`next_ordinal`, incremented per submission, placed or queued).
 
 Resource declaration. `CandidateOperation.resources: OperationResources | None`
 (omitted when absent, so existing request bytes and digests are unchanged;
@@ -284,19 +288,23 @@ code and leaves no claim, reservation or child):
    CPU-only declaration that binds device nodes (`request.devices`):
    `placement_unreachable`;
 6. `plan_dispatch` refusal (cannot fit even an idle budget):
-   `resource_refused` with its `escalated to operator` reasons; queued (fits
-   the budget, not the current ledger): `host_capacity` with the ledger
-   shortfall. B3-5a has no `queued` operation state; queued dispatch is B3-5b.
-   Decision B3-Q6 is one of these placement rules (`plan_dispatch`, see the
+   `resource_refused` with its `escalated to operator` reasons. Otherwise the
+   ledger is first promoted (below), then this unit is planned behind every
+   remaining waiter, `plan_dispatch((*queued, unit), reservations, budget,
+   on_refusal="continue")`: it is placed only when every earlier waiter is
+   placed and it fits (strict FIFO, decision B3-Q4), else queued (see
+   [Queued operations](#queued-operations)). Decision B3-Q6 is one of these
+   placement rules (`plan_dispatch`, see the
    [scheduling contract](../../core/runtime_control/scheduling.md#decision)):
    without `acknowledge_shared_gpu_time_budget`, a time-budgeted run is placed
    only on a slot no other reservation holds, and no run joins a slot holding a
-   time-budgeted one. When no such slot is free the result is `host_capacity`
-   whose reason names the contention.
+   time-budgeted one; when no such slot is free it is queued and its queued
+   reason names the contention. `host_capacity` is no longer returned.
 
-Placement and spawn. After the claim the reservation is written (process
-unbound, so a crash fails closed) and the `Placement` is published write-once
-as `operations/<UUID>/placement.json`. For a GPU unit the launch mapping is
+Placement and spawn. After the claim the reservation (or queue entry) is
+written (process unbound, so a crash fails closed). A placed unit's `Placement`
+is published write-once as `operations/<UUID>/placement.json`; a queued unit
+publishes `operations/<UUID>/queued.json` instead (below). For a GPU unit the launch mapping is
 overlaid before every later name check and the child environment: the slot UUID
 replaces any inherited `CUDA_VISIBLE_DEVICES` (the sandbox sees the slot as
 logical device 0). No other variable changes. A CPU-only unit binds no device node. After `Popen` returns, the child's
@@ -330,8 +338,17 @@ never sees the sandbox.
   live member in A, AND, if `sandbox.json` exists, the same for B. A missing
   `sandbox.json` is accepted only after the child ended: the sandbox runs with
   `--die-with-parent` and cannot outlive a child that died before publishing
-  it. No identity at all, a mismatched published identity, or any unreadable
-  record keeps the reservation (no exception).
+  it. Every entry also records `submitter` (the submitting process's
+  `ProcessIdentity`, omitted on entries written before it existed). When no
+  child identity exists at all (none bound, no `process.json`), the entry is
+  released once that submitter has positively exited: it was killed between
+  writing the entry and spawning or binding a child, so no child exists for it
+  and the entry would otherwise hold capacity, or the head of the queue,
+  forever. An interrupted spawn that does not kill the submitter (any
+  non-`OSError`, such as `KeyboardInterrupt`) removes the entry itself before
+  re-raising. With no identity and no recorded or exited submitter, a
+  mismatched published identity, or any unreadable record, the entry is kept
+  (no exception).
 - Operator, `release_reservation` (CLI `release-reservation --host-ledger DIR
   --operation-id UUID`), for a stuck reservation. It refuses `not_reserved`,
   `session_live` (the child or sandbox leader alive, or any member in A or B),
@@ -341,6 +358,12 @@ never sees the sandbox.
   identity, on the operator's word.
 
 Known caveats (not covered by the evidence above):
+
+- Submitter window: if the submitter is killed after `Popen` returned but
+  before the child published `process.json` (its first action), the entry is
+  released while that child starts. A queued child then finds its entry gone
+  and ends without running (`host_queue_failed`); a placed child would run
+  unaccounted until it exits.
 
 - bwrap startup window: `--die-with-parent` takes effect only once bwrap has
   set its parent-death signal during startup. If the operation child dies in
@@ -353,6 +376,73 @@ Known caveats (not covered by the evidence above):
   either fact unreadable) and then reports an absent sandbox leader as
   `unknown`. Such a reservation is never released automatically; the operator
   release may release it, since no live member is visible.
+
+### Queued operations
+
+Owner: `host_queue.py` (decision B3-5 D2). A candidate (or loop resume) that
+fits the budget but not the current ledger is claimed and spawned like a
+placed one, and the handle returns `observation="queued"`. Admission writes a
+`QueuedOperation` and publishes write-once `operations/<UUID>/queued.json`
+(`HostQueueTicket`: `ledger_root`, `budget`, the queued `placement`). A queued
+GPU unit has no device yet: `CUDA_VISIBLE_DEVICES` (still required in
+`request.environment_names`) is neither required from the launch environment
+nor passed to the child (`HostSlot.deferred_names`).
+
+The operation child waits before any native dispatch or reusable verification.
+Every `QUEUE_POLL_SECONDS` (1.0 s) it takes the ledger lock (a `ledger_busy`
+wait is retried at the next poll), sweeps, and promotes:
+`promote(state, budget)` plans every queued entry in ordinal order against the
+reservations and turns each placed one into a `HostReservation` bound to that
+entry's child, whichever child polls. A later waiter can therefore never take
+capacity an earlier one was given. When the child finds its own reservation it
+publishes `placement.json`, sets `CUDA_VISIBLE_DEVICES` in its own environment
+to the slot UUID (for a GPU unit) and continues as a placed operation
+(`sandbox.json`, release). Submissions also promote: admission promotes the
+swept ledger before planning the new unit.
+
+Waiting cost (known limit). Each waiting child is a full operation child that
+has already imported the operation stack: about 0.56 GiB resident while idle
+(review measurement, 2026-10-28). That memory is not counted in any reservation,
+and the queue has no length cap, so many queued submissions can exhaust host
+memory before any of them runs. Tracked in #1073 (lazy imports in the waiting
+child and/or a queue cap).
+
+Snapshot. While `queued.json` exists without `placement.json` and the child is
+alive, `read_operation` reports `state="queued"`, `reason="host_queued"`;
+afterwards the ordinary states apply.
+
+Cancel (the operator's Stop). `queued` is a live state for `request_cancel`
+(`cancel.LIVE_STATES`) and `cancellable`. The waiting child checks the
+cancel marker before each poll and again right after its own placement; when
+it is set the child removes its entry (queued or already promoted) from the
+ledger and publishes `Completion(outcome="pre_dispatch_failure",
+reason="cancelled_while_queued")`: the snapshot is `operation_failed` with that
+reason and `cancel_requested`. No workspace is claimed and no native record is
+written. A queued entry that left the ledger otherwise (operator release)
+ends with `reason="host_queue_failed"`.
+
+Release. The sweep drops a queued entry by the same evidence as a reservation
+(its child has positively exited; a waiting child never has a sandbox), so a
+dead waiter cannot hold the head of the line. `release_reservation` also
+releases a stuck queue entry. A queue entry never reserves budget, but it
+holds the budget digest: while one exists a different budget is refused
+`budget_mismatch`.
+
+Loop resume. A `candidate_loop_resume` under a ledger reserves with its root
+candidate's `resources` and launch request (timeout, environment names,
+devices), placed or queued like a candidate; a root without `resources` still
+refuses `resources_required`. A placed segment publishes `sandbox.json` like a
+candidate. A resume submitted without a ledger whose root ran placed (the root's
+operation directory holds `placement.json`) refuses `host_ledger_required`
+before any claim: it would otherwise run unaccounted beside placed runs.
+
+Operation receipt. The child's `Completion` carries `host_placement`
+(`HostPlacementEvidence`: the published `placement`, the operation child
+`process` identity the reservation is bound to, and the published `sandbox`
+identity or `null`), omitted for an operation that was never placed (serial
+completion bytes unchanged). `read_operation` refuses `integrity` when it
+disagrees with `placement.json`. The release itself is observed by the ledger,
+not recorded in the operation directory.
 
 Scheduling mode. `scheduling_mode` in run invariants describes in-run (graph)
 dispatch only. Host placement is operation provenance (`placement.json`,
@@ -375,9 +465,10 @@ reuse and zombies establish original-process exit within that namespace. Unreada
 identity is unknown. Presence only describes the wrapper, not provider progress.
 No persisted monotonic clock or elapsed-time timeout inference exists.
 
-A submission handle may say `starting`; a later reader without trustworthy
-process/outcome evidence says `unknown`. Matching live marker without completion
-is `active`. A validated native final receipt yields `completed`, retaining the
+A submission handle may say `starting` (or `queued` for a host-ledger waiter);
+a later reader without trustworthy process/outcome evidence says `unknown`.
+Matching live marker without completion is `active`, or `queued` while the child
+still waits for its host placement ([Queued operations](#queued-operations)). A validated native final receipt yields `completed`, retaining the
 native status. `finishing=True` means the wrapper is still observed alive.
 Release requires a validated terminal native/pre-dispatch outcome plus positively
 observed wrapper exit, or a definite failed spawn. Missing identity or uncertain
