@@ -617,3 +617,31 @@ def test_namespace_capacity_refusal_stops_observe_only_while_cli_proceeds(
         spawn.assert_called_once()
         assert sandbox.admission_observations[-1]["would_refuse"] is True
         assert sandbox.admission_observations[-1]["reason_code"] == "insufficient_headroom"
+
+
+@pytest.mark.parametrize("mode", ["trial", "formal"])
+@pytest.mark.parametrize(
+    "variable", ["SIDERIUS_PAIR_VRAM_CEILING_GIB", "SIDERIUS_GPU_VRAM_QUOTA_MIB"]
+)
+def test_missing_namespace_requirement_keeps_ceiling_resolution_failure_conservative(
+    monkeypatch, mode, variable
+):
+    from core.runtime_control.admission import stops_phase
+
+    monkeypatch.delenv(PROCESS_VISIBILITY_ENV, raising=False)
+    monkeypatch.setenv(variable, "not-a-number")
+    decision = decide(
+        requirement_mib=None, requirement_provenance=None, ceiling_gib=None, mode=mode
+    )
+    assert decision.reason_code == "environment_headroom_unproven"
+    assert variable in decision.reason
+    assert stops_phase("observe_only", decision.reason_code, evidence=decision.evidence)
+    ordinary = decide(
+        accounting(process_visibility=None),
+        requirement_mib=None,
+        requirement_provenance=None,
+        ceiling_gib=None,
+        mode=mode,
+    )
+    assert ordinary.reason_code == "policy_unavailable"
+    assert not stops_phase("observe_only", ordinary.reason_code, evidence=ordinary.evidence)

@@ -54,6 +54,11 @@ def evaluate_isolated_admission(
 ) -> AdmissionDecision:
     """Require new-worker demand plus all retained pre-spawn occupancy to fit.
 
+    Only missing authoritative requirements may use ordinary phase posture,
+    after a valid declaration, UUID-bound coherent accounting, no sampling error,
+    and successful ceiling resolution. Other isolated refusals stop every mode.
+    Immediate sampling is the only freshness guarantee; there is no age guard.
+
     Both production callers sample after the measurement worker exits and
     before the phase worker starts. The requirement describes that new worker;
     the persistent parent's CUDA memory is additional, not replaceable demand.
@@ -102,6 +107,16 @@ def evaluate_isolated_admission(
     evidence["outside_upper_bound_mib"] = bound.outside_upper_bound_mib
     if mode not in ACCEPTED_MODES:
         return environment_refusal("The phase admission mode is invalid.", evidence)
+    try:
+        limits = resolve_gpu_ceiling(
+            ceiling_gib=ceiling_gib, measured_capacity_gib=gib_from_mib(bound.device_total_mib)
+        )
+    except (TypeError, ValueError) as error:
+        return environment_refusal(
+            f"The aggregate GPU ceiling could not be resolved: {error}",
+            evidence,
+            requirement_source=requirement_provenance or "unavailable",
+        )
     if (
         requirement_provenance not in AUTHORITATIVE_PROVENANCE
         or not isinstance(requirement_mib, (int, float))
@@ -149,16 +164,6 @@ def evaluate_isolated_admission(
         evidence["requirement_error"] = ownership_issue
         return environment_refusal(ownership_issue, evidence)
 
-    try:
-        limits = resolve_gpu_ceiling(
-            ceiling_gib=ceiling_gib, measured_capacity_gib=gib_from_mib(bound.device_total_mib)
-        )
-    except (TypeError, ValueError) as error:
-        return environment_refusal(
-            f"The aggregate GPU ceiling could not be resolved: {error}",
-            evidence,
-            requirement_source=str(requirement_provenance),
-        )
     effective = limits.effective_gib
     aggregate = gib_from_mib(requirement_mib + bound.device_used_mib)
     if not math.isfinite(aggregate):

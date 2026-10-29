@@ -186,11 +186,12 @@ posture. Saved missing-requirement decisions retain `process_visibility` and
 `effective_execution_conditions`; proceeding does not certify a global process view.
 
 Missing or inconsistent accounting, invalid visibility declarations, missing GPU
-identity, and admission policy exceptions still stop with
+identity, ceiling-resolution failures, and admission policy exceptions still stop with
 `environment_headroom_unproven`, including in `observe_only`. Only explicit CPU
 availability permits the missing-GPU-identity path to proceed. Repair the
 execution evidence before retrying; this refusal is not advice to shrink the
 model or batch. Unattributed bytes never establish clean process visibility.
+There is no staleness guard beyond sampling immediately before phase admission.
 
 To obtain separate training and inference measurements and enable runtime
 protection, select the
