@@ -65,6 +65,7 @@ def training_request(prepared):
                 "formal_time_budget_minutes",
                 "trial_portion",
                 "train_portion",
+                "is_trial",
             )
         }
     )
