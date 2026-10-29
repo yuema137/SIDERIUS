@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -11,12 +13,17 @@ from agent.schemas.output_types import OutputTypeName
 from core.seeding import RunSeedBinding
 from execute_tools.run_report import MetricView, RunHeadline
 from tools.candidate_operations import OperationStoreConfig
-from tools.candidate_operations.models import OperationKind, ProcessObservation
+from tools.candidate_operations.models import (
+    OperationKind,
+    OperationResources,
+    ProcessObservation,
+)
 from tools.candidate_operations.native_chain_models import NativeChainObservation
 from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.graph_models import GraphReason, GraphState, GraphTrace
 from tools.candidate_worker.loop_stop import StopReason
+from tools.candidate_worker.parallel_models import ParallelDispatch
 from tools.workflow_authoring.models import Project
 from tools.workflow_preview.models import PreviewModel
 from tools.workspace_sandbox.profile import SandboxProfile
@@ -52,6 +59,46 @@ class TaskChoice(PreviewModel):
         return SandboxProfile.environment_keys(value)
 
 
+class ConsoleHostLedger(PreviewModel):
+    """Operator selection of the shared host reservation ledger (B3-4c).
+
+    Both paths are the operator's: an existing private ledger directory and a
+    ``HostBudget`` JSON file (``budget_intake.load_host_budget_file``), loaded
+    once when the console starts. Candidate runs and loop resumes launched from
+    the console then reserve in this ledger; native chains stay serial.
+    """
+
+    ledger_root: str
+    budget_file: str
+
+
+class RunResourcesSelection(PreviewModel):
+    """Operator scheduling inputs added to a reviewed candidate launch (B3-4c).
+
+    ``resources`` is the run's reservation in the host ledger (required when the
+    console has one); ``parallel`` opts the graph run into parallel dispatch.
+    Both are omitted when absent, so existing launch requests keep their bytes.
+    """
+
+    resources: OperationResources | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    parallel: ParallelDispatch | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    def bound_digest(self, base: str) -> str:
+        """The reviewed digest with these inputs folded in; ``base`` when there are none.
+
+        A review returns it and its launch must echo it, so the reservation and the
+        parallel opt-in cannot change after review; existing clients that send
+        neither keep their digest.
+        """
+        if self.resources is None and self.parallel is None:
+            return base
+        payload = {"base": base, **self.model_dump(mode="json", include={"resources", "parallel"})}
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 class ConsoleConfig(PreviewModel):
     operation_store: OperationStoreConfig
     tasks: tuple[TaskChoice, ...] = ()
@@ -64,6 +111,10 @@ class ConsoleConfig(PreviewModel):
     credential_file: str | None = None
     editor_projects: tuple[Project, ...] = ()
     runnable_editor_projects: tuple[str, ...] = ()
+    #: B3-4c — omitted when absent: every console launch stays serial and unbudgeted.
+    host_ledger: ConsoleHostLedger | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def origins_and_ids(self):
@@ -146,7 +197,9 @@ class PrepareSelection(PreviewModel):
         return CandidatePreparationRequest.safe_name(value)
 
 
-class PreparedSelection(PreviewModel):
+class PreparedSelection(RunResourcesSelection):
+    """The reviewed preparation plus the operator's scheduling inputs (B3-4c)."""
+
     prepare_operation_id: UUID
 
 
@@ -186,7 +239,9 @@ class RouteView(PreviewModel):
     model: str | None
 
 
-class PreparedReview(PreviewModel):
+class PreparedReview(RunResourcesSelection):
+    """``prepared_digest`` binds the request and the echoed ``resources``/``parallel``."""
+
     credential_readiness: CredentialReadiness
     prepare_operation_id: UUID
     prepared_digest: str

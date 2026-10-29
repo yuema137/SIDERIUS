@@ -11,7 +11,6 @@ from tools.candidate_operations import (
     CandidateOperation,
     OperationHandle,
     lookup_operation_request,
-    submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_worker.admission import admit_input_paths
@@ -27,9 +26,9 @@ from tools.workflow_preview.models import FileObservation, PreviewModel, Workflo
 from workflows.definition import ReusableWorkflowDocument, TaskReferences
 
 from .files import credentials
-from .models import CredentialReadiness, PreparedSelection, RouteView
+from .models import CredentialReadiness, PreparedSelection, RouteView, RunResourcesSelection
 from .readiness import credential_readiness
-from .service import CandidateConsole
+from .service import CandidateConsole, with_run_resources
 
 
 class EditedRunSelection(PreparedSelection):
@@ -75,6 +74,11 @@ class EditedRunReview(PreviewModel):
     envelope: ReviewedEnvelope = Field(exclude=True)
     effects: EditedRunEffects
     boundary: str = "Bindings reviewed; native validation at launch. No training or iteration."
+
+
+def _bound(prior: CandidateOperation) -> RunResourcesSelection:
+    """The scheduling inputs a submitted operation carries, as they were reviewed."""
+    return RunResourcesSelection(resources=prior.resources, parallel=prior.request.parallel)
 
 
 class EditedCandidate:
@@ -188,7 +192,7 @@ class EditedCandidate:
             selection=selection,
             source_origin=source.source_path,
             reviewed_context=context,
-            review_digest=envelope.digest(),
+            review_digest=selection.bound_digest(envelope.digest()),
             envelope=envelope,
             effects=EditedRunEffects(
                 nodes=tuple((node.id, node.capability) for node in definition.nodes),
@@ -238,26 +242,31 @@ class EditedCandidate:
                 or context.project_id != project_id
                 or context.prepare_operation_id != selection.prepare_operation_id
                 or capture.sha256 != selection.expected_source_sha256
-                or ReviewedEnvelope(context=context, request=prior.request).digest()
+                or _bound(prior).bound_digest(
+                    ReviewedEnvelope(
+                        context=context, request=prior.request.model_copy(update={"parallel": None})
+                    ).digest()
+                )
                 != selection.expected_review_digest
             ):
                 raise OperationFailure(
                     "conflict", "operation ID identifies another reviewed capture"
                 )
-            return submit_operation(store, prior, launch_environment={})
+            return self.console.submit(prior, launch_environment={})
         review = self._checked_review(
             project_id,
             EditedRunSelection(
                 prepare_operation_id=selection.prepare_operation_id,
                 expected_source_sha256=selection.expected_source_sha256,
+                resources=selection.resources,
+                parallel=selection.parallel,
             ),
         )
         if review.review_digest != selection.expected_review_digest:
             raise OperationFailure("stale_review", "reviewed bindings changed; review again")
         request = review.envelope.request
         environment = credentials(self.console.config.credential_file, request.environment_names)
-        return submit_operation(
-            store,
-            CandidateOperation(request_id=selection.candidate_operation_id, request=request),
-            launch_environment=environment,
+        operation = CandidateOperation(request_id=selection.candidate_operation_id, request=request)
+        return self.console.submit(
+            with_run_resources(operation, selection), launch_environment=environment
         )

@@ -12,7 +12,6 @@ from tools.candidate_operations import (
     build_reusable_operation,
     lookup_operation_request,
     operation_request_digest,
-    submit_operation,
 )
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare import verify_reusable_preparation
@@ -41,7 +40,7 @@ from .reusable_models import (
 )
 from .reusable_policy import capture_path, check_capture_policy, configured_capture
 from .seed_labels import review_label
-from .service import CandidateConsole
+from .service import CandidateConsole, with_run_resources
 
 
 class ReusableCandidate:
@@ -141,6 +140,7 @@ class ReusableCandidate:
     def review(self, project_id: str, selection: ReusableCaptureSelection) -> ReusableCaptureReview:
         selection = ReusableCaptureSelection.model_validate_json(selection.model_dump_json())
         task, inspected, operation = self._operation(project_id, selection, uuid4())
+        operation = with_run_resources(operation, selection)
         binding, request = inspected.binding, operation.request
         saved = binding.request
         plan, _ = captured_plan(Path(binding.envelope), binding, CapturedBytes())
@@ -230,11 +230,13 @@ class ReusableCandidate:
                 or operation_request_digest(prior) != launch.expected_request_digest
             ):
                 raise OperationFailure("conflict", "operation ID identifies another capture")
-            return submit_operation(store, prior, launch_environment={})
+            return self.console.submit(prior, launch_environment={})
         try:
             _, _, operation = self._operation(
                 project_id, launch.selection, launch.candidate_operation_id
             )
+            # Bound before the digest check: the review digested the same operation.
+            operation = with_run_resources(operation, launch.selection)
             if operation_request_digest(operation) != launch.expected_request_digest:
                 raise OperationFailure("stale_review", "captured request changed; review again")
             environment = credentials(
@@ -242,7 +244,7 @@ class ReusableCandidate:
             )
         except OperationFailure as error:
             raise ReusableAdmissionNotAttempted(error.detail.code, error.detail.message) from error
-        return submit_operation(store, operation, launch_environment=environment)
+        return self.console.submit(operation, launch_environment=environment)
 
 
 def admit_captured_judge_route(loop: AuthoredLoop, request: CandidateRunRequest) -> None:

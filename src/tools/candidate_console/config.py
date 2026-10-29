@@ -3,6 +3,10 @@
 from dataclasses import replace
 from pathlib import Path
 
+from core.runtime_control.budget_intake import HostBudgetFileError, load_host_budget_file
+from tools.candidate_operations.host_ledger import HostScheduling, ledger_directory
+from tools.candidate_operations.models import OperationFailure
+
 from .files import canonical, config_bytes, credential_values, token
 from .models import ConsoleConfig
 from .settings_models import ResolvedConsole
@@ -88,6 +92,24 @@ def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> 
         # Validate private file facts and JSON/dotenv shape, without selecting/printing values.
         credential_values(config.credential_file)
     return config
+
+
+def host_scheduling(config: ConsoleConfig) -> HostScheduling | None:
+    """Load the configured host ledger once (B3-4c); ``None`` keeps every launch serial.
+
+    The directory must already exist with owned mode 0700 (``ledger_directory``);
+    the budget file is read only through ``load_host_budget_file``. Either
+    failure stops the console from starting rather than launching unbudgeted.
+    """
+    selection = config.host_ledger
+    if selection is None:
+        return None
+    try:
+        ledger_directory(selection.ledger_root)
+        budget = load_host_budget_file(Path(selection.budget_file).absolute())
+    except (OperationFailure, HostBudgetFileError) as error:
+        raise ValueError(f"configured host ledger is unusable: {error}") from error
+    return HostScheduling(ledger_root=selection.ledger_root, budget=budget)
 
 
 def load_config(path: str) -> ConsoleConfig:

@@ -12,7 +12,7 @@ from tools.candidate_prepare import ReusablePreparedSelection
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import AuthoredLoop
 
-from .models import CredentialReadiness, RouteView
+from .models import CredentialReadiness, RouteView, RunResourcesSelection
 
 
 class ReusableCaptureChoice(PreviewModel):
@@ -20,7 +20,9 @@ class ReusableCaptureChoice(PreviewModel):
     run_id: UUID
 
 
-class ReusableCaptureSelection(ReusableCaptureChoice):
+class ReusableCaptureSelection(ReusableCaptureChoice, RunResourcesSelection):
+    """The reviewed capture plus the operator's scheduling inputs (B3-4c)."""
+
     preparation: ReusablePreparedSelection
     #: Optional operator seed for the candidate run (issue #983); omitted means
     #: the operation generates and records one at admission. The reviewed

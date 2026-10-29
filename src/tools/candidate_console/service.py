@@ -1,6 +1,7 @@
 """Code-callable console policy; native operations remain the execution owner."""
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
 from uuid import UUID
 
@@ -32,7 +33,12 @@ from tools.candidate_operations import (
     submit_operation,
 )
 from tools.candidate_operations.files import canonical
-from tools.candidate_operations.models import OperationFailure, UnknownOperation
+from tools.candidate_operations.models import (
+    OperationFailure,
+    OperationSubmission,
+    ReusablePreparationExpectation,
+    UnknownOperation,
+)
 from tools.candidate_operations.read import lookup_operation_request
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
 from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
@@ -40,7 +46,7 @@ from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.loop_stop import JudgeBoundaryVerdict
 from tools.candidate_worker.models import CandidateRunReceipt
 
-from .config import validate_config
+from .config import host_scheduling, validate_config
 from .files import credentials
 from .graph_results import read_graph_results
 from .models import (
@@ -64,6 +70,7 @@ from .models import (
     RecordedExampleOption,
     RecordedExampleView,
     RouteView,
+    RunResourcesSelection,
     StatusView,
     TaskChoice,
 )
@@ -163,9 +170,49 @@ def _judge_verdict(workspace: str, verdict: JudgeBoundaryVerdict) -> JudgeVerdic
     )
 
 
+#: Submission kinds the host reservation ledger governs (B3-5a/5b). Preparations
+#: and native chains are not reserved, so they always launch serially.
+LEDGER_KINDS = frozenset({"candidate", "candidate_loop_resume"})
+
+
+def with_run_resources(
+    operation: CandidateOperation, selection: RunResourcesSelection
+) -> CandidateOperation:
+    """Attach the operator's reservation and parallel opt-in after review (B3-4c).
+
+    Revalidated through the operation and request owners, so a ``parallel``
+    block on a non-graph request is refused here as anywhere else.
+    """
+    if selection.resources is None and selection.parallel is None:
+        return operation
+    request = operation.request.model_copy(update={"parallel": selection.parallel})
+    return CandidateOperation.model_validate_json(
+        operation.model_copy(
+            update={"request": request, "resources": selection.resources}
+        ).model_dump_json()
+    )
+
+
 class CandidateConsole:
     def __init__(self, config: ConsoleConfig):
         self.config = validate_config(config)
+        self.host = host_scheduling(self.config)
+
+    def submit(
+        self,
+        submission: OperationSubmission,
+        *,
+        launch_environment: Mapping[str, str],
+        expected_reusable_inputs: ReusablePreparationExpectation | None = None,
+    ) -> OperationHandle:
+        """The one console submission path; the ledger selection applies by kind."""
+        return submit_operation(
+            self.config.operation_store,
+            submission,
+            launch_environment=launch_environment,
+            expected_reusable_inputs=expected_reusable_inputs,
+            host=self.host if submission.kind in LEDGER_KINDS else None,
+        )
 
     def choices(self) -> tuple[ChoiceView, ...]:
         return tuple(
@@ -202,8 +249,7 @@ class CandidateConsole:
         task = next((t for t in self.config.tasks if t.task_id == selection.task_id), None)
         if task is None:
             raise OperationFailure("task_policy", "unknown configured task")
-        return submit_operation(
-            self.config.operation_store,
+        return self.submit(
             PrepareOperation(
                 request_id=selection.operation_id, request=preparation_request(task, selection)
             ),
@@ -242,7 +288,9 @@ class CandidateConsole:
         return PreparedReview(
             credential_readiness=credential_readiness(request, self.config.credential_file),
             prepare_operation_id=prepared.prepare_operation_id,
-            prepared_digest=prepared.request_sha256,
+            prepared_digest=selection.bound_digest(prepared.request_sha256),
+            resources=selection.resources,
+            parallel=selection.parallel,
             task_id=task.task_id,
             task_label=task.label,
             run_name=saved.run_name,
@@ -274,18 +322,15 @@ class CandidateConsole:
         prepared, _ = self.resolve_prepared_context(
             PreparedSelection(prepare_operation_id=selection.prepare_operation_id)
         )
-        if selection.expected_prepared_digest != prepared.request_sha256:
+        if selection.expected_prepared_digest != selection.bound_digest(prepared.request_sha256):
             raise OperationFailure(
                 "stale_review", "prepared request changed; prepare and review again"
             )
         environment = credentials(self.config.credential_file, prepared.request.environment_names)
-        return submit_operation(
-            self.config.operation_store,
-            CandidateOperation(
-                request_id=selection.candidate_operation_id, request=prepared.request
-            ),
-            launch_environment=environment,
+        operation = CandidateOperation(
+            request_id=selection.candidate_operation_id, request=prepared.request
         )
+        return self.submit(with_run_resources(operation, selection), launch_environment=environment)
 
     def status(self, operation_id: UUID) -> StatusView:
         if not operation_admitted(self.config.operation_store, operation_id):
@@ -393,7 +438,7 @@ class CandidateConsole:
             if root is None:
                 raise OperationFailure("kind", "operation is not an authored loop")
             environment = credentials(self.config.credential_file, root.request.environment_names)
-        return submit_operation(store, submission, launch_environment=environment)
+        return self.submit(submission, launch_environment=environment)
 
     def graph_results(self, operation_id: UUID) -> GraphResultsView:
         return read_graph_results(self.config, operation_id)

@@ -228,7 +228,8 @@ def test_resume_submits_reviewed_digest_with_root_credential_names(console_confi
         roots.append(value)
         return _root()
 
-    def submit(store, submission, launch_environment):
+    def submit(store, submission, launch_environment, *, host, **_options):
+        assert host is None  # no host ledger configured: the serial default
         submitted.append((store, submission, launch_environment))
         return _handle(submission.request_id, "starting")
 
@@ -293,7 +294,7 @@ def test_repeated_resume_request_replays_before_credential_reads(console_config,
         SERVICE + "loop_root_operation", lambda *_: pytest.fail("root/credentials read on replay")
     )
 
-    def submit(store, submission, launch_environment):
+    def submit(store, submission, launch_environment, **_options):
         submitted.append((submission, launch_environment))
         return _handle(submission.request_id, "existing")
 

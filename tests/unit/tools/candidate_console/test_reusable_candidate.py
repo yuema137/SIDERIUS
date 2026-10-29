@@ -279,9 +279,7 @@ def test_http_refusal_signal_only_before_submission(captured, monkeypatch):
         def uncertain(*args, **kwargs):
             raise OperationFailure("busy", "operation owner entered")
 
-        monkeypatch.setattr(
-            "tools.candidate_console.reusable_candidate.submit_operation", uncertain
-        )
+        monkeypatch.setattr("tools.candidate_console.service.submit_operation", uncertain)
         response = http.post(path, json=launch.model_dump(mode="json"))
         assert response.status_code == 409
         assert "admission_not_attempted" not in response.json()["error"]
@@ -464,6 +462,36 @@ def test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops(loope
             JUDGE,
         ],
     }
+
+
+def test_reviewed_resources_bind_the_reusable_launch_and_replay_idempotently(captured):
+    """B3-4c: the reservation is part of the reviewed request digest."""
+    from tools.candidate_operations.models import OperationResources
+
+    adapter, project, choice, _ = captured
+    resources = OperationResources(
+        gpu_count=0, host_memory_gib=2.0, cpu_slots=1, time_budgeted=False
+    )
+    selection = adapter.select(project.project_id, choice).model_copy(
+        update={"resources": resources}
+    )
+    plain = adapter.review(project.project_id, adapter.select(project.project_id, choice))
+    review = adapter.review(project.project_id, selection)
+    assert review.request_digest != plain.request_digest
+    launch = launch_payload(review)
+    first = adapter.launch(project.project_id, launch)
+    replay = adapter.launch(project.project_id, launch)
+    assert replay.observation == "existing" and replay.request_digest == first.request_digest
+    changed = launch.model_copy(
+        update={
+            "candidate_operation_id": uuid4(),
+            "selection": selection.model_copy(
+                update={"resources": resources.model_copy(update={"cpu_slots": 2})}
+            ),
+        }
+    )
+    with pytest.raises(OperationFailure, match="review again"):
+        adapter.launch(project.project_id, changed)
 
 
 #: Issue #983 S6. Above 2**52, so a float round-trip would corrupt it.
