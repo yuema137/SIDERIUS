@@ -71,7 +71,7 @@
       const marker = element('span', '', summary, 'palette-badge'); marker.dataset.badge = tag; marker.title = tag;
       element('span', tag, marker, 'palette-visually-hidden');
     }
-    if (info) element('span', String(info.stage + 1), summary, 'palette-step').setAttribute('aria-label', `Step ${info.stage + 1}`);
+    // Rows are already in pipeline order; no step-number badge (tour #13).
     summary.setAttribute('aria-label', `${capabilityLabel(capability)}${info ? `, step ${info.stage + 1}` : ''}${tag ? `, ${tag}` : ''}, ${count} route${count === 1 ? '' : 's'}`);
   }
   function details(parent, capability, guide, entries) {
@@ -178,14 +178,15 @@
   }
 
   // Start guide: the build chain and context feeders, both server-derived.
-  // Start guide: one sentence (build chain) plus a "How it works" disclosure.
+  // Start guide: one sentence (build chain) plus a "Using this list" disclosure (the
+  // header Help opens the tour; red-team A-8: no second, look-alike help entry).
   function startGuide(box, guide, empty) {
     box.replaceChildren();
     if (!guide?.chain.length) return false;
     const [first, ...rest] = guide.chain.map(capabilityLabel);
     element('p', `${empty ? 'The canvas is empty. ' : ''}Start with ${first}${rest.length ? `, then add ${rest.join(' → ')}` : ''}.`, box, 'palette-guide-lead');
     const more = element('details', '', box, 'palette-guide-more');
-    element('summary', 'How it works', more);
+    element('summary', 'Using this list', more);
     if (guide.context.length) element('p', `${list(guide.context)} add${guide.context.length === 1 ? 's' : ''} optional context that feeds the chain.`, more);
     element('p', 'Expand a capability to see what it receives, what it sends and what it connects to. Hover or focus a route for a preview; click, press Enter or drag it onto the canvas to add it.', more);
     return true;

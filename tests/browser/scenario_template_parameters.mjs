@@ -105,6 +105,7 @@ try {
   await page.locator('#circuit-node-train').click();
   await adviceFirst();
   const settings = page.locator('#editor-training-settings');
+  if (!(await settings.evaluate(details => details.open))) await settings.locator('summary').click();
   await settings.locator('[data-training-mode="trial_max_epochs"]').selectOption('supplied');
   await settings.locator('[data-training="trial_max_epochs"]').fill('3');
   await reviewAndSave();

@@ -12,8 +12,12 @@
     const parts = fragment.split('/');
     const valid = ['home', 'workflow', 'run', 'monitor', 'settings'].includes(parts[0]) &&
       (parts.length === 1 || (parts.length === 2 && parts[0] === 'monitor' && uuid.test(parts[1])));
-    document.getElementById('route-status').textContent = valid ? '' : 'Invalid console route or operation UUID. Enter a complete operation UUID in Monitor.';
+    // A malformed Monitor operation link stays on Monitor and says why; any other unknown
+    // route (a typo, an old bookmark) returns to Home (E-8).
+    if (!valid && parts[0] !== 'monitor') { history.replaceState(history.state, '', '#home'); route(focus); return; }
+    document.getElementById('route-status').textContent = valid ? '' : 'Invalid operation UUID. Enter a complete operation UUID in Monitor.';
     view = valid ? parts[0] : 'monitor'; operation = valid && parts.length === 2 ? parts[1] : null;
+    const skip = document.getElementById('skip-to-canvas'); if (skip) skip.hidden = view !== 'workflow';
     document.title = {workflow: 'SIDERIUS · Workflow', run: 'SIDERIUS · Run', settings: 'SIDERIUS · Settings'}[view] || 'SIDERIUS · Candidate console';
     for (const panel of document.querySelectorAll('[data-view]')) panel.hidden = panel.dataset.view !== view;
     for (const link of document.querySelectorAll('nav a')) {
@@ -24,5 +28,6 @@
   }
   window.consoleNavigation = Object.freeze({isOperationId: value => uuid.test(value), get view() {return view;}, get operation() {return operation;}});
   window.addEventListener('hashchange', () => route(true));
+  document.getElementById('skip-to-canvas')?.addEventListener('click', event => { event.preventDefault(); window.editorCircuit?.focusCanvas(); });
   route();
 })();

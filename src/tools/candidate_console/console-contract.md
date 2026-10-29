@@ -789,14 +789,15 @@ tooltip prefixed "Receives <name>." / "Sends <name>."), and the legend note expl
 both arrows; each legend row's tooltip is the type's server description (rows stay one line). Port
 pills show the readable name (the id stays in the tooltip), wires take the colour of
 the result they carry, required inputs and outputs have filled sockets and optional
-inputs hollow ones, and a closed "Port types (N)" legend lists the contracts present
+inputs hollow ones, and a closed "Connector types (N)" legend (two-column popover) lists the contracts present
 in the opened graph. The table never decides compatibility. Connection preview
 reads only the server's `port_inventory` choices: hovering an output highlights
 offered inputs and dims the rest without selecting; pressing an output and releasing
 over an input binds exactly as output-then-input clicks do. A refused or dimmed
-input states `<input> expects <socket contract> (<name>), but <source> provides
-<output contract> (<name>)`, or that the server does not offer the source although
-both contracts match.
+input states (spec K10) `Can't connect: <source module> sends <name>; this input
+receives <name>.`, or that the source module is not offered for this input although
+both contracts match; a refused drop also shows that sentence anchored under the
+input (`.circuit-anchor-note`, removed by the next gesture or render).
 External source chips remain inspector bindings. Omitted optional ports and argument
 creation/deletion are not graphical controls in this slice.
 
@@ -805,7 +806,7 @@ The node palette (`editor-palette.js`, `editor-palette.css`; presentation only,
 (`.editor-workspace` in `editor.css`: `--rail-width`, own scroll, sized with the
 `theme.css` layout tokens) so a drag source and the canvas share the screen; under
 900px it collapses to a drawer opened
-by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
+by its "Modules" toggle. Entries are focusable `div[role=button]` (click,
 Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
 drag payload. It lists
 `GET /api/editor/node-catalog` entries (fetched once per connection, only while the
@@ -813,10 +814,11 @@ Workflow view is shown; other pages never request it) as a compact, aligned stac
 of one uniform-height collapsed `details.palette-category` row per capability (icon,
 display name from `editorCapabilityPresentation.label` on one line with
 ellipsis and a full-title tooltip, a dot marker with accessible text and tooltip for
-"Start here" on `guide.chain[0]` / "Optional context" on `guide.context`, step
-number) in `guide` stage order, with a text search (matching rows open). Above the
+"Start here" on `guide.chain[0]` / "Optional context" on `guide.context`; no
+step-number badge, the stack is already in stage order) in `guide` stage order, with a text search (matching rows open). Above the
 stack a one-sentence start guide renders `guide.chain` (emphasised while the canvas
-has no card) with a "How it works" disclosure naming `guide.context`. Expanding a row (accordion, open state kept across re-renders) shows the
+has no card) with a "Using this list" disclosure naming `guide.context` (the header
+Help opens the tour; there is no second, look-alike help entry). Expanding a row (accordion, open state kept across re-renders) shows the
 server description, the sent type, connects-from/to and one addable `.palette-entry`
 per route with contract chips: "→ <name>" for each received (required) type and
 "<name> →" for the sent type (`data-direction` receives/sends, accessible text
@@ -862,37 +864,46 @@ Selection shows one line: the contract name (`editorContractPresentation.describ
 the `contract_names.py` owner), the server `summary`, and whether
 existing inputs of that contract are offered in the select above. A collapsed
 "Create external input…" form asks for an input id (suggested `<node>_<argument>`,
-de-duplicated), and for a reusable (schema 2) document with a `managed` contract,
-"Managed by the run" or "A JSON file in the project". It also asks for the
-project-relative file path; the path is never prefilled, only an `e.g.
-inputs/<id>.json` placeholder. "Create and connect" validates the id
-(identifier, unused) and a non-empty path. It then adds the binding to the draft's
+de-duplicated). In a version 1 document it also asks for the project-relative file
+path; the path is never prefilled, only an `e.g. inputs/<id>.json` placeholder. A
+reusable (schema 2) document never offers a file (red-team SEC-6: reusable preparation
+accepts only managed inputs): a `managed` contract creates a `managed_candidate`
+binding with no path, and a contract without a managed form shows the form disabled
+with that reason. "Create and connect" validates the id (identifier, unused) and, for
+a file input, a non-empty path. It then adds the binding to the draft's
 `externals` and connects the socket as one undoable operation ("Create input …").
 The server validates the result.
-Removal is offered by Delete/Backspace on a focused capability heading, its
-context menu and "Remove capability" in Selection; it sends a `remove_node` review
-directly (Review is the explanation: refusal text or `node_edit.message` plus the
-exact diff). Removing several nodes at once asks for confirmation; the canvas has
-no multi-selection yet, so current gestures remove one node without a prompt.
+Deletion is offered by Delete/Backspace on a focused module heading (a mouse click
+focuses the clicked heading after the select re-render, so click-then-Delete works),
+its context menu ("Delete module") and the trash icon in the Selection header
+(`aria-label` `Delete <id>`). It always succeeds in the draft with no confirmation
+(`removed` in the node-drafts proposal); readers become "not connected" problems and
+Undo restores everything. Problems name only modules that remain: the server reports
+removal, remaining-reader and pending-module problems together, an emptied canvas has
+the single problem `workflow_empty` ("add at least one module"), and
+`loop_feedback_missing` stays while either loop endpoint is deleted, even after new
+modules are added. The browser also drops located problems whose module is no longer
+displayed and re-diagnoses from a cached inspection on every edit; the Research loop
+section shows `#editor-loop-broken` (only Remove research loop) instead of
+stop-condition edits while the loop points at a deleted module.
 Required and bound inputs always render as card rows; optional unbound inputs fold
 into one `.circuit-optional` disclosure per card ("N optional inputs"), expandable
 and remembered across re-renders of the same graph. While an output is pending,
 the summary is highlighted when a folded input is type-compatible.
 
-Canvas view state (zoom, scroll, Arrange view, expanded optional rows) is owned by
+Canvas view state (zoom, scroll, expanded optional rows) is owned by
 `editor-circuit.js`, keyed by project and node IDs, and never reaches a document:
 viewing sends no request and cannot change saved bytes. The canvas is a CSS
 `transform: scale()` of the world, with positions kept in document pixels
 (drags divide screen deltas by the zoom). On opening a graph it fits once
 (`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
-canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size and
-Arrange view. The canvas grows with its zoomed content up to
-`clamp(420px, 100vh - 200px, 860px)`, shows edge shadows toward unseen content,
-and a note states how many capabilities are partly outside the view. Arrange view
-displays `geometry.place` with no stored positions (display only); a move made
-there records the displayed layout as an ordinary local edit and leaves Arrange
-view. Overlapping saved cards (`geometry.overlaps`) and unrouteable wires are
-reported with that display-only way out.
+canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size, Check
+the loop and Tidy up (the one layout tool; the former display-only Arrange view was
+removed because a drag in it saved the arranged layout, red-team A-1). The canvas
+grows with its zoomed content up to `clamp(420px, 100vh - 200px, 860px)`, shows edge
+shadows toward unseen content, and a note states how many modules are partly outside
+the view. Overlapping saved cards (`geometry.overlaps`) and unrouteable wires are
+reported with Tidy up (undoable) as the way out.
 
 The workflow-level Research loop panel (`editor-loop-controls.js`, view only;
 `editor.js` owns the draft) shows "No research loop declared" with an Add action
@@ -925,16 +936,21 @@ The Selection inspector groups one node's parameters (`editor-node-parameters.js
 view only; `editor.js` owns every mutation): **Inputs** (one binding select per
 socket, required/optional and bound state in its label; a required unbound one is
 marked `.field-problem`), **Training settings** on a tuning node (a
-`#editor-training-settings` disclosure, open on selection, listing every
-`TrainingInspector` control with its mode select, value, a per-field "Reset to
-default" that removes the authored key, a `Default` / `Modified` / `Changed, not
-saved` badge against the native default and the loaded source, and inline help
-from `TrainingControl.help` plus the native preview), **Loop and stop settings**
+`#editor-training-settings` disclosure, collapsed by default (an opened one stays
+open across re-renders) with summary `Training settings · N of M changed`, listing every
+`TrainingInspector` control with its mode select (`Default` / `Set value` / `None`),
+value, a per-field reset icon (`[data-training-reset]`, shown and enabled only when the
+field is changed) that removes the authored key, a `Default` / `Modified` / `Changed, not
+saved` badge against the native default and the loaded source, an invalid-number
+message under the field (`.field-error`), and inline help from `TrainingControl.help`;
+the schema default / native preview, epoch-ceiling prose, output restriction and
+parameter-rules JSON are advanced detail), **Loop and stop settings**
 on a feedback endpoint (a summary and a button to the workflow-level Research loop
 panel) and **Model hyperparameters** on a tuning node (read-only: they are owned
 by the task manifest, shown as `definition.task.manifest` and any task binding;
 no control edits them). A card whose server inventory has a required unbound input
-gets `.has-required-unbound` (red outline/glow) and a `.circuit-problem-badge`.
+gets `.has-required-unbound` and a small `.circuit-problem-badge` count; the soft red
+ring is on the unconnected socket itself.
 `#editor-problems` (`editor-problems.js`, beside Review) lists "N problems" from
 server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
 (`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
@@ -970,13 +986,18 @@ Training-settings actions from `editor-node-parameters.js` (value, mode, per-fie
 Reset) are draft operations too: typing in one field coalesces, each Reset is its
 own undo step, and undo/redo re-render the badges from the restored document.
 History: every operation records one undo step (consecutive typing in one field
-coalesces, limit 200). Secondary **Undo**/**Redo** buttons (Save stays the one
-primary editor action) and Ctrl/Cmd+Z,
-Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only) restore
+coalesces, limit 200). **Undo**/**Redo** buttons and Ctrl/Cmd+Z,
+Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only, and never
+while a `dialog[open]` exists or a `[role=dialog]` / `[popover]` element holds focus,
+red-team A-4) restore
 earlier states and invalidate any review. **Discard changes** restores the loaded
 state without reading disk and is itself undoable, including dirty Source text:
 the discard step carries the typed text (`sourceText`) and Undo restores it as
-dirty Source text (invalid training/loop field text is not kept). **Refresh from
+dirty Source text (invalid training/loop field text is not kept). While typed Source
+text (dirty, or checked from typed text) is pending and advanced tools are off,
+`#editor-hidden-source` says "You have unsaved Python edits from advanced mode" with
+Show (turns advanced tools on and focuses the source) and Discard, and the Save step
+says it writes the typed Python text (red-team A-2). **Refresh from
 disk** re-reads and asks first when dirty. Undo/Redo are disabled while Source
 text is dirty or an invalid training/loop field draft is pending (Ctrl/Cmd+Z
 then reports why and keeps the typed text); Undo/Redo/Discard are disabled
@@ -1047,7 +1068,7 @@ and dark themes, and full-layout persistence for pointer and keyboard moves;
 and overlap detection without a browser. `tests/browser/editor_canvas_fit.mjs`
 (same variables) checks at 1440x900 that all five cards are in view after
 fit-on-open, that view controls send nothing and keep bytes, folded optional
-inputs, the disjoint fully wired interpretation fixture, Arrange view on an
+inputs, the disjoint fully wired interpretation fixture, Tidy up and Undo on an
 overlapping layout, zoomed drag arithmetic and a non-empty task panel. `tests/browser/port_legibility.mjs` (same variables) opens the
 eight-node families fixture and checks one distinct colour+shape token and readable
 pill name per contract, filled/hollow sockets, wire colour, the legend, hover
@@ -1091,7 +1112,9 @@ your typed Python text first, then use a template."), as restoring a version doe
 Quick start's import goes through the same path. Afterwards `editorAdvice.focusFirst()` selects the first
 canvas module whose capability has an advice target and focuses its advice field. The node inspector calls `window.editorAdvice.render` directly
 after the node heading, so "Your advice to the agents" (multi-line, help,
-example placeholder) is its first input; edits are draft document edits with one
+example placeholder, and under it `.advice-privacy`: "Advice is sent to the model
+provider and kept in version history; don't paste secrets.", red-team SEC-2) is its
+first input; edits are draft document edits with one
 coalesced undo step per node, disabled while a palette node is pending.
 `tests/browser/scenario_template_parameters.mjs` (import refused over typed source,
 import loop, edit a training parameter, review, save) and `tests/browser/scenario_template_advice.mjs` (import
@@ -1363,9 +1386,32 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   their natural height (no `--workspace-height`). **Tidy up** (`#circuit-tidy`,
   `layout-grid`) places every module with `editorCircuitGeometry.tidy`: columns by
   longest result-input path from a source, rows by the mean row of the sources (ties
-  by id), steps = largest card + 80/32 px rounded up to 16 px, all on the 16 px grid.
-  It is one draft edit through the ordinary `move` callback (label `Tidy up layout`,
-  undoable, saved only with Save); Arrange view stays display-only.
+  by pipeline stage: literature, interpretation, proposal, implementation, validation,
+  tuning, then id); modules with no wire take the next column in stage order, and with
+  no wire anywhere they form one row in stage order; steps = largest card + 80/32 px
+  rounded up to 16 px, all on the 16 px grid. It is one draft edit through the
+  ordinary `move` callback (label `Tidy up layout`, undoable, saved only with Save).
+- Check the workflow (`#circuit-check`, `repeat-2`; `editor-circuit-walk.js`): `plan`
+  orders the displayed nodes sources-first and lists one step per result-fed input,
+  then the loop feedback; the first required, non-framework-supplied, unbound input
+  (or a loop whose endpoint is gone, or an empty canvas) is the break. `run` moves an
+  HTML token (`.circuit-walk-token`) along each drawn wire path (220-900 ms per wire),
+  then marks the break socket `.walk-break` (soft red halo, three gentle pulses, a few
+  px around the 12 px socket, never larger than the card) with one sentence
+  `#circuit-walk-note` under the card ("Implement can't start: Model plan is not
+  connected."). `prefers-reduced-motion: reduce` skips the token and the pulse; the
+  halo and note show at once. The viewport carries `data-walk-state` running /
+  complete / break; any re-render clears it. It derives no validity of its own.
+- The research loop's feedback is drawn as a dashed display-only path
+  (`.circuit-feedback`) from the feedback module's output over the cards to the target
+  module's heading.
+- Keyboard and screen readers (red-team E-7): `#skip-to-canvas` is the first Tab stop
+  on the Workflow view (hidden on other views) and focuses the selected (else first)
+  module heading or the viewport without changing the route. Wire targets are named
+  `<module> sends <connector> to <module>`, are in the Tab order only with advanced tools
+  on (`tabindex -1` for beginners) and show a soft focus halo along the stroke. Unknown
+  hash routes are replaced by `#home` (navigation.js); a malformed `#monitor/<id>` stays
+  on Monitor with "Invalid operation UUID".
 - `+` add-handle (`editor-canvas-add.js`, canvas-study V5): an output whose card feeds
   no wire, and whose contract at least one catalog route accepts, shows a 20 px `+` 8 px
   outside the card while the card is hovered, focused or selected (no dead `+`; the
@@ -1373,7 +1419,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   output's contract id (`editorNodePalette.connectable`, presentation filter only).
   Choosing one calls `editorNodePalette.addConnected`, which adds a pending node 80 px
   right of the source with that argument (required first) bound to
-  `{kind: 'result', node, port: 'result'}` as ONE draft edit (`Add capability <id>`);
+  `{kind: 'result', node, port: 'result'}` as ONE draft edit (`Add module <id>`);
   the server node inspection decides completeness as for palette adds. Esc closes.
 - Research loop is a section of the Selection panel (`#editor-loop.inspector-section`).
 - Sockets (tour review batch 1): the visible socket label is the connector (schema) name
@@ -1391,9 +1437,9 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   external input) into one `+N optional` row. Fit to view never zooms below 75%; a larger
   graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
   zoom out still reaches 40%.
-- Canvas controls are one icon cluster bottom-right (zoom out, zoom %, zoom in, Actual
-  size, Fit, Arrange view, Tidy up); the connector legend is a bottom-left chip whose
-  content opens as a popover above it.
+- Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
+  in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
+  chip whose content opens as a two-column popover above it.
 - Problems (spec §9): `#problems-chip` (`circle-alert` + "N problems") toggles the 320px
   `#editor-problems` popover under it; it never takes space in the page. Each row is one
   sentence `<module name>: <connector name> is not connected` (other codes:
@@ -1501,7 +1547,7 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Workflow | Workflow project select and task chip (page bar) | Beginner | shown | Choose a task |
 | Workflow | Task package and version details (choose version, update references, findings) | Beginner | collapsed card below the frame; open by default with advanced tools | Opened from the task chip when a version must be chosen |
 | Workflow | Module rail (palette) | Beginner | shown | Add modules |
-| Workflow | Canvas, bottom-right controls (Fit, zoom, Arrange view, Tidy up), `+` add-handles, empty-canvas start state | Beginner | shown | Build and connect |
+| Workflow | Canvas, bottom-right controls (Fit, zoom, Check the workflow, Tidy up), `+` add-handles, empty-canvas start state, Skip to canvas | Beginner | shown | Build and connect |
 | Workflow | Canvas controls help (keyboard-move hints) | Advanced | gated | Long control reference; the tour covers first use |
 | Workflow | Connection mappings list | Advanced | gated | Protocol detail per binding |
 | Workflow | Templates button and gallery (Blank workflow first, Use template) | Beginner | shown | One-click start from a simple closed loop |
@@ -1511,7 +1557,7 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Workflow | Mapping chips ("adapter") on cards, card Mapping details | Advanced | gated (`editor-contract-presentation.js`, `editor-circuit.js`; flag change re-renders the canvas) | Protocol field mapping |
 | Workflow | Selection inspector, in order: advice (`editor-advice.js`), inputs with contract names, "Create external input" (`editor-external-inputs.js`), training and loop settings | Beginner | shown | Configure the selected module |
 | Workflow | Inspector Mapping details, model-hyperparameter owner (`editor-node-parameters.js`) | Advanced | gated (`editor.js`, `editor-node-parameters.js`) | Protocol / task-manifest detail |
-| Workflow | Remove capability (Selection, after the sections above) | Beginner | shown | Undo a placement |
+| Workflow | Delete module (trash icon in the Selection header) | Beginner | shown | Undo a placement |
 | Workflow | Research loop (Selection section) | Beginner | shown | Iteration limit and stop conditions |
 | Workflow | References (task / external locations) | Advanced | gated | Paths owned by the task configuration |
 | Workflow | Advanced source (Python editor) | Advanced | gated | Direct source editing |

@@ -83,7 +83,7 @@ try {
   await output('hypothesis').click(); await output('hypothesis').click({button: 'right'});
   assert.equal(await dirty(), false);
   await output('check_left').click(); await input('build_left', 'output').click();
-  assert.match(await page.locator('.circuit-message').textContent(), /refused/);
+  assert.match(await page.locator('.circuit-message').textContent(), /Can't connect/);
   assert.equal(await dirty(), false); await page.keyboard.press('Escape');
   await output('alternate').focus(); await page.keyboard.press('Space');
   await input('build_left', 'output').focus(); await page.keyboard.press('Space');

@@ -47,23 +47,24 @@
     element('summary', 'Create external input…', form);
     const field = (label, input) => { const wrapper = element('label', label, form); wrapper.append(input); return input; };
     const name = field('Input id', Object.assign(document.createElement('input'), {value: id, name: 'external-id'}));
-    const managed = entry.managed && context.reusable;
-    const mode = managed ? field('Value', document.createElement('select')) : null;
-    if (mode) {
-      element('option', 'Managed by the run (preparation supplies it)', mode).value = 'managed';
-      element('option', 'A JSON file in the project', mode).value = 'file';
-      mode.name = 'external-mode';
-    }
+    // Red-team SEC-6: reusable (schema 2) preparation accepts only inputs the run manages, so a
+    // reusable workflow never offers "A JSON file in the project"; an input with no managed
+    // route cannot be created here and says why.
+    const isManaged = !!context.reusable;
+    const blocked = context.reusable && !entry.managed;
     const location = field('File path (relative to the project folder)', Object.assign(document.createElement('input'),
       {name: 'external-location', placeholder: `e.g. inputs/${id}.json`}));
-    element('p', `The file holds a ${entry.contract.native_type} value as JSON. Nothing is read until a run is prepared.`, form, 'external-input-note');
+    if (isManaged) {
+      location.parentElement.hidden = true;
+      element('p', blocked ? 'Reusable workflows accept only inputs the run manages, and this one has no managed form. Declare it in a version 1 workflow instead.'
+        : 'The run supplies this input when it is prepared (reusable workflows accept only managed inputs).', form, 'external-input-note');
+    } else element('p', `The file holds a ${entry.contract.native_type} value as JSON. Nothing is read until a run is prepared.`, form, 'external-input-note');
     const error = element('p', '', form, 'external-input-error'); error.setAttribute('role', 'status');
-    const sync = () => { location.parentElement.hidden = mode?.value === 'managed'; };
-    mode?.addEventListener('change', sync); sync();
     const button = element('button', 'Create and connect', form); button.type = 'button';
-    for (const input of [name, location, button, ...(mode ? [mode] : [])]) input.disabled = !context.enabled;
+    for (const input of [name, location, button]) input.disabled = !context.enabled || blocked;
     button.addEventListener('click', () => {
-      const value = name.value.trim(), path = location.value.trim(), isManaged = mode?.value === 'managed';
+      if (blocked) return;
+      const value = name.value.trim(), path = location.value.trim();
       if (!IDENTIFIER.test(value)) { error.textContent = 'Use a letter first, then letters, digits, _ or -.'; return; }
       if (context.taken.has(value)) { error.textContent = `An input named ${value} already exists; choose it above or pick another id.`; return; }
       if (!isManaged && !path) { error.textContent = 'Enter the project-relative path of the JSON file.'; return; }

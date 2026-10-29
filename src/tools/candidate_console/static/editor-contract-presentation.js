@@ -100,10 +100,10 @@
     const ids = new Set();
     for (const item of inventory) { ids.add(learn(item.socket_contract)); ids.add(learn(item.node_output_contract)); }
     const box = document.createElement('details'); box.className = 'circuit-contract-legend';
-    text('summary', `Port types (${ids.size})`, box);
+    text('summary', `Connector types (${ids.size})`, box);
     // Opened, the legend is a popover above its bottom-left chip (spec K14): it never pushes the canvas.
     const pop = text('div', '', box, 'circuit-contract-legend-popover');
-    const note = text('p', 'Colour, shape and name identify the data type (schema) a socket carries; the same type has the same name everywhere. A wire can join only an output and an input with the same contract; the server decides which connections are offered. Filled socket: output or required input. Hollow socket: optional input. ', pop, 'circuit-contract-legend-note');
+    const note = text('p', 'Colour, shape and name show the data a socket carries. A wire joins an output and an input of the same type. Filled: output or required input; hollow: optional. ', pop, 'circuit-contract-legend-note');
     // Direction key inline in the note, so the open legend stays as short as before.
     const key = text('span', '', note, 'circuit-contract-legend-direction');
     text('span', '→', key, 'circuit-port-direction').setAttribute('aria-hidden', 'true');
@@ -121,10 +121,11 @@
     parent.append(box); return box;
   }
   // Short reason for a connection the server does not offer, naming both contracts.
+  // Spec K10: "Can't connect: Propose model sends Model plan; this input receives Design brief."
   function refusal(sourceLabel, sourceContract, inputLabel, socketContract) {
-    if (!sourceContract || !socketContract) return `Connection refused: the server does not offer ${sourceLabel} for ${inputLabel}.`;
-    if (sourceContract === socketContract) return `Connection refused: the server does not offer ${sourceLabel} for ${inputLabel}, although both carry ${socketContract}.`;
-    return `Connection refused: ${inputLabel} expects ${socketContract} (${describe(socketContract).name}), but ${sourceLabel} provides ${sourceContract} (${describe(sourceContract).name}).`;
+    if (!sourceContract || !socketContract) return `Can't connect ${sourceLabel} to ${inputLabel}.`;
+    if (sourceContract === socketContract) return `Can't connect: ${sourceLabel} is not offered for ${inputLabel}.`;
+    return `Can't connect: ${sourceLabel} sends ${describe(sourceContract).name}; ${inputLabel} receives ${describe(socketContract).name}.`;
   }
   const sourceLabel = source => !source ? 'unbound' : source.kind === 'external' ? `external:${source.binding}` : `${source.node}.${source.port || 'result'}`;
   // Per-node protocol mapping chip ("adapter"): declared on the consumer node, never a

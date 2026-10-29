@@ -62,6 +62,7 @@ try {
   await page.locator('#editor-advanced').evaluate(el => {el.open = true;});
   if (training) {
     await page.locator('[data-node="fit"].editor-node').click();
+    await page.locator('#editor-training-settings').evaluate(details => { details.open = true; }); // collapsed by default (spec §8.1)
     assert.ok((await page.locator('#editor-inspector pre').textContent()).includes('"exact": null'));
     await page.locator('[data-training-mode="sampling_seed"]').selectOption('supplied');
     await page.locator('[data-training="sampling_seed"]').fill('31');

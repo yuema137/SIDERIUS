@@ -40,7 +40,7 @@
       node('span', sentence(item, actions), button, 'editor-problem-text');
       // The raw located diagnostic stays available as advanced detail.
       // Server messages may already start with their location ("build.output: …"): say it once.
-      const where = item.node ? `${item.node}.${item.field || 'request'}` : item.line ? `line ${item.line}` : 'source';
+      const where = item.node ? `${item.node}.${item.field || 'request'}` : item.line ? `line ${item.line}` : WORKFLOW.has(item.code) ? 'workflow' : 'source';
       const message = item.message.startsWith(`${where}: `) ? item.message.slice(where.length + 2) : item.message;
       const raw = node('code', `${where} · ${message}`, button, 'editor-problem-raw');
       raw.dataset.uiFlag = 'advanced';

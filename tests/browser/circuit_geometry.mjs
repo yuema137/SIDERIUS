@@ -79,12 +79,17 @@ console.log('PASS view fit scale bounds and saved-layout overlap detection');
   const nodes = [node('validate', ['implement', 'propose']), node('implement', ['propose']), {id: 'propose', request: {kind: 'external', binding: 'x'}}, node('side', ['propose']), node('lone', [])];
   const placed = tidy(nodes, {width: 215, height: 150});
   const column = Math.ceil((215 + 80) / 16) * 16, row = Math.ceil((150 + 32) / 16) * 16;
-  assert.deepEqual([placed.get('propose').x, placed.get('lone').x], [0, 0], 'Sources start the first column');
+  assert.equal(placed.get('propose').x, 0, 'Sources start the first column');
+  assert.equal(placed.get('lone').x, 3 * column, 'A module with no wire takes the column after the connected ones');
   assert.equal(placed.get('implement').x, column, 'One step after its source');
   assert.equal(placed.get('validate').x, 2 * column, 'Longest path, not the shortest (propose -> validate skip edge)');
   assert.deepEqual([placed.get('implement').y, placed.get('side').y].sort(), [0, row], 'Siblings share a column on separate rows');
   for (const {x, y} of placed.values()) assert.ok(x % 16 === 0 && y % 16 === 0, 'On the 16px grid');
   const keys = [...placed.values()].map(({x, y}) => `${x},${y}`);
   assert.equal(new Set(keys).size, keys.length, 'No two modules share a slot');
-  console.log('PASS tidy layout: longest-path columns, grid-aligned disjoint slots');
+  // Tour #12: with no wire at all, modules form one row in pipeline order (never backwards).
+  const stages = {validate: 4, implement: 3, propose: 2};
+  const row1 = tidy([{id: 'validate', request: {kind: 'external'}}, {id: 'implement', request: {kind: 'external'}}, {id: 'propose', request: {kind: 'external'}}], {width: 215, height: 150}, undefined, undefined, id => stages[id]);
+  assert.deepEqual(['propose', 'implement', 'validate'].map(id => row1.get(id).x), [0, column, 2 * column], 'Pipeline order left to right');
+  console.log('PASS tidy layout: longest-path columns, loose modules after them, pipeline order, grid-aligned disjoint slots');
 }

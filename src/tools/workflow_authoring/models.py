@@ -116,7 +116,7 @@ class PendingNode(Model):
                 code="required_unbound",
                 node=self.node,
                 field=field,
-                message=f"{self.node}.{field}: required input is unbound",
+                message=f"{self.node}.{field}: required input is not connected",
             )
             for field in fields
         )

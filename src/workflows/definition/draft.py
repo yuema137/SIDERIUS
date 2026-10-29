@@ -167,5 +167,5 @@ def _unbound(node: str, field: str) -> DraftProblem:
         code="required_unbound",
         node=node,
         field=field,
-        message=f"{node}.{field}: required input is unbound",
+        message=f"{node}.{field}: required input is not connected",
     )
