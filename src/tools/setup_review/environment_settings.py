@@ -24,7 +24,7 @@ from tools.setup_review.semantic_models import SavedTaskCheckSnapshot, SnapshotI
 from tools.setup_review.snapshot_io import claim_snapshot_output, read_snapshot
 from workflows.launch_identity import resolve_launch_identity
 from workflows.launch_projection import json_launch_values
-from workflows.run_config import validate_launch_trial_overrides
+from workflows.run_config import validate_launch_admission
 from workflows.runtime_settings import resolve_watchdog_policy
 from workflows.standard_launch import build_standard_launch_config
 
@@ -127,7 +127,7 @@ def inspect_environment(request: EnvironmentPreviewRequest) -> EnvironmentPrevie
     launch = build_standard_launch_config(
         args, resolve_launch_identity(args), resolved_paths=[], fixed_candidate_plan=None
     )
-    validate_launch_trial_overrides(launch)
+    validate_launch_admission(launch)
     values = json_launch_values(launch)
     if binding is not None:
         from workflows.reviewed_launch_binding import verify_binding

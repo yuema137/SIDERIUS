@@ -14,10 +14,11 @@ from workflows.definition.fanout import execution_families
 from . import readiness
 from .graph_models import GraphCapability, GraphNodeEvidence, GraphReason, GraphState, GraphTrace
 from .layout import graph_instance_dir
-from .models import CandidateRunReceipt, CandidateRunRequest
+from .models import CandidateRunReceipt, CandidateRunRequest, tuning_seed_scope
 from .route_eval import RouteEvaluationOutput
 
 if TYPE_CHECKING:
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
     from agent.schemas.proposal import ProposalOutput
     from workflows.adaptors import AdaptorOutcome
 
@@ -604,6 +605,7 @@ def verify_graph_training(
         or validation.candidate_id != proposal.candidate_id
         or value.constraint_context != seed.constraint_context
         or value.current_run_best_formal_score != incumbent
+        or not _seeded_as_launched(value, initial, shape.tuning, iteration)
         or output.run_name != initial.run_name
         or output.model_type != proposal.model_name
         or output.candidate_id != proposal.candidate_id
@@ -612,6 +614,21 @@ def verify_graph_training(
         != ("failed" if output.termination_reason == "infrastructure_abort" else "succeeded")
     ):
         raise ValueError("graph native training identity/termination mismatch")
+
+
+def _seeded_as_launched(
+    value: "HyperparamTuningInput", initial: CandidateRunReceipt, node_id: str, iteration: int
+) -> bool:
+    """The tuner trained under the launch receipt's seed at this body's coordinates.
+
+    A receipt that predates the seed contract stays readable without this check.
+    """
+    if initial.run_seed is None:
+        return True
+    return (value.run_seed, value.seed_coordinates) == (
+        initial.run_seed,
+        tuning_seed_scope(iteration, node_id),
+    )
 
 
 def _check_staged_implementation(

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID
 
+from core.seeding import MissingRunSeed
 from tools.candidate_prepare import prepare_candidate, prepare_reusable_candidate
 from tools.candidate_prepare.reusable_models import ReusablePreparationObservations
 from tools.candidate_worker import launch_candidate
@@ -13,7 +14,7 @@ from tools.candidate_worker import launch_candidate
 from .cancel import cancel_probe
 from .files import canonical, publish, read_model
 from .host_liveness import PLACEMENT_FILE, SANDBOX_FILE
-from .models import Completion, OperationRecord
+from .models import SEEDED_SUBMISSIONS, Completion, OperationRecord
 from .native_chain import execute_native_chain
 from .native_resume_execute import execute_native_resume
 from .process import current_identity, identity_of, runtime_identity
@@ -50,14 +51,22 @@ def execute(path: Path) -> int:
             completion = execute_native_resume(record, path)
             publish(path / "completion.json", completion)
             return 0 if completion.outcome == "native_chain" else 1
+        if isinstance(record.submission, SEEDED_SUBMISSIONS) and record.run_seed is None:
+            # Only admission binds a seed; the child never generates a second one.
+            raise MissingRunSeed("operation record has no admitted run seed")
         entered = True
         if record.submission.kind == "prepare":
-            prepare_candidate(record.submission.request, invocation_id=record.native_id)
+            prepare_candidate(
+                record.submission.request,
+                invocation_id=record.native_id,
+                run_seed=record.run_seed,
+            )
         elif record.submission.kind == "prepare_reusable":
             prepare_reusable_candidate(
                 record.submission.request,
                 invocation_id=record.native_id,
                 expected_observations=ReusablePreparationObservations.from_inputs(record.inputs),
+                run_seed=record.run_seed,
             )
         elif record.submission.kind == "candidate_loop_resume":
             from .loop_resume import execute_resume
@@ -67,6 +76,7 @@ def execute(path: Path) -> int:
             launch_candidate(
                 record.submission.request,
                 invocation_id=record.native_id,
+                run_seed=record.run_seed,
                 cancel_requested=cancel_probe(path, record),
                 **sandbox_observer(record, path),
             )

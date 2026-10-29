@@ -217,6 +217,39 @@ def test_five_node_native_training_and_parent_evidence(prepared, training_runner
         verify_graph_trace(request, parent, receipt)
 
 
+@pytest.mark.parametrize("forged", ["run_seed", "seed_coordinates"])
+def test_graph_readback_refuses_a_forged_tuning_seed(prepared, training_runner, forged):
+    """(b) Fails if a persisted tuning input may claim another seed or position than launched."""
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+    from core.seeding import SeedCoordinates
+    from tools.candidate_worker.graph_evidence import read_graph_control
+    from tools.candidate_worker.models import CandidateRunReceipt
+
+    request = graph_training_request(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    workspace = Path(receipt.workspace)
+    launched = CandidateRunReceipt.model_validate_json(
+        read_graph_control(workspace / "candidate_run/launch.json")
+    )
+    assert launched.run_seed is not None
+    verify_graph_trace(request, launched, receipt)
+    path = tuning_input_path(workspace, "train")
+    value = HyperparamTuningInput.model_validate_json(read_graph_control(path))
+    assert (value.run_seed, value.seed_coordinates) == (
+        launched.run_seed,
+        SeedCoordinates(iteration=1, node_id="train"),
+    )
+    update = (
+        {"run_seed": launched.run_seed + 1}
+        if forged == "run_seed"
+        else {"seed_coordinates": SeedCoordinates(iteration=2, node_id="train")}
+    )
+    path.write_text(value.model_copy(update=update).model_dump_json(indent=2))
+    with pytest.raises(ValueError, match="graph native training identity"):
+        verify_graph_trace(request, launched, receipt)
+
+
 def test_saved_reusable_interpretation_profile_reaches_same_native_five_node_path(
     prepared, native_runner, training_runner, monkeypatch
 ):

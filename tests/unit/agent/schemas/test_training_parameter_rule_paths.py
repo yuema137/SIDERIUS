@@ -60,14 +60,14 @@ def test_actual_schedule_branches_and_omitted_exact_fields_stay_consumable(
         {
             "train_config.epochs": {"exact": 5},
             f"train_config.lr_schedule.{path}": {"exact": value},
-            "model_config.plugin_extension": {"exact": {"arbitrary": True}},
+            "model_config.dropout": {"exact": 0.25},
         }
     )
     effective = apply_parameter_rules(plan, workflow_rules=rules)
     consumed = TrainConfig.model_validate(effective.train_cfg)
     assert consumed.epochs == 5
     assert consumed.lr_schedule.model_dump()[path] == value
-    assert effective.model_cfg["plugin_extension"] == {"arbitrary": True}
+    assert effective.model_cfg["dropout"] == 0.25
     assert "epochs" not in plan.train_cfg
     assert schedule[path] != value
 

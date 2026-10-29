@@ -620,6 +620,7 @@ def test_new_training_record_refuses_target_dependent_analysis(tmp_path: Path) -
     )
     with pytest.raises(AnalysisPlanResolutionError, match="analysis scope"):
         DataAnalysisAgent(
+            run_seed=11,
             task_analysis_capability=analysis_capability,
             bridge_factory=lambda **kwargs: _ModelDiagnosticBridge(
                 analysis_input=analysis_input, **kwargs

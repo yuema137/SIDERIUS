@@ -1,13 +1,14 @@
 """Bounded authoring requests and projections of the existing declaration."""
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
-from workflows.definition import AuthoredLoop, AuthoredWorkflowDocument
+from workflows.definition import ArgumentBinding, AuthoredLoop, AuthoredWorkflowDocument
+from workflows.definition.catalog import CAPABILITIES, PROTOCOLS
 from workflows.definition.draft import DraftInspection, WorkflowDraft
-from workflows.definition.models import Source
+from workflows.definition.models import Identifier, Source
 from workflows.definition.source import SourceDiagnostic
 
 from .task_models import TaskReferenceAcceptance, TaskReferenceReview, TaskReferenceUpdateProposal
@@ -54,6 +55,85 @@ class LoopProposal(Model):
     loop: AuthoredLoop | None
 
 
+class AddNodeProposal(Model):
+    """Insert one catalog node into the exact proposal source; other bytes stay.
+
+    ``protocol=None`` selects the capability's external request route
+    (``binding``); otherwise ``arguments`` bind the protocol's sockets. Unbound
+    required inputs are a draft-only state: Review refuses them as
+    ``draft_incomplete`` and nothing invalid can reach Save.
+    """
+
+    kind: Literal["add_node"]
+    source: BoundedSource
+    node: Identifier
+    capability: str
+    protocol: str | None = None
+    binding: Identifier | None = None
+    arguments: tuple[ArgumentBinding, ...] = ()
+    x: float = Field(allow_inf_nan=False)
+    y: float = Field(allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def catalog_route(self) -> Self:
+        capability = CAPABILITIES.get(self.capability)
+        if capability is None:
+            raise ValueError("capability is not in the native catalog")
+        if self.protocol is None:
+            if self.arguments:
+                raise ValueError("an external request route has no protocol arguments")
+            return self
+        protocol = PROTOCOLS.get(self.protocol)
+        if protocol is None or protocol.output != capability.input:
+            raise ValueError("protocol does not produce this capability's input")
+        if self.binding is not None:
+            raise ValueError("a protocol route has no external request binding")
+        names = [item.name for item in self.arguments]
+        if len(set(names)) != len(names) or not set(names) <= {
+            item.name for item in protocol.arguments
+        }:
+            raise ValueError("arguments must be unique protocol sockets")
+        return self
+
+    def missing_inputs(self) -> tuple[str, ...]:
+        if self.protocol is None:
+            return () if self.binding else (f"{self.node}.request: required input is unbound",)
+        bound = {item.name for item in self.arguments}
+        return tuple(
+            f"{self.node}.{item.name}: required input is unbound"
+            for item in PROTOCOLS[self.protocol].arguments
+            if item.required and item.name not in bound
+        )
+
+
+class RemoveNodeProposal(Model):
+    """Remove nodes with their own input bindings and layout positions.
+
+    Any remaining input or loop endpoint that reads a removed node refuses the
+    whole proposal with an explanation; nothing is rewired implicitly.
+    """
+
+    kind: Literal["remove_node"]
+    source: BoundedSource
+    nodes: tuple[Identifier, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique(self) -> Self:
+        if len(set(self.nodes)) != len(self.nodes):
+            raise ValueError("node ids must be unique")
+        return self
+
+
+class NodeEditSummary(Model):
+    """Review explanation of a node add/remove; the diff stays the exact authority."""
+
+    added: tuple[str, ...] = ()
+    removed: tuple[str, ...] = ()
+    # Input connections of removed nodes that disappear with them.
+    disconnected: tuple[str, ...] = ()
+    message: str
+
+
 class DocumentProposal(Model):
     kind: Literal["document"]
     document: AuthoredWorkflowDocument
@@ -81,6 +161,8 @@ class ReviewRequest(Model):
         | LoopProposal
         | DocumentProposal
         | DraftProposal
+        | AddNodeProposal
+        | RemoveNodeProposal
         | TaskReferenceUpdateProposal,
         Field(discriminator="kind"),
     ]
@@ -98,10 +180,18 @@ class ReviewRequest(Model):
         return self
 
 
+# 1-64 characters, no control characters, no leading/trailing whitespace.
+VersionName = Annotated[
+    str, Field(pattern=r"^[^\s\x00-\x1f\x7f](?:[^\x00-\x1f\x7f]{0,62}[^\s\x00-\x1f\x7f])?$")
+]
+
+
 class SaveRequest(SourceProposal):
     kind: Literal["source"] = "source"
     expected_sha256: Digest
     proposal_sha256: Digest
+    # Presentation-only name recorded beside the source; omitted -> next "vN".
+    version_name: VersionName | None = Field(default=None, exclude_if=lambda value: value is None)
     task_reference_acceptance: TaskReferenceAcceptance | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -178,9 +268,46 @@ class ReviewView(Model):
     sha256: Digest
     diff: str
     document: AuthoredWorkflowDocument
+    node_edit: NodeEditSummary | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SaveView(Model):
     sha256: Digest
     recovery_ids: tuple[str, ...]
     unchanged: bool = False
+    version_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class CatalogArgument(Model):
+    name: str
+    contract: NativeContract
+    required: bool
+
+
+class CatalogEntry(Model):
+    """One addable request route for one capability; ``protocol=None`` is external."""
+
+    capability: str
+    protocol: str | None
+    owner: str | None
+    input_contract: NativeContract
+    output_contract: NativeContract
+    arguments: tuple[CatalogArgument, ...]
+
+
+class NodeCatalog(Model):
+    entries: tuple[CatalogEntry, ...]
+
+
+class NodeDraftRequest(Model):
+    expected_sha256: Digest
+    proposal: AddNodeProposal
+
+
+class NodeDraftView(Model):
+    """Inert inspection of a pending node; ``ports`` use the ordinary inventory shape."""
+
+    proposal: AddNodeProposal
+    status: Literal["incomplete", "invalid", "complete"]
+    diagnostics: tuple[str, ...] = ()
+    ports: tuple[PortInventoryEntry, ...]

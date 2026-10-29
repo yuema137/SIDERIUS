@@ -43,7 +43,7 @@
     control?.focus();
     return !!control;
   }
-  /** Open Advanced → Source and place the caret at a one-based line. */
+  /** Open Advanced source and place the caret at a one-based line. */
   function focusSource(line) {
     const advanced = document.getElementById('editor-advanced'), source = document.getElementById('editor-source');
     if (advanced) advanced.open = true;

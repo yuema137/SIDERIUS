@@ -16,7 +16,12 @@ from agent.schemas.data_analysis.context import DataAnalysisInput
 from agent.schemas.data_analysis.generated_program import GeneratedAnalysisProgram
 from agent.schemas.data_analysis.generated_skill import GeneratedSkillPromotionDraft
 from agent.schemas.data_analysis.plan import AnalysisPlan
-from agent.schemas.data_analysis.skills import ResolvedSkillInterface, SkillPayload, SkillResult
+from agent.schemas.data_analysis.skills import (
+    AnalysisCoverage,
+    ResolvedSkillInterface,
+    SkillPayload,
+    SkillResult,
+)
 from agent.schemas.data_analysis.view_formats import GENERATED_PROGRAM_VIEW_FORMATS_V1
 
 
@@ -66,6 +71,18 @@ def _planning_input(analysis_input: DataAnalysisInput) -> dict:
         item.model_dump(mode="json") for item in analysis_input.planning_assets()
     ]
     payload["source_scope"] = analysis_input.effective_source_scope().model_dump(mode="json")
+    return payload
+
+
+def _coverage(coverage: AnalysisCoverage, *, seed_declared: bool) -> dict:
+    """Coverage as rendered: a derived sampling seed is executed but never shown.
+
+    Issue #983: only an operator-declared seed reaches a prompt; a seed derived
+    from the run seed would make the prompt bytes run-specific.
+    """
+    payload = coverage.model_dump(mode="json")
+    if not seed_declared:
+        payload.pop("sampling_seed", None)
     return payload
 
 
@@ -357,6 +374,7 @@ the model was inspected. State limitations and sampling coverage honestly. Autho
 descriptors are declared context, not new measurements or permission to read additional data.
 Use their units/acquisition metadata only for the matching measured asset; do not invent missing
 artifact contents from a reference. Return JSON only."""
+    seed_declared = analysis_input.resource_envelope.declared_sampling_seed() is not None
     bounded_results = [
         {
             "result_id": result.result_id,
@@ -376,7 +394,7 @@ artifact contents from a reference. Return JSON only."""
             ],
             "coverage": None
             if result.coverage is None
-            else result.coverage.model_dump(mode="json"),
+            else _coverage(result.coverage, seed_declared=seed_declared),
             "warnings": list(result.warnings[:16]),
             "artifact_refs": [item.model_dump(mode="json") for item in result.artifact_refs[:16]],
         }

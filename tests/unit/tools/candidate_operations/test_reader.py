@@ -35,6 +35,8 @@ def native_fixture(admitted):
         request_path=str(control / "request.json"),
         log_path=str(control / "worker.log"),
         source_observations=saved.sources,
+        run_seed=record.run_seed.value,
+        run_seed_source=record.run_seed.source,
     )
     publish_native(control / "receipt.json", receipt)
     return config, submission, record, path, control, receipt

@@ -406,6 +406,7 @@ def test_after_process_operation_read_reaches_terminal_verifier(
         runtime=runtime_identity(),
         inputs=training_request.files,
         admitted_at=now(),
+        run_seed=receipt.seed_binding(),
     )
     with locked_store(config) as root:
         claim(root, record)
@@ -776,6 +777,20 @@ def test_candidate_settings_nonfinite_floats_inherit_the_string_encoding():
     def floats(annotation) -> bool:
         return annotation is float or any(floats(arg) for arg in typing.get_args(annotation))
 
+    def owner_refuses_inf(owner, name) -> bool:
+        # The owning model's validators decide: NumericRange refuses inf in an
+        # after-validator that the field annotation cannot express. Probe the
+        # owner with a finite value (must pass) and with inf (must fail).
+        try:
+            owner.model_validate({name: 0.0})
+        except ValidationError:
+            return False
+        try:
+            owner.model_validate({name: float("inf")})
+        except ValidationError:
+            return True
+        return False
+
     offenders, seen = [], set()
 
     def walk(annotation, path):
@@ -786,7 +801,12 @@ def test_candidate_settings_nonfinite_floats_inherit_the_string_encoding():
                     inherits = arg.model_config.get("ser_json_inf_nan") == "strings"
                     for name, info in arg.model_fields.items():
                         annotation = info.rebuild_annotation()
-                        if floats(info.annotation) and not inherits and admits_inf(annotation):
+                        if (
+                            floats(info.annotation)
+                            and not inherits
+                            and admits_inf(annotation)
+                            and not owner_refuses_inf(arg, name)
+                        ):
                             offenders.append(f"{path}.{name} ({arg.__name__})")
                         walk(info.annotation, f"{path}.{name}")
                 elif dataclasses.is_dataclass(arg):
@@ -798,11 +818,7 @@ def test_candidate_settings_nonfinite_floats_inherit_the_string_encoding():
 
     for name, info in CandidateTrainingSettings.model_fields.items():
         walk(info.annotation, name)
-    # Known gap, owned by parameter_rules.py: the follow-up after #1058/#1060
-    # makes ParameterRule bounds and exact/allowed refuse non-finite numbers.
-    # Exact equality makes this fail both on a new gap and once that lands.
-    known = [
-        "launch.workflow_parameter_rules.rules.range.min (NumericRange)",
-        "launch.workflow_parameter_rules.rules.range.max (NumericRange)",
-    ]
-    assert offenders == known, offenders
+    # No known gaps: NumericRange bounds and ParameterRule exact/allowed values
+    # refuse non-finite numbers at their owning models, so none reach transport.
+    # Exact equality makes any new offender fail this guard.
+    assert offenders == [], offenders

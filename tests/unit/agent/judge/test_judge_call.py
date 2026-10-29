@@ -222,11 +222,14 @@ def test_reordered_call_chain_is_refused(tmp_path):
     """Defect: chained calls can be dropped, spliced or reordered undetected."""
     first = run(tmp_path, StubBridge())
     second = _chained(first, [first])
-    verify_call_chain([first, second])
+    kinds = ("stop", "stop")
+    verify_call_chain([first, second], content_kinds=kinds)
     with pytest.raises(JudgeEvidenceError, match="call_index"):
-        verify_call_chain([second, first])
+        verify_call_chain([second, first], content_kinds=kinds)
     with pytest.raises(JudgeEvidenceError, match="earlier calls"):
-        verify_call_chain([first, _chained(first, [second])])
+        verify_call_chain([first, _chained(first, [second])], content_kinds=kinds)
+    with pytest.raises(JudgeEvidenceError, match="not the declared 'revision'"):
+        verify_call_chain([first, second], content_kinds=("stop", "revision"))
 
 
 @pytest.mark.parametrize(

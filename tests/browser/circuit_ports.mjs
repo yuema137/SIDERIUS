@@ -49,6 +49,8 @@ try {
   const output = name => page.locator(`#circuit-output-${name}`);
   const input = (name, argument) => page.locator(`#circuit-input-${name}-${argument}`);
   const dirty = () => page.evaluate(() => window.workflowEditor.state.dirty);
+  // Binding inspection (POST .../draft) is a read-only declaration check; only review/save author.
+  const authored = () => requests.filter(item => !item.path.endsWith('/draft'));
   assert.equal(await page.locator('.editor-node').count(), 8);
   const layoutSnapshot = () => page.evaluate(() => ({
     positions: [...document.querySelectorAll('.circuit-card')].map(card => [card.dataset.node, card.style.left, card.style.top]),
@@ -91,7 +93,9 @@ try {
   assert.equal(await page.locator('#editor-inspector select[data-argument="output"] option:checked').textContent(), 'alternate.result');
   const beforePosition = await page.locator('.circuit-card[data-node="build_left"]').evaluate(element => element._position);
   const beforeLayout = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => ({node: card.dataset.node, ...card._position})));
+  // Unified draft: a layout move after wiring joins the same draft instead of being refused.
   await page.locator('#circuit-node-build_left').focus(); await page.keyboard.press('Alt+ArrowDown');
+  assert.notDeepEqual(await page.locator('.circuit-card[data-node="build_left"]').evaluate(element => element._position), beforePosition, 'Alt+arrow moves a card while connections are pending');
   // Pointer deltas below are screen pixels; compare them at 100 % (fit-on-open may have zoomed out).
   await page.locator('#circuit-zoom-reset').click();
   const header = page.locator('#circuit-node-build_left'); await header.scrollIntoViewIfNeeded();
@@ -108,15 +112,23 @@ try {
   await page.mouse.move(rect.x + 70, rect.y + 45, {steps: 4}); await page.mouse.up();
   const position = await page.locator('.circuit-card[data-node="build_left"]').evaluate(element => element._position);
   assert.deepEqual(position, {x: beforePosition.x + 40, y: beforePosition.y + 50});
-  assert.equal(requests.length, 0, 'Selecting, cancelling, wiring and dragging do not send POSTs');
+  assert.equal(authored().length, 0, 'Selecting, cancelling, wiring and dragging do not review or save');
+  assert.ok(requests.every(item => item.path.endsWith('/draft')));
   assert.equal(await readFile(metadata.source, 'utf8'), original);
+  assert.match(await page.locator('#editor-pending').textContent(), /Pending binding draft/);
+  await waitUntil(async () => !(await page.locator('#editor-review').isDisabled()));
   await page.locator('#editor-review').click();
   await page.locator('#editor-task-acknowledge').waitFor();
   await page.locator('#editor-task-acknowledge').check(); await page.locator('#editor-save').click();
   await waitUntil(async () => !(await dirty()) && (await readFile(metadata.source, 'utf8')) !== original);
   const saved = await readFile(metadata.source, 'utf8');
-  assert.deepEqual(requests.map(item => item.path.split('/').at(-1)), ['review', 'save']);
-  const reviewed = requests[0].body.proposal.document;
+  assert.deepEqual(authored().map(item => item.path.split('/').at(-1)), ['review', 'save']);
+  // One review carries both the wiring patches and the layout of the same draft.
+  const proposal = authored()[0].body.proposal;
+  assert.equal(proposal.kind, 'draft');
+  const reviewed = proposal.draft.base_document;
+  assert.deepEqual(proposal.draft.bindings.map(item => [item.node, item.argument, item.source.node]).sort(),
+    [['build_left', 'output', 'alternate'], ['check_left', 'proposal', 'alternate']]);
   // A move persists every displayed card position, not only the moved card.
   assert.deepEqual(reviewed.positions, beforeLayout.map(item => item.node === 'build_left' ? {node: 'build_left', ...position} : item));
   assert.equal(reviewed.execution_profile, 'native-proposal-families/v1');
@@ -168,7 +180,7 @@ p.write_text(render_workflow_source(ReusableWorkflowDocument.model_validate_json
   assert.equal(await dirty(), false, 'A retained inspector handle cannot edit a replacement graph');
   assert.equal(await page.locator('#editor-source').inputValue(), refreshedSource);
   assert.deepEqual(await layoutSnapshot(), refreshedLayout);
-  assert.deepEqual(requests.map(item => item.path.split('/').at(-1)), ['review', 'save']);
+  assert.deepEqual(authored().map(item => item.path.split('/').at(-1)), ['review', 'save']);
   assert.equal(await readFile(snapshot, 'utf8'), saved, 'Code edits never rewrite the previous capture');
   assert.deepEqual(faults, []);
   console.log('PASS real socket branch move, keyboard/cancel/type refusal, pointer and keyboard layout, reviewed save, native family preparation, code roundtrip, themes and narrow view; no API/GPU');

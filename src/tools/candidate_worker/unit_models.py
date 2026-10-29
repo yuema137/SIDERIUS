@@ -70,6 +70,7 @@ class AdmittedTraining(BaseModel):
     settings: CandidateTrainingSettings
     constraints: ConstraintContext | None
     node_id: str
+    iteration: PositiveInt
     workspace: str
     run_name: str
     run_dir: str
@@ -101,6 +102,7 @@ class AdmittedTraining(BaseModel):
             admitted_run_bindings(composition, config, **facts),
             self.constraints,
             self.node_id,
+            self.iteration,
         )
 
 
@@ -115,6 +117,7 @@ def admission_from(
         settings=admitted.settings,
         constraints=admitted.constraints,
         node_id=admitted.node_id,
+        iteration=admitted.iteration,
         **{name: getattr(admitted.bindings, name) for name in _binding_fields()},
     )
     if transport.restore(composition, config) != admitted:

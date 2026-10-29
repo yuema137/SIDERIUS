@@ -7,7 +7,7 @@ fingerprint still moves with the preflight estimation assembly on any
 framework revision that edits a file it hashes).
 
 A rubric is a declared scoring scheme for LLM judges, never a task metric. It
-names integer criteria; the weighted total is computed by framework code from
+names integer criteria; the weighted mean is computed by framework code from
 validated per-criterion integers (the LLM never emits a total). A rubric is
 identified by ``(id, version)`` and bound to its exact content by
 :func:`rubric_sha256`. A consumer names a rubric through a :class:`RubricRef`
@@ -33,6 +33,9 @@ Version = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*
 MAX_RUBRIC_CRITERIA = 32
 MAX_RUBRIC_WEIGHT = 100.0
 MAX_RUBRIC_SCALE_SPAN = 100
+#: Debate rounds a ``debate-judge/v1`` declaration may request (declaration and
+#: debate call schemas share it; kept here because declarations import only this module).
+MAX_DEBATE_ROUNDS = 4
 
 
 class _StrictModel(BaseModel):

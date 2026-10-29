@@ -1,0 +1,18 @@
+/* Page guidance: step indicator, first-run guide, Workflow -> Run handoff and the Run view. */
+.step-indicator ol { display: flex; flex-wrap: wrap; gap: 4px 0; margin: 0; padding: 0; list-style: none; font-size: .9rem; }
+.step-indicator li { display: flex; align-items: center; color: var(--muted); }
+.step-indicator li + li::before { content: '›'; padding: 0 10px; color: var(--muted); }
+.step-indicator a { padding: 4px 0; }
+.step-indicator a[aria-current="step"] { font-weight: 700; text-decoration-thickness: 3px; }
+.step-indicator li.done a::after { content: ' ✓'; color: var(--secondary); }
+
+.start-guide { border-color: var(--primary); }
+.start-guide h2 { margin-top: 0; }
+
+.workflow-next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.workflow-next p { margin: 0; flex: 1 1 260px; }
+
+#view-run { display: grid; gap: 16px; align-content: start; }
+#view-run > h1 { margin: 0; }
+.run-source h2, .run-step h2 { margin-top: 0; }
+#workflow-details h2 { font-size: 1rem; margin: 12px 0 4px; }

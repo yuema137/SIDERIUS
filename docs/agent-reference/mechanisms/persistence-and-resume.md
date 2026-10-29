@@ -71,6 +71,22 @@ comparison; cross-revision resume still follows the assembly-digest rule (#999).
 The budget itself (`host_budget`: digest, `max_concurrent_units`, source) is `_PROVENANCE`.
 Owner: [scheduling contract](../../../src/core/runtime_control/scheduling.md).
 
+`judge_routes` (B2-4) is canonical: the resolved `WorkflowLLMConfig.judge` routes and
+run-level call cap (`JudgeRoutes(stop, aggregate, debate, max_judge_calls)`, each route
+a `JudgeRoute(provider, model_id, reasoning_effort, max_output_tokens, max_retries)` or
+`None`), built by
+`workflows.llm_config.locked_judge_routes`. A recorded judge verdict replays only
+against the route that produced it, so a continuation cannot add, drop or change a
+judge route or the call cap. It is omitted from the lock when the config declares no `judge` block,
+so judge-free lock bytes are unchanged. All three lock sites agree: the chain
+pre-flight (`run_one_iteration.compute_expected_invariants`) and the workflow
+startup (`training_startup.workflow_lock_identity`) resolve it from the launch's
+`WorkflowLLMConfig`; the tuner receives the locked value as
+`HyperparamTuningInput.judge_routes` (from `RunInvariants.judge_routes` in
+`tuner_preparation`) and locks it back. A standalone tuner launch carries `None`, so
+it refuses a workspace locked with judge routes. Loop readback of judge evidence
+reads the route from this lock (candidate-worker contract, "Judge stop condition").
+
 Ordering at startup is load-bearing: materialize + hash the effective health
 config → validate ingress evidence → create-or-validate the lock.
 
@@ -99,9 +115,12 @@ Owner: `core/run_seed_lock.py` (resolution) over `core/run_invariants.py`
   workspace lock, so a new workspace never inherits a source run's seed.
 - `WorkflowLaunchConfig.run_seed` projects only when set (`omit_if_none`), so a
   seedless reviewed capture keeps its bytes. Candidate settings refuse it
-  (`INACTIVE_LAUNCH_FIELDS`). Until S4 admits the seed with the operation,
-  candidate training admission resolves its workspace seed the same way (lock,
-  then generation) and prints the `[seed]` line.
+  (`INACTIVE_LAUNCH_FIELDS`). A candidate's seed is bound at operation
+  admission or by direct `launch_candidate` and recorded in `launch.json`;
+  candidate training admission never generates. `adopt_bound_run_seed(workspace,
+  binding)` locks that binding (with its source) on the first body and requires
+  later bodies and resumed segments to find the same value locked; a pre-seed
+  launch receipt raises `MissingRunSeed`.
 - The standalone tuner CLI (`ml_hyperparameter_tune_agent.py main`) is an entry
   boundary too: lock, then `--run_seed`, then generation, before round 1.
 - The tuner receives the locked value as `HyperparamTuningInput.run_seed`, locks
@@ -159,6 +178,7 @@ see it.
 | resume with different health-gate enablement | startup failure |
 | resume after editing a health plugin or task health config | startup failure (the digest moved) |
 | resume with a `--run_seed` different from the locked `run_seed` | startup failure naming `run_seed` |
+| resume with a judge route or `max_judge_calls` added, dropped or changed (`judge_routes`) | startup failure naming `judge_routes` |
 | continuing a workspace whose lock has no `run_seed` (created before the seed contract) | refused (`pre_seed_lock_violation`); the chain halts. The workspace stays readable and is not modified. A seedless comparison (old tooling reading the lock) still validates against it. |
 | malformed carried confirmations | raises |
 | inspector cannot compute the next iteration | launcher halts with both signals shown |
