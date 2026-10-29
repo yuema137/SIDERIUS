@@ -11,7 +11,7 @@ import pytest
 from tools.candidate_console import PrepareSelection
 from tools.candidate_console.config import load_console
 from tools.candidate_console.service import preparation_request
-from tools.candidate_console.settings_file import SettingsInvalid
+from tools.candidate_console.settings_file import SettingsInvalid, parse_settings
 from tools.candidate_console.workspace import init_workspace, resolve_console
 
 REPO = Path(__file__).resolve().parents[4]
@@ -377,3 +377,9 @@ def test_a_task_named_like_the_mapping_field_is_still_an_entry(workspace, monkey
     )
     code, err = _main(monkeypatch, capsys, "check", "--config", str(_console(workspace)))
     assert code == 2 and "data_folders[0].subpath" in err
+
+
+def test_pathologically_nested_settings_are_refused_not_crashed() -> None:
+    """Defect: json.loads RecursionError escaped SettingsInvalid, so GET /api/settings 500ed."""
+    with pytest.raises(SettingsInvalid, match="not valid"):
+        parse_settings(b"[" * 100_000)

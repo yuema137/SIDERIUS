@@ -94,7 +94,9 @@ def parse_settings(payload: bytes) -> GlobalSettings:
             "global settings file repeats a key inside one JSON object; each key may appear "
             "only once"
         ) from None
-    except ValueError:
+    except (ValueError, RecursionError):
+        # RecursionError: nesting too deep for json.loads; refuse like any
+        # other unusable document instead of escaping as a 500.
         raise SettingsInvalid(f"global settings file is not valid {SETTINGS_SCHEMA} JSON") from None
     try:
         return GlobalSettings.model_validate_json(payload)
