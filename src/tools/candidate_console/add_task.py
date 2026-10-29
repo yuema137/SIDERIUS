@@ -150,6 +150,10 @@ def _external_directories(manifest: Path) -> tuple[str, ...]:
     directories: set[Path] = set()
     for reference in references:
         target = reference.path.resolve()
+        if reference.kind == "path":
+            # An envelope path may be a directory or not exist yet; mount what holds it.
+            directories.add(target if target.is_dir() else target.parent)
+            continue
         if not target.exists():
             raise AddTaskRefused(
                 f"manifest {reference.location} names {reference.path}, which does not exist"

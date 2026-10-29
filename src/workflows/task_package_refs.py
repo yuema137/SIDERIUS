@@ -18,7 +18,8 @@ Scope and limits:
     data analysis);
   * inside a ``config`` *mapping* (task-owned constructor arguments, passed
     unchanged by ``_validated_task_config_mapping``) only the values of exact
-    ``{ref: <str>}`` envelopes; every other key and value there belongs to the
+    ``{ref: <str>}`` envelopes (kind ``path``: a directory or a not-yet-existing
+    path is valid); every other key and value there belongs to the
     task and is never read as a path, at any depth;
   * the ``code_package`` ``root`` plus each of its ``files``.
 - References inside the referenced files (for example a Health config naming
@@ -55,11 +56,14 @@ class ManifestReference:
 
     location: str  # dotted manifest location, e.g. ``metric.implementation.file``
     path: Path  # lexically resolved against the manifest directory
-    kind: Literal["file", "directory"]
+    #: ``file``/``directory`` must exist as such; ``path`` (a ``{ref:}`` envelope) is
+    #: only resolved by composition and handed to the constructor, so it may be a
+    #: directory or not exist yet.
+    kind: Literal["file", "directory", "path"]
 
 
 def _reference(
-    where: str, ref: str, manifest_dir: str, kind: Literal["file", "directory"]
+    where: str, ref: str, manifest_dir: str, kind: Literal["file", "directory", "path"]
 ) -> ManifestReference:
     return ManifestReference(where, Path(resolve_manifest_ref(ref, manifest_dir)), kind)
 
@@ -70,7 +74,7 @@ def _constructor_refs(
     """Only exact ``{ref: <str>}`` envelopes, as ``_validated_task_config_mapping`` resolves."""
     for key, value in config.items():
         if isinstance(value, dict) and set(value) == {"ref"} and isinstance(value["ref"], str):
-            found.append(_reference(f"{location}.{key}.ref", value["ref"], manifest_dir, "file"))
+            found.append(_reference(f"{location}.{key}.ref", value["ref"], manifest_dir, "path"))
 
 
 def _walk(value: Any, location: str, manifest_dir: str, found: list[ManifestReference]) -> None:

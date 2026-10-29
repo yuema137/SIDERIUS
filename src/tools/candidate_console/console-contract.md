@@ -79,9 +79,12 @@ manifest as YAML without importing task code and lists only what the composition
 resolves: a string `file`, `declaration`, `dir` or `config` value at any depth;
 inside a `config` mapping (task-owned constructor arguments, passed unchanged by
 `_validated_task_config_mapping`) only exact `{ref: <str>}` envelope values, never
-other keys at any depth; and `code_package.root` plus its `files`. Each listed path must exist
-(a `dir` as a directory, others as files) and its real path (`Path.resolve()`)
-must equal or lie inside the real path of a mounted path. Otherwise a
+other keys at any depth; and `code_package.root` plus its `files`. A `dir` must
+exist as a directory and the other keys as files; an envelope path has no
+existence requirement (composition only resolves it, so it may be a directory or
+not exist yet). Every listed path's real path (`Path.resolve()`) must equal or lie
+inside the real path of a mounted path. With `--external`, an envelope contributes
+its folder when it is an existing directory, otherwise its parent. Otherwise a
 `SettingsInvalid` names the task, the manifest location and the path, for example
 `task quickstart manifest task_data_path.file names /abs/plugins/_task.py, which is
 outside every mounted path (manifest, data folder, task_read_only, serving

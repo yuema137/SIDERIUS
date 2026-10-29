@@ -276,9 +276,10 @@ def test_constructor_config_values_are_not_paths_but_ref_envelopes_are(
     """Defect: task-owned constructor arguments named file/dir/... are checked as paths.
 
     Composition passes a ``config`` mapping to the constructor unchanged and resolves
-    only ``{ref: ...}`` envelopes. Fails if plain ``file``/``dir``/``declaration``
-    values (at any depth) are refused, if an absolute ref under the mounted system
-    directory ``/usr`` is refused, or if an envelope outside every mount passes.
+    only ``{ref: ...}`` envelopes, which may name a directory or a path that does not
+    exist yet. Fails if plain ``file``/``dir``/``declaration`` values (at any depth)
+    are refused, if an envelope naming a directory, a missing path or a file under
+    the mounted ``/usr`` is refused, or if an envelope outside every mount passes.
     """
     _, config, manifest = workspace
     _set_task_data_config(
@@ -289,8 +290,11 @@ def test_constructor_config_values_are_not_paths_but_ref_envelopes_are(
             "dir": "train",
             "nested": {"declaration": "not/a/path.json", "config": "free text"},
             "tool": {"ref": "/usr/bin/env"},
+            "cache_dir": {"ref": "cache"},  # an existing directory beside the manifest
+            "out": {"ref": "not_yet"},  # a path the task creates later
         },
     )
+    (manifest.parent / "cache").mkdir()
     argv = ("add-task", "--config", str(config), "--manifest", str(manifest))
     code, _, err = _main(monkeypatch, capsys, *argv, "--dry-run")
     assert code == 0, err

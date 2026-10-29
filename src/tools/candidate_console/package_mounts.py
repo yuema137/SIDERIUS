@@ -60,15 +60,17 @@ def unmounted_reference(
 
 
 def check_package_mounts(task: TaskChoice) -> None:
-    """Refuse, naming the file, when a manifest reference is missing or not mounted."""
+    """Refuse, naming the file, when a file/dir reference is missing or any reference is unmounted."""
     try:
         references = manifest_references(task.task_manifest)
     except (OSError, ValueError) as error:
         raise SettingsInvalid(f"task {task.task_id}: {error}") from None
     for reference in references:
-        exists = (
-            reference.path.is_dir() if reference.kind == "directory" else reference.path.is_file()
-        )
+        exists = {
+            "directory": reference.path.is_dir,
+            "file": reference.path.is_file,
+            "path": lambda: True,  # composition only resolves an envelope path
+        }[reference.kind]()
         if not exists:
             raise SettingsInvalid(
                 f"task {task.task_id} manifest {reference.location} names {reference.path}, "
