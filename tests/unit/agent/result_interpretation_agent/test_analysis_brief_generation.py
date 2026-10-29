@@ -398,3 +398,25 @@ def test_constraints_reach_primary_interpretation_calls(tmp_path):
     for _, _, user in bridge.calls:
         assert '"train_config.lr"' in user
         assert "not corrections to historical results" in user
+
+
+@pytest.mark.parametrize("declared", [None, 20260915])
+def test_brief_shows_only_an_operator_declared_sampling_seed(tmp_path, declared) -> None:
+    """Issue #983: an undeclared analysis sampling seed is derived from the run
+    seed, so the brief must not show the schema default ``0`` that never runs.
+    Fails if the undeclared seed is rendered, or a declared one is dropped."""
+    policy = {} if declared is None else {"sampling_policy": {"seed": declared}}
+    envelope = AnalysisResourceEnvelope.model_validate(
+        {"wall_time_budget_s": 300, "per_skill_timeout_s": 12, **policy}
+    )
+    inp = _cold_input(tmp_path, requested=True).model_copy(
+        update={"analysis_resource_envelope": envelope}
+    )
+    bridge = _BriefBridge({"questions": [{"question": "How variable are the observed inputs?"}]})
+    ResultInterpretationAgent(bridge_factory=lambda **_kwargs: bridge).run(inp)
+    prompt = json.JSONDecoder().raw_decode(bridge.calls[0][2])[0]
+    sampling = prompt["analysis_resource_envelope"]["sampling_policy"]
+    if declared is None:
+        assert "seed" not in sampling
+    else:
+        assert sampling["seed"] == declared

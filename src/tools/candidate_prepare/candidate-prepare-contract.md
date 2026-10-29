@@ -38,8 +38,10 @@ prepared `CandidateRunRequest` carries no seed: a candidate built from a
 preparation admits its own seed and records the preparation's only as
 `OperationRecord.preparation_run_seed`
 ([operations contract](../candidate_operations/candidate-operations-contract.md#run-seed-issue-983)).
-Preparation does not consume the seed yet; data-analysis sampling derives from it
-in a later #983 step.
+Preparation never runs Data Analysis and consumes no seed itself. Data-analysis
+sampling runs only in the native workflow and derives from that run's lock
+(`node_id=None`;
+[seeding](../../../docs/agent-reference/mechanisms/seeding.md#data-analysis-sampling)).
 
 Paths must be canonical absolute local paths. Manifest/profile are existing
 regular files; data is an existing directory. Output and future workspace must

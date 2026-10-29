@@ -75,6 +75,7 @@ def test_program_regeneration_executes_and_reuses_report(tmp_path):
     bridge = BrokenRepairBridge(analysis_input=inp)
     capability = _RecordingCapability()
     node = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=capability,
         bridge_factory=lambda **_: bridge,
         provider="test",
@@ -128,6 +129,7 @@ def test_exhausted_program_recovery_reaches_proposer_without_data_access(tmp_pat
     bridge = BrokenRepairBridge(analysis_input=expected, exhausted=True)
     output = run_optional_data_analysis(
         interpretation,
+        run_seed=11,
         binding=binding,
         iteration=1,
         run_name="workflow-run",

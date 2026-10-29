@@ -432,8 +432,16 @@ def resolve_analysis_plan(
     skills = {skill.card.skill_id: skill for skill in discovery.skills}
     assets = {asset.asset_id: asset for asset in analysis_input.available_assets}
     resolved: list[ResolvedAnalysisInvocation] = []
+    declared_seed = analysis_input.resource_envelope.declared_sampling_seed()
     for invocation in plan.invocations:
         sampling = invocation.sampling_plan.policy
+        if declared_seed is not None and sampling.seed != declared_seed:
+            # Issue #983: an operator-declared seed is executed exactly; the plan
+            # must carry it (a derived seed instead replaces the plan's value).
+            raise AnalysisPlanResolutionError(
+                "sampling_plan.policy.seed must equal the operator-declared "
+                f"sampling seed {declared_seed}"
+            )
         if sampling.strategy == "stratified" and not analysis_input.access_policy.permits(
             split_id=invocation.sampling_plan.split_id,
             information_class="metadata",

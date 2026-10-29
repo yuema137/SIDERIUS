@@ -198,6 +198,8 @@ resource_envelope:
     mode: representative
     max_items: 5000
     strategy: uniform
+    # Optional. Omit `seed` to derive the sampling seed from the run seed
+    # (recorded per run); a declared seed is used exactly and shown to the LLM.
     seed: 17
 
 builtin_skill_packs: [core-analysis]
