@@ -1727,14 +1727,17 @@ step (`python -m tools.candidate_operations status --store-config … --operatio
 Manual UUID entry remains available.
 
 Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
-(M-2; native `failed`, `timed_out` and `interrupted` read "Failed: …" in plain words,
+(M-2; native `failed`, `timed_out` and `interrupted` read "Failed: the <run, preparation,
+native chain, …> …" in plain words for every kind, including a preparation (#1145),
 native `cancelled` (Stop run, #1027) reads "Stopped on request before finishing; no
 candidate result was produced.", and a store `unknown` state whose process reason is
 `missing_identity` reads "… is starting."). For a failed operation `#monitor-cause` shows "Cause (from the
 log): <last exception line>" (`operationOutcome.cause`, the last line shaped like
 `Name(Error|Exception|Failure|Refusal): …`) from the log text already displayed; the
-Run page reads the last 64 KiB of the native, then operation, log once and appends the
-same line. Loop body counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
+Run page reads the last 64 KiB of the native, then operation, log once
+(`operationOutcome.readCause`) and appends the same line, for a failed launch in step 2
+and for a failed preparation in step 1 (#1145; a preparation's native log is the run's
+`inputs/preparation/worker.log`, which the step-1 status line also names). Loop body counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
 Operation facts. `#operation-observed` shows local time (ISO and UUID in its title).
 After a terminal state (`completed`/`operation_failed`, process `exited`, not
 `finishing`) has been read and its log drained to `observed_size`, the operation is
@@ -1905,7 +1908,18 @@ handoff, so another entry can replace it. When this page created a preparation, 
 first observed `prepared` status opens it in step 2 once (a read-only `/select`); Review
 and Launch stay explicit. A store `unknown` state without a receipt reads "Preparing…"
 (process reason `missing_identity`) or "Checking status…", never as a finished failure
-(B8-2). Step 2 names the version its prepared run holds (`ReusableCaptureReview.
+(B8-2). Conversely a terminal failure never reads as "Preparing…" or "finished" (#1145):
+each step passes `operationOutcome.ending(status)` in its `run-step-state` event, and
+`run-steps.js` maps it to one `#run-next` sentence that says what happened and where to
+look. `ending` is `not_started` (`operation_failed`/`spawn_failed`),
+`cancelled_before_start` (`operation_failed`/`cancelled_while_queued`), `operation_failed`
+(any other `operation_failed`), the native `failed`, `timed_out`, `interrupted` or
+`cancelled` of a `completed` operation, `failed` for a completed preparation whose native
+status is not `prepared`, and `null` otherwise (running, unresolved, prepared, accepted,
+rejected, stopped, paused). For example a failed preparation reads "The preparation
+failed. The cause and its log are named below; start over to try again." and a failed
+launch "The run failed. The cause is shown below; open it in Monitor for the full log."
+A typed `problem` (refused, unknown, unresolved) still takes precedence. Step 2 names the version its prepared run holds (`ReusableCaptureReview.
 source_version_name`, display-only `recorded_name` of `source_sha256`, or before review
 the preparation intent's `source_version` handed over by `openPrepared`); when it is not
 the current saved version, `#capture-source`, the top `#run-source-state` and `#run-next`

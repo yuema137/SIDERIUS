@@ -94,7 +94,8 @@
     sourceState();
     window.dispatchEvent(new CustomEvent('run-step-state', {detail: {
       source: 'launch', selected: !!selected, outdated: outdated(), reviewed: !!review, intent: !!intent, problem,
-      running: !!intent && !state?.released && !problem, finished: !!state?.released
+      running: !!intent && !state?.released && !problem, finished: !!state?.released,
+      ending: intent && observed && !problem ? window.operationOutcome.ending(observed) : null
     }}));
   }
   function credentials(readiness) {
@@ -151,19 +152,10 @@
   let causeFor = null, causeText = '';
   async function showCause(id) {
     causeFor = id; causeText = '';
-    for (const kind of ['native', 'operation']) {
-      try {
-        const head = await session.request(`operations/${id}/log?kind=${kind}&offset=0&max_bytes=1`);
-        if (head.missing) continue;
-        const offset = Math.max(0, head.observed_size - 65536);
-        const tail = await session.request(`operations/${id}/log?kind=${kind}&offset=${offset}&max_bytes=65536`);
-        const found = window.operationOutcome.cause(tail.text);
-        if (found && intent?.payload.candidate_operation_id === id) {
-          causeText = found;
-          $('operation-status').textContent += ` Cause (from the log): ${found}`;
-          return;
-        }
-      } catch (error) { if (error.stale) return; }
+    const found = await window.operationOutcome.readCause(session.request, id);
+    if (found && intent?.payload.candidate_operation_id === id) {
+      causeText = found;
+      $('operation-status').textContent += ` Cause (from the log): ${found}`;
     }
   }
   function unresolvedMessage(error) {
