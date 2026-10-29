@@ -12,10 +12,11 @@
  *   bindings     [{node, argument, source|null}] patches relative to anchor.inventory
  *   anchor       {source, document, inventory}: the last server projection the
  *                draft starts from (loaded source, or a reviewed source/task/node edit)
- *   node         null, or one pending palette node: AddNodeProposal fields without
- *                `source` ({node, capability, protocol, binding, arguments, x, y});
- *                it is added on top of an unedited anchor (document equals
- *                anchor.document, no binding patches), so it is reviewed alone
+ *   nodes        pending palette nodes: PendingNode fields ({node, capability, protocol,
+ *                binding, arguments, x, y}); any number, beside every other edit
+ *   externals    new external inputs (ExternalBinding / ManagedCandidateBinding JSON)
+ *                that pending or saved sockets may read (editor-node-drafts.js)
+ *   removed      ids of saved nodes deleted in the draft; their readers are disconnected
  *   training, loopTemplate   server presentation values for the anchor (not compared)
  */
 (() => {
@@ -32,7 +33,8 @@
     return JSON.stringify(value ?? null);
   }
   // Identity of the authored proposal; presentation values never make a draft dirty.
-  const identity = state => canonical({document: state.document, bindings: state.bindings, source: state.anchor.source, node: state.node ?? null});
+  const identity = state => canonical({document: state.document, bindings: state.bindings, source: state.anchor.source,
+    nodes: state.nodes || [], externals: state.externals || [], removed: state.removed || []});
   const sameTarget = (patch, node, argument) => patch.node === node && patch.argument === argument;
 
   const withoutText = state => { const {sourceText, ...rest} = state; return rest; };
@@ -117,8 +119,14 @@
   const withoutLoop = document => { const copy = clone(document); delete copy.definition.loop; return canonical(copy); };
   /** The existing typed review proposal for this draft (server models in workflow_authoring.models). */
   function proposal(state) {
-    // A pending node is a byte-preserving source insertion on the anchor (AddNodeProposal).
-    if (state.node) return {kind: 'add_node', source: state.anchor.source, ...clone(state.node)};
+    // Pending nodes/inputs (NodeDraftsProposal): targeted insertions on the anchor, unless
+    // other edits travel with them (`document` when edited, binding patches).
+    // Deleted saved nodes (`removed`) travel in the same typed proposal.
+    if (state.nodes?.length || state.externals?.length || state.removed?.length) {
+      const edited = canonical(state.document) !== canonical(state.anchor.document);
+      return {kind: 'node_drafts', source: state.anchor.source, nodes: clone(state.nodes || []), externals: clone(state.externals || []),
+        document: edited ? clone(state.document) : null, bindings: clone(state.bindings), removed: clone(state.removed || [])};
+    }
     if (state.bindings.length) {
       // The server inspects patches over this edited document, so layout and inspector edits travel with them.
       return {kind: 'draft', draft: {base_document: clone(state.document), bindings: clone(state.bindings)}};
@@ -171,7 +179,7 @@
     return {state: {...clone(loaded), document}, conflicts};
   }
 
-  /** Undo/Redo/Discard buttons (secondary: Save stays the one primary action), dirty badge, page-title mark and keyboard shortcuts. */
+  /** Undo/Redo/Revert-to-saved buttons (secondary: Save stays the one primary action), dirty badge, page-title mark and keyboard shortcuts. */
   function mount({header, actions, undo, redo, discard, active}) {
     const button = (id, text) => {
       const element = document.createElement('button');
@@ -179,7 +187,9 @@
       actions.append(element); return element;
     };
     const undoButton = button('editor-undo', 'Undo'), redoButton = button('editor-redo', 'Redo');
-    const discardButton = button('editor-discard-draft', 'Discard changes');
+    // "Revert to saved" (red-team A-5): restores the saved version locally; "Reload from disk"
+    // (conflict card, advanced toolbar) is the only action that re-reads the file.
+    const discardButton = button('editor-discard-draft', 'Revert to saved');
     undoButton.setAttribute('aria-keyshortcuts', 'Control+Z');
     redoButton.setAttribute('aria-keyshortcuts', 'Control+Shift+Z Control+Y');
     undoButton.addEventListener('click', undo); redoButton.addEventListener('click', redo);
@@ -197,6 +207,8 @@
     window.addEventListener('console-view', title);
     document.addEventListener('keydown', event => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || !active()) return;
+      // Red-team A-4: an open modal or popover owns the keyboard; the canvas behind it does not change.
+      if (document.querySelector('dialog[open]') || (event.target instanceof Element && event.target.closest('[role="dialog"], [popover]'))) return;
       const key = event.key.toLowerCase();
       if (key !== 'z' && key !== 'y') return;
       // Text controls keep their native text undo; their edits are already draft operations.

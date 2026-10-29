@@ -1,4 +1,4 @@
-/* Problems list view only: editor.js owns selection and every document mutation.
+/* Problems popover view only (page-bar chip, spec §9): editor.js owns selection and every document mutation.
  * Items are the server's diagnostics: located draft problems (DraftProblem: code,
  * node, field, message) and source diagnostics (SourceDiagnostic: code, message,
  * line, field_path). The browser never derives a problem of its own. */
@@ -10,15 +10,25 @@
     parent.append(element); return element;
   };
   const cssId = value => String(value).replace(/[^A-Za-z0-9_-]/g, '\\$&');
-  const where = item => item.node ? `${item.node}.${item.field || 'request'}` : item.line ? `Source line ${item.line}` : 'Source';
-  /** actions: {select(node, field)} for socket problems, {source(line)} otherwise. */
+  // Whole-workflow draft problems (deleted loop module, empty workflow): no field to open.
+  const WORKFLOW = new Set(['loop_feedback_missing', 'workflow_empty']);
+  // One plain sentence per problem (spec §9): "Propose model: Results analysis is not connected".
+  // actions.describe(node, field) -> {module, connector} from the open graph and the server inventory.
+  function sentence(item, actions) {
+    if (WORKFLOW.has(item.code)) return item.message.charAt(0).toUpperCase() + item.message.slice(1) + '.';
+    if (!item.node) return `Python source${item.line ? ` line ${item.line}` : ''}: ${item.message}`;
+    const {module, connector} = actions.describe?.(item.node, item.field || 'request') || {};
+    const who = module || item.node;
+    if (item.code === 'required_unbound' && connector) return `${who}: ${connector} is not connected`;
+    return `${who}: ${item.message}`;
+  }
+  /** actions: {select(node, field)} for socket problems, {source(line)} otherwise, {describe}. */
   function render(container, items, actions) {
     container.replaceChildren();
     container.hidden = !items.length;
-    if (!items.length) return;
-    const heading = node('h2', `${items.length} problem${items.length === 1 ? '' : 's'}`, container);
+    if (!items.length) { container.classList.remove('open'); return; }
+    const heading = node('h2', `${items.length} problem${items.length === 1 ? '' : 's'} to fix before saving`, container);
     heading.id = 'editor-problems-heading';
-    node('p', 'Review and Save stay unavailable until these are resolved. Select a problem to go to its field.', container, 'muted');
     const list = node('ul', '', container);
     list.setAttribute('aria-labelledby', heading.id);
     for (const item of items) {
@@ -26,9 +36,18 @@
       const button = node('button', '', entry, 'editor-problem');
       button.type = 'button'; button.dataset.code = item.code;
       if (item.node) { button.dataset.node = item.node; button.dataset.field = item.field || 'request'; }
-      node('strong', where(item), button);
-      node('span', ` ${item.message}`, button);
-      button.addEventListener('click', () => item.node ? actions.select(item.node, item.field || 'request') : actions.source(item.line || null));
+      button.append(window.consoleIcons?.make('circle-alert', 16) || '');
+      node('span', sentence(item, actions), button, 'editor-problem-text');
+      // The raw located diagnostic stays available as advanced detail.
+      // Server messages may already start with their location ("build.output: …"): say it once.
+      const where = item.node ? `${item.node}.${item.field || 'request'}` : item.line ? `line ${item.line}` : WORKFLOW.has(item.code) ? 'workflow' : 'source';
+      const message = item.message.startsWith(`${where}: `) ? item.message.slice(where.length + 2) : item.message;
+      const raw = node('code', `${where} · ${message}`, button, 'editor-problem-raw');
+      raw.dataset.uiFlag = 'advanced';
+      button.addEventListener('click', () => {
+        container.classList.remove('open');
+        if (item.node) actions.select(item.node, item.field || 'request'); else if (!WORKFLOW.has(item.code)) actions.source(item.line || null);
+      });
     }
   }
   /** Move focus to the inspector control of one socket, and mark its canvas port. */

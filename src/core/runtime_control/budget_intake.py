@@ -15,7 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from core.runtime_control.scheduling import HostBudget, PositiveCount, Sha256Hex
+from core.runtime_control.scheduling import BudgetSource, HostBudget, PositiveCount, Sha256Hex
 
 #: ``serial``: no budget, one unit at a time (every existing run).
 #: ``parallel-v1``: budgeted dispatch with drain-on-failure trace semantics.
@@ -79,7 +79,7 @@ class HostBudgetProvenance(BaseModel):
 
     digest: Sha256Hex
     max_concurrent_units: PositiveCount
-    source: Literal["caller", "file"]
+    source: BudgetSource
 
     @classmethod
     def of(cls, budget: HostBudget) -> HostBudgetProvenance:

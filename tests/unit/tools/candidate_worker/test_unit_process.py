@@ -327,11 +327,12 @@ def test_unit_transport_keeps_nonfinite_floats_and_validator_filled_fields_set()
     nested = output.metric_spec.scoreability
     assert decoded.metric_spec.scoreability.model_fields_set == nested.model_fields_set
     assert decoded.metric_spec.scoreability == nested
-    settings = CandidateTrainingSettings.model_validate_json(
-        '{"launch": {"degenerate_penalty_score": -Infinity}}'
-    )
-    restored = decode_transport(type(settings), encode_transport(settings))
-    assert restored.launch.degenerate_penalty_score == float("-inf")
+    # #1045: the settings a unit transports cannot carry an infinite penalty;
+    # its owner refuses it before any transport (fails without allow_inf_nan).
+    with pytest.raises(ValueError, match="degenerate_penalty_score"):
+        CandidateTrainingSettings.model_validate_json(
+            '{"launch": {"degenerate_penalty_score": -Infinity}}'
+        )
     # NaN is not equal to itself; the round-trip check must still accept it.
     nan = decode_transport(
         type(output),

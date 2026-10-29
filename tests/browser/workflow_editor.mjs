@@ -10,6 +10,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
@@ -22,6 +23,7 @@ try {
   const require = createRequire(import.meta.url);
   const {chromium} = require(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}});
   const faults = []; page.on('pageerror', error => faults.push(error.message));
   for (let tries = 0; ; tries++) {
@@ -30,7 +32,7 @@ try {
   }
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported')); 
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened ')); 
   const source = page.locator('#editor-source');
   assert.equal(await source.isVisible(), false);
   assert.equal(new URL(page.url()).hash, '#workflow');
@@ -53,7 +55,7 @@ try {
   }));
   async function retainAcrossViews() {
     const before = await editorSnapshot(), count = posts.length;
-    for (const view of ['slow-control', 'home', 'run', 'workflow']) await page.locator(`nav a[href="#${view}"]`).click();
+    for (const view of ['monitor', 'home', 'run', 'workflow']) await page.locator(`nav a[href="#${view}"]`).click();
     assert.deepEqual(await editorSnapshot(), before);
     assert.equal(posts.length, count, 'Navigation never submits');
     assert.equal(await page.locator('#token').inputValue(), '');
@@ -70,7 +72,7 @@ try {
   assert.match(await page.locator('#editor-edges').textContent(), /external:other → p.request/);
   assert.match(await page.locator('#editor-diff').textContent(), /binding='other'/);
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   const inspect = () => JSON.parse(execFileSync(process.env.EDITOR_PYTHON, ['-c', 'import sys; from pathlib import Path; from workflows.definition import parse_workflow_source; print(parse_workflow_source(Path(sys.argv[1]).read_text()).model_dump_json())', metadata.source], {cwd: root, encoding: 'utf8'}));
   assert.equal(inspect().definition.nodes[0].request.binding, 'other');
   assert.equal(inspect().definition.task.manifest, 'missing.json');
@@ -106,7 +108,7 @@ try {
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   assert.equal(inspect().definition.externals[0].location, 'gui.json');
   assert.equal(inspect().definition.nodes.length, 2);
   // Delayed old Review must not override newer source edits or enable Save.
@@ -145,7 +147,7 @@ try {
   // Reusable declarations use the real canonical authoring path; managed roles
   // have no editable location, while all unsupported preparation choices survive.
   await page.locator('#editor-project').selectOption('reusable');
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   assert.equal(await page.getByLabel('external:initial', {exact: true}).count(), 0);
   assert.equal(await page.getByLabel('external:build_store', {exact: true}).count(), 0);
   assert.equal(await page.getByLabel('external:check_store', {exact: true}).count(), 0);
@@ -155,9 +157,9 @@ try {
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   await page.locator('#editor-refresh').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   const reusable = JSON.parse(execFileSync(process.env.EDITOR_PYTHON, ['-c', 'import sys; from pathlib import Path; from workflows.definition import parse_workflow_source; print(parse_workflow_source(Path(sys.argv[1]).read_text()).model_dump_json())', metadata.reusable_source], {cwd: root, encoding: 'utf8'}));
   assert.equal(reusable.definition.schema_version, 2);
   assert.equal(reusable.definition.task.manifest, 'edited-task.yaml');

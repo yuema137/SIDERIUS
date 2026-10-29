@@ -13,6 +13,7 @@ from tools.candidate_console.reusable_preparation import (
 )
 from tools.candidate_console.service import CandidateConsole
 from tools.candidate_operations.models import OperationFailure
+from tools.candidate_operations.store import load_record
 from tools.workflow_authoring.models import Project
 
 
@@ -243,6 +244,62 @@ def test_review_shows_recorded_version_name_without_changing_identity(fresh):
     assert "source_version_name" not in intent(named).model_dump()
 
 
+def test_preparation_review_prechecks_configured_credential_names(fresh, tmp_path):
+    """R-5: before Prepare the server reports which configured names are absent, and a
+    missing file is distinguished from an unreadable one; values never leave the process."""
+    adapter, selection, _ = fresh
+    task = adapter.console.config.tasks[0].model_copy(
+        update={"candidate_environment_names": ("OPENAI_API_KEY",)}
+    )
+    path = tmp_path / "keys.env"
+    adapter.console.config = adapter.console.config.model_copy(
+        update={"tasks": (task,), "credential_file": str(path)}
+    )
+    missing = adapter.review("fresh", selection).credential_readiness
+    assert (missing.file_status, missing.ready) == ("missing", False)
+    assert missing.missing_names == ("OPENAI_API_KEY",)
+    path.write_text("OPENAI_API_KEY=SECRET-MARKER\n")
+    path.chmod(0o644)
+    assert adapter.review("fresh", selection).credential_readiness.file_status == "unavailable"
+    path.chmod(0o600)
+    ready = adapter.review("fresh", selection)
+    assert ready.credential_readiness.ready
+    assert "SECRET-MARKER" not in ready.model_dump_json()
+
+
+def _training_document(**launch):
+    from workflows.definition import parse_workflow_source
+
+    root = Path(__file__).resolve().parents[4]
+    source = (root / "examples/workflow_declarations/reusable_training.py").read_text()
+    document = parse_workflow_source(source)
+    settings = dict(document.training_settings)
+    settings["launch"] = {
+        key: value for key, value in {**settings["launch"], **launch}.items() if value is not None
+    }
+    return document.model_copy(update={"training_settings": settings})
+
+
+@pytest.mark.parametrize(
+    ("launch", "fragment"),
+    [
+        ({"healthgate_mode": None, "result_authority": None}, "must declare"),
+        ({"result_authority": None}, "--result_authority"),
+        ({"result_authority": "scientific"}, "contradiction"),
+    ],
+    ids=["both-missing", "authority-missing", "observe-only-scientific"],
+)
+def test_preparation_review_refuses_undeclared_launch_policy(launch, fragment):
+    """L-1: Review refuses what training admission would refuse after launch, with the
+    launch-policy owner's own message; a declared legal pair passes."""
+    from tools.candidate_console.reusable_preparation import check_declared_launch_policy
+
+    check_declared_launch_policy(_training_document())
+    with pytest.raises(OperationFailure, match=fragment) as raised:
+        check_declared_launch_policy(_training_document(**launch))
+    assert raised.value.detail.code == "launch_policy"
+
+
 @pytest.mark.parametrize("with_workspace", [False, True])
 def test_console_app_protects_workspace_settings_at_admission(fresh, with_workspace):
     """Defect: the served app admits a read-only input over the workspace settings/library.
@@ -277,3 +334,30 @@ def test_console_app_protects_workspace_settings_at_admission(fresh, with_worksp
         assert response.status_code == 409 and response.json()["error"]["code"] == "stale_review"
     else:
         assert response.status_code == 200, response.text
+
+
+#: Issue #983 S6. Above 2**52, so a float round-trip would corrupt it.
+SEED = 4_503_599_627_370_497
+
+
+def test_new_run_seed_reaches_the_admitted_preparation_and_blank_keeps_bytes(fresh, monkeypatch):
+    """Fails if the entered seed is dropped between review and admission, if a
+    blank seed changes the reviewed selection bytes or request digest, or if
+    recovery accepts a retained intent whose seed differs from the admitted one."""
+    adapter, chosen, _ = fresh
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", lambda *args: None)
+    blank = adapter.review("fresh", chosen)
+    assert "run_seed" not in chosen.model_dump_json()
+    assert blank.seed == "Seed: generated at launch"
+    seeded_selection = chosen.model_copy(update={"run_seed": SEED})
+    seeded = adapter.review("fresh", seeded_selection)
+    assert seeded.seed == f"Seed: {SEED} (you set)"
+    assert seeded.expectation.request_digest != blank.expectation.request_digest
+    adapter.prepare("fresh", intent(seeded))
+    record = load_record(adapter.console.config.operation_store, chosen.preparation_operation_id)
+    assert (record.run_seed.value, record.run_seed.source) == (SEED, "operator")
+    changed = intent(seeded).model_copy(
+        update={"selection": seeded_selection.model_copy(update={"run_seed": SEED - 1})}
+    )
+    with pytest.raises(OperationFailure, match="retained selection"):
+        adapter.prepare("fresh", changed)

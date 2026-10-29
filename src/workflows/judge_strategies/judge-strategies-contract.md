@@ -264,11 +264,11 @@ value (`cardinality_mismatch` otherwise) and stamps
    `PromptBudgetExceeded` when the first call's rendered prompt (system + user
    characters, including task `JudgeTaskBlocks` guidance) exceeds
    `MAX_JUDGE_PROMPT_CHARS` (400 000, `agent/schemas/judge.py`: about 100k tokens,
-   leaving output room in a 128k-token window; no context-size owner exists in the
-   bridge or `WorkflowLLMConfig`). The message names the budget, the measured size
-   and the remedy (fewer items, shorter guidance, `per_item` scoring); nothing is
-   written. A
-   `JudgeCallRefused` or `ExecutionDeadlineExceeded` from the call core
+   nominally leaving output room in a 128k-token window; no context-size owner
+   exists in the bridge or `WorkflowLLMConfig`). The message names the budget,
+   the measured size and the remedy (fewer items, shorter guidance, `per_item`
+   scoring); nothing is written. A `JudgeCallRefused` or
+   `ExecutionDeadlineExceeded` from the call core
    propagates; any published call files then stay without a `strategy.json`, and
    a rerun of that invocation refuses.
 2. For each planned call: `run_judge_call(call_request(...), template, route,
@@ -291,8 +291,20 @@ value (`cardinality_mismatch` otherwise) and stamps
    is never reused).
 4. Publish `StrategyEvidence(schema_version="siderius.judge-strategy/v1",
    invocation_sha256, strategy_kind, static_call_bound, calls=(digests in order),
-   outcome)` write-once at `<evidence_dir>/strategy.json` as canonical JSON and
-   return `StrategyResult(outcome, evidence_sha256)`.
+   outcome, unsent_prompt_chars, unsent_prompt_sha256)` write-once at
+   `<evidence_dir>/strategy.json` as canonical JSON and return
+   `StrategyResult(outcome, evidence_sha256)`.
+
+`MAX_JUDGE_PROMPT_CHARS` counts Python characters (`len(system) + len(user)`),
+not tokens. Non-Latin text can tokenize more densely than the approximate four
+characters per token, so the cap does not guarantee fitting a token context window.
+
+For `prompt_too_large`, strategy evidence records the unsent call's measured
+`unsent_prompt_chars` and `unsent_prompt_sha256` (the canonical prompt identity:
+`prompt_sha256` over the rendered system and user strings). Both fields are
+required for that failure and omitted otherwise. Replay re-renders the unsent
+call and refuses if either differs;
+older over-budget records without these fields refuse as malformed.
 
 Usage rows are recorded by the bridge under label `judge.rubric-rank` with the
 run context; no side ledger.

@@ -132,7 +132,7 @@ def test_binding_draft_disconnect_promote_and_conflict(editor_config):
         body = {"expected_sha256": base["sha256"], "proposal": {"kind": "draft", "draft": draft}}
         refused = client.post("/api/editor/example/review", headers=headers, json=body)
         assert refused.status_code == 409, refused.text
-        assert "required input is unbound" in refused.text
+        assert "required input is not connected" in refused.text
         assert path.read_text() == original
         assert not tuple(editor_config.editor_projects[0].recovery_directory.iterdir())
         # A typed but incompatible source must still reach the native validator.
@@ -257,14 +257,15 @@ def test_oversized_source_is_bounded_unavailable_not_console_startup_failure(edi
 
 
 STATIC = Path(__file__).resolve().parents[4] / "src/tools/candidate_console/static"
-# Capability names from the paper's discovery-loop figure (docs/assets/discovery-loop.svg).
+# One sentence-case display name per capability, the stages of the paper's
+# discovery-loop figure (docs/assets/discovery-loop.svg) in plain words.
 PAPER_LABELS = {
-    "interpretation": "INTERPRET",
-    "literature": "LITERATURE",
-    "proposal": "PROPOSE",
-    "implementation": "IMPLEMENT",
-    "validation": "VALIDATE",
-    "tuning": "TRAIN & TUNE",
+    "interpretation": "Interpret results",
+    "literature": "Literature review",
+    "proposal": "Propose model",
+    "implementation": "Implement",
+    "validation": "Validate",
+    "tuning": "Train & tune",
 }
 
 
@@ -297,29 +298,28 @@ def test_every_catalog_capability_has_its_paper_label_and_theme_role():
         assert theme.count(f"--capability-{role}-tint:") == 2, role
 
 
-def contract_presentation_entries() -> dict[str, tuple[str, str, str]]:
-    """Parse ``{contract: (name, colour, shape)}`` from the browser's contract table."""
+def contract_presentation_entries() -> dict[str, tuple[str, str]]:
+    """Parse ``{contract: (colour, shape)}`` from the browser's contract table."""
     script = (STATIC / "editor-contract-presentation.js").read_text()
     block = re.search(r"const entries = Object\.freeze\(\{\n(.*?)\n  \}\);", script, re.S)
     assert block, "contract presentation table not found"
     rows = block.group(1).splitlines()
-    pattern = r"    '([^']+)': \{name: '([^']+)', colour: '([^']+)', shape: '([^']+)'\},"
+    pattern = r"    '([^']+)': \{colour: '([^']+)', shape: '([^']+)'\},"
     parsed = [re.fullmatch(pattern, row) for row in rows]
     assert all(parsed), f"unparsed contract rows: {rows}"
-    return {match[1]: (match[2], match[3], match[4]) for match in parsed if match}
+    return {match[1]: (match[2], match[3]) for match in parsed if match}
 
 
 def test_every_catalog_contract_has_a_distinct_port_token_in_both_themes():
     """Fails if a catalog contract falls back to a hash token (which can collide), two
-    contracts share a colour+shape or a readable name, or a colour lacks a CSS token."""
+    contracts share a colour+shape, the browser table owns names again (the server's
+    contract_names owner does), or a colour lacks a CSS token."""
     from workflows.definition.catalog import CONTRACTS
 
     entries = contract_presentation_entries()
     assert set(entries) == set(CONTRACTS)
-    tokens = [(colour, shape) for _, colour, shape in entries.values()]
+    tokens = list(entries.values())
     assert len(set(tokens)) == len(tokens)
-    names = [name for name, _, _ in entries.values()]
-    assert len(set(names)) == len(names)
     css = (STATIC / "editor-contract-presentation.css").read_text()
     for colour in {colour for colour, _ in tokens}:
         assert f"--contract-{colour}:" in css, colour
@@ -520,7 +520,7 @@ def test_research_loop_add_limit_remove_round_trip_over_editor_routes(editor_con
 
 def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_config):
     """Fails if a GUI stop-condition edit bypasses the typed declaration (invalid k,
-    missing metric id, duplicate kind or the reserved judge reach disk), if a
+    missing metric id, duplicate kind or an incomplete judge reach disk), if a
     condition-free loop's bytes drift, or if add-then-remove does not restore them."""
     from tests.browser.workflow_editor_server import interpretation_profile_source
     from workflows.definition import parse_workflow_source
@@ -533,6 +533,13 @@ def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_co
     }
     threshold = {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85}
     patience = {"kind": "no_improvement", "completed_bodies": 1}
+    # B2-5: the editor's judge row carries only JudgeStop's declared fields.
+    judge = {
+        "kind": "judge",
+        "criterion": "Stop once a body adds no new insight.",
+        "min_completed_bodies": 1,
+        "on_failure": "continue",
+    }
     with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
         base = client.get("/api/editor/example", headers=headers).json()
         loop = base["document"]["definition"]["loop"]
@@ -586,6 +593,7 @@ def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_co
         for invalid in (
             [{"kind": "no_improvement", "completed_bodies": 2}],  # == final_iteration
             [threshold, {**threshold, "threshold": 0.9}],
+            [{**judge, "min_completed_bodies": 2}],  # never judged before the final boundary
         ):
             _, refused = review(invalid)
             assert refused.status_code == 422, (invalid, refused.text)
@@ -611,6 +619,17 @@ def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_co
         # Remove one, then the other: the condition-free bytes return exactly.
         review_and_save([patience])
         assert "MetricThresholdStop" not in path.read_text()
+        review_and_save([])
+        assert path.read_bytes() == original
+
+        # A judge condition from the editor reviews and saves through the same declaration;
+        # removing it restores the condition-free bytes.
+        view = review_and_save([judge])
+        assert any(
+            "JudgeStop(" in line for line in view["diff"].splitlines() if line.startswith("+ ")
+        ), view["diff"]
+        saved = parse_workflow_source(path.read_text()).model_dump(mode="json")
+        assert saved["definition"]["loop"]["stop_conditions"] == [judge]
         review_and_save([])
         assert path.read_bytes() == original
 
@@ -728,3 +747,48 @@ def test_node_palette_catalog_and_node_draft_routes(editor_config):
         refused = client.post("/api/editor/example/node-draft", headers=headers, json=body)
         assert refused.status_code == 422
         assert editor_config.editor_projects[0].source_file.read_text() == base["source"]
+
+
+def test_filesystem_failures_say_what_was_attempted(editor_config, monkeypatch):
+    """Fails if a failed read claims a proposal "remains unsaved" or a failed write does not
+    say nothing was saved (red-team E-4/S-4: one generic message for both)."""
+    import tools.workflow_authoring.service as service
+
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        base = client.get("/api/editor/example", headers=headers).json()
+        proposed = SOURCE.replace("old.json", "gui.json")
+        view = client.post(
+            "/api/editor/example/review",
+            headers=headers,
+            json={
+                "expected_sha256": base["sha256"],
+                "proposal": {"kind": "source", "source": proposed},
+            },
+        ).json()
+
+        def fail(*args, **kwargs):
+            raise OSError("disk unavailable")
+
+        monkeypatch.setattr(service, "publish_bytes_write_once", fail)
+        saved = client.post(
+            "/api/editor/example/save",
+            headers=headers,
+            json={
+                "expected_sha256": base["sha256"],
+                "proposal_sha256": view["sha256"],
+                "source": proposed,
+            },
+        )
+        assert saved.status_code == 409
+        assert saved.json()["error"] == {
+            "code": "filesystem",
+            "message": "Not saved: the project folder or its recovery copies could not be written",
+        }
+        monkeypatch.setattr(service.WorkflowAuthoring, "_read_bytes", fail)
+        read = client.get("/api/editor/example", headers=headers).json()["error"]
+        assert read["code"] == "filesystem" and "unsaved" not in read["message"].lower()
+        assert "not saved" not in read["message"].lower()

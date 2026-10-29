@@ -61,3 +61,5 @@ For the Paper asset's exact conversion command, tool version, and hashes, see
 | `discovery-loop.svg` | `README.md`, `docs/concepts/overview.md` |
 | `ownership-split.svg` | `README.md`, `docs/concepts/overview.md` |
 | `three-kinds-of-number.svg` | `README.md`, `docs/concepts/objectives-and-metrics.md` |
+| `model-capabilities.svg` | `docs/reference/model-qualification.md` |
+| `providers/*.svg` | Provider table in `docs/reference/model-qualification.md`; [source and license](providers/README.md) |

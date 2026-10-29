@@ -53,6 +53,9 @@ Sha256Hex = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 #: ``halt``: any refusal places nothing (graph-mode serial reference).
 #: ``continue``: refused units are reported; others are still planned.
 RefusalPolicy = Literal["continue", "halt"]
+#: Where a budget was declared; ``host_reservation``: derived inside a run from its
+#: host-ledger grant (B3-4). Provenance only, excluded from the digest.
+BudgetSource = Literal["caller", "file", "host_reservation"]
 
 
 class ResourceRequest(BaseModel):
@@ -72,6 +75,13 @@ class ResourceRequest(BaseModel):
     host_memory_gib: PositiveQuantity
     cpu_slots: PositiveCount
     wall_seconds: PositiveQuantity
+    #: Decision B3-Q6: the unit runs under a measured time budget, so contention
+    #: on a shared GPU changes what that budget admits. Omitted when false, so a
+    #: request that does not set it keeps its serialization.
+    time_budgeted: StrictBool = Field(default=False, exclude_if=lambda value: value is False)
+    #: Concurrent units this reservation may run (a parallel run's envelope, B3-4a);
+    #: counted against ``max_concurrent_units``. Omitted when 1.
+    unit_slots: PositiveCount = Field(default=1, exclude_if=lambda value: value == 1)
 
     @model_validator(mode="after")
     def _vram_matches_gpu_count(self) -> ResourceRequest:
@@ -126,7 +136,7 @@ class HostBudget(BaseModel):
     host_memory_gib: PositiveQuantity
     cpu_slots: PositiveCount
     max_concurrent_units: PositiveCount
-    source: Literal["caller", "file"]
+    source: BudgetSource
     #: Decision B3-Q6: the operator accepts that units sharing one GPU contend for
     #: wall time, so time-budgeted runs may share a slot. Omitted when false, so
     #: a budget that does not set it keeps its digest.
@@ -241,11 +251,26 @@ class _Ledger(BaseModel):
     def host_memory_gib(self) -> float:
         return sum(p.reserved.host_memory_gib for p in self.placed)
 
+    def unit_slots(self) -> int:
+        return sum(p.reserved.unit_slots for p in self.placed)
+
     def cpu_slots(self) -> int:
         return sum(p.reserved.cpu_slots for p in self.placed)
 
     def gpu_members(self, uuid: str) -> tuple[PairMember, ...]:
         return tuple(_pair_member(p.reserved) for p in self.placed if p.gpu_uuid == uuid)
+
+    def time_contention(self, request: ResourceRequest, slot: GpuSlot) -> str | None:
+        """Decision B3-Q6: a time-budgeted unit shares no slot unless acknowledged."""
+        if self.budget.acknowledge_shared_gpu_time_budget:
+            return None
+        sharing = [p.reserved for p in self.placed if p.gpu_uuid == slot.uuid]
+        if not sharing or not (request.time_budgeted or any(r.time_budgeted for r in sharing)):
+            return None
+        return (
+            f"{slot.uuid}: a time-budgeted unit would share it "
+            "(acknowledge_shared_gpu_time_budget is not set)"
+        )
 
 
 def plan_dispatch(
@@ -343,6 +368,11 @@ def _refusal_reasons(request: ResourceRequest, budget: HostBudget) -> tuple[str,
         )
     if request.cpu_slots > budget.cpu_slots:
         reasons.append(f"needs {request.cpu_slots} CPU slots; budget declares {budget.cpu_slots}")
+    if request.unit_slots > budget.max_concurrent_units:
+        reasons.append(
+            f"needs {request.unit_slots} concurrent units; budget declares "
+            f"max_concurrent_units {budget.max_concurrent_units}"
+        )
     if request.gpu_count == 1:
         reasons.extend(_gpu_refusal_reasons(request, budget))
     if reasons:
@@ -374,7 +404,7 @@ def _place(request: ResourceRequest, ledger: _Ledger, digest: str) -> Placement:
 
 def _shared_shortfall(request: ResourceRequest, ledger: _Ledger) -> str | None:
     budget = ledger.budget
-    if len(ledger.placed) >= budget.max_concurrent_units:
+    if ledger.unit_slots() + request.unit_slots > budget.max_concurrent_units:
         return f"max_concurrent_units {budget.max_concurrent_units} reached"
     reserved_memory = ledger.host_memory_gib()
     if reserved_memory + request.host_memory_gib > budget.host_memory_gib:
@@ -395,6 +425,10 @@ def _place_on_gpu(request: ResourceRequest, ledger: _Ledger, digest: str) -> Pla
     candidate = _pair_member(request)
     headroom: list[str] = []
     for slot in ledger.budget.gpus:
+        contention = ledger.time_contention(request, slot)
+        if contention:
+            headroom.append(contention)
+            continue
         members = (*ledger.gpu_members(slot.uuid), candidate)
         decision = evaluate_resolved_pair_admission(members, limits=slot.ceiling)
         if decision.feasible:

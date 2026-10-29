@@ -1,8 +1,11 @@
 """Code-callable console policy; native operations remain the execution owner."""
 
+import hashlib
 from pathlib import Path
 from uuid import UUID
 
+from agent.judge.evidence import read_call_evidence
+from agent.schemas.judge import StopVerdict
 from tools.candidate_operations import (
     CandidateLoopResumeOperation,
     CandidateLoopResumeRequest,
@@ -15,7 +18,9 @@ from tools.candidate_operations import (
     PreparedCandidate,
     PrepareOperation,
     list_operations,
+    loop_control_requests,
     loop_root_operation,
+    operation_admitted,
     read_operation,
     read_operation_log,
     read_operation_tokens,
@@ -26,20 +31,24 @@ from tools.candidate_operations import (
     review_loop_resume,
     submit_operation,
 )
-from tools.candidate_operations.models import OperationFailure
+from tools.candidate_operations.files import canonical
+from tools.candidate_operations.models import OperationFailure, UnknownOperation
 from tools.candidate_operations.read import lookup_operation_request
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
 from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
 from tools.candidate_worker import CandidateTokenSnapshot
+from tools.candidate_worker.loop_stop import JudgeBoundaryVerdict
 from tools.candidate_worker.models import CandidateRunReceipt
 
 from .config import validate_config
 from .files import credentials
 from .graph_results import read_graph_results
 from .models import (
+    ChoicesView,
     ChoiceView,
     ConsoleConfig,
     GraphResultsView,
+    JudgeVerdictView,
     LaunchSelection,
     LoopPauseAcknowledgement,
     LoopResumeReview,
@@ -60,6 +69,20 @@ from .models import (
 )
 from .readiness import credential_readiness
 from .recorded_examples import read_recorded_example
+from .seed_labels import CHAIN_CONTRADICTED, readback_label
+
+
+def seed_readback(snapshot: OperationSnapshot) -> str:
+    """The recorded seed: the operation record's, or a native chain's lock readback."""
+    chain = snapshot.native_chain
+    if chain is not None:
+        if chain.run_seed_anomaly is not None:
+            return CHAIN_CONTRADICTED
+        return readback_label(chain.run_seed, chain.run_seed_source, native_chain=True)
+    seed = snapshot.run_seed
+    if seed is None:
+        return readback_label(None, None)
+    return readback_label(seed.value, seed.source)
 
 
 def preparation_request(
@@ -80,7 +103,7 @@ def preparation_request(
 
 
 def loop_status(
-    operation_store: OperationStoreConfig, snapshot: OperationSnapshot
+    operation_store: OperationStoreConfig, snapshot: OperationSnapshot, *, requests: bool = False
 ) -> LoopStatusView | None:
     """Declared loop bound from the root submission; bodies only from this segment's receipt.
 
@@ -97,10 +120,46 @@ def loop_status(
         raise OperationFailure("kind", "operation loop definition is missing")
     receipt = snapshot.receipt
     trace = receipt.loop_trace if isinstance(receipt, CandidateRunReceipt) else None
+    stop, pause = (
+        loop_control_requests(operation_store, snapshot.operation_id)
+        if requests
+        else (False, False)
+    )
     return LoopStatusView(
         final_iteration=loop.final_iteration,
         attempted_iterations=None if trace is None else trace.attempted_iterations,
         stop_reason=None if trace is None else trace.stop_reason,
+        stop_requested=stop,
+        pause_requested=pause,
+        judge_verdicts=()
+        if trace is None or not isinstance(receipt, CandidateRunReceipt)
+        else tuple(_judge_verdict(receipt.workspace, item) for item in trace.judge_verdicts),
+    )
+
+
+def _judge_verdict(workspace: str, verdict: JudgeBoundaryVerdict) -> JudgeVerdictView:
+    """Project one verified boundary verdict; the rationale only from its own evidence.
+
+    The evidence file is read by the judge owner's digest-checked reader under the run
+    workspace. A missing, foreign or malformed file leaves the rationale absent rather
+    than failing the status read; the verdict itself stays as the receipt recorded it.
+    """
+    rationale = confidence = None
+    root = Path(workspace)
+    path = root / verdict.evidence_path
+    try:
+        # An abstention (decision None) records a failed call: there is no rationale to show.
+        if verdict.decision is not None and path.resolve().is_relative_to(root.resolve()):
+            evidence = read_call_evidence(path, expected_sha256=verdict.evidence_sha256)
+            if isinstance(evidence.payload, StopVerdict):
+                rationale, confidence = evidence.payload.rationale, evidence.payload.confidence
+    except (OSError, ValueError):
+        pass
+    return JudgeVerdictView(
+        iteration=verdict.iteration,
+        decision=verdict.decision,
+        rationale=rationale,
+        confidence=confidence,
     )
 
 
@@ -124,6 +183,19 @@ class CandidateConsole:
             )
             for t in self.config.tasks
         )
+
+    def operations_store_id(self) -> str:
+        """Opaque, stable digest of the store's canonical ``state_root``; never a path.
+
+        Only the state root identifies the store (records live there). Editing the
+        preparation/candidate output roots and restarting must keep the id, or browsers
+        would hide a retained unresolved launch and re-enable Launch.
+        """
+        state_root = str(canonical(self.config.operation_store.state_root)).encode()
+        return hashlib.sha256(b"siderius-operation-store/v2\0" + state_root).hexdigest()[:32]
+
+    def choices_view(self) -> ChoicesView:
+        return ChoicesView(operations_store_id=self.operations_store_id(), tasks=self.choices())
 
     def prepare(self, selection: PrepareSelection) -> OperationHandle:
         selection = PrepareSelection.model_validate_json(selection.model_dump_json())
@@ -216,6 +288,8 @@ class CandidateConsole:
         )
 
     def status(self, operation_id: UUID) -> StatusView:
+        if not operation_admitted(self.config.operation_store, operation_id):
+            raise UnknownOperation()
         snapshot = read_operation(self.config.operation_store, operation_id)
         receipt = snapshot.receipt
         native_id = (
@@ -226,15 +300,15 @@ class CandidateConsole:
             else None
         )
         return StatusView(
-            # The run seed's console readback is issue #983 S6; the view omits it.
-            **snapshot.model_dump(exclude={"receipt", "receipt_digest", "run_seed"}),
+            **snapshot.model_dump(exclude={"receipt", "receipt_digest"}),
+            seed=seed_readback(snapshot),
             native_status=receipt.status if receipt else None,
             graph_trace=receipt.graph_trace if isinstance(receipt, CandidateRunReceipt) else None,
             native_id=native_id,
             validation_passed=receipt.validation_passed
             if isinstance(receipt, CandidateRunReceipt)
             else None,
-            loop=loop_status(self.config.operation_store, snapshot),
+            loop=loop_status(self.config.operation_store, snapshot, requests=True),
         )
 
     def cancel_operation(self, operation_id: UUID) -> OperationCancelAcknowledgement:
@@ -263,6 +337,7 @@ class CandidateConsole:
                     state=snapshot.state,
                     native_status=snapshot.receipt.status if snapshot.receipt else None,
                     loop=loop,
+                    seed=seed_readback(snapshot),
                 )
             )
         return OperationListView(

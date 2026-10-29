@@ -80,12 +80,16 @@ def run_llm_strategy(
     _require_fresh(invocation.evidence_dir)
     digest = invocation_sha256(invocation)
     calls: tuple[JudgeCallEvidence, ...] = ()
+    unsent_prompt_chars = None
+    unsent_prompt_sha256 = None
     while (planned := next_call(kind, invocation, calls)) is not None:
         request = call_request(digest, planned, calls)
         size = prompt_chars(planned, request)
         if size > MAX_JUDGE_PROMPT_CHARS:
             if not calls:
                 raise budget_refusal(invocation, 0, size)  # nothing sent, nothing written
+            unsent_prompt_chars = size
+            unsent_prompt_sha256 = planned.template.identity(request).prompt_sha256
             break  # recorded: decide() derives prompt_too_large for the unsent call
         evidence = run_judge_call(
             request,
@@ -105,6 +109,8 @@ def run_llm_strategy(
         static_call_bound=bound,
         calls=tuple(evidence_sha256(call) for call in calls),
         outcome=decide(kind, invocation, calls),
+        unsent_prompt_chars=unsent_prompt_chars,
+        unsent_prompt_sha256=unsent_prompt_sha256,
     )
     data = canonical_json_bytes(record)
     publish_bytes_write_once(str(invocation.evidence_dir / STRATEGY_EVIDENCE_FILE), data)

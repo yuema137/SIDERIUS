@@ -1,0 +1,20 @@
+/* First-run tour (onboarding.js): a non-modal card beside the highlighted element.
+ * No backdrop: everything outside the card stays visible and usable. */
+.onboarding-tour {
+  position: fixed;
+  z-index: 30;
+  width: min(340px, calc(100vw - 16px));
+  padding: var(--space-4);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-2);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--elev-2);
+}
+.onboarding-tour h2 { margin: 0 0 var(--space-2); font-size: var(--font-heading); }
+.onboarding-tour p { margin: 0 0 var(--space-3); font-size: var(--font-help); }
+.onboarding-tour .onboarding-count { margin-bottom: var(--space-1); color: var(--secondary); font-size: var(--font-label); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.onboarding-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.onboarding-actions button { min-height: 36px; padding: 5px 12px; }
+/* The highlighted element: an outline ring only, so its layout never moves. */
+.onboarding-target { outline: 3px solid var(--focus); outline-offset: 3px; }
