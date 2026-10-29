@@ -21,6 +21,8 @@ import stat
 from collections.abc import Iterator
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .files import canonical, config_bytes, open_directory, require_owner_only_file, write_all
 from .readiness_models import WorkspaceEntry, WorkspaceReadiness, WorkspaceStatus
 from .settings_file import (
@@ -481,7 +483,7 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
             payload = _existing_file(console, label="settings/console.json")
             try:
                 resolved = resolve_console(payload)
-            except SettingsInvalid:
+            except (SettingsInvalid, ValidationError):
                 raise  # names its own field or predicate (MissingSetting included)
             except ValueError:
                 raise WorkspaceRefused(

@@ -7,6 +7,7 @@ from core.runtime_control.budget_intake import HostBudgetFileError, load_host_bu
 from tools.candidate_operations.host_ledger import HostScheduling, ledger_directory
 from tools.candidate_operations.models import OperationFailure
 
+from .config_errors import MissingConfigFile
 from .files import canonical, config_bytes, credential_values, token
 from .models import ConsoleConfig
 from .settings_models import ResolvedConsole
@@ -65,9 +66,13 @@ def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> 
                 validate_read_only_exclusion(tuple(map(Path, paths)), protected)
             except ValueError:
                 raise SettingsInvalid(f"{label} overlaps a protected console path") from None
-        for name in (task.task_manifest, task.llm_config_file):
-            if not canonical(name).is_file():
-                raise ValueError("configured resource file must exist")
+        for field in ("task_manifest", "llm_config_file"):
+            name = getattr(task, field)
+            path = canonical(name)
+            if not path.exists():
+                raise MissingConfigFile(f"task {task.task_id}", field, name)
+            if not path.is_file():
+                raise ValueError("configured resource must be a file")
         for name in task.task_read_only:
             if not canonical(name).exists():
                 raise ValueError("configured dependency must exist")

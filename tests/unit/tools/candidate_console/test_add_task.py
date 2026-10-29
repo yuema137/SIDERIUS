@@ -83,6 +83,36 @@ def test_add_task_writes_starter_fields_and_package_mount_and_check_passes(
     assert _main(monkeypatch, capsys, "check", "--config", str(config))[0] == 0
 
 
+@pytest.mark.parametrize("command", ["check", "serve", "init"])
+def test_registered_task_schema_errors_name_fields_without_values(
+    command, workspace, monkeypatch, capsys
+):
+    """Defect: a config written by add-task loses field diagnostics or leaks an edited value."""
+    root, config, manifest = workspace
+    assert (
+        _main(
+            monkeypatch, capsys, "add-task", "--config", str(config), "--manifest", str(manifest)
+        )[0]
+        == 0
+    )
+    data = json.loads(config.read_text())
+    del data["tasks"][0]["candidate_network"]
+    data["tasks"][0]["label"] = {"secret": "DUMMY_REGISTERED_TASK_SECRET"}
+    config.write_text(json.dumps(data))
+    args = ("--workspace", str(root.parent)) if command == "init" else ("--config", str(config))
+    code, out, err = _main(monkeypatch, capsys, command, *args)
+    assert code == 2
+    expected = {
+        "console.json is invalid at tasks[0].candidate_network (missing)",
+        "console.json is invalid at tasks[0].label (string_type)",
+    }
+    if command == "init":
+        expected.add("Nothing was deleted.")
+    assert set(err.splitlines()) == expected
+    assert "DUMMY_REGISTERED_TASK_SECRET" not in out + err
+    assert str(root) not in out + err
+
+
 def test_environment_names_come_from_the_selected_llm_profile(workspace, monkeypatch, capsys):
     """Defect: env names are hard-coded instead of read from the task's LLM profile.
 
