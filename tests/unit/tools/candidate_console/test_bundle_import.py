@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -210,3 +211,12 @@ def test_fetch_data_refuses_a_group_writable_data_folder(bundle, workspace):
     assert result.returncode == 2
     assert "data must be owned by you without group/other write" in result.stderr
     assert not (root / "data" / "quickstart").exists()
+
+
+def test_read_bundle_accepts_the_trailing_slash_tab_completion_adds(bundle):
+    """Defect: ``--from-bundle DIR/`` (as tab completion types it) is refused."""
+    from tools.candidate_console.example_bundle import BundleRefused, read_bundle
+
+    assert read_bundle(f"{bundle}/").root == bundle
+    with pytest.raises(BundleRefused, match=re.escape("without '..'")):
+        read_bundle(f"{bundle}/../{bundle.name}/")

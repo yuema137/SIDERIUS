@@ -26,6 +26,25 @@ Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
 See [supported providers and models](docs/reference/model-qualification.md) for
 required model capabilities and the configurations tested so far.
 
+## Your first hour
+
+The quickest way to learn SIDERIUS is to run a small ready-made example in the
+browser console, then repeat the same steps with your own task. Both stages are
+written out command by command, with the output to expect, in the
+[first-hour path](docs/getting-started/README.md#your-first-hour-from-the-example-to-your-own-task).
+
+1. **Run the example.** Install, get the example bundle, create a console
+   workspace with `init --credential-file`, write the example data, register it
+   with `add-task --from-bundle`, start the console with `serve` and open it.
+   Then follow the tabs **Task → Workflow → Run → Monitor**.
+2. **Bring your own task.** Package your task with your coding agent, place it in
+   `siderius_workspace/tasks/<id>/`, register it with `add-task`, restart the
+   console, build a workflow for it and run it.
+
+You need a Linux machine with an NVIDIA GPU and bubblewrap; the first-hour path
+lists the [prerequisites](docs/getting-started/README.md#before-you-start) and
+defines its three terms: task, experiment setup and run.
+
 <a id="start-with-your-coding-agent"></a>
 
 ## Quick start with your coding agent
@@ -40,8 +59,8 @@ Use this checkout's own `.venv/bin/python` after installation. Provider keys
 are needed for real model calls; offline setup checks need none.
 The command line and the browser console read them from different places; see
 [API keys](docs/getting-started/installation.md#api-keys).
-The optional browser console also needs the
-[Linux workspace sandbox](src/tools/workspace_sandbox/README.md).
+The optional browser console also needs Linux with bubblewrap; run the
+[bubblewrap check](src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works).
 
 Follow [getting started](docs/getting-started/README.md) for the ordered setup,
 where to put credentials, and how to open the candidate console.

@@ -176,7 +176,8 @@ unpacked bundle folder and reuses every other `add-task` option except
 | `fetch_data.py`, `README.md` | data writer and human instructions |
 | `SHA256SUMS` | `<64 hex>  <path>` per line (`sha256sum -c` format), sorted by path, unique, every file except itself; paths must be relative POSIX without `.`, `..` or empty parts |
 
-**Verification** (`read_bundle`, before any write): `DIR` absolute, normalized and
+**Verification** (`read_bundle`, before any write): trailing `/` characters of `DIR`
+are dropped (shell tab completion), then `DIR` must be absolute, normalized and
 canonical; `SHA256SUMS` must list `task/task.yaml`, `setup/setup.json` and
 `console-task.json`; each listed file is opened component by component with
 `O_NOFOLLOW`, must be a regular file of at most 16 MiB, and its sha256 must match.
@@ -392,6 +393,22 @@ absent, selecting that library profile as `llm_profile`, and `settings/console.j
 write-once only when absent: `workspace_root`, `port` (default 8740, `--port`),
 `browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`,
 `experiment_setups: {"browser_creatable": true}` (see "Experiment setups").
+**`--credential-file PATH`** (init only; `check`/`serve` reject it) is checked
+before anything is created by `files.require_owner_only_file`: `files.canonical`
+path, no-follow parent walk, `stat(follow_symlinks=False)` requiring a regular file
+with `st_uid == os.getuid()` and mode exactly 0600. The file is never opened, so no
+value is read or printed; a failed predicate exits 2 with one fixed message and
+creates nothing. A new `console.json` gets the top-level `credential_file: PATH`.
+An existing `console.json` is never rewritten: when its `credential_file` differs
+from `PATH` (or is absent), `init` still creates the missing folders and the
+per-task output roots below, then raises `workspace.CredentialFileNotAdded`
+(`member` = `"credential_file": "<PATH>"`, JSON-escaped, no comma; `config_path`;
+`replaces`) and exits 2. For an absent member it prints `<member>,` to add right
+after the opening `{`; for a different value it prints `<member>` and tells the
+operator to keep the old line's trailing comma, because `init` writes
+`credential_file` last and `add-task` keeps member order. Both end with the full
+`check --config <config_path>` command. An equal value proceeds normally. The later load (same as `check`) parses the file's JSON/dotenv shape via
+`files.credential_values` without printing values.
 When `console.json` exists and names this workspace, `init` also creates the missing
 derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
 them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
@@ -1883,7 +1900,9 @@ opening a disclosure, and scrolls to the capture heading only after the
 on Home. **Choose a task** (`#quick-start-task`, from `consoleTask`) has four states in
 `#quick-start-task-state`: "Loading tasks…" while the list is read, "Tasks could not be
 loaded: <reason>" with `#quick-start-task-retry` (`consoleTask.reload()`), "No task is
-configured. …" with a link to the README setup step, or the list (#1131 items 1 and 3;
+registered. Put your task package in siderius_workspace/tasks/<id>/ and run add-task
+(see the README), then restart the console." (same text as the Task tab empty state)
+with a link to the README setup step, or the list (#1131 items 1 and 3;
 never a permanent loading line). **Experiment setup** (`#quick-start-setup`, from
 `GET /api/tasks/<id>/setups`; loading/failure in `#quick-start-setup-state`, a failure with
 `#quick-start-setup-retry`) offers

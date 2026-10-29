@@ -25,8 +25,17 @@ even when using the default models.
 
 To see the whole console path once before you package your own task, start from
 the quickstart example bundle. It holds a small synthetic task package and a
-ready experiment setup. Its [README](../../../examples/console_bundle/README.md)
-lists six commands: unpack, `init`, write the data, import with
+ready experiment setup. Download `siderius-example-quickstart-<version>.zip`
+from the [releases page](https://github.com/yuema137/SIDERIUS/releases) when the
+release lists it; until then build it from this checkout:
+
+```bash
+mkdir -p /absolute/downloads
+.venv/bin/python -m tools.release.build_example_bundle --output-dir /absolute/downloads
+```
+
+The build prints the path of the zip. Its [README](../../../examples/console_bundle/README.md)
+lists six commands: unpack, `init --credential-file`, write the data, import with
 `add-task --from-bundle`, `serve`, and open the console. The import checks every
 file against the bundle's `SHA256SUMS`, copies the package to
 `siderius_workspace/tasks/quickstart/`, registers it as step 2 below does, and
@@ -70,8 +79,23 @@ overwrites an existing `tasks/` folder.
    ```
 
    The token locks the console against other users and programs on the machine;
-   it is not a model provider API key. Follow [Credentials](#credentials)
-   below to bind provider keys before Launch.
+   it is not a model provider API key. Runs read provider keys only from the
+   private file named by `credential_file`. To set it while creating the
+   workspace, first create that file (see [Credentials](#credentials)), then add
+   `--credential-file`:
+
+   ```bash
+   .venv/bin/python -m tools.candidate_console init --workspace /absolute/project \
+     --credential-file /absolute/private/credentials.json
+   ```
+
+   `init` refuses the file unless it is a regular file you own with mode `600`,
+   and never prints its contents. It writes the path into a new
+   `console.json`; the closing check then reads the file only to confirm it is
+   JSON or dotenv text, so an empty file passes and you can add the key later.
+   If `console.json` already exists, `init` does not change it: it creates any
+   missing folders, prints the exact `"credential_file": ...` line to add or
+   substitute and the `check` command to run next, and exits with status 2.
 
    `init` is safe to run again. It only creates what is missing; it never
    deletes, replaces or follows a symlink. It refuses a folder that is a symlink,
@@ -472,8 +496,9 @@ coding agent, then press **Refresh**.
    (`task_revision`) or **unversioned**. With exactly one task, the console selects
    it for you. Otherwise select one. The browser remembers your choice for this
    console.
-   - **No task is configured** means `siderius_workspace/settings/console.json`
-     lists no task. Add your task there as described in step 2 of
+   - **No task is registered** means `siderius_workspace/settings/console.json`
+     lists no task. Put your task package in `siderius_workspace/tasks/<id>/`,
+     run `add-task` as described in step 2 of
      [Set up and open the console](#set-up-and-open-the-console), then restart the
      console.
    - **Tasks could not be loaded** shows the reason; select **Retry**.
@@ -704,9 +729,11 @@ start"). Native chains always run one step at a time, outside the ledger.
 
 For example, if your saved `llm.json` uses OpenAI routes, set
 `candidate_environment_names` in that task's `console.json` entry to
-`["OPENAI_API_KEY"]`. Set `credential_file` to a private absolute path such as
-`/absolute/private/credentials.json`. Its contents have this shape (placeholder
-only; replace it privately with your key):
+`["OPENAI_API_KEY"]` (`add-task` writes these names for you). Set
+`credential_file` to a private absolute path such as
+`/absolute/private/credentials.json`, either with `init --credential-file`
+(step 1) or by adding the line to `console.json` yourself. Its contents have this
+shape (placeholder only; replace it privately with your key):
 
 ```json
 {
@@ -715,7 +742,14 @@ only; replace it privately with your key):
 ```
 
 Create the file privately, owned by the user running the console, with mode
-`600`, then edit it locally. For an existing file, set that mode with:
+`600`, then edit it locally in your editor. This creates an empty file with that
+mode (the folder must already exist); skip it if the file already exists:
+
+```bash
+(umask 077 && touch /absolute/private/credentials.json)
+```
+
+For an existing file, set that mode with:
 
 ```bash
 chmod 600 /absolute/private/credentials.json

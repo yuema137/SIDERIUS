@@ -166,10 +166,14 @@ def _read_file(root: int, name: str) -> bytes:
 
 
 def read_bundle(directory: str) -> VerifiedBundle:
-    """Verify every ``SHA256SUMS`` entry and validate the two descriptors."""
+    """Verify every ``SHA256SUMS`` entry and validate the two descriptors.
+
+    Trailing slashes (shell tab completion) are dropped before the path checks.
+    """
+    directory = directory.rstrip("/") or "/"
     if not os.path.isabs(directory) or os.path.normpath(directory) != directory:
         raise BundleRefused(
-            f"--from-bundle must be an absolute path without '..' or a trailing slash, "
+            f"--from-bundle must be an absolute path without '..', "
             f"for example {os.path.abspath(directory)}"
         )
     try:

@@ -56,7 +56,7 @@ try {
   await state.filter({hasText: 'Tasks could not be loaded: Fixture task list unavailable'}).waitFor();
   assert.equal(await page.locator('#quick-start-open').isDisabled(), true);
   mode = 'empty'; await page.locator('#quick-start-task-retry').click();
-  await state.filter({hasText: 'No task is configured'}).waitFor();
+  await state.filter({hasText: 'No task is registered. Put your task package in siderius_workspace/tasks/<id>/ and run add-task (see the README), then restart the console'}).waitFor();
   assert.match(await state.locator('a').getAttribute('href'), /README.md#set-up-and-open-the-console$/);
   assert.equal(await page.locator('#quick-start-task-retry').isHidden(), true);
   mode = 'real'; await page.evaluate(() => window.consoleTask.reload());
