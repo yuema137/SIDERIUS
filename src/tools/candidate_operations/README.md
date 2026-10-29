@@ -224,8 +224,9 @@ GPU is in use, it is refused with `host_capacity`, and the message says a
 time-budgeted run would share the GPU. If you accept that contention, set
 `"acknowledge_shared_gpu_time_budget": true` in the budget file before the first
 submission. Changing the budget file while runs hold reservations is refused with
-`budget_mismatch`. If a submission or a release reports `ledger_format`, the
-ledger file was written by an earlier SIDERIUS version. Wait until the runs it
+`budget_mismatch`. If a submission or a release reports `ledger_format`, this
+SIDERIUS version cannot read the ledger file (another version wrote it, or it is
+damaged). Wait until the runs it
 lists have ended, move the named `ledger.json` aside, and retry.
 
 Nothing polls in the background. A finished run's reservation is returned the

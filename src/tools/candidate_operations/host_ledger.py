@@ -144,6 +144,9 @@ def _acquire(lock: int) -> None:
 def read_state(root: Path) -> HostLedgerState:
     """The ledger, or a typed ``ledger_format`` refusal for one this revision cannot read.
 
+    That covers a ledger written by an earlier or a newer revision and a corrupt
+    or truncated file alike: none of them is parsed, guessed or repaired.
+
     Every reader (admission, the sweep, the release command) goes through here,
     so an unreadable ledger is refused the same way everywhere and never rewritten.
     """
@@ -155,8 +158,9 @@ def read_state(root: Path) -> HostLedgerState:
     except ValidationError as error:
         raise OperationFailure(
             "ledger_format",
-            f"this host ledger was written by an earlier SIDERIUS revision; once its runs "
-            f"have ended, move {path} aside and retry",
+            f"this host ledger is unreadable by this SIDERIUS revision (written by another "
+            f"revision, or corrupt); once the runs it lists have ended, move {path} aside "
+            "and retry",
         ) from error
 
 
