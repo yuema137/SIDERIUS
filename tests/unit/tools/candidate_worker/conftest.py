@@ -11,13 +11,18 @@ from tools.workflow_preview import WorkflowPreviewRequest, preview_workflow
 from workflows.definition import WorkflowDocument
 
 REPO = Path(__file__).resolve().parents[4]
+QUICKSTART = REPO / "configs/task_composition/quickstart.yaml"
 
 
 @pytest.fixture
 def prepared(tmp_path, monkeypatch):
+    yield from _prepared(tmp_path, monkeypatch, QUICKSTART)
+
+
+def _prepared(tmp_path, monkeypatch, manifest: Path):
     monkeypatch.setenv("OPENAI_API_KEY", "offline-test-key")
     project = tmp_path / "project"
-    project.mkdir()
+    project.mkdir(exist_ok=True)  # a test manifest may live here (a mounted read-only root)
     (project / "data").mkdir()
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(workspace / "generated_library"))
@@ -38,6 +43,7 @@ def prepared(tmp_path, monkeypatch):
 
     with run_registration_scope():
         yield _prepare_request(
+            manifest,
             project,
             workspace,
             compose_run_task_bindings,
@@ -48,6 +54,7 @@ def prepared(tmp_path, monkeypatch):
 
 
 def _prepare_request(
+    manifest,
     project,
     workspace,
     compose_run_task_bindings,
@@ -55,7 +62,7 @@ def _prepare_request(
     ProposalInput,
     ProposerInterpretationEvidence,
 ):
-    composition = compose_run_task_bindings(str(REPO / "configs/task_composition/quickstart.yaml"))
+    composition = compose_run_task_bindings(str(manifest))
     seed = ProposalInput(
         interpretation_evidence=ProposerInterpretationEvidence(),
         cold_start=True,
@@ -91,7 +98,7 @@ def _prepare_request(
             {
                 "definition": {
                     "task": {
-                        "manifest": str(REPO / "configs/task_composition/quickstart.yaml"),
+                        "manifest": str(manifest),
                         "data_root": "data",
                         "workspace": str(workspace),
                     },

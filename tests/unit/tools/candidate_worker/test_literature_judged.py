@@ -11,14 +11,19 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
+from agent.schemas.judge_task import rubric_ref
 from tests.helpers.candidate_literature import literature_judged_request
 from tests.unit.workflows.test_debate_judge import DebateBridge
 from tests.unit.workflows.test_judge_merge import MergeBridge
+from tests.unit.workflows.test_judge_strategies import RUBRIC as SCORED_RUBRIC
+from tests.unit.workflows.test_judge_strategies import StubBridge
 from tests.unit.workflows.test_primary_advisors import AdvisorsBridge
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.workflow_preview import WorkflowPreviewRequest, preview_workflow
 
+from .conftest import QUICKSTART, _prepared
 from .test_literature import literature_sdk as literature_sdk
 from .test_literature_adaptors import findings as findings
 from .test_literature_adaptors import proposal_seed, run, states
@@ -233,6 +238,71 @@ def test_run_level_max_judge_calls_refuses_before_any_effect(
     assert receipt.error == "StrategyError: the run may make 5 judge calls; max_judge_calls is 4"
     assert receipt.graph_trace is None
     assert not literature_sdk[0] and not native_runner.calls and bridge.calls == []
+
+
+def _absolute(value, base: Path):
+    """The quickstart manifest's relative refs, resolved for a copy written elsewhere."""
+    if isinstance(value, dict):
+        return {key: _absolute(item, base) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_absolute(item, base) for item in value]
+    if isinstance(value, str) and value.startswith(("../", "./")):
+        return str((base / value).resolve())
+    return value
+
+
+@pytest.fixture
+def prepared_rubric(tmp_path, monkeypatch):
+    """The quickstart task plus a task-declared rubric (``rubrics:``), as a test manifest."""
+    task = tmp_path / "project" / "task"  # inside the mounted project root
+    task.mkdir(parents=True)
+    (task / "rubric.yaml").write_text(yaml.safe_dump(SCORED_RUBRIC.model_dump(mode="json")))
+    raw = _absolute(yaml.safe_load(QUICKSTART.read_text()), QUICKSTART.parent)
+    raw["rubrics"] = [{"config": str(task / "rubric.yaml")}]
+    manifest = task / "manifest.yaml"
+    manifest.write_text(yaml.safe_dump(raw))
+    yield from _prepared(tmp_path, monkeypatch, manifest)
+
+
+def test_rubric_top2_ranks_by_the_task_rubric_end_to_end(
+    prepared_rubric, native_runner, findings, monkeypatch
+):
+    """Defect: the rubric ranking does not decide which reviews reach which proposal
+    (lost order or unit mapping), the task rubric is not the one scored, or readback
+    re-runs the scorer instead of replaying it.
+
+    Hand-computed weighted means (B2-6 fixture table): reviews:2 = 13/3, reviews:0 = 3,
+    reviews:1 = 3 (tie, input order), so top-2 feeds review2 then review0.
+    """
+    seeded(findings)
+    bridge = judge_bridge(monkeypatch, StubBridge())
+    combine = {
+        "kind": "rubric-rank/v1",
+        "route_slot": "aggregate",
+        "max_calls": 3,
+        "guidance": "none",
+        "criterion": "Which review should seed a proposal?",
+        "rubric": rubric_ref(SCORED_RUBRIC).model_dump(mode="json"),
+        "scoring": "per_item",
+        "repeats": 1,
+    }
+    request = literature_judged_request(
+        prepared_rubric,
+        combine=combine,
+        select={"kind": "top-k/v1", "k": 2},
+        distribute={"kind": "per-item/v1", "count": 2, "on_short": "fail"},
+        reviews=REVIEWS[:3],
+    )
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    assert bridge.calls == ["judge.rubric-rank"] * 3
+    assert evidence_contents(receipt, "propose0") == ["Finding of review2."]
+    assert evidence_contents(receipt, "propose1") == ["Finding of review0."]
+    record = json.loads(Path(receipt.graph_trace.adaptors[0].record_path).read_bytes())
+    assert [entry["exact"] for entry in record["ranking"]["entries"]] == ["13/3", "3", "3"]
+    calls = len(bridge.calls)
+    verify_graph_trace(request, parent, receipt)
+    assert len(bridge.calls) == calls
 
 
 def _refused(request, change, match):
