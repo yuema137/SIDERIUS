@@ -675,6 +675,16 @@ and degraded persistence, so a consumer can explain the absent score. This
 optional additive field defaults to `None` for historical outputs and other exits.
 Earlier successful records, if any, remain available; the refusal adds no score.
 
+Training classifies the normalized decision against the core authority
+`admission.RESOURCE_REJECTIONS`; it does not maintain another stopping-code set.
+`runtime.normalize_training_admission_refusal` defaults a missing/empty reason
+code to `policy_unavailable` before recording or deciding whether to stop. If
+full admission validation fails, it emits a valid infrastructure refusal with
+the original message and raw payload under `evidence.invalid_admission`. A
+recognized infrastructure code is retained; unknown codes or malformed resource
+verdicts become `policy_unavailable`. This yields one refusal record and an
+immediate stop, never a second attempt-failure record followed by a retry.
+
 The complete admission vocabulary in `core/runtime_control/admission.py` is
 these three reasons plus `insufficient_headroom`. The latter remains retryable:
 a smaller candidate can change its resource verdict. Ordinary model failures

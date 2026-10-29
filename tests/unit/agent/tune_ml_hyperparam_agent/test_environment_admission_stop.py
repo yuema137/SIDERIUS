@@ -25,7 +25,9 @@ _NODE = "nodes.ml_hyperparameter_tune_agent"
 _MESSAGE = "GPU phase not started: current environment evidence is unavailable."
 
 
-def _drive(tmp_path: Path, training_status: dict) -> tuple[HyperparamTuningOutput, int, int]:
+def _drive(
+    tmp_path: Path, training_status: dict
+) -> tuple[HyperparamTuningOutput, int, int, list[dict]]:
     agent_input = HyperparamTuningInput(
         run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
@@ -99,7 +101,7 @@ def _drive(tmp_path: Path, training_status: dict) -> tuple[HyperparamTuningOutpu
         sandbox.save_record.side_effect = saved.append
         sandbox.dirs = {"configs": str(configs)}
         output = HyperparamTuningAgent().run(agent_input)
-        return output, brain.plan.call_count, training_calls
+        return output, brain.plan.call_count, training_calls, saved
 
 
 def _refusal(reason_code: AdmissionReason) -> dict:
@@ -125,7 +127,7 @@ def _refusal(reason_code: AdmissionReason) -> dict:
     ],
 )
 def test_environment_refusal_stops_without_replanning(tmp_path: Path, reason_code: AdmissionReason):
-    output, plans, training_calls = _drive(tmp_path, _refusal(reason_code))
+    output, plans, training_calls, _saved = _drive(tmp_path, _refusal(reason_code))
     assert output.total_attempts == training_calls == 1
     assert plans == 1  # The initial plan only: zero replans.
     assert output.completed_rounds == output.consecutive_fail_rounds_at_exit == 0
@@ -154,8 +156,29 @@ def test_environment_refusal_stops_without_replanning(tmp_path: Path, reason_cod
     ],
 )
 def test_model_failures_preserve_attempt_and_round_retries(tmp_path: Path, training_status: dict):
-    output, plans, training_calls = _drive(tmp_path, training_status)
+    output, plans, training_calls, _saved = _drive(tmp_path, training_status)
     assert output.total_attempts == training_calls == plans == 9
     assert output.consecutive_fail_rounds_at_exit == 3
     assert output.termination_reason == "aborted_fail_rounds"
     assert output.environment_admission_refusal is None
+
+
+@pytest.mark.parametrize("missing_field", ["reason_code", "requirement_source"])
+def test_incomplete_admission_stops_without_duplicate_record(tmp_path: Path, missing_field: str):
+    """Missing codes and invalid evidence must not become nine model retries."""
+    status = _refusal("environment_headroom_unproven")
+    del status["admission"][missing_field]
+    output, plans, training_calls, saved = _drive(tmp_path, status)
+    assert output.total_attempts == training_calls == plans == 1
+    assert output.consecutive_fail_rounds_at_exit == 0
+    assert output.termination_reason == "infrastructure_abort"
+    assert len(output.all_records) == 1  # No second attempt_failure after validation fails.
+    record = output.all_records[0]
+    assert record.status == "skipped_infrastructure_failure"
+    refusal = output.environment_admission_refusal
+    assert refusal is not None
+    expected_code = (
+        "policy_unavailable" if missing_field == "reason_code" else "environment_headroom_unproven"
+    )
+    assert refusal.reason_code == saved[0]["memory"]["reason_code"] == expected_code
+    assert refusal.reason == _MESSAGE
