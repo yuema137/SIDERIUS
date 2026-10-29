@@ -20,6 +20,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -1434,6 +1435,15 @@ class ExperimentPlan(BaseModel):
             return cls.model_validate(raw), None
         except Exception as exc:
             plan_error = str(exc)
+            # Exclude raw LLM inputs and exception context from the new log line.
+            # Non-validation exceptions can embed arbitrary payloads in their text.
+            plan_error_log = (
+                exc.json(include_input=False, include_context=False, include_url=False)
+                if isinstance(exc, ValidationError)
+                else type(exc).__name__
+            )
+            if len(plan_error_log) > 512:
+                plan_error_log = plan_error_log[:509] + "..."
             # Keep only experiment fields, let trial fields take defaults.
             # Use alias names (model_config, train_config, loss_config) since
             # that's what the LLM outputs.
@@ -1448,7 +1458,8 @@ class ExperimentPlan(BaseModel):
             safe = {k: v for k, v in raw.items() if k in _EXPERIMENT_KEYS}
             print(
                 f"[ExperimentPlan] LLM returned invalid trial fields — "
-                f"falling back to defaults. Kept keys: {list(safe.keys())}"
+                f"falling back to defaults. Kept keys: {list(safe.keys())}. "
+                f"Validation error: {plan_error_log}"
             )
             rejected = cls._describe_lost_ordering(raw, plan_error)
             if rejected is not None:
