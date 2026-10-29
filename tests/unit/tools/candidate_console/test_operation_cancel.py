@@ -99,5 +99,8 @@ def test_status_projects_cancel_facts(console_config, monkeypatch, field, value)
     monkeypatch.setattr(
         "tools.candidate_console.service.loop_root_operation", lambda config, value: None
     )
+    monkeypatch.setattr(
+        "tools.candidate_console.service.operation_admitted", lambda config, value: True
+    )
     status = client(console_config).get(f"/api/operations/{operation_id}").json()
     assert status.get(field, "absent") == (True if value else "absent")

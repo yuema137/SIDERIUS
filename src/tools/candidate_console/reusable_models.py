@@ -85,6 +85,9 @@ class ReusableCaptureReview(PreviewModel):
     environment_names: tuple[str, ...]
     read_only: tuple[str, ...]
     credential_readiness: CredentialReadiness
+    # Display-only Save name of source_sha256 in the project's version record (B8-3); the
+    # SHA-256 stays the bound identity. Absent when the bytes were never saved here.
+    source_version_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ReusableAdmissionNotAttempted(OperationFailure):

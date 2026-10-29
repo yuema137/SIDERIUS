@@ -1,4 +1,35 @@
-/* Shared presentation roles. No task, draft or operation state belongs here. */
+/* Shared presentation roles. No task, draft or operation state belongs here.
+ * Light accents are dark enough for 4.5:1 text on the page, panel and every capability tint. */
+/* Layout system (both themes), adopted from the GUI design spec (ui-design-spec.md §1, §2):
+ * one 4/8/12/16/24/32/48 spacing scale, radii 4/8/pill, elevation only for overlays and
+ * movable canvas cards, and type sizes 12/14/20 (16 for prose pages). */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --shell-pad: clamp(16px, 2vw, 32px);
+  --bar-height: 48px;
+  --control-height: 36px;
+  --rail-width: 272px;
+  --inspector-width: 352px;
+  --radius-1: 4px;
+  --radius-2: 8px;
+  --radius-pill: 999px;
+  --measure: 75ch;
+  --font-title: 20px;
+  --font-prose: 16px;
+  --font-heading: 14px;
+  --font-body: 14px;
+  --font-label: 12px;
+  --font-help: 12px;
+  --elev-0: none;
+  --elev-1: 0 1px 2px #0000001f, 0 0 0 1px var(--border);
+  --elev-2: 0 4px 12px #00000029;
+}
 :root {
   color-scheme: light;
   --bg: #f1f6fb;
@@ -10,13 +41,13 @@
   --control-border: #163e6945;
   --control: #fbfcfe;
   --hover: #163e690b;
-  --primary: #3677b2;
+  --primary: #2e6da6;
   --primary-hover: #245f93;
   --on-primary: #ffffff;
-  --secondary: #11807d;
+  --secondary: #0f7672;
   --focus: #3a7ebb;
-  --error: #d33750;
-  --warning: #91680e;
+  --error: #c4304a;
+  --warning: #85600c;
   --warning-bg: #fff5e2;
   --success: #58b947;
   --disabled: #f1f4f8;
@@ -42,6 +73,7 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --elev-2: 0 4px 12px #00000080;
   --bg: #08131d;
   --panel: #0e1e2d;
   --raised: #96c8f50d;

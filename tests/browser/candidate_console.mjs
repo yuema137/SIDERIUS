@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const require = createRequire(import.meta.url);
 for (const name of ['CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_TEST_ORIGIN']) {
@@ -31,15 +32,16 @@ const assets = join(dirname(fileURLToPath(import.meta.url)), '../../src/tools/ca
 const screenshots = process.env.CONSOLE_SCREENSHOT_DIR || await mkdtemp(join(tmpdir(), 'siderius-console-browser-'));
 await mkdir(screenshots, { recursive: true });
 const server = createServer(async (req, res) => {
-  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/theme.js': ['theme.js', 'text/javascript'], '/theme.css': ['theme.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
+  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/theme.js': ['theme.js', 'text/javascript'], '/theme.css': ['theme.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'], '/icons.svg': ['icons.svg', 'image/svg+xml'] };
   // Serve every static script/style index.html loads, as production does; a missing module
   // (for example editor-task-controls.js) breaks session listeners before Connect completes.
   const asset = /^\/([a-z0-9-]+)\.(js|css)$/.exec(req.url);
   if (asset) files[req.url] = [asset[1] + '.' + asset[2], asset[2] === 'js' ? 'text/javascript' : 'text/css'];
+  if (/^\/siderius-logo-(light|dark)\.svg$/.test(req.url)) files[req.url] = [req.url.slice(1), 'image/svg+xml'];
   const file = files[req.url];
   if (!file) { res.writeHead(404); res.end(); return; }
   try {
-    res.writeHead(200, { 'Content-Type': file[1], 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'" });
+    res.writeHead(200, { 'Content-Type': file[1], 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'" });
     res.end(await readFile(join(assets, file[0])));
   } catch { res.writeHead(500); res.end(); }
 });
@@ -48,6 +50,7 @@ const { chromium } = require(process.env.CONSOLE_PLAYWRIGHT_MODULE);
 let browser;
 try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE });
+  showAllConsoleSections(browser);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   const faults = [];
@@ -83,7 +86,7 @@ try {
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') return reply({ operations: [], unreadable: 0, examined: 0, incomplete: false });
     if (url.pathname.endsWith('/graph-results')) return reply({ error: { code: 'not_found', message: 'Fixture has no workflow results' } }, 404);
-    if (url.pathname === '/api/choices') return reply([{ task_id: 'synthetic', label: 'Synthetic ' + hostile, task_manifest: '/fixture/task.json', data_root: '/fixture/data', llm_config_file: '/fixture/llm.json', preparation_root: '/fixture/preparations', candidate_root: '/fixture/candidates', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300 }]);
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: [{ task_id: 'synthetic', label: 'Synthetic ' + hostile, task_manifest: '/fixture/task.json', data_root: '/fixture/data', llm_config_file: '/fixture/llm.json', preparation_root: '/fixture/preparations', candidate_root: '/fixture/candidates', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300 }]});
     if (url.pathname === '/api/preparations') {
       preparation = request.postDataJSON();
       if (dropPreparation) { dropPreparation = false; await route.abort(); return; }
@@ -117,7 +120,7 @@ try {
   // Keyboard connect proves associated labels, native submit and focus navigation.
   await page.getByLabel('Console token', { exact: true }).focus();
   await page.keyboard.type('browser-fixture-token'); await page.keyboard.press('Tab'); await page.keyboard.press('Enter');
-  await page.getByText('Connected. Observations', { exact: false }).waitFor({state: 'attached'});
+  await page.locator('#access-status').filter({ hasText: 'Connected.' }).waitFor({state: 'attached'});
   await page.locator('#prepare-form').getByLabel('Run name', { exact: true }).fill('browser-offline');
   await page.getByText('Optional stage advice', { exact: true }).click();
   await page.getByLabel('Proposal advice', { exact: true }).fill(hostile);
@@ -126,12 +129,12 @@ try {
   assert.equal(requests.filter(item => item.method === 'POST').length, 1);
   assert.equal(await page.locator('#prepare-form').getByLabel('Run name', { exact: true }).isDisabled(), true);
   const uncertainId = await page.locator('#prepare-id').textContent();
-  await page.locator('nav a[href="#slow-control"]').click();
+  await page.locator('nav a[href="#monitor"]').click();
   await page.locator('nav a[href="#home"]').click();
   await page.locator('#access-change').click(); // Connected pages collapse the token form.
   await page.locator('#token').fill('browser-fixture-token');
   await page.locator('#access-form button').click();
-  await page.getByText('Connected. Observations', {exact: false}).waitFor();
+  await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
   assert.equal(await page.locator('#prepare-id').textContent(), uncertainId);
   assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'Reconnect/navigation retain uncertain submission without retrying');
   await page.getByRole('button', { name: 'Retry same preparation', exact: true }).click();
@@ -160,13 +163,19 @@ try {
   const launches = requests.filter(item => item.path === '/api/candidates');
   assert.equal(launches.length, 3);
   assert.deepEqual(launches[0].body, launches[1].body); assert.deepEqual(launches[1].body, launches[2].body);
-  await page.locator('nav a[href="#slow-control"]').click();
+  await page.locator('nav a[href="#monitor"]').click();
   await page.locator('details', {has: page.locator('#tokens-table')}).getByText('Reported token table', {exact: true}).click(); // Recorded example has its own table.
   await page.getByText('Activity and logs', {exact: true}).click();
-  await page.locator('#monitor-status').filter({ hasText: 'Native: rejected' }).waitFor({state: 'attached'});
+  await page.locator('#monitor-status').filter({ hasText: 'validation rejected the candidate' }).waitFor({state: 'attached'});
+  // M-2: raw enums stay in developer facts.
+  assert.ok((await page.locator('#operation-facts').textContent()).includes('Native statusrejected'));
   assert.equal(await page.locator('#log img').count(), 0);
   assert.ok((await page.locator('#log').textContent()).includes(hostile));
-  await page.waitForTimeout(2200); assert.ok(logOffsets.includes(73), 'Log cursor must use returned byte offset.');
+  // M-5: a finished operation is read once, then polling stops; an explicit Read re-reads.
+  const settledReads = logOffsets.length; await page.waitForTimeout(2200);
+  assert.equal(logOffsets.length, settledReads, 'No polling after a terminal state');
+  await page.getByRole('button', { name: 'Read operation', exact: true }).click();
+  await page.waitForTimeout(300); assert.ok(logOffsets.includes(73), 'Log cursor must use returned byte offset.');
   await page.locator('#tokens-status').filter({ hasText: 'Partial evidence' }).waitFor({state: 'attached'});
   assert.equal(await page.locator('#token-rows tr').count(), 2);
   assert.ok((await page.locator('#token-rows').textContent()).includes('100 · 1 missing'));
@@ -176,8 +185,9 @@ try {
   await page.waitForTimeout(2200);
   assert.equal(await page.locator('#token-rows').textContent(), tokenText, 'Polling replaces token sums.');
   tokenFailure = true; nativeState = 'unknown';
+  await page.getByRole('button', { name: 'Read operation', exact: true }).click();
   await page.locator('#tokens-status').filter({ hasText: 'Reported tokens stale' }).waitFor({state: 'attached'});
-  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor({state: 'attached'});
+  await page.locator('#monitor-status').filter({ hasText: 'cannot be determined right now' }).waitFor({state: 'attached'});
   assert.equal(await page.locator('#token-rows').textContent(), tokenText, 'Token-only failure retains same-run table.');
   assert.ok(logOffsets.filter(offset => offset === 73).length >= 2, 'Logs continue during token-only failure.');
   tokenFailure = false;
@@ -207,16 +217,16 @@ try {
   nativeState = 'unknown';
   await page.getByLabel('Operation UUID', { exact: true }).fill(known);
   await page.getByRole('button', { name: 'Read operation', exact: true }).click();
-  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor({state: 'attached'});
+  await page.locator('#monitor-status').filter({ hasText: 'cannot be determined right now' }).waitFor({state: 'attached'});
   nativeState = 'completed'; finishing = true;
   await page.getByRole('button', { name: 'Read operation', exact: true }).click();
-  await page.locator('#monitor-status').filter({ hasText: 'Finishing:' }).waitFor({state: 'attached'});
-  assert.ok((await page.locator('#monitor-status').textContent()).includes('Native result is available; the wrapper is still finishing.'));
+  await page.locator('#monitor-status').filter({ hasText: 'still finishing' }).waitFor({state: 'attached'});
+  assert.ok((await page.locator('#monitor-status').textContent()).includes('The result is in; the worker is still finishing.'));
   assert.ok((await page.locator('#operation-facts').textContent()).includes('alive:'));
   assert.ok((await page.locator('#operation-facts').textContent()).includes('Native receipt availabletrue'));
   disconnected = true;
   await page.getByRole('button', { name: 'Read operation', exact: true }).click();
-  await page.locator('#monitor-status').filter({ hasText: 'Observation stale' }).waitFor({state: 'attached'});
+  await page.locator('#monitor-status').filter({ hasText: 'server is unreachable' }).waitFor({state: 'attached'});
   disconnected = false;
   finishing = false; nativeState = 'unknown';
   await page.reload();
@@ -226,9 +236,9 @@ try {
   assert.equal(new URL(page.url()).search, '');
   await page.getByLabel('Console token', { exact: true }).fill('browser-fixture-token');
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
-  await page.getByText('Connected. Observations', { exact: false }).waitFor({state: 'attached'});
+  await page.locator('#access-status').filter({ hasText: 'Connected.' }).waitFor({state: 'attached'});
   await page.getByRole('button', { name: 'Read operation', exact: true }).click();
-  await page.locator('#monitor-status').filter({ hasText: 'State: unknown' }).waitFor({state: 'attached'});
+  await page.locator('#monitor-status').filter({ hasText: 'cannot be determined right now' }).waitFor({state: 'attached'});
   assert.equal(requests.filter(item => item.method === 'POST').length, mutations, 'Reconnect must be GET-only.');
   await page.locator('nav a[href="#home"]').click();
   await page.locator('#configured-task > summary').click();
@@ -243,7 +253,9 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Retry same candidate launch', exact: true }).isDisabled(), true);
   assert.ok((await page.locator('#launch-status').textContent()).includes(hostile));
   assert.equal(await page.evaluate(() => window.hostile), undefined);
-  assert.equal(await page.locator('img').count(), 0);
+  // Hostile text must never create an image; the static brand logos are the only <img> elements.
+  assert.equal(await page.locator('img:not([data-brand-logo])').count(), 0);
+  assert.equal(await page.locator('img[data-brand-logo]').count(), 4, 'Only the four static brand logos');
   readinessBlocked = true;
   const frozenReview = await page.locator('#review').textContent();
   await page.getByRole('button', { name: 'New preparation', exact: true }).click();

@@ -11,6 +11,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[key], `Set ${key}`);
 await mkdir(process.env.CONSOLE_EVIDENCE_DIR, {recursive: false});
@@ -32,6 +33,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}}), faults = [];
   page.on('pageerror', error => faults.push(error.message));
   page.setDefaultTimeout(30000);
@@ -68,7 +70,31 @@ try {
   assert.ok(byContract.size >= 6, `families graph shows several contracts: ${[...byContract.keys()]}`);
   const tokens = [...byContract.values()].map(value => JSON.parse(value)).map(([shape, colour]) => `${shape}|${colour}`);
   assert.equal(new Set(tokens).size, tokens.length, 'distinct contracts render distinct colour+shape pairs');
-  assert.equal(await input('build_left', 'output').locator('.circuit-port-contract').textContent(), 'Proposal result');
+  assert.equal(await input('build_left', 'output').locator('.circuit-port-contract').textContent(), 'Model plan');
+  // Names come from the server and name the schema only: the producing output and the
+  // consuming input show the same name; direction is an arrow on the socket.
+  assert.equal(await output('hypothesis').locator('.circuit-port-contract').textContent(), 'Model plan');
+  for (const port of ports) assert.doesNotMatch(port.name, /\b(input|output|request|result|in|out)\b/i, `${port.id} name has no direction word`);
+  const arrows = await page.evaluate(() => [...document.querySelectorAll('.circuit-port[data-contract]')].map(port => ({
+    output: port.hasAttribute('data-output'), direction: port.dataset.contractDirection, label: port.getAttribute('aria-label'),
+    first: port.firstElementChild?.classList.contains('circuit-port-direction'),
+    last: [...port.querySelectorAll(':scope > .circuit-port-direction')].length === 1})));
+  for (const arrow of arrows) {
+    assert.equal(arrow.direction, arrow.output ? 'sends' : 'receives');
+    assert.match(arrow.label, arrow.output ? /^Sends / : /^Receives /);
+    assert.ok(arrow.last, 'one direction arrow per socket');
+    if (!arrow.output) assert.ok(arrow.first, 'incoming arrow precedes the input label');
+  }
+  assert.match(await output('hypothesis').getAttribute('aria-label'), /^Sends Model plan\./);
+  // Arrows sit in the port padding: they add no height, so measured layout keeps cards apart.
+  const arrowFlow = await page.evaluate(() => [...document.querySelectorAll('.circuit-port > .circuit-port-direction')]
+    .every(mark => getComputedStyle(mark).position === 'absolute'));
+  assert.ok(arrowFlow, 'direction arrows take no layout space');
+  const cardRects = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => ({
+    node: card.dataset.node, left: card.offsetLeft, top: card.offsetTop, right: card.offsetLeft + card.offsetWidth, bottom: card.offsetTop + card.offsetHeight})));
+  for (const [i, a] of cardRects.entries()) for (const b of cardRects.slice(i + 1)) {
+    assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.node} and ${b.node} do not overlap`);
+  }
   // Required inputs/outputs are filled; optional inputs are hollow.
   for (const port of ports.filter(value => value.required !== undefined)) {
     assert.equal(port.fill, port.required === 'true' ? 'filled' : 'hollow', port.id);
@@ -83,12 +109,15 @@ try {
 
   // Legend lists every contract present in the graph with its swatch and readable name.
   const legend = page.locator('.circuit-contract-legend');
-  assert.match(await legend.locator('summary').textContent(), /^Port types \(\d+\)$/);
+  assert.match(await legend.locator('summary').textContent(), /^Connector types \(\d+\)$/);
   await legend.locator('summary').click();
   const legendIds = await legend.locator('li').evaluateAll(items => items.map(item => item.dataset.contract));
   for (const contract of byContract.keys()) assert.ok(legendIds.includes(contract), `legend lists ${contract}`);
-  assert.match(await legend.locator('li[data-contract="proposal.output"]').textContent(), /Proposal result/);
+  assert.match(await legend.locator('li[data-contract="proposal.output"]').textContent(), /Model plan/);
+  assert.equal(await legend.locator('.circuit-contract-legend-direction .circuit-port-direction').count(), 2, 'legend explains both arrows');
+  assert.match(await legend.locator('li[data-contract="proposal.output"]').getAttribute('title'), /model specification/, 'server description is the row tooltip');
   assert.ok(await legend.locator('li[data-contract="proposal.output"] .circuit-contract-swatch[data-contract-shape="square"]').count());
+  await legend.locator('summary').click(); // the legend is a popover; close it as a user would
 
   // C1 hover preview: compatible inputs highlight, incompatible ones dim, nothing is selected.
   await page.locator('#circuit-fit').click();
@@ -104,7 +133,8 @@ try {
   assert.ok(Number(dim.socket) < 0.5, 'incompatible input dims its socket');
   assert.equal(dim.pill, 'dashed', 'incompatible input dashes its contract pill');
   assert.equal(dim.port, '1', 'incompatible label text is not faded below 4.5:1 (port stays clickable)');
-  assert.match(await dimmed.getAttribute('title'), /expects implementation\.output .*provides proposal\.output/);
+  assert.equal(await dimmed.getAttribute('data-refusal'), "Can't connect: Propose model sends Model plan; this input receives Model code.", 'K10 sentence names both connector types');
+  assert.equal(await dimmed.getAttribute('title'), null, 'No native title tooltip on sockets (spec §6.2)');
   assert.equal(await output('alternate').getAttribute('aria-pressed'), 'false', 'hover does not select');
   await page.mouse.move(2, 2);
   assert.equal(await page.locator('.circuit-port.compatible, .circuit-port.incompatible').count(), 0, 'leaving the output clears the preview');
@@ -112,7 +142,7 @@ try {
 
   // Refused connection names both contracts.
   await output('check_left').click(); await input('build_left', 'output').click();
-  assert.match(await message(), /refused: build_left\.output expects proposal\.output \(Proposal result\), but check_left\.result provides validation\.output \(Validation result\)/);
+  assert.equal(await message(), "Can't connect: Validate sends Code verdict; this input receives Model plan.", 'refusal names both connector types');
   assert.equal(await dirty(), false); await page.keyboard.press('Escape');
 
   // U5: the protocol mapping chip expands to source -> argument field mappings.
@@ -122,15 +152,36 @@ try {
   assert.equal(await chip.getAttribute('aria-expanded'), 'false'); assert.ok(await fields.isHidden());
   await chip.click();
   assert.equal(await chip.getAttribute('aria-expanded'), 'true'); assert.ok(await fields.isVisible());
-  const inputs = await page.locator('.circuit-card[data-node="build_left"] [data-input]').count();
-  assert.equal(await fields.locator('li').count(), inputs, 'one field row per protocol argument');
+  // Sockets exclude framework-supplied inputs (batch 2c: managed storage has no socket);
+  // advanced Mapping details still list every protocol argument, storage included.
+  const sockets = await page.locator('.circuit-card[data-node="build_left"] [data-input]').count();
+  assert.equal(await page.locator('#circuit-input-build_left-storage').count(), 0, 'managed storage has no socket');
+  assert.equal(await fields.locator('li').count(), sockets + 1, 'one field row per protocol argument (sockets plus managed storage)');
   assert.match(await fields.locator('li[data-argument="output"]').textContent(), /hypothesis\.result → output.*proposal\.output/);
   assert.match(await fields.locator('li[data-argument="storage"]').textContent(), /external:\S+ → storage/);
   assert.match(await fields.locator('.circuit-adapter-owner').textContent(), /into implementation\.input.*no extra node/);
 
   // C1 drag: press an output, drag over a compatible input (highlighted), release to bind.
   await page.locator('#circuit-fit').click();
+  // As a user would: bring the canvas (and the drop target) into the window before dragging.
+  await page.locator('.circuit-viewport').scrollIntoViewIfNeeded();
+  await input('build_left', 'output').scrollIntoViewIfNeeded();
+  // Fit stops at 75%; zoom out (as a user would) until both drag ends are inside the canvas.
+  const bothInside = () => page.evaluate(() => {
+    const frame = document.querySelector('.circuit-viewport').getBoundingClientRect();
+    return ['#circuit-output-alternate', '#circuit-input-build_left-output'].every(selector => {
+      const box = document.querySelector(selector).getBoundingClientRect(), x = box.left + box.width / 2, y = box.top + box.height / 2;
+      return x > frame.left && x < frame.right && y > frame.top && y < frame.bottom;
+    });
+  });
+  for (let i = 0; i < 6 && !(await bothInside()); i++) {
+    await page.locator('#circuit-zoom-out').click();
+    await page.locator('.circuit-viewport').evaluate(viewport => { viewport.scrollTop = 0; viewport.scrollLeft = 0; });
+  }
   const from = await output('alternate').boundingBox(), to = await input('build_left', 'output').boundingBox();
+  // A drop outside the window hits nothing (elementFromPoint is null): fail clearly instead of timing out.
+  const windowSize = await page.evaluate(() => ({width: innerWidth, height: innerHeight}));
+  for (const box of [from, to]) assert.ok(box.y + box.height / 2 < windowSize.height && box.x + box.width / 2 < windowSize.width, `drag endpoint on screen: ${JSON.stringify(box)} in ${JSON.stringify(windowSize)}`);
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2); await page.mouse.down();
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {steps: 6});
   assert.ok(await input('build_left', 'output').evaluate(element => element.classList.contains('compatible')), 'drag highlights the target');
@@ -145,7 +196,7 @@ try {
     await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, `port-legibility-${theme}.png`), fullPage: true});
   }
   assert.deepEqual(faults, []);
-  console.log('PASS distinct contract tokens, filled/hollow sockets, wire colour, legend, hover preview, named refusal, mapping chip and drag-to-connect; no API/GPU');
+  console.log('PASS server-owned schema names, direction arrows, distinct contract tokens, filled/hollow sockets, wire colour, legend, hover preview, named refusal, mapping chip and drag-to-connect; no API/GPU');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');

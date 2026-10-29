@@ -79,7 +79,7 @@ def test_recovery_after_removed_choice_inputs_and_credentials(chain, console_con
     )
     # A monitor-only restart deliberately omits the now unavailable credential file.
     monitor = client(config.model_copy(update={"credential_file": None}))
-    assert monitor.get("/api/choices").json() == []
+    assert monitor.get("/api/choices").json()["tasks"] == []
     assert monitor.get("/api/native-chain/choices").json() == []
     status = monitor.get(f"/api/operations/{selection.operation_id}").json()
     assert status["kind"] == "native_chain" and status["receipt_available"] is False

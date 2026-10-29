@@ -8,6 +8,9 @@ nodes, invoke protocols, inspect files, import user code or execute graphs.
 `catalog.py` is a closed inventory of supported native boundaries. Catalog owner
 strings are documentation, never dynamic import instructions. Native schemas
 and protocol functions remain authoritative for runtime semantics.
+Human-facing schema names, descriptions and kinds are owned by
+`contract_names.py` ([contract schema names](contract-names.md)); they never
+affect identity or compatibility.
 
 Each capability has one complete request and a `result` output. Protocol
 arguments are logical bindings, not arbitrary schema-field connections.

@@ -8,8 +8,11 @@ parents are required; malicious same-user path swaps are outside this contract.
 import difflib
 import fcntl
 import hashlib
+import io
 import os
 import stat
+import tokenize
+from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -34,6 +37,9 @@ from .models import (
     DraftView,
     LoopProposal,
     NodeDraftRequest,
+    NodeDraftsProposal,
+    NodeDraftsRequest,
+    NodeDraftsView,
     NodeDraftView,
     Project,
     RemoveNodeProposal,
@@ -43,8 +49,15 @@ from .models import (
     SaveView,
     SourceView,
 )
-from .node_edits import NodeEditRefusal, add_node, inspect_node, remove_node
-from .options import binding_projection
+from .node_edits import (
+    NodeEditRefusal,
+    add_node,
+    apply_node_drafts,
+    inspect_node,
+    inspect_node_drafts,
+    remove_node,
+)
+from .options import binding_projection, managed_roles
 from .task_models import TaskReferenceReview, TaskReferenceTarget, TaskReferenceUpdateProposal
 from .training import training_inspector
 from .versions import (
@@ -67,6 +80,29 @@ from .versions import (
 
 def digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _comments(source: str) -> list[str]:
+    """Comment texts of ``source``; a file that does not tokenize falls back to ``#`` lines."""
+    try:
+        return [
+            token.string.strip()
+            for token in tokenize.generate_tokens(io.StringIO(source).readline)
+            if token.type == tokenize.COMMENT
+        ]
+    except (tokenize.TokenError, SyntaxError):
+        return [line.strip() for line in source.splitlines() if line.lstrip().startswith("#")]
+
+
+def removed_comments(current: str, proposed: str) -> tuple[str, ...]:
+    """Comments of ``current`` that ``proposed`` drops, counting repeated texts separately."""
+    lost = Counter(_comments(current)) - Counter(_comments(proposed))
+    removed: list[str] = []
+    for text in _comments(current):
+        if lost[text] > 0:
+            lost[text] -= 1
+            removed.append(text)
+    return tuple(removed)
 
 
 def reviewed_source(
@@ -94,9 +130,11 @@ def reviewed_source(
         document=document,
         binding_options=legacy_options,
         port_inventory=port_inventory,
+        managed_roles=managed_roles(document),
         training=training_inspector(document),
         loop_template=loop_template(document),
         task_reference_update=task_review,
+        removed_comments=removed_comments(base.source, source),
     )
 
 
@@ -183,12 +221,22 @@ class WorkflowAuthoring:
         path = self.project.source_file
         checked_path(path)
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
-        with os.fdopen(os.open(path, flags), "rb") as handle:
+        try:
+            fd = os.open(path, flags)
+        except FileNotFoundError as error:
+            raise AuthoringError("not_found", f"Workflow file not found: {path}") from error
+        except PermissionError as error:
+            raise AuthoringError(
+                "not_readable", f"Workflow file is not readable: {path}"
+            ) from error
+        with os.fdopen(fd, "rb") as handle:
             info = os.fstat(handle.fileno())
             mode = self._source_mode(info)
             payload = handle.read(MAX_SOURCE_BYTES + 1)
         if len(payload) > MAX_SOURCE_BYTES:
-            raise AuthoringError("limit", "editor source exceeds 32 KiB UTF-8")
+            raise AuthoringError(
+                "limit", f"Workflow file is larger than the 32 KiB editor limit: {path}"
+            )
         try:
             payload.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -217,6 +265,7 @@ class WorkflowAuthoring:
             document=document,
             binding_options=legacy_options,
             port_inventory=port_inventory,
+            managed_roles=managed_roles(document),
             training=training_inspector(document),
             loop_template=loop_template(document),
         )
@@ -235,6 +284,12 @@ class WorkflowAuthoring:
         request = NodeDraftRequest.model_validate_json(request.model_dump_json())
         self._base(self._read_bytes()[0], request.expected_sha256)
         return inspect_node(request.proposal)
+
+    def inspect_node_drafts(self, request: NodeDraftsRequest) -> NodeDraftsView:
+        """Inspect pending nodes/external inputs (possibly incomplete) without rendering a save."""
+        request = NodeDraftsRequest.model_validate_json(request.model_dump_json())
+        self._base(self._read_bytes()[0], request.expected_sha256)
+        return inspect_node_drafts(request.proposal)
 
     def _base(self, payload: bytes, expected: str) -> SourceView:
         current = self._view(payload)
@@ -288,12 +343,14 @@ class WorkflowAuthoring:
             source = render_workflow_source(updated)
         elif isinstance(proposal, LoopProposal):
             source = render_workflow_source(with_loop(proposal.source, proposal.loop))
-        elif isinstance(proposal, (AddNodeProposal, RemoveNodeProposal)):
+        elif isinstance(proposal, (AddNodeProposal, NodeDraftsProposal, RemoveNodeProposal)):
             self._base(current_payload, request.expected_sha256)
             try:
                 source, node_edit = (
                     add_node(proposal)
                     if isinstance(proposal, AddNodeProposal)
+                    else apply_node_drafts(proposal)
+                    if isinstance(proposal, NodeDraftsProposal)
                     else remove_node(proposal)
                 )
             except NodeEditRefusal as error:
@@ -402,6 +459,12 @@ class WorkflowAuthoring:
         proposed = parse_workflow_source(request.source)
         with self._locked():
             previous, mode = self._read_bytes()
+            # Temp + rename could replace a file its owner protected; refuse instead.
+            if not mode & stat.S_IWUSR:
+                raise AuthoringError(
+                    "read_only",
+                    f"This file is read-only on disk: {self.project.source_file}",
+                )
             current = self._base(previous, request.expected_sha256)
             bound = any(
                 isinstance(document, ReusableWorkflowDocument) and document.task_binding is not None

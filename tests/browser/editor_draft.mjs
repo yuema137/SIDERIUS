@@ -11,6 +11,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[key], `Set ${key}`);
@@ -30,13 +31,14 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}}), faults = [], posts = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => { if (request.method() === 'POST') posts.push({path: new URL(request.url()).pathname, body: request.postDataJSON()}); });
   await page.goto(metadata.origin + '/#workflow');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   const original = await readFile(metadata.source, 'utf8');
   const source = page.locator('#editor-source');
   const loadedSource = await source.inputValue();
@@ -124,7 +126,7 @@ try {
   const reviewedSource = await source.inputValue();
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'Review has no disk side effect');
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   assert.deepEqual(authored(), ['review', 'save']);
   const saved = await readFile(metadata.source, 'utf8');
   assert.equal(saved, reviewedSource, 'Save writes exactly the reviewed bytes');
@@ -145,7 +147,7 @@ try {
   await page.locator('#editor-discard-draft').click();
   assert.equal(await source.inputValue(), saved);
   assert.equal(await dirty(), false);
-  assert.match(await page.locator('#editor-status').textContent(), /typed source text discarded.*Undo restores them/);
+  assert.match(await page.locator('#editor-status').textContent(), /^Reverted to the saved version, typed Python text included\. Undo brings your changes back\.$/);
   await page.locator('#editor-undo').click();
   assert.equal(await source.inputValue(), typedSource, 'Undo after Discard restores the typed Source text');
   assert.equal(await sourceDirty(), true);
@@ -164,7 +166,7 @@ try {
   await page.locator('#editor-review').click();
   await page.locator('#editor-conflict').waitFor({state: 'visible'});
   await page.locator('#editor-rebase').click();
-  assert.match(await page.locator('#editor-status').textContent(), /edits were re-applied/);
+  assert.match(await page.locator('#editor-status').textContent(), /changes are reapplied onto the latest version/);
   assert.equal(await manifest.inputValue(), 'task/disk-manifest.json', 'The draft now carries the disk change');
   assert.deepEqual(await position(), rebasedPosition, 'The draft keeps the layout edit');
   await page.locator('#editor-review').click();
