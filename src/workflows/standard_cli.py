@@ -897,6 +897,13 @@ def build_parser() -> argparse.ArgumentParser:
         "the first production steps, not a separate probe workload.",
     )
     parser.add_argument(
+        "--runtime_verification_pathological_min_unit_ms",
+        type=float,
+        default=None,
+        help="Slowdown floor in observation wall-time milliseconds (finite, nonnegative). "
+        "Omit to preserve 100 ms; 0 disables the absolute floor for historical reproduction.",
+    )
+    parser.add_argument(
         "--execution_regime",
         type=str,
         choices=sorted(get_args(ExecutionRegime)),

@@ -2513,6 +2513,18 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    runtime_verification_pathological_min_unit_ms: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Optional slowdown floor in observation wall-time milliseconds. "
+            "None preserves the verifier's 100 ms default; 0 disables the "
+            "absolute floor for both streak and distribution slowdown checks."
+        ),
+    )
+
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K) ---
     # Mirrors the trial/formal split of the time gate. The tuner picks the
     # right one per round via plan.is_trial. Each is independently optional:

@@ -169,6 +169,7 @@ still applies. Unset fields take the `WorkflowLaunchConfig` defaults below.
 | `max_rounds` | `10` | Tuning rounds per iteration (the training configurations Train & tune plans and runs). With `is_trial: true`, `force_formal_round: true` and `max_rounds: 1`, Trial-only overrides are refused; use at least 2. |
 | `force_formal_round` | `true` | Force a Formal tuning round. |
 | `trial_time_budget_minutes`, `formal_time_budget_minutes` | unset | Wall-time budget per Trial / Formal tuning round attempt. |
+| `runtime_verification_pathological_min_unit_ms` | unset | Finite nonnegative observation wall-time floor (ms) for streak/distribution slowdown refusal. Unset preserves the verifier's 100 ms default and existing runtime-policy evidence; `0` restores pre-#1202 relative-only checks. Explicit values are recorded in `runtime_policy.verification.pathological_min_unit_ms`; budgets and wall caps are unchanged. |
 | `trial_vram_budget_gb`, `formal_vram_budget_gb` | unset | VRAM ceilings per mode. |
 | `max_epochs` | unset | Epoch ceiling for both modes. |
 | `trial_max_epochs`, `formal_max_epochs` | unset | Per-mode epoch ceilings; unset means `max_epochs` governs. |
