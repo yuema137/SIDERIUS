@@ -247,7 +247,8 @@ def test_unknown_operation_is_typed_only_after_a_store_read(prepared, tmp_path):
     )
     missing = client(service.config.model_copy(update={"operation_store": gone}))
     response = missing.get(f"/api/operations/{uuid4()}")
-    assert response.json()["error"]["code"] != "unknown_operation"
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
 
 
 def test_unexpected_failure_has_secured_sanitized_response(console_config, monkeypatch, caplog):

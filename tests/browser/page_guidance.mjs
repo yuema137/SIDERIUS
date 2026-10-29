@@ -1,7 +1,7 @@
 /** Page guidance witness: real Chromium + real authoring API + temporary ordinary Python project.
  * Covers the separate #run page, the "Next: prepare a run" handoff gated only by the
  * New run gate (window.newRunGate), the first-run "Start from a task example" guide,
- * the Task > Workflow > Run > Results step indicator and the collapsed secondary detail.
+ * the Task > Workflow > Run > Monitor step indicator and the collapsed secondary detail.
  * The empty-canvas start state names the next action; the tour itself is layout_onboarding.mjs.
  * The fixture configures no runnable project, so one projects reply is rewritten to mark
  * `reusable` runnable; no preparation, launch, provider call or file write is performed.
@@ -117,11 +117,11 @@ try {
   await page.locator('#view-workflow').waitFor();
   assert.match(await source.inputValue(), /unsaved page guidance edit/, 'Route changes keep the draft');
 
-  // Home keeps the journey without the step indicator; Monitor is the Results step.
+  // Home keeps the journey without the step indicator; Monitor names its own step.
   await nav('home');
   assert.equal(await page.locator('#step-indicator').isHidden(), true);
   await nav('monitor');
-  assert.equal(await current(), 'Results');
+  assert.equal(await current(), 'Monitor');
 
   assert.equal(await readFile(metadata.reusable_source, 'utf8').then(text => text.includes('unsaved page guidance edit')), false);
   assert.deepEqual(posts.filter(path => !path.endsWith('/draft')), [], 'Guidance and navigation never review, save, prepare or launch');

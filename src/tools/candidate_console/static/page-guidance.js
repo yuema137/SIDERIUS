@@ -50,7 +50,7 @@
     $('problems-chip').replaceChildren(window.consoleIcons?.make('circle-alert', 16) || '', `${count} problem${count === 1 ? '' : 's'}`);
     if (!count) setProblemsOpen(false);
     const view = window.consoleNavigation.view;
-    const current = {task: 'task', workflow: 'workflow', run: 'run', monitor: 'results'}[view] || null;
+    const current = {task: 'task', workflow: 'workflow', run: 'run', monitor: 'monitor'}[view] || null;
     const done = {task: !!window.consoleTask?.selectedId, workflow: ready};
     $('step-indicator').hidden = !current;
     for (const item of $('step-indicator').querySelectorAll('[data-step]')) {
