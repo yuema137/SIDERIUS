@@ -37,6 +37,8 @@ from .settings_file import protected_paths
 from .settings_models import SettingsContext
 from .settings_routes import settings_router
 from .settings_service import ConsoleSettings
+from .task_summary import TaskSummaries
+from .task_summary_routes import task_summary_router
 
 
 def error_response(status: int, code: str, message: str) -> JSONResponse:
@@ -97,6 +99,7 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
         )
     )
     app.include_router(edited_router(service))
+    app.include_router(task_summary_router(TaskSummaries(service.config.tasks)))
     app.include_router(reusable_router(service))
     app.include_router(native_chain_router(service))
     app.include_router(
