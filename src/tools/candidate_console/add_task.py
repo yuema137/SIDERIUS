@@ -19,7 +19,9 @@ The command appends one ``tasks[]`` entry and writes nothing else:
 Location fields (data, output roots, LLM profile) stay omitted so the
 workspace layout and global settings fill them. Before writing, every
 manifest reference must resolve inside the run sandbox mounts
-(``package_mounts``). The write is a compare-and-swap on the bytes read and an
+(``package_mounts``) and every ``candidate_devices`` path must pass the run
+sandbox's device admission (``SandboxProfile.device_paths``) on this host;
+``check`` only warns about devices. The write is a compare-and-swap on the bytes read and an
 atomic owner-only (0600) publish; ``--dry-run`` prints the entry and writes
 nothing. Credential values are never read.
 
@@ -45,7 +47,7 @@ from tools.candidate_operations.models import OperationFailure
 
 from .files import canonical, config_bytes
 from .models import ConsoleConfig
-from .package_mounts import check_package_mounts
+from .package_mounts import check_candidate_devices, check_package_mounts
 from .settings_file import SettingsInvalid
 from .settings_models import ResolvedConsole
 
@@ -294,6 +296,7 @@ def plan_task(request: AddTaskRequest) -> TaskPlan:
         resolved = _resolve(updated)
         task = next(t for t in resolved.config.tasks if t.task_id == task_id)
         check_package_mounts(task)
+        check_candidate_devices(task)
     except AddTaskRefused:
         raise
     except SettingsInvalid as error:

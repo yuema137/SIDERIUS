@@ -109,15 +109,20 @@
       : `Credentials not ready${missing.length ? ': missing ' + missing.join(', ') : ''}. ${readiness.instructions.join(' ')}`;
   }
   // Issue #1136: native training (a `tuning` node) needs an NVIDIA GPU and refuses a
-  // sandbox without one. Presentation only, from the reviewed nodes and devices.
+  // sandbox without one. Presentation only, from the reviewed nodes and devices, then the
+  // server's device warnings (walkthrough N2: the same wording `check` prints, for
+  // example a device path missing on this host or GPU nodes without /sys).
   function computeReview(value) {
+    const lines = [];
     if (!value.nodes.some(([, capability]) => capability === 'tuning')) {
-      return [['capture-compute-review', 'Compute: this workflow has no training node, so no GPU check applies.']];
+      lines.push(['capture-compute-review', 'Compute: this workflow has no training node, so no GPU check applies.']);
+    } else {
+      lines.push(['capture-compute-review', 'Compute: NVIDIA GPU required']);
+      if (!window.consoleCompute.gpuDevices(value.devices).length) {
+        lines.push(['capture-compute-warning', window.consoleCompute.gpuWarning]);
+      }
     }
-    const lines = [['capture-compute-review', 'Compute: NVIDIA GPU required']];
-    if (!window.consoleCompute.gpuDevices(value.devices).length) {
-      lines.push(['capture-compute-warning', window.consoleCompute.gpuWarning]);
-    }
+    (value.device_warnings || []).forEach((text, index) => lines.push([`capture-device-warning-${index}`, 'Warning: ' + text]));
     return lines;
   }
   function invalidate() { generation++; selected = null; review = null; handedVersion = null; $('summary').replaceChildren(); $('details').textContent = ''; credentials(null); controls(); }
@@ -287,7 +292,7 @@
       const seedLine = document.createElement('p'); seedLine.textContent = value.seed; $('summary').append(seedLine);
       const workspace = document.createElement('p'); workspace.textContent = 'Output workspace: ' + value.workspace; $('summary').append(workspace);
       const loop = document.createElement('p'); loop.id = 'capture-loop'; loop.textContent = researchLoop(value); $('summary').append(loop);
-      for (const [id, text] of computeReview(value)) { const line = document.createElement('p'); line.id = id; line.textContent = text; if (id === 'capture-compute-warning') line.className = 'warning'; $('summary').append(line); }
+      for (const [id, text] of computeReview(value)) { const line = document.createElement('p'); line.id = id; line.textContent = text; if (id === 'capture-compute-warning' || id.startsWith('capture-device-warning-')) line.className = 'warning'; $('summary').append(line); }
       const hostSummary = document.createElement('p'); hostSummary.id = 'capture-scheduling-review'; hostSummary.textContent = 'Host resources: ' + window.runScheduling.describe(value.selection); $('summary').append(hostSummary);
       const routeSummary = document.createElement('p'); routeSummary.textContent = 'Model routes: ' + value.routes.map(route => `${route.node_id} → ${route.provider || '?'} / ${route.model || '?'}`).join('; '); $('summary').append(routeSummary);
       status(value.credential_readiness.ready

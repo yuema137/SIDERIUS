@@ -3,6 +3,9 @@
  * required"; when the task passes no /dev/nvidia<N> node into the sandbox it also
  * warns that training runs will be refused, and the warning disappears when one is passed.
  *
+ * The review also repeats the server's device warnings (ReusableCaptureReview.device_warnings,
+ * the wording `check` prints: a device path missing on this host, GPU nodes without /sys;
+ * walkthrough N2); without that, Review enabled Launch with no hint of the refusal to come.
  * Why this fails without the change (reusable-run.js computeReview): the review
  * summary then has no #capture-compute-review line, and a task configured with
  * candidate_devices [] (the fixture default) gets no warning before Launch, which
@@ -95,6 +98,21 @@ try {
   });
   await page.locator('#capture-review').click();
   await page.locator('#capture-compute-warning').waitFor();
+  assert.equal(await page.locator('[id^="capture-device-warning-"]').count(), 0, 'no server warning for this review');
+
+  // 4. N2: the server's device warnings (the wording check prints) are repeated in the review.
+  const serverWarnings = ['Device /dev/nvidia1 cannot be passed into the run sandbox (declared path does not exist: /dev/nvidia1); a run given it will be refused.',
+    'GPU devices are passed but /sys is not mounted read-only; CUDA may fail to start inside the run sandbox (see README).'];
+  await page.unroute('**/reusable-captures/review');
+  await page.route('**/reusable-captures/review', async route => {
+    const response = await route.fetch(); const body = await response.json();
+    await route.fulfill({response, json: {...body, devices: ['/dev/nvidia0', '/dev/nvidia1'], device_warnings: serverWarnings}});
+  });
+  await page.locator('#capture-review').click();
+  await page.locator('#capture-device-warning-1').waitFor();
+  assert.deepEqual(await page.locator('[id^="capture-device-warning-"]').allTextContents(), serverWarnings.map(text => 'Warning: ' + text));
+  assert.deepEqual(await page.locator('[id^="capture-device-warning-"]').evaluateAll(lines => lines.map(line => line.className)), ['warning', 'warning']);
+  await page.screenshot({path: join(evidence, 'device-warnings.png'), fullPage: true});
   assert.deepEqual(faults, []);
   console.log('PASS: run review states the NVIDIA GPU requirement and warns when the task passes no GPU device node');
 } finally {

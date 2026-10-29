@@ -3,9 +3,12 @@
  *   (editor.js Review); when that check succeeds, this step opens with the version name and
  *   #editor-save, which writes exactly the checked bytes (editor.js owns both requests).
  *   A template import's own check does not open it (quietly()).
- * - Task chip: the saved task package/version in one line (read-only); it opens the Task
- *   tab, where the Task version card (the version switch) lives. Task reference review
- *   findings and acknowledgements render in this save step (#editor-task-review).
+ * - Task chip: the open setup's own task label (setups.py binds each setup to one task)
+ *   and, when the workflow pins one, its task package version; read-only, it opens the
+ *   Task tab, where the Task version card (the version switch) lives. A separate
+ *   "Task version: not pinned" note appears only when that task declares versions and
+ *   the workflow pins none. Task reference review findings and acknowledgements render
+ *   in this save step (#editor-task-review).
  * - Undo/Redo/Revert as icon buttons (editor-draft.js creates them) and a `⋯` overflow menu.
  * - Workspace height: the docked rail | canvas | Selection frame fills the window below the
  *   page bar (--workspace-height); the rail and Selection scroll inside it.
@@ -87,12 +90,30 @@
     window.addEventListener('console-view', () => setTimeout(reveal), {once: true});
     location.hash = 'task';
   }
+  // Walkthrough N1: "Task: not bound" meant "no task version pinned" and read as a setup
+  // detached from its task. The chip names the setup's own task; the pin is separate.
+  const pin = element('span', 'Task version: not pinned', null, 'version-tag unrecorded');
+  pin.id = 'editor-task-version'; pin.hidden = true;
+  const PIN_TITLE = 'Task versions are optional. This workflow does not pin a recorded version of its task package, so it uses the package as it is now. To pin one, open the Task version card from the task chip.';
+  pin.title = PIN_TITLE;
+  $('editor-task-chip').after(pin);
+  function ownTask() {
+    const setup = window.experimentSetups?.current;
+    return setup?.taskId ? window.consoleTask.tasks.find(task => task.task_id === setup.taskId) || null : null;
+  }
   function syncChip() {
     const current = state(), chip = $('editor-task-chip'), label = chip.querySelector('.chip-label');
     const opened = window.consoleSession.connected && current.sourceAvailable;
-    const binding = current.taskBinding;
+    const binding = current.taskBinding, task = ownTask();
     const needs = opened && !!binding && !current.taskSelected;
-    label.textContent = !opened ? 'Task: not open' : binding ? `Task: ${binding.package_id} · ${binding.revision}` : 'Task: not bound';
+    // A pinned version is shown beside this task only when it pins this task's package.
+    const ownPin = !!binding && !!task && binding.package_id === task.package_id;
+    const name = task ? task.label : 'none configured';
+    label.textContent = !opened ? 'Task: not open' : `Task: ${name}${ownPin ? ` · version ${binding.revision}` : ''}`;
+    const other = opened && !!binding && !!task && !ownPin;
+    pin.hidden = !opened || !task || (!other && (!!binding || !task.revision));
+    pin.textContent = other ? 'Task version: pins another package' : 'Task version: not pinned';
+    pin.title = other ? `This workflow pins ${binding.package_id} · ${binding.revision}, not a version of ${task.label}. Open the Task version card from the task chip to update its references.` : PIN_TITLE;
     chip.classList.toggle('needs-attention', needs);
     chip.title = needs ? 'Choose the configured task version on the Task tab before saving.' : 'Show the task and the version this workflow uses on the Task tab.';
   }
@@ -169,6 +190,7 @@
   new MutationObserver(syncReasons).observe($('editor-problems'), {childList: true, subtree: true, attributes: true});
   window.addEventListener('new-run-gate', syncReasons);
   window.addEventListener('workflow-editor-state', sync);
+  for (const name of ['experiment-setup', 'console-task']) window.addEventListener(name, syncChip);
   window.consoleSession.subscribe(sync);
   sync();
   /** Run `action` (sync or async) without opening the save step for the check it causes. */

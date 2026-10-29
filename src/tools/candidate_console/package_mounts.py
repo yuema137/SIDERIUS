@@ -17,7 +17,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from tools.workspace_sandbox.profile import SYSTEM_DIRECTORIES, SYSTEM_FILES, runtime_roots
+from tools.workspace_sandbox.profile import (
+    SYSTEM_DIRECTORIES,
+    SYSTEM_FILES,
+    SandboxProfile,
+    runtime_roots,
+)
 from workflows.task_package_refs import ManifestReference, manifest_references
 
 from .models import ConsoleConfig, TaskChoice
@@ -85,11 +90,59 @@ def check_package_mounts(task: TaskChoice) -> None:
         )
 
 
+def device_problem(device: str) -> str | None:
+    """Why the run sandbox would refuse ``device`` on this host, or ``None``.
+
+    Calls the sandbox's own admission, ``SandboxProfile.device_paths`` (a
+    canonical existing path under ``/dev`` that is a character device), and
+    returns its refusal reason; this module adds no second device rule.
+    """
+    try:
+        SandboxProfile.device_paths((Path(device),))
+    except ValueError as error:
+        return str(error)
+    return None
+
+
+def check_candidate_devices(task: TaskChoice) -> None:
+    """Refuse, naming the path, a ``candidate_devices`` entry the sandbox cannot pass.
+
+    Only ``add-task`` calls this, where the paths are typed. ``check``/``serve``
+    report the same problems as warnings (:func:`device_warnings`), because a
+    node such as ``/dev/nvidia-uvm`` may appear only after first CUDA use; run
+    admission (``SandboxProfile.device_paths``) stays the hard gate.
+    """
+    for device in task.candidate_devices:
+        problem = device_problem(device)
+        if problem is not None:
+            raise SettingsInvalid(
+                f"task {task.task_id} candidate_devices names {device}, which the run "
+                f"sandbox refuses ({problem}); list only device nodes present on this "
+                "machine (for example ls -l /dev/nvidia*)"
+            )
+
+
+def device_warnings(devices: tuple[str, ...], read_only: tuple[str, ...]) -> tuple[str, ...]:
+    """The device warnings for one task's run: unusable paths, then GPU nodes without ``/sys``.
+
+    ``check``/``serve`` print this list for every task; Run review repeats it for the
+    reviewed request, so an unusable device is named before Launch.
+    """
+    warnings = [
+        f"Device {device} cannot be passed into the run sandbox ({problem}); "
+        "a run given it will be refused."
+        for device in devices
+        if (problem := device_problem(device)) is not None
+    ]
+    if any(GPU_DEVICE.fullmatch(device) for device in devices) and "/sys" not in read_only:
+        warnings.append(GPU_WITHOUT_SYS)
+    return tuple(warnings)
+
+
 def gpu_warnings(config: ConsoleConfig) -> tuple[str, ...]:
-    """One warning per task passing NVIDIA device nodes without a read-only ``/sys``."""
+    """Each task's device warnings, prefixed with its ID (``check``/``serve`` stderr)."""
     return tuple(
-        f"Task {task.task_id}: {GPU_WITHOUT_SYS}"
+        f"Task {task.task_id}: {warning}"
         for task in config.tasks
-        if any(GPU_DEVICE.fullmatch(device) for device in task.candidate_devices)
-        and "/sys" not in task.task_read_only
+        for warning in device_warnings(task.candidate_devices, task.task_read_only)
     )

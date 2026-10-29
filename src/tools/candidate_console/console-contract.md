@@ -94,11 +94,27 @@ YAML mapping is refused the same way. Limits: references inside referenced files
 validity is still decided only by the composition child. The sandbox profile is
 unchanged.
 
+Device admission (walkthrough N2): `package_mounts.device_problem` calls the run
+sandbox's own `SandboxProfile.device_paths` for one path (canonical, existing, under
+`/dev`, a character device) and returns its refusal reason; there is no second device
+rule. `add-task`, where the paths are typed, refuses (exit 2, console.json unchanged)
+with `task <id> candidate_devices names <path>, which the run sandbox refuses
+(<reason>); list only device nodes present on this machine (for example ls -l
+/dev/nvidia*)`. `check` and `serve` (and every console construction or global-settings
+write, which run `validate_config`) do not fail on a device: a node such as
+`/dev/nvidia-uvm` or `/dev/nvidia-caps/*` may appear only after first CUDA use, so they
+print `Warning: Task <id>: Device <path> cannot be passed into the run sandbox
+(<reason>); a run given it will be refused.` to stderr. Run admission
+(`SandboxProfile.device_paths` in `candidate_prepare.admission`) stays the hard gate.
+
 GPU prerequisite (#1145 item 5; no `/sys` is added anywhere): when a task's
 `candidate_devices` contains a `/dev/nvidia<N>` node and `"/sys"` is not in its
 `task_read_only`, `check`/`serve` print to stderr, without failing,
 `Warning: Task <id>: GPU devices are passed but /sys is not mounted read-only; CUDA
-may fail to start inside the run sandbox (see README).`
+may fail to start inside the run sandbox (see README).` One owner,
+`package_mounts.device_warnings(devices, read_only)`, produces both kinds of warning
+(unusable device paths first, then GPU nodes without `/sys`); `check`/`serve` prefix
+each with `Task <id>: `, and Run review shows the same list for the reviewed request.
 
 ### Registering a task: `add-task`
 
@@ -142,7 +158,8 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
   `--env` names, de-duplicated. No credential value is read.
 - Location fields (`data_root`, `llm_config_file`, output roots) stay omitted, so
   the layout and global settings fill them. Before writing, the resolved console
-  must validate and `check_package_mounts` must pass for the new task.
+  must validate and `check_package_mounts` and `check_candidate_devices` (device
+  admission above) must pass for the new task.
 - Write: the new entry is appended to `tasks[]` of the parsed document (other keys
   keep their order), serialized with `json.dumps(indent=2)`. `publish_task` re-reads
   the file and refuses when its bytes differ from the bytes read
@@ -306,9 +323,13 @@ GPU into the run sandbox; runs that train a model will be refused." (`/dev/nvidi
 alone is not a GPU node). The sentence and the device test have one browser owner,
 `compute-requirement.js` (`window.consoleCompute.gpuWarning`, `gpuDevices`), shared
 with the Task tab's Run policy. A workflow without a `tuning` node says no GPU check applies. Read
-from `ReusableCaptureReview.nodes`/`devices`; nothing is refused in the browser,
-and the native launch guard remains the authority (browser witness
-`tests/browser/gpu_compute_review.mjs`).
+from `ReusableCaptureReview.nodes`/`devices`. For every workflow the review then shows
+one `#capture-device-warning-<i>` line (class `warning`, prefixed "Warning: ") per
+`ReusableCaptureReview.device_warnings`, which the server computes with
+`package_mounts.device_warnings` from the reviewed request's `devices` and
+`read_only` (walkthrough N2: GPU nodes without `/sys`, or a device path missing on this
+host). Launch stays enabled; nothing is refused in the browser, and the native launch
+guard remains the authority (browser witness `tests/browser/gpu_compute_review.mjs`).
 
 Browser (B3-4c UI). The Run lane's **Host resources and parallel nodes** panel
 (`run-scheduling.js`, `#scheduling`) is shown only when `/api/choices` reports
@@ -1750,7 +1771,9 @@ native `cancelled` (Stop run, #1027) reads "Stopped on request before finishing;
 candidate result was produced.", and a store `unknown` state whose process reason is
 `missing_identity` reads "… is starting."). For a failed operation `#monitor-cause` shows "Cause (from the
 log): <last exception line>" (`operationOutcome.cause`, the last line shaped like
-`Name(Error|Exception|Failure|Refusal): …`) from the log text already displayed; the
+`Name(Error|Exception|Failure|Refusal): …`; a line over 300 characters is cut at the
+last space before character 300, trailing punctuation dropped, and ends with "…", never
+mid-word) from the log text already displayed; the
 Run page reads the last 64 KiB of the native, then operation, log once
 (`operationOutcome.readCause`) and appends the same line, for a failed launch in step 2
 and for a failed preparation in step 1 (#1145; a preparation's native log is the run's
@@ -2030,9 +2053,19 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   `.access-collapsed`) it is one chip: `#access-status` **Connected.** (tooltip: the
   2 s observation refresh), **Change token**, **Disconnect console**.
 - Page bar, left to right: `h1` + `#editor-dirty`; `#editor-project` (label visually
-  hidden); `#editor-task-chip` (`Task: <package_id> · <revision>`, `Task: not bound` or
-  `Task: not open`; `needs-attention` while a bound workflow has no selected configured
-  version; read-only: a click navigates to `#task` and opens `#editor-task-panel` there,
+  hidden); `#editor-task-chip` (`Task: <label>` of the open setup's own task, from
+  `experimentSetups.current.taskId` and `consoleTask.tasks`, followed by
+  ` · version <revision>` when the workflow pins a task binding; `Task: none configured` for a
+  setup of no configured task, `Task: not open` with no open source; the version is
+  shown only when the pinned `package_id` equals the task's configured
+  `TaskListItem.package_id` (from `task_revision`);
+  `needs-attention` while a bound workflow has no selected configured version), then
+  `#editor-task-version` "Task version: not pinned" (shown only when the setup's task has
+  a configured `revision` and the workflow pins none; its tooltip says task versions are
+  optional and the workflow uses the package as it is now; it reads "Task version: pins
+  another package", with the pinned `package_id · revision` in its tooltip, when the
+  workflow pins a package other than its task's) (walkthrough N1; witness
+  `tests/browser/experiment_setups.mjs`); read-only: a click navigates to `#task` and opens `#editor-task-panel` there,
   the **Task version** `details.card` holding the `editor-task-controls.js` `render`
   view (version switch), open by default when advanced tools are on; the `⋯` item does
   the same); `#problems-chip`; `#editor-edit-actions`

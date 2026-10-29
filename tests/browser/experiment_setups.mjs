@@ -79,6 +79,23 @@ try {
   assert.match(await readFile(source, 'utf8'), /advice/i, 'The research-loop template was rendered into the setup');
   assert.equal((await stat(source)).mode & 0o777, 0o600);
 
+  // N1: the page bar names the setup's own task, never "not bound"; a version pin is a
+  // separate, optional note shown only when the task declares versions.
+  await waitUntil(async () => (await page.locator('#editor-task-chip').textContent()) === 'Task: Synthetic task');
+  assert.equal(await page.locator('#editor-task-version').isHidden(), true, 'An unversioned task needs no pin note');
+  await page.route('**/api/tasks', async route => {
+    const response = await route.fetch(), json = await response.json();
+    await route.fulfill({response, json: {...json, tasks: json.tasks.map(task => ({...task, revision: 'r1', package_id: 'synthetic-package'}))}});
+  });
+  await page.evaluate(() => window.consoleTask.reload());
+  await page.locator('#editor-task-version').filter({hasText: 'Task version: not pinned'}).waitFor();
+  assert.match(await page.locator('#editor-task-version').getAttribute('title'), /Task versions are optional/);
+  assert.equal(await page.locator('#editor-task-chip').textContent(), 'Task: Synthetic task');
+  await page.screenshot({path: join(evidence, 'page-bar-task.png')});
+  await page.unroute('**/api/tasks');
+  await page.evaluate(() => window.consoleTask.reload());
+  await waitUntil(async () => page.locator('#editor-task-version').isHidden());
+
   // F11: a new metric-threshold stop starts with the task's main score metric id, and the
   // field suggests the task's declared metric ids.
   await page.locator('#editor-loop-add-metric-threshold').click();

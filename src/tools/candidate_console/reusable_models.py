@@ -89,6 +89,9 @@ class ReusableCaptureReview(PreviewModel):
     devices: tuple[str, ...]
     environment_names: tuple[str, ...]
     read_only: tuple[str, ...]
+    #: ``package_mounts.device_warnings`` for ``devices``/``read_only``, the same
+    #: wording ``check`` prints; display only, Launch stays enabled.
+    device_warnings: tuple[str, ...] = ()
     credential_readiness: CredentialReadiness
     # Display-only Save name of source_sha256 in the project's version record (B8-3); the
     # SHA-256 stays the bound identity. Absent when the bytes were never saved here.

@@ -28,6 +28,7 @@ from workflows.definition import AuthoredLoop
 
 from .files import credentials
 from .models import RouteView, TaskChoice
+from .package_mounts import device_warnings
 from .readiness import credential_readiness
 from .reusable_models import (
     ReusableAdmissionNotAttempted,
@@ -217,6 +218,7 @@ class ReusableCandidate:
             devices=request.devices,
             environment_names=request.environment_names,
             read_only=request.read_only,
+            device_warnings=device_warnings(request.devices, request.read_only),
             credential_readiness=credential_readiness(request, self.console.config.credential_file),
             source_version_name=recorded_name(
                 Path(binding.original_source.path), binding.original_source.sha256
