@@ -569,6 +569,30 @@ def test_review_reports_comments_the_checked_bytes_remove(editor):
     assert kept.removed_comments == ()
 
 
+def test_save_identical_read_only_source_is_unchanged(editor):
+    """The premature read-only refusal must not prevent an identical-byte no-op."""
+    proposal = request(editor, SOURCE)
+    path = editor.project.source_file
+    path.chmod(0o444)
+    before = path.stat()
+    try:
+        saved = editor.save(proposal)
+        assert saved.unchanged is True
+        assert saved.sha256 == proposal.proposal_sha256
+        assert saved.recovery_ids == ()
+        assert path.read_text() == SOURCE
+        after = path.stat()
+        assert (after.st_ino, after.st_mtime_ns, after.st_mode) == (
+            before.st_ino,
+            before.st_mtime_ns,
+            before.st_mode,
+        )
+        assert list(editor.project.recovery_directory.iterdir()) == []
+        assert not path.with_name(path.name + ".versions.json").exists()
+    finally:
+        path.chmod(0o644)
+
+
 def test_save_refuses_a_read_only_source_without_writing(editor):
     """Fails if temp + rename replaces a file its owner made read-only (red-team E-3):
     the refusal is typed ``read_only`` and leaves bytes, mode and recovery untouched."""
