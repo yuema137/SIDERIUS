@@ -85,6 +85,10 @@ proven releasable before another UUID is admitted. This includes orphan director
 left by crashes before request or active-pointer publication. No partial directory
 is deleted or automatically reconciled. Readers require the saved store config,
 preventing a different root policy from silently changing admitted authority.
+Once all claims are releasable, admission removes the old derived pointer under
+the store lock; the new claim publishes its own pointer. Read-only status polling
+does not remove files. Ending a paused predecessor with a verified abandoned
+successor also removes that successor's matching pointer under the same lock.
 
 Records use existing `core.durable_io` write-once/atomic publishers through a
 pinned directory descriptor. These fsync file contents; no stronger machine-power-
@@ -488,6 +492,10 @@ setsid session leaders; bwrap itself is not exercised).
 ## Outcome and process projection
 
 `read_operation` revalidates saved requests and marker identity on each read.
+It binds and observes the process identity before reading completion/spawn-failure
+markers. A completion published immediately before the observed wrapper exit
+therefore participates in that same read, including an `unknown` completion that
+must keep admission blocked.
 Linux process observation compares boot ID, PID and `/proc/PID/stat` start ticks.
 Readers and operation processes must share the same host PID namespace. PID
 reuse and zombies establish original-process exit within that namespace. Unreadable/malformed
@@ -502,6 +510,11 @@ native status. `finishing=True` means the wrapper is still observed alive.
 Release requires a validated terminal native/pre-dispatch outcome plus positively
 observed wrapper exit, or a definite failed spawn. Missing identity or uncertain
 outcome keeps admission blocked even after apparent process death.
+The bounded exception is an abandoned authored-loop root or resume segment with no
+completion or receipt: its verified wrapper exit and confirmed ended sessions project `operation_failed`,
+and release rechecks those sessions, as specified under
+Authored completed-boundary Pause/Resume below. This does not infer whether any
+provider work occurred or create a scientific outcome.
 
 Known Popen failure publishes `spawn_failure.json`. Known wrapper failure before
 entering native invocation produces `pre_dispatch_failure` completion and
@@ -1201,8 +1214,13 @@ changes after review refuse the new operation rather than changing its meaning.
 
 `request_loop_stop(config, operation_id)` is an operation-bound graceful request
 for the candidate worker's declared finite loop, including an exited, verified paused
-tail. For a paused receipt it calls `review_locked` under the same store lock as
-Resume admission: clean supervision, bound completion and no successor are required.
+tail. For a paused receipt it calls `review_locked(..., ending=True)` under the
+same store lock as Resume admission: clean supervision and bound completion are
+required. An existing successor is allowed only when `loop_recovery.failed_successor`
+verifies that it is the selected predecessor's bound resume operation, has no
+completion or native receipt, and its wrapper and sandbox sessions have ended.
+This ending-only path permits a partial next body; it neither promotes that body
+to a result nor authorizes re-execution. Live, unknown or corrupt successors refuse.
 It preserves the paused receipt and writes only the run-wide Stop marker; a stale
 Resume review cannot admit after Stop wins the lock. It reuses the store lock,
 configured-root admission, saved request/run identity checks and current process
@@ -1259,8 +1277,26 @@ dispatched orphan record (possibly with an unreferenced
 `continuations/<id>/continuation.json`) and does not consume the reservation. The
 orphan is not releasable, so the store stays `busy` and admits no new ID until it is
 resolved. A crash or spawn failure after `successor.json` exists remains fail-closed
-and never re-dispatches: this scope does not recycle reservations or automatically
-retry uncertain dispatch.
+and never re-dispatches: reservations are not recycled and uncertain dispatch is
+never automatically retried. An authored-loop root or resume without completion or
+native receipt projects `state="operation_failed", reason="loop_process_exited"`
+only when both its wrapper exit and ended wrapper/sandbox sessions are verified.
+Wrapper exit with live or unobservable sessions stays `state="unknown",
+reason="loop_process_exiting"`; it is not a terminal failure.
+`process.observe` binds boot ID and PID start ticks: absent PIDs on an observable
+`/proc`, reused PIDs, zombies/dead processes and a different boot prove exit;
+unreadable identities stay unknown. Marker integrity and native receipt validation
+still precede this projection; no completion or scientific receipt is fabricated.
+Both failure projection and release require `host_liveness.reservation_evidence`
+to prove that the wrapper session and any published sandbox session ended;
+release independently rechecks that evidence. Missing sandbox
+identity follows that owner's die-with-parent rule; unknown or live session
+evidence blocks release. The paused predecessor retains its successor UUID and
+receipt, with `reason="loop_successor_failed"` only when this recovery is safe.
+End loop may then record the run-wide Stop; Resume review still refuses the
+immutable reservation. `test_dead_successor.py` exercises real pause/resume
+admission with fake absent/reused/zombie PID observations, session safeguards,
+partial-body preservation, store release and ending without retry.
 New execution rechecks the original runtime and provider environment names (missing
 names refuse with `credentials`); values are never stored. Native worker admission owns task plugins and scientific validation.
 

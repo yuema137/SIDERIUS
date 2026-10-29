@@ -138,7 +138,11 @@ def read_operation(config: OperationStoreConfig, operation_id: UUID) -> Operatio
 
 
 def _read_record(
-    config: OperationStoreConfig, record: OperationRecord, operation_id: UUID
+    config: OperationStoreConfig,
+    record: OperationRecord,
+    operation_id: UUID,
+    *,
+    project_successor_recovery: bool = True,
 ) -> OperationSnapshot:
     path = operation_path(config, operation_id)
     process = ProcessObservation(status="unknown", reason="missing_identity")
@@ -151,15 +155,18 @@ def _read_record(
         ):
             return read_resume_chain(record)
         identity = optional(path / "process.json", ProcessIdentity)
+        if identity is not None:
+            bound(record, identity)
+            # Read terminal markers after observing exit: the child may publish
+            # its completion immediately before it disappears.
+            process = observe(identity)
         failure = optional(path / "spawn_failure.json", SpawnFailure)
         completion = optional(path / "completion.json", Completion)
-        for marker in (identity, failure, completion):
+        for marker in (failure, completion):
             if marker is not None:
                 bound(record, marker)
         if completion is not None and completion.host_placement is not None:
             _require_recorded_placement(path, completion)
-        if identity is not None:
-            process = observe(identity)
         if failure is not None:
             if identity is not None or completion is not None:
                 raise OperationFailure("integrity", "spawn failure contradicts child evidence")
@@ -186,10 +193,16 @@ def _read_record(
             raise OperationFailure("integrity", "completed native receipt changed or vanished")
         if native is not None:
             successor = None
+            reason = "native_terminal"
             if is_authored_loop(record):
                 from .loop_resume import successor_id
 
                 successor = successor_id(record)
+                if successor is not None and project_successor_recovery:
+                    from .loop_recovery import failed_successor
+
+                    if failed_successor(record) is not None:
+                        reason = "loop_successor_failed"
             if completion is not None and completion.outcome == "pre_dispatch_failure":
                 raise OperationFailure(
                     "integrity", "pre-dispatch failure contradicts native receipt"
@@ -207,7 +220,7 @@ def _read_record(
                 successor_operation_id=successor,
                 receipt=native[0],
                 receipt_digest=native[1],
-                reason="native_terminal",
+                reason=reason,
             )
         if completion is not None:
             return OperationSnapshot(
@@ -223,6 +236,20 @@ def _read_record(
                 cancel_requested=cancel is not None,
             )
         waiting = is_queued(path) and not os.path.lexists(path / PLACEMENT_FILE)
+        if is_authored_loop(record) and process.status == "exited":
+            from .loop_recovery import sessions_ended
+
+            ended = sessions_ended(record)
+            return OperationSnapshot(
+                operation_id=operation_id,
+                kind=record.submission.kind,
+                request_digest=record.request_digest,
+                observed_at=observed_at,
+                state="operation_failed" if ended else "unknown",
+                process=process,
+                cancel_requested=cancel is not None,
+                reason="loop_process_exited" if ended else "loop_process_exiting",
+            )
         state = "unknown" if process.status != "alive" else "queued" if waiting else "active"
         return OperationSnapshot(
             operation_id=operation_id,
@@ -264,6 +291,10 @@ def releasable(config: OperationStoreConfig, operation_id: UUID) -> bool:
         snapshot = read_operation(config, operation_id)
     except (OSError, ValueError):
         return False
+    if snapshot.reason == "loop_process_exited":
+        from .loop_recovery import sessions_ended
+
+        return sessions_ended(load_record(config, operation_id))
     return (snapshot.state == "operation_failed" and snapshot.reason == "spawn_failed") or (
         snapshot.state in {"completed", "operation_failed"} and snapshot.process.status == "exited"
     )

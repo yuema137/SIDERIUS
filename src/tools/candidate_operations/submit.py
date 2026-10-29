@@ -348,13 +348,19 @@ def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopS
             return marker
         snapshot = read_operation(config, operation_id)
         if snapshot.receipt is not None and snapshot.receipt.status == "paused":
-            # Same lock as Resume admission: only the clean paused tail can end,
-            # never a historical checkpoint whose successor already continues it.
-            review_locked(config, operation_id)
+            # A reserved successor may have died without a receipt. Ending is
+            # safe only once its sessions ended; Resume still cannot reuse it.
+            review_locked(config, operation_id, ending=True)
         elif snapshot.receipt_available or snapshot.process.status != "alive":
             raise OperationFailure("not_running", "candidate is terminal or not confirmed running")
         with directory(control) as descriptor:
             publish_bytes_write_once(
                 f"/proc/self/fd/{descriptor}/stop.json", encode_control(marker)
             )
+        # Successful paused Stop admission already proved this successor ended.
+        # Its sessions may have ended between the first snapshot and that review.
+        if snapshot.successor_operation_id is not None:
+            from .store import release_active
+
+            release_active(config, snapshot.successor_operation_id)
         return marker
