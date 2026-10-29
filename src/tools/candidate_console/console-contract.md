@@ -2279,15 +2279,17 @@ View fields:
   resolved task data path and metric implementations, the model-plugin binding's
   plugin paths, and `source_paths` keys whose value equals the plugin path;
   otherwise `["unrecorded"]`. Names are never interpreted.
-- `scopes` (`DataScopeFacts`): built through `acquire_attempt_scopes` in `formal`
-  mode with `HyperparamTuningInput` formal defaults, no sampling seed and no
-  planner task parameters (`basis` states this). `declared` carries per-leg
+- `scopes` (`DataScopeFacts`): the task's full declared split, before any
+  run-level sampling: built through `acquire_attempt_scopes` in `formal` mode with
+  `snapshot` strategy, training and evaluation portion 1.0, no sampling seed and no
+  planner task parameters (`basis` states this). A run's own portions and seeds
+  select a subset of it. `declared` carries per-leg
   `{file_count, expected_on_disk_bytes}` from the task's `storage_read_scope`;
   `not_declared` (no scope capability or no `storage_read_scope`) carries no
   volumes, never 0; `failed` carries the task's message. There is no test-split
   concept: only training and evaluation scopes are shown.
 - `sample_counts` (`SampleCountFacts`, only with `count_samples=1`): `len()` of the
-  task's `training_dataset` (formal default `train_portion`) and
+  task's `training_dataset` (`train_portion=1.0`) and
   `validation_dataset` over those scopes; `not_countable` when the task builds no
   scopes or its datasets have no length. Counting may read the data; it runs in the
   same sandbox and timeout.

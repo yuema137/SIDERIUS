@@ -120,7 +120,8 @@ def test_quickstart_summary_projects_owner_facts_and_counts_only_on_request(
 
     counted = client.get("/api/tasks/synthetic/summary?count_samples=1").json()
     assert counted["package"]["sample_counts"]["state"] == "counted"
-    assert counted["package"]["sample_counts"]["evaluation"] > 0
+    counts = counted["package"]["sample_counts"]
+    assert (counts["training"], counts["evaluation"]) == (128, 64)
 
     for body in (plain.text, json.dumps(counted)):
         assert SECRET not in body
