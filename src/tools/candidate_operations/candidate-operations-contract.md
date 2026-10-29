@@ -1193,7 +1193,11 @@ changes after review refuse the new operation rather than changing its meaning.
 ### Authored finite-loop Stop
 
 `request_loop_stop(config, operation_id)` is an operation-bound graceful request
-for the candidate worker's declared finite loop. It reuses the store lock,
+for the candidate worker's declared finite loop, including an exited, verified paused
+tail. For a paused receipt it calls `review_locked` under the same store lock as
+Resume admission: clean supervision, bound completion and no successor are required.
+It preserves the paused receipt and writes only the run-wide Stop marker; a stale
+Resume review cannot admit after Stop wins the lock. It reuses the store lock,
 configured-root admission, saved request/run identity checks and current process
 observation. It writes only the already-claimed native control marker, never
 creates a queued candidate workspace, and never sends a signal. Identical marker
