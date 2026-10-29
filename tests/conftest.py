@@ -288,6 +288,23 @@ def _restore_generated_library_binding_after_test():
                 os.environ[name] = value
 
 
+@pytest.fixture(autouse=True)
+def _assume_visible_gpu_for_real_launch_preflight(request, monkeypatch):
+    """Let tests drive the real-launch CLI path on CPU-only hosts (issue #1136).
+
+    ``workflows.run_one_iteration`` refuses a real (non-pseudo) launch when no
+    CUDA device is visible. Tests that exercise that path with the workflow
+    mocked (the unit suite mocks hardware, per the flow-only rule) would
+    otherwise exit 2 on CI runners. This stubs only the discovery-backed
+    ``core.gpu_requirement.real_launch_gpu_refusal`` to "GPU visible"; the
+    refusal wording and the pure ``gpu_refusal_for`` stay real. A test of the
+    preflight itself opts out with ``@pytest.mark.real_gpu_preflight``.
+    """
+    if request.node.get_closest_marker("real_gpu_preflight"):
+        return
+    monkeypatch.setattr("core.gpu_requirement.real_launch_gpu_refusal", lambda: None)
+
+
 # ---------------------------------------------------------------------------
 # Pseudo/full-provider test helpers
 # ---------------------------------------------------------------------------

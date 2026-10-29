@@ -108,6 +108,17 @@ ledger's own launch code, so nothing reaches Launch that Launch would refuse or
 silently ignore. `ChoicesView.host_ledger` (omitted when false) tells the browser
 whether a ledger is configured.
 
+Compute requirement (issue #1136, presentation only). A reviewed run whose
+captured workflow has a `tuning` node (native training, which refuses a sandbox
+without a CUDA device) shows `#capture-compute-review` "Compute: NVIDIA GPU
+required"; when the reviewed `devices` (the task's `candidate_devices`) contain no
+`/dev/nvidia<N>` node, `#capture-compute-warning` adds "This task does not pass a
+GPU into the run sandbox; the run will be refused." (`/dev/nvidiactl` alone is not
+a GPU node). A workflow without a `tuning` node says no GPU check applies. Read
+from `ReusableCaptureReview.nodes`/`devices`; nothing is refused in the browser,
+and the native launch guard remains the authority (browser witness
+`tests/browser/gpu_compute_review.mjs`).
+
 Browser (B3-4c UI). The Run lane's **Host resources and parallel nodes** panel
 (`run-scheduling.js`, `#scheduling`) is shown only when `/api/choices` reports
 `host_ledger` (`consoleSession.hostLedger`); otherwise `#scheduling-unavailable`

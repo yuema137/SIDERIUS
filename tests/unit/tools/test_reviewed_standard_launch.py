@@ -267,6 +267,9 @@ def _exercise_real_standard_main(
     from workflows.llm_config import WorkflowLLMConfig
 
     monkeypatch.chdir(tmp_path)
+    # This runs in a child process, outside tests/conftest.py's autouse stub:
+    # the real-launch CUDA preflight (#1136) is not what this witness owns.
+    monkeypatch.setattr("core.gpu_requirement.real_launch_gpu_refusal", lambda: None)
     repo = Path(__file__).resolve().parents[3]
     import yaml
 
