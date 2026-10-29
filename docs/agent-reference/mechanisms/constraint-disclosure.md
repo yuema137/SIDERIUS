@@ -34,6 +34,13 @@ Formal evaluation remains operator-owned via `formal_eval_portion`. Time
 budgets do not imply a hard kill deadline. Optional `timing` carries the existing
 `PlannerTimingContext`; it does not calculate inheritance itself.
 
+`execution.force_formal_round` is the launch policy for the final round of each
+iteration, not a requirement to run every round in Formal mode. When supplied,
+`timing.forced_formal` reports whether the current round is forced Formal; absent
+timing leaves that round-specific status unknown. Earlier rounds still follow
+the existing trial-eligibility policy. The serialized launch flag is retained
+unchanged for persisted-record compatibility; the renderer states its scope.
+
 The disclosure supplements current-run recommendations. It must not rewrite
 historical evidence or source-paper methods. Literature source extraction and
 cache consolidation are deliberately excluded: they preserve source facts and
