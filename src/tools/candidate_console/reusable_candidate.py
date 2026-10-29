@@ -37,6 +37,7 @@ from .reusable_models import (
     ReusableCaptureSelection,
 )
 from .reusable_policy import capture_path, check_capture_policy, configured_capture
+from .seed_labels import review_label
 from .service import CandidateConsole
 
 
@@ -130,6 +131,7 @@ class ReusableCandidate:
             self.console.config.operation_store,
             selection.preparation,
             operation_id,
+            selection.run_seed,
         )
         return task, inspected, operation
 
@@ -209,6 +211,7 @@ class ReusableCandidate:
             source_version_name=recorded_name(
                 Path(binding.original_source.path), binding.original_source.sha256
             ),
+            seed=review_label(selection.run_seed),
         )
 
     def launch(self, project_id: str, launch: ReusableCaptureLaunch) -> OperationHandle:

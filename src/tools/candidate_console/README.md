@@ -405,7 +405,7 @@ See the [reusable configuration contract](console-contract.md#reusable-capture-c
    is offline and does not need provider keys. **Check status** or **Monitor
    preparation** shows its outcome. Saving and preparation never launch a candidate.
 4. Once preparation reports **prepared**, select **Open prepared run**, then
-   **Review capture**. Check model routes and credential readiness. Existing runs
+   **Review capture**. Leave **Seed** (under **Optional settings**) blank; SIDERIUS picks one and records it. Check model routes and credential readiness. Existing runs
    made through Python or CLI can instead be selected from **Prepared run**.
 5. Select **Launch captured run** explicitly. This runs Propose → Implement →
    Validate and, when declared, native Tune with the captured inputs. It may call

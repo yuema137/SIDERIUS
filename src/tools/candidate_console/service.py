@@ -65,6 +65,20 @@ from .models import (
 )
 from .readiness import credential_readiness
 from .recorded_examples import read_recorded_example
+from .seed_labels import CHAIN_CONTRADICTED, readback_label
+
+
+def seed_readback(snapshot: OperationSnapshot) -> str:
+    """The recorded seed: the operation record's, or a native chain's lock readback."""
+    chain = snapshot.native_chain
+    if chain is not None:
+        if chain.run_seed_anomaly is not None:
+            return CHAIN_CONTRADICTED
+        return readback_label(chain.run_seed, chain.run_seed_source, native_chain=True)
+    seed = snapshot.run_seed
+    if seed is None:
+        return readback_label(None, None)
+    return readback_label(seed.value, seed.source)
 
 
 def preparation_request(
@@ -253,8 +267,8 @@ class CandidateConsole:
             else None
         )
         return StatusView(
-            # The run seed's console readback is issue #983 S6; the view omits it.
-            **snapshot.model_dump(exclude={"receipt", "receipt_digest", "run_seed"}),
+            **snapshot.model_dump(exclude={"receipt", "receipt_digest"}),
+            seed=seed_readback(snapshot),
             native_status=receipt.status if receipt else None,
             graph_trace=receipt.graph_trace if isinstance(receipt, CandidateRunReceipt) else None,
             native_id=native_id,
@@ -290,6 +304,7 @@ class CandidateConsole:
                     state=snapshot.state,
                     native_status=snapshot.receipt.status if snapshot.receipt else None,
                     loop=loop,
+                    seed=seed_readback(snapshot),
                 )
             )
         return OperationListView(

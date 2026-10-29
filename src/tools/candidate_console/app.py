@@ -305,6 +305,7 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
             "reusable-run.js": "text/javascript",
             "reusable-intents.js": "text/javascript",
             "new-run.js": "text/javascript",
+            "seed-input.js": "text/javascript",
             "page-guidance.js": "text/javascript",
             "settings.js": "text/javascript",
             "page-guidance.css": "text/css",

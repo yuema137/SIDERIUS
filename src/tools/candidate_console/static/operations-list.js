@@ -42,7 +42,7 @@
       // Run name plus start time tells entries apart even when names repeat.
       link.textContent = [name || KINDS[item.kind] || item.kind, when(item.admitted_at)].join(' · ');
       meta.className = 'muted operation-meta';
-      meta.textContent = [KINDS[item.kind] || item.kind, window.operationOutcome.sentence(item), progress(item.loop)].filter(Boolean).join(' · ');
+      meta.textContent = [KINDS[item.kind] || item.kind, window.operationOutcome.sentence(item), progress(item.loop), item.seed].filter(Boolean).join(' · ');
       link.title = `Operation UUID ${id} · admitted ${item.admitted_at}`;
       entry.append(link, meta); list.append(entry);
     }

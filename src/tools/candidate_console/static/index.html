@@ -58,6 +58,7 @@
   <script src="/reusable-intents.js" defer></script>
   <script src="/run-steps.js" defer></script>
   <script src="/reusable-run.js" defer></script>
+  <script src="/seed-input.js" defer></script>
   <script src="/new-run.js" defer></script>
   <script src="/browser-data.js" defer></script>
   <script src="/native-chain.js" defer></script>
@@ -270,6 +271,10 @@
     <p id="capture-source"></p>
     <button id="capture-prepare-current" type="button" class="secondary" hidden>Prepare the current version instead</button>
     <div id="capture-summary"></div>
+    <details class="run-optional" id="capture-optional"><summary>Optional settings</summary>
+      <label for="capture-seed">Seed</label><input id="capture-seed" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-describedby="capture-seed-help">
+      <p id="capture-seed-help" class="muted">Leave Seed blank; SIDERIUS picks one and records it.</p>
+    </details>
     <p id="capture-credentials" class="run-credentials" hidden></p>
     <div class="actions"><button id="capture-review" class="secondary" disabled>Review prepared run</button><button id="capture-launch" disabled>Launch run</button></div>
     <p id="capture-launch-reason" class="muted"></p>

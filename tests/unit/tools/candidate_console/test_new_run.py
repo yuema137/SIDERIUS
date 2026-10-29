@@ -13,6 +13,7 @@ from tools.candidate_console.reusable_preparation import (
 )
 from tools.candidate_console.service import CandidateConsole
 from tools.candidate_operations.models import OperationFailure
+from tools.candidate_operations.store import load_record
 from tools.workflow_authoring.models import Project
 
 
@@ -333,3 +334,30 @@ def test_console_app_protects_workspace_settings_at_admission(fresh, with_worksp
         assert response.status_code == 409 and response.json()["error"]["code"] == "stale_review"
     else:
         assert response.status_code == 200, response.text
+
+
+#: Issue #983 S6. Above 2**52, so a float round-trip would corrupt it.
+SEED = 4_503_599_627_370_497
+
+
+def test_new_run_seed_reaches_the_admitted_preparation_and_blank_keeps_bytes(fresh, monkeypatch):
+    """Fails if the entered seed is dropped between review and admission, if a
+    blank seed changes the reviewed selection bytes or request digest, or if
+    recovery accepts a retained intent whose seed differs from the admitted one."""
+    adapter, chosen, _ = fresh
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", lambda *args: None)
+    blank = adapter.review("fresh", chosen)
+    assert "run_seed" not in chosen.model_dump_json()
+    assert blank.seed == "Seed: generated at launch"
+    seeded_selection = chosen.model_copy(update={"run_seed": SEED})
+    seeded = adapter.review("fresh", seeded_selection)
+    assert seeded.seed == f"Seed: {SEED} (you set)"
+    assert seeded.expectation.request_digest != blank.expectation.request_digest
+    adapter.prepare("fresh", intent(seeded))
+    record = load_record(adapter.console.config.operation_store, chosen.preparation_operation_id)
+    assert (record.run_seed.value, record.run_seed.source) == (SEED, "operator")
+    changed = intent(seeded).model_copy(
+        update={"selection": seeded_selection.model_copy(update={"run_seed": SEED - 1})}
+    )
+    with pytest.raises(OperationFailure, match="retained selection"):
+        adapter.prepare("fresh", changed)

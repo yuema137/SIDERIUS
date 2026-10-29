@@ -8,14 +8,20 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from tests.unit.tools.candidate_prepare.test_reusable_preparation import direct_child, reusable
 from tests.unit.tools.candidate_prepare.test_reusable_selection import published
 from tools.candidate_console.reusable_candidate import ReusableCandidate
-from tools.candidate_console.reusable_models import ReusableCaptureChoice, ReusableCaptureLaunch
+from tools.candidate_console.reusable_models import (
+    ReusableCaptureChoice,
+    ReusableCaptureLaunch,
+    ReusableCaptureSelection,
+)
 from tools.candidate_console.service import CandidateConsole, preparation_request
 from tools.candidate_operations import build_reusable_operation, operation_request_digest
 from tools.candidate_operations.models import OperationFailure
+from tools.candidate_operations.store import load_record
 from tools.workflow_authoring.models import Project
 
 
@@ -404,3 +410,30 @@ def test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops(loope
             {"kind": "no_improvement", "completed_bodies": 2},
         ],
     }
+
+
+#: Issue #983 S6. Above 2**52, so a float round-trip would corrupt it.
+SEED = 4_503_599_627_370_497
+
+
+def test_capture_seed_is_bound_by_the_reviewed_digest_and_admitted(captured):
+    """Fails if the candidate seed is not part of the reviewed request digest
+    (a launch could then run a seed the operator never reviewed) or is not the
+    seed the admitted operation records."""
+    adapter, project, choice, _ = captured
+    chosen = adapter.select(project.project_id, choice)
+    assert "run_seed" not in chosen.model_dump_json()
+    blank = adapter.review(project.project_id, chosen)
+    seeded = adapter.review(project.project_id, chosen.model_copy(update={"run_seed": SEED}))
+    native = build_reusable_operation(
+        adapter.console.config.operation_store, chosen.preparation, uuid4(), SEED
+    )
+    assert seeded.request_digest == operation_request_digest(native) != blank.request_digest
+    assert (blank.seed, seeded.seed) == ("Seed: generated at launch", f"Seed: {SEED} (you set)")
+    handle = adapter.launch(project.project_id, launch_payload(seeded))
+    record = load_record(adapter.console.config.operation_store, handle.operation_id)
+    assert (record.run_seed.value, record.run_seed.source) == (SEED, "operator")
+    with pytest.raises(ValidationError):
+        ReusableCaptureSelection.model_validate(
+            {**chosen.model_dump(mode="json"), "run_seed": 2**53}
+        )
