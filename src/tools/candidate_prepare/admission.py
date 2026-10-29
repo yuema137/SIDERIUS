@@ -49,10 +49,28 @@ def validate_destination_overlap(destination: Path, inputs: tuple[Path, ...]) ->
         raise ValueError(f"destination overlaps selected input or protected root: {destination}")
 
 
+def validate_read_only_exclusion(inputs: tuple[Path, ...], protected: tuple[Path, ...]) -> None:
+    """Refuse a read-only input that contains, or lies inside, a caller-protected path.
+
+    Read-only mounts are otherwise checked only for canonical form and type, so a
+    data folder holding a credential, token, settings or output root would expose
+    it to the sandbox. Static: no reads or existence requirements.
+    """
+    if any(overlap(item, root) for item in inputs for root in protected):
+        raise ValueError("read-only input overlaps a protected path")
+
+
 def admit(
-    request: CandidatePreparationRequest, *, future_parent: Path | None = None
+    request: CandidatePreparationRequest,
+    *,
+    future_parent: Path | None = None,
+    protected: tuple[Path, ...] = (),
 ) -> tuple[tuple[FileObservation, bytes], ...]:
-    """Validate selected paths and both policies without creating either destination."""
+    """Validate selected paths and both policies without creating either destination.
+
+    ``protected`` names caller-owned paths no read-only input may overlap (the
+    console's settings, credentials, store and output roots).
+    """
     manifest, config, data, output, workspace = map(
         canonical,
         (
@@ -69,6 +87,7 @@ def admit(
     SandboxProfile.environment_keys(request.candidate_environment_names)
     if not data.is_dir():
         raise ValueError("data_root must be an existing directory")
+    validate_read_only_exclusion((data, *sources), protected)
     destinations = (
         (output, workspace) if future_parent is None else (output, workspace, future_parent)
     )

@@ -12,6 +12,7 @@ from agent.schemas.data_analysis.common import CertifiedArtifactRef, canonical_j
 from agent.schemas.data_analysis.context import DataAnalysisInput
 from agent.schemas.data_analysis.plan import AnalysisPlan
 from agent.schemas.data_analysis.report import CertifiedResultRef, DataAnalysisReport
+from agent.schemas.data_analysis.resources import AnalysisSamplingSeeds
 from agent.schemas.data_analysis.skills import ArtifactOutputContract, ProducedArtifact, SkillResult
 from agent.schemas.data_analysis.trained_model import ModelInferenceReceipt
 from agent.schemas.storage import StorageConfig
@@ -98,6 +99,10 @@ class AnalysisRunStore:
 
     def write_discovery(self, value: DiscoverySnapshot) -> CertifiedArtifactRef:
         return self._write_model_once("discovery.json", value)
+
+    def write_sampling_seeds(self, value: AnalysisSamplingSeeds) -> CertifiedArtifactRef:
+        """Issue #983: each invocation's executed sampling seed; never prompt input."""
+        return self._write_model_once("sampling_seeds.json", value)
 
     def write_plan(self, value: AnalysisPlan) -> CertifiedArtifactRef:
         return self._write_model_once("plan.json", value)

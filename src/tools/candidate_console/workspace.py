@@ -21,9 +21,30 @@ import stat
 from collections.abc import Iterator
 from pathlib import Path
 
-from .files import canonical, config_bytes, open_directory
+from .files import canonical, config_bytes, open_directory, write_all
 from .readiness_models import WorkspaceEntry, WorkspaceReadiness, WorkspaceStatus
-from .settings_models import ConsoleFile, ResolvedConsole, SettingsContext
+from .settings_file import (
+    SETTINGS_FILE,
+    MissingSetting,
+    SettingsInvalid,
+    allowlists,
+    llm_profile_path,
+    read_settings,
+    resolve_folder,
+    settings_path,
+)
+from .settings_models import (
+    SETTINGS_SCHEMA,
+    AdviceFileChoice,
+    ConsoleFile,
+    DataRootChoice,
+    GlobalSettings,
+    GlobalSettingsPolicy,
+    LibraryRef,
+    LLMProfileChoice,
+    ResolvedConsole,
+    SettingsContext,
+)
 
 WORKSPACE_DIRECTORY = "siderius_workspace"
 SETTINGS = "settings"
@@ -53,10 +74,6 @@ TASK_OUTPUT_PARENTS = {
 TASK_PARENTS = {**TASK_OUTPUT_PARENTS, "data_root": "data"}
 
 
-class MissingSetting(ValueError):
-    """A required console field has no source; the message names fields, never values."""
-
-
 class WorkspaceRefused(ValueError):
     """``init`` found a directory or file it must not use; nothing was deleted."""
 
@@ -70,14 +87,36 @@ def init_command(workspace_root: Path) -> str:
 # Resolution ------------------------------------------------------------------------
 
 
-def resolve_console(payload: bytes) -> ResolvedConsole:
-    """Fill omitted layout locations; the result is typed but not yet filesystem-validated."""
+def resolve_console(payload: bytes, *, settings: GlobalSettings | None = None) -> ResolvedConsole:
+    """Fill omitted fields: console.json, then the global settings file, then the layout.
+
+    ``settings`` replaces the settings file's content (a candidate write is resolved
+    before it is published). The result is typed but not yet filesystem-validated.
+    """
     from .models import ConsoleConfig
 
     document = ConsoleFile.model_validate_json(payload).model_dump(mode="json", exclude_unset=True)
     value = document.pop("workspace_root", None)
     workspace = None if value is None else canonical(value)
+    lists = allowlists(
+        tuple(LLMProfileChoice.model_validate(item) for item in document.pop("llm_profiles", [])),
+        tuple(AdviceFileChoice.model_validate(item) for item in document.pop("advice_files", [])),
+        tuple(DataRootChoice.model_validate(item) for item in document.pop("data_roots", [])),
+        workspace,
+    )
+    policy_value = document.pop("global_settings", None)
+    policy = None if policy_value is None else GlobalSettingsPolicy.model_validate(policy_value)
+    path = digest = None
+    if policy is not None:
+        if workspace is None:
+            raise SettingsInvalid("global_settings requires workspace_root")
+        path = settings_path(workspace)
+        if settings is None:
+            settings, digest = read_settings(path)
+    elif settings is not None:
+        raise SettingsInvalid("global settings are not enabled in console.json")
     derived: set[tuple[str | None, str]] = set()
+    from_settings: set[tuple[str, str]] = set()
     if workspace is not None:
         if "operation_store" not in document or document["operation_store"] is None:
             document["operation_store"] = {
@@ -94,8 +133,23 @@ def resolve_console(payload: bytes) -> ResolvedConsole:
             raise MissingSetting(
                 f"console needs {field} (set it in console.json or set workspace_root)"
             )
-    for task in document.get("tasks", []):
+    tasks = document.get("tasks", [])
+    if settings is not None:
+        unknown = sorted(set(settings.data_folders) - {task["task_id"] for task in tasks})
+        if unknown:
+            raise SettingsInvalid(f"global settings data folder names unknown task {unknown[0]!r}")
+    for task in tasks:
         task_id = task["task_id"]
+        if settings is not None:
+            if task.get("llm_config_file") is None and settings.llm_profile is not None:
+                profile = llm_profile_path(settings.llm_profile, lists, workspace)
+                task["llm_config_file"] = str(profile)
+                from_settings.add((task_id, "llm_config_file"))
+            folder = settings.data_folders.get(task_id)
+            if task.get("data_root") is None and folder is not None:
+                label = f"data folder for task {task_id}"
+                task["data_root"] = str(resolve_folder(folder, lists, label=label))
+                from_settings.add((task_id, "data_root"))
         for field, parent in TASK_PARENTS.items():
             # An explicit null reusable_runs_root keeps reusable runs disabled.
             explicit = field in task and (field == "reusable_runs_root" or task[field] is not None)
@@ -105,12 +159,25 @@ def resolve_console(payload: bytes) -> ResolvedConsole:
         for field in ("data_root", "preparation_root", "candidate_root"):
             if task.get(field) is None:
                 raise MissingSetting(
-                    f"task {task_id} needs {field} (set it in console.json or set workspace_root)"
+                    f"task {task_id} needs {field} (set it in console.json, global settings "
+                    "or workspace_root)"
                 )
         if task.get("llm_config_file") is None:
-            raise MissingSetting(f"task {task_id} needs llm_config_file (set it in console.json)")
+            raise MissingSetting(
+                f"task {task_id} needs llm_config_file (set it in console.json or global settings)"
+            )
     config = ConsoleConfig.model_validate_json(json.dumps(document))
-    return ResolvedConsole(config, SettingsContext(workspace, frozenset(derived)))
+    context = SettingsContext(
+        workspace_root=workspace,
+        derived=frozenset(derived),
+        allowlists=lists,
+        policy=policy,
+        settings_path=path,
+        settings=settings,
+        settings_sha256=digest,
+        from_settings=frozenset(from_settings),
+    )
+    return ResolvedConsole(config, context)
 
 
 # No-follow directory walking ----------------------------------------------------------
@@ -159,7 +226,7 @@ def _status(directory: int, name: str, *, owned: bool = True) -> WorkspaceStatus
     return "present"
 
 
-def _ensure_directory(directory: int, name: str, label: str) -> int:
+def ensure_owned_directory(directory: int, name: str, label: str) -> int:
     """Create ``name`` (0700) when missing, open it no-follow and enforce ownership."""
     try:
         os.mkdir(name, 0o700, dir_fd=directory)
@@ -288,7 +355,7 @@ def _create_token(settings: int) -> None:
     except FileExistsError:
         return  # left untouched; load_console validates it with files.token
     try:
-        os.write(descriptor, secrets.token_urlsafe(32).encode())
+        write_all(descriptor, secrets.token_urlsafe(32).encode())
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
@@ -329,12 +396,14 @@ def _init(base: Path, workspace: Path, port: int) -> Path:
             raise WorkspaceRefused(
                 "workspace parent must be owned by you without group/other write"
             )
-        root = _ensure_directory(directory, WORKSPACE_DIRECTORY, WORKSPACE_DIRECTORY)
+        root = ensure_owned_directory(directory, WORKSPACE_DIRECTORY, WORKSPACE_DIRECTORY)
     opened = {"": root}
     try:
         for name in INIT_CHILDREN:
             above, _, leaf = name.rpartition("/")
-            opened[name] = _ensure_directory(opened[above], leaf, f"{WORKSPACE_DIRECTORY}/{name}")
+            opened[name] = ensure_owned_directory(
+                opened[above], leaf, f"{WORKSPACE_DIRECTORY}/{name}"
+            )
         _create_token(opened[SETTINGS])
         profile = _default_llm_profile()
         digest = hashlib.sha256(profile).hexdigest()[:12]
@@ -343,6 +412,16 @@ def _init(base: Path, workspace: Path, port: int) -> Path:
             profile,
             label="library default LLM profile",
         )
+        if _status(opened[SETTINGS], SETTINGS_FILE) == "missing":
+            default = LibraryRef(
+                name=f"default-{digest}.json", sha256=hashlib.sha256(profile).hexdigest()
+            )
+            selection = GlobalSettings(schema_version=SETTINGS_SCHEMA, llm_profile=default)
+            _write_once(
+                settings_path(workspace),
+                (selection.model_dump_json(indent=2) + "\n").encode(),
+                label="global settings",
+            )
         console = workspace / SETTINGS / CONSOLE_FILE
         if _status(opened[SETTINGS], CONSOLE_FILE) == "missing":
             skeleton = {
@@ -350,18 +429,27 @@ def _init(base: Path, workspace: Path, port: int) -> Path:
                 "port": port,
                 "browser_origin": f"http://127.0.0.1:{port}",
                 "tasks": [],
+                "global_settings": {"browser_writable": True},
             }
             _write_once(
                 console, (json.dumps(skeleton, indent=2) + "\n").encode(), label="console.json"
             )
         else:
-            resolved = resolve_console(_existing_file(console, label="settings/console.json"))
+            payload = _existing_file(console, label="settings/console.json")
+            try:
+                resolved = resolve_console(payload)
+            except SettingsInvalid:
+                raise  # names its own field or predicate (MissingSetting included)
+            except ValueError:
+                raise WorkspaceRefused(
+                    "settings/console.json is not a valid console configuration; left unchanged"
+                ) from None
             if resolved.settings.workspace_root == workspace:
                 for task_id, field in resolved.settings.derived_task_fields():
                     if field in TASK_OUTPUT_PARENTS:
                         parent_name = TASK_OUTPUT_PARENTS[field]
                         os.close(
-                            _ensure_directory(
+                            ensure_owned_directory(
                                 opened[parent_name],
                                 task_id,
                                 f"{WORKSPACE_DIRECTORY}/{parent_name}/{task_id}",
