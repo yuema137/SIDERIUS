@@ -345,3 +345,35 @@ def test_settings_errors_locate_entries_without_echoing_file_text(
     _write_settings(workspace, **settings)
     code, err = _main(monkeypatch, capsys, "check", "--config", str(_console(workspace)))
     assert code == 2 and named in err and "SECRET" not in err
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The bad entry is the third one written; JSON parsers would report it first.
+        '"data_folders": {"A": {"root_id": "workspace", "subpath": "a"}, '
+        '"b": {"root_id": "workspace", "subpath": "b"}, "A": {"root_id": "workspace", "subpath": 3}}',
+        '"data_folders": {"A": {"root_id": "workspace", "subpath": "a", "subpath": "SECRET"}}',
+        '"advice": null, "advice": null',
+    ],
+)
+def test_repeated_keys_are_refused_before_any_location_is_named(
+    text, workspace, monkeypatch, capsys
+):
+    """Defect: a repeated key is silently collapsed, so the file means something other
+    than what is written and an error points the operator at the wrong entry (#1087)."""
+    path = workspace / "settings" / "global_settings.json"
+    path.write_text('{"schema_version": "siderius.console-global-settings/v1", ' + text + "}")
+    path.chmod(0o600)
+    code, err = _main(monkeypatch, capsys, "check", "--config", str(_console(workspace)))
+    assert code == 2 and "repeats a key inside one JSON object" in err
+    assert "SECRET" not in err and "data_folders[0]" not in err
+
+
+def test_a_task_named_like_the_mapping_field_is_still_an_entry(workspace, monkeypatch, capsys):
+    """Defect: a task key equal to ``data_folders`` shifts the next segment (#1087)."""
+    _write_settings(
+        workspace, data_folders={"data_folders": {"root_id": "workspace", "subpath": 3}}
+    )
+    code, err = _main(monkeypatch, capsys, "check", "--config", str(_console(workspace)))
+    assert code == 2 and "data_folders[0].subpath" in err

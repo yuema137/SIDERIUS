@@ -14,8 +14,6 @@ import stat
 import threading
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from tools.candidate_operations.models import OperationFailure
 
 from .files import canonical, config_bytes, open_directory, private_bytes, write_all
@@ -32,8 +30,8 @@ from .settings_file import (
     SettingsInvalid,
     advice_path,
     check_subpath,
-    invalid_fields,
     library_directory,
+    parse_settings,
 )
 from .settings_library import (
     LibraryRefused,
@@ -43,7 +41,6 @@ from .settings_library import (
     store,
 )
 from .settings_models import (
-    SETTINGS_SCHEMA,
     AllowlistRef,
     FileRef,
     GlobalSettings,
@@ -178,15 +175,14 @@ class ConsoleSettings:
             )
         digest = hashlib.sha256(payload).hexdigest()
         try:
-            return GlobalSettings.model_validate_json(payload), digest, None
-        except ValidationError as error:
+            return parse_settings(payload), digest, None
+        except SettingsInvalid as error:
             return (
                 None,
                 digest,
                 (
-                    f"settings/global_settings.json is not valid {SETTINGS_SCHEMA} JSON at "
-                    f"{invalid_fields(error, payload)}. Fix or "
-                    "restore the file and Reload, or choose values here and Save to replace it."
+                    f"settings/global_settings.json: {error}. Fix or restore the file and "
+                    "Reload, or choose values here and Save to replace it."
                 ),
             )
 
