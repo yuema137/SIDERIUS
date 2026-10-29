@@ -10,6 +10,7 @@ from workflows.definition import AuthoredWorkflowDocument, ReusableWorkflowDocum
 # Presentation only: no copied defaults, validation constraints or execution policy.
 CONTROLS = (
     ("is_trial", "Trial/formal mode", "boolean"),
+    ("max_rounds", "Tuning rounds per body", "integer"),
     ("trial_time_budget_minutes", "Trial budget (minutes)", "number"),
     ("formal_time_budget_minutes", "Formal budget (minutes)", "number"),
     ("trial_max_epochs", "Trial epoch ceiling", "integer"),

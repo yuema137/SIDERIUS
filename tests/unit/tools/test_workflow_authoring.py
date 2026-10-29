@@ -424,9 +424,12 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     assert controls["formal_time_budget_minutes"].state == "null"
     assert controls["formal_time_budget_minutes"].nullable
     assert controls["trial_max_epochs"].state == "unset"
+    assert controls["max_rounds"].effective == 10
+    assert controls["max_rounds"].state == "unset"
     assert view.document.training_settings == supplied
     document = view.document.model_copy(deep=True)
     document.training_settings["launch"]["trial_max_epochs"] = 3
+    document.training_settings["launch"]["max_rounds"] = 3
     review = author.review(
         ReviewRequest(
             expected_sha256=view.sha256,
@@ -443,7 +446,9 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
         )
     )
     saved = parse_workflow_source(source.read_text())
-    assert saved.training_settings == {"launch": {**supplied["launch"], "trial_max_epochs": 3}}
+    assert saved.training_settings == {
+        "launch": {**supplied["launch"], "trial_max_epochs": 3, "max_rounds": 3}
+    }
     assert "formal_max_epochs" not in saved.training_settings["launch"]
 
 

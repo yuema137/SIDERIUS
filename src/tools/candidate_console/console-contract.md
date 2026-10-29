@@ -346,6 +346,11 @@ before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
 training controls come from the captured settings' native launch schema, including
 its defaults. No task import or current editor/settings lookup occurs. Review
 refuses changed input bytes. The projection does not alter launch or its digest.
+`TrainingReview.max_rounds` carries the captured native integer limit (10 when
+omitted), rendered as **Tuning rounds per body**. It is independent of the
+research-loop body count and cannot be replaced by a later editor draft.
+`tests/browser/tuning_rounds.mjs` witnesses the default 10, editing and saving 3,
+and preparing a run whose review facts and visible summary both show 3.
 
 The ordinary `#capture-summary` displays all three captured advice strings, Health
 mode (`observe_only`: Record only; `blocking`: Block on failure), trial/formal time

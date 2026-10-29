@@ -17,6 +17,7 @@ from workflows.candidate_training_settings import parse_training_settings
 
 class TrainingReview(PreviewModel):
     healthgate_mode: str | None
+    max_rounds: int
     trial_time_budget_minutes: float | None
     formal_time_budget_minutes: float | None
     max_epochs: int | None
