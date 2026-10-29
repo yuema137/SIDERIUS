@@ -598,6 +598,19 @@ See the [reusable configuration contract](console-contract.md#reusable-capture-c
    edits remain separate. Follow **Monitor operation** for validation outcome;
    prepared inputs alone do not mean a candidate was accepted.
 
+If a step does not succeed, the line under the Run steps says so in plain words, for
+example "The preparation failed. The cause and its log are named below; start over to
+try again." or "The run failed. The cause is shown below; open it in Monitor for the
+full log." A time limit, an interruption, a stop on request and a worker that never
+started each get their own sentence. Below it, the step's status line names the cause:
+the last error line of the log, such as "Cause (from the log): TaskCompositionError:
+plugin file … does not exist". A failed preparation also names its log file,
+`inputs/preparation/worker.log` in the run's folder; Monitor shows the same log under
+**Activity and logs** with log source **Native**. Fix the cause, then select **Start
+over** and prepare again. A paused research loop is not reported as finished either:
+the line says whether it is waiting for your input or was paused by you, and to open
+it in Monitor to resume.
+
 The browser retains preparation and candidate intents separately before sending
 either effect. Storage failure prevents dispatch. After a lost response or reload,
 Connect and use **Check status** or retry the same operation. An unresolved intent

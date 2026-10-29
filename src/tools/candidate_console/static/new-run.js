@@ -82,7 +82,8 @@
         : 'Open an experiment setup whose runs are enabled and save your edits first.';
     window.dispatchEvent(new CustomEvent('new-run-gate', {detail: {ready: !!ready()}}));
     window.dispatchEvent(new CustomEvent('run-step-state', {detail: {
-      source: 'prepare', reviewed: !!review, intent: !!intent, prepared: prepared(), problem
+      source: 'prepare', reviewed: !!review, intent: !!intent, prepared: prepared(), problem,
+      ending: intent && operation && !problem ? window.operationOutcome.ending(operation) : null
     }}));
   }
   function invalidate() {
@@ -129,9 +130,21 @@
     }
     if (value.state === 'operation_failed') return value.reason === 'spawn_failed'
       ? 'Preparation did not start: the worker could not be launched. Start over to try again.'
-      : 'Preparation failed. Its evidence is kept in Monitor; start over to try again.';
+      : 'Preparation failed before reporting a result. Its evidence is kept in Monitor; start over to try again.' + causeLine(value);
     if (prepared()) return 'Prepared. Review and launch it in step 2.';
-    return `Preparation finished without a prepared run (${value.native_status || 'no result'}). Its evidence is kept in Monitor; start over to try again.`;
+    // #1145: the native error is in the preparation's worker log, not in the status.
+    return `${window.operationOutcome.sentence(value)} Its log is inputs/preparation/worker.log in this run's folder (Monitor shows it under Activity and logs, log source Native). Start over to try again.` + causeLine(value);
+  }
+  // L-2 for preparations (#1145): one cause line, read once from the end of its logs.
+  let causeFor = null, causeText = '';
+  const causeLine = value => causeFor === value.operation_id && causeText ? ` Cause (from the log): ${causeText}` : '';
+  async function showCause(id) {
+    causeFor = id; causeText = '';
+    const found = await window.operationOutcome.readCause(session.request, id);
+    if (found && intent?.payload.selection.preparation_operation_id === id && causeFor === id) {
+      causeText = found;
+      $('operation-status').textContent += ` Cause (from the log): ${found}`;
+    }
   }
   function display(value, exact) {
     if (!coordinator.observe('preparation', exact, value)) return;
@@ -139,6 +152,7 @@
     problem = '';
     $('operation-status').textContent = describe(value);
     controls();
+    if (window.operationOutcome.failed(value) && window.operationOutcome.terminal(value) && causeFor !== value.operation_id) void showCause(value.operation_id);
     if (prepared() && createdHere === JSON.stringify(exact) && openedFor !== createdHere) {
       openedFor = createdHere;
       $('open').click();
