@@ -10,7 +10,7 @@ from workflows.definition import AuthoredWorkflowDocument, ReusableWorkflowDocum
 # Presentation only: no copied defaults, validation constraints or execution policy.
 CONTROLS = (
     ("is_trial", "Trial/formal mode", "boolean"),
-    ("max_rounds", "Tuning rounds per body", "integer"),
+    ("max_rounds", "Tuning rounds per iteration", "integer"),
     ("trial_time_budget_minutes", "Trial budget (minutes)", "number"),
     ("formal_time_budget_minutes", "Formal budget (minutes)", "number"),
     ("trial_max_epochs", "Trial epoch ceiling", "integer"),
@@ -31,7 +31,7 @@ POLICY_CHOICES: tuple[tuple[str, str, str, tuple[tuple[str, str], ...]], ...] = 
         "healthgate_mode",
         "Health checks",
         "What a failed health check does during training. Record only notes it and "
-        "keeps going; Block on failure invalidates that round (the task's health "
+        "keeps going; Block on failure invalidates that tuning round (the task's health "
         "checks must be configured to block).",
         (("observe_only", "Record only"), ("blocking", "Block on failure")),
     ),

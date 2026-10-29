@@ -258,7 +258,7 @@ def review_locked(config: OperationStoreConfig, operation_id: UUID) -> Operation
     try:
         require_unused_next(request, initial, receipt.loop_trace.attempted_iterations)
     except ValueError as error:
-        raise OperationFailure("loop_resume", "next body slot is not unused") from error
+        raise OperationFailure("loop_resume", "next iteration slot is not unused") from error
     return snapshot
 
 

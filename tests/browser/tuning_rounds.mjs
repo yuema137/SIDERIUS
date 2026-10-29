@@ -62,7 +62,7 @@ try {
   await page.locator('#editor-training-settings').evaluate(el => { el.open = true; });
   const rounds = page.locator('[data-training="max_rounds"]');
   assert.equal(await rounds.count(), 1, 'Tuning rounds control must be exposed');
-  assert.match(await page.locator('[data-training-field="max_rounds"]').textContent(), /Tuning rounds per body/);
+  assert.match(await page.locator('[data-training-field="max_rounds"]').textContent(), /Tuning rounds per iteration/);
   assert.equal(await rounds.inputValue(), '10');
   assert.equal(await page.locator('[data-training-mode="max_rounds"]').inputValue(), 'unset');
   assert.ok(!(await readFile(metadata.source, 'utf8')).includes("'max_rounds'"));
@@ -70,7 +70,7 @@ try {
   await page.locator('#capture-earlier').evaluate(el => {el.open = true;});
   await page.locator('#capture-task').selectOption('synthetic');
   await open(metadata.captures[0]);
-  assert.match(await page.locator('#capture-summary').textContent(), /Tuning rounds per body: 10/);
+  assert.match(await page.locator('#capture-summary').textContent(), /Tuning rounds per iteration: 10/);
 
   await page.locator('nav a[href="#workflow"]').click();
   await page.locator('[data-training-mode="max_rounds"]').selectOption('supplied');
@@ -93,7 +93,7 @@ try {
   const review = await (await responsePromise).json();
   assert.equal(review.facts.training.max_rounds, 3);
   await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
-  assert.match(await page.locator('#capture-summary').textContent(), /Tuning rounds per body: 3/);
+  assert.match(await page.locator('#capture-summary').textContent(), /Tuning rounds per iteration: 3/);
   // Preparation polling may precede creation of this exact operation record.
   const operationId = await page.locator('#new-run-operation-id').textContent();
   const operationUrl = `${origin}/api/operations/${operationId}`;

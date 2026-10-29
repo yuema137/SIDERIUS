@@ -137,7 +137,7 @@ try {
 
   // A running loop: Stop run hides the boundary Stop/Pause controls; the cancelled loop reads as not resumable.
   await page.evaluate(value => { location.hash = 'slow-control/' + value; }, loop);
-  await page.locator('#loop-state').filter({hasText: 'Research loop: up to 3 bodies.'}).waitFor();
+  await page.locator('#loop-state').filter({hasText: 'Research loop: up to 3 iterations.'}).waitFor();
   await stop.waitFor({state: 'visible'});
   assert.ok(await page.locator('#loop-pause').isVisible());
   await stop.click();

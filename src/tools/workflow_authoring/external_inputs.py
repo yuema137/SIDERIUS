@@ -16,7 +16,7 @@ from .models import ExternalInputCatalog, ExternalInputKind
 from .options import contract_info
 
 _SUMMARIES = {
-    "interpretation.input": "Evidence the interpretation step reads to start a research round.",
+    "interpretation.input": "Evidence the interpretation step reads to start a research iteration.",
     "optional.text": "An optional text value, such as a data directory.",
     "optional.expert-advice": "Optional expert advice given to the tuning or proposal step.",
     "optional.expert-context": "Optional list of expert context items for a proposal.",
@@ -50,8 +50,8 @@ def external_input_catalog() -> ExternalInputCatalog:
                 managed=contract in _MANAGED,
                 summary=_SUMMARIES[contract],
                 managed_summary=(
-                    "SIDERIUS fills this for you: the first round starts cold "
-                    "(no earlier results needed); later rounds receive the previous round's "
+                    "SIDERIUS fills this for you: the first iteration starts cold "
+                    "(no earlier results needed); later iterations receive the previous iteration's "
                     "training results."
                     if contract == "interpretation.input" and contract in _MANAGED
                     else None
