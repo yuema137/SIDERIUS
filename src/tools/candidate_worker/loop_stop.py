@@ -229,7 +229,6 @@ def _deterministic_reason(
                     and _threshold_met(value.bodies[: value.input_anchor], order, condition)
                 ):
                     assert incumbent is not None and incumbent_iteration is not None
-                    assert incumbent_iteration is not None
                     return MetricThresholdReason(
                         condition_index=index,
                         iteration=value.iteration,

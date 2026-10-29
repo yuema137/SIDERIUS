@@ -24,6 +24,7 @@ const resumedStop = '99999999-9999-4999-8999-999999999999';
 const judgeStop = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const asking = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const judgeAsking = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const pausedStopped = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 let browser;
 try {
   const metadata = await new Promise((accept, reject) => {
@@ -113,6 +114,12 @@ try {
       value.loop = {final_iteration: 12, attempted_iterations: 7, stop_requested: false, pause_requested: false, input_request: {
         reason: {kind: 'no_improvement', condition_index: 0, iteration: 7, k: 3, non_improving_bodies: 3, last_improvement_iteration: 4, incumbent: 0.81},
         summary: {iteration: 7, final_iteration: 12, metric_id: 'accuracy', direction: 'higher', incumbent: 0.81, incumbent_iteration: 4, non_improving_bodies: 3, input_anchor: 0, bodies_since_input: 7}}};
+      return reply(value);
+    }
+    if (url.pathname === `/api/operations/${pausedStopped}`) {
+      // An operator Pause took effect, then a Stop was recorded: the run is terminal.
+      const value = terminal(pausedStopped, 'paused', 2);
+      value.loop = {final_iteration: 3, attempted_iterations: 2, stop_requested: true, pause_requested: true};
       return reply(value);
     }
     if (url.pathname === `/api/operations/${judgeAsking}`) {
@@ -272,6 +279,10 @@ try {
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, judgeAsking);
   await state.filter({hasText: 'Waiting for your input. The judge asked for your input: Scores stopped moving. (no valid score yet). Paused after body 3 of 5. Stop was requested; this run cannot continue.'}).waitFor();
   assert.ok(await resumeGroup.isHidden(), 'a recorded Stop leaves nothing to resume');
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, pausedStopped);
+  await state.filter({hasText: 'Research loop paused at a completed body boundary after 2 of 3 bodies. Stop was requested; this run cannot continue.'}).waitFor();
+  assert.ok(!(await state.textContent()).includes('can be resumed'), 'a stopped paused run never offers resumption in words');
+  assert.ok(await resumeGroup.isHidden(), 'an operator-paused run with a recorded Stop offers no Resume');
   assert.equal(posts.length, 1);
   assert.deepEqual(faults, []);
   console.log('PASS: Stop and Pause post once and read "requested" until the receipt; a paused loop is resumable after review, Resume posts once with the retained UUID, and the resumed segment shows Stop and its bodies; a receipt stop_reason reads in plain words, with whole-run body numbers on a resumed segment.');

@@ -741,7 +741,8 @@ boundary's `judge_verdicts` entry), then "Review and resume to continue with bod
 N+1.", "A resumed segment continues this run." with a successor, or "Stop was
 requested; this run cannot continue." when `stop_requested`. The exact recorded
 values stay in the state's tooltip. A paused status with `stop_requested` (either
-pause kind) offers no Resume: the owner refuses a stopped run. Resuming an input
+pause kind) reads "Stop was requested; this run cannot continue." and offers no
+Resume: the owner refuses a stopped run. Resuming an input
 request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
 resume** (one GET on click, never polled), then **Resume loop**, disabled unless
 credentials are ready. The client generates one request UUID per reviewed digest

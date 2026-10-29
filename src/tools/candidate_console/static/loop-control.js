@@ -101,7 +101,9 @@
         : stopRecorded(status) ? ' Stop was requested; this run cannot continue.'
           : ` Review and resume to continue with body ${loop.input_request.summary.iteration + 1}.`);
     }
-    if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed body boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.' : ' No partial body is kept; it can be resumed from the next body after review.');
+    if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed body boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.'
+      : stopRecorded(status) ? ' Stop was requested; this run cannot continue.'
+        : ' No partial body is kept; it can be resumed from the next body after review.');
     if (status.native_status === 'completed' && loop.stop_reason) return `Research loop ${stopReason(loop.stop_reason, loop.final_iteration)}.`;
     if (status.native_status === 'completed') return counted(loop, 'Research loop finished') + (stopRecorded(status) || pauseRecorded(status) ? ' The request did not take effect before the final iteration.' : '');
     return counted(loop, `Research loop ended (${status.native_status})`);
