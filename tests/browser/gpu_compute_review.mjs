@@ -101,7 +101,7 @@ try {
   assert.equal(await page.locator('[id^="capture-device-warning-"]').count(), 0, 'no server warning for this review');
 
   // 4. N2: the server's device warnings (the wording check prints) are repeated in the review.
-  const serverWarnings = ['Device /dev/nvidia1 does not exist on this host; the run sandbox cannot pass it.',
+  const serverWarnings = ['Device /dev/nvidia1 cannot be passed into the run sandbox (declared path does not exist: /dev/nvidia1); a run given it will be refused.',
     'GPU devices are passed but /sys is not mounted read-only; CUDA may fail to start inside the run sandbox (see README).'];
   await page.unroute('**/reusable-captures/review');
   await page.route('**/reusable-captures/review', async route => {

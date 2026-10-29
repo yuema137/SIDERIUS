@@ -94,7 +94,8 @@
   // detached from its task. The chip names the setup's own task; the pin is separate.
   const pin = element('span', 'Task version: not pinned', null, 'version-tag unrecorded');
   pin.id = 'editor-task-version'; pin.hidden = true;
-  pin.title = 'Task versions are optional. This workflow does not pin a recorded version of its task package, so it uses the package as it is now. To pin one, open the Task version card from the task chip.';
+  const PIN_TITLE = 'Task versions are optional. This workflow does not pin a recorded version of its task package, so it uses the package as it is now. To pin one, open the Task version card from the task chip.';
+  pin.title = PIN_TITLE;
   $('editor-task-chip').after(pin);
   function ownTask() {
     const setup = window.experimentSetups?.current;
@@ -105,9 +106,14 @@
     const opened = window.consoleSession.connected && current.sourceAvailable;
     const binding = current.taskBinding, task = ownTask();
     const needs = opened && !!binding && !current.taskSelected;
-    const name = task ? task.label : binding ? binding.package_id : 'not a setup of a configured task';
-    label.textContent = !opened ? 'Task: not open' : `Task: ${name}${binding ? ` · version ${binding.revision}` : ''}`;
-    pin.hidden = !opened || !!binding || !task?.revision;
+    // A pinned version is shown beside this task only when it pins this task's package.
+    const ownPin = !!binding && !!task && binding.package_id === task.package_id;
+    const name = task ? task.label : 'none configured';
+    label.textContent = !opened ? 'Task: not open' : `Task: ${name}${ownPin ? ` · version ${binding.revision}` : ''}`;
+    const other = opened && !!binding && !!task && !ownPin;
+    pin.hidden = !opened || !task || (!other && (!!binding || !task.revision));
+    pin.textContent = other ? 'Task version: pins another package' : 'Task version: not pinned';
+    pin.title = other ? `This workflow pins ${binding.package_id} · ${binding.revision}, not a version of ${task.label}. Open the Task version card from the task chip to update its references.` : PIN_TITLE;
     chip.classList.toggle('needs-attention', needs);
     chip.title = needs ? 'Choose the configured task version on the Task tab before saving.' : 'Show the task and the version this workflow uses on the Task tab.';
   }

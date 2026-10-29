@@ -566,10 +566,11 @@ def test_review_repeats_the_device_warnings_for_the_reviewed_request(captured, m
 
     monkeypatch.setattr(
         "tools.candidate_console.package_mounts.device_problem",
-        lambda device: None if device == "/dev/nvidia0" else "does not exist on this host",
+        lambda device: None if device == "/dev/nvidia0" else "fixture reason",
     )
     assert device_warnings(("/dev/nvidia0", "/dev/nvidia-uvm"), ()) == (
-        "Device /dev/nvidia-uvm does not exist on this host; the run sandbox cannot pass it.",
+        "Device /dev/nvidia-uvm cannot be passed into the run sandbox (fixture reason); "
+        "a run given it will be refused.",
         GPU_WITHOUT_SYS,
     )
     assert device_warnings(("/dev/nvidia0",), ("/sys",)) == ()

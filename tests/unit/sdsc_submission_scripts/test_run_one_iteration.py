@@ -1433,6 +1433,28 @@ class TestRealLaunchGpuPreflight:
     startup and fail later with an opaque LaunchGuardFailure. The CLI now
     refuses first, through the hardware-discovery owner, with exit 2."""
 
+    def test_the_cli_refusal_names_the_observed_cause(self, monkeypatch):
+        """Walkthrough N2 review: the CLI preflight gave every host the generic
+        "candidate_devices must include the GPU device nodes" fix. Fails if
+        ``real_launch_gpu_refusal`` stops passing the observed cause, or if a
+        visible GPU still reads the filesystem facts."""
+        from core import gpu_requirement, hardware_context
+
+        monkeypatch.setattr(hardware_context, "discover", lambda: _hardware(False))
+        monkeypatch.setattr(
+            gpu_requirement, "observe_gpu_unavailable_cause", lambda: "sys_not_mounted"
+        )
+        refusal = gpu_requirement.real_launch_gpu_refusal()
+        assert refusal is not None and "CUDA error 304" in refusal
+        assert "candidate_devices must include" not in refusal
+
+        def _unexpected():
+            raise AssertionError("a visible GPU must not be classified")
+
+        monkeypatch.setattr(gpu_requirement, "observe_gpu_unavailable_cause", _unexpected)
+        monkeypatch.setattr(hardware_context, "discover", lambda: _hardware(True))
+        assert gpu_requirement.real_launch_gpu_refusal() is None
+
     def test_cpu_host_refuses_before_iteration_dir_lock_or_llm(
         self, tmp_path, isolated_registries, monkeypatch, capsys
     ):

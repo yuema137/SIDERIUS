@@ -19,8 +19,9 @@ The command appends one ``tasks[]`` entry and writes nothing else:
 Location fields (data, output roots, LLM profile) stay omitted so the
 workspace layout and global settings fill them. Before writing, every
 manifest reference must resolve inside the run sandbox mounts
-(``package_mounts``) and every ``candidate_devices`` path must be a character
-device on this host. The write is a compare-and-swap on the bytes read and an
+(``package_mounts``) and every ``candidate_devices`` path must pass the run
+sandbox's device admission (``SandboxProfile.device_paths``) on this host;
+``check`` only warns about devices. The write is a compare-and-swap on the bytes read and an
 atomic owner-only (0600) publish; ``--dry-run`` prints the entry and writes
 nothing. Credential values are never read.
 

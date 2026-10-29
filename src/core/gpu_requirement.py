@@ -50,7 +50,9 @@ _FIX: dict[GpuUnavailableCause, str] = {
     ),
     "cuda_init_failed": (
         "NVIDIA device nodes and /sys are visible, but CUDA failed to initialize. "
-        "Check the driver on this machine with nvidia-smi"
+        "Check the driver on this machine with nvidia-smi, pass /dev/nvidiactl and "
+        "/dev/nvidia-uvm as well as /dev/nvidia<N>, and make sure CUDA_VISIBLE_DEVICES "
+        "is not set to an empty value"
     ),
 }
 
@@ -91,11 +93,14 @@ def gpu_required_message(detail: str, cause: GpuUnavailableCause | None = None) 
     )
 
 
-def gpu_refusal_for(hardware: HardwareContext) -> str | None:
+def gpu_refusal_for(
+    hardware: HardwareContext, cause: GpuUnavailableCause | None = None
+) -> str | None:
     """The refusal for a real launch on ``hardware``, or None when a GPU is visible.
 
     ``hardware`` comes from ``core.hardware_context.discover()``, the single
-    device-discovery owner; this function reads it and never probes.
+    device-discovery owner; ``cause`` (when observed) selects the fix. This
+    function reads its arguments and never probes.
     """
     if hardware.device_available:
         return None
@@ -104,15 +109,19 @@ def gpu_refusal_for(hardware: HardwareContext) -> str | None:
         f"PyTorch {hardware.torch_version} reports no CUDA device; "
         f"CUDA_VISIBLE_DEVICES={'unset' if visible is None else repr(visible)}"
     )
-    return gpu_required_message(detail)
+    return gpu_required_message(detail, cause)
 
 
 def real_launch_gpu_refusal() -> str | None:
     """Discover this process's device view and return the refusal, if any.
 
     Reads ``core.hardware_context.discover()`` (imported here, so importing
-    this module stays torch-free) and writes nothing.
+    this module stays torch-free) and, when no device is available, the
+    filesystem facts of :func:`observe_gpu_unavailable_cause`; writes nothing.
     """
     from core import hardware_context
 
-    return gpu_refusal_for(hardware_context.discover())
+    hardware = hardware_context.discover()
+    if hardware.device_available:
+        return None
+    return gpu_refusal_for(hardware, observe_gpu_unavailable_cause())

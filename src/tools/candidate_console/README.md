@@ -149,12 +149,16 @@ overwrites an existing `tasks/` folder.
    runs fail to find CUDA, adding `"/sys"` to the task's `task_read_only` is the
    setting that warning refers to; decide whether exposing `/sys` is acceptable on
    your machine.
-   Run review repeats this warning before you launch. `add-task` and `check` refuse a
-   `--device` path that does not exist on this machine. When a launch is refused for
-   lack of a GPU, the cause line says which of three things is missing: no device
-   node was passed, device nodes were passed but `/sys` is not mounted (CUDA error
-   304, the case this warning predicts), or CUDA failed to start with both present
-   (check the driver with `nvidia-smi`).
+   Run review repeats this warning before you launch. `add-task` refuses a
+   `--device` path that the run sandbox cannot pass (for example one that does not
+   exist on this machine). `check` and `serve` only warn about such a path, because
+   some nodes such as `/dev/nvidia-uvm` appear only after the first CUDA use; a run
+   given it is still refused. When a launch is refused for lack of a GPU, the cause
+   line says which of three things is missing: no device node was passed, device
+   nodes were passed but `/sys` is not mounted (CUDA error 304, the case this warning
+   predicts), or CUDA failed to start with both present (check the driver with
+   `nvidia-smi`, pass `/dev/nvidiactl` and `/dev/nvidia-uvm` too, and do not set
+   `CUDA_VISIBLE_DEVICES` to an empty value).
 
    You can also write the task entry yourself. A task needs its `task_id`,
    `label`, `task_manifest`, resource policy and time limits; the

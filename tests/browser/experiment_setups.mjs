@@ -85,7 +85,7 @@ try {
   assert.equal(await page.locator('#editor-task-version').isHidden(), true, 'An unversioned task needs no pin note');
   await page.route('**/api/tasks', async route => {
     const response = await route.fetch(), json = await response.json();
-    await route.fulfill({response, json: {...json, tasks: json.tasks.map(task => ({...task, revision: 'r1'}))}});
+    await route.fulfill({response, json: {...json, tasks: json.tasks.map(task => ({...task, revision: 'r1', package_id: 'synthetic-package'}))}});
   });
   await page.evaluate(() => window.consoleTask.reload());
   await page.locator('#editor-task-version').filter({hasText: 'Task version: not pinned'}).waitFor();

@@ -156,11 +156,19 @@ def test_unavailable_prerequisites_return_a_state_with_a_hint_not_a_500(
 
 def test_unknown_task_is_404_and_list_names_configured_tasks(console_config):
     """Defect: the Task list shows a version the console configuration does not declare,
-    or hides the configured ``task_revision`` the Task tab labels each task with."""
+    or hides the configured ``task_revision`` the Task tab labels each task with, or its
+    ``package_id`` the Workflow page bar compares with a workflow's pinned binding."""
     client = _client(console_config)
     assert client.get("/api/tasks/nope/summary").status_code == 404
     assert client.get("/api/tasks").json() == {
-        "tasks": [{"task_id": "synthetic", "label": "Synthetic task", "revision": None}]
+        "tasks": [
+            {
+                "task_id": "synthetic",
+                "label": "Synthetic task",
+                "revision": None,
+                "package_id": None,
+            }
+        ]
     }
     pin = TaskBinding(
         package_id="synthetic-task",
@@ -171,7 +179,8 @@ def test_unknown_task_is_404_and_list_names_configured_tasks(console_config):
     versioned = console_config.model_copy(
         update={"tasks": (console_config.tasks[0].model_copy(update={"task_revision": pin}),)}
     )
-    assert _client(versioned).get("/api/tasks").json()["tasks"][0]["revision"] == "r2"
+    listed = _client(versioned).get("/api/tasks").json()["tasks"][0]
+    assert (listed["revision"], listed["package_id"]) == ("r2", "synthetic-task")
 
 
 def test_data_walk_cap_reports_an_incomplete_volume(tmp_path):

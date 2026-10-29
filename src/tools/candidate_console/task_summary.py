@@ -138,11 +138,16 @@ class TaskSummaryView(PreviewModel):
 
 
 class TaskListItem(PreviewModel):
-    """``revision`` is the configured ``task_revision.revision``; ``None`` when unversioned."""
+    """``revision``/``package_id``: the configured ``task_revision``; ``None`` when unversioned.
+
+    The Workflow page bar compares ``package_id`` with a workflow's pinned
+    ``task_binding.package_id`` before showing that version beside this task.
+    """
 
     task_id: str
     label: str
     revision: str | None
+    package_id: str | None = None
 
 
 class TaskListView(PreviewModel):
@@ -298,6 +303,9 @@ class TaskSummaries:
                     task_id=task.task_id,
                     label=task.label,
                     revision=None if task.task_revision is None else task.task_revision.revision,
+                    package_id=None
+                    if task.task_revision is None
+                    else task.task_revision.package_id,
                 )
                 for task in self._tasks.values()
             )
