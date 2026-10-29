@@ -3,8 +3,10 @@
 import zipfile
 from pathlib import Path
 
+import pytest
 import yaml
 
+from execute_tools import task_data_path as tdp
 from execute_tools.task_registration_scope import run_registration_scope
 from tools.release.build_example_bundle import FIXED_TIME, SHIPPED_MANIFEST, build
 from workflows.task_composition import compose_run_task_bindings
@@ -43,7 +45,23 @@ def test_two_builds_produce_identical_bytes_with_fixed_metadata(tmp_path):
         assert info.compress_type == zipfile.ZIP_STORED
 
 
-def test_bundle_task_is_self_contained_and_composes_like_the_checkout_quickstart(tmp_path):
+@pytest.fixture
+def isolated_task_registry(monkeypatch):
+    """An empty task-data-path registry for this test, restored afterwards.
+
+    Another test in the same process may leave ``quickstart_tabular``
+    registered from a modified copy of the plugin; the registry then (rightly)
+    refuses the checkout plugin as different content. The test needs the
+    checkout's own registration, so it starts from an empty roster, as
+    ``test_step12_pr12e_negative_controls`` does.
+    """
+    monkeypatch.setattr(tdp, "_REGISTRY", {})
+    monkeypatch.setattr(tdp, "_CONTENT", {})
+
+
+def test_bundle_task_is_self_contained_and_composes_like_the_checkout_quickstart(
+    tmp_path, isolated_task_registry
+):
     """Defect: the bundle's task drifts from examples/quickstart or still points outside itself.
 
     The bundle manifest spells references package-relative, and the plugin
