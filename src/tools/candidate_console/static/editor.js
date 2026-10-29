@@ -594,7 +594,7 @@
     $('source').value = ''; $('source').disabled = true;
     $('current').textContent = ''; $('conflict-diff').textContent = '';
     $('path').textContent = ''; $('revision').textContent = '';
-    invalidate(); diagnostic(); render(); status('Opening selected project…');
+    invalidate(); diagnostic(); render(); status('Opening the selected experiment setup…');
   }
   async function refresh(ask = true) {
     if (!window.consoleSession.connected) return;
@@ -610,18 +610,26 @@
   // The setup list (experiment-setups.js) fills the select: the selected task's setups,
   // then legacy projects that match no configured task. Opening a list keeps the open
   // setup when it is listed; pending edits are never dropped without confirmation.
-  let projectsLoaded = false;
+  let projectsLoaded = false, shownSetups = [];
+  // Task choices load once per connection here (connection() reloads them on reconnect):
+  // reloading on every Workflow entry would invalidate a pending task reference review.
   function openProjects() {
     if (!window.consoleSession.connected) return;
-    void loadTaskChoices();
+    if (!projectsLoaded) void loadTaskChoices();
     window.experimentSetups?.load();
   }
   function useSetups(list, preferred = null) {
     const listed = id => list.some(item => item.id === id);
     let next = listed(preferred) ? preferred : listed(project) ? project : list[0]?.id || '';
     if (project && next !== project && pending() && !window.confirm('Discard pending edits and open another experiment setup?')) {
-      list = [...list, {id: project, label: `${project} (unsaved edits)`, runnable: candidateEnabled, group: 'other'}]; next = project;
+      // Declined: the open setup stays, listed as it was (same group, label and task).
+      const kept = shownSetups.find(item => item.id === project) || {id: project, label: project, runnable: candidateEnabled, group: 'other', taskId: null};
+      const marked = {...kept, label: `${kept.label} (unsaved edits)`};
+      list = listed(project) ? list.map(item => item.id === project ? {...item, label: marked.label} : item) : [...list, marked];
+      next = project;
     }
+    list = [...list.filter(item => item.group !== 'other'), ...list.filter(item => item.group === 'other')];
+    shownSetups = list;
     const select = $('project'); select.replaceChildren();
     let others = null;
     for (const item of list) {
@@ -632,9 +640,11 @@
     const changed = next !== project || !projectsLoaded;
     projectsLoaded = true;
     candidateEnabled = !!list.find(item => item.id === next)?.runnable;
-    if (!changed) { controls(); return; }
-    project = next; resetProjectState();
-    if (project) void refresh(false); else { status('This task has no experiment setup yet. Create one with New setup….'); controls(); }
+    if (changed) {
+      project = next; resetProjectState();
+      if (project) void refresh(false); else { status('This task has no experiment setup yet. Create one with New setup….'); controls(); }
+    } else controls();
+    return list;
   }
   function connection() {
     if (!window.consoleSession.connected) { if (taskReview()) invalidate(); else controls(); return; }

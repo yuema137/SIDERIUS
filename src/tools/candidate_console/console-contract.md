@@ -911,7 +911,7 @@ console.json only.
 
 | Route | Behaviour | Refusals |
 | --- | --- | --- |
-| `GET /api/tasks/{task_id}/setups` | `{"setups": [SetupView{setup_id, label, runnable, saved_version, refs_match_task}]}` for setups whose task is `task_id`; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
+| `GET /api/tasks/{task_id}/setups` | `SetupList{setups: [SetupView{setup_id, label, runnable, saved_version, refs_match_task}], browser_creatable}` for setups whose task is `task_id`; `browser_creatable` is `SetupStore.creatable`, the predicate `POST` enforces; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
 | `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
 
 **Run attribution.** The console records the selected setup on reusable runs:
@@ -952,7 +952,9 @@ task)" holding legacy `editor_projects` that match no configured task (compatibi
 stay editable; a legacy project matched to another task is not listed). `useSetups` keeps
 the open setup when it is listed, else opens `preferred` or the first entry; pending edits
 are dropped only after "Discard pending edits and open another experiment setup?" (if
-declined, the open setup stays, listed as "<id> (unsaved edits)"). An empty list says
+declined, the open setup stays in its own group and task, labelled "<label> (unsaved
+edits)", and `experimentSetups.current` still names it). A task change clears the old
+task's list before the new one loads. `useSetups` returns the list it shows. An empty list says
 "This task has no experiment setup yet. Create one with New setup…."; a failed read shows
 `#setup-state` and `#setup-retry`.
 
@@ -961,14 +963,17 @@ declined, the open setup stays, listed as "<id> (unsaved edits)"). An empty list
 **Blank**, a required **Label** (`#setup-new-label`, ≤160 characters) and
 **Create setup** (`#setup-new-create`) → `POST /api/tasks/<id>/setups`
 `{label, template_id | null}`; on 201 the list reloads with the new `setup_id` preferred
-and the page shows Workflow. A refusal stays in `#setup-new-status`: 403 explains that the
+and the page shows Workflow. When the list says `browser_creatable: false`, `#setup-new` carries the explanation as its
+title and the dialog shows it ("…You can still open existing setups.") with
+**Create setup** disabled, before any click; Enter in the label field submits; the
+"Enter a label" hint clears once a label is typed. A refusal stays in `#setup-new-status`: 403 explains that the
 console operator turns on `"experiment_setups": {"browser_creatable": true}` in
 `settings/console.json` and restarts; 409 shows the server message and any `finding`.
 A listed setup with `refs_match_task: false` shows `#setup-drift` with
 `#setup-drift-update`, which opens the Task version card (the existing reference
 update). `experiment-setup` events carry `{setup, task}`.
 
-Run page: `#run-setup-header` reads "Setup: <label> · Task: <task label>" ("not bound to a
+Run page: `#run-setup-header` reads "Setup: <label> · Task: <label of the setup's own task>" ("not bound to a
 configured task" for an "other" project). For a setup of the selected task, `new-run.js`
 hides `#new-run-task` and its label, shows `#new-run-task-fact` "Task: <label>" and keeps
 the select's value on that task (a retained preparation keeps its own task); the
@@ -978,10 +983,12 @@ next-step lines then say "check the inputs" only. Admission is unchanged
 **Runs of this setup** (`setup-runs.js`, `#setup-runs`, shown while a setup is open):
 on Run entry, a setup change and Refresh (`#setup-runs-refresh`) it reads
 `GET /api/operations?limit=50&project_id=<setup_id>` and lists each run as a link to
-`#monitor/<UUID>` (run name and local admission time; outcome sentence below). The
-status line counts the runs, "No runs of this setup yet." when none, and when the reply
-is `incomplete` says older runs may be missing (the store scan limit), never claiming a
-complete history; unverifiable records are counted.
+`#monitor/<UUID>` (run name and local admission time; outcome sentence below). A newer read
+(another setup, Refresh) replaces an in-flight one; only the newest renders. The status
+line counts the runs, "No runs of this setup yet." when none (complete), "No runs found;
+older runs may be missing." when none and `incomplete`, and with runs plus `incomplete`
+says older runs may be missing (the store scan limit), never claiming a complete
+history; unverifiable records are counted.
 
 **Metric threshold prefill (F11):** `task-tab.js` also reads the selected task's summary
 on Workflow entry and fills `<datalist id="task-metric-ids">` with the declared metric
@@ -1685,16 +1692,21 @@ on Home. **Choose a task** (`#quick-start-task`, from `consoleTask`) has four st
 loaded: <reason>" with `#quick-start-task-retry` (`consoleTask.reload()`), "No task is
 configured. …" with a link to the README setup step, or the list (#1131 items 1 and 3;
 never a permanent loading line). **Experiment setup** (`#quick-start-setup`, from
-`GET /api/tasks/<id>/setups`; loading/failure in `#quick-start-setup-state`) offers
+`GET /api/tasks/<id>/setups`; loading/failure in `#quick-start-setup-state`, a failure with
+`#quick-start-setup-retry`) offers
 "Create a setup from the research-loop template" first, then the task's setups (a setup
 whose runs are off says "Runs are not enabled for this setup"). Creating needs a label
 (`#quick-start-label`, prefilled "<task label> research loop"); **Create and open** selects
 the task, POSTs `{label, template_id: "single-loop-with-advice"}` through
 `experimentSetups.create` (a refusal, including 403 `read_only`, stays in
 `#quick-start-status` with the dialog open) and opens the created setup; choosing an
-existing setup opens it without a request. Then the dialog routes to `#workflow`, waits up
+existing setup opens it without a request. With `browser_creatable: false` the create
+option is disabled ("turned off on this console"), the dialog says who turns it on, and an
+existing setup is preselected. When an existing setup does not open, the dialog names the
+real reason: the setups read failed, or the open setup's unsaved edits were kept. Then the dialog routes to `#workflow`, waits up
 to 20 s for the saved source (else shows the editor's status, L-3) and focuses the first
-advice field (L-6; the bounded re-focus stops at the author's first click or key). The
+advice field (L-6) through `editorAdvice.focusSettled()`, the bounded re-focus the
+gallery's template import also uses; it stops at the author's first click or key. The
 template is the loop whose Propose model `human_advice` socket is connected (managed
 `advice`), so that advice reaches the proposal agent. Rounds, stop conditions and
 training settings are then edited in the ordinary panel. The Run page's step-1 entry is

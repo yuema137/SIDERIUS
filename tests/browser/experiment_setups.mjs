@@ -64,6 +64,7 @@ try {
   assert.match(await page.locator('#setup-new-status').textContent(), /Enter a label/);
   assert.deepEqual(posts, [], 'No request without a label');
   await page.locator('#setup-new-label').fill('My loop');
+  assert.equal(await page.locator('#setup-new-status').textContent(), '', 'The label hint hides once a label is typed');
   await page.screenshot({path: join(evidence, 'setup-new-light.png')});
   await page.locator('#theme-preference').evaluate(select => { select.value = 'dark'; select.dispatchEvent(new Event('change', {bubbles: true})); });
   await page.screenshot({path: join(evidence, 'setup-new-dark.png')});
@@ -131,11 +132,28 @@ try {
   await waitUntil(async () => (await page.locator('#editor-project').inputValue()) === 'blank-one');
   assert.deepEqual(await page.locator('#editor-project option').allTextContents(), ['My loop', 'Blank one']);
 
+  // Pending edits are never dropped silently: declining keeps the open setup, listed as it
+  // was (its own label and task, not "Other workflows"); accepting switches.
+  await page.locator('#editor-source').fill((await page.locator('#editor-source').inputValue()) + '\n# unsaved blank edit\n');
+  await waitUntil(() => page.evaluate(() => window.workflowEditor.state.dirty));
+  const confirms = [];
+  page.once('dialog', dialog => { confirms.push(dialog.message()); void dialog.dismiss(); });
+  await page.evaluate(() => window.experimentSetups.load('my-loop', true));
+  assert.match(confirms[0], /Discard pending edits and open another experiment setup/);
+  assert.equal(await page.locator('#editor-project').inputValue(), 'blank-one');
+  assert.deepEqual(await page.locator('#editor-project option').allTextContents(), ['My loop', 'Blank one (unsaved edits)']);
+  assert.equal(await page.locator('#editor-project optgroup').count(), 0, 'The kept setup stays in its task group');
+  assert.equal(await page.evaluate(() => window.experimentSetups.current?.taskId), 'synthetic');
+  assert.match(await page.locator('#editor-source').inputValue(), /unsaved blank edit/);
+  page.once('dialog', dialog => void dialog.accept());
+  await page.evaluate(() => window.experimentSetups.load('my-loop', true));
+  await waitUntil(async () => (await page.locator('#editor-project').inputValue()) === 'my-loop' && !(await page.evaluate(() => window.workflowEditor.state.dirty)));
+
   // Drift: a setup whose references differ from the task offers the reference update.
   await page.route('**/api/tasks/synthetic/setups', async route => {
     if (route.request().method() !== 'GET') return route.continue();
     const response = await route.fetch(), json = await response.json();
-    await route.fulfill({response, json: {setups: json.setups.map(item => ({...item, refs_match_task: item.setup_id !== 'my-loop'}))}});
+    await route.fulfill({response, json: {...json, setups: json.setups.map(item => ({...item, refs_match_task: item.setup_id !== 'my-loop'}))}});
   });
   await page.evaluate(() => window.experimentSetups.load('my-loop', true));
   await page.locator('#setup-drift').waitFor();
@@ -143,6 +161,19 @@ try {
   await page.locator('#setup-drift-update').click();
   await page.locator('#view-task').waitFor();
   assert.equal(await page.locator('#editor-task-panel').evaluate(element => element.open), true);
+  await page.unroute('**/api/tasks/synthetic/setups');
+
+  // A 409 (for example an identity mismatch) shows the server message and its finding.
+  await page.route('**/api/tasks/synthetic/setups', route => route.request().method() === 'POST'
+    ? route.fulfill({status: 409, json: {error: {code: 'identity_mismatch', message: 'task identity does not match task_revision'}, finding: {state: 'blocked', code: 'identity_mismatch', message: 'The package changed since task_revision was recorded.', reference: 'task_binding'}}})
+    : route.continue());
+  await page.locator('nav a[href="#workflow"]').click();
+  await page.locator('#setup-new').click();
+  await page.locator('#setup-new-label').fill('Mismatch');
+  await page.locator('#setup-new-label').press('Enter');
+  await page.locator('#setup-new-status').filter({hasText: 'task identity does not match task_revision The package changed'}).waitFor();
+  assert.equal(await dialog.evaluate(element => element.open), true);
+  await page.locator('#setup-new-dialog .actions button.secondary').click();
   await page.unroute('**/api/tasks/synthetic/setups');
 
   // A console that does not create setups says who turns it on; nothing is created.
@@ -156,8 +187,27 @@ try {
   await page.locator('#setup-new-status').filter({hasText: 'browser_creatable'}).waitFor();
   assert.match(await page.locator('#setup-new-status').textContent(), /console operator.*restarts the console/);
   assert.equal(await dialog.evaluate(element => element.open), true);
+  await page.locator('#setup-new-dialog .actions button.secondary').click();
+  await page.unroute('**/api/tasks/synthetic/setups');
+
+  // Creation turned off is said before any click; existing setups still open.
+  await page.route('**/api/tasks/synthetic/setups', async route => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch(), json = await response.json();
+    await route.fulfill({response, json: {...json, browser_creatable: false}});
+  });
+  const before = posts.length;
+  await page.evaluate(() => window.experimentSetups.load(null, true));
+  await waitUntil(async () => (await page.locator('#setup-new').getAttribute('title') || '').includes('browser_creatable'));
+  await page.locator('#setup-new').click();
+  await page.locator('#setup-new-status').filter({hasText: 'You can still open existing setups'}).waitFor();
+  assert.equal(await page.locator('#setup-new-create').isDisabled(), true);
+  await page.locator('#setup-new-label').press('Enter');
+  assert.equal(posts.length, before, 'Nothing is sent while creation is off');
+  await page.locator('#setup-new-dialog .actions button.secondary').click();
+  assert.equal(await page.locator('#editor-project option').count(), 2, 'Existing setups stay listed');
   assert.deepEqual(faults, []);
-  console.log('PASS experiment setups: task-scoped list, template and blank creation, save then Run with the task fixed, drift banner, refused creation');
+  console.log('PASS experiment setups: task-scoped list, template and blank creation, save then Run with the task fixed, pending-edit confirm, drift banner, 409 and 403 refusals, creation off');
 } finally {
   await browser?.close();
   server.kill();

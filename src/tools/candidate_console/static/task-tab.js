@@ -122,7 +122,8 @@
       if (id !== selection.selectedId || revision !== session.revision) return;
       summary = view; failure = '';
       // Poll the plain URL while the sandboxed observation runs (never re-send refresh=1).
-      if (view.state === 'observing' && active()) timer = setTimeout(() => void read(), POLL_MS);
+      // Workflow reads once per entry (metric suggestions); only the Task tab polls.
+      if (view.state === 'observing' && session.connected && window.consoleNavigation?.view === 'task') timer = setTimeout(() => void read(), POLL_MS);
     } catch (error) {
       if (error.stale || id !== selection.selectedId || revision !== session.revision) return;
       failure = `The task summary could not be loaded: ${error.message}`;

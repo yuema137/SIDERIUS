@@ -5,7 +5,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const session = window.consoleSession;
-  let listedFor = null, loading = false;
+  let listedFor = null, sequence = 0;
   const say = text => { $('setup-runs-status').textContent = text; };
   const when = value => { const time = new Date(value); return Number.isNaN(time.getTime()) ? String(value) : time.toLocaleString(); };
   function render(operations) {
@@ -25,21 +25,25 @@
   async function load(force = false) {
     const setup = window.experimentSetups?.current, key = setup ? `${session.revision}/${setup.id}` : null;
     $('setup-runs').hidden = !setup;
-    if (!setup || !session.connected || loading || (!force && listedFor === key)) return;
-    loading = true; $('setup-runs-refresh').disabled = true; say('Reading the runs of this setup…');
+    if (!setup || !session.connected || (!force && listedFor === key)) return;
+    // A newer read (another setup, Refresh) replaces an in-flight one; only the newest renders.
+    const mine = ++sequence;
+    $('setup-runs-refresh').disabled = true; say('Reading the runs of this setup…'); render([]);
     try {
       const value = await session.request(`operations?limit=50&project_id=${encodeURIComponent(setup.id)}`);
-      if (window.experimentSetups?.current?.id !== setup.id) return;
+      if (mine !== sequence || window.experimentSetups?.current?.id !== setup.id) return;
       if (!Array.isArray(value?.operations)) throw new Error('unexpected list response');
       listedFor = key; render(value.operations);
-      const notes = [value.operations.length ? `${value.operations.length} run${value.operations.length === 1 ? '' : 's'} of this setup, most recent first.` : 'No runs of this setup yet.'];
+      const count = value.operations.length;
       // The store scan has a limit: never claim a complete history it did not examine.
-      if (value.incomplete) notes.push('The store holds more records than one listing examines, so older runs may be missing; open them by UUID in Monitor.');
+      const notes = [count ? `${count} run${count === 1 ? '' : 's'} of this setup, most recent first.`
+        : value.incomplete ? 'No runs found; older runs may be missing.' : 'No runs of this setup yet.'];
+      if (value.incomplete && count) notes.push('The store holds more records than one listing examines, so older runs may be missing; open them by UUID in Monitor.');
       if (value.unreadable) notes.push(`${value.unreadable} record${value.unreadable === 1 ? '' : 's'} could not be verified and ${value.unreadable === 1 ? 'is' : 'are'} not listed.`);
       say(notes.join(' '));
     } catch (error) {
-      if (!error.stale) { listedFor = null; say(`The runs of this setup could not be read: ${error.message}. Use Refresh to try again.`); }
-    } finally { loading = false; $('setup-runs-refresh').disabled = !session.connected; }
+      if (!error.stale && mine === sequence) { listedFor = null; say(`The runs of this setup could not be read: ${error.message}. Use Refresh to try again.`); }
+    } finally { if (mine === sequence) $('setup-runs-refresh').disabled = !session.connected; }
   }
   const onRun = () => window.consoleNavigation?.view === 'run';
   window.addEventListener('experiment-setup', () => { if (onRun()) void load(); });

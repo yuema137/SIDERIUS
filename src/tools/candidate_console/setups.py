@@ -87,6 +87,14 @@ class SetupView(PreviewModel):
     refs_match_task: bool
 
 
+class SetupList(PreviewModel):
+    """``GET /api/tasks/{task_id}/setups``; ``browser_creatable`` tells the browser before a
+    click whether ``POST`` can create (the same predicate ``SetupStore.create`` enforces)."""
+
+    setups: tuple[SetupView, ...]
+    browser_creatable: bool
+
+
 class SetupRefused(Exception):
     def __init__(
         self, status: int, code: str, message: str, finding: TaskReferenceFinding | None = None

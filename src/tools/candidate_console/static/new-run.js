@@ -310,7 +310,7 @@
       payload: {selection: review.selection, expectation: review.expectation}
     };
     try { coordinator.save('preparation', exact); }
-    catch (_) { status('Prepare not sent: this browser could not keep the request, or another run on this project is unresolved.'); return; }
+    catch (_) { status('Prepare not sent: this browser could not keep the request, or another run of this experiment setup is unresolved.'); return; }
     intent = exact;
     createdHere = JSON.stringify(exact);
     operation = null;

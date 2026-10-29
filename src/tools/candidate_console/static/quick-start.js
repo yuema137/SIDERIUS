@@ -27,6 +27,7 @@
   const setupLabel = element('label', 'Experiment setup', dialog); setupLabel.htmlFor = 'quick-start-setup';
   const setupSelect = element('select', '', dialog); setupSelect.id = 'quick-start-setup';
   const setupState = element('p', '', dialog); setupState.id = 'quick-start-setup-state'; setupState.setAttribute('role', 'status');
+  const setupRetry = element('button', 'Retry', dialog, 'secondary'); setupRetry.type = 'button'; setupRetry.id = 'quick-start-setup-retry'; setupRetry.hidden = true;
   const nameLabel = element('label', 'Label of the new setup', dialog); nameLabel.htmlFor = 'quick-start-label';
   const name = element('input', '', dialog); name.id = 'quick-start-label'; name.maxLength = 160; name.autocomplete = 'off';
   const state = element('p', '', dialog); state.id = 'quick-start-status'; state.setAttribute('role', 'status');
@@ -34,7 +35,7 @@
   const start = element('button', 'Open research loop', actions); start.type = 'button'; start.id = 'quick-start-open';
   const close = element('button', 'Cancel', actions, 'secondary'); close.type = 'button';
   close.addEventListener('click', () => dialog.close());
-  let setups = null, setupsFor = null, setupsError = '';
+  let setups = null, setupsFor = null, setupsError = '', creatable = true;
 
   function renderTasks() {
     const loaded = tasks.state === 'ready', list = loaded ? tasks.tasks : [];
@@ -59,7 +60,7 @@
     try {
       const value = await session.request(`tasks/${encodeURIComponent(id)}/setups`);
       if (id !== taskSelect.value || revision !== session.revision) return;
-      setups = value.setups;
+      setups = value.setups; creatable = value.browser_creatable !== false;
     } catch (error) {
       if (error.stale || id !== taskSelect.value) return;
       setupsError = error.message; setupsFor = null;
@@ -72,18 +73,23 @@
     setupLabel.hidden = setupSelect.hidden = !shown || !setups;
     if (shown && setups) {
       const previous = setupSelect.value;
-      const create = element('option', 'Create a setup from the research-loop template'); create.value = CREATE;
+      const create = element('option', 'Create a setup from the research-loop template' + (creatable ? '' : ' (turned off on this console)')); create.value = CREATE;
+      create.disabled = !creatable;
       setupSelect.replaceChildren(create, ...setups.map(setup => {
         const option = element('option', setup.label + (setup.runnable ? '' : ' (Runs are not enabled for this setup)')); option.value = setup.setup_id; return option;
       }));
-      if ([...setupSelect.options].some(option => option.value === previous)) setupSelect.value = previous;
+      if ([...setupSelect.options].some(option => option.value === previous && !option.disabled)) setupSelect.value = previous;
+      // Creation off: an existing setup is the default choice, if there is one.
+      else if (!creatable) setupSelect.value = setups[0]?.setup_id ?? CREATE;
       if (!name.value || name.dataset.suggested === name.value) { name.value = `${task.label} research loop`; name.dataset.suggested = name.value; }
     }
     const creating = shown && !!setups && setupSelect.value === CREATE;
     nameLabel.hidden = name.hidden = !creating;
     start.textContent = creating ? 'Create and open' : 'Open research loop';
-    start.disabled = !session.connected || !shown || !setups;
-    setupState.textContent = !shown ? '' : setupsError ? `Setups could not be loaded: ${setupsError} Choose the task again to retry.` : !setups ? 'Loading the setups of this task…' : '';
+    start.disabled = !session.connected || !shown || !setups || (creating && !creatable);
+    setupRetry.hidden = !(shown && setupsError);
+    setupState.textContent = !shown ? '' : setupsError ? `Setups could not be loaded: ${setupsError}`
+      : !setups ? 'Loading the setups of this task…' : !creatable ? window.experimentSetups.creationOff : '';
   }
   function render() { renderTasks(); void loadSetups(); }
 
@@ -100,29 +106,10 @@
     const finish = ok => { clearTimeout(timer); window.removeEventListener('workflow-editor-state', check); resolve(ok); };
     if (!check()) { window.addEventListener('workflow-editor-state', check); timer = setTimeout(() => finish(false), LOAD_MS); }
   });
-  async function focusAdvice() {
-    // Advice is the first thing to write (L-6). The inspector may re-render once more after
-    // the setup opens; re-focus until the advice field holds focus (bounded). The author's
-    // own first click or key ends this at once.
-    let acted = false;
-    const act = () => { acted = true; };
-    document.addEventListener('pointerdown', act, {capture: true, once: true});
-    document.addEventListener('keydown', act, {capture: true, once: true});
-    try {
-      for (const wait of [0, 150, 400, 800]) {
-        await new Promise(done => setTimeout(done, wait));
-        if (acted || document.activeElement?.classList.contains('advice-input')) break;
-        await window.editorAdvice?.focusFirst();
-      }
-    } finally {
-      document.removeEventListener('pointerdown', act, {capture: true});
-      document.removeEventListener('keydown', act, {capture: true});
-    }
-  }
   start.addEventListener('click', async () => {
     const taskId = taskSelect.value, chosen = setupSelect.value, label = name.value.trim();
     if (!taskId || start.disabled) return;
-    if (chosen === CREATE && !label) { state.textContent = 'Enter a label for the new setup.'; name.focus(); return; }
+    if (chosen === CREATE && !label) { state.textContent = 'Enter a label for the new setup.'; state.dataset.hint = '1'; name.focus(); return; }
     start.disabled = true; state.textContent = chosen === CREATE ? 'Creating the setup…' : 'Opening…';
     try {
       tasks.select(taskId);
@@ -134,17 +121,25 @@
         setupsFor = null;
       } else await window.experimentSetups.load(setupId, true);
       location.hash = 'workflow';
-      if (editorState().projectId !== setupId) { state.textContent = 'Kept the current workflow.'; return; }
+      if (editorState().projectId !== setupId) {
+        // The real reason: the list could not be read, or the open setup's unsaved edits were kept.
+        const failure = window.experimentSetups.error;
+        state.textContent = failure ? `Couldn't open the setup: ${failure}` : 'Kept the open setup: it has unsaved edits. Save or discard them, then try again.';
+        return;
+      }
       if (!(await loaded(setupId))) {
         state.textContent = `Couldn't open ${setupId}: ${$('editor-status')?.textContent || 'the workflow did not load.'} Reload the page to try again.`;
         return;
       }
       dialog.close(); state.textContent = '';
-      await focusAdvice();
+      await window.editorAdvice?.focusSettled();
     } finally { start.disabled = false; renderSetups(); }
   });
   taskSelect.addEventListener('change', () => { name.value = ''; void loadSetups(); });
   setupSelect.addEventListener('change', renderSetups);
+  setupRetry.addEventListener('click', () => { setupsFor = null; void loadSetups(); });
+  name.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); start.click(); } });
+  name.addEventListener('input', () => { if (state.dataset.hint && name.value.trim()) { state.textContent = ''; delete state.dataset.hint; } });
   taskRetry.addEventListener('click', () => tasks.reload());
   function open() {
     state.textContent = ''; setupsFor = null;

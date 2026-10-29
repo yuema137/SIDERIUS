@@ -205,8 +205,8 @@
       if (reviewed) {
         $('editor-template-gallery').close();
         status(`Imported ${template.title} as an unsaved draft.`);
-        // Human advice is the first thing to write (canvas-study T5).
-        void window.editorAdvice?.focusFirst();
+        // Human advice is the first thing to write (canvas-study T5); bounded re-focus (L-6).
+        void window.editorAdvice?.focusSettled();
       } else {
         status(`Not imported: ${document.getElementById('editor-status')?.textContent || 'Review refused the template.'}`);
       }

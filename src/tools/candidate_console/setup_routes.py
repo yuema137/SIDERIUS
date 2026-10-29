@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .service import CandidateConsole
 from .settings_file import SettingsInvalid
-from .setups import SetupCreate, SetupRefused, SetupView
+from .setups import SetupCreate, SetupList, SetupRefused, SetupView
 
 
 def _refusal(error: SetupRefused) -> JSONResponse:
@@ -26,11 +26,10 @@ def setups_router(console: CandidateConsole) -> APIRouter:
     @router.get("")
     def listing(task_id: str):
         try:
-            return {
-                "setups": [
-                    view.model_dump(mode="json") for view in console.setups.for_task(task_id)
-                ]
-            }
+            return SetupList(
+                setups=console.setups.for_task(task_id),
+                browser_creatable=console.setup_store.creatable,
+            ).model_dump(mode="json")
         except SetupRefused as error:
             return _refusal(error)
 

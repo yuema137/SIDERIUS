@@ -80,7 +80,7 @@ def test_created_setup_is_admitted_only_for_its_own_task(workspace):
     assert [s["setup_id"] for s in api.get("/api/tasks/synthetic/setups").json()["setups"]] == [
         "my-setup"
     ]
-    assert api.get("/api/tasks/other/setups").json() == {"setups": []}
+    assert api.get("/api/tasks/other/setups").json() == {"setups": [], "browser_creatable": True}
     assert api.get("/api/editor/my-setup").status_code == 200
 
 
@@ -143,7 +143,7 @@ def test_legacy_editor_project_is_listed_for_its_task_and_keeps_its_routes(works
     assert [(s["setup_id"], s["runnable"], s["refs_match_task"]) for s in listed] == [
         ("legacy", True, True)
     ]
-    assert api.get("/api/tasks/other/setups").json() == {"setups": []}
+    assert api.get("/api/tasks/other/setups").json() == {"setups": [], "browser_creatable": True}
     # Legacy setups keep their unbound run admission: any configured task's policy applies.
     console = api.app.state.console
     assert configured_capture(console.setups, "legacy", "other")[1].task_id == "other"
@@ -255,3 +255,12 @@ def test_unexpected_observation_error_is_a_typed_refusal(workspace, monkeypatch)
     assert response.status_code == 409, response.text
     assert response.json()["error"]["code"] == "inspection_failed"
     assert list((workspace / "projects").iterdir()) == []
+
+
+def test_setup_list_reports_whether_the_browser_may_create(workspace):
+    """Defect: the browser offers "New setup" on a console whose POST is refused (403), so
+    the user learns only after clicking; the list must carry the same predicate."""
+    _edit(workspace, experiment_setups={"browser_creatable": False})
+    api = _client(_load(workspace))
+    assert api.get("/api/tasks/synthetic/setups").json()["browser_creatable"] is False
+    assert _create(api).status_code == 403

@@ -8,8 +8,9 @@
   const $ = id => document.getElementById(id);
   const session = window.consoleSession, tasks = window.consoleTask;
   const BLANK = '';
+  const CREATION_OFF = 'Creating setups in the browser is turned off for this console. The console operator turns it on with "experiment_setups": {"browser_creatable": true} in siderius_workspace/settings/console.json and restarts the console. You can still open existing setups.';
   const REFUSED_403 = 'Creating setups in the browser is turned off for this console. The console operator turns it on with "experiment_setups": {"browser_creatable": true} in siderius_workspace/settings/console.json, then restarts the console (init writes this for new workspaces).';
-  let list = [], loadedKey = null, loading = null, catalog = null, error = '';
+  let list = [], listTask = null, loadedKey = null, loading = null, catalog = null, error = '', creatable = null;
   const el = (tag, text, parent, className) => {
     const node = document.createElement(tag); if (text) node.textContent = text;
     if (className) node.className = className; if (parent) parent.append(node); return node;
@@ -22,12 +23,15 @@
   async function load(preferred = null, force = false) {
     const taskId = tasks.selectedId, revision = session.revision, key = `${revision}/${taskId}`;
     if (!session.connected || !taskId || (!force && (loadedKey === key || loading === key))) return;
+    // Another task's list never stands for this one while it loads (header, lock, runs).
+    if (listTask !== taskId) { list = []; listTask = taskId; creatable = null; render(); }
     loading = key; say('Loading the experiment setups of this task…');
     try {
       const [projects, ...perTask] = await Promise.all([session.request('editor/projects'),
         ...tasks.tasks.map(task => session.request(`tasks/${encodeURIComponent(task.task_id)}/setups`))]);
       if (revision !== session.revision || taskId !== tasks.selectedId) return;
       const byTask = Object.fromEntries(tasks.tasks.map((task, index) => [task.task_id, perTask[index].setups]));
+      creatable = perTask[tasks.tasks.findIndex(task => task.task_id === taskId)].browser_creatable === true;
       const matched = new Set(Object.values(byTask).flat().map(setup => setup.setup_id));
       list = [
         ...byTask[taskId].map(setup => ({id: setup.setup_id, label: setup.label, runnable: setup.runnable, refsMatchTask: setup.refs_match_task, group: 'task', taskId})),
@@ -35,7 +39,8 @@
           .map(item => ({id: item.project_id, label: item.project_id, runnable: item.candidate_run_enabled, refsMatchTask: null, group: 'other', taskId: null}))
       ];
       loadedKey = key; error = ''; say('');
-      window.workflowEditor.useSetups(list, preferred);
+      // The editor returns what it shows (a declined switch keeps the open setup listed).
+      list = window.workflowEditor.useSetups(list, preferred);
     } catch (failure) {
       if (failure.stale || revision !== session.revision) return;
       error = failure.message; say(`Experiment setups could not be loaded: ${failure.message}`);
@@ -46,10 +51,13 @@
     const item = current(), task = tasks.selected;
     $('setup-drift').hidden = !(item && item.refsMatchTask === false);
     $('setup-new').disabled = !session.connected || !task;
+    $('setup-new').title = creatable === false ? CREATION_OFF : '';
     $('setup-retry').hidden = !error;
     // Run page header: which setup and task a new run uses.
     $('run-setup-header').hidden = !item;
-    $('run-setup-header').textContent = item ? `Setup: ${item.label} · Task: ${item.group === 'task' && task ? task.label : 'not bound to a configured task'}` : '';
+    // The setup's own task (the same one new-run.js locks), never merely the selected one.
+    const own = item?.taskId ? tasks.tasks.find(entry => entry.task_id === item.taskId) : null;
+    $('run-setup-header').textContent = item ? `Setup: ${item.label} · Task: ${own ? own.label : 'not bound to a configured task'}` : '';
     window.dispatchEvent(new CustomEvent('experiment-setup', {detail: {setup: item, task}}));
   }
 
@@ -91,22 +99,32 @@
       throw new Error(failure.status === 403 ? REFUSED_403 : failure.message + (finding ? ` ${finding}` : ''));
     }
   }
+  const offNotice = () => creatable === false;
+  function syncCreate() {
+    create.disabled = offNotice();
+    if (offNotice()) status.textContent = CREATION_OFF;
+    else if (status.dataset.hint && name.value.trim()) { status.textContent = ''; delete status.dataset.hint; }
+  }
+  name.addEventListener('input', syncCreate);
+  name.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); create.click(); } });
   create.addEventListener('click', async () => {
+    if (create.disabled) return;
     const label = name.value.trim(), chosen = shapes.querySelector('input:checked')?.value ?? BLANK;
-    if (!label) { status.textContent = 'Enter a label for the setup.'; name.focus(); return; }
+    if (!label) { status.textContent = 'Enter a label for the setup.'; status.dataset.hint = '1'; name.focus(); return; }
     create.disabled = true; status.textContent = 'Creating…';
     try {
       const view = await submit(chosen, label);
       if (view) { dialog.close(); location.hash = 'workflow'; }
     } catch (failure) { status.textContent = failure.message; }
-    finally { create.disabled = false; }
+    finally { syncCreate(); }
   });
   async function open(preferred = 'single-loop-with-advice') {
     const task = tasks.selected; if (!task) return;
     intro.textContent = `A setup is one workflow for the task "${task.label}". Choose how it starts and give it a label; you can change the workflow afterwards.`;
-    status.textContent = ''; name.value = '';
+    status.textContent = ''; delete status.dataset.hint; name.value = '';
     if (!dialog.open) dialog.showModal();
-    await showShapes(preferred); name.focus();
+    syncCreate();
+    await showShapes(preferred); syncCreate(); name.focus();
   }
   $('setup-new').addEventListener('click', () => void open());
   $('setup-retry').addEventListener('click', () => void load(null, true));
@@ -119,5 +137,6 @@
   session.subscribe(render);
   render();
   window.experimentSetups = Object.freeze({load: (preferred, force) => load(preferred, force), open, create: submit,
-    get list() { return list; }, get current() { return current(); }});
+    get list() { return list; }, get current() { return current(); }, get error() { return error; },
+    get creatable() { return creatable; }, creationOff: CREATION_OFF});
 })();
