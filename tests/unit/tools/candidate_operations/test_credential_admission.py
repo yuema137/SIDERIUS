@@ -8,6 +8,7 @@ import pytest
 
 from tests.unit.tools.candidate_worker.conftest import prepared
 from tools.candidate_operations import CandidateOperation, OperationStoreConfig, submit_operation
+from tools.candidate_operations.models import OperationFailure
 
 
 def config_for(tmp_path):
@@ -42,8 +43,11 @@ def test_new_candidate_refusal_precedes_record_and_spawn(prepared, tmp_path, mon
     submission = CandidateOperation(request_id=uuid4(), request=prepared)
     spawn = Mock()
     monkeypatch.setattr("tools.candidate_operations.submit.spawn", spawn)
-    with pytest.raises(ValueError, match=r"environment|changed"):
+    with pytest.raises(OperationFailure, match=r"environment|changed") as refused:
         submit_operation(config, submission, launch_environment=source)
+    if case in {"forged", "stale"}:
+        assert refused.value.detail.code == "candidate_preflight"
+        assert refused.value.detail.message == "candidate inputs or routes changed; review again"
     assert not (Path(config.state_root) / "operations" / str(submission.request_id)).exists()
     assert not (Path(config.state_root) / "active.json").exists()
     assert not Path(prepared.preview.document.definition.task.workspace).exists()
