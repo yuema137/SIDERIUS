@@ -200,9 +200,11 @@
       note(result, `Samples could not be counted: ${message}`, 'warning');
     }
   }
-  // The task's forward contract (ForwardContract fields). A shape is shown as monospace
-  // text followed by its one-line meaning; notes are shown as plain text.
-  const IO_NOTES = {embedding_note: 'Input encoding', output_head_note: 'Output head'};
+  // The task's forward contract (ForwardContract fields). Shapes lead as Input and Output rows
+  // (monospace shape, then its one-line meaning); every other declared, non-empty field follows
+  // with its label, or its name made human-readable, so nothing declared is hidden.
+  const IO_LABELS = {task_type: 'Task type', task_note: 'Task note', embedding_note: 'Input encoding', output_head_note: 'Output head'};
+  const IO_SHAPE_FIELDS = new Set(['input_shape', 'input_description', 'output_shape', 'output_description', 'num_classes']);
   function ioCell(shape, meaning) {
     const cell = el('span', '', null);
     if (shape) cell.append(mono(shape));
@@ -215,7 +217,10 @@
     if (io.input_shape || io.input_description) rows.push(['Input', ioCell(io.input_shape, io.input_description)]);
     if (io.output_shape || io.output_description) rows.push(['Output', ioCell(io.output_shape, io.output_description)]);
     if (io.num_classes) rows.push(['Classes', count(io.num_classes)]);
-    for (const [name, label] of Object.entries(IO_NOTES)) if (typeof io[name] === 'string' && io[name]) rows.push([label, io[name]]);
+    for (const [name, value] of Object.entries(io)) {
+      if (IO_SHAPE_FIELDS.has(name) || value === '' || value === null || value === false || value === 0) continue;
+      rows.push([IO_LABELS[name] || human(name), typeof value === 'string' ? value : json(value)]);
+    }
     if (rows.length) facts(box, rows); else note(box, 'Not declared by this task.');
   }
   function objective(parent, pkg) {

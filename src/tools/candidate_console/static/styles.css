@@ -25,7 +25,7 @@ header, main, footer, nav.actions {
 header.console-header {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
   padding-top: var(--space-3);
   padding-bottom: var(--space-2);
@@ -276,9 +276,6 @@ footer {
   .columns {
     grid-template-columns: 1fr;
   }
-  header.console-header {
-    flex-wrap: wrap;
-  }
   .brand span {
     display: block;
     margin: 6px 0 0;
@@ -402,6 +399,9 @@ main > #route-status:empty { display: none; }
 
 /* Header: logo, intro, theme, Help and Settings in one 48px bar; Settings opens a panel below. */
 header.console-header { position: relative; min-height: var(--bar-height); }
+/* Connected: the header is one row (the access banner is collapsed to a chip). Before connecting the
+ * full-width access banner wraps onto its own line, so wrapping stays on. */
+header.console-header:has(#access-section.access-collapsed) { flex-wrap: nowrap; }
 .help-button, .settings-button { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 32px; padding: 0 var(--space-3); }
 .help-mark { display: inline-grid; place-items: center; width: 18px; height: 18px; border: 1.5px solid currentColor; border-radius: 50%; font-size: var(--font-label); font-weight: 700; }
 .settings-panel {
