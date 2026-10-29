@@ -16,7 +16,7 @@ def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> 
     """Validate inert facts; ``workspace`` adds its settings and library to protected paths."""
     from tools.candidate_prepare.admission import validate_read_only_exclusion
 
-    from .package_mounts import check_package_mounts
+    from .package_mounts import check_candidate_devices, check_package_mounts
     from .settings_file import SettingsInvalid, protected_paths
     from .setups import SetupRegistry, SetupStore, check_setup_project
 
@@ -73,6 +73,7 @@ def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> 
                 raise ValueError("configured dependency must exist")
         # Every file the manifest references must be visible inside the run sandbox.
         check_package_mounts(task)
+        check_candidate_devices(task)
     for choice in config.native_chain_choices:
         request = choice.request
         for path in (request.capture_path, request.envelope, *request.read_only, *request.devices):

@@ -78,12 +78,23 @@ class TestLaunchSelfTest:
         with pytest.raises(LaunchGuardFailure, match="requires a real bounded-probe runner"):
             run_launch_self_test(require_probe_runner=True)
 
-    def test_a_missing_accelerator_is_refused_as_the_gpu_requirement(self):
+    @pytest.mark.parametrize(
+        "cause,fix",
+        [
+            ("no_device_nodes", "list its device nodes in the task's candidate_devices"),
+            ("sys_not_mounted", "/sys is not mounted here, so CUDA cannot start (CUDA error 304)"),
+            ("cuda_init_failed", "CUDA failed to initialize. Check the driver"),
+        ],
+    )
+    def test_a_missing_accelerator_is_refused_with_the_fix_for_its_cause(self, cause, fix):
         """Issue #1136: a CPU-only operator got "requires a real bounded-probe
-        runner", which never said a GPU was needed. Fails if the guard stops
-        naming the requirement, or stops refusing (fail-closed)."""
+        runner", which never said a GPU was needed. Walkthrough N2: with device
+        nodes passed, the refusal still said candidate_devices must include them,
+        while the real cause (/sys not mounted, CUDA error 304) went unnamed.
+        Fails if the guard stops naming the requirement, stops refusing
+        (fail-closed), or words one cause's fix for another."""
         from core.runtime_control.measurement_capability import (
-            NO_CUDA_REASON,
+            NO_CUDA_REASONS,
             ResolvedMeasurementCapability,
         )
 
@@ -92,14 +103,17 @@ class TestLaunchSelfTest:
             dataset_adapter="a",
             data_shape_class="s",
             probe_available=False,
-            unavailability_reason=NO_CUDA_REASON,
+            unavailability_reason=NO_CUDA_REASONS[cause],
         )
         with pytest.raises(LaunchGuardFailure) as refused:
             run_launch_self_test(require_probe_runner=True, capability=capability)
         message = str(refused.value)
         assert "needs an NVIDIA GPU with CUDA" in message
-        assert NO_CUDA_REASON in message
-        assert "candidate_devices" in message
+        assert fix in message
+        others = {"no_device_nodes": "candidate_devices", "sys_not_mounted": "error 304"}
+        for other, phrase in others.items():
+            if other != cause:
+                assert phrase not in message, f"{cause} refusal gives the {other} fix"
 
     def test_a_missing_dataset_is_not_misreported_as_a_gpu_problem(self, tmp_path):
         """The GPU wording is only for accelerator reasons: a host WITH a GPU

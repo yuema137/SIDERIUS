@@ -33,14 +33,29 @@ import os
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.gpu_requirement import GpuUnavailableCause, observe_gpu_unavailable_cause
 from core.runtime_control.phases import RuntimePhase
 
 #: Unavailability reasons that mean "no usable accelerator here", as opposed to
 #: a missing dataset or caller input. The launch guard words its refusal as the
-#: GPU requirement (issue #1136) only for these.
+#: GPU requirement (issue #1136) only for these. A missing CUDA device has one
+#: reason per observed cause (``core.gpu_requirement``), so the guard reads the
+#: cause from the reason without parsing text.
 NO_TORCH_REASON = "torch is not importable"
-NO_CUDA_REASON = "no CUDA device is visible"
-_ACCELERATOR_REASONS = frozenset({NO_TORCH_REASON, NO_CUDA_REASON})
+NO_CUDA_REASONS: dict[GpuUnavailableCause, str] = {
+    "no_device_nodes": "no CUDA device is visible: no /dev/nvidia<N> device node is present",
+    "sys_not_mounted": (
+        "no CUDA device is visible: NVIDIA device nodes are present but /sys is not mounted"
+    ),
+    "cuda_init_failed": (
+        "no CUDA device is visible: NVIDIA device nodes and /sys are present, "
+        "but CUDA failed to initialize"
+    ),
+}
+_CAUSE_OF_REASON: dict[str, GpuUnavailableCause] = {
+    reason: cause for cause, reason in NO_CUDA_REASONS.items()
+}
+_ACCELERATOR_REASONS = frozenset({NO_TORCH_REASON, *NO_CUDA_REASONS.values()})
 
 
 class ResolvedMeasurementCapability(BaseModel):
@@ -105,6 +120,13 @@ class ResolvedMeasurementCapability(BaseModel):
         """True when measurement is refused because no accelerator is usable."""
         return not self.probe_available and self.unavailability_reason in _ACCELERATOR_REASONS
 
+    @property
+    def gpu_unavailable_cause(self) -> GpuUnavailableCause | None:
+        """Which GPU prerequisite is missing, when CUDA reported no device."""
+        if self.probe_available or self.unavailability_reason is None:
+            return None
+        return _CAUSE_OF_REASON.get(self.unavailability_reason)
+
 
 def resolve_measurement_capability(
     *,
@@ -142,7 +164,7 @@ def resolve_measurement_capability(
     except ImportError:
         return _no(NO_TORCH_REASON)
     if not torch.cuda.is_available():
-        return _no(NO_CUDA_REASON)
+        return _no(NO_CUDA_REASONS[observe_gpu_unavailable_cause()])
     if not dataset_root:
         return _no("no dataset root was supplied by the caller")
     if not os.path.isdir(dataset_root):

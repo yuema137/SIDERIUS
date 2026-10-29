@@ -149,6 +149,12 @@ overwrites an existing `tasks/` folder.
    runs fail to find CUDA, adding `"/sys"` to the task's `task_read_only` is the
    setting that warning refers to; decide whether exposing `/sys` is acceptable on
    your machine.
+   Run review repeats this warning before you launch. `add-task` and `check` refuse a
+   `--device` path that does not exist on this machine. When a launch is refused for
+   lack of a GPU, the cause line says which of three things is missing: no device
+   node was passed, device nodes were passed but `/sys` is not mounted (CUDA error
+   304, the case this warning predicts), or CUDA failed to start with both present
+   (check the driver with `nvidia-smi`).
 
    You can also write the task entry yourself. A task needs its `task_id`,
    `label`, `task_manifest`, resource policy and time limits; the
@@ -561,7 +567,10 @@ open workflow uses; its findings then open in the Workflow save step. See
 
 ## Bind a task version
 
-The task chip in the Workflow page bar shows the task package and version; click it
+The task chip in the Workflow page bar shows the setup's task, for example
+`Task: Quickstart`, and the pinned version when there is one. Versions are optional:
+when the task declares versions and the workflow pins none, a separate
+`Task version: not pinned` note appears beside the chip. Click the chip
 to open the **Task version** card on the **Task** tab. That card states which task package and
 version the open workflow uses. Versions are offered only for configured tasks
 that declare `task_revision`; otherwise the panel says that none are configured.

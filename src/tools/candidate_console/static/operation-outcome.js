@@ -76,7 +76,10 @@
     const lines = String(text || '').split('\n').map(line => line.trim());
     const found = lines.filter(line => /^[A-Za-z_][\w.]*(Error|Exception|Failure|Refusal)\b:/.test(line)).at(-1);
     if (!found) return null;
-    return found.length > 300 ? found.slice(0, 297) + '…' : found;
+    if (found.length <= 300) return found;
+    // Cut at the last word boundary that fits, never inside a word (walkthrough N2).
+    const space = found.lastIndexOf(' ', 299);
+    return (space > 0 ? found.slice(0, space) : found.slice(0, 299)).replace(/[\s,;:(]+$/, '') + '…';
   }
   // L-2: one cause line for a failed operation, read once from the last 64 KiB of its
   // native, then operation, log (the same text Monitor shows). `request` is

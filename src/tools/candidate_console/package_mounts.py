@@ -85,11 +85,50 @@ def check_package_mounts(task: TaskChoice) -> None:
         )
 
 
+def device_problem(device: str) -> str | None:
+    """Why ``device`` cannot be passed into a run sandbox from this host, or ``None``.
+
+    The sandbox binds only character devices (``SandboxProfile.device_paths``).
+    """
+    path = Path(device)
+    if not path.exists():
+        return "does not exist on this host"
+    if not path.is_char_device():
+        return "is not a character device"
+    return None
+
+
+def check_candidate_devices(task: TaskChoice) -> None:
+    """Refuse, naming the path, a ``candidate_devices`` entry the sandbox cannot pass."""
+    for device in task.candidate_devices:
+        problem = device_problem(device)
+        if problem is not None:
+            raise SettingsInvalid(
+                f"task {task.task_id} candidate_devices names {device}, which {problem}; "
+                "list only device nodes present on this machine (for example ls -l /dev/nvidia*)"
+            )
+
+
+def device_warnings(devices: tuple[str, ...], read_only: tuple[str, ...]) -> tuple[str, ...]:
+    """The device warnings for one task's run: unusable paths, then GPU nodes without ``/sys``.
+
+    ``check`` refuses an unusable path at start; Run review repeats this list for the
+    reviewed request, so a device that disappeared since is named before Launch.
+    """
+    warnings = [
+        f"Device {device} {problem}; the run sandbox cannot pass it."
+        for device in devices
+        if (problem := device_problem(device)) is not None
+    ]
+    if any(GPU_DEVICE.fullmatch(device) for device in devices) and "/sys" not in read_only:
+        warnings.append(GPU_WITHOUT_SYS)
+    return tuple(warnings)
+
+
 def gpu_warnings(config: ConsoleConfig) -> tuple[str, ...]:
-    """One warning per task passing NVIDIA device nodes without a read-only ``/sys``."""
+    """Each task's device warnings, prefixed with its ID (``check``/``serve`` stderr)."""
     return tuple(
-        f"Task {task.task_id}: {GPU_WITHOUT_SYS}"
+        f"Task {task.task_id}: {warning}"
         for task in config.tasks
-        if any(GPU_DEVICE.fullmatch(device) for device in task.candidate_devices)
-        and "/sys" not in task.task_read_only
+        for warning in device_warnings(task.candidate_devices, task.task_read_only)
     )

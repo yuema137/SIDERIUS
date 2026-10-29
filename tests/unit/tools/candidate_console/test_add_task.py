@@ -220,6 +220,8 @@ def test_check_warns_when_gpu_devices_are_passed_without_sys(
     not appear when /sys is listed in task_read_only.
     """
     _, config, manifest = workspace
+    # The host need not have a GPU: existence is admitted separately (next test).
+    monkeypatch.setattr("tools.candidate_console.package_mounts.device_problem", lambda _: None)
     argv = ("add-task", "--config", str(config), "--manifest", str(manifest))
     assert _main(monkeypatch, capsys, *argv, "--device", "/dev/nvidia0", "/dev/nvidiactl")[0] == 0
     if read_only_sys:
@@ -231,11 +233,45 @@ def test_check_warns_when_gpu_devices_are_passed_without_sys(
     assert (GPU_WARNING in err) is not read_only_sys
 
 
+def test_add_task_and_check_refuse_a_device_path_the_sandbox_cannot_pass(
+    workspace, tmp_path, monkeypatch, capsys
+):
+    """Defect (walkthrough N2): add-task and check accepted /dev/nvidia* paths absent on
+    the host, so the first sign was a refused GPU launch that blamed the device list.
+
+    Fails if add-task writes an entry naming a missing path or a regular file, if the
+    refusal does not name the path and why, or if check accepts such an entry written
+    by hand.
+    """
+    _, config, manifest = workspace
+    before = config.read_bytes()
+    plain = tmp_path / "not-a-device"
+    plain.write_text("")
+    absent = "/dev/siderius-absent-node0"
+    argv = ("add-task", "--config", str(config), "--manifest", str(manifest), "--device")
+    for device, why in (
+        (absent, "does not exist on this host"),
+        (str(plain), "is not a character device"),
+    ):
+        code, _, err = _main(monkeypatch, capsys, *argv, "/dev/null", device)
+        assert code == 2
+        assert f"candidate_devices names {device}, which {why}" in err
+        assert config.read_bytes() == before, "a refused add-task wrote console.json"
+    assert _main(monkeypatch, capsys, *argv, "/dev/null")[0] == 0
+    document = json.loads(config.read_text())
+    document["tasks"][0]["candidate_devices"] = ["/dev/null", absent]
+    config.write_text(json.dumps(document))
+    code, _, err = _main(monkeypatch, capsys, "check", "--config", str(config))
+    assert code == 2
+    assert f"candidate_devices names {absent}, which does not exist on this host" in err
+
+
 def test_interactive_prompt_passes_the_listed_nvidia_nodes(workspace, monkeypatch, capsys):
     """Defect: without --device on a TTY, the listed host GPU nodes are not offered or not used."""
     _, config, manifest = workspace
     nodes = ("/dev/nvidia0", "/dev/nvidiactl")
     monkeypatch.setattr("tools.candidate_console.add_task.host_gpu_devices", lambda: nodes)
+    monkeypatch.setattr("tools.candidate_console.package_mounts.device_problem", lambda _: None)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
     plan = plan_task(AddTaskRequest(config=str(config), manifest=str(manifest)))

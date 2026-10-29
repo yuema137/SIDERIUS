@@ -30,8 +30,13 @@ iteration directory, the run lock and any LLM call. On refusal it prints
 with CUDA, and none is visible here (...)` to stderr and exits `2`. No manifest is
 written, so the consecutive-failure brake does not count it; `run_chain.sh`
 records the iteration as failed (`iter:2`) and the chain ends incomplete. The
-runtime-control launch guard raises `LaunchGuardFailure` with the same sentence
-when its measurement capability reports `accelerator_unavailable`; other
+runtime-control launch guard raises `LaunchGuardFailure` with the same requirement
+when its measurement capability reports `accelerator_unavailable`, worded for the
+observed cause (`core.gpu_requirement.observe_gpu_unavailable_cause`, from filesystem
+facts only: no `/dev/nvidia<N>` character device → pass device nodes in
+`candidate_devices`; nodes but no `/sys/bus/pci/devices` → `/sys` is not mounted,
+CUDA error 304; both present → CUDA failed to initialize, check the driver; the
+capability's `unavailability_reason` is one of `NO_CUDA_REASONS` per cause); other
 unavailability reasons (for example a missing dataset) keep the bounded-probe
 wording. The chain header prints `Compute device   : NVIDIA GPU with CUDA required
 (checked before any model call)` for real chains and `not checked (pseudo-mode; ...)`

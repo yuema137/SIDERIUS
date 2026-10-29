@@ -100,9 +100,9 @@ def run_launch_self_test(
     available, detail = _probe_runner_availability(capability)
     if require_probe_runner and not available:
         if capability is not None and capability.accelerator_unavailable:
-            # Issue #1136: the commonest cause, said plainly. Same exception and
-            # fail-closed behavior; only the wording names the requirement.
-            raise LaunchGuardFailure(gpu_required_message(detail))
+            # Issue #1136: the commonest cause, said plainly, with the fix for the
+            # observed missing prerequisite. Same exception and fail-closed behavior.
+            raise LaunchGuardFailure(gpu_required_message(detail, capability.gpu_unavailable_cause))
         raise LaunchGuardFailure(
             "this launch requires a real bounded-probe runner and the "
             f"environment cannot build one: {detail}. A formal runtime "

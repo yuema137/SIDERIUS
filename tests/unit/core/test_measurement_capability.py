@@ -207,3 +207,59 @@ class TestTheResolverIsGeneric:
         )
         assert a.task_identity != b.task_identity
         assert a.dataset_adapter != b.dataset_adapter
+
+
+class TestAMissingCudaDeviceNamesItsCause:
+    """Walkthrough N2: a sandbox given /dev/nvidia* without /sys failed with CUDA
+    error 304, and the refusal told the operator to pass the device nodes they had
+    already passed. The cause is classified from filesystem facts, never driver text."""
+
+    @staticmethod
+    def _roots(tmp_path, *, node: bool, pci: bool):
+        dev, sys_root = tmp_path / "dev", tmp_path / "sys"
+        dev.mkdir()
+        (dev / "nvidiactl").symlink_to("/dev/null")  # a control node alone is not a GPU
+        if node:
+            (dev / "nvidia0").symlink_to("/dev/null")  # a character device
+        if pci:
+            (sys_root / "bus" / "pci" / "devices").mkdir(parents=True)
+        return dev, sys_root
+
+    @pytest.mark.parametrize(
+        "node,pci,cause",
+        [
+            (False, True, "no_device_nodes"),
+            (True, False, "sys_not_mounted"),
+            (True, True, "cuda_init_failed"),
+        ],
+    )
+    def test_the_observed_prerequisite_decides_the_cause(self, tmp_path, node, pci, cause):
+        """Fails if a device-node or /sys fact is misread (for example nvidiactl
+        counted as a GPU, or a missing /sys reported as a driver failure)."""
+        from core.gpu_requirement import observe_gpu_unavailable_cause
+
+        dev, sys_root = self._roots(tmp_path, node=node, pci=pci)
+        assert observe_gpu_unavailable_cause(dev=dev, sys_root=sys_root) == cause
+
+    def test_a_regular_file_named_like_a_gpu_node_is_not_a_device(self, tmp_path):
+        """Fails if a plain file /dev/nvidia0 (no device passed) counts as a node."""
+        from core.gpu_requirement import observe_gpu_unavailable_cause
+
+        dev, sys_root = self._roots(tmp_path, node=False, pci=True)
+        (dev / "nvidia0").write_text("")
+        assert observe_gpu_unavailable_cause(dev=dev, sys_root=sys_root) == "no_device_nodes"
+
+    @pytest.mark.parametrize("cause", ["no_device_nodes", "sys_not_mounted", "cuda_init_failed"])
+    def test_the_resolver_carries_the_cause_to_the_capability(self, monkeypatch, cause):
+        """Production reachability: the reason the resolver records must map back to
+        the observed cause and stay an accelerator reason (the launch guard's GPU
+        wording depends on both)."""
+        torch = pytest.importorskip("torch")
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        monkeypatch.setattr(
+            "core.runtime_control.measurement_capability.observe_gpu_unavailable_cause",
+            lambda: cause,
+        )
+        capability = resolve_measurement_capability(**IDENTITY, dataset_root=None)
+        assert capability.accelerator_unavailable is True
+        assert capability.gpu_unavailable_cause == cause
