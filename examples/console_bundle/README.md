@@ -71,6 +71,14 @@ with the version in the zip's name.
    your group or others can write to. Running it again keeps identical files and
    never overwrites a different one.
 
+   Write the data before step 4: the import ends with the same check as
+   `check`, which needs `data/quickstart/` to exist. If you ran step 4 first and
+   it reported that check failed, the task is already added: run this step,
+   then `.venv/bin/python -m tools.candidate_console check --config
+   /absolute/project/siderius_workspace/settings/console.json`. If you import
+   with `--task-id NAME` in step 4, run this step with the same `--task-id NAME`,
+   because the data folder is `data/NAME/`.
+
 4. Import the task and its experiment setup. Pass the GPU device files that runs
    may use (these are the usual ones; list yours with `ls /dev/nvidia*`):
 
@@ -101,7 +109,8 @@ with the version in the zip's name.
 
    A file that does not match `SHA256SUMS` stops the command before anything
    is copied: unpack the zip again. An existing `tasks/quickstart/` folder is
-   never overwritten; pass `--task-id` with another name instead. To change the
+   never overwritten; pass `--task-id` with another name instead, and write the
+   data again with that name (step 3). To change the
    starting time limits or network access, add the `add-task` options the
    [console guide](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#set-up-and-open-the-console)
    describes, or edit the task's entry in `console.json` afterwards.
