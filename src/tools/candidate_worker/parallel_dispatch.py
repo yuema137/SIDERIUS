@@ -13,26 +13,25 @@ concurrency over them:
 - drain (decision B3-Q2): after a failure readiness closes every undispatched
   node; running units finish with their real outcome;
 - every dispatched entry publishes a write-once `UnitReceipt`;
+- every finished unit is collected before readiness is asked for the next node,
+  so a failure that already exited stops new dispatch;
 - on SIGTERM, or any exception leaving the loop, every running unit's process
-  group is terminated (TERM, grace, KILL) before the error propagates.
+  group is terminated (TERM, grace, KILL) before the error propagates
+  (`unit_processes`, which also starts units through the code-package guard).
 
 Contract: candidate-worker-contract.md, "Parallel dispatch".
 """
 
-import signal
 import subprocess
-import sys
-import threading
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
-from core.runtime_control.process_group import terminate_observed_group
 from core.runtime_control.scheduling import HostBudget, Placement, ResourceRequest, plan_dispatch
 
 from . import unit_runner
@@ -42,11 +41,15 @@ from .layout import candidate_control_dir
 from .parallel_envelope import declared_units
 from .parallel_models import UnitExit, UnitReceipt
 from .unit_models import NodeInvocation, unit_paths
+from .unit_processes import (
+    POLL_SECONDS,
+    TermGate,
+    UnitProcess,
+    UnitTerminated,
+    start_unit,
+    terminate,
+)
 
-#: Seconds between polls of running units.
-POLL_SECONDS = 0.05
-#: TERM-to-KILL grace when terminating a unit's process group.
-TERMINATE_GRACE_SECONDS = 1.0
 #: Concurrent validators must not share one `.pytest_cache`; serial runs keep
 #: the exact pytest command (decision 4, 2026-10-28).
 PYTEST_ADDOPTS_ENV = "PYTEST_ADDOPTS"
@@ -55,12 +58,11 @@ PYTEST_NO_CACHE = "-p no:cacheprovider"
 BUDGET_FILE = "parallel_budget.json"
 
 
+__all__ = ["ParallelRefused", "UnitTerminated", "dispatch_parallel", "start_unit"]
+
+
 class ParallelRefused(ValueError):
     """A declared unit can never fit the admitted budget: the body runs nothing."""
-
-
-class UnitTerminated(BaseException):
-    """SIGTERM reached the worker during parallel dispatch."""
 
 
 @dataclass
@@ -69,7 +71,7 @@ class RunningUnit:
     item: GraphNodeEvidence
     invocation: NodeInvocation
     result_path: Path
-    process: subprocess.Popen
+    process: UnitProcess
     placement: Placement
     queued_event: int | None
     started_event: int
@@ -107,12 +109,7 @@ def unit_requests(body: GraphBody, budget: HostBudget) -> dict[str, ResourceRequ
                 launch.trial_time_budget_minutes is not None
                 or launch.formal_time_budget_minutes is not None
             )
-            active = body.admitted.bindings.active_vram_budget_gb
-            if declared.gpu and (active is None or (declared.vram_gib or 0.0) < active):
-                raise ParallelRefused(
-                    f"resource_refused: tuning node {node_id!r} declares "
-                    f"{declared.vram_gib} GiB; the run's active VRAM budget is {active}"
-                )
+            _require_tuning_device(node_id, declared, body)
         request = ResourceRequest(
             unit_id=node_id,
             dispatch_ordinal=ordinal,
@@ -131,20 +128,39 @@ def unit_requests(body: GraphBody, budget: HostBudget) -> dict[str, ResourceRequ
     return requests
 
 
+def _require_tuning_device(node_id: str, declared, body: GraphBody) -> None:
+    """A GPU run's tuning unit must be declared on a GPU covering its VRAM budget.
+
+    A CPU-only placement hides every GPU (``CUDA_VISIBLE_DEVICES=""``), so a
+    ``gpu: false`` tuning declaration on a run with an active VRAM budget or a GPU
+    hardware context would silently train on CPU.
+    """
+    assert body.admitted is not None
+    bindings = body.admitted.bindings
+    active = bindings.active_vram_budget_gb
+    hardware = bindings.hardware_context
+    gpu_run = active is not None or (hardware is not None and hardware.device_available)
+    if not declared.gpu:
+        if gpu_run:
+            raise ParallelRefused(
+                f"resource_refused: tuning node {node_id!r} is declared gpu=false, but the run "
+                f"trains on a GPU (active VRAM budget {active}, hardware "
+                f"{None if hardware is None else hardware.device_name}); declare tuning with "
+                "gpu=true and vram_gib covering the VRAM budget"
+            )
+        return
+    if active is None or (declared.vram_gib or 0.0) < active:
+        raise ParallelRefused(
+            f"resource_refused: tuning node {node_id!r} declares "
+            f"{declared.vram_gib} GiB; the run's active VRAM budget is {active}"
+        )
+
+
 def unit_environment(placement: Placement) -> dict[str, str]:
     env = unit_runner.unit_env(cuda_visible_devices=placement.cuda_visible_devices)
     prior = env.get(PYTEST_ADDOPTS_ENV)
     env[PYTEST_ADDOPTS_ENV] = PYTEST_NO_CACHE if not prior else f"{prior} {PYTEST_NO_CACHE}"
     return env
-
-
-def start_unit(invocation_path: Path, env: dict[str, str]) -> subprocess.Popen:
-    """Spawn the unit child in its own session, sharing the worker log."""
-    sys.stdout.flush()
-    sys.stderr.flush()
-    return subprocess.Popen(
-        unit_runner.unit_command(str(invocation_path)), env=env, start_new_session=True
-    )
 
 
 def dispatch_parallel(body: GraphBody, budget: HostBudget) -> None:
@@ -156,8 +172,13 @@ def dispatch_parallel(body: GraphBody, budget: HostBudget) -> None:
     running: dict[str, RunningUnit] = {}
     queued: dict[str, int] = {}
     adaptors = {adaptor.id for adaptor in body.definition.adaptors}
-    with _sigterm_raises(), _terminating(running):
+    gate = TermGate()
+    with gate.installed(), _terminating(body, running, clock, gate):
         while not body.done():
+            # A failure that already exited must stop dispatch before readiness runs.
+            _collect_finished(body, running, clock)
+            if body.done():  # the units just collected may have closed the body
+                break
             node_id = body.next_node(frozenset(running))
             if node_id is None:
                 if running:
@@ -182,12 +203,13 @@ def dispatch_parallel(body: GraphBody, budget: HostBudget) -> None:
                 raise RuntimeError(f"admitted unit {node_id!r} was refused")
             placement = decision.placements[0]
             if placement.decision == "queued":
-                queued.setdefault(node_id, clock.tick())
+                # The last event before this unit queued; consumes no event of its own.
+                queued.setdefault(node_id, clock.events)
                 if not running:
                     raise RuntimeError(f"unit {node_id!r} queued with nothing running")
                 _collect(body, running, _wait_any(running), clock)
                 continue
-            _start(body, node_id, placement, running, clock, queued.pop(node_id, None))
+            _start(body, node_id, placement, running, clock, gate, queued.pop(node_id, None))
 
 
 def _run_adaptor(body: GraphBody, node_id: str, clock: _Clock) -> None:
@@ -219,6 +241,7 @@ def _start(
     placement: Placement,
     running: dict[str, RunningUnit],
     clock: _Clock,
+    gate: TermGate,
     queued_event: int | None,
 ) -> None:
     item = body.running_item(node_id)
@@ -226,23 +249,33 @@ def _start(
     try:
         invocation = body.invocation(node_id).model_copy(update={"parallel": True})
         path, result_path = unit_runner.publish_invocation(invocation)
-        process = start_unit(path, unit_environment(placement))
+        env = unit_environment(placement)
     except Exception as error:
         body.fail(node_id, item, error)
         _publish(body, node_id, placement, queued_event, started, started_at, clock, "raised")
         body.decide_routes(node_id)
         return
-    running[node_id] = RunningUnit(
-        node_id,
-        item,
-        invocation,
-        result_path,
-        process,
-        placement,
-        queued_event,
-        started,
-        started_at,
-    )
+    # A SIGTERM landing between the spawn and the registration would orphan it.
+    with gate.held():
+        process = start_unit(path, env)
+        running[node_id] = RunningUnit(
+            node_id,
+            item,
+            invocation,
+            result_path,
+            process,
+            placement,
+            queued_event,
+            started,
+            started_at,
+        )
+
+
+def _collect_finished(body: GraphBody, running: dict[str, RunningUnit], clock: _Clock) -> None:
+    """Collect every unit that has already exited, in dispatch order."""
+    for unit in sorted(running.values(), key=lambda item: item.placement.dispatch_ordinal):
+        if unit.process.poll() is not None:
+            _collect(body, running, unit.node_id, clock)
 
 
 def _wait_any(running: dict[str, RunningUnit]) -> str:
@@ -258,9 +291,12 @@ def _collect(body: GraphBody, running: dict[str, RunningUnit], node_id: str, clo
     unit = running.pop(node_id)
     exit_kind: UnitExit = "returned"
     try:
-        if unit.process.returncode != 0:
+        unit.process.check()  # the code-package refusal, before any other outcome
+        code = unit.process.returncode
+        assert code is not None  # collected only after the unit exited
+        if code != 0:
             exit_kind = "process_failed"
-            raise subprocess.CalledProcessError(unit.process.returncode, unit.process.args)
+            raise subprocess.CalledProcessError(code, unit.process.args)
         result = unit_runner.collect_result(unit.invocation, unit.result_path)
         if result.outcome in ("raised", "exited", "interrupted"):
             exit_kind = result.outcome
@@ -314,34 +350,30 @@ def receipt_path(body: GraphBody, node_id: str) -> Path:
 
 
 @contextmanager
-def _terminating(running: dict[str, RunningUnit]) -> Iterator[None]:
-    """Any exit with units still running kills every one of their process groups."""
+def _terminating(
+    body: GraphBody, running: dict[str, RunningUnit], clock: _Clock, gate: TermGate
+) -> Iterator[None]:
+    """Any exit with units still running kills every one of their process groups.
+
+    SIGTERM is held during the cleanup, so a second signal cannot abort it. Each
+    terminated unit publishes a ``terminated`` receipt (best effort: the body
+    has no trace to verify it against).
+    """
     try:
         yield
     finally:
-        for unit in list(running.values()):
-            terminate_observed_group(
-                unit.process.pid,
-                grace_seconds=TERMINATE_GRACE_SECONDS,
-                poll_seconds=POLL_SECONDS,
-                child=unit.process,
-            )
-            unit.process.wait()
-        running.clear()
-
-
-@contextmanager
-def _sigterm_raises() -> Iterator[None]:
-    """Turn SIGTERM into ``UnitTerminated`` so the cleanup above runs."""
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-
-    def raise_terminated(signum: int, frame: object) -> None:
-        raise UnitTerminated(f"signal {signum}")
-
-    previous: Callable | int | None = signal.signal(signal.SIGTERM, raise_terminated)
-    try:
-        yield
-    finally:
-        signal.signal(signal.SIGTERM, previous)
+        with gate.held():
+            for unit in list(running.values()):
+                terminate(unit.process)
+                with suppress(Exception):
+                    _publish(
+                        body,
+                        unit.node_id,
+                        unit.placement,
+                        unit.queued_event,
+                        unit.started_event,
+                        unit.started_at,
+                        clock,
+                        "terminated",
+                    )
+            running.clear()
