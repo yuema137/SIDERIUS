@@ -37,6 +37,8 @@ from .settings_file import protected_paths
 from .settings_models import SettingsContext
 from .settings_routes import settings_router
 from .settings_service import ConsoleSettings
+from .setup_routes import setups_router
+from .setups import SetupStore
 from .task_summary import TaskSummaries
 from .task_summary_routes import task_summary_router
 
@@ -87,16 +89,17 @@ def refusal(table: dict[str, str], error: OperationFailure) -> JSONResponse:
 def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -> FastAPI:
     """``settings`` is the startup snapshot's context (``load_console(...).settings``);
     absent, the Settings page is read-only."""
-    service = CandidateConsole(config)
     workspace = None if settings is None else settings.workspace_root
+    service = CandidateConsole(
+        config,
+        SetupStore.load(config, workspace, None if settings is None else settings.setups_policy),
+    )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.console = service
+    # One registry for the editor, run admission, export and native-chain separation.
+    app.include_router(setups_router(service))
     app.include_router(
-        editor_router(
-            service.config.editor_projects,
-            service.config.runnable_editor_projects,
-            task_reference_targets(service.config.tasks),
-        )
+        editor_router(service.setups, task_targets=task_reference_targets(config.tasks))
     )
     app.include_router(edited_router(service))
     app.include_router(task_summary_router(TaskSummaries(service.config.tasks)))
@@ -107,7 +110,9 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
     )
     app.include_router(
         settings_router(
-            ConsoleSettings(service.config, settings or SettingsContext(None, frozenset()))
+            ConsoleSettings(
+                service.config, settings or SettingsContext(None, frozenset()), service.setups
+            )
         )
     )
     app.add_middleware(RequestBoundary, config=service.config, token=token(config.auth_token_file))

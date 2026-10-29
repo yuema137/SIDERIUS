@@ -55,7 +55,7 @@ class ReusableCandidate:
         choice: ReusableCaptureChoice,
         retained: ReusableCaptureSelection | None = None,
     ) -> tuple[TaskChoice, ReusableBindingInspection]:
-        project, task, root = configured_capture(self.console.config, project_id, choice.task_id)
+        project, task, root = configured_capture(self.console.setups, project_id, choice.task_id)
         path = capture_path(root, choice.run_id)
         if retained is not None and retained.preparation.envelope != str(path):
             raise OperationFailure("task_policy", "retained capture is outside selected task")
@@ -79,7 +79,7 @@ class ReusableCandidate:
     ) -> ReusableCapturePage:
         if not 1 <= limit <= 100:
             raise ValueError("capture page limit must be between 1 and 100")
-        _, _, root = configured_capture(self.console.config, project_id, task_id)
+        _, _, root = configured_capture(self.console.setups, project_id, task_id)
 
         # Bounded memory and metadata reads, direct children only, lexical UUID pagination.
         def names():

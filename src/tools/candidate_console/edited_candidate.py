@@ -88,12 +88,7 @@ class EditedCandidate:
         self.console = console
 
     def project(self, project_id: str):
-        config = self.console.config
-        if project_id not in config.runnable_editor_projects:
-            raise OperationFailure("editor_policy", "project is not enabled for candidate runs")
-        return next(
-            project for project in config.editor_projects if project.project_id == project_id
-        )
+        return self.console.setups.runnable(project_id).project
 
     def review(self, project_id: str, selection: EditedRunSelection) -> EditedRunReview:
         self.console.require_reviewable_resources(selection)
@@ -119,10 +114,14 @@ class EditedCandidate:
 
     def _review(self, project_id: str, selection: EditedRunSelection) -> EditedRunReview:
         selection = EditedRunSelection.model_validate_json(selection.model_dump_json())
-        project = self.project(project_id)
-        prepared, _ = self.console.resolve_prepared_context(
+        setup = self.console.setups.runnable(project_id)
+        project = setup.project
+        prepared, task = self.console.resolve_prepared_context(
             PreparedSelection(prepare_operation_id=selection.prepare_operation_id)
         )
+        # A console-created setup is bound to one task, as in ``configured_capture``.
+        if setup.task_id is not None and setup.task_id != task.task_id:
+            raise OperationFailure("task_policy", "experiment setup belongs to another task")
         source = WorkflowAuthoring(project).read()
         if source.sha256 != selection.expected_source_sha256:
             raise OperationFailure("stale_review", "saved source changed; review again")
