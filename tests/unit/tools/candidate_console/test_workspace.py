@@ -428,3 +428,79 @@ def test_settings_modules_do_not_import_prompt_lock_or_node_code():
                 else []
             )
             assert not [name for name in names if name.startswith(forbidden)], module.name
+
+
+def _credential_file(tmp_path: Path, mode: int, secret: str) -> Path:
+    path = tmp_path / "private" / "credentials.env"
+    path.parent.mkdir(mode=0o700)
+    path.write_text(f"OPENAI_API_KEY={secret}\n")
+    path.chmod(mode)
+    return path
+
+
+def test_init_credential_file_records_it_in_a_new_console_json_without_printing_it(
+    tmp_path, monkeypatch, capsys
+):
+    """Defect: init --credential-file omits the key, or a credential value reaches the output."""
+    secret = "sk-init-never-printed-" + "y" * 24
+    credentials = _credential_file(tmp_path, 0o600, secret)
+    parent = tmp_path / "project"
+    parent.mkdir(mode=0o700)
+    code, out, err = _main(
+        monkeypatch,
+        capsys,
+        "init",
+        "--workspace",
+        str(parent),
+        "--credential-file",
+        str(credentials),
+    )
+    assert code == 0, err
+    config = parent / "siderius_workspace" / "settings" / "console.json"
+    assert json.loads(config.read_text())["credential_file"] == str(credentials)
+    assert load_console(str(config)).config.credential_file == str(credentials)
+    assert secret not in out + err
+
+
+@pytest.mark.parametrize("mode", [0o640, 0o644, 0o400])
+def test_init_credential_file_refuses_a_file_that_is_not_owner_only_600(
+    mode, tmp_path, monkeypatch, capsys
+):
+    """Defect: init records a credential file others can read, or creates a workspace anyway."""
+    secret = "sk-mode-never-printed-" + "z" * 24
+    credentials = _credential_file(tmp_path, mode, secret)
+    code, out, err = _main(
+        monkeypatch,
+        capsys,
+        "init",
+        "--workspace",
+        str(tmp_path),
+        "--credential-file",
+        str(credentials),
+    )
+    assert code == 2
+    assert "--credential-file must be an existing regular file you own with mode 600" in err
+    assert secret not in out + err
+    assert not (tmp_path / "siderius_workspace").exists()
+
+
+def test_init_credential_file_never_rewrites_an_existing_console_json(
+    tmp_path, monkeypatch, capsys
+):
+    """Defect: a re-run of init silently rewrites console.json, or gives no line to add."""
+    config = init_workspace(str(tmp_path))
+    before = config.read_bytes()
+    credentials = _credential_file(tmp_path, 0o600, "sk-existing-" + "w" * 24)
+    argv = ("init", "--workspace", str(tmp_path), "--credential-file", str(credentials))
+    code, _, err = _main(monkeypatch, capsys, *argv)
+    assert code == 2
+    line = f'"credential_file": {json.dumps(str(credentials))},'
+    assert f"  {line}\n" in err and "add this line right after its opening {" in err
+    assert config.read_bytes() == before
+    # Adding exactly that line makes the same re-run succeed without touching the file.
+    text = before.decode()
+    edited = text.replace("{\n", "{\n  " + line + "\n", 1)
+    config.write_text(edited)
+    code, _, err = _main(monkeypatch, capsys, *argv)
+    assert code == 0, err
+    assert config.read_text() == edited

@@ -26,6 +26,25 @@ Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
 See [supported providers and models](docs/reference/model-qualification.md) for
 required model capabilities and the configurations tested so far.
 
+## Your first hour
+
+The quickest way to learn SIDERIUS is to run a small ready-made example in the
+browser console, then repeat the same steps with your own task. Both stages are
+written out command by command, with the output to expect, in the
+[first-hour path](docs/getting-started/README.md#your-first-hour-from-the-example-to-your-own-task).
+
+1. **Run the example.** Install, get the example bundle, create a console
+   workspace with `init --credential-file`, write the example data, register it
+   with `add-task --from-bundle`, start the console with `serve` and open it.
+   Then follow the tabs **Task → Workflow → Run → Monitor**.
+2. **Bring your own task.** Package your task with your coding agent, place it in
+   `siderius_workspace/tasks/<id>/`, register it with `add-task`, restart the
+   console, build a workflow for it and run it.
+
+A *task* is your scientific problem as a package (data, model input and output,
+score, Health checks); an *experiment setup* is one workflow bound to one task;
+a *run* is one execution of a setup.
+
 <a id="start-with-your-coding-agent"></a>
 
 ## Quick start with your coding agent
@@ -40,8 +59,9 @@ Use this checkout's own `.venv/bin/python` after installation. Provider keys
 are needed for real model calls; offline setup checks need none.
 The command line and the browser console read them from different places; see
 [API keys](docs/getting-started/installation.md#api-keys).
-The optional browser console also needs the
-[Linux workspace sandbox](src/tools/workspace_sandbox/README.md).
+The optional browser console also needs Linux with bubblewrap:
+`bwrap --unshare-all --ro-bind / / true` must finish without an error
+([if it fails](src/tools/workspace_sandbox/README.md#if-the-check-fails)).
 
 Follow [getting started](docs/getting-started/README.md) for the ordered setup,
 where to put credentials, and how to open the candidate console.

@@ -12,6 +12,7 @@ from .settings_file import MissingSetting, SettingsInvalid
 from .settings_models import ResolvedConsole
 from .workspace import (
     DEFAULT_PORT,
+    CredentialFileNotAdded,
     WorkspaceRefused,
     init_workspace,
     resolve_console,
@@ -46,6 +47,22 @@ def _load(path: str) -> ResolvedConsole | None:
         with contextlib.suppress(OSError, ValueError):
             _print_readiness(workspace_readiness(resolve_console(config_bytes(path))))
     return None
+
+
+def _print_credential_line(error: CredentialFileNotAdded) -> None:
+    """init never rewrites an existing console.json: name the one line to add or change."""
+    action = (
+        "names a different credential_file; replace that line with"
+        if error.replaces
+        else "has no credential_file; add this line right after its opening {"
+    )
+    print(
+        "Workspace folders are ready, but settings/console.json already exists and init "
+        f"never rewrites it. It {action}:",
+        file=sys.stderr,
+    )
+    print(f"  {error.line}", file=sys.stderr)
+    print("Then run check with --config and restart the console if it is running.", file=sys.stderr)
 
 
 def _report(resolved: ResolvedConsole) -> None:
@@ -100,12 +117,24 @@ def main(argv: list[str] | None = None) -> int:
         help="existing parent directory for siderius_workspace/ (init only; no default)",
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="init only")
+    parser.add_argument(
+        "--credential-file",
+        help=(
+            "init only: absolute path of your private API key file (mode 600); "
+            "recorded as credential_file in a new console.json; values are never printed"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.command == "init":
         if args.workspace is None or args.config is not None:
             parser.error("init requires --workspace and takes no --config")
         try:
-            config_path = str(init_workspace(args.workspace, port=args.port))
+            config_path = str(
+                init_workspace(args.workspace, port=args.port, credential_file=args.credential_file)
+            )
+        except CredentialFileNotAdded as error:
+            _print_credential_line(error)
+            return 2
         except WorkspaceRefused as error:
             print(f"Workspace init refused: {error}. Nothing was deleted.", file=sys.stderr)
             return 2
@@ -133,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if args.config is None or args.workspace is not None:
             parser.error(f"{args.command} requires --config and takes no --workspace")
+        if args.credential_file is not None:
+            parser.error("--credential-file is for init only")
         config_path = args.config
     resolved = _load(config_path)
     if resolved is None:

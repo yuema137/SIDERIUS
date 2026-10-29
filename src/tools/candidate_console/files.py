@@ -70,6 +70,26 @@ def _file_bytes(value: str, *, owner_only: bool) -> bytes:
             os.close(descriptor)
 
 
+def require_owner_only_file(value: str) -> None:
+    """Refuse unless ``value`` is a canonical regular file you own with mode 600.
+
+    Checks metadata only (no-follow ``stat`` through no-follow parents); the file
+    is never opened, so its contents are neither read nor exposed.
+    """
+    path = canonical(value)
+    directory = open_directory(path.parent)
+    try:
+        metadata = os.stat(path.name, dir_fd=directory, follow_symlinks=False)
+    finally:
+        os.close(directory)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+    ):
+        raise OperationFailure("configuration", "private file requires owner-only mode 600")
+
+
 def private_bytes(value: str) -> bytes:
     return _file_bytes(value, owner_only=True)
 

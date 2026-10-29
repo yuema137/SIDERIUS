@@ -18,12 +18,19 @@ demonstrates the workflow, not scientific quality.
 - A working run sandbox
   ([workspace sandbox](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/workspace_sandbox/README.md)).
 - An API key for the model provider. The standard model profile uses OpenAI,
-  so runs need `OPENAI_API_KEY`. Nothing in steps 1 to 4 reads a key.
+  so runs need `OPENAI_API_KEY`. No command below reads or prints the key;
+  only a launched run receives it.
+- The zip, `siderius-example-quickstart-<version>.zip`. Download it from the
+  [SIDERIUS releases page](https://github.com/yuema137/SIDERIUS/releases) when
+  the release lists it. Until then, build it from your checkout with the
+  command in [Building this bundle](#building-this-bundle-maintainers); it
+  prints the path of the zip it wrote.
 
 The examples use `/absolute/downloads` for the folder holding the downloaded
-zip and `/absolute/project` for a folder you own where the console workspace
-will live. Replace both with your own absolute paths, and replace `<version>`
-with the version in the zip's name.
+zip, `/absolute/project` for a folder you own where the console workspace
+will live, and `/absolute/private/credentials.json` for your private key file.
+Replace them with your own absolute paths, and replace `<version>` with the
+version in the zip's name.
 
 ## What the bundle contains
 
@@ -47,16 +54,28 @@ with the version in the zip's name.
    To check the download yourself, run `sha256sum -c SHA256SUMS` inside it;
    every line should end in `OK`. Step 4 makes the same check.
 
-2. Create the console workspace:
+2. Create your private key file and the console workspace. The first command
+   creates an empty key file that only you can read (mode `600`; its folder must
+   exist). The second creates the workspace and records that file's path:
 
    ```bash
-   .venv/bin/python -m tools.candidate_console init --workspace /absolute/project
+   install -m 600 /dev/null /absolute/private/credentials.json
+   .venv/bin/python -m tools.candidate_console init --workspace /absolute/project \
+     --credential-file /absolute/private/credentials.json
    ```
 
-   This creates `/absolute/project/siderius_workspace/` and prints
+   `init` creates `/absolute/project/siderius_workspace/` and prints
    `Workspace configuration: /absolute/project/siderius_workspace/settings/console.json`.
-   The [console guide](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#set-up-and-open-the-console)
-   lists the folders it creates.
+   It refuses a key file that is not yours with mode `600`, never prints its
+   contents, and records its path as `credential_file` in the new
+   `console.json`. If `console.json` already exists, `init` leaves it unchanged
+   and prints the one `"credential_file": ...` line to add yourself. Now open
+   the key file in your editor and write `{"OPENAI_API_KEY": "your key"}`; a run
+   reads it only when you launch. The
+   [console guide](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#set-up-and-open-the-console)
+   lists the folders `init` creates, and its
+   [Credentials section](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#credentials)
+   shows the dotenv format you may use instead.
 
 3. Write the task data into the workspace:
 
@@ -71,13 +90,13 @@ with the version in the zip's name.
    your group or others can write to. Running it again keeps identical files and
    never overwrites a different one.
 
-   Write the data before step 4: the import ends with the same check as
-   `check`, which needs `data/quickstart/` to exist. If you ran step 4 first and
-   it reported that check failed, the task is already added: run this step,
-   then `.venv/bin/python -m tools.candidate_console check --config
-   /absolute/project/siderius_workspace/settings/console.json`. If you import
-   with `--task-id NAME` in step 4, run this step with the same `--task-id NAME`,
-   because the data folder is `data/NAME/`.
+   Write the data before step 4. Step 4 ends by running `check`, and `check`
+   fails while `data/quickstart/` is missing. If you ran step 4 first and it
+   reported that check failed, the task is already added, so do not import it
+   again: run this step, then `.venv/bin/python -m tools.candidate_console check
+   --config /absolute/project/siderius_workspace/settings/console.json`. If you
+   import with `--task-id NAME` in step 4, run this step with the same
+   `--task-id NAME`, because the data folder is then `data/NAME/`.
 
 4. Import the task and its experiment setup. Pass the GPU device files that runs
    may use (these are the usual ones; list yours with `ls /dev/nvidia*`):
@@ -115,10 +134,8 @@ with the version in the zip's name.
    [console guide](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#set-up-and-open-the-console)
    describes, or edit the task's entry in `console.json` afterwards.
 
-5. Give runs your API key, then start the console. Set `credential_file` in
-   `console.json` to a private file holding `OPENAI_API_KEY`, as the
-   [Credentials section](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#credentials)
-   shows. Then run:
+5. Start the console in a terminal that stays open (on a remote server, a
+   `tmux` or `screen` session):
 
    ```bash
    .venv/bin/python -m tools.candidate_console serve \
@@ -161,9 +178,12 @@ workflow ran end to end; it makes no claim about model quality.
 
 ## Next steps
 
-To package your own task, see the
-[task definition guide](https://github.com/yuema137/SIDERIUS/blob/master/docs/guides/define-a-task.md),
-then register it with `add-task --manifest` as the console guide describes.
+To bring your own task, follow stage 2 of the
+[first-hour path](https://github.com/yuema137/SIDERIUS/blob/master/docs/getting-started/README.md#stage-2-bring-your-own-task):
+package it with your coding agent, place it in `siderius_workspace/tasks/<id>/`,
+register it with `add-task --manifest`, restart the console and build a workflow
+for it. The `tasks/quickstart/` folder this import created is a complete example
+of the package layout.
 
 ## Building this bundle (maintainers)
 

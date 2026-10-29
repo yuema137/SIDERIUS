@@ -49,7 +49,7 @@
     else if (tasks.state === 'error') taskState.textContent = `Tasks could not be loaded: ${tasks.error}`;
     else if (!loaded) taskState.textContent = 'Loading tasks…';
     else if (!list.length) {
-      taskState.textContent = 'No task is configured. Add your task to siderius_workspace/settings/console.json, then restart the console. ';
+      taskState.textContent = 'No task is registered. Put your task package in siderius_workspace/tasks/<id>/ and run add-task (see the README). ';
       const link = element('a', 'How to add a task (step 2)', taskState); link.href = SETUP_GUIDE; link.target = '_blank'; link.rel = 'noopener noreferrer';
     }
   }

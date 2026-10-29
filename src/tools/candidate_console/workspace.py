@@ -21,7 +21,7 @@ import stat
 from collections.abc import Iterator
 from pathlib import Path
 
-from .files import canonical, config_bytes, open_directory, write_all
+from .files import canonical, config_bytes, open_directory, require_owner_only_file, write_all
 from .readiness_models import WorkspaceEntry, WorkspaceReadiness, WorkspaceStatus
 from .settings_file import (
     SETTINGS_FILE,
@@ -78,6 +78,18 @@ TASK_PARENTS = {**TASK_OUTPUT_PARENTS, "data_root": "data"}
 
 class WorkspaceRefused(ValueError):
     """``init`` found a directory or file it must not use; nothing was deleted."""
+
+
+class CredentialFileNotAdded(WorkspaceRefused):
+    """``init --credential-file`` met an existing console.json it never rewrites.
+
+    ``line`` is the exact top-level JSON member the operator adds or changes.
+    """
+
+    def __init__(self, line: str, *, replaces: bool) -> None:
+        super().__init__("settings/console.json was left unchanged")
+        self.line = line
+        self.replaces = replaces
 
 
 def init_command(workspace_root: Path) -> str:
@@ -370,15 +382,32 @@ def _create_token(settings: int) -> None:
         os.close(descriptor)
 
 
-def init_workspace(parent: str, *, port: int = DEFAULT_PORT) -> Path:
+def init_workspace(
+    parent: str, *, port: int = DEFAULT_PORT, credential_file: str | None = None
+) -> Path:
     """Create missing fixed folders, token, default LLM profile and console.json skeleton.
 
     Returns the console.json path. Re-running is safe: existing items are checked,
     never replaced. With an existing console.json, the derived per-task output roots
     of its tasks are created too (never ``data/<task_id>``).
+
+    ``credential_file`` must be a canonical owner-only (mode 600) regular file; only
+    its metadata is checked. A new console.json records it as the top-level
+    ``credential_file``. An existing console.json naming another (or no) credential
+    file is never rewritten: after creating the folders, ``CredentialFileNotAdded``
+    carries the exact line to add.
     """
     if not 1024 <= port <= 65535:
         raise WorkspaceRefused("port must be between 1024 and 65535")
+    if credential_file is not None:
+        try:
+            require_owner_only_file(credential_file)
+        except (OSError, ValueError):  # OperationFailure is a ValueError
+            raise WorkspaceRefused(
+                "--credential-file must be an existing regular file you own with mode 600 "
+                "(chmod 600 FILE), given as an absolute path without symlinks; "
+                "its contents were not read"
+            ) from None
     try:
         base = canonical(parent)
         if not base.is_dir():
@@ -392,12 +421,12 @@ def init_workspace(parent: str, *, port: int = DEFAULT_PORT) -> Path:
     # are 0700 under a 077 umask, and created folders are fchmod-ed to 0700 too.
     previous = os.umask(0o077)
     try:
-        return _init(base, workspace, port)
+        return _init(base, workspace, port, credential_file)
     finally:
         os.umask(previous)
 
 
-def _init(base: Path, workspace: Path, port: int) -> Path:
+def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -> Path:
     import hashlib
 
     with _open_directory(base) as directory:
@@ -441,6 +470,8 @@ def _init(base: Path, workspace: Path, port: int) -> Path:
                 "global_settings": {"browser_writable": True},
                 "experiment_setups": {"browser_creatable": True},
             }
+            if credential_file is not None:
+                skeleton["credential_file"] = credential_file
             _write_once(
                 console, (json.dumps(skeleton, indent=2) + "\n").encode(), label="console.json"
             )
@@ -454,6 +485,12 @@ def _init(base: Path, workspace: Path, port: int) -> Path:
                 raise WorkspaceRefused(
                     "settings/console.json is not a valid console configuration; left unchanged"
                 ) from None
+            existing = resolved.config.credential_file
+            if credential_file is not None and existing != credential_file:
+                raise CredentialFileNotAdded(
+                    f'"credential_file": {json.dumps(credential_file)},',
+                    replaces=existing is not None,
+                )
             if resolved.settings.workspace_root == workspace:
                 for task_id, field in resolved.settings.derived_task_fields():
                     if field in TASK_OUTPUT_PARENTS:
