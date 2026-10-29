@@ -33,7 +33,7 @@ whether referenced manifests, data or plugins exist.
    This is an addition to the console's other required fields. All three paths
    must be explicit absolute paths with existing parents. Restart the console
    after changing its configuration.
-4. Follow **Workflow Editor** from the console, enter its access token and choose
+4. Open the **Workflow** tab of the console, enter its access token and choose
    a project. Select a node to edit a supported binding, or edit task/external
    locations. The Python panel also accepts supported source changes, including
    adding nodes. Click **Save** to validate the graph; a save row opens (with
@@ -75,7 +75,8 @@ and their ports. Viewing alone does not change the file, but the editor can save
    (`ConsoleConfig`, the file passed to the console). Its four keys are exactly
    `project_id`, `project_root`, `source_file` and `recovery_directory`; all paths
    are absolute. Restart the console so it reads the change.
-3. In the console, open **Workflow Editor** and choose the project from step 4.
+3. In the console, open the **Workflow** tab and choose the project from step 4 of
+   the list above.
    The canvas draws the workflow's nodes and their ports.
 
 Caveats:

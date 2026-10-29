@@ -188,7 +188,7 @@ for execution. Preparation and launch are those of any saved source above.
   read it from the task package, never guess. Direction comes from the task's
   metric, never from the declaration. A mismatch refuses at worker admission,
   not at editor Review.
-- If the user edits the loop in the Workflow Editor, re-read `workflow.py`
+- If the user edits the loop in the console's Workflow tab, re-read `workflow.py`
   before changing it; the editor rewrites the file in canonical form.
 - Stop (run-wide, terminal) and Pause (this segment) take effect at the next
   completed-iteration boundary; an acknowledgement is not the outcome. From
@@ -272,13 +272,22 @@ profile. The v1.1.0 workaround is two steps, and the operator must approve each
 paid run:
 
 1. Run A: the literature-judged workflow, with its judge synthesizing the key
-   findings into one review.
-2. Run B: the authored loop. Pass run A's findings as the optional `expert_context`
-   argument of `interpretation-to-proposal` (typed `list[ExpertContextItem]`, schema
-   in `src/agent/schemas/proposal.py`). Build the value with those typed models and
-   confirm its binding in the
-   [worker contract](../../../src/tools/candidate_worker/candidate-worker-contract.md)
-   before launch.
+   findings into one merged review (`synthesize_count: 1`).
+2. Run B: the authored loop. Give run A's merged findings to the proposer as
+   human advice, using one of these two routes:
+   - Declared advice: set `preparation_options.proposal_advice` in run B's
+     `workflow.py` to the findings text. It is the proposal capability's advice
+     (`human_advice` of `interpretation-to-proposal`) and is applied on every
+     iteration. The field is `str | None` (`CandidatePreparationOptions`,
+     `src/workflows/definition/models.py`) with no declared length bound, so keep
+     the text to the findings the user chose and do not paste raw run output.
+   - Resume advice: at a pause, pass the text with `--advice-file`. It is 1 to
+     4000 characters after trimming (`MAX_OPERATOR_ADVICE_CHARS`), is appended after
+     the declared advice, and applies only to the resumed segment.
+
+Do not set `expert_context` for this workaround. For
+`native-interpretation-candidate/v1` it is framework-managed, and reusable
+preparation sets it to `None` (`src/tools/candidate_prepare/reusable_interpretation.py`).
 
 A combined profile is deferred to v1.2. Tell the user this limit when they ask for
 both in one run.
