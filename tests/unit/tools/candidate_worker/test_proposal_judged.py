@@ -12,9 +12,10 @@ import pytest
 
 from tests.helpers.candidate_literature import proposal_judged_request
 from tests.unit.workflows.test_debate_judge import DebateBridge
-from tools.candidate_worker import phases
+from tools.candidate_worker import adaptor_phase, graph, graph_evidence, phases, unit_dispatch
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.workflow_preview import WorkflowPreviewRequest, preview_workflow
+from workflows.definition import AdaptorSource
 
 from .test_literature_adaptors import run, states
 from .test_native import native_runner as native_runner
@@ -101,6 +102,43 @@ def test_a_failed_judge_blocks_every_branch(prepared, native_runner, consumed, m
     assert states(receipt)["rank"] == ("failed", "judge_failure")
     assert consumed == []
     verify_graph_trace(request, parent, receipt)
+
+
+def _swapped_selection(real):
+    """Runtime fault: each judged branch reads the other ranked output (0 <-> 1)."""
+
+    def selected(shape, outcomes, node_id):
+        source = shape.judged_source(node_id)
+        if source is None:
+            return real(shape, outcomes, node_id)
+        index = 1 - source.index
+        outcome = outcomes[source.adaptor]
+        output = next(item for item in outcome.outputs if item.index == index)
+        value = adaptor_phase.adaptor_value(
+            outcome, AdaptorSource(adaptor=source.adaptor, index=index)
+        )
+        return value, output.inputs[0].source.node
+
+    return selected
+
+
+def test_a_swapped_judged_selection_fails_verification(prepared, native_runner, monkeypatch):
+    """Defect: branch 0 implements the other ranked proposal (outputs swapped at runtime),
+    yet the replay accepts it because it never checks which judged output a branch consumed."""
+    bridge = DebateBridge(order=["proposals:2", "proposals:0", "proposals:1"])
+    monkeypatch.setattr("agent.judge.call.bridge_for_route", lambda route: bridge)
+    swapped = _swapped_selection(adaptor_phase.judged_proposal)
+    monkeypatch.setattr(unit_dispatch, "judged_proposal", swapped)
+    monkeypatch.setattr(graph, "judged_proposal", swapped)
+    # Launch replays the same receipt on the same path; bypass only that call so the
+    # replay under test (verify_graph_trace) is the one that refuses the swapped record.
+    monkeypatch.setattr(graph_evidence, "verify_graph_trace", lambda *args, **kwargs: None)
+    request = judged(prepared)
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    monkeypatch.undo()
+    with pytest.raises(ValueError, match="implemented a candidate other than"):
+        verify_graph_trace(request, parent, receipt)
 
 
 def _refused(request, change, match):
