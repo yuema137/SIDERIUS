@@ -391,8 +391,22 @@ analysis run store for each persisted analysis program. Such a call reseeds a
 generator with the program's own constant: the one class of seed not derived
 from `run_seed`.
 
+## RNG census guard
+
+`tests/unit/core/test_rng_census.py` (census in `tests/unit/core/rng_census.py`)
+walks every `src/**/*.py` with the AST, resolving import aliases, and flags:
+`random.<draw|seed|Random>`, `np.random.<legacy draw|seed|default_rng|state>`,
+`torch.<rand*|manual_seed|Generator|…>` and `torch.cuda.manual_seed[_all]`,
+any `secrets.*`, `hash(` in `execute_tools/` or `nodes/`, and a
+`DataLoader(shuffle=…)` without `generator=`. A process entry (`__main__.py`,
+`*_main.py`, a top-level `main()` or a `__main__` guard) that reaches torch,
+directly or through any chain of `src` imports, must call `seed_process`,
+`apply_process_seeds` or `seeded_scope`, or be enumerated with a reason. Every remaining site is listed in
+`ALLOWLIST` / `ENTRY_ALLOWLIST`, keyed by `(module, function, call)` with a
+reason; an unlisted site and a stale entry both fail. The exp-side census
+(task data paths) is E3.
+
 ## Not yet provided
 
 These belong to later #983 PRs:
 
-- The RNG census guard (S8).
