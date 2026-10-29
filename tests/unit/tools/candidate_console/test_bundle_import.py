@@ -213,6 +213,59 @@ def test_fetch_data_refuses_a_group_writable_data_folder(bundle, workspace):
     assert not (root / "data" / "quickstart").exists()
 
 
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "changed_generator",
+        "changed_manifest",
+        "missing_sums",
+        "unlisted_generator",
+        "unlisted_manifest",
+        "symlink_generator",
+    ],
+)
+def test_fetch_verifies_the_bundle_before_executing_task_code(bundle, workspace, damage):
+    """Defect: fetch executes task code before verifying its bundle.
+
+    The import-time marker must stay absent for every integrity refusal, and
+    no data may be written. The marker is initially checksum-listed so damage
+    to other entries proves verification of the entire bundle precedes exec.
+    """
+    from tools.candidate_console.example_bundle import format_sums, parse_sums
+
+    root, _ = workspace
+    marker = root / "generator-executed"
+    generator_name = "task/plugins/_quickstart_task.py"
+    manifest_name = "task/declared/data_manifest.json"
+    plugin = bundle / generator_name
+    plugin.write_text(plugin.read_text() + f"\nPath({str(marker)!r}).write_text('executed')\n")
+    sums = bundle / "SHA256SUMS"
+    files = {name: (bundle / name).read_bytes() for name in parse_sums(sums.read_bytes())}
+    sums.write_bytes(format_sums(files))
+    if damage == "changed_generator":
+        plugin.write_text(plugin.read_text() + "\n# changed\n")
+    elif damage == "changed_manifest":
+        manifest = bundle / manifest_name
+        manifest.write_bytes(manifest.read_bytes() + b"\n")
+    elif damage == "missing_sums":
+        sums.unlink()
+    elif damage.startswith("unlisted_"):
+        del files[generator_name if damage == "unlisted_generator" else manifest_name]
+        sums.write_bytes(format_sums(files))
+    else:
+        outside = root / "generator.py"
+        plugin.rename(outside)
+        plugin.symlink_to(outside)
+
+    result = _fetch(bundle, root)
+
+    assert not marker.exists(), "unverified task code executed"
+    assert result.returncode == 2, result.stderr
+    assert "fetch_data refused:" in result.stderr
+    assert "SHA256SUMS" in result.stderr or "symlink" in result.stderr
+    assert not (root / "data" / "quickstart").exists()
+
+
 def test_read_bundle_accepts_the_trailing_slash_tab_completion_adds(bundle):
     """Defect: ``--from-bundle DIR/`` (as tab completion types it) is refused."""
     from tools.candidate_console.example_bundle import BundleRefused, read_bundle

@@ -40,7 +40,7 @@ version in the zip's name.
 | `setup/setup.json` | The first experiment setup to create: the `single-loop-with-advice` workflow template and its label. It names a template; it holds no workflow code. |
 | `fetch_data.py` | Writes the task's data into your workspace. The data is generated from a fixed seed and checked against `task/declared/data_manifest.json`, so nothing is downloaded. |
 | `console-task.json` | The task ID (`quickstart`) and label the import uses, and for reference the starting time limits and network setting it writes. |
-| `SHA256SUMS` | The SHA-256 of every other file. The import checks it. |
+| `SHA256SUMS` | The SHA-256 of every other file. The data writer and import both check it. |
 
 ## Run the example
 
@@ -52,7 +52,7 @@ version in the zip's name.
 
    This creates `/absolute/downloads/siderius-example-quickstart-<version>/`.
    To check the download yourself, run `sha256sum -c SHA256SUMS` inside it;
-   every line should end in `OK`. Step 4 makes the same check.
+   every line should end in `OK`. Steps 3 and 4 also verify the listed files.
 
 2. Create your private key file and the console workspace. The first command
    creates an empty key file that only you can read (mode `600`; its folder must
@@ -84,6 +84,11 @@ version in the zip's name.
    .venv/bin/python /absolute/downloads/siderius-example-quickstart-<version>/fetch_data.py \
      --workspace /absolute/project/siderius_workspace
    ```
+
+   Before running the task's generator, it checks the bundle's `SHA256SUMS`.
+   A missing or changed file stops the command before task code runs or data
+   is written; unpack the zip again. If you pass `--package`, it must name the
+   `task/` folder inside an unpacked bundle with its own `SHA256SUMS`.
 
    It writes four CSV files to `siderius_workspace/data/quickstart/`, readable
    only by you, and ends with `Data ready in .../data/quickstart`. It refuses a

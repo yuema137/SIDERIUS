@@ -225,6 +225,17 @@ SHA256SUMS; download and unpack the bundle again`, `<path> is missing, a symlink
 unreadable`, `SHA256SUMS line N is not '<sha256>  <path>'`, and invalid
 descriptors (`setup/setup.json is not a valid ... descriptor`).
 
+**Data generation** (`examples/console_bundle/fetch_data.py`, before `add-task`):
+`render_shards` calls `read_bundle` on the selected package's parent before
+executing task code. `--package` must name the `task/` folder in an unpacked
+bundle. The generator (`task/plugins/_quickstart_task.py`) and data manifest
+(`task/declared/data_manifest.json`) must both be listed. Execution and manifest
+parsing use the verified in-memory bytes, without reopening these files.
+Verification failures exit 2 with `fetch_data refused: ...` before task code
+executes or workspace data is written. Generated shard hashes are then checked
+against the verified data manifest before the existing write-once data writer
+runs. No task content, shard hashes or composition fingerprints change.
+
 **Pre-copy checks** (`plan_import`): console.json validates and resolves, has
 `workspace_root`, and `experiment_setups.browser_creatable` is true (else
 refused: the first setup could not be created); `task_id` (`--task-id`, else

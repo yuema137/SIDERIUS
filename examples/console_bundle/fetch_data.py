@@ -5,6 +5,8 @@ Run it with the SIDERIUS checkout's interpreter, after ``init``::
     /path/to/SIDERIUS/.venv/bin/python fetch_data.py \
         --workspace /absolute/project/siderius_workspace
 
+The enclosing bundle's SHA256SUMS is verified before executing task code; only
+the verified generator and data manifest bytes are used.
 The data is generated, not downloaded: the task package's seeded generator
 (``task/plugins/_quickstart_task.py``) renders four CSV shards, and every shard is
 checked against ``task/declared/data_manifest.json`` before anything is written.
@@ -38,20 +40,34 @@ class FetchRefused(ValueError):
     """Nothing unsafe was written; the message names the folder or file."""
 
 
-def _load_generator(package: Path) -> ModuleType:
+def _load_generator(package: Path, source: bytes) -> ModuleType:
     path = package / "plugins" / "_quickstart_task.py"
     spec = importlib.util.spec_from_file_location("siderius_example_quickstart_data", path)
-    if spec is None or spec.loader is None or not path.is_file():
+    if spec is None or spec.loader is None:
         raise FetchRefused(f"{path} is missing; run this from the unpacked bundle")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    exec(compile(source, str(path), "exec"), module.__dict__)
     return module
 
 
 def render_shards(package: Path) -> dict[str, bytes]:
     """``{shard file name: bytes}``, each verified against the package's data manifest."""
-    generator = _load_generator(package)
-    manifest = json.loads((package / "declared" / "data_manifest.json").read_text("utf-8"))
+    from tools.candidate_console.example_bundle import BundleRefused, read_bundle
+
+    package = package.absolute()
+    if package.name != "task":
+        raise FetchRefused("--package must name the task/ folder in an unpacked bundle")
+    try:
+        bundle = read_bundle(str(package.parent))
+    except BundleRefused as error:
+        raise FetchRefused(str(error)) from None
+    generator_name = "task/plugins/_quickstart_task.py"
+    manifest_name = "task/declared/data_manifest.json"
+    for name in (generator_name, manifest_name):
+        if name not in bundle.files:
+            raise FetchRefused(f"SHA256SUMS does not list {name}")
+    generator = _load_generator(package, bundle.files[generator_name])
+    manifest = json.loads(bundle.files[manifest_name])
     expected = manifest["sha256"]
     shards = {}
     for shard in range(generator.SHARD_COUNT):
