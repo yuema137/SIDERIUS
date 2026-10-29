@@ -111,7 +111,8 @@ def replay_llm_strategy(
         raise StrategyError("re-derived strategy outcome differs from the recorded outcome")
     if record.outcome.failure_code == "prompt_too_large":
         pending = next_call(kind, invocation, calls)
-        assert pending is not None  # decide() verified the over-budget pending call
+        if pending is None:
+            raise StrategyError("prompt_too_large outcome has no pending call to replay")
         request = call_request(digest, pending, calls)
         if (
             prompt_chars(pending, request) != record.unsent_prompt_chars
