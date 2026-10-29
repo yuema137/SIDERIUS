@@ -95,14 +95,14 @@ def main() -> int:
     if resolved is None:
         return 2
     config = resolved.config
-    port = urlsplit(config.browser_origin).port
+    browser_port = urlsplit(config.browser_origin).port
     print(f"Console address: {config.browser_origin}")
     print(f"Access token file: {config.auth_token_file}")
     print("  The console asks for this token when you connect, on this machine or remotely.")
     print(f"  Show it with: cat {config.auth_token_file}")
     print("  On this machine: open the console address in your browser.")
     print("  On a remote server: first run on your own computer")
-    print(f"    ssh -N -L {port}:127.0.0.1:{port} YOUR_HOST")
+    print(f"    ssh -N -L 127.0.0.1:{browser_port}:127.0.0.1:{config.port} YOUR_HOST")
     print("  then open the console address there.")
     _print_readiness(workspace_readiness(resolved))
     if args.command == "serve":

@@ -78,7 +78,7 @@
       <ul>
         <li><strong>What it is:</strong> a secret created by init that locks this console, so other users and programs on the same machine cannot start runs or read your data. It is not a model provider API key.</li>
         <li><strong>Where to find it:</strong> in the console-token file printed by init, check and serve (<code>siderius_workspace/settings/console-token</code>). Show it with <code>cat</code> on the machine that runs the console, then paste it here.</li>
-        <li><strong>Local or remote:</strong> on your own computer, open the printed address directly. On a remote server, keep the server running there and open an SSH tunnel from your computer first (<code>ssh -N -L PORT:127.0.0.1:PORT YOUR_HOST</code>), then open the same address locally.</li>
+        <li><strong>Local or remote:</strong> on your own computer, open the printed address directly. On a remote server, keep the server running there and open an SSH tunnel from your computer first (<code>ssh -N -L 127.0.0.1:PORT:127.0.0.1:PORT YOUR_HOST</code>), then open the same address locally.</li>
       </ul>
       <p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p></details>
     <form id="access-form" class="actions"><div class="grow"><label for="token">Console token</label><input id="token" type="password" autocomplete="off" required></div><button type="submit">Connect</button></form>

@@ -178,7 +178,7 @@ def test_init_output_passes_check_with_owner_only_folders(tmp_path, monkeypatch,
 
 @pytest.mark.parametrize("command", ["init", "check", "serve"])
 def test_cli_explains_token_and_access_with_browser_port(command, tmp_path, monkeypatch, capsys):
-    """Defect: access guidance omits the token or uses the bind port for the browser tunnel."""
+    """Defect: access guidance omits the token, or the tunnel does not map the browser port to the server port."""
     config = init_workspace(str(tmp_path), port=8741)
     data = json.loads(config.read_text())
     data["browser_origin"] = "http://127.0.0.1:9842"
@@ -196,7 +196,7 @@ def test_cli_explains_token_and_access_with_browser_port(command, tmp_path, monk
         f"  Show it with: cat {token_file}\n"
         "  On this machine: open the console address in your browser.\n"
         "  On a remote server: first run on your own computer\n"
-        "    ssh -N -L 9842:127.0.0.1:9842 YOUR_HOST\n"
+        "    ssh -N -L 127.0.0.1:9842:127.0.0.1:8741 YOUR_HOST\n"
         "  then open the console address there.\n"
     )
     if command == "init":

@@ -52,7 +52,7 @@ even when using the default models.
      Show it with: cat /absolute/project/siderius_workspace/settings/console-token
      On this machine: open the console address in your browser.
      On a remote server: first run on your own computer
-       ssh -N -L 8740:127.0.0.1:8740 YOUR_HOST
+       ssh -N -L 127.0.0.1:8740:127.0.0.1:8740 YOUR_HOST
      then open the console address there.
    ```
 
@@ -131,11 +131,14 @@ even when using the default models.
    tunnel command on your own computer first:
 
    ```bash
-   ssh -N -L 8740:127.0.0.1:8740 YOUR_HOST
+   ssh -N -L 127.0.0.1:8740:127.0.0.1:8740 YOUR_HOST
    ```
 
-   Then open `http://127.0.0.1:8740` on your own computer. If the local forwarding
-   port differs, configure `browser_origin` to that exact local address before starting the server.
+   Then open `http://127.0.0.1:8740` on your own computer. The first port is the
+   one your browser uses (`browser_origin`); the last is the server's `port` on the
+   remote machine. If you forward a different local port, set `browser_origin` to that
+   exact local address before starting the server; `check` and `serve` print the
+   matching tunnel command.
 5. On the machine running the console, view the token with:
 
    ```bash
