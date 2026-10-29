@@ -228,8 +228,24 @@ def test_advice_file_is_saved_in_the_resume_request_and_invalid_advice_writes_no
     assert status == 0
     saved = CandidateLoopResumeOperation.model_validate_json(output.read_bytes())
     assert saved.request.operator_advice == "Try a smaller hidden width."
+    # A CRLF (Windows) file binds the same text as its LF form.
+    advice.write_bytes(b"First line.\r\nSecond line.\r\n")
+    crlf = tmp_path / "crlf.json"
+    status, _, _ = invoke(
+        monkeypatch,
+        capsys,
+        "write-loop-resume",
+        *args,
+        "--output",
+        str(crlf),
+        "--advice-file",
+        str(advice),
+    )
+    assert status == 0
+    saved = CandidateLoopResumeOperation.model_validate_json(crlf.read_bytes())
+    assert saved.request.operator_advice == "First line.\nSecond line."
     marker = "secret\x1b[31m control"
-    for invalid in (marker.encode(), b"   ", b"\xff\xfe", b"x" * 4001):
+    for invalid in (marker.encode(), b"   ", b"\xff\xfe", b"x" * 4001, b"secret\rcr"):
         advice.write_bytes(invalid)
         refused = tmp_path / "refused.json"
         status, out, err = invoke(
@@ -244,4 +260,4 @@ def test_advice_file_is_saved_in_the_resume_request_and_invalid_advice_writes_no
         )
         assert (status, out, json.loads(err)["code"]) == (2, "", "invalid_input_or_record")
         assert "secret" not in err and not refused.exists()
-    assert len(reviews) == 1
+    assert len(reviews) == 2

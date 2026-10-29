@@ -155,8 +155,9 @@ def write_loop_resume(
     advice = (
         None
         if args.advice_file is None
+        # CRLF files are normalized to LF; a lone CR stays and is refused as a control.
         else OPERATOR_ADVICE.validate_python(
-            Path(args.advice_file).absolute().read_bytes().decode("utf-8")
+            Path(args.advice_file).absolute().read_bytes().decode("utf-8").replace("\r\n", "\n")
         )
     )
     predecessor = UUID(args.operation_id)

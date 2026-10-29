@@ -1560,7 +1560,7 @@ request digests of loops without `request_input` are unchanged.
 ### Resume advice
 
 A Resume may carry operator advice: untrusted text, typed `loop_models.OperatorAdvice`
-(surrounding whitespace removed; 1..4000 characters; no control characters except
+(surrounding whitespace removed; 1..4000 characters; no `Cc`/`Cf` (control or format, e.g. C1, bidi overrides, BOM) characters except
 newline and tab). It is not a reviewed captured input: root captured inputs stay
 unchanged, and the advice travels in the operations request and in the immutable
 `LoopContinuation.operator_advice` (omitted when absent, so advice-free bindings keep

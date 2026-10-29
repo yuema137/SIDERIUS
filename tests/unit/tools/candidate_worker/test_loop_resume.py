@@ -1233,3 +1233,88 @@ def test_resume_advice_reaches_only_the_resumed_proposals_and_tampering_is_refus
         for path, payload in zip(paths, originals, strict=True):
             path.write_bytes(payload)
     assert len(verify_loop(request, launched, resumed.receipt)) == 2
+
+
+def test_resume_without_advice_replaces_earlier_advice_across_three_segments(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """Advice belongs to the segment whose Resume gave it; a later Resume without advice
+    gives none. Fails if the body dispatched by the third (advice-free) segment receives
+    the second segment's advice, or if readback carries earlier advice forward (the
+    resumed receipt would then refuse), or if the ancestry schedule is misread."""
+    from agent.schemas.proposal import ProposalInput
+    from tools.candidate_worker import training
+    from tools.candidate_worker.layout import proposal_input_path
+    from tools.candidate_worker.loop_evidence import verify_loop
+    from tools.candidate_worker.loop_models import ResumeAdvice
+    from tools.candidate_worker.loop_resume import segment_advice
+    from tools.candidate_worker.models import CandidateRunReceipt
+    from workflows.definition.fanout import execution_families
+
+    request = loop_request(prepared, final_iteration=3)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    root_id, advised_id, plain_id = uuid4(), uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+    pause_during = {"iteration_001": root_id, "iteration_002": advised_id}
+
+    def pause_by_slot(self, value):
+        output = real_tune(self, value)
+        for slot, operation_id in pause_during.items():
+            if slot in value.storage.local.workspace:
+                request_loop_pause(config, operation_id)
+        return output
+
+    def resume(predecessor_id, request_id, advice):
+        review = review_loop_resume(config, predecessor_id)
+        submit_operation(
+            config,
+            CandidateLoopResumeOperation(
+                request_id=request_id,
+                request=CandidateLoopResumeRequest(
+                    predecessor_operation_id=predecessor_id,
+                    expected_receipt_digest=review.receipt_digest,
+                    operator_advice=advice,
+                ),
+            ),
+            launch_environment=env,
+        )
+        process_segments()
+        return read_operation(config, request_id)
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_by_slot)
+    submit_operation(
+        config, CandidateOperation(request_id=root_id, request=request), launch_environment=env
+    )
+    process_segments()
+    assert resume(root_id, advised_id, ADVICE).receipt.status == "paused"
+    last = resume(advised_id, plain_id, None)
+    assert last.receipt.status == "completed", last
+    assert last.receipt.loop_trace.attempted_iterations == 3
+    workspace = Path(last.receipt.workspace)
+    proposer = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    ).interpretation.proposal
+
+    def human(iteration):
+        path = proposal_input_path(
+            workspace, request.preview.execution_profile, proposer, iteration=iteration
+        )
+        value = ProposalInput.model_validate_json(path.read_bytes())
+        return [i.content for i in value.expert_context if i.source_ref == "human:human_advice"]
+
+    (declared,) = human(1)
+    assert human(2) == [f"{declared}\n\nOperator advice after body 1:\n{ADVICE}"]
+    assert human(3) == [declared]
+    launched = CandidateRunReceipt.model_validate_json(
+        (workspace / "candidate_run/launch.json").read_bytes()
+    )
+    assert segment_advice(launched, plain_id) == (
+        (1, ResumeAdvice(after_body=1, text=ADVICE)),
+        (2, None),
+    )
+    assert len(verify_loop(request, launched, last.receipt)) == 3

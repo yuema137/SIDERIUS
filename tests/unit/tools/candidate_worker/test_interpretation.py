@@ -298,6 +298,9 @@ def test_resume_advice_composes_after_declared_advice_and_is_absent_without_it()
         ("nul\x00byte", None),
         ("carriage\rreturn", None),
         ("escape\x1b[31m", None),
+        ("c1 csi\x9b2J", None),
+        ("bidi \u202eoverride", None),
+        ("bom\ufeffinside", None),
     ],
 )
 def test_operator_advice_is_trimmed_bounded_and_free_of_control_characters(raw, accepted):

@@ -1,5 +1,6 @@
 """Bounded finite-loop receipt and operation-bound graceful Stop marker."""
 
+import unicodedata
 from typing import TYPE_CHECKING, Annotated, Self
 from uuid import UUID
 
@@ -57,8 +58,9 @@ def _operator_advice(value: str) -> str:
     text = value.strip()
     if not 1 <= len(text) <= MAX_OPERATOR_ADVICE_CHARS:
         raise ValueError(f"operator advice must be 1 to {MAX_OPERATOR_ADVICE_CHARS} characters")
-    if any((ord(char) < 32 and char not in "\n\t") or ord(char) == 127 for char in text):
-        raise ValueError("operator advice may not contain control characters")
+    # Cc covers C0, DEL and C1 (e.g. CSI \x9b); Cf covers bidi overrides and the BOM.
+    if any(unicodedata.category(char) in ("Cc", "Cf") and char not in "\n\t" for char in text):
+        raise ValueError("operator advice may not contain control or format characters")
     return text
 
 

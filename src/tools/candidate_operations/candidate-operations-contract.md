@@ -1222,7 +1222,7 @@ Submit `CandidateLoopResumeOperation(request_id=..., request=CandidateLoopResume
 predecessor_operation_id=..., expected_receipt_digest=review.receipt_digest,
 operator_advice=None))` through `submit_operation`. `operator_advice` is optional
 untrusted text for the resumed segment's proposals (the worker's `OperatorAdvice`:
-surrounding whitespace removed, 1..4000 characters, no control characters except
+surrounding whitespace removed, 1..4000 characters, no `Cc`/`Cf` (control or format) characters except
 newline and tab; invalid advice refuses at validation). It is omitted when absent, so
 advice-free requests keep their bytes and request digest. Reusing a request ID with
 different advice is a `conflict`. Reservation copies it into
@@ -1295,7 +1295,8 @@ admission, refusals and idempotency are the owner's:
 | `write-loop-resume ... --output FILE [--advice-file TEXT_FILE]` | review, then construct the request below | the saved `CandidateLoopResumeOperation` |
 
 `--advice-file` reads UTF-8 operator advice into `operator_advice`. Invalid advice
-(non-UTF-8, empty after trimming, over 4000 characters, control characters) exits 2
+(non-UTF-8, empty after trimming, over 4000 characters, control or format
+characters; CRLF line breaks are first normalized to LF, a lone CR is refused) exits 2
 with `invalid_input_or_record`. It never echoes the text, and nothing is reviewed or
 written. `write-loop-resume` reviews the paused segment and creates `FILE` once; an existing
 file refuses with `output_exists` and is left unchanged, so a retry after a lost
