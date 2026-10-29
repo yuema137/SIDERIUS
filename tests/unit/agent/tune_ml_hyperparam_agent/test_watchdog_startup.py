@@ -1,5 +1,6 @@
 """Invalid watchdog declarations are configuration errors before candidate work."""
 
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -93,3 +94,61 @@ def test_invalid_declaration_refused_by_real_run_before_any_runtime_or_llm(
         agent.run(inp)
     forbidden.assert_not_called()
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("composed", [True, False])
+def test_composed_single_file_run_on_a_non_tidmad_profile_refused_before_effects(
+    composed, tmp_path, monkeypatch
+):
+    """Defect: with is_trial false every round is single_file, which trains on one
+    TIDMAD file; a composed non-TIDMAD task then spends planner calls on attempts that
+    can never train. The real run() must refuse at startup, naming the cause, for every
+    entry point (fails if the startup check is removed or ignores the profile)."""
+    from importlib import import_module
+
+    from agent.schemas.hyperparam_tuning import TaskCompositionRef
+    from execute_tools.dataset_config import bind_dataset_profile
+    from workflows.task_composition import compose_dataset_profile_from_manifest
+
+    node = import_module("nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent")
+    forbidden = Mock(side_effect=AssertionError("startup reached effectful work"))
+    monkeypatch.setattr(node, "_run_skill", forbidden)
+    monkeypatch.setattr(node, "run_bound_model_io_contract", forbidden)
+    monkeypatch.setattr(node, "resolve_bound_task_data_path", forbidden)
+    ref = TaskCompositionRef(
+        semantic_fingerprint="quickstart-fixture",
+        task_data_path_id="quickstart_tabular",
+        task_health_binding=None,
+    )
+    inp = _input(
+        is_trial=False,
+        runtime_watchdog_enabled=False,
+        task_composition_ref=ref if composed else None,
+        storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r"}},
+    )
+    root = Path(__file__).resolve().parents[4]
+    profile = compose_dataset_profile_from_manifest(
+        str(root / "configs/task_composition/quickstart.yaml")
+    )
+    agent = HyperparamTuningAgent(bridge_factory=forbidden, sandbox_factory=forbidden)
+    with bind_dataset_profile(profile):
+        if composed:
+            with pytest.raises(ValueError, match="declares no TIDMAD topology"):
+                agent.run(inp)
+        else:
+            # Un-composed runs keep their legacy path: startup moves on to the next owner.
+            with pytest.raises(AssertionError, match="effectful work"):
+                agent.run(inp)
+    assert not list(tmp_path.iterdir())
+
+
+def test_tidmad_profile_keeps_single_file_mode():
+    """TIDMAD (paper) behavior is unchanged: is_trial false with TIDMAD topology passes."""
+    from agent.schemas.hyperparam_tuning import TaskCompositionRef
+    from execute_tools.dataset_config import TIDMAD_PROFILE
+    from nodes.ml_hyperparameter_tune_agent.runtime import validate_training_mode_startup
+
+    ref = TaskCompositionRef(
+        semantic_fingerprint="tidmad", task_data_path_id="tidmad", task_health_binding=None
+    )
+    validate_training_mode_startup(_input(is_trial=False, task_composition_ref=ref), TIDMAD_PROFILE)

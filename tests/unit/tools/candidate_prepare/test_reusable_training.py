@@ -38,6 +38,8 @@ SETTINGS = {
         "train_portion": 0.3,
         "healthgate_mode": "observe_only",
         "result_authority": "diagnostic",
+        # Trial/formal mode: single_file (is_trial false) cannot train this non-TIDMAD task.
+        "is_trial": True,
         "workflow_parameter_rules": {
             "rules": {
                 "train_config.epochs": {"range": {"min": 1, "max": 3}},

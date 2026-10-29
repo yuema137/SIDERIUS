@@ -44,6 +44,8 @@ def training_request(prepared):
     launch = {
         "healthgate_mode": "observe_only",
         "result_authority": "diagnostic",
+        # Trial/formal mode: single_file (is_trial false) cannot train this non-TIDMAD task.
+        "is_trial": True,
         "allowed_output_types": ["classifier"],
         "trial_time_budget_minutes": 7.0,
         "formal_time_budget_minutes": 19.0,

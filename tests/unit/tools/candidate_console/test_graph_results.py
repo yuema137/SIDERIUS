@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import pytest
@@ -95,3 +96,70 @@ def test_graph_results_schema_invalid_record_yields_integrity_refusal(monkeypatc
         _body_result(iteration=1, tuning=tuning)
     assert refused.value.detail.code == "integrity"
     assert str(record_path) not in refused.value.detail.message
+
+
+def _summary(
+    status: Literal["completed", "partial", "failed"], completed_rounds: int, termination: str
+) -> GraphRunSummary:
+    return GraphRunSummary(
+        run_name="fixture",
+        model_type="test-model",
+        status=status,
+        termination_reason=termination,
+        started_at="2026-01-01T00:00:00Z",
+        finished_at="2026-01-01T00:00:01Z",
+        completed_rounds=completed_rounds,
+        total_attempts=9,
+        metric=None,
+        metric_source="unavailable",
+        ranking_refusal=None,
+        secondary_metrics=(),
+        headline=RunHeadline(
+            best_exp_id=None,
+            best_score=None,
+            best_formal_score=None,
+            best_valid_exp_id=None,
+            best_valid_score=None,
+            best_valid_formal_score=None,
+        ),
+        status_counts={},
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "rounds", "termination", "expected"),
+    [
+        ("partial", 0, "aborted_fail_rounds", "No training round completed: 0 completed rounds"),
+        # Even a record that says completed with no round must not read as a success.
+        ("completed", 0, "completed", "No training round completed:"),
+        ("partial", 2, "wall_clock_budget", "Not completed (tuner status partial): 2 completed"),
+        ("completed", 1, "max_rounds", "Completed: 1 completed round in 9 attempts"),
+    ],
+)
+def test_body_outcome_comes_from_the_tuner_record_not_the_node_state(
+    monkeypatch, tmp_path, status, rounds, termination, expected
+):
+    """Defect: Monitor showed the graph node state 'succeeded' for a tuner that completed
+    0 of 10 rounds (every attempt refused). The body outcome must be projected from the
+    tuner record and never claim completion without a completed round (fails if the
+    outcome is dropped or derived from tuning_state)."""
+    from tools.candidate_console import graph_results
+    from tools.candidate_worker.graph_models import GraphNodeEvidence
+
+    summary = _summary(status, rounds, termination)
+    monkeypatch.setattr(graph_results, "_verified_record", lambda path, digest: None)
+    monkeypatch.setattr(graph_results, "_summary", lambda output, path: summary)
+    tuning = GraphNodeEvidence(
+        node_id="tuning",
+        capability="tuning",
+        predecessors=(),
+        storage=str(tmp_path),
+        state="succeeded",
+        record_path=str(tmp_path / "record.json"),
+        record_sha256="0" * 64,
+    )
+    body = graph_results._body_result(iteration=1, tuning=tuning)
+    assert body.outcome is not None and body.outcome.startswith(expected)
+    assert termination.replace("_", " ") in body.outcome
+    if rounds == 0:
+        assert "Completed" not in body.outcome and "succeeded" not in body.outcome

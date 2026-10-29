@@ -229,6 +229,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _time_skip_memory_extra,
     _vram_skip_memory_extra,
     is_evidence_refusal,
+    validate_training_mode_startup,
     validate_watchdog_startup,
 )
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
@@ -759,6 +760,8 @@ class HyperparamTuningAgent:
                 agent_input.storage.local.run_name, field="storage.local.run_name"
             )
         validate_watchdog_startup(agent_input)
+        # Same profile the run resolves below; it has no failure mode of its own.
+        validate_training_mode_startup(agent_input, resolve_dataset_profile())
 
         from execute_tools.evaluation_execution import candidate_evaluation_executor
         from execute_tools.model_output_retention import require_local_output_inventory

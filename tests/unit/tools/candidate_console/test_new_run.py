@@ -364,3 +364,34 @@ def test_new_run_seed_reaches_the_admitted_preparation_and_blank_keeps_bytes(fre
     )
     with pytest.raises(OperationFailure, match="retained selection"):
         adapter.prepare("fresh", changed)
+
+
+def _tidmad_topology_manifest(tmp_path):
+    """A manifest whose dataset profile carries TIDMAD topology (the shipped profile)."""
+    import json
+
+    from execute_tools.dataset_config import TIDMAD_PROFILE
+
+    (tmp_path / "profile.json").write_text(json.dumps(TIDMAD_PROFILE.model_dump(mode="json")))
+    manifest = tmp_path / "task.yaml"
+    manifest.write_text(
+        "task_data_path: {}\ndataset_profile: {config: profile.json}\n"
+        "metric: {}\ntask_health: {}\ntask_config: {}\n"
+    )
+    return str(manifest)
+
+
+def test_review_refuses_single_file_mode_for_a_task_without_tidmad_topology(tmp_path):
+    """Defect: the console route resolves is_trial false, so a composed non-TIDMAD task
+    reaches single_file rounds that load a TIDMAD file and never train; Review must
+    refuse before preparation (fails if check_trainable_launch ignores is_trial)."""
+    from tools.candidate_console.reusable_preparation import check_trainable_launch
+
+    quickstart, _ = copy_quickstart_package(tmp_path / "task")
+    with pytest.raises(OperationFailure, match="is_trial to true") as raised:
+        check_trainable_launch(_training_document(), task_manifest=str(quickstart))
+    assert raised.value.detail.code == "launch_policy"
+    check_trainable_launch(_training_document(is_trial=True), task_manifest=str(quickstart))
+    # A TIDMAD-topology profile keeps its single-file path: is_trial false stays admitted.
+    tidmad = _tidmad_topology_manifest(tmp_path)
+    check_trainable_launch(_training_document(), task_manifest=tidmad)

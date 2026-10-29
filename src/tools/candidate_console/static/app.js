@@ -14,7 +14,9 @@
   function observedLine(id, status, final) {
     const element = document.getElementById('operation-observed');
     const at = status?.observed_at;
-    say('operation-observed', (final ? 'Final status · observed ' : 'Observed ') + (at ? localTime(at) : 'unavailable'));
+    // A paused loop is a settled read, not a final one: it may still be resumed.
+    const label = !final ? 'Observed ' : status?.native_status === 'paused' ? 'Paused · observed ' : 'Final status · observed ';
+    say('operation-observed', label + (at ? localTime(at) : 'unavailable'));
     if (at) element.title = 'Operation ' + id + ' · ' + at; else element.title = 'Operation ' + id;
   }
   const say = (id, value) => { if (document.getElementById(id).textContent !== value) document.getElementById(id).textContent = value; };

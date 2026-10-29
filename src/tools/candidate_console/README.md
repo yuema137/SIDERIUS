@@ -143,7 +143,10 @@ overwrites an existing `tasks/` folder.
    running console reads `console.json` only when it starts.
 
    **GPU runs.** List the GPU's device node (for example `/dev/nvidia0`) in the
-   task's `candidate_devices`; that is the only GPU setting. When a run's device
+   task's `candidate_devices` to give its runs a GPU. Inside the run sandbox,
+   starting each GPU training or inference phase also needs evidence that the GPU
+   has enough free memory; the framework's GPU admission handles that, and listing
+   the device does not by itself prove it. When a run's device
    list contains a `/dev/nvidia<N>` node, the run sandbox itself also mounts the
    host's `/sys` read-only and passes the NVIDIA control nodes this machine has
    (`/dev/nvidiactl`, `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`,
@@ -316,6 +319,10 @@ overwrites an existing `tasks/` folder.
    token table, or Activity and logs when needed. When a workflow run has
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.
+   **Train & tune node execution** only says the node ran; **Train & tune outcome**
+   says what training achieved, for example "No training round completed: 0
+   completed rounds in 9 attempts …" when every attempt was refused or failed.
+   A paused loop's status line reads **Paused · observed …**, not **Final status**.
    A running authored research loop shows **Stop at next boundary**: the current
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
@@ -886,8 +893,11 @@ task; choose an installed planner strategy explicitly in the external LLM profil
 (for example the native `tune.planner_strategy: native-timing-v1`). The example's
 budgets and diagnostic settings are demonstration choices, not scientific defaults.
 
-Select **fit / tuning** in Workflow. The small inspector edits trial/formal
-budget minutes, epoch ceilings, portions and retention flags. Open **Training
+Select **fit / tuning** in Workflow. The small inspector edits **Trial/formal mode**
+(`is_trial`), trial/formal budget minutes, epoch ceilings, portions and retention
+flags. Keep **Trial/formal mode** on, as the templates and the command line do: with
+it off, every round uses single-file mode, which only a task with TIDMAD topology can
+train in, so Run review refuses such a run for any other task before it calls a model. Open **Training
 settings** (collapsed, with the number of changed fields). **Default** removes the
 key; **None** explicitly stores null where supported. Empty numbers block review;
 zero is validated by the native owner. There is no seed setting here: each run gets

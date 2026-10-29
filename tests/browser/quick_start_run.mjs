@@ -2,7 +2,7 @@
  * runnable legacy project; Quick start itself is quick_start.mjs), then Run. With the launch policy unset in the Train & tune inspector, the
  * field is marked required and the Run page's Check inputs refuses with the launch
  * policy owner's message before anything is prepared; with the template's declared
- * pair (Record only / Diagnostic) Check inputs passes and the launched run gets past
+ * pair (Block on failure / Diagnostic, trial/formal mode) Check inputs passes and the launched run gets past
  * training admission. Offline fixture provider and training runner; no paid API. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -77,9 +77,9 @@ try {
   await page.locator('#circuit-node-train').click();
   const policy = page.locator('#editor-training-policy');
   await policy.waitFor();
-  assert.equal(await policy.locator('[data-training-choice="healthgate_mode"]').inputValue(), 'observe_only');
+  assert.equal(await policy.locator('[data-training-choice="healthgate_mode"]').inputValue(), 'blocking');
   assert.equal(await policy.locator('[data-training-choice="result_authority"]').inputValue(), 'diagnostic');
-  assert.equal(await policy.locator('[data-training-choice="healthgate_mode"] option:checked').textContent(), 'Record only');
+  assert.equal(await policy.locator('[data-training-choice="healthgate_mode"] option:checked').textContent(), 'Block on failure');
   // Unset reads as a problem on the field.
   await policy.locator('[data-training-choice="healthgate_mode"]').selectOption('');
   assert.match(await policy.locator('[data-training-choice-field="healthgate_mode"] .field-error').textContent(), /Required: choose one/);
@@ -107,10 +107,10 @@ try {
   const operations = async () => { try { return (await readdir(join(metadata.state, 'operations'))).length; } catch { return 0; } };
   assert.equal(await operations(), 0, 'A refused review prepares nothing');
 
-  // Choose Record only again (the template's pair), save, and run.
+  // Choose Block on failure again (the template's pair), save, and run.
   await view('workflow');
   await page.locator('#circuit-node-train').click();
-  await page.locator('#editor-training-policy [data-training-choice="healthgate_mode"]').selectOption('observe_only');
+  await page.locator('#editor-training-policy [data-training-choice="healthgate_mode"]').selectOption('blocking');
   assert.equal(await page.locator('[data-training-choice-field="healthgate_mode"] .field-error').textContent(), '');
   await save();
   // B8-2: record every preparation status line; none may claim a finished failure.

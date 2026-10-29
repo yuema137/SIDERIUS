@@ -56,7 +56,10 @@ try {
       total_attempts: 3, metric: {metric_id: 'example_score', direction: 'higher', verb: 'maximize', comparative: 'higher', antonym: 'lower'},
       metric_source: 'run_output_metric_spec', ranking_refusal: null, secondary_metrics: [], headline: headline(iteration * 4, `exp-${iteration}`),
       status_counts: {success: 3},
-    }, ...(iteration === 2 ? {skipped: [{node_id: 'build1', reason: 'route_not_selected'}]} : {})}))});
+    }, ...(iteration === 2 ? {skipped: [{node_id: 'build1', reason: 'route_not_selected'}],
+      // The node executed, but the tuner record says no round completed: the outcome row,
+      // not the node state, carries that (a 0-round body must never read as succeeded).
+      outcome: 'No training round completed: 0 completed rounds in 9 attempts (tuner status partial; ended by aborted fail rounds).'} : {})}))});
     return reply({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture', state: 'completed',
       process: {status: 'exited', reason: 'observed'}, finishing: false, receipt_available: true, native_status: 'completed',
       native_id: 'fixture-run', validation_passed: true, reason: 'native_terminal'});
@@ -75,7 +78,10 @@ try {
   assert.ok(await panel.getByText('body-1', {exact: true}).count());
   assert.ok(await panel.getByText('body-2', {exact: true}).count());
   assert.ok(await panel.getByText('Best score').count());
-  assert.equal(await panel.getByText('Train & tune state', {exact: true}).count(), 2, 'stage uses the paper capability label');
+  assert.equal(await panel.getByText('Train & tune node execution', {exact: true}).count(), 2, 'stage uses the paper capability label and names node execution, not outcome');
+  assert.equal(await panel.getByText('Train & tune state', {exact: true}).count(), 0, 'node state is not presented as the tuning outcome');
+  assert.equal(await panel.getByText('Train & tune outcome', {exact: true}).count(), 1, 'only the body with a tuner outcome shows the outcome row');
+  assert.ok(await panel.getByText(/^No training round completed: 0 completed rounds in 9 attempts/).count(), 'the 0-round outcome is shown verbatim');
   assert.equal(await panel.locator('.graph-result-body').count(), 2, 'per-body summaries remain separate');
   assert.equal(requests.filter(item => item.path.endsWith('/graph-results')).length, 1, 'results are read once after terminal status');
   assert.equal(await panel.locator('.graph-result-skipped').count(), 1, 'only the routed body lists skipped nodes');
