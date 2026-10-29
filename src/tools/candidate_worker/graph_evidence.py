@@ -299,7 +299,7 @@ def verify_graph_trace(
     ):
         raise ValueError("graph output index mismatch")
     if shape.proposal_selection is not None:
-        verify_judged_branches(request, trace, outcomes, iteration=iteration)
+        verify_judged_branches(request, initial, trace, outcomes, iteration=iteration)
     if shape.tuning is not None:
         verify_graph_training(
             request,
@@ -621,22 +621,27 @@ def verify_graph_training(
 
 def verify_judged_branches(
     request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
     trace: GraphTrace,
     outcomes: "Mapping[str, AdaptorOutcome]",
     *,
     iteration: int,
 ) -> None:
-    """Replay which ranked output each judged branch consumed (``native-proposal-judged/v1``).
+    """Replay which ranked output and seed owner each judged branch consumed.
 
     The runtime selects a branch's proposal and seed owner through
-    ``adaptor_phase.judged_proposal``. This re-derives that selection from the verified
-    adaptor outcomes and checks the branch's recorded candidate ids against it.
+    ``adaptor_phase.judged_proposal``. The implementation record stamps the digest of the
+    proposal and seed it ran on; this recomputes that digest from the verified adaptor
+    value and the owner's persisted seed. Content binding works for merged outputs,
+    which carry no candidate_id.
     """
     from agent.schemas.implementor import ImplementorOutput
-    from agent.schemas.proposal import ProposalOutput
+    from agent.schemas.proposal import ProposalInput, ProposalOutput
     from agent.schemas.validator import ValidatorOutput
 
     from .adaptor_phase import judged_proposal
+    from .inputs import consumed_input_sha256
+    from .layout import proposal_input_path
 
     shape = execution_families(
         request.preview.document.definition, request.preview.execution_profile
@@ -656,19 +661,20 @@ def verify_judged_branches(
         implemented = ImplementorOutput.model_validate_json(
             read_graph_control(Path(implementation_path))
         )
-        if implemented.candidate_id != ranked.candidate_id:
-            raise ValueError(
-                f"judged branch {implementation} implemented a candidate other than "
-                f"adaptor {source.adaptor} output {source.index}"
+        owner_seed = ProposalInput.model_validate_json(
+            read_graph_control(
+                proposal_input_path(
+                    Path(initial.workspace),
+                    request.preview.execution_profile,
+                    owner,
+                    iteration=iteration,
+                )
             )
-        owner_path = nodes[owner].record_path
-        if owner_path is None:
-            raise ValueError(f"judged branch {implementation} seed owner {owner} has no record")
-        produced = ProposalOutput.model_validate_json(read_graph_control(Path(owner_path)))
-        if produced.candidate_id != ranked.candidate_id:
+        )
+        if implemented.consumed_input_sha256 != consumed_input_sha256(owner_seed, ranked):
             raise ValueError(
-                f"judged branch {implementation} seed owner {owner} does not own "
-                f"adaptor {source.adaptor} output {source.index}"
+                f"judged branch {implementation} consumed a proposal or seed other than "
+                f"adaptor {source.adaptor} output {source.index} of owner {owner}"
             )
         validation_path = nodes[validation].record_path
         if validation_path is not None:

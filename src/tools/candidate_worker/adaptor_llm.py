@@ -13,10 +13,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel
+
 from agent.judge import call as judge_call
 from agent.judge.call import JudgeRunContext
 from agent.schemas.judge import JudgeRoutes
 from agent.schemas.judge_task import JudgeTaskDeclarations, RubricRefError, resolve_rubric_ref
+from agent.schemas.proposal import ProposalOutput, mint_candidate_id
 from core.run_invariants import load_run_invariants
 from workflows.adaptors import (
     AdaptorInputRef,
@@ -357,15 +360,26 @@ def _ranked(kind: str, ranking: ItemRanking, admissible: tuple[AdaptorItem, ...]
     )
 
 
+def _identified(value: BaseModel, content_sha256: str) -> BaseModel:
+    if isinstance(value, ProposalOutput):
+        return value.model_copy(update={"candidate_id": mint_candidate_id(content_sha256)})
+    return value
+
+
 def _synthesized(
     kind: str, combined: CombinedItems, admissible: tuple[AdaptorItem, ...]
 ) -> Combined:
-    """New values, re-validated by their native type, with their parents as lineage."""
+    """New values, re-validated by their native type, with their parents as lineage.
+
+    A synthesized ``proposal.output`` gets its system identity here, at the adaptor
+    boundary and before any implementation: ``mint_candidate_id`` of the value's
+    canonical digest (the B2 evidence keeps the author-unset value).
+    """
     refs = {_item_id(item.ref): item.ref for item in admissible}
     value_type = native_type(combined.contract)
     units = tuple(
         Unit(
-            value=value_type.model_validate(item.value),
+            value=_identified(value_type.model_validate(item.value), item.value_sha256),
             element_contract=combined.contract,
             inputs=tuple(refs[parent] for parent in item.parents),
             role="synthesized",

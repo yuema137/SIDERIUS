@@ -238,6 +238,14 @@ class ImplementorInput(BaseModel):
     which maps ProposalOutput → ImplementorInput.
     """
 
+    consumed_input_sha256: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Worker-stamped digest of the proposal and seed a judged branch's "
+        "implementation runs on (inputs.consumed_input_sha256; native-proposal-judged/v1 only). "
+        "The node echoes it into the output record. Absent elsewhere.",
+    )
+
     constraint_context: ConstraintContext | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -480,6 +488,13 @@ class ImplementorOutput(BaseModel):
         description="V21 PR E — echoed verbatim from ImplementorInput. "
         "Observational join identity only (O-E-5); None = pre-PR-E or "
         "non-proposer candidate.",
+    )
+    consumed_input_sha256: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Worker-stamped digest of the proposal and seed this implementation consumed "
+        "(canonical JSON of the proposal and ProposalInput). Judged-branch replay compares it "
+        "with the adaptor-selected value and its owner seed; absent for other records.",
     )
     model_type: str = Field(
         description="The PLUGIN_MODEL_TYPE key written into the plugin file. "

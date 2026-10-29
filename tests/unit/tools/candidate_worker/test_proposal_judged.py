@@ -137,8 +137,115 @@ def test_a_swapped_judged_selection_fails_verification(prepared, native_runner, 
     receipt, parent = run(request)
     assert receipt.status == "accepted", receipt.error
     monkeypatch.undo()
-    with pytest.raises(ValueError, match="implemented a candidate other than"):
+    with pytest.raises(ValueError, match="consumed a proposal or seed other than"):
         verify_graph_trace(request, parent, receipt)
+
+
+def _other_owner_seed(real):
+    """Runtime fault: the branch runs on the seed of the other branch's owner."""
+
+    def selected(shape, outcomes, node_id):
+        selected = real(shape, outcomes, node_id)
+        if selected is None:
+            return None
+        value, _owner = selected
+        for implementation, _validation in shape.branches:
+            if implementation != node_id and shape.judged_source(implementation) is not None:
+                _, other = real(shape, outcomes, implementation)
+                return value, other
+        raise AssertionError("two judged branches are required")
+
+    return selected
+
+
+def test_a_branch_run_on_another_owners_seed_fails_verification(
+    prepared, native_runner, monkeypatch
+):
+    """Defect: a branch implements its ranked proposal but on the seed of another proposal
+    owner (the seed swap in graph dispatch is removed or misdirected); replay accepts it."""
+    bridge = DebateBridge(order=["proposals:2", "proposals:0", "proposals:1"])
+    monkeypatch.setattr("agent.judge.call.bridge_for_route", lambda route: bridge)
+    monkeypatch.setattr(graph, "judged_proposal", _other_owner_seed(adaptor_phase.judged_proposal))
+    monkeypatch.setattr(graph_evidence, "verify_graph_trace", lambda *args, **kwargs: None)
+    request = judged(prepared)
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    monkeypatch.undo()
+    with pytest.raises(ValueError, match="consumed a proposal or seed other than"):
+        verify_graph_trace(request, parent, receipt)
+
+
+class ProposalMergeBridge:
+    """Merges by returning one proposal record a proposal node persisted, with every
+    framework-owned field left unset (the author contract of ``proposal.output``)."""
+
+    def __init__(self, workspace: Path) -> None:
+        self.workspace = workspace
+        self.calls: list[str] = []
+
+    def set_run_context(self, **kwargs) -> None:
+        pass
+
+    def generate(self, system_prompt: str, user_prompt: str, *, label: str):
+        self.calls.append(label)
+        facts = json.loads(user_prompt.split("Facts (JSON):\n", 1)[1])
+        record = next(self.workspace.rglob("graph_instances/propose0/**/proposal_*.json"))
+        value = json.loads(record.read_bytes())
+        for field in (
+            "candidate_id",
+            "observed_prediction_reference",
+            "preflight_estimated_minutes",
+            "preflight_factor",
+        ):
+            value[field] = None
+        value["proposed_discoveries"] = []
+        parents = [item["item_id"] for item in facts["items"]]
+        return {
+            "kind": "synthesis",
+            "items": [{"parents": parents, "value": value}],
+            "rationale": "fixture",
+        }
+
+
+def test_a_merged_proposal_gets_a_replayable_system_identity_and_verifies(
+    prepared, native_runner, consumed, monkeypatch
+):
+    """Defect: a judge-merge proposal (no LLM candidate_id) is refused by the validation
+    join, gets a non-deterministic identity that replay cannot reproduce, or its branch
+    implements another proposal."""
+    from agent.schemas.proposal import mint_candidate_id
+
+    workspace = Path(prepared.preview.document.definition.task.workspace)
+    bridge = ProposalMergeBridge(workspace)
+    monkeypatch.setattr("agent.judge.call.bridge_for_route", lambda route: bridge)
+    merge = {
+        "kind": "judge-merge/v1",
+        "route_slot": "aggregate",
+        "max_calls": 1,
+        "guidance": "none",
+        "criterion": "Merge the proposals into one.",
+        "synthesize_count": 1,
+        "min_parents": 2,
+    }
+    request = judged(
+        prepared,
+        combine=merge,
+        select={"kind": "all/v1"},
+        distribute={"kind": "single/v1"},
+    )
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    record = json.loads(Path(receipt.graph_trace.adaptors[0].record_path).read_bytes())
+    output = record["outputs"][0]
+    expected = mint_candidate_id(
+        json.loads(next(workspace.rglob("**/rank.judge/strategy.json")).read_bytes())["outcome"][
+            "combined"
+        ]["items"][0]["value_sha256"]
+    )
+    assert output["status"] == "emitted"
+    assert [cid for _, cid, _ in consumed] == [expected]
+    assert expected not in candidate_ids(receipt).values()
+    verify_graph_trace(request, parent, receipt)
 
 
 def _refused(request, change, match):
