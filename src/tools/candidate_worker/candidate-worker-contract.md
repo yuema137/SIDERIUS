@@ -126,12 +126,12 @@ boundary, and this extraction adds no executable authored-graph topology or
 new setup behavior.
 
 The proposer returns its own candidate ID. The worker checks implementation-bound
-schema eligibility, output types and generated name before implementation. The
-worker loads no earlier experiment's source as reference code, so it removes
-experiment-source `inherited_components` claims (printing which ones to the run
-log) and implements from the proposal's own specification; human and
-external-agent claims are kept. A later loop body naming an earlier body's model
-therefore proceeds instead of failing the run. The existing isolation
+schema eligibility, output types and generated name before implementation.
+Experiment-source `inherited_components` claims are kept as the proposer wrote
+them; as in the native exploration loop they are optional reference context.
+The worker loads no earlier experiment's source, and the validator reports a
+claim the implementation does not carry as unverified, so a later loop body
+that names an earlier body's model proceeds. The existing isolation
 policy applies when the native seed requests it. `local_full_spec` constructs
 implementation input; managed model/test/loss directories and task/advice/hardware
 context are added through existing helpers. `local_all_fields` constructs the

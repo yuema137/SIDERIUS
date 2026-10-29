@@ -1,58 +1,47 @@
-"""A later loop body may name an earlier experiment; the worker must not crash on it.
+"""A later loop body may name an earlier experiment; the worker must not fail on it.
 
 Release-gate run 25e91f63 failed at body 2 with "fresh candidate worker cannot
 restore inherited experiment source" when the proposer built on body 1's model.
 """
 
-from agent.schemas.hyperparam_tuning import ExpertAdvice
-from agent.schemas.proposal import InheritedComponent, ProposalOutput
-from tools.candidate_worker.phases import drop_experiment_inheritance
+import json
+from pathlib import Path
+
+from tools.candidate_worker import launch_candidate
+
+from .conftest import refresh
+from .test_native import native_runner as native_runner
+
+CLAIM = {
+    "component": "hidden_width",
+    "source_type": "experiment",
+    "source_id": "compact_tanh_mlp",
+    "contribution_evidence": "Body 1 learned the boundary with this width.",
+}
 
 
-def _component(source_type: str, source_id: str) -> InheritedComponent:
-    return InheritedComponent(
-        component="hidden_width",
-        source_type=source_type,
-        source_id=source_id,
-        contribution_evidence="Carried over from an earlier finding.",
-    )
+def test_experiment_inheritance_claim_is_kept_and_the_candidate_runs(
+    prepared, native_runner, monkeypatch
+):
+    from agent.schemas.proposal import InheritedComponent
+    from nodes.ml_model_proposal_agent.ml_model_proposal_agent import MLModelProposalAgent
 
+    original = MLModelProposalAgent.run
 
-def _proposal(*components: InheritedComponent) -> ProposalOutput:
-    return ProposalOutput(
-        model_name="structured_feature_mlp",
-        output_type="classifier",
-        model_description="Second-body proposal.",
-        mathematical_definition="MLP over engineered features.",
-        motivation="Build on body 1.",
-        expert_advice=ExpertAdvice(
-            focus_areas=["capacity"],
-            constraints=["tiny"],
-            known_failures=[],
-            suggested_directions=["wider hidden layer"],
-            rationale="Fixture.",
-        ),
-        baseline_config={
-            "model_config": {"hidden": 16},
-            "train_config": {"lr": 1e-3, "epochs": 1, "batch_size": 4},
-            "loss_config": {"loss_type": "focal"},
-        },
-        inherited_components=list(components),
-    )
+    def run_with_claim(self, seed):
+        # The native proposer writes its record and returns the same object; a
+        # causal-stage claim reaches both. Reproduce that with one added claim.
+        proposal = original(self, seed)
+        proposal = proposal.model_copy(
+            update={"inherited_components": [InheritedComponent.model_validate(CLAIM)]}
+        )
+        record = Path(seed.storage.local.workspace) / f"proposal_{seed.storage.local.run_name}.json"
+        record.write_text(proposal.model_dump_json(indent=2))
+        return proposal
 
+    monkeypatch.setattr(MLModelProposalAgent, "run", run_with_claim)
+    receipt = launch_candidate(refresh(prepared))
 
-def test_experiment_claims_are_removed_and_other_sources_kept(capsys):
-    human = _component("human", "human:instruction_1")
-    proposal = _proposal(_component("experiment", "compact_tanh_mlp"), human)
-
-    kept = drop_experiment_inheritance(proposal)
-
-    assert kept.inherited_components == [human]
-    assert "compact_tanh_mlp" in capsys.readouterr().out
-    assert proposal.inherited_components[0].source_type == "experiment"
-
-
-def test_a_proposal_without_experiment_claims_is_returned_unchanged():
-    proposal = _proposal(_component("human", "human:instruction_1"))
-
-    assert drop_experiment_inheritance(proposal) is proposal
+    assert receipt.status == "accepted", receipt.error
+    proposal = json.loads(Path(receipt.native_output_paths[0]).read_text())
+    assert [item["source_id"] for item in proposal["inherited_components"]] == ["compact_tanh_mlp"]
