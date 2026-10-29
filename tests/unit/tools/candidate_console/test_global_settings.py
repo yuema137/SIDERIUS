@@ -312,3 +312,36 @@ def test_native_admission_refuses_protected_read_only_inputs(selection, tmp_path
     secret = Path(selection.data_root) / "token"
     with pytest.raises(ValueError, match="overlaps a protected path"):
         admit(selection, protected=(secret,))
+
+
+@pytest.mark.parametrize(
+    ("settings", "named"),
+    [
+        (
+            {"data_folders": {"SECRET/../x": {"root_id": "workspace", "subpath": "a"}}},
+            "data_folders[0].[key]",
+        ),
+        (
+            {"data_folders": {"synthetic": {"root_id": "workspace", "subpath": "a", "SECRET": 1}}},
+            "data_folders[0].<key>",
+        ),
+        (
+            {
+                "data_folders": {
+                    "synthetic": {"root_id": "workspace", "subpath": "a"},
+                    "SECRETTASK": {"root_id": "workspace", "subpath": 3},
+                }
+            },
+            "data_folders[1].subpath",
+        ),
+        ({"SECRETTOP": 1}, "at <key>"),
+    ],
+)
+def test_settings_errors_locate_entries_without_echoing_file_text(
+    settings, named, workspace, monkeypatch, capsys
+):
+    """Defect: a schema error repeats a key from the file, or cannot say which entry or
+    whether the key or a field inside it is wrong."""
+    _write_settings(workspace, **settings)
+    code, err = _main(monkeypatch, capsys, "check", "--config", str(_console(workspace)))
+    assert code == 2 and named in err and "SECRET" not in err
