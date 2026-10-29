@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, NonNegativeInt, model_validator
+from pydantic import Field, NonNegativeInt, ValidationError, model_validator
 
 from core.runtime_control.scheduling import HostBudget, Placement
 from tools.workflow_preview.models import PreviewModel
@@ -48,7 +48,6 @@ class HostReservation(PreviewModel):
     request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     state_root: str
     placement: Placement
-    time_budgeted: bool
     process: ProcessIdentity | None = None
 
     @model_validator(mode="after")
@@ -143,10 +142,26 @@ def _acquire(lock: int) -> None:
 
 
 def read_state(root: Path) -> HostLedgerState:
+    """The ledger, or a typed ``ledger_format`` refusal for one this revision cannot read.
+
+    That covers a ledger written by an earlier or a newer revision and a corrupt
+    or truncated file alike: none of them is parsed, guessed or repaired.
+
+    Every reader (admission, the sweep, the release command) goes through here,
+    so an unreadable ledger is refused the same way everywhere and never rewritten.
+    """
+    path = root / LEDGER_FILE
     try:
-        return read_model(root / LEDGER_FILE, HostLedgerState, private_file=True)
+        return read_model(path, HostLedgerState, private_file=True)
     except FileNotFoundError:
         return HostLedgerState()
+    except ValidationError as error:
+        raise OperationFailure(
+            "ledger_format",
+            f"this host ledger is unreadable by this SIDERIUS revision (written by another "
+            f"revision, or corrupt); once the runs it lists have ended, move {path} aside "
+            "and retry",
+        ) from error
 
 
 def write_state(root: Path, state: HostLedgerState) -> None:

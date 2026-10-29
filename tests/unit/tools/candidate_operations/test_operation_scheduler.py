@@ -381,7 +381,12 @@ def test_a_held_ledger_refuses_after_a_bounded_wait(prepared, tmp_path, children
 
 
 def test_time_budgeted_run_shares_a_gpu_only_when_acknowledged(prepared, tmp_path, children):
-    """Decision B3-Q6: contention changes measured-time admission of both runs."""
+    """Decision B3-Q6: contention changes measured-time admission of both runs.
+
+    The rule is a ``plan_dispatch`` placement constraint (#1019): with the only
+    slot shared, the run cannot be placed now (``host_capacity``) and the reason
+    names the time-budget contention; the reservation records the flag.
+    """
     for acknowledge, ledger in ((False, "plain"), (True, "acknowledged")):
         host = _ledger(tmp_path, ledger, acknowledge=acknowledge)
         submit_operation(
@@ -396,8 +401,14 @@ def test_time_budgeted_run_shares_a_gpu_only_when_acknowledged(prepared, tmp_pat
         )
         if acknowledge:
             assert launch().observation == "starting"
+            with locked_ledger(host.ledger_root) as root:
+                flags = [r.placement.reserved.time_budgeted for r in read_state(root).reservations]
+            assert flags == [False, True]
         else:
-            assert _code(launch) == "shared_gpu_time_budget"
+            with pytest.raises(OperationFailure) as refused:
+                launch()
+            assert refused.value.detail.code == "host_capacity"
+            assert "time-budgeted unit would share it" in str(refused.value)
 
 
 def test_spawn_failure_returns_the_reservation(prepared, tmp_path, monkeypatch):
@@ -461,3 +472,39 @@ def test_cli_passes_the_budget_and_refuses_either_flag_alone(
         assert cli.main() == 2
         assert json.loads(capsys.readouterr().err)["code"] == "usage"
     assert len(seen) == 1
+
+
+def test_a_ledger_from_an_earlier_revision_is_refused_with_one_typed_reason(
+    prepared, tmp_path, children
+):
+    """A B3-5a ledger (reservation-level ``time_budgeted``) surfaced as a raw validation
+    error, so admission, the sweep and the operator release all failed untyped and
+    nothing told the operator what to do."""
+    from tools.candidate_operations.files import publish_encoded
+    from tools.candidate_operations.host_ledger import LEDGER_FILE
+
+    host = _ledger(tmp_path)
+    first = _gpu_operation(prepared, 1.0)
+    submit_operation(_store(tmp_path, "a"), first, launch_environment=KEY, host=host)
+    path = Path(host.ledger_root) / LEDGER_FILE
+    old = json.loads(path.read_text())
+    old["reservations"][0]["time_budgeted"] = False
+    publish_encoded(path, json.dumps(old).encode(), replace=True)
+    before = path.read_bytes()
+    second = _gpu_operation(prepared, 1.0)
+    launch = lambda: submit_operation(  # noqa: E731
+        _store(tmp_path, "b"), second, launch_environment=KEY, host=host
+    )
+    with pytest.raises(OperationFailure) as refused:
+        launch()
+    assert refused.value.detail.code == "ledger_format"
+    assert str(path) in str(refused.value) and "move" in str(refused.value)
+    assert "unreadable by this SIDERIUS revision" in str(refused.value)
+    released = lambda: release_reservation(host.ledger_root, first.request_id)  # noqa: E731
+    assert _code(released) == "ledger_format"
+    assert path.read_bytes() == before  # never rewritten
+    assert _claims(_store(tmp_path, "b")) == []
+    # A truncated (corrupt) ledger is refused the same way, never repaired.
+    publish_encoded(path, before[: len(before) // 2], replace=True)
+    assert _code(launch) == "ledger_format"
+    assert _code(released) == "ledger_format"

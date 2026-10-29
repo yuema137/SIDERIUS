@@ -72,6 +72,10 @@ class ResourceRequest(BaseModel):
     host_memory_gib: PositiveQuantity
     cpu_slots: PositiveCount
     wall_seconds: PositiveQuantity
+    #: Decision B3-Q6: the unit runs under a measured time budget, so contention
+    #: on a shared GPU changes what that budget admits. Omitted when false, so a
+    #: request that does not set it keeps its serialization.
+    time_budgeted: StrictBool = Field(default=False, exclude_if=lambda value: value is False)
 
     @model_validator(mode="after")
     def _vram_matches_gpu_count(self) -> ResourceRequest:
@@ -247,6 +251,18 @@ class _Ledger(BaseModel):
     def gpu_members(self, uuid: str) -> tuple[PairMember, ...]:
         return tuple(_pair_member(p.reserved) for p in self.placed if p.gpu_uuid == uuid)
 
+    def time_contention(self, request: ResourceRequest, slot: GpuSlot) -> str | None:
+        """Decision B3-Q6: a time-budgeted unit shares no slot unless acknowledged."""
+        if self.budget.acknowledge_shared_gpu_time_budget:
+            return None
+        sharing = [p.reserved for p in self.placed if p.gpu_uuid == slot.uuid]
+        if not sharing or not (request.time_budgeted or any(r.time_budgeted for r in sharing)):
+            return None
+        return (
+            f"{slot.uuid}: a time-budgeted unit would share it "
+            "(acknowledge_shared_gpu_time_budget is not set)"
+        )
+
 
 def plan_dispatch(
     ready: tuple[ResourceRequest, ...],
@@ -395,6 +411,10 @@ def _place_on_gpu(request: ResourceRequest, ledger: _Ledger, digest: str) -> Pla
     candidate = _pair_member(request)
     headroom: list[str] = []
     for slot in ledger.budget.gpus:
+        contention = ledger.time_contention(request, slot)
+        if contention:
+            headroom.append(contention)
+            continue
         members = (*ledger.gpu_members(slot.uuid), candidate)
         decision = evaluate_resolved_pair_admission(members, limits=slot.ceiling)
         if decision.feasible:
