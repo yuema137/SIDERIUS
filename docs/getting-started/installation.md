@@ -159,9 +159,23 @@ single map; the linked procedures own the details.
 | Resume of a paused research loop | The same source as its submit route above (code/CLI), or the console's `credential_file` for **Resume loop**; either way the names are the original launch request's, rechecked at Resume | [Loop control recipe](../../src/tools/candidate_operations/candidate-operations-contract.md#control-an-authored-loop-from-code-or-the-cli), [console Pause and Resume](../../src/tools/candidate_console/console-contract.md#pause-and-resume) |
 | Paper resolver (Semantic Scholar) | `S2_API_KEY` in the calling process; source checkouts fall back to the checkout `.env` when the variable is absent | [Semantic Scholar key](#semantic-scholar-key) |
 
-Key names are declared in `src/agent/llm_settings.py` — `KNOWN_PROVIDERS`
-(`OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`) and the explicit-model
-`OPTIONAL_PROVIDERS` (`ANTHROPIC_API_KEY`, `MOONSHOT_API_KEY`, `ZAI_API_KEY`).
+Supported provider identifiers and credential names are declared in
+`src/agent/llm_settings.py` (`KNOWN_PROVIDERS` and `OPTIONAL_PROVIDERS`):
+
+| Service / model family | `provider` | Credential variable |
+| --- | --- | --- |
+| OpenAI | `openai` | `OPENAI_API_KEY` |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` |
+| Anthropic / Claude | `anthropic` | `ANTHROPIC_API_KEY` |
+| Moonshot / Kimi | `moonshot` | `MOONSHOT_API_KEY` |
+| Z.AI / GLM | `zai` | `ZAI_API_KEY` |
+
+Anthropic, Moonshot and Z.AI require an explicit `model_id` and the
+`pydantic-ai` extra. Follow the [additional-provider setup](../../src/agent/llm_transport/README.md)
+and test the operations your selected model needs; an adapter does not establish
+account access or support for every model operation.
+
 Offline installation, focused tests and `--dry-run` need none of them.
 
 ### Command-line procedure
@@ -174,9 +188,8 @@ shell does not inherit an earlier shell's setup: prepare and check credentials
 in the same shell that starts the run.
 
 The launch caller must require the variables for the providers enabled by its
-reviewed routing configuration. The bridge currently names `OPENAI_API_KEY`,
-`GEMINI_API_KEY`, and `DEEPSEEK_API_KEY`; do not require keys for disabled
-providers. Presence is only a local binding check—it does not prove validity,
+reviewed routing configuration, using the provider table above. Do not require
+keys for disabled providers. Presence is only a local binding check—it does not prove validity,
 quota, or network reachability. For a trusted shell-compatible credentials
 file, this complete pattern checks names only and then invokes the real launch
 in the same shell (replace the required list and final command with the

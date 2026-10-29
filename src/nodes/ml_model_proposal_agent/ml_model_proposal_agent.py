@@ -1762,6 +1762,7 @@ class MLModelProposalAgent:
                 "expert_advice": raw.get("expert_advice", {}),
                 "baseline_config": resolve_proposal_baseline_config(
                     raw.get("baseline_config", {}),
+                    proposed_model_type=proposed_name,
                     composition_ref=inp.task_composition_ref,
                     workflow_rules=inp.workflow_parameter_rules,
                 ),
@@ -2453,6 +2454,7 @@ class MLModelProposalAgent:
                         "expert_advice": raw.get("expert_advice", {}),
                         "baseline_config": resolve_proposal_baseline_config(
                             raw.get("baseline_config", {}),
+                            proposed_model_type=proposed_name,
                             composition_ref=inp.task_composition_ref,
                             workflow_rules=inp.workflow_parameter_rules,
                         ),

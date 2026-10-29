@@ -35,6 +35,7 @@ from agent.schemas.hyperparam_tuning import (
     serialize_expert_advice,
     validate_runtime_config,
 )
+from agent.schemas.parameter_rules import validate_model_parameter_rules
 from agent.schemas.task_config import ForwardContract
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import get_or_create
@@ -1143,6 +1144,16 @@ class HyperparamTuningAgent:
                 agent_input.seed_plugin_path, sandbox.plugin_dir, agent_input.model_type
             )
             print(f"[Tuner] Seed plugin staged: {os.path.basename(copied)} -> {sandbox.plugin_dir}")
+
+        # A fixed model executes every attempt, so a model_config rule it would
+        # drop is refused once here, before any LLM call or attempt budget.
+        if model_type_setting != "auto":
+            composition_ref = agent_input.task_composition_ref
+            validate_model_parameter_rules(
+                model_type_setting,
+                task_rules=composition_ref.parameter_rules if composition_ref else None,
+                workflow_rules=agent_input.workflow_parameter_rules,
+            )
 
         brain = self._bridge_factory(**_bridge_kwargs_from_input(agent_input))
 

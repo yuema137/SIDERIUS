@@ -275,9 +275,11 @@ Those defaults do not activate omitted phases or outer retries. Tuning advice,
 ordinary budgets, epoch limits, typed frozen portions, retention, parameter
 rules and runtime controls use the native owners. `data_dir` must match the
 selected root; `require_probe_runner` resolves to true and explicit false is
-refused. Trial/formal time budgets are finite positive minutes or null. Zero
-is refused at this ingress because the historical forecast/measured paths do
-not share zero semantics; their existing behavior is unchanged.
+refused. Trial/formal/bypass time budgets are finite positive minutes or
+null; the rule is the tuner schema's `OperatorTimeBudgetMinutes`, applied by
+`run_config.validate_launch_admission` on this ingress and on the standard CLI,
+direct workflow and setup-preview paths alike (issue #828). Null disables a
+budget; zero, negative and non-finite values are refused before model work.
 
 Known native scalar, schedule, formal-policy, scope, order and deadline checks
 run before proposer construction. Runtime-verifier identity, measurement

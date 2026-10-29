@@ -13,10 +13,12 @@ nor safe to load from an experiment manifest.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
+from decimal import Decimal
+from numbers import Real
 from types import UnionType
-from typing import Annotated, Any, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -36,37 +38,203 @@ class ParameterRuleError(ValueError):
     """A parameter-rule declaration or effective value is invalid."""
 
 
-def _model_path_exists(annotation: Any, parts: list[str]) -> bool:
-    """Recognize fields from their consuming models, including optional unions."""
+def _target_annotations(annotation: Any, parts: list[str]) -> list[Any]:
+    """Leaf annotations that consume ``parts`` in a model, across optional unions.
+
+    An empty result means no consuming field exists. A model with
+    ``extra="allow"`` keeps unknown keys, so they are consumed as ``Any``.
+    """
     origin = get_origin(annotation)
     if origin is Annotated:
-        return _model_path_exists(get_args(annotation)[0], parts)
+        return _target_annotations(get_args(annotation)[0], parts)
     if origin in (Union, UnionType):
-        return any(_model_path_exists(branch, parts) for branch in get_args(annotation))
+        return [
+            leaf for branch in get_args(annotation) for leaf in _target_annotations(branch, parts)
+        ]
     if not isinstance(annotation, type) or not issubclass(annotation, BaseModel):
-        return False
+        return []
     field = annotation.model_fields.get(parts[0])
     if field is None:
-        return False
-    return len(parts) == 1 or _model_path_exists(field.annotation, parts[1:])
+        return [Any] if annotation.model_config.get("extra") == "allow" else []
+    if len(parts) == 1:
+        return [field.annotation]
+    return _target_annotations(field.annotation, parts[1:])
 
 
-def _validate_training_rule_path(path: str, parts: list[str]) -> None:
-    """Keep fixed training targets aligned with the actual execution schema."""
-    if parts[0] != "train_config":
-        return
-    from ml_models.models_format_sandbox import TrainConfig
+def _admits_bool(annotation: Any) -> bool:
+    """Whether a field type keeps a boolean as a boolean instead of coercing it."""
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _admits_bool(get_args(annotation)[0])
+    if origin in (Union, UnionType):
+        return any(_admits_bool(branch) for branch in get_args(annotation))
+    if origin is Literal:
+        return any(isinstance(value, bool) for value in get_args(annotation))
+    return annotation is Any or annotation is bool
 
-    if not _model_path_exists(TrainConfig, parts[1:]):
+
+def _fixed_rule_schemas() -> dict[str, type[BaseModel]]:
+    """Consuming execution schema for each closed rule root.
+
+    ``model_config`` is absent: its consuming schema is the executed model's
+    configuration class, known only per plan (see
+    :func:`_validate_model_rule_paths`). Custom-loss plugin hyperparameters
+    are not transported through ``loss_config``; ``LossConfig`` is the
+    complete loss-routing surface.
+    """
+    from ml_models.models_format_sandbox import LossConfig, TrainConfig
+
+    return {"train_config": TrainConfig, "loss_config": LossConfig}
+
+
+def _validate_rule_target(
+    path: str,
+    parts: list[str],
+    schema: type[BaseModel],
+    rules: Iterable[ParameterRule],
+) -> None:
+    """Refuse a rule the consuming schema would silently drop or reinterpret."""
+    leaves = _target_annotations(schema, parts[1:])
+    if not leaves:
         raise ParameterRuleError(
-            f"unsupported training parameter path {path!r}: target must exist in "
-            "TrainConfig or one of its nested configuration models; check the "
-            "training fields in the task-composition parameter-rule contract"
+            f"unsupported {parts[0]} parameter path {path!r}: target must exist in "
+            f"{schema.__name__} or one of its nested configuration models; check the "
+            f"{parts[0]} fields in the task-composition parameter-rule contract"
         )
+    if any(_admits_bool(leaf) for leaf in leaves):
+        return
+    for rule in rules:
+        declared = [rule.exact] if rule.kind == "exact" else list(rule.allowed or ())
+        if any(isinstance(value, bool) for value in declared):
+            raise ParameterRuleError(
+                f"{rule.kind} parameter rule for {path!r} declares a boolean, but the "
+                f"{schema.__name__} field type does not admit a boolean (a numeric field "
+                "would coerce it to 1 or 0); declare a value of the field's type"
+            )
 
 
-def _validate_parameter_path(path: str) -> None:
-    """Validate declaration syntax and fixed-contract target membership."""
+def _validate_fixed_rule_path(path: str, parts: list[str], rules: Iterable[ParameterRule]) -> None:
+    """Keep fixed training and loss targets aligned with their execution schema."""
+    schema = _fixed_rule_schemas().get(parts[0])
+    if schema is not None:
+        _validate_rule_target(path, parts, schema, rules)
+
+
+def _validate_model_rule_paths(
+    resolved: dict[str, Any],
+    declarations: tuple[tuple[str, ParameterRules], ...],
+    executed_model_type: Any,
+    *,
+    defer_unknown_model: bool,
+) -> None:
+    """Bind ``model_config`` rules to the model that will actually execute.
+
+    The executed model is chosen by ``force_model`` or the plan's top-level
+    ``model_type``; the planner overwrites the nested ``model_config.model_type``
+    mirror with it before execution. A ``model_config.model_type`` rule is
+    therefore judged against the executed type (an exact lock that disagrees
+    is refused, never silently overwritten), and every other ``model_config``
+    target must exist in that model's configuration class.
+
+    Only a proposal baseline (``defer_unknown_model``) may defer when the
+    model or its config class is not known yet; the tuner fails closed.
+    """
+    paths = sorted(
+        {
+            path
+            for _, rules in declarations
+            for path in rules.rules
+            if path.startswith("model_config.")
+        }
+    )
+    if not paths:
+        return
+    if not isinstance(executed_model_type, str):
+        if defer_unknown_model:
+            return
+        raise ParameterRuleError(
+            f"parameter rules {paths!r} target model_config, but no executed model_type "
+            "is known to check them against"
+        )
+    if "model_config.model_type" in paths:
+        for _, rules in declarations:
+            rule = rules.rules.get("model_config.model_type")
+            if rule is not None and rule.kind == "exact" and rule.exact != executed_model_type:
+                raise ParameterRuleError(
+                    f"exact parameter rule for 'model_config.model_type' locks "
+                    f"{rule.exact!r}, but the executed model is {executed_model_type!r}; the "
+                    "executed model comes from force_model or the plan's model_type"
+                )
+        model_config = resolved.setdefault("model_config", {})
+        if isinstance(model_config, dict):
+            # Mirror the executed type, as the planner does, so non-exact
+            # model_type rules validate the model that will run.
+            model_config["model_type"] = executed_model_type
+    from ml_models.models_format_sandbox import get_config_class
+
+    schema = get_config_class(executed_model_type)
+    if schema is None:
+        if defer_unknown_model:
+            return
+        raise ParameterRuleError(
+            f"parameter rules {paths!r} target model_config, but model_type "
+            f"{executed_model_type!r} has no registered configuration class to check them"
+        )
+    for path in paths:
+        if path != "model_config.model_type":
+            _validate_rule_target(
+                path,
+                path.split("."),
+                schema,
+                [rules.rules[path] for _, rules in declarations if path in rules.rules],
+            )
+
+
+def validate_model_parameter_rules(
+    model_type: str,
+    *,
+    task_rules: ParameterRules | None,
+    workflow_rules: ParameterRules | None,
+) -> None:
+    """Launch-time check of ``model_config`` rules against a fixed model.
+
+    With ``force_model`` every attempt executes this model, so a rule that can
+    never pass for it is refused once before any attempt instead of failing
+    each one. The full resolver runs on an empty model configuration for the
+    forced model: targets must exist in its config class, ``model_type``
+    rules of every kind are judged against it, and exact values are applied.
+    Values the planner chooses later stay deferred.
+    """
+    selected = [
+        ParameterRules(
+            rules={
+                path: rule
+                for path, rule in (rules or ParameterRules()).rules.items()
+                if path.startswith("model_config.")
+            }
+        )
+        for rules in (task_rules, workflow_rules)
+    ]
+    model_config: dict[str, Any] = {}
+    for rules in selected:
+        for path, rule in rules.rules.items():
+            if rule.kind != "exact":
+                continue
+            parent = model_config
+            for part in path.split(".")[1:-1]:
+                # A plan supplies nested parents; the launch document must too.
+                parent = parent.setdefault(part, {})
+    resolve_parameter_rule_document(
+        {"model_type": model_type, "model_config": model_config},
+        task_rules=selected[0],
+        workflow_rules=selected[1],
+        defer_missing_non_exact=True,
+        defer_unknown_model=False,
+    )
+
+
+def _validate_parameter_path(path: str, rules: Iterable[ParameterRule]) -> None:
+    """Validate declaration syntax and fixed-contract target membership and type."""
     parts = path.split(".")
     if any(not part or not part.isidentifier() for part in parts):
         raise ParameterRuleError(f"invalid parameter path {path!r}")
@@ -75,7 +243,7 @@ def _validate_parameter_path(path: str) -> None:
             f"parameter path {path!r} must target a leaf under "
             "model_config, train_config, or loss_config"
         )
-    _validate_training_rule_path(path, parts)
+    _validate_fixed_rule_path(path, parts, rules)
 
 
 def register_parameter_predicate(name: str, predicate: ParameterPredicate) -> None:
@@ -100,13 +268,51 @@ register_parameter_predicate("odd_integer", _is_odd_integer)
 register_parameter_predicate("even_integer", _is_even_integer)
 
 
+# Rule values come from YAML/JSON, so real nesting is shallow; the bound only
+# turns a cyclic (YAML anchor) or pathological value into a validation error.
+_MAX_RULE_VALUE_DEPTH = 64
+
+
+def _rule_value_problem(
+    value: Any, depth: int = 0, path: frozenset[int] = frozenset()
+) -> str | None:
+    """Why a rule value cannot be transported, or None when it can.
+
+    Refuses a non-finite real (inf, -inf or NaN) anywhere in the value,
+    including mapping keys, and a cyclic or deeper-than-bounded structure.
+    A container shared by two branches (a YAML alias used twice) is fine.
+    """
+    if isinstance(value, (Real, Decimal)) and not isinstance(value, bool):
+        if math.isfinite(value):
+            return None
+        return "a non-finite number (inf, -inf or NaN); declare a finite value"
+    if isinstance(value, Mapping):
+        children: Iterable[Any] = [*value.keys(), *value.values()]
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        children = value
+    else:
+        return None
+    if id(value) in path:
+        return "a cyclic reference"
+    if depth >= _MAX_RULE_VALUE_DEPTH:
+        return f"nesting deeper than {_MAX_RULE_VALUE_DEPTH} levels"
+    inner = path | {id(value)}
+    for child in children:
+        problem = _rule_value_problem(child, depth + 1, inner)
+        if problem is not None:
+            return problem
+    return None
+
+
 class NumericRange(BaseModel):
     """Inclusive numeric interval for one resolved parameter."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    min: float | None = None
-    max: float | None = None
+    # Strict bounds: lax coercion would silently read ``true`` as 1.0 or "3" as
+    # 3.0, while the enforced parameter value itself must be a non-bool number.
+    min: float | None = Field(default=None, strict=True)
+    max: float | None = Field(default=None, strict=True)
 
     @model_validator(mode="after")
     def validate_interval(self) -> NumericRange:
@@ -145,8 +351,21 @@ class ParameterRule(BaseModel):
 
     @model_validator(mode="after")
     def validate_rule(self) -> ParameterRule:
+        # Only ``exact`` may carry null. A null range/allowed/predicate would
+        # otherwise fall through ``kind`` and silently become an exact-null lock.
+        for kind in ("range", "allowed", "predicate"):
+            if kind in self.model_fields_set and getattr(self, kind) is None:
+                raise ValueError(
+                    f"{kind} rule must not be null; declare {{'exact': null}} to lock a null value"
+                )
         if self.allowed is not None and not self.allowed:
             raise ValueError("allowed must contain at least one value")
+        # Range bounds are already finite (NumericRange). A non-finite exact or
+        # allowed value cannot round-trip through standard JSON transport.
+        declared = self.exact if self.kind == "exact" else self.allowed
+        problem = _rule_value_problem(declared)
+        if problem is not None:
+            raise ValueError(f"{self.kind} rule must not contain {problem}")
         if self.predicate is not None and not self.predicate.strip():
             raise ValueError("predicate name must not be empty")
         return self
@@ -194,8 +413,8 @@ class ParameterRules(BaseModel):
 
     @model_validator(mode="after")
     def validate_paths(self) -> ParameterRules:
-        for path in self.rules:
-            _validate_parameter_path(path)
+        for path, rule in self.rules.items():
+            _validate_parameter_path(path, (rule,))
         return self
 
 
@@ -261,12 +480,14 @@ def apply_parameter_rules(
     *,
     task_rules: ParameterRules | None = None,
     workflow_rules: ParameterRules | None = None,
+    executed_model_type: str | None = None,
 ) -> Any:
     """Apply exact locks and validate every task/workflow constraint.
 
     Task and workflow declarations are peers at enforcement time: all rules
     must hold.  A workflow may therefore narrow a task constraint but cannot
-    overwrite or bypass it.
+    overwrite or bypass it. ``executed_model_type`` defaults to the plan's
+    top-level ``model_type``.
     """
     from agent.schemas.hyperparam_tuning import ExperimentPlan
 
@@ -274,6 +495,7 @@ def apply_parameter_rules(
         plan.model_dump(by_alias=True),
         task_rules=task_rules,
         workflow_rules=workflow_rules,
+        executed_model_type=executed_model_type,
     )
     try:
         return ExperimentPlan.model_validate(document)
@@ -289,14 +511,20 @@ def resolve_parameter_rule_document(
     task_rules: ParameterRules | None = None,
     workflow_rules: ParameterRules | None = None,
     defer_missing_non_exact: bool = False,
+    defer_unknown_model: bool = False,
+    executed_model_type: str | None = None,
 ) -> dict[str, Any]:
     """Resolve the same typed rules on a plan or proposal baseline mapping.
 
     The caller owns its resulting schema. This function never mutates the
     authored input: exact rules create effective values in the returned copy,
     while other rule kinds only validate existing values. A proposal baseline
-    may defer an omitted non-exact field until the tuner chooses it; the tuner
-    itself uses the strict default and must validate the effective plan.
+    may defer an omitted non-exact field (``defer_missing_non_exact``) and a
+    model that is not known or registered yet (``defer_unknown_model``) until
+    the tuner chooses them; the tuner itself uses the strict defaults and must
+    validate the effective plan. ``executed_model_type`` is the model that
+    will run (``force_model``, the plan's ``model_type``, or a proposal's
+    model name); it defaults to the document's top-level ``model_type``.
     """
     declarations = (
         ("task", task_rules or ParameterRules()),
@@ -305,9 +533,21 @@ def resolve_parameter_rule_document(
     # Frozen models can still contain a mutated rules dictionary. Recheck at
     # this shared execution boundary, including proposal-baseline resolution.
     resolved = deepcopy(dict(document))
-    paths = {path for _, rules in declarations for path in rules.rules}
-    for path in paths:
-        _validate_parameter_path(path)
+    rules_by_path: dict[str, list[ParameterRule]] = {}
+    for _, rules in declarations:
+        for path, rule in rules.rules.items():
+            rules_by_path.setdefault(path, []).append(rule)
+    paths = set(rules_by_path)
+    for path, path_rules in rules_by_path.items():
+        _validate_parameter_path(path, path_rules)
+    if executed_model_type is None:
+        executed_model_type = resolved.get("model_type")
+    _validate_model_rule_paths(
+        resolved,
+        declarations,
+        executed_model_type,
+        defer_unknown_model=defer_unknown_model,
+    )
     for path in sorted(paths):
         exact_values = [
             rule.exact

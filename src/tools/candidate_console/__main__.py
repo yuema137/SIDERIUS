@@ -7,10 +7,10 @@ import sys
 from .config import load_console
 from .files import config_bytes
 from .readiness_models import WorkspaceReadiness
+from .settings_file import MissingSetting, SettingsInvalid
 from .settings_models import ResolvedConsole
 from .workspace import (
     DEFAULT_PORT,
-    MissingSetting,
     WorkspaceRefused,
     init_workspace,
     resolve_console,
@@ -37,6 +37,8 @@ def _load(path: str) -> ResolvedConsole | None:
         return load_console(path)
     except MissingSetting as error:
         print(f"Console configuration is incomplete: {error}.", file=sys.stderr)
+    except SettingsInvalid as error:
+        print(f"Console settings are invalid: {error}.", file=sys.stderr)
     except (OSError, ValueError):
         print(INVALID, file=sys.stderr)
         # Name unusable workspace folders when the file itself resolves.
@@ -70,6 +72,13 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 2
+        except SettingsInvalid as error:
+            print(
+                f"Workspace init stopped: console settings are invalid: {error}. "
+                "Nothing was deleted.",
+                file=sys.stderr,
+            )
+            return 2
         except (OSError, ValueError):
             print(
                 "Workspace init failed: a filesystem operation was refused. Nothing was deleted.",
@@ -93,7 +102,7 @@ def main() -> int:
         from .app import create_app
 
         uvicorn.run(
-            create_app(config),
+            create_app(config, resolved.settings),
             host=config.bind_host,
             port=config.port,
             proxy_headers=False,
