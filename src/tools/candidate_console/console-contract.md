@@ -969,6 +969,11 @@ even when the loop has since become terminal (the backend replays the marker
 before its running check); a 200 is therefore an idempotent acknowledgement,
 never evidence that the loop is still running.
 
+For an exited, verified paused tail, the same route records Stop after the
+operations owner checks its clean pause and absence of a successor under the
+admission lock. No receipt is rewritten and no new operation/status is invented.
+An existing successor refuses the request; a Stop recorded first blocks Resume.
+
 Monitor: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
 **Stop at next boundary** is shown only for a status with `loop` (root or resumed
@@ -1026,14 +1031,24 @@ instead reads "Waiting for your input." followed by what was met in plain words 
 the request (for example "No improvement for 3 bodies (best 0.81 at body 4, higher
 is better). Paused after body 7 of 12."; a judge request adds the rationale of that
 boundary's `judge_verdicts` entry), then "Review and resume to continue with body
-N+1.", "A resumed segment continues this run." with a successor, or "Stop was
-requested; this run cannot continue." when `stop_requested`. The exact recorded
-values stay in the state's tooltip. A paused status with `stop_requested` (either
-pause kind) reads "Stop was requested; this run cannot continue." and offers no
-Resume: the owner refuses a stopped run. Resuming an input
+N+1." or "A resumed segment continues this run." with a successor. A recorded
+Stop without a successor instead uses the ended display below. The exact recorded
+values stay in the state's tooltip. A paused status with `stop_requested` and no successor (either pause kind)
+reads "Ended by you at the pause after body N." and offers no Resume or End:
+the owner refuses a stopped run. This is a terminal display derived from the
+paused receipt and durable Stop marker; the native status remains `paused`. Resuming an input
 request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
 resume** (one GET on click, never polled), then **Resume loop**, disabled unless
-credentials are ready. The client generates one request UUID per reviewed digest
+credentials are ready. **End loop here** is offered beside these actions on a
+paused tail that is no longer finishing. It confirms that completed results are
+kept and the run cannot resume, then posts `{}` to the existing `loop-stop` route.
+Pending Stop and Resume requests disable competing actions. Success triggers a
+fresh Monitor read, including its status sentence and observation label; a
+reload derives the ended display from the durable marker. An unstopped paused
+receipt is labelled "Current status", not "Final status". A continued predecessor
+never offers End, even when a descendant later records Stop.
+
+The client generates one request UUID per reviewed digest
 and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
 the POST; a retry reuses it, and the record is released once status shows the
 successor. After a review, `#loop-resume-advice` (a textarea, `maxlength=4000`) is
