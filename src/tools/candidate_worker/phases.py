@@ -4,7 +4,6 @@ from pathlib import Path
 
 from agent.schemas.implementor import ImplementorOutput, ImplementorTaskBlocks
 from agent.schemas.proposal import ProposalOutput
-from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
 from agent.schemas.validator import ValidatorOutput
 from core.durable_io import publish_bytes_write_once
@@ -14,7 +13,8 @@ from core.training_seeds import SeedContext
 from nodes.ml_code_validator_agent.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import MLModelProposalAgent
-from workflows.candidate_requests import enrich_implementation_request, enrich_validation_request
+from workflows.candidate_requests import enrich_implementation_request
+from workflows.candidate_validation_join import VALIDATION_PROTOCOLS
 from workflows.llm_config import WorkflowLLMConfig
 
 from .artifacts import capture_record, verify_artifacts
@@ -132,6 +132,24 @@ def context_probe_seed(
     )
 
 
+def _validation_protocol(request: CandidateRunRequest, node_id: str) -> str:
+    """The catalog protocol the validation node ``node_id`` declares."""
+    from workflows.definition import ProtocolRequest
+
+    node = next(
+        (node for node in request.preview.document.definition.nodes if node.id == node_id),
+        None,
+    )
+    if node is None or not isinstance(node.request, ProtocolRequest):
+        raise ValueError(f"validation node {node_id!r} declares no protocol")
+    if node.request.protocol not in VALIDATION_PROTOCOLS:
+        raise ValueError(
+            f"validation node {node_id!r} declares {node.request.protocol!r}, which no "
+            "validation executor implements"
+        )
+    return node.request.protocol
+
+
 def _judged_branch(request: CandidateRunRequest, node_id: str) -> bool:
     """Only a judged branch (``native-proposal-judged/v1``) stamps its consumed input, so
     every other implementation record keeps its bytes."""
@@ -164,32 +182,18 @@ def run_validation(
     context.require_binding(request, initial, inputs, "validation")
     seed, attempt = inputs.proposal, inputs.attempt
     if request.preview.execution_profile is not None:
-        from workflows.candidate_validation_join import proposed_implementation_to_validation
-
         assert seed.task_composition_ref is not None
         verify_artifacts(implemented, attempt, request.read_only, seed.task_composition_ref)
-        validation = proposed_implementation_to_validation(
-            proposal,
-            implemented,
-            attempt.storage,
-            inputs.validator_provider,
-            inputs.validator_model,
-            constraint_context=seed.constraint_context,
-            human_advice=request.validation_advice,
-        )
-    else:
-        validation = local_all_fields(
-            implemented,
-            attempt.storage,
-            inputs.validator_provider,
-            inputs.validator_model,
-            constraint_context=seed.constraint_context,
-        )
-        enrich_validation_request(
-            validation,
-            human_advice=request.validation_advice,
-            inherited_components=proposal.inherited_components,
-        )
+    # The declared protocol executes, for every profile (VALIDATION_PROTOCOLS owner).
+    validation = VALIDATION_PROTOCOLS[_validation_protocol(request, context.node_id)](
+        proposal,
+        implemented,
+        attempt.storage,
+        inputs.validator_provider,
+        inputs.validator_model,
+        constraint_context=seed.constraint_context,
+        human_advice=request.validation_advice,
+    )
     validator = MLCodeValidatorAgent(
         **config.get("validate"), probe_seed=context_probe_seed(context, initial)
     )
