@@ -68,6 +68,7 @@ from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import yaml
@@ -924,6 +925,38 @@ def _construct_declared_implementation(factory: Any, config: dict[str, Any], whe
         ) from exc
 
 
+def _same_task_data_path_source(
+    registered: object, loaded: object, registered_identity: str, loaded_identity: str
+) -> bool:
+    """Recognize path aliases without rewriting the registration's pinned identity."""
+    registered_class, loaded_class = type(registered), type(loaded)
+    if registered_class.__qualname__ != loaded_class.__qualname__:
+        return False
+    digests = []
+    sources = []
+    for cls, identity in (
+        (registered_class, registered_identity),
+        (loaded_class, loaded_identity),
+    ):
+        # Only ordinary source-file identities qualify; package identities and
+        # source-less fallbacks retain their existing admission rules.
+        prefix = f"{cls.__module__}.{cls.__qualname__}@"
+        if not identity.startswith(prefix):
+            return False
+        digest = identity[len(prefix) :]
+        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            return False
+        source = getattr(sys.modules.get(cls.__module__), "__file__", None)
+        if not source:
+            return False
+        digests.append(digest)
+        sources.append(source)
+    try:
+        return digests[0] == digests[1] and Path(sources[0]).resolve() == Path(sources[1]).resolve()
+    except (OSError, RuntimeError):
+        return False
+
+
 def _compose_task_data_path(
     section: dict[str, Any], manifest_dir: str
 ) -> tuple[TaskDataPath, ResolvedPluginRef | None, dict[str, Any]]:
@@ -996,19 +1029,19 @@ def _compose_task_data_path(
         # EDITED plugin therefore ran the OLD code under a FRESH identity, and
         # nothing anywhere said so.
         #
-        # The registration performed above (or, for an already-present id,
-        # skipped as idempotent) has already settled the two-phase rule: an
-        # id whose content DIFFERS never reaches here, because
-        # `register_task_data_path` refused it. So reaching this line means the
-        # content matched, and returning the registered object is correct —
-        # but the check is stated HERE too, because "the other function
-        # already checked" is exactly the kind of reasoning that decays.
+        # Different loader module names may refer to the same source file.
+        # Compare resolved paths and the CAPTURED digest before accepting that
+        # alias; never re-read the registered file to establish its old bytes.
         registered_identity = registered_content_identity(declared)
         loaded_identity = content_identity(resolved)
+        registered = resolve_task_data_path(TaskBindingContext(task_data_path_id=declared))
         if (
             loaded_identity is not None
             and registered_identity is not None
             and loaded_identity != registered_identity
+            and not _same_task_data_path_source(
+                registered, resolved, registered_identity, loaded_identity
+            )
         ):
             raise TaskCompositionError(
                 f"{where}: task_data_path {declared!r} is registered with "
@@ -1029,7 +1062,7 @@ def _compose_task_data_path(
             # silently discard the task-owned scope-building semantics.
             return cast("TaskDataPath", resolved), plugin_ref, declared_config
         return (
-            resolve_task_data_path(TaskBindingContext(task_data_path_id=declared)),
+            registered,
             plugin_ref,
             declared_config,
         )
