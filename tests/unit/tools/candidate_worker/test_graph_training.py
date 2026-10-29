@@ -576,12 +576,10 @@ def test_unadapted_training_trace_bytes_are_unchanged(
     )
 
 
-def test_nonfinite_launch_values_survive_the_graph_tuning_input(prepared, training_runner):
-    """#1012: the graph writes the tuner input as JSON and evidence rereads it.
-
-    The default inf->null encoding turned an accepted infinite penalty into
-    None, so the reread evidence disagreed with the value the tuner ran.
-    """
+def test_graph_training_refuses_an_infinite_penalty_before_tuning(prepared, training_runner):
+    """#1045: an infinite degenerate_penalty_score reached the graph tuning
+    input (and, before #1012, was reread as None). Its owner now refuses it at
+    training admission: no tuning input is written and the tuner never runs."""
     request = graph_training_request(prepared)
     path = Path(request.preview.project_root) / "training.json"
     settings = json.loads(path.read_text())
@@ -589,16 +587,10 @@ def test_nonfinite_launch_values_survive_the_graph_tuning_input(prepared, traini
     path.write_text(json.dumps(settings))
     request = refresh(request)
     receipt = launch_candidate(request)
-    assert receipt.status == "completed", receipt.error
-    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
-
-    saved = HyperparamTuningInput.model_validate_json(
-        tuning_input_path(Path(receipt.workspace), "train").read_bytes()
-    )
-    assert saved.degenerate_penalty_score == float("-inf")
-    verify_graph_trace(
-        request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
-    )
+    assert receipt.status == "failed"
+    assert "degenerate_penalty_score" in (receipt.error or "")
+    assert not tuning_input_path(Path(receipt.workspace), "train").exists()
+    assert not any(name == "tuner" for name, _ in training_runner)
 
 
 def test_native_run_output_with_nonfinite_scores_is_not_a_disagreement(
