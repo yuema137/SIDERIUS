@@ -238,3 +238,76 @@ def test_locked_parameters_keep_an_exact_null_lock():
         ("loss_config.reduction", "allowed", ["mean"]),
         ("train_config.batch_size", "exact", None),
     ]
+
+
+def test_console_failure_message_is_bounded(console_config):
+    """Defect: an observer exception produces an arbitrarily large console view."""
+    from tools.setup_review.composition_models import FAILURE_MESSAGE_MAX_CHARS
+
+    def fail(job, task):
+        raise RuntimeError("x" * (FAILURE_MESSAGE_MAX_CHARS + 100))
+
+    summaries = TaskSummaries(console_config.tasks, observer=fail, start=lambda work: work())
+    view = summaries.summary("synthetic")
+    assert view is not None and view.state == "failed" and view.failure is not None
+    assert view.failure.stage == "console"
+    assert view.failure.message == ("RuntimeError: " + "x" * 10000)[:FAILURE_MESSAGE_MAX_CHARS]
+    assert len(view.failure.message) == FAILURE_MESSAGE_MAX_CHARS
+
+
+def test_data_walk_deadline_reports_partial_totals(tmp_path, monkeypatch):
+    """Defect: entry-limited walks keep running after their wall-time budget expires."""
+    import time
+
+    (tmp_path / "first").write_bytes(b"abc")
+    (tmp_path / "second").write_bytes(b"def")
+    ticks = iter([0.0, 0.0, 0.0, 0.0])
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 10.0))
+    volume = walk_data_root(tmp_path)
+    assert volume.complete is False
+    assert (volume.files, volume.bytes) == (1, 3)
+
+
+@pytest.mark.parametrize("kind", ["file", "directory"])
+def test_data_walk_skips_other_devices(tmp_path, monkeypatch, kind):
+    """Defect: a mount beneath data_root is traversed and reported as complete."""
+    import os
+    from types import SimpleNamespace
+
+    from tools.candidate_console import task_summary
+
+    mount = tmp_path / "mount"
+    if kind == "directory":
+        mount.mkdir()
+        (mount / "foreign").write_bytes(b"foreign")
+    else:
+        mount.write_bytes(b"foreign")
+    scandir = os.scandir
+    device = tmp_path.stat().st_dev
+
+    class ForeignEntry:
+        path = str(mount)
+
+        def stat(self, *, follow_symlinks):
+            return SimpleNamespace(st_dev=device + 1, st_size=7)
+
+        def is_dir(self, *, follow_symlinks):
+            return kind == "directory"
+
+        def is_file(self, *, follow_symlinks):
+            return kind == "file"
+
+    class Listing:
+        def __enter__(self):
+            return iter([ForeignEntry()])
+
+        def __exit__(self, *args):
+            pass
+
+    def listing(path):
+        return Listing() if Path(path) == tmp_path else scandir(path)
+
+    monkeypatch.setattr(task_summary.os, "scandir", listing)
+    volume = walk_data_root(tmp_path)
+    assert volume.complete is False
+    assert (volume.files, volume.bytes) == (0, 0)
