@@ -1,5 +1,6 @@
 """Validate inert operator resources without composing tasks or constructing clients."""
 
+from dataclasses import replace
 from pathlib import Path
 
 from .files import canonical, config_bytes, credential_values, token
@@ -7,7 +8,12 @@ from .models import ConsoleConfig
 from .settings_models import ResolvedConsole
 
 
-def validate_config(config: ConsoleConfig) -> ConsoleConfig:
+def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> ConsoleConfig:
+    """Validate inert facts; ``workspace`` adds its settings and library to protected paths."""
+    from tools.candidate_prepare.admission import validate_read_only_exclusion
+
+    from .settings_file import SettingsInvalid, protected_paths
+
     config = ConsoleConfig.model_validate_json(config.model_dump_json())
     store = config.operation_store
     canonical(store.state_root)
@@ -41,6 +47,15 @@ def validate_config(config: ConsoleConfig) -> ConsoleConfig:
                 )
         if not canonical(task.data_root).is_dir():
             raise ValueError("configured data root must exist")
+        protected = protected_paths(config, workspace)
+        for label, paths in (
+            (f"data folder for task {task.task_id}", (task.data_root,)),
+            (f"read-only dependency of task {task.task_id}", task.task_read_only),
+        ):
+            try:
+                validate_read_only_exclusion(tuple(map(Path, paths)), protected)
+            except ValueError:
+                raise SettingsInvalid(f"{label} overlaps a protected console path") from None
         for name in (task.task_manifest, task.llm_config_file):
             if not canonical(name).is_file():
                 raise ValueError("configured resource file must exist")
@@ -84,4 +99,15 @@ def load_console(path: str) -> ResolvedConsole:
     from .workspace import resolve_console
 
     resolved = resolve_console(config_bytes(path))
-    return ResolvedConsole(validate_config(resolved.config), resolved.settings)
+    context = replace(resolved.settings, console_path=canonical(path))
+    return validate_resolved(ResolvedConsole(resolved.config, context))
+
+
+def validate_resolved(resolved: ResolvedConsole) -> ResolvedConsole:
+    """``validate_config`` with workspace protection, then settings certification."""
+    from .settings_file import validate_settings
+
+    config = validate_config(resolved.config, workspace=resolved.settings.workspace_root)
+    resolved = ResolvedConsole(config, resolved.settings)
+    validate_settings(resolved)
+    return resolved

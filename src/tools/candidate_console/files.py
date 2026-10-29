@@ -34,6 +34,13 @@ def open_directory(path: Path) -> int:
     return directory
 
 
+def write_all(descriptor: int, payload: bytes) -> None:
+    """Write every byte; ``os.write`` may return a short count."""
+    view = memoryview(payload)
+    while view:
+        view = view[os.write(descriptor, view) :]
+
+
 def _file_bytes(value: str, *, owner_only: bool) -> bytes:
     path = canonical(value)
     directory = open_directory(path.parent)

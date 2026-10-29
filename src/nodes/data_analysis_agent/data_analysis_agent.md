@@ -122,14 +122,23 @@ report = DataAnalysisAgent(
     historical_model_inference_capability=historical_inference_capability,
     provider="gemini",
     model_id="gemini-3.1-pro-preview",
+    # Required: the run's RunSeed (the fixed workflow passes its lock's seed).
+    # run() raises MissingRunSeed before any LLM call when it is None.
+    run_seed=run_seed,
 ).run(inp)
 ```
+
+`run_seed` is a constructor argument, not a `DataAnalysisInput` field: the
+input's canonical digest (`input_digest`) is rendered into the plan prompt,
+which must not vary with the run seed. See
+[sampling seed](#sampling-seed-issue-983).
 
 ## Storage outputs
 
 For local storage, the node writes beneath
 `{workspace}/data_analysis/{run_name}/{request_id}/`: `input.json`,
-`discovery.json`, `plan.json`, append-only `skill_results.jsonl`, append-only
+`discovery.json`, `plan.json`, `sampling_seeds.json` (each invocation's
+executed sampling seed, `AnalysisSamplingSeeds`), append-only `skill_results.jsonl`, append-only
 `inference_receipts.jsonl` and `prediction_retention_receipts.jsonl` when historical inference is requested, immutable
 certified artifacts, and bounded `report.json` / `report.md`. When a capability
 gap requires custom analysis, exact generated source and its validated
@@ -146,6 +155,37 @@ An additional promotion copies verified prior program content into the new
 iteration's registry before publishing a new immutable snapshot; it never
 mutates the prior registry. Standalone callers may pass the same typed ref
 directly.
+
+## Sampling seed (issue #983)
+
+Owner: `agent.data_analysis.sampling_seed`
+([seeding contract](../../../docs/agent-reference/mechanisms/seeding.md#data-analysis-sampling)).
+Explicitness belongs to the operator's `AnalysisResourceEnvelope`:
+`declared_sampling_seed()` is the envelope's `sampling_policy.seed` only when
+the policy file set it (`"seed" in model_fields_set`). The envelope serializes
+`sampling_policy.seed` only when declared, so the declaration survives the
+input's dump/validate round trips and an undeclared seed is never shown.
+
+- **Declared.** `resolve_analysis_plan` refuses a planned invocation whose
+  `sampling_plan.policy.seed` differs (`AnalysisPlanResolutionError` naming the
+  declared seed; the existing replan allowance applies). The plan executes as
+  written, and every prompt renders the seed exactly as before.
+- **Derived.** After plan acceptance, `apply_sampling_seed` replaces each
+  invocation's policy seed with
+  `derive_seed(run_seed, "data_analysis.sampling", SeedCoordinates())` before
+  authorization and materialization; the stored `plan.json` keeps the LLM's
+  value. The selection and generated-program envelope dumps, the plan input and
+  the Interpreter's analysis-brief envelope omit `seed`; report synthesis omits
+  `coverage.sampling_seed`. The task's selection identity and the report's
+  coverage carry the executed seed.
+- **Record.** `sampling_seeds.json` lists `invocation_id`, `sampling_seed`,
+  `sampling_seed_source` (`declared`/`derived`) and, when derived,
+  `llm_plan_seed_ignored`. It is written after plan publication and is never
+  prompt, skill or generated-program input.
+
+Consequence (operator decision D-OP-3.3): an undeclared seed differs per run,
+so identical policies select different rows across runs and materialized views
+are not reused across runs. Resume within one run keeps its seed.
 
 ## Key behavioral notes
 

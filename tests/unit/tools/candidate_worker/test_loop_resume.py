@@ -32,7 +32,6 @@ from .test_interpretation import interpretation_provider as interpretation_provi
 from .test_native import native_runner as native_runner
 from .test_training import training_runner as training_runner
 
-
 #: Names the offline fixtures bind in the test process that a real launcher would
 #: provide some other way; every other inherited name is dropped like Popen(env=...).
 FIXTURE_ENVIRONMENT = (
