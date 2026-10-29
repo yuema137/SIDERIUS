@@ -105,6 +105,7 @@ from core.preflight_estimation import (
     resolve_preflight_estimator,
 )
 from ml_models.model_descriptions import DescriptionSourcePolicy
+from workflows.task_package_refs import resolve_manifest_ref
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.custom_loss_contract import TaskOwnedCustomLoss
@@ -503,12 +504,8 @@ def _require(section: dict[str, Any], key: str, where: str) -> str:
 
 
 def _resolve_path(ref: str, manifest_dir: str) -> str:
-    """Refs are relative to the MANIFEST's directory, never to the cwd.
-
-    A task package must be movable and must compose identically regardless of
-    where the process happens to be launched from.
-    """
-    return ref if os.path.isabs(ref) else os.path.normpath(os.path.join(manifest_dir, ref))
+    """Refs are relative to the MANIFEST's directory (``task_package_refs`` owns the rule)."""
+    return resolve_manifest_ref(ref, manifest_dir)
 
 
 def _normalized_ref(ref: str) -> str:
