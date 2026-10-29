@@ -271,6 +271,9 @@ startup controls. `SUPPORTED_LAUNCH_FIELDS`, `INACTIVE_LAUNCH_FIELDS` and
 direct workflow, not automatic CLI host-profile resolution. Inactive history,
 outer iteration/retry, omitted-stage/advice, raw `plan_overrides`, cooperative
 allocation, and chain-incumbent controls must equal their native defaults.
+The chain-incumbent controls include the two formal deltas
+(`skip_formal_min_delta`, `bypass_formal_time_budget_min_delta`): only those
+gates consume them, and the gates stay off on this ingress (issue #1012).
 Those defaults do not activate omitted phases or outer retries. Tuning advice,
 ordinary budgets, epoch limits, typed frozen portions, retention, parameter
 rules and runtime controls use the native owners. `data_dir` must match the
@@ -280,6 +283,14 @@ null; the rule is the tuner schema's `OperatorTimeBudgetMinutes`, applied by
 `run_config.validate_launch_admission` on this ingress and on the standard CLI,
 direct workflow and setup-preview paths alike (issue #828). Null disables a
 budget; zero, negative and non-finite values are refused before model work.
+The same function checks every launch value against its owner's annotation
+(issue #1045): the same-named `HyperparamTuningInput` field, or for the two
+launch-only floats `ResearchPolicy.minimum_boldness` and
+`run_config.FiniteTargetScore`. Timeouts, safety factors, thresholds and
+`degenerate_penalty_score` therefore refuse inf/NaN identically on every path.
+`None` is skipped as "omitted"; when an owner admits `None`, the refusal says
+so. The standard CLI runs this check in `run_one_iteration.main` on the
+builder-projected launch, before workspace binding (exit 2).
 
 Known native scalar, schedule, formal-policy, scope, order and deadline checks
 run before proposer construction. Runtime-verifier identity, measurement
@@ -302,7 +313,39 @@ constraint sections refuse; incomplete context is completed from
 `workflow_constraint_context`. Implementation and validation external context
 bindings are checked against that same result. The admitted proposal is saved
 before its first call; resolved settings are saved to
-`candidate_run/training_settings.json`.
+`candidate_run/training_settings.json`. `CandidateTrainingSettings` serializes
+an accepted nonfinite value of a typed `float` field as the JSON string
+`"Infinity"`, `"-Infinity"` or `"NaN"` (`ser_json_inf_nan="strings"`), so
+admission's own JSON round trip and the saved document preserve it exactly;
+finite values are byte-identical. This covers floats on `WorkflowLaunchConfig`
+and nested dataclasses, which inherit the setting; a nested `BaseModel` uses its
+own config, so a launch float there must refuse inf/NaN or carry the same
+setting (guarded by
+`test_candidate_settings_nonfinite_floats_inherit_the_string_encoding`).
+Parameter-rule bounds and `ParameterRule.exact` / `allowed` values refuse
+non-finite numbers at their owners (`NumericRange`, `ParameterRule`), so no such
+value reaches transport.
+Ingress may write such a value as a string (for example `"-inf"`).
+
+Every other candidate-worker JSON write declares its artifact class through
+`record_json.artifact_json` (issue #1046), and the class picks one existing
+owner; there is no third encoding:
+
+- `record`: files that people and the dashboard read, namely captured node
+  records such as `run_output_<run_name>.json` and the request/receipt control
+  documents. These use the storage owner
+  `execute_tools.scoring_utils.coerce_nonfinite_to_none`: strict JSON, with
+  inf/NaN written as `null`, exactly as the native tuner writes `run_output`.
+- `internal`: documents a later worker phase rereads and compares, namely node
+  inputs, the proposal seed, fan-out payloads and the graph tuning input. These
+  use the unit-transport JSON-constant encoding
+  (`unit_transport.constants_json`), so an inf/NaN value survives the reread.
+
+`capture_record` compares an existing native record with the returned output
+after projecting the output through the same storage owner. A `-inf` no-signal
+sentinel or a NaN therefore no longer reads as "native record disagrees", and
+the in-memory output, with `-inf` intact, is what the worker passes on.
+Whether a value may be nonfinite stays with its owner (issue #1012).
 
 Passed validation returns typed in-memory outputs to training. Missing model
 or loss sources refuse before construction/staging. The shared construction
@@ -1068,7 +1111,43 @@ either literature shape. Proposal diagnostics are per node
 | Profile | Admission (`fanout.literature_collection_candidate` / `literature_split_candidate`) |
 | --- | --- |
 | `native-literature-collection/v1` (S2) | ≥ 1 external reviews; one adaptor with one `literature.output` port binding every review result exactly once, `collect/v1` + `all/v1` + `single/v1`; exactly one proposal using `literature-collection-to-proposal(reviews=AdaptorSource(<adaptor>), proposal_input=<external seed>)`; its complete branches |
+| `native-literature-judged/v1` (B6-8a) | ≥ 1 external reviews; one adaptor with one `literature.output` port (`max_items` declared) binding every review exactly once, an LLM COMBINE kind (`fanout.literature_judged_candidate`; any other profile refuses an LLM COMBINE with `LLM_COMBINE_NOT_ADMITTED`), `single/v1` or `per-item/v1(M)`; one proposal per output through `literature-to-proposal(output=AdaptorSource(<adaptor>[, index=i]), proposal_input=<external seed>)` (no index for `single/v1`, indices `0..M-1` each once); `admit_llm_strategy` admits the kind and the deterministic validation table admits a declared `Fallback.combine` with the same SELECT/DISTRIBUTE; one complete family per proposal. See "LLM COMBINE literature profile" |
+| `native-proposal-judged/v1` (B6-8b) | ≥ 2 external proposals; one adaptor with one `proposal.output` port (`max_items` declared) binding every proposal result exactly once, an LLM COMBINE kind, `single/v1` or `per-item/v1(M)`; one branch per output: an implementation `proposal-to-implementation(output=AdaptorSource(<adaptor>[, index=i]), storage)` and exactly one validation reading it (`implementation-to-validation`, or `proposed-implementation-to-validation` whose `proposal` is the same adaptor output); no other node, tuner, loop or route (`definition/proposal_judged.py`). See "LLM COMBINE literature profile" for the executor; a judged branch's proposal value is the adaptor output it reads (`adaptor_phase.judged_proposal`) and its seed (task facts, constraints) is the seed of the proposal that output cites first; every proposal seed is reconciled against every branch's protocol externals before any effect. A synthesized `proposal.output` (`judge-merge`, `primary-advisors`, debate synthesize) gets its system `candidate_id` at the adaptor boundary, `agent.schemas.proposal.mint_candidate_id(CombinedItem.value_sha256)` (the proposer's mint owner; deterministic, so replay reproduces it; the author still leaves it unset), so the validation join's identity check holds unchanged. The worker stamps `ImplementorInput.consumed_input_sha256 = inputs.consumed_input_sha256(seed, proposal)` for judged-branch implementations only (the node echoes it into `ImplementorOutput`; absent and omitted elsewhere), and `graph_evidence.verify_judged_branches` recomputes it from the verified adaptor value and the owner's persisted seed: a branch that ran on another output or another owner's seed is refused |
 | `native-literature-split/v1` (S3) | exactly one external review; one adaptor with one `literature.output` port bound to it and `split-items/v1(field="findings", count=M, on_short)` after any COMBINE/SELECT pair the declaration validation table admits (S3 is `field-rank/v1(confidence, descending)` + `top-k/v1(k)`); exactly M proposals, each `literature-to-proposal(output=AdaptorSource(<adaptor>, index=i), proposal_input=<external seed>)`, indices `0..M-1` each bound once; one complete family per proposal |
+
+**LLM COMBINE literature profile** (`native-literature-judged/v1`, B6-8a;
+`adaptor_llm.py`, `adaptor_phase.decide`). Before any effect, `graph.execute_fanout`
+builds `judge_adaptor_context(request, initial, composition.judge_task)`:
+
+- **Routes.** `run_judge_routes` reads `WorkflowLLMConfig.judge` from the run's
+  captured, digest-checked `llm_config` snapshot (`locked_judge_routes`); an absent
+  block refuses; when a workspace run lock holds judge routes they must be equal.
+  Worker and verifier read the same snapshot.
+- **Rubrics (D3).** A `rubric-rank/v1` rubric resolves only against the task
+  composition's `rubrics:` (`resolve_rubric_ref`); an unknown or edited rubric raises
+  `UnsupportedRubricSource` naming that source (experiment-owned rubrics are not
+  supported). `guidance="task_blocks"` requires task `judge_blocks`.
+- **Run-level judge call sum (D4).** `Σ_adaptors strategy_call_bound(strategy,
+  bound sources) × bodies + stop_calls ≤ WorkflowLLMConfig.judge.max_judge_calls`,
+  with `bodies = loop.final_iteration` (1 without a loop) and `stop_calls =
+  loop_stop.judge_call_bound(loop)` (0 without a loop); an absent cap refuses. A
+  refusal fails the run before any node starts (receipt `failed`, no graph trace).
+
+Execution: `decide_llm` admits the items (B6 rule), and with none admissible records
+`rejected/no_admissible_input` without calling B2. Otherwise it builds
+`StrategyInvocation(evidence_dir=<adaptor dir>/<id>.judge)`, runs
+`run_llm_strategy` (bridge resolved at call time through
+`agent.judge.call.bridge_for_route`; usage rows under the run context), maps the
+outcome onto the B6 core (adaptor contract) and records the evidence anchor. A
+strategy refusal raised before any provider contact (prompt budget, item cap)
+fails the slot without a record, like any uncertain adaptor failure. The verifier
+(`verify_adaptors`) recomposes the judge declarations from the task manifest
+(`task_composition.compose_judge_declarations`, judge sections only), takes each
+recorded record's `strategy_evidence.sha256` and replays with
+`replay_llm_strategy`: it never contacts a provider; any edited, reordered or stray
+call file, a changed rubric file, or a judge directory under a record without an
+anchor refuses. GUI: the console lists no candidate profiles, so nothing is added
+there; the profile is preview/launch-selectable like S2/S3.
 
 **Protocol application** (`literature_edges.proposal_input`, the one owner unit
 dispatch and the verifier call). The single-review profile keeps

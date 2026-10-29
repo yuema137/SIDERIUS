@@ -1469,7 +1469,9 @@ class HyperparamTuningAgent:
             # (c) ``best_trial_score < resolved_skip_formal_threshold`` —
             # the startup-resolved value (V19 PR 1: single-source
             # arithmetic; ``None`` = no chain incumbent = gate inert).
-            # Disabled by ``skip_formal_min_delta=float('-inf')``.
+            # Inert while the chain-incumbent gates are off (the default: omit
+            # --enable_chain_incumbent_formal_gates); a nonfinite operator
+            # delta is refused at launch.
             # V20 PR D (D-C3): the winner is resolved ONCE here and reused
             # by the skip gate, the bypass gate and the log line below.
             # Three independent `_best_trial_winner` calls would agree only

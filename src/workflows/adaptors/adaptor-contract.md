@@ -12,7 +12,17 @@ the candidate worker (B6-3: `readiness.NodeReadiness.kind="adaptor"`,
 `adaptor_phase.py`). LLM COMBINE kinds belong to B2
 (`admit_/run_/replay_llm_strategy` in `workflows.judge_strategies`,
 [strategy contract](../judge_strategies/judge-strategies-contract.md)); their
-rankings re-enter through `select`.
+results re-enter this core (B6-8a, `tools/candidate_worker/adaptor_llm.py`):
+`run.admissible_items` admits the items, B2 decides, and `run.select_and_distribute`
+applies SELECT and DISTRIBUTE to a `Combined` built from the B2 outcome (a rubric
+ranking: `Ranking(basis="rubric")` with `RankEntry.exact = weighted_mean_exact`; a
+debate ranking: `Ranking(basis="judge")`, values `None`; combined values: one
+`Unit(role="synthesized")` per `CombinedItem`, inputs = its parents' refs, value
+re-validated by the contract's native type; `fallback`: the declared
+`Fallback.combine` run by `combine` on the same admissible items). A B2 `failed`
+outcome is `AdaptorOutcome(status="failed", reason="judge_failure")`.
+`run_deterministic_adaptor` is `admissible_items` + `combine` +
+`select_and_distribute`, so both paths share SELECT/DISTRIBUTE.
 
 | Owner | Responsibility |
 | --- | --- |
@@ -150,8 +160,13 @@ output and `OutputDigest(port, index, status, sha256)` where `sha256` is
 `canonical_sha256(value)` (sorted-key, compact, ASCII JSON of
 `model_dump(mode="json")`, the encoding of `WorkflowDefinition.declaration_digest`;
 owner `core/canonical_json.py`, shared with custom adaptors). The record test pins a literal digest.
-Fields for implementation identity, B2 strategy evidence and custom execution
-are added by the PRs that produce them.
+An LLM COMBINE record adds `strategy_evidence = StrategyEvidenceRef(path, sha256)`
+(B6-8a): `path` is `<adaptor-id>.judge/strategy.json` relative to the adaptor
+directory and `sha256` is `StrategyResult.evidence_sha256`, the anchor readback
+passes to `replay_llm_strategy`; `fallback` names the fallback combine kind actually
+run. `strategy_evidence` is omitted when absent, so deterministic records keep their
+bytes; `combine` in `strategies`/`parameters_sha256` may be an LLM kind. Fields for
+implementation identity and custom execution are added by the PRs that produce them.
 
 ## Validation evidence
 

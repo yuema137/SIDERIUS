@@ -83,7 +83,7 @@ them. Dataset row counts are separate from physical-segment counts.
 | `formal_max_epochs` | `int \| None` | No | `None` | FORMAL-role epoch ceiling (D-BUD-6). Precedence for a formal round: this value → `max_epochs` → no clamp; trial rounds never read it. `ge=1`. |
 | `force_formal_round` | `bool` | No | `True` | When `True` (default), the **last** round of every iteration forces `plan.is_trial = False` so it always runs in formal mode (full dataset) regardless of what the planner picked. |
 | `formal_round_strategy` | `Literal["full_clone", "hybrid_params", "independent", "inherit_best_train_plus_formal_eval"]` | No | `"full_clone"` | Orchestration policy for the forced formal round: `full_clone` re-runs the best trial verbatim on full data; `hybrid_params` carries trial-winner hyperparams + formal sampling; `independent` lets the planner propose a fresh formal config. |
-| `degenerate_penalty_score` | `float \| None` | No | `None` | Operator policy for the agent's reaction when scoring flags a degenerate output on a formal round (e.g. all-zeros prediction). When set, the degenerate run gets this penalty score and the tuner continues; when `None`, the run is recorded as-is. |
+| `degenerate_penalty_score` | `float \| None` | No | `None` | Operator policy for the agent's reaction when scoring flags a degenerate output on a formal round (e.g. all-zeros prediction). When set (finite; inf/NaN are refused at launch, issue #1045), the degenerate run gets this penalty score and the tuner continues; when `None`, the run is recorded as-is. |
 
 ### Trial mode sampling
 
@@ -315,8 +315,8 @@ expression — and failing before any GPU work is the fail-closed direction.
 | `runtime_completion_policy` | `completed-workload-v1 \| verified-prediction-v1` | No | `completed-workload-v1` | Completed phase actual costs govern the current attempt; incomplete phases still require conservative verification. Explicit strict mode retains the pre-completion admission rule. Compared in run identity and forwarded unchanged to training and inference. Historical experiment selection belongs to the consumer repository. |
 | `runtime_verifier` | `str \| None` | No | `None` | Optional installed runtime-verifier provider. Omitted constructs the native verifier. Selection resolves before work and never silently falls back. |
 | `runtime_verifier_identity` | `RuntimeVerifierIdentity \| None` | No | `None` | Resolved source and qualified-assembly identity, compared in workspace locks and verified in the executor environment. Ordinarily resolved from `runtime_verifier`; an explicit expected identity must match. |
-| `trial_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates trial rounds. `None` = trial VRAM-gate disabled. |
-| `formal_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates formal rounds. `None` = formal VRAM-gate disabled. |
+| `trial_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates trial rounds. Finite and positive (`OperatorVramBudgetGb`, issue #1044); zero, negative and non-finite values are refused at launch. `None` = trial VRAM-gate disabled. |
+| `formal_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates formal rounds. Finite and positive (`OperatorVramBudgetGb`, issue #1044); zero, negative and non-finite values are refused at launch. `None` = formal VRAM-gate disabled. |
 | `vram_probe_step_timeout_seconds` | `float` | No | `180.0` | Watchdog for one training-mode or inference footprint forward during VRAM preflight. It runs no optimizer update and does not bound an epoch or candidate run. |
 | `vram_preflight_total_timeout_seconds` | `float` | No | `900.0` | End-to-end watchdog for the isolated VRAM preflight worker, including model construction, footprint measurement, and inference-batch search. Independent of Trial/Formal training budgets. |
 | `vram_preflight_host_memory_limit_gb` | `float \| None` | No | `None` | Resident host-memory limit for the complete isolated VRAM-preflight process tree. `None` preserves the deployment default, normally 24 GiB. Independent of the GPU VRAM ceiling; a breach is inconclusive rather than model-capacity evidence. |
@@ -1315,8 +1315,8 @@ is interpreted. Every golden-metric ORDERING decision asks it:
 | Decision | Member used |
 |---|---|
 | trial winner (`_best_trial_winner`) | `best` (ties → first, as `max()` did) |
-| skip gate + its disabled sentinel | `is_better`, `worst_sentinel` |
-| bypass gate + its disabled sentinel | `is_at_least`, `best_sentinel` |
+| skip gate + its inert (worst-value) threshold | `is_better`, `worst_sentinel` |
+| bypass gate + its inert (best-value) threshold | `is_at_least`, `best_sentinel` |
 | bootstrap reference | `worst_sentinel` |
 | resolved skip / bypass thresholds | `toward_better(reference, declared_delta)` |
 | planner score-table incumbent | `best` |
@@ -1336,7 +1336,7 @@ direction and asserts these two do not move.
 |---|---|---|
 | `skip_formal_min_delta`, `bypass_formal_time_budget_min_delta` | DECLARED by the operator, in the golden metric's units | a COORDINATE on the better-direction axis: negative loosens, positive tightens, under both directions. The documented disable values (`-inf` skip, `+inf` bypass) still resolve to that metric's worst / best sentinel, so there is no second convention to learn |
 | `bypass_formal_time_budget_minutes` | `float \| None`, default `None`; finite and positive (`OperatorTimeBudgetMinutes`, issue #828) | **Lane F3 / F-BYPASS-WD-1**: the ELEVATED wall-time ceiling (minutes) a score-QUALIFIED bypass formal attempt may use. ONE resolved value feeds BOTH consumers — admission RE-EVALUATES the forecast against it (a forecast past even this ceiling is REFUSED under bypass; the flag is never forced), and the same value becomes the attempt's `chosen_time_budget`, so the runtime watchdog's `operator_budget_seconds` moves WITH the admission verdict. `None` (default) = a qualified bypass grants NO extension — the elevated ceiling must be explicitly typed at launch (campaign: 200; normal formal: `formal_time_budget_minutes` 120), so it can never become a global raise through a schema default. The watchdog is never disabled by this value. Fresh-chain note: with `enable_chain_incumbent_formal_gates` ON and no incumbent, the −inf bootstrap makes the SCORE side unconditional (V20 §16.C) — the reachable unqualified state is the absence of a HealthGate-valid trial winner. |
-| bootstrap and disabled sentinels | generic ORDER facts | `worst_sentinel` / `best_sentinel` |
+| worst-value bootstrap and inert-threshold sentinels (defensive; not an operator setting) | generic ORDER facts | `worst_sentinel` / `best_sentinel` |
 | the efficiency band | generic, metric-independent by definition | ONE named `EFFICIENCY_BAND_FRACTION` (0.05), applied to the run's OBSERVED score range and moved toward worse — never a raw `best − 0.05` |
 | `degenerate_penalty_score` | DECLARED, and INAPPLICABLE under a minimised metric | a finite float is **REFUSED at startup** with a recorded reason. It is not negated and not reinterpreted: the "large negative, strictly below any healthy success" convention describes a maximised metric, and under a minimised one the same number is the run's best score. `None` (the default) is direction-free and always accepted |
 
@@ -1569,7 +1569,7 @@ enable_chain_incumbent_formal_gates=True, budgets unset
 Surfaced by 07b's Gate 1, which worked around it by temporarily enabling both
 budgets. The coupling predates 07b. Everything else at the formal boundary is
 unchanged: candidate-validity filtering, `MetricOrder`, the skip/bypass
-threshold mathematics and their disabled sentinels, the no-winner-still-skips
+threshold mathematics and their inert sentinel thresholds, the no-winner-still-skips
 rule (a genuinely empty or all-invalid trial stage still skips formal), and
 all retry / round / attempt semantics.
 

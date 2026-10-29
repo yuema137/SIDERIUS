@@ -27,7 +27,7 @@ from tools.candidate_worker import launch_candidate
 from tools.workflow_preview import preview_workflow
 from tools.workflow_preview.models import WorkflowPreviewRequest
 
-from .conftest import _prepare_request
+from .conftest import QUICKSTART, _prepare_request
 from .test_native import native_runner
 
 SIBLING_FIRST = ("propose0", "build0", "check0", "propose1", "build1", "check1")

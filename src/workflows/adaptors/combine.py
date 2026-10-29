@@ -35,7 +35,8 @@ from workflows.definition.models import ResultSource
 from .exact import ExactRational
 from .items import AdaptorInputRef, AdaptorItem, AdaptorModel, AdaptorStrategyError, tuning_output
 
-Role = Literal["selected", "collected", "concatenated", "replicated"]
+# "synthesized": a new value an LLM combining kind wrote from its parents (B2/B6-8a).
+Role = Literal["selected", "collected", "concatenated", "replicated", "synthesized"]
 RankBasis = Literal["metric", "field", "rubric", "judge"]
 
 
@@ -134,7 +135,7 @@ def combine(
         raise AdaptorStrategyError("COMBINE requires at least one admissible item")
     match strategy:
         case PassCombine():
-            return Combined(combine_kind=strategy.kind, units=_whole_units(items))
+            return Combined(combine_kind=strategy.kind, units=whole_units(items))
         case CollectCombine():
             return Combined(combine_kind=strategy.kind, units=(_collect(items),))
         case ConcatItemsCombine(field=field):
@@ -151,7 +152,7 @@ def with_list(value: BaseModel, list_field: str, entries: list[BaseModel]) -> Ba
     return type(value).model_validate_json(updated.model_dump_json())
 
 
-def _whole_units(items: tuple[AdaptorItem, ...]) -> tuple[Unit, ...]:
+def whole_units(items: tuple[AdaptorItem, ...]) -> tuple[Unit, ...]:
     return tuple(
         Unit(
             value=_value(item), element_contract=item.contract, inputs=(item.ref,), role="selected"
@@ -221,7 +222,7 @@ def _metric_rank(
     ranking = Ranking(
         basis="metric", entries=entries, metric_id=metric.id, direction=order.direction
     )
-    return Combined(combine_kind=strategy.kind, units=_whole_units(items), ranking=ranking)
+    return Combined(combine_kind=strategy.kind, units=whole_units(items), ranking=ranking)
 
 
 def _field_rank(strategy: FieldRankCombine, items: tuple[AdaptorItem, ...]) -> Combined:
@@ -235,7 +236,7 @@ def _field_rank(strategy: FieldRankCombine, items: tuple[AdaptorItem, ...]) -> C
         raise AdaptorStrategyError(
             f"field-rank/v1 field {strategy.field!r} is not catalogued for {item.contract!r}"
         )
-    parent = _whole_units(items)[0]
+    parent = whole_units(items)[0]
     entries = list(getattr(parent.value, field.list_field))
     units = tuple(
         Unit(

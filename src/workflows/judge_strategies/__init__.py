@@ -9,6 +9,8 @@ Contract: ``judge-strategies-contract.md`` beside this file.
 from .admission import admit_llm_strategy
 from .kinds import IMPLEMENTED_KINDS, strategy_call_bound
 from .models import (
+    CombinedItem,
+    CombinedItems,
     ItemRanking,
     PromptBudgetExceeded,
     RubricScore,
@@ -29,6 +31,8 @@ from .run import run_llm_strategy
 __all__ = [
     "IMPLEMENTED_KINDS",
     "ITEM_PROJECTORS",
+    "CombinedItem",
+    "CombinedItems",
     "ItemRanking",
     "PromptBudgetExceeded",
     "RubricScore",

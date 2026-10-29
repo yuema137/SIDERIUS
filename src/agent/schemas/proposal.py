@@ -10,6 +10,7 @@ for consumption by both ml_model_implementor and tune_ml_hyperparam_agent.
 from __future__ import annotations
 
 import re
+import uuid
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
@@ -22,6 +23,7 @@ from agent.schemas.hyperparam_tuning import (
     ExpertAdviceInput,
     GateExhaustionInfo,
     OperatorTimeBudgetMinutes,
+    OperatorVramBudgetGb,
     TaskCompositionRef,
 )
 from agent.schemas.output_types import OutputTypeName as OutputTypeName
@@ -53,6 +55,19 @@ from execute_tools.dataset_config import (
 
 
 # B.1 — Falsifiable prediction
+
+
+def mint_candidate_id(content_sha256: str | None = None) -> str:
+    """The one owner of a proposal's ``candidate_id`` (``cand_<32 hex>``), system-minted.
+
+    The proposer mints a random identity (``None``). A framework-synthesized proposal (an
+    LLM COMBINE output under ``native-proposal-judged/v1``) derives it from the value's
+    canonical content digest, so replay reproduces it. Never LLM-generated: the author
+    leaves ``candidate_id`` unset (catalog ``PROTECTED_FIELDS``).
+    """
+    return f"cand_{uuid.uuid4().hex if content_sha256 is None else content_sha256[:32]}"
+
+
 class FalsifiablePrediction(BaseModel):
     """A concrete numerical prediction tied to a measurable metric.
 
@@ -1020,9 +1035,8 @@ class ProposalInput(BaseModel):
             "usable_cap_gb."
         ),
     )
-    vram_budget_gb: float | None = Field(
+    vram_budget_gb: OperatorVramBudgetGb | None = Field(
         default=None,
-        ge=0.0,
         description=(
             "Active operator-defined VRAM ceiling (GB) for the upcoming "
             "tuning iteration. Workflow picks trial_vram_budget_gb if "

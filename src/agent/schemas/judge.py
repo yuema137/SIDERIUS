@@ -14,7 +14,8 @@ from typing import Annotated, Literal, Self, get_args
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
-from agent.schemas.judge_task import MAX_DEBATE_ROUNDS, JudgeTaskBlocks, RubricSpec
+from agent.schemas.judge_refs import MAX_DEBATE_ROUNDS
+from agent.schemas.judge_task import JudgeTaskBlocks, RubricSpec
 from execute_tools.evaluation_metric import MetricDirection, MetricIdentityKey
 from execute_tools.metric_order import MetricOrder
 
