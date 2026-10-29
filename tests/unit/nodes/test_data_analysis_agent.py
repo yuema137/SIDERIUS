@@ -650,6 +650,7 @@ def _input(tmp_path: Path) -> DataAnalysisInput:
 def test_standalone_agent_runs_typed_pipeline_and_persists_bounded_report(tmp_path: Path) -> None:
     analysis_input = _input(tmp_path)
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **kwargs: _Bridge(analysis_input=analysis_input, **kwargs),
         provider="test",
@@ -748,6 +749,7 @@ def test_certified_scope_reference_reaches_authorization_as_exact_opaque_scope(
     )
     capability = _RecordingCapability()
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=capability,
         bridge_factory=lambda **kwargs: ScopeRefBridge(analysis_input=inp, **kwargs),
         provider="test",
@@ -771,6 +773,7 @@ def test_generated_program_is_persisted_before_plan_and_certified_as_evidence(
     analysis_input = _input(tmp_path)
     bridge = _GeneratedProgramBridge(analysis_input=analysis_input)
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **_kwargs: bridge,
         provider="test",
@@ -861,6 +864,7 @@ def test_plan_resolution_retries_generated_question_mismatch_without_widening(
     bridge = ResolutionRetryBridge(analysis_input=analysis_input)
     capability = _RecordingCapability()
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=capability,
         bridge_factory=lambda **_kwargs: bridge,
         provider="test",
@@ -895,6 +899,7 @@ def test_plan_resolution_retry_still_rejects_invalid_second_plan(tmp_path: Path)
 
     analysis_input = _input(tmp_path)
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **kwargs: AlwaysInvalidPlanBridge(
             analysis_input=analysis_input, **kwargs
@@ -941,6 +946,7 @@ def test_generated_python_json_literal_gets_one_audited_repair_before_persistenc
     inp = _input(tmp_path)
     bridge = JsonLiteralBridge(analysis_input=inp)
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **_kwargs: bridge,
         provider="test",
@@ -977,6 +983,7 @@ def test_generated_program_promotes_then_reuses_exact_local_skill(tmp_path: Path
     first_input = _input(tmp_path).model_copy(update={"allow_generated_skill_promotion": True})
     first_bridge = _PromotingGeneratedProgramBridge(analysis_input=first_input)
     first_report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **_kwargs: first_bridge,
         provider="test",
@@ -1010,6 +1017,7 @@ def test_generated_program_promotes_then_reuses_exact_local_skill(tmp_path: Path
     second_input = DataAnalysisInput.model_validate(second_payload)
     second_bridge = _GeneratedSkillReuseBridge(analysis_input=second_input)
     second_report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **_kwargs: second_bridge,
         provider="test",
@@ -1036,6 +1044,7 @@ def test_generated_program_cannot_claim_an_artifact_it_did_not_write(tmp_path: P
     analysis_input = _input(tmp_path)
     bridge = _MissingGeneratedArtifactBridge(analysis_input=analysis_input)
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **_kwargs: bridge,
         provider="test",
@@ -1058,6 +1067,7 @@ def test_one_schema_repair_preserves_selection_and_persists_receipt(tmp_path: Pa
     analysis_input = _input(tmp_path)
     bridge = _RepairingBridge(analysis_input=analysis_input)
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **_kwargs: bridge,
         provider="test",
@@ -1096,6 +1106,7 @@ def test_schema_repair_cannot_change_recoverable_skill_selection(tmp_path: Path)
     analysis_input = _input(tmp_path)
     bridge = _RepairingBridge(analysis_input=analysis_input, change_decision=True)
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **_kwargs: bridge,
         provider="test",
@@ -1117,6 +1128,7 @@ def test_plan_repair_may_only_delete_illegal_nonmetadata_fields(tmp_path: Path) 
     analysis_input = _input(tmp_path)
     bridge = _PlanRepairingBridge(analysis_input=analysis_input)
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **_kwargs: bridge,
         provider="test",
@@ -1228,6 +1240,7 @@ def test_plan_repair_rejects_semantic_changes(tmp_path: Path, repair_change: str
     )
     capability = _RecordingCapability()
     report = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=capability,
         bridge_factory=lambda **_kwargs: bridge,
         provider="test",
@@ -1291,6 +1304,7 @@ def test_analysis_deadline_includes_llm_stages_and_refuses_late_report(
             return result
 
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         provider="test",
         model_id="fake",
@@ -1330,6 +1344,7 @@ def test_no_applicable_analysis_is_persisted_without_data_access_or_fake_finding
     bridge = DecliningBridge()
     inp = _input(tmp_path)
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=NoReadCapability(),
         bridge_factory=lambda **_kwargs: bridge,
     )
@@ -1406,6 +1421,7 @@ def test_synthesis_grounding_retries_once_without_rerunning_skills(tmp_path, ret
 
     bridge = GroundingBridge()
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **kwargs: bridge,
         provider="test",
@@ -1477,6 +1493,7 @@ def test_generated_read_binding_replans_then_executes_and_resumes(tmp_path: Path
     bridge = _GeneratedBindingRecoveryBridge(analysis_input=inp)
     capability = _RecordingCapability()
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=capability,
         bridge_factory=lambda **kwargs: bridge,
         provider="test",
@@ -1540,6 +1557,7 @@ def test_generated_plan_recovery_exhausts_one_shared_retry_before_access(
     bridge = _GeneratedBindingRecoveryBridge(analysis_input=inp, retry_outcome=retry_outcome)
     capability = _RecordingCapability()
     agent = DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=capability,
         bridge_factory=lambda **kwargs: bridge,
         provider="test",
@@ -1594,6 +1612,7 @@ def test_plan_recovery_does_not_reclassify_nonplanning_failures(tmp_path, failur
     capability = _RecordingCapability()
     with pytest.raises(type(failure)) as caught:
         DataAnalysisAgent(
+            run_seed=11,
             task_analysis_capability=capability,
             bridge_factory=lambda **kwargs: bridge,
             provider="test",
@@ -1610,6 +1629,7 @@ def test_constraint_context_reaches_analysis_stages_and_schema_repair(tmp_path):
     inp = _input(tmp_path).model_copy(update={"constraint_context": locked_context()})
     bridge = _RepairingBridge(analysis_input=inp)
     DataAnalysisAgent(
+        run_seed=11,
         task_analysis_capability=_Capability(),
         bridge_factory=lambda **_: bridge,
         provider="test",

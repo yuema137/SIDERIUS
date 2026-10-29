@@ -31,10 +31,11 @@ smoke test.
 ### When you do add a key
 
 Real runs (Level 2 onward) need an LLM provider. Level 1 is the credential-free
-dry run. Three providers are known to the
-bridge — **OpenAI** (`OPENAI_API_KEY`), **Gemini** (`GEMINI_API_KEY`) and
-**DeepSeek** (`DEEPSEEK_API_KEY`) — and any other OpenAI-compatible endpoint
-works by passing `base_url`/`api_key` explicitly. At every real launch, load a
+dry run. The bridge supports OpenAI, Gemini, DeepSeek, Anthropic/Claude,
+Moonshot/Kimi and Z.AI/GLM. The [provider table](installation.md#api-keys)
+lists their configuration identifiers, credential names and additional setup.
+Custom OpenAI-compatible endpoints can be configured with explicit
+`base_url`/`api_key`; test compatibility before a campaign. At every real launch, load a
 trusted machine-owned credential file outside the checkout (mode `600`) or use
 managed secret injection, then check the enabled provider variable names in
 the same shell/process that invokes the run. Do not commit, upload, log or

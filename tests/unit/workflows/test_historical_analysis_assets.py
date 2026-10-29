@@ -597,6 +597,7 @@ def test_production_analysis_stage_receives_prior_model_assets_and_inference_cap
     monkeypatch.setattr("workflows.data_analysis_stage.DataAnalysisAgent", CapturingAgent)
     output = run_optional_data_analysis(
         interpretation,
+        run_seed=11,
         binding=binding,
         iteration=2,
         run_name="iter_002",

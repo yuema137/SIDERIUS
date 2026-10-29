@@ -141,7 +141,7 @@ from workflows.llm_config import (
     resolve_standard_llm_config,
 )
 from workflows.native_chain_binding import NativeChainCaptureRefusal
-from workflows.run_config import WorkflowLaunchConfig, validate_launch_trial_overrides
+from workflows.run_config import WorkflowLaunchConfig, validate_launch_admission
 from workflows.runtime_settings import (
     build_required_profile_binding as build_required_profile_binding,
 )
@@ -1186,9 +1186,10 @@ def main(
     expectations = chain_capture if chain_capture is not None else reviewed_setup
     if expectations is not None:
         expectations.check_entry(args)
-    # Validate the resolved schedule before workspace binding, task imports or LLM work.
+    # Validate the resolved schedule and time budgets before workspace binding,
+    # task imports or LLM work.
     try:
-        validate_launch_trial_overrides(
+        validate_launch_admission(
             WorkflowLaunchConfig(
                 max_rounds=args.max_rounds,
                 is_trial=args.is_trial,
@@ -1198,6 +1199,9 @@ def main(
                 trial_portion=args.trial_portion,
                 train_portion=args.train_portion,
                 eval_portion=args.eval_portion,
+                trial_time_budget_minutes=args.trial_time_budget_minutes,
+                formal_time_budget_minutes=args.formal_time_budget_minutes,
+                bypass_formal_time_budget_minutes=args.bypass_formal_time_budget_minutes,
             )
         )
     except ValueError as exc:
