@@ -720,7 +720,11 @@ route-local fixed messages; others the generic message.
 `LoopResumeReview`: the predecessor UUID, the owner's `receipt_digest` as
 `expected_receipt_digest`, completed bodies, the root bound and name-only
 `credential_readiness` for the root request (no values). `resume_loop` submits
-`CandidateLoopResumeOperation` through `submit_operation`. If the request UUID is
+`CandidateLoopResumeOperation` through `submit_operation`. `LoopResumeSelection`
+accepts optional `operator_advice`, validated by the worker's `OperatorAdvice`
+(invalid advice is a 422 that never echoes the text), and passes it unchanged into
+`CandidateLoopResumeRequest.operator_advice`. A retried UUID with different advice is
+the owner's `conflict`. If the request UUID is
 already admitted it replays with an empty environment before any root or credential
 read, so a retry after an unconfirmed outcome returns the same operation. Otherwise
 the root's `environment_names` are read from the configured `credential_file` with
@@ -729,6 +733,12 @@ the same `credentials` helper as Launch. Refusals on both routes: `loop_resume`
 digest), `kind`, `not_ready` and `runtime` 409 with route-local fixed messages;
 `credentials` 409 carrying missing names only; `busy`/`conflict` use the global
 messages. Unknown predecessor 404.
+
+`StatusView.loop.operator_advice` (status and list; omitted when absent) is the
+advice the selected resume segment was admitted with
+(`candidate_operations.loop_segment_advice`, read from the immutable operation
+record). Monitor shows it as "Resumed with your advice: <text>" in `#loop-advice`,
+set with `textContent` only.
 
 Monitor shows **Pause at next boundary** beside Stop for an active loop
 segment with no receipt; after acknowledgement it reads "Pause requested … Not yet
@@ -748,7 +758,13 @@ resume** (one GET on click, never polled), then **Resume loop**, disabled unless
 credentials are ready. The client generates one request UUID per reviewed digest
 and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
 the POST; a retry reuses it, and the record is released once status shows the
-successor. A 409 clears the review. On success the monitor selects the resumed
+successor. After a review, `#loop-resume-advice` (a textarea, `maxlength=4000`) is
+shown. It is prefilled with the retained record's advice when one exists, otherwise
+with this paused segment's own `operator_advice`. The first Resume attempt trims the
+text and fixes it: the retained record stores the request UUID together with
+`operator_advice` (omitted when empty), and the textarea becomes read-only, so a
+retry is byte-identical. Only a 422 (refused before admission) clears the record and
+unlocks the textarea. Empty advice sends no `operator_advice` key. A 409 clears the review. On success the monitor selects the resumed
 segment, which reads "Resumed segment." and shows Stop and Pause while active and
 its per-body results once completed. A continued predecessor shows "Continued by
 <UUID>" (a Slow-control link) and no Resume. Witnesses:

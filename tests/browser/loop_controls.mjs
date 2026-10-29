@@ -45,6 +45,7 @@ try {
   page.on('pageerror', error => faults.push(error.message));
   let stopRecorded = false, runningTerminal = false, pausingTerminal = false, resumedTerminal = false, resumed = null;
   const pausePosts = [], resumePosts = [];
+  let askingDropped = false; // The first advised Resume is lost in transit (unconfirmed outcome).
   const status = (operation, fields) => ({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture',
     state: 'active', process: {status: 'alive', reason: 'observed'}, finishing: false, receipt_available: false, native_status: null,
     native_id: null, validation_passed: null, reason: 'fixture', ...fields});
@@ -59,7 +60,9 @@ try {
       await new Promise(done => setTimeout(done, 400)); // Keep the request pending across a second click.
       if (url.pathname === '/api/loop-resumes') {
         const body = JSON.parse(request.postData());
-        resumePosts.push(body); resumed = body.request_id;
+        resumePosts.push(body);
+        if (body.predecessor_operation_id === asking && !askingDropped) { askingDropped = true; return route.abort('failed'); }
+        resumed = body.request_id;
         return route.fulfill({status: 202, json: {operation_id: resumed, kind: 'candidate_loop_resume', request_digest: 'b'.repeat(64), observed_at: 'fixture', observation: 'starting'}});
       }
       assert.equal(request.postData(), '{}');
@@ -110,8 +113,9 @@ try {
     }
     if (url.pathname === `/api/operations/${asking}`) {
       // A "Pause and ask me" no-improvement condition paused the loop: no operator Pause marker.
-      const value = terminal(asking, 'paused', 7);
-      value.loop = {final_iteration: 12, attempted_iterations: 7, stop_requested: false, pause_requested: false, input_request: {
+      // A resumed segment that already carries advice: the next Resume is prefilled with it.
+      const value = {...terminal(asking, 'paused', 7), kind: 'candidate_loop_resume'};
+      value.loop = {final_iteration: 12, attempted_iterations: 7, stop_requested: false, pause_requested: false, operator_advice: 'Earlier <b>advice</b>.', input_request: {
         reason: {kind: 'no_improvement', condition_index: 0, iteration: 7, k: 3, non_improving_bodies: 3, last_improvement_iteration: 4, incumbent: 0.81},
         summary: {iteration: 7, final_iteration: 12, metric_id: 'accuracy', direction: 'higher', incumbent: 0.81, incumbent_iteration: 4, non_improving_bodies: 3, input_anchor: 0, bodies_since_input: 7}}};
       return reply(value);
@@ -270,12 +274,26 @@ try {
   await resumeGroup.waitFor({state: 'visible'});
   await page.locator('#loop-resume-review').click();
   await page.locator('#loop-resume-summary').filter({hasText: 'body 8 of 12'}).waitFor();
+  // Untrusted advice renders as text only, and prefills the next Resume.
+  assert.equal(await page.locator('#loop-advice').textContent(), 'Resumed with your advice: Earlier <b>advice</b>.');
+  assert.equal(await page.locator('#loop-advice b').count(), 0, 'advice is never parsed as markup');
+  const adviceBox = page.locator('#loop-resume-advice');
+  assert.equal(await adviceBox.inputValue(), 'Earlier <b>advice</b>.');
+  assert.equal(await adviceBox.getAttribute('maxlength'), '4000');
+  assert.equal(await adviceBox.evaluate(box => box.readOnly), false);
+  await adviceBox.fill('  Try a smaller hidden width.\n');
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-waiting-for-input.png'), fullPage: true});
   await page.locator('#loop-resume').click();
+  await page.locator('#loop-resume-status').filter({hasText: 'retrying reuses the same request'}).waitFor();
+  assert.equal(await adviceBox.evaluate(box => box.readOnly), true, 'advice is fixed once Resume was attempted');
+  assert.equal(await adviceBox.inputValue(), 'Try a smaller hidden width.');
+  await page.locator('#loop-resume').click();
   await page.waitForFunction(id => location.hash.startsWith('#monitor/') && location.hash !== '#monitor/' + id, asking);
-  assert.equal(resumePosts.length, 2);
-  assert.deepEqual(Object.keys(resumePosts[1]).sort(), ['expected_receipt_digest', 'predecessor_operation_id', 'request_id']);
+  assert.equal(resumePosts.length, 3);
+  assert.deepEqual(Object.keys(resumePosts[1]).sort(), ['expected_receipt_digest', 'operator_advice', 'predecessor_operation_id', 'request_id']);
   assert.equal(resumePosts[1].predecessor_operation_id, asking);
+  assert.equal(resumePosts[1].operator_advice, 'Try a smaller hidden width.');
+  assert.deepEqual(resumePosts[2], resumePosts[1], 'a retry resends the same request UUID and advice');
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, judgeAsking);
   await state.filter({hasText: 'Waiting for your input. The judge asked for your input: Scores stopped moving. (no valid score yet). Paused after body 3 of 5. Stop was requested; this run cannot continue.'}).waitFor();
   assert.ok(await resumeGroup.isHidden(), 'a recorded Stop leaves nothing to resume');
