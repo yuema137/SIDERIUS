@@ -39,6 +39,7 @@ def capture_facts(request: CandidateRunRequest) -> CaptureFacts:
     """
     training = None
     rules = None
+    seen: set[str] = set()
     for binding in request.preview.document.definition.externals:
         if binding.contract not in {
             "proposal.input",
@@ -46,9 +47,17 @@ def capture_facts(request: CandidateRunRequest) -> CaptureFacts:
             "optional.task-composition-ref",
         }:
             continue
+        field = "training" if binding.contract == "native-training.settings" else "rules"
+        if field in seen:
+            raise OperationFailure(
+                "reusable_preparation", f"duplicate captured review {field} binding"
+            )
+        seen.add(field)
         observation = next(
-            item for item in request.files if item.reference == f"external.{binding.id}"
+            (item for item in request.files if item.reference == f"external.{binding.id}"), None
         )
+        if observation is None:
+            raise OperationFailure("reusable_preparation", "captured review input missing")
         payload = safe_bytes(Path(observation.path))
         if hashlib.sha256(payload).hexdigest() != observation.sha256:
             raise OperationFailure("reusable_preparation", "captured review input changed")

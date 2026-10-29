@@ -362,7 +362,12 @@ before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
 `task_composition_ref.parameter_rules` or the separate `TaskCompositionRef.parameter_rules`;
 training controls come from the captured settings' native launch schema, including
 its defaults. No task import or current editor/settings lookup occurs. Review
-refuses changed input bytes. The projection does not alter launch or its digest.
+refuses missing observations or changed input bytes with `reusable_preparation`.
+At most one external may supply task rules (across `proposal.input` and
+`optional.task-composition-ref`) and at most one may supply training settings;
+duplicate sources refuse with `reusable_preparation`, even when task rules are null.
+These errors use bounded messages without input paths or payloads.
+The projection does not alter launch or its digest.
 `TrainingReview.max_rounds` carries the captured native integer limit (10 when
 omitted), rendered as **Tuning rounds per body**. It is independent of the
 research-loop body count and cannot be replaced by a later editor draft.
