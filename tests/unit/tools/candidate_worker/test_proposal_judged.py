@@ -293,3 +293,80 @@ def test_profile_admission_refusals(prepared):
         (deterministic, "requires an LLM COMBINE kind"),
     ):
         _refused(request, change, match)
+
+
+@pytest.fixture
+def executed(monkeypatch):
+    """Validation protocol ids the validation units actually executed, in run order."""
+    from workflows.candidate_validation_join import VALIDATION_PROTOCOLS
+
+    seen: list[str] = []
+
+    def spy(protocol, function):
+        def run(*args, **kwargs):
+            seen.append(protocol)
+            return function(*args, **kwargs)
+
+        return run
+
+    monkeypatch.setattr(
+        phases,
+        "VALIDATION_PROTOCOLS",
+        {protocol: spy(protocol, function) for protocol, function in VALIDATION_PROTOCOLS.items()},
+    )
+    return seen
+
+
+def _implementation_only_validators(request):
+    """Rewrite every judged validator to ``implementation-to-validation(output=<impl>)``."""
+    raw = request.preview.model_dump(mode="json")
+    for node in raw["document"]["definition"]["nodes"]:
+        if node["capability"] != "validation":
+            continue
+        request_ = node["request"]
+        arguments = {arg["name"]: arg for arg in request_["arguments"]}
+        implementation = arguments.pop("implementation")
+        arguments.pop("proposal", None)
+        request_["protocol"] = "implementation-to-validation"
+        request_["arguments"] = [
+            {"name": "output", "source": implementation["source"]},
+            *(arg for name, arg in arguments.items() if name in ("storage", "constraint_context")),
+        ]
+    preview = WorkflowPreviewRequest.model_validate_json(json.dumps(raw))
+    observed = preview_workflow(preview)
+    return request.model_copy(
+        update={
+            "preview": preview,
+            "files": observed.files,
+            "declaration_digest": preview.document.definition.declaration_digest(),
+            "selected_constructor_routes": observed.selected_constructor_routes,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "protocol", ["proposed-implementation-to-validation", "implementation-to-validation"]
+)
+def test_a_judged_validator_executes_the_protocol_it_declares(
+    prepared, native_runner, executed, monkeypatch, protocol
+):
+    """Defect: the validation unit runs proposed-implementation-to-validation whatever
+    the declaration names, so a declared implementation-to-validation never executes."""
+    bridge = DebateBridge(order=["proposals:2", "proposals:0", "proposals:1"])
+    monkeypatch.setattr("agent.judge.call.bridge_for_route", lambda route: bridge)
+    request = judged(prepared)
+    if protocol == "implementation-to-validation":
+        request = _implementation_only_validators(request)
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    assert executed == [protocol, protocol]
+    verify_graph_trace(request, parent, receipt)
+
+
+def test_every_catalog_validation_protocol_has_an_executor():
+    """Defect: a catalog validation protocol is declarable but no executor runs it."""
+    from workflows.candidate_validation_join import VALIDATION_PROTOCOLS
+    from workflows.definition.catalog import PROTOCOLS
+
+    declared = {key for key, value in PROTOCOLS.items() if value.output == "validation.input"}
+    assert set(VALIDATION_PROTOCOLS) == declared
