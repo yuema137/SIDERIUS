@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 
+from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .models import ConsoleConfig
@@ -67,12 +68,30 @@ class RequestBoundary:
         headers: dict[bytes, list[bytes]] = {}
         for name, value in scope["headers"]:
             headers.setdefault(name.lower(), []).append(value)
+        forwarded = b"forwarded" in headers or any(k.startswith(b"x-forwarded-") for k in headers)
         if (
             len(headers.get(b"host", [])) != 1
             or headers[b"host"][0].decode("latin1") not in self.hosts
-            or b"forwarded" in headers
-            or any(k.startswith(b"x-forwarded-") for k in headers)
+            or forwarded
         ):
+            if (
+                len(headers.get(b"host", [])) == 1
+                and not forwarded
+                and scope["method"] in {"GET", "HEAD"}
+                and not scope["path"].startswith("/api/")
+                and any(
+                    item.split(b";", 1)[0].strip().lower() == b"text/html"
+                    for value in headers.get(b"accept", [])
+                    for item in value.split(b",")
+                )
+            ):
+                response = PlainTextResponse(
+                    "Request host is not allowed.\n"
+                    f"Open http://{self.config.bind_host}:{self.config.port}/\n",
+                    status_code=403,
+                )
+                await response(scope, receive, secured_send)
+                return
             await refuse(403, "host", "request host is not allowed")
             return
         api = scope["path"].startswith("/api/")

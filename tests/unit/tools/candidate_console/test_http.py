@@ -78,6 +78,39 @@ def test_auth_before_any_body_receive_and_stream_limit(console_config):
     assert calls == ["receive", "receive"]
 
 
+@pytest.mark.parametrize("port", [8740, 9123])
+def test_rejected_browser_host_shows_bind_url_without_changing_admission(console_config, port):
+    """Reverting the fix loses the plain-text bind URL; other admission stays unchanged."""
+    config = console_config.model_copy(update={"port": port})
+    api = client(config)
+    headers = {"Host": f"localhost:{port}", "Accept": "text/html,application/xhtml+xml"}
+    response = api.get("/", headers=headers)
+    assert response.status_code == 403
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.text == f"Request host is not allowed.\nOpen http://127.0.0.1:{port}/\n"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "default-src 'none'" in response.headers["content-security-policy"]
+    assert "location" not in response.headers
+    allowed = api.get("/", headers={**headers, "Host": f"127.0.0.1:{port}"})
+    assert allowed.status_code == 200
+    assert allowed.headers["content-type"].startswith("text/html")
+    for refused in (
+        api.get("/api/choices", headers=headers),
+        api.get("/", headers={**headers, "Accept": "application/json"}),
+        api.get("/", headers={**headers, "Forwarded": "host=localhost"}),
+        api.get("/", headers={**headers, "X-Forwarded-Host": "localhost"}),
+        api.get("/", headers=[*headers.items(), ("Host", "evil.invalid")]),
+        api.post("/", headers=headers),
+    ):
+        assert refused.status_code == 403
+        assert refused.json() == {
+            "error": {"code": "host", "message": "request host is not allowed"}
+        }
+
+
 def test_host_origin_content_and_sanitized_errors(console_config):
     api = client(console_config)
     assert api.get("/api/choices").status_code == 200
