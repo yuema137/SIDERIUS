@@ -173,9 +173,7 @@ def host_slot(
         yield LedgerSlot(root, host, admitted)
 
 
-def _require_unplaced_root(
-    config: OperationStoreConfig, submission: OperationSubmission
-) -> None:
+def _require_unplaced_root(config: OperationStoreConfig, submission: OperationSubmission) -> None:
     """A loop whose root ran placed in a host ledger never resumes outside it.
 
     The serial path would run the segment unaccounted beside ledger-placed runs;
