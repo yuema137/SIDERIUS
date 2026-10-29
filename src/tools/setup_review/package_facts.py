@@ -9,7 +9,6 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any
 
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from execute_tools.dataset_config import bind_dataset_profile
 from execute_tools.health_checks.roster_projection import project_health_roster
 from execute_tools.task_data_path import (
@@ -33,21 +32,17 @@ if TYPE_CHECKING:
     from workflows.task_composition import RunTaskComposition
 
 
-def _default(name: str) -> Any:
-    return HyperparamTuningInput.model_fields[name].default
-
-
-def _basis() -> str:
-    return (
-        f"default formal workload: training strategy={_default('formal_strategy')} "
-        f"portion={_default('formal_portion')}, evaluation strategy=snapshot "
-        f"portion={_default('formal_eval_portion')}; no sampling seed and no "
-        "planner-chosen task parameters"
-    )
+#: The task's full declared split: every row of each leg, before any run-level
+#: sampling (a run's formal/trial portions and seeds select a subset of this).
+FULL_PORTION = 1.0
+BASIS = (
+    "full task split, before any run-level sampling: snapshot strategy, training "
+    "and evaluation portion 1.0, no sampling seed and no planner-chosen task parameters"
+)
 
 
 def _formal_scopes(composition: RunTaskComposition) -> tuple[object, object]:
-    """Build scopes through the run's own acquisition owner with formal defaults."""
+    """Build the full training/evaluation scopes through the run's acquisition owner."""
     from nodes.ml_hyperparameter_tune_agent.scope_acquisition import acquire_attempt_scopes
 
     with (
@@ -57,10 +52,10 @@ def _formal_scopes(composition: RunTaskComposition) -> tuple[object, object]:
         scopes = acquire_attempt_scopes(
             composed=True,
             mode="formal",
-            trial_strategy=_default("formal_strategy"),
-            trial_portion=_default("formal_portion"),
+            trial_strategy="snapshot",
+            trial_portion=FULL_PORTION,
             eval_strategy="snapshot",
-            eval_portion=_default("formal_eval_portion"),
+            eval_portion=FULL_PORTION,
             train_sampling_seed=None,
             eval_sampling_seed=None,
             target_files=None,
@@ -88,7 +83,7 @@ def _counts(impl: Any, data_root: str, training: object, evaluation: object) -> 
     try:
         train = impl.training_dataset(
             training,
-            EpochSamplingParams(data_dir=data_root, train_portion=_default("formal_train_portion")),
+            EpochSamplingParams(data_dir=data_root, train_portion=FULL_PORTION),
         )
         valid = impl.validation_dataset(evaluation, EvalMaterializationParams(data_dir=data_root))
         if not (hasattr(train, "__len__") and hasattr(valid, "__len__")):
@@ -104,7 +99,7 @@ def _scope_facts(
     composition: RunTaskComposition, request: TaskSummaryRequest
 ) -> tuple[DataScopeFacts, SampleCountFacts | None]:
     impl = composition.task_data_path
-    basis = _basis()
+    basis = BASIS
     if not declares_scope_capability(impl):
         absent = "this task does not build its own scopes"
         counts = SampleCountFacts(state="not_countable", message=absent)
