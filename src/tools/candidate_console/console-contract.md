@@ -900,6 +900,28 @@ console.json only.
 | `GET /api/tasks/{task_id}/setups` | `{"setups": [SetupView{setup_id, label, runnable, saved_version, refs_match_task}]}` for setups whose task is `task_id`; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
 | `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
 
+**Run attribution.** The console records the selected setup on reusable runs:
+`ReusableCandidatePreparationRequest.setup_id` (set by `ReusablePreparation` to the
+setup `configured_capture` admitted: it exists, is runnable and matches the task)
+and `CandidateOperation.setup_id` (set by `ReusableCandidate` after the same
+check). Both are optional, `^[a-zA-Z0-9_-]{1,80}$`, and omitted when `None`, so
+older records and their request digests are byte-identical. When present they are
+bound into the operation request digest (the prepare one through its request; the
+candidate one by `store.digest`), so a replay with another attribution is a
+conflict. Legacy `editor_projects` runs are attributed too.
+
+| `GET /api/operations?project_id=` | rows attributed to that setup | 422 for a malformed ID |
+|---|---|---|
+
+`list_operations(config, limit, project_id)` applies the setup predicate to every
+verified record (newest first) before `limit`; the unfiltered list is unchanged
+(the newest `limit` records). The recorded id is `OperationListItemView.project_id`:
+a reusable preparation's `request.setup_id`, a candidate's `setup_id` (a loop
+resume uses its root candidate's), else an edited run's reviewed `project_id`.
+Records without attribution have `project_id: null` and appear only unfiltered.
+`incomplete` still reports a store beyond the 4096-entry scan limit, so a filtered
+list never claims completeness the scan did not have.
+
 CAS: `SetupStore` holds the sha256 of the bytes it last read or wrote; a write
 from another process (or a hand edit) refuses with `stale` and leaves the file
 unchanged. Templates for an opened project keep using `instantiate`, which now
@@ -1414,7 +1436,8 @@ responses and may inspect it through the existing monitor.
 ## Operation list
 
 `GET /api/operations` lists operations admitted by this console's own operation
-store, most recently admitted first, at most `limit` rows. The owner is
+store, most recently admitted first, at most `limit` rows (optional `project_id`
+setup filter, applied before `limit`: see "Experiment setups"). The owner is
 `tools.candidate_operations.list_operations`: it enumerates only
 `{state_root}/operations/<UUID>` entries, verifies each through the same
 `load_record` path as a single read, sorts by the record's `admitted_at`, and

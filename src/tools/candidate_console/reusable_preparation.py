@@ -121,6 +121,8 @@ class ReusablePreparation:
             source_path=str(project.source_file),
             project_root=str(project.project_root),
             runs_root=str(root),
+            # Attribution to the setup configured_capture just admitted for this task.
+            setup_id=project.project_id,
             **selection.model_dump(exclude={"task_id", "preparation_operation_id"}),
             **task.model_dump(
                 include={

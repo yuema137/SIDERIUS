@@ -135,6 +135,10 @@ class ReusableCandidate:
             operation_id,
             selection.run_seed,
         )
+        # Attribute the run to the setup ``_inspect`` admitted (exists, runnable, task).
+        operation = CandidateOperation.model_validate_json(
+            operation.model_copy(update={"setup_id": project_id}).model_dump_json()
+        )
         return task, inspected, operation
 
     def review(self, project_id: str, selection: ReusableCaptureSelection) -> ReusableCaptureReview:

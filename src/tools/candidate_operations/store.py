@@ -48,6 +48,8 @@ def digest(submission: OperationSubmission) -> str:
         content["reusable_preparation"] = submission.reusable_preparation.model_dump(mode="json")
     if submission.kind == "candidate" and submission.resources is not None:
         content["resources"] = submission.resources.model_dump(mode="json")
+    if submission.kind == "candidate" and submission.setup_id is not None:
+        content["setup_id"] = submission.setup_id
     return hashlib.sha256(
         json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
