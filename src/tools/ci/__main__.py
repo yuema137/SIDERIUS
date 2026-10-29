@@ -89,7 +89,8 @@ def _validate_splits_against_collection(
             print(
                 f"split for {name} DROPPED (stale or uncollectable): "
                 f"measured {len(nodes)} node(s), live {len(live)} — "
-                "falling back to the whole-file atom; regenerate weights.json"
+                "falling back to the whole-file atom; regenerate weights.json",
+                file=sys.stderr,
             )
     return kept
 
