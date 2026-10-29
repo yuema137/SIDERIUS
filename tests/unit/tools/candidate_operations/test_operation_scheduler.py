@@ -674,3 +674,87 @@ def test_a_ledger_from_an_earlier_revision_is_refused_with_one_typed_reason(
     publish_encoded(path, before[: len(before) // 2], replace=True)
     assert _code(launch) == "ledger_format"
     assert _code(released) == "ledger_format"
+
+
+def test_an_interrupted_spawn_leaves_no_ledger_entry(prepared, tmp_path, monkeypatch):
+    """A Ctrl-C (not an OSError) between writing the entry and spawning used to keep it."""
+
+    def interrupted(path, env):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", interrupted)
+    host = _ledger(tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        submit_operation(
+            _store(tmp_path, "a"), _gpu_operation(prepared, 3.0), launch_environment=KEY, host=host
+        )
+    with locked_ledger(host.ledger_root) as root:
+        state = read_state(root)
+    assert state.reservations == () and state.queued == ()
+
+
+def test_a_queue_entry_whose_submitter_died_does_not_block_the_line(
+    prepared, tmp_path, children, monkeypatch
+):
+    """A submitter SIGKILLed after writing a queue entry, before any child, left an
+    unbound entry at the head of the FIFO forever. Its exited submitter now releases it."""
+    host = _ledger(tmp_path)
+    first = _gpu_operation(prepared, 3.0)
+    submit_operation(_store(tmp_path, "a"), first, launch_environment=KEY, host=host)
+    abandoned = _gpu_operation(prepared, 3.0)
+    pid = os.fork()
+    if pid == 0:  # the submitter, killed right after the entry is written
+        monkeypatch.setattr("tools.candidate_operations.submit.spawn", lambda *a: os._exit(0))
+        try:
+            submit_operation(_store(tmp_path, "b"), abandoned, launch_environment=KEY, host=host)
+        finally:
+            os._exit(1)
+    os.waitpid(pid, 0)
+    (entry,) = _queue(host)
+    assert entry.operation_id == abandoned.request_id and entry.process is None
+    assert entry.submitter is not None and entry.submitter.pid == pid
+    _end(children.children[0])
+    late = _gpu_operation(prepared, 3.0)
+    handle = submit_operation(_store(tmp_path, "c"), late, launch_environment=KEY, host=host)
+    assert handle.observation == "starting"
+    assert _queue(host) == ()
+
+
+def test_a_serial_resume_of_a_ledger_placed_root_is_refused(prepared, tmp_path, monkeypatch):
+    """Without the ledger the segment would run unaccounted beside placed runs."""
+    from tools.candidate_operations.host_admission import host_slot
+    from tools.candidate_operations.models import (
+        CandidateLoopResumeOperation,
+        CandidateLoopResumeRequest,
+    )
+    from tools.candidate_operations.store import operation_path
+
+    config = _store(tmp_path, "a")
+    root = _gpu_operation(prepared, 2.0)
+    resume = CandidateLoopResumeOperation(
+        request_id=uuid4(),
+        request=CandidateLoopResumeRequest(
+            predecessor_operation_id=root.request_id, expected_receipt_digest="a" * 64
+        ),
+    )
+    monkeypatch.setattr("tools.candidate_operations.host_admission.load_record", lambda c, i: i)
+    monkeypatch.setattr(
+        "tools.candidate_operations.loop_resume.root_record",
+        lambda _: type("Root", (), {"submission": root})(),
+    )
+    directory = Path(config.state_root)
+    for part in (
+        directory,
+        directory / "operations",
+        directory / "operations" / str(root.request_id),
+    ):
+        part.mkdir(mode=0o700)
+    with host_slot(None, config, resume):
+        pass  # an unplaced root resumes serially as before
+    (operation_path(config, root.request_id) / "placement.json").write_text("{}")
+
+    def enter():
+        with host_slot(None, config, resume):
+            pass
+
+    assert _code(enter) == "host_ledger_required"

@@ -7,6 +7,7 @@ the budget but not the current ledger is queued (B3-5b): claimed and spawned, it
 child then waits in ``host_queue``. Decisions B3-5 D1-D6.
 """
 
+import os
 import subprocess
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -44,7 +45,7 @@ from .models import (
     OperationSubmission,
 )
 from .process import identity_of
-from .store import load_record, native_directory
+from .store import load_record, native_directory, operation_path
 
 #: Names a placed GPU run must declare so its sandbox receives the placement.
 GPU_PLACEMENT_NAMES = (CUDA_VISIBLE_DEVICES_ENV_VAR,)
@@ -120,6 +121,8 @@ class LedgerSlot(HostSlot):
             "request_digest": record.request_digest,
             "state_root": record.config.state_root,
             "placement": placement,
+            # Evidence if this submitter dies before a child is bound.
+            "submitter": identity_of(record, os.getpid()),
         }
         entry = (
             QueuedOperation(**identity)
@@ -157,6 +160,7 @@ def host_slot(
     submission: OperationSubmission,
 ) -> Iterator[HostSlot]:
     if host is None:
+        _require_unplaced_root(config, submission)
         yield HostSlot()
         return
     root_operation, resources = _declared(config, submission)
@@ -167,6 +171,28 @@ def host_slot(
             state, host.budget, submission.request_id, root_operation.request, resources
         )
         yield LedgerSlot(root, host, admitted)
+
+
+def _require_unplaced_root(
+    config: OperationStoreConfig, submission: OperationSubmission
+) -> None:
+    """A loop whose root ran placed in a host ledger never resumes outside it.
+
+    The serial path would run the segment unaccounted beside ledger-placed runs;
+    the operator resumes it with the same ledger and budget instead.
+    """
+    if submission.kind != "candidate_loop_resume":
+        return
+    from .loop_resume import root_record
+
+    root = root_record(load_record(config, submission.request.predecessor_operation_id))
+    placed = operation_path(config, root.submission.request_id) / PLACEMENT_FILE
+    if os.path.lexists(placed):
+        raise OperationFailure(
+            "host_ledger_required",
+            "this loop's root ran placed in a host ledger; resume it with the same "
+            "--host-ledger and --host-budget",
+        )
 
 
 def _declared(

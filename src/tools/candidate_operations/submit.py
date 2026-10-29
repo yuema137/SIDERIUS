@@ -283,7 +283,11 @@ def _claim_and_spawn(
     observation: Literal["starting", "queued", "operation_failed"] = slot.observation
     try:
         child = spawn(path, env)
-    except OSError:
+    except BaseException as error:
+        if not isinstance(error, OSError):
+            # Interrupted before any child was bound: leave no ledger entry behind.
+            slot.spawn_failed(submission.request_id)
+            raise
         slot.spawn_failed(submission.request_id)
         # Popen failure means no executed child; any other ambiguous failure propagates
         # with the already-durable claim intact and is never retried automatically.

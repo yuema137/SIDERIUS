@@ -338,8 +338,17 @@ never sees the sandbox.
   live member in A, AND, if `sandbox.json` exists, the same for B. A missing
   `sandbox.json` is accepted only after the child ended: the sandbox runs with
   `--die-with-parent` and cannot outlive a child that died before publishing
-  it. No identity at all, a mismatched published identity, or any unreadable
-  record keeps the reservation (no exception).
+  it. Every entry also records `submitter` (the submitting process's
+  `ProcessIdentity`, omitted on entries written before it existed). When no
+  child identity exists at all (none bound, no `process.json`), the entry is
+  released once that submitter has positively exited: it was killed between
+  writing the entry and spawning or binding a child, so no child exists for it
+  and the entry would otherwise hold capacity, or the head of the queue,
+  forever. An interrupted spawn that does not kill the submitter (any
+  non-`OSError`, such as `KeyboardInterrupt`) removes the entry itself before
+  re-raising. With no identity and no recorded or exited submitter, a
+  mismatched published identity, or any unreadable record, the entry is kept
+  (no exception).
 - Operator, `release_reservation` (CLI `release-reservation --host-ledger DIR
   --operation-id UUID`), for a stuck reservation. It refuses `not_reserved`,
   `session_live` (the child or sandbox leader alive, or any member in A or B),
@@ -349,6 +358,12 @@ never sees the sandbox.
   identity, on the operator's word.
 
 Known caveats (not covered by the evidence above):
+
+- Submitter window: if the submitter is killed after `Popen` returned but
+  before the child published `process.json` (its first action), the entry is
+  released while that child starts. A queued child then finds its entry gone
+  and ends without running (`host_queue_failed`); a placed child would run
+  unaccounted until it exits.
 
 - bwrap startup window: `--die-with-parent` takes effect only once bwrap has
   set its parent-death signal during startup. If the operation child dies in
@@ -417,7 +432,9 @@ Loop resume. A `candidate_loop_resume` under a ledger reserves with its root
 candidate's `resources` and launch request (timeout, environment names,
 devices), placed or queued like a candidate; a root without `resources` still
 refuses `resources_required`. A placed segment publishes `sandbox.json` like a
-candidate.
+candidate. A resume submitted without a ledger whose root ran placed (the root's
+operation directory holds `placement.json`) refuses `host_ledger_required`
+before any claim: it would otherwise run unaccounted beside placed runs.
 
 Operation receipt. The child's `Completion` carries `host_placement`
 (`HostPlacementEvidence`: the published `placement`, the operation child

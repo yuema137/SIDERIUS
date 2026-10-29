@@ -49,6 +49,9 @@ class HostReservation(PreviewModel):
     state_root: str
     placement: Placement
     process: ProcessIdentity | None = None
+    #: The submitting process that wrote this entry (B3-5b review): evidence for
+    #: releasing an entry whose submitter died before any child was bound.
+    submitter: ProcessIdentity | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def bound_identity(self):
@@ -59,7 +62,7 @@ class HostReservation(PreviewModel):
 
     def evidence(self) -> ReservationEvidence:
         return reservation_evidence(
-            self.state_root, self.operation_id, self.request_digest, self.process
+            self.state_root, self.operation_id, self.request_digest, self.process, self.submitter
         )
 
 
@@ -71,6 +74,9 @@ class QueuedOperation(PreviewModel):
     state_root: str
     placement: Placement
     process: ProcessIdentity | None = None
+    #: The submitting process that wrote this entry (B3-5b review): evidence for
+    #: releasing an entry whose submitter died before any child was bound.
+    submitter: ProcessIdentity | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def bound_identity(self):
@@ -86,16 +92,17 @@ class QueuedOperation(PreviewModel):
         ``sandbox.json`` is read when published, which a waiting child never does.
         """
         return reservation_evidence(
-            self.state_root, self.operation_id, self.request_digest, self.process
+            self.state_root, self.operation_id, self.request_digest, self.process, self.submitter
         )
 
 
 def _require_own_process(entry: HostReservation | QueuedOperation) -> None:
-    process = entry.process
-    if process is not None and (
-        process.operation_id != entry.operation_id or process.request_digest != entry.request_digest
-    ):
-        raise ValueError("reservation process identity names another operation")
+    for process in (entry.process, entry.submitter):
+        if process is not None and (
+            process.operation_id != entry.operation_id
+            or process.request_digest != entry.request_digest
+        ):
+            raise ValueError("reservation process identity names another operation")
 
 
 LedgerEntry = HostReservation | QueuedOperation
@@ -264,6 +271,7 @@ def promote(state: HostLedgerState, budget: HostBudget) -> HostLedgerState:
             state_root=entry.state_root,
             placement=placed[str(entry.operation_id)],
             process=entry.process,
+            submitter=entry.submitter,
         )
         if str(entry.operation_id) in placed
         else entry
