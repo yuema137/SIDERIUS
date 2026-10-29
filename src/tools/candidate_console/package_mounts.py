@@ -14,7 +14,6 @@ The sandbox profile itself is unchanged.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from tools.workspace_sandbox.profile import (
@@ -27,12 +26,6 @@ from workflows.task_package_refs import ManifestReference, manifest_references
 
 from .models import ConsoleConfig, TaskChoice
 from .settings_file import SettingsInvalid
-
-GPU_DEVICE = re.compile(r"/dev/nvidia[0-9]+")
-GPU_WITHOUT_SYS = (
-    "GPU devices are passed but /sys is not mounted read-only; CUDA may fail to start "
-    "inside the run sandbox (see README)."
-)
 
 
 def mounted_paths(task: TaskChoice) -> tuple[Path, ...]:
@@ -122,21 +115,20 @@ def check_candidate_devices(task: TaskChoice) -> None:
             )
 
 
-def device_warnings(devices: tuple[str, ...], read_only: tuple[str, ...]) -> tuple[str, ...]:
-    """The device warnings for one task's run: unusable paths, then GPU nodes without ``/sys``.
+def device_warnings(devices: tuple[str, ...]) -> tuple[str, ...]:
+    """The device paths of one task's run that the sandbox would refuse, as warnings.
 
     ``check``/``serve`` print this list for every task; Run review repeats it for the
-    reviewed request, so an unusable device is named before Launch.
+    reviewed request, so an unusable device is named before Launch. A GPU node needs
+    no further setting: the sandbox adds read-only ``/sys`` and the NVIDIA control
+    nodes itself (``tools.workspace_sandbox.gpu``).
     """
-    warnings = [
+    return tuple(
         f"Device {device} cannot be passed into the run sandbox ({problem}); "
         "a run given it will be refused."
         for device in devices
         if (problem := device_problem(device)) is not None
-    ]
-    if any(GPU_DEVICE.fullmatch(device) for device in devices) and "/sys" not in read_only:
-        warnings.append(GPU_WITHOUT_SYS)
-    return tuple(warnings)
+    )
 
 
 def gpu_warnings(config: ConsoleConfig) -> tuple[str, ...]:
@@ -144,5 +136,5 @@ def gpu_warnings(config: ConsoleConfig) -> tuple[str, ...]:
     return tuple(
         f"Task {task.task_id}: {warning}"
         for task in config.tasks
-        for warning in device_warnings(task.candidate_devices, task.task_read_only)
+        for warning in device_warnings(task.candidate_devices)
     )

@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from core.runtime_control.process_visibility import PROCESS_VISIBILITY_ENV
+from tools.workspace_sandbox.gpu import passthrough
 from tools.workspace_sandbox.profile import (
     NETWORK_FILES,
     SYSTEM_DIRECTORIES,
@@ -69,10 +70,14 @@ def command_prefix(profile: SandboxProfile) -> list[str]:
     for root in runtime_roots():
         args.extend(["--ro-bind", str(root), str(root)])
     args.extend(["--bind", str(profile.workspace), str(profile.workspace)])
+    # A declared /dev/nvidia<N> adds read-only /sys and the host's NVIDIA control
+    # nodes (tools.workspace_sandbox.gpu); without one the argv is unchanged.
+    gpu_read_only, gpu_devices = passthrough(profile.devices)
+    read_only = set(profile.read_only) | set(gpu_read_only)
     # Freeze declared task/config descendants after the writable project mount.
-    for path in sorted(set(profile.read_only), key=lambda p: (len(p.parts), str(p))):
+    for path in sorted(read_only, key=lambda p: (len(p.parts), str(p))):
         args.extend(["--ro-bind", str(path), str(path)])
-    for path in profile.devices:
+    for path in (*profile.devices, *gpu_devices):
         args.extend(["--dev-bind", str(path), str(path)])
     args.extend(["--remount-ro", "/", "--chdir", str(profile.workspace)])
     return args

@@ -45,8 +45,9 @@ _FIX: dict[GpuUnavailableCause, str] = {
     ),
     "sys_not_mounted": (
         "NVIDIA device nodes were passed, but /sys is not mounted here, so CUDA cannot "
-        "start (CUDA error 304). The console run sandbox does not mount /sys; see "
-        "GPU runs in the console README"
+        "start (CUDA error 304). The console run sandbox mounts /sys read-only by itself "
+        "for a task that lists a /dev/nvidia<N> device node; check that the task lists "
+        "one, then run check --gpu (see GPU runs in the console README)"
     ),
     "cuda_init_failed": (
         "NVIDIA device nodes and /sys are visible, but CUDA failed to initialize. "

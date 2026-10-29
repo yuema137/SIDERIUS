@@ -142,23 +142,43 @@ overwrites an existing `tasks/` folder.
    check as step 3. It ends with `Restart the console to load the new task.`: a
    running console reads `console.json` only when it starts.
 
-   **GPU runs.** Passing `/dev/nvidia*` devices alone may not be enough: CUDA can
-   also need `/sys` mounted read-only inside the run sandbox, which `add-task` does
-   not add. `check` then prints `GPU devices are passed but /sys is not mounted
-   read-only; CUDA may fail to start inside the run sandbox (see README).` If your
-   runs fail to find CUDA, adding `"/sys"` to the task's `task_read_only` is the
-   setting that warning refers to; decide whether exposing `/sys` is acceptable on
-   your machine.
-   Run review repeats this warning before you launch. `add-task` refuses a
-   `--device` path that the run sandbox cannot pass (for example one that does not
-   exist on this machine). `check` and `serve` only warn about such a path, because
-   some nodes such as `/dev/nvidia-uvm` appear only after the first CUDA use; a run
-   given it is still refused. When a launch is refused for lack of a GPU, the cause
-   line says which of three things is missing: no device node was passed, device
-   nodes were passed but `/sys` is not mounted (CUDA error 304, the case this warning
-   predicts), or CUDA failed to start with both present (check the driver with
-   `nvidia-smi`, pass `/dev/nvidiactl` and `/dev/nvidia-uvm` too, and do not set
-   `CUDA_VISIBLE_DEVICES` to an empty value).
+   **GPU runs.** List the GPU's device node (for example `/dev/nvidia0`) in the
+   task's `candidate_devices`; that is the only GPU setting. When a run's device
+   list contains a `/dev/nvidia<N>` node, the run sandbox itself also mounts the
+   host's `/sys` read-only and passes the NVIDIA control nodes this machine has
+   (`/dev/nvidiactl`, `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`,
+   `/dev/nvidia-modeset`, `/dev/nvidia-caps/*`). CUDA needs that metadata to start
+   (without it, error 304). Tasks without a GPU node get neither; see the
+   [sandbox README](../workspace_sandbox/README.md#gpu-tasks) for what becomes
+   visible. An older entry that lists `"/sys"` in `task_read_only` keeps working.
+
+   To confirm a GPU task can start CUDA before you launch, run on the machine
+   that will run it:
+
+   ```bash
+   .venv/bin/python -m tools.candidate_console check --gpu --config /absolute/project/siderius_workspace/settings/console.json
+   ```
+
+   Add `--task <task_id>` to probe one task. For each task that lists a
+   `/dev/nvidia<N>` node it prints what the sandbox passes, then
+   `Task <id>: GPU PASS: 1 CUDA device(s), first: <GPU name>` or
+   `Task <id>: GPU FAIL: <cause>`; it exits 0 only when every probed task passes.
+   The probe imports PyTorch and allocates one value on the GPU inside the same
+   sandbox a candidate run gets, without network or model calls, and stops after
+   120 seconds.
+
+   `add-task` refuses a `--device` path that the run sandbox cannot pass (for
+   example one that does not exist on this machine). `check` and `serve` only warn
+   about such a path, because some nodes such as `/dev/nvidia-uvm` appear only
+   after the first CUDA use, and Run review repeats the warning before you launch.
+   A run given a `/dev/nvidia<N>` node this machine does not have is refused with
+   `GPU device /dev/nvidia<N> is not present on this machine`. When a launch is
+   refused for lack of a GPU, the cause line says which of three things is
+   missing: no device node was passed; device nodes were passed but `/sys` is not
+   mounted (CUDA error 304: the run did not get the automatic passthrough, so check
+   that the task lists a `/dev/nvidia<N>` node and run `check --gpu`); or CUDA
+   failed to start with both present (check the driver with `nvidia-smi`, and do
+   not set `CUDA_VISIBLE_DEVICES` to an empty value).
 
    You can also write the task entry yourself. A task needs its `task_id`,
    `label`, `task_manifest`, resource policy and time limits; the
