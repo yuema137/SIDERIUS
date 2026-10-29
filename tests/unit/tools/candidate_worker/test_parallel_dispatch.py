@@ -480,3 +480,33 @@ def test_two_real_units_run_concurrently_to_completion(
     for row in envs.values():
         assert row["cuda"] == "" and "-p no:cacheprovider" in row["pytest"] and row["session"]
     assert {row["unit"] for row in rows if row["kind"] == "token_unit"} == set(envs)
+
+
+def test_a_failure_that_already_exited_stops_the_next_dispatch(
+    prepared, native_runner, monkeypatch
+):
+    """`build0` fails at once; readiness asked before collecting it would start `build1`."""
+    starter = _Starter(5, failing=frozenset({"build0"}), hold={"build0": 0})
+    monkeypatch.setattr(parallel_dispatch, "start_unit", starter)
+    receipt = launch_candidate(_parallel(prepared, _budget(units=2)))
+    assert receipt.status == "failed", receipt.error
+    assert receipt.graph_trace is not None
+    states = {item.node_id: item.state for item in receipt.graph_trace.nodes}
+    assert states["build1"] == "blocked"
+    assert "build1" not in starter.envs
+
+
+def test_a_held_sigterm_is_delivered_only_after_the_critical_section():
+    """A TERM landing between spawn and registration, or during cleanup, must not
+    abort that block; it must still end the dispatch right after it."""
+    from tools.candidate_worker.unit_processes import TermGate, UnitTerminated
+
+    gate = TermGate()
+    finished = []
+    with pytest.raises(UnitTerminated):
+        with gate.held():
+            gate._handler(15, None)  # delivered mid-block: recorded, not raised
+            finished.append("registered")
+    assert finished == ["registered"]
+    with pytest.raises(UnitTerminated):
+        gate._handler(15, None)  # outside a held block: immediate
