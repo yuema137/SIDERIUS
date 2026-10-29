@@ -9,7 +9,13 @@ order together with the decided outcome; B6 records its digest.
 from collections.abc import Callable
 from pathlib import Path
 
-from agent.judge.call import JudgeBridge, JudgeRunContext, bridge_for_route, run_judge_call
+from agent.judge.call import (
+    JudgeBridge,
+    JudgeRunContext,
+    bridge_for_route,
+    emit_judge_marker,
+    run_judge_call,
+)
 from agent.judge.evidence import evidence_sha256
 from agent.schemas.data_analysis.common import canonical_json_bytes, canonical_sha256
 from agent.schemas.judge import (
@@ -102,4 +108,13 @@ def run_llm_strategy(
     )
     data = canonical_json_bytes(record)
     publish_bytes_write_once(str(invocation.evidence_dir / STRATEGY_EVIDENCE_FILE), data)
+    if record.outcome.status == "skipped":
+        # Telemetry only (best effort): the skipped invocation is visible in the usage ledger.
+        emit_judge_marker(
+            route,
+            context,
+            label=f"judge.{strategy.kind.split('/')[0]}.skipped",
+            extra={"adaptor_id": invocation.adaptor_id, "items": len(invocation.items)},
+            bridge_factory=bridge_factory,
+        )
     return StrategyResult(outcome=record.outcome, evidence_sha256=canonical_sha256(record))

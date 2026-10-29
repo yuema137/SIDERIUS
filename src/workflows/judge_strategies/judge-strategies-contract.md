@@ -1,9 +1,12 @@
 # `workflows/judge_strategies/` — LLM COMBINE strategies for adaptors
 
 Technical contract for the LLM strategy framework (advanced design B2, PR B2-6).
-Source and tests determine current behavior. Implemented kinds: `rubric-rank/v1`
-(ranking), `judge-merge/v1` (combining, B2-9) and `primary-advisors-llm/v1`
-(combining, B2-8). `debate-judge/v1` is refused until its PR (B2-7) lands. No
+Source and tests determine current behavior. Every declared kind is implemented:
+`rubric-rank/v1` (ranking, B2-6), `judge-merge/v1` (combining, B2-9),
+`primary-advisors-llm/v1` (combining, B2-8) and `debate-judge/v1` (ranking or
+combining, B2-7). `kind_not_implemented` remains the refusal for a kind added to
+the union before its implementation; a test keeps the union and
+`IMPLEMENTED_KINDS` equal. No
 adaptor can declare or run an LLM kind yet: the adaptor wiring (B6-8) makes the
 union declarable in `AdaptorInstance.combine` and calls this package.
 
@@ -18,13 +21,15 @@ union declarable in `AdaptorInstance.combine` and calls this package.
 | `plan.py` | `PlannedCall`, `StrategyKind`, `StrategyFoldFailure`, `judged_items`, `precall_failure`, `next_call`, `strategy_route`, `call_request`, `call_path`, `decide` (shared by run and replay) |
 | `rubric_rank.py` | `rubric-rank/v1`: `call_bound`, `min_items`, `plan_call`, `fold` (pure) |
 | `judge_merge.py` | `judge-merge/v1`: `MERGE_TEMPLATE` (`judge.merge/v1`, role `merger`, usage label `judge.judge-merge`, response `SynthesisVerdict`), `call_bound`, `min_items`, `output_count`, `plan_call`, `fold` |
+| `debate_judge.py` | `debate-judge/v1`: `call_bound`, `min_items`, `output_count`, `trivial`, `plan_call`, `fold` |
+| `debate_templates.py` | `ADVOCATE_TEMPLATE` (`judge.debate.advocate/v1`, role `advocate`), `CRITIC_TEMPLATE` (`judge.debate.critic/v1`, role `critic`), both response `DebateTurn`; `RANK_TEMPLATE` (`judge.debate.rank/v1`, role `judge`, response `RankVerdict`), `SYNTHESIZE_TEMPLATE` (`judge.debate.synthesize/v1`, role `judge`, response `SynthesisVerdict`); usage label `judge.debate-judge` |
 | `primary_advisors.py` | `primary-advisors-llm/v1`: `ADVICE_TEMPLATE` (`judge.advice/v1`, role `advisor`, response `AdvisoryNote`), `REVISION_TEMPLATE` (`judge.revision/v1`, role `reviser`, response `SynthesisVerdict`), both usage label `judge.primary-advisors-llm`; `call_bound`, `min_items`, `output_count`, `admit_parameters`, `precheck`, `split`, `plan_call`, `fold` |
 | `synthesis.py` | Combining kinds' values: `output_facts` (contract JSON schema + framework-owned fields for the prompt), `check_draft`, `provenance_label`, `combined_items` |
 | `run.py` | `run_llm_strategy`: the only provider effect in the package |
 | `replay.py` | `replay_llm_strategy`: readback; its direct imports include no provider module (`agent.llm_bridge`, `agent.judge.call`) |
 | `models.py` | `StrategyItem`, `StrategyInvocation`, `invocation_sha256`, `RubricScore`, `CriterionValue`, `ItemRanking`, `CombinedItem`, `CombinedItems`, `StrategyFailureCode`, `StrategyOutcome`, `StrategyEvidence`, `StrategyResult`, `StrategyAdmission`, `StrategyRefusal`, `StrategyError` |
 | `agent/judge/rubric_template.py` | `RUBRIC_TEMPLATE` (`judge.rubric/v1`, role `scorer`, usage label `judge.rubric-rank`, response `RubricVerdict`) |
-| `agent/schemas/judge.py` | Call-level types: `RubricScoringRequest` (`CallContent` kind `rubric_scoring`), `MergeRequest` (kind `merge`, role `merger`), `AdviceRequest` (kind `advice`, role `advisor`), `RevisionRequest` (kind `revision`, role `reviser`), `JudgedItem`, `ItemProjection`, `ProjectedField`, `RubricVerdict` (`CallPayload` kind `rubric`), `AdvisoryNote` (kind `advice`), `SynthesisVerdict` (kind `synthesis`) with `SynthesizedDraft(parents, value)` |
+| `agent/schemas/judge.py` | Call-level types: `RubricScoringRequest` (`CallContent` kind `rubric_scoring`), `MergeRequest` (kind `merge`, role `merger`), `AdviceRequest` (kind `advice`, role `advisor`), `RevisionRequest` (kind `revision`, role `reviser`), `AdvocacyRequest` (kind `advocacy`, role `advocate`), `CritiqueRequest` (kind `critique`, role `critic`), `DebateVerdictRequest` (kind `debate_verdict`, role `judge`), `JudgedItem`, `ItemProjection`, `ProjectedField`, `RubricVerdict` (`CallPayload` kind `rubric`), `AdvisoryNote` (kind `advice`), `DebateTurn` (kind `debate_turn`), `RankVerdict` (kind `rank`), `SynthesisVerdict` (kind `synthesis`) with `SynthesizedDraft(parents, value)` |
 
 Not owned here: every judge call, its evidence file and its readback
 ([judge contract](../../agent/judge/judge-contract.md): `run_judge_call`,
@@ -64,9 +69,9 @@ admitted iff `refusals` is empty. Refusal codes:
 | `mixed_contracts` | ports of more than one contract |
 | `unprojectable_contract` | no projector in `ITEM_PROJECTORS` (v1: `proposal.output`, `literature.output`) |
 | `output_contract_mismatch` | the output contract must equal the input contract (a ranking passes values through; a combining kind synthesizes values of the same contract) |
-| `select_incompatible` | a rubric ranking feeds only `all/v1`, `top-k/v1` or `threshold/v1` with `basis="rubric"`; a combining kind feeds only `all/v1` |
+| `select_incompatible` | a ranking feeds only `all/v1`, `top-k/v1` or `threshold/v1` on the kind's own `threshold_basis` (`rubric-rank`: `"rubric"`; `debate-judge` rank mode has none: an ordinal ranking has no scale, so every threshold and `first-admissible/v1` are refused); a combining kind (incl. `debate-judge` synthesize mode) feeds only `all/v1` |
 | `output_not_emittable` | a combining kind's output contract is not in `catalog.CUSTOM_EMITTABLE` (authority contracts such as `tuning.output` are never synthesized) |
-| `cardinality_mismatch` | a combining kind's declared output count (`judge-merge`: `synthesize_count`) lies outside `cardinality` |
+| `cardinality_mismatch` | a combining kind's declared output count (`judge-merge`, `debate-judge` synthesize: `synthesize_count`; `primary-advisors-llm`: 1) lies outside `cardinality` |
 | `insufficient_capacity` | the ports hold fewer items than the kind's `min_items` (`judge-merge`: `min_parents`; `primary-advisors-llm`: 2) |
 | `primary_rule_unavailable` | `primary-advisors-llm` declares `primary="metric_best"`: no projectable contract carries item metric facts yet |
 | `primary_item_undeclared` | `primary="declared"` names a `primary_item` that is not an input position `<port>:<position>` of the declared ports |
@@ -169,6 +174,47 @@ output_index, parents, value, value_sha256)])`. A merged proposal is a new
 candidate; downstream training still needs its own implementation and
 validation (B6 profile admission). No score arithmetic is involved.
 
+## `debate-judge/v1`
+
+Parameters: `rounds: 1..4`, `critic: bool`, `judge_output: "rank" | "synthesize"`,
+`synthesize_count` iff synthesize. Static call bound `rounds × (N + critic) + 1`.
+Calls are serial and round-major: per round, one `advocate` call per item in
+declared order (`AdvocacyRequest(round, item_id)`), then one `critic` call when
+declared (`CritiqueRequest(round)`); then one `judge` call
+(`DebateVerdictRequest(judge_output, synthesize_count, output_contract)`).
+Every request carries the criterion, the projected items, the guidance and the
+verbatim `transcript` of all earlier `DebateTurn`s; its `prior_turns` name every
+earlier call's evidence digest, so an edited, dropped, reordered or re-recorded
+turn makes replay refuse.
+
+`DebateTurn(kind="debate_turn", round, role, item_id, argument ≤ 3000, cites)`:
+`cites` holds at most `MAX_SCORED_ITEMS_PER_CALL` distinct ids (schema;
+`invalid_payload` otherwise); `check_payload` requires `(round, role, item_id)`
+to equal the request's (an advocate argues for its own item; a critic names none)
+and `cites` ⊆ listed ids (`inadmissible_choice`).
+
+Prompt size bound: every debate call lists every item, so the per-call item cap
+applies (`batch_too_large` at admission; `StrategyInvocation` refuses more than
+`MAX_SCORED_ITEMS_PER_CALL` items; request `items` carry it as `max_length`).
+`rounds ≤ MAX_DEBATE_ROUNDS` (4, `agent/schemas/judge_task.py`), so a transcript
+holds at most `MAX_DEBATE_TURNS = 4 × (16 + 1) = 68` turns (schema `max_length`),
+each ≤ 3000 characters of argument plus ≤ 16 cites.
+
+- **rank**: the judge returns `RankVerdict(order, rationale)`; `order` must be a
+  permutation of the listed ids (no subset, extra or repeat; else
+  `inadmissible_choice`). The fold returns `ItemRanking(order)` without `scores`
+  (omitted from the JSON). One admissible item needs no debate: `trivial` returns
+  its ranking, the outcome is `skipped` with no call (zero recorded calls,
+  replayable), and `run_llm_strategy` emits the best-effort usage marker
+  `judge.debate-judge.skipped`.
+- **synthesize**: `min_items` = 2 (one item → `insufficient_items`, no call). The
+  judge returns a `SynthesisVerdict`; `check_payload` requires distinct listed
+  parents (at least one) and a contract-valid value with framework-owned fields
+  unset; the fold requires exactly `synthesize_count` values
+  (`cardinality_mismatch` otherwise) and stamps `adaptor:<id>/debate-judge/v1`.
+
+No score arithmetic is involved; the ranking is ordinal.
+
 ## `primary-advisors-llm/v1`
 
 Parameters: `primary: "declared" | "metric_best" | "first_admissible"` (no
@@ -234,7 +280,8 @@ value (`cardinality_mismatch` otherwise) and stamps
    kind `precheck` failure (`primary_unavailable`) → no call, that code; all
    decided → `StrategyOutcome(status="decided", ranking=...)` for a ranking kind or
    `combined=...` for a combining kind (`combined` is omitted from the JSON when
-   absent), unless the fold raises `StrategyFoldFailure` (`cardinality_mismatch`);
+   absent); a kind's `trivial` ranking (one item, `debate-judge` rank) → `skipped`
+   with no call, unless the fold raises `StrategyFoldFailure` (`cardinality_mismatch`);
    a decided chain that stopped before an over-budget call → `prompt_too_large`
    (re-derived on replay by re-rendering that call; any other early end refuses);
    otherwise `failed` with the call's `failure_code`, or `fallback` with
@@ -283,9 +330,11 @@ The adaptor wiring (B6-8) is the only intended caller. It must:
    "task_blocks"`. Assign `evidence_dir = candidate_control_dir(workspace,
    iteration=N)/adaptors/<id>.judge/`, unique per invocation and write-once. Pass the
    run lock's `JudgeRoutes` and a `JudgeRunContext` of the same iteration.
-4. **Consume.** `decided` → map `ItemRanking` to a B6 `Ranking(basis="rubric")`
-   with `RankEntry.value = weighted_mean` and `RankEntry.exact = weighted_mean_exact`
-   (a rubric ranking without `exact` is refused), then SELECT/DISTRIBUTE; or,
+4. **Consume.** `decided` or `skipped` → map `ItemRanking` to a B6
+   `Ranking(basis="rubric")` with `RankEntry.value = weighted_mean` and
+   `RankEntry.exact = weighted_mean_exact` (rubric-rank; a rubric ranking without
+   `exact` is refused), or `Ranking(basis="judge")` with `RankEntry.value = None`
+   (`debate-judge` rank: ordinal, `scores` absent), then SELECT/DISTRIBUTE; or,
    for `combined`, validate each `CombinedItem.value` with the output contract's
    native type, record its `parents` as lineage and DISTRIBUTE them (`all/v1`);
    `fallback` → run `fallback_combine` deterministically on the same items;
@@ -297,6 +346,16 @@ The adaptor wiring (B6-8) is the only intended caller. It must:
    never call `run_llm_strategy` on readback or resume.
 
 ## Validation evidence
+
+`tests/unit/workflows/test_debate_judge.py` (B2-7): call count equals the static
+bound and the ranking is the judge's order; unlisted and repeated cites refused;
+more items than one call may hold refused; every call sees every earlier turn
+round-major; edited, dropped, reordered and re-recorded turns refused on replay;
+non-permutation orders refused (with fallback); an advocate for another item
+refused; one item → `skipped`, no call, marker, replay; synthesize mode stamped
+values, count and two-item floor; admission rows (rank + threshold, rank +
+first-admissible, synthesize + top-k, count outside bound, cap); pinned
+`judge.debate.{advocate,critic,rank,synthesize}/v1` digests.
 
 `tests/unit/workflows/test_primary_advisors.py` (B2-8): single_call bound 1 with
 stamped lineage and replay; a declared primary is used, not the first item;

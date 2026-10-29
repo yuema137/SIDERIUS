@@ -7,6 +7,7 @@ returns rubric verdicts, so no API key is needed.
 import ast
 import json
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from pydantic import ValidationError
@@ -45,12 +46,10 @@ from workflows.definition.adaptor_strategies import (
     ThresholdSelect,
     TopKSelect,
 )
-from workflows.definition.llm_strategies import (
-    DebateJudgeStrategy,
-    RubricRankStrategy,
-)
+from workflows.definition.llm_strategies import LLMStrategy, RubricRankStrategy
 from workflows.definition.models import InputPort, ResultSource
 from workflows.judge_strategies import (
+    IMPLEMENTED_KINDS,
     StrategyError,
     StrategyInvocation,
     admit_llm_strategy,
@@ -483,7 +482,6 @@ def test_invocation_refuses_a_rubric_or_guidance_it_does_not_reference(tmp_path)
 
 PORT = InputPort(name="reviews", contract="literature.output", cardinality="many", max_items=3)
 TOP1 = TopKSelect(k=1)
-COMMON = {"route_slot": "debate", "max_calls": 9, "guidance": "none", "criterion": "c"}
 
 
 def admit(select=TOP1, inputs=None, output_contract="literature.output", value=None):
@@ -576,20 +574,19 @@ def test_rubric_threshold_over_metric_scored_items_is_not_a_reorder():
         assert "metric_scored_reorder" not in codes
 
 
-@pytest.mark.parametrize(
-    "declared",
-    [
-        DebateJudgeStrategy(**COMMON, rounds=1, critic=False, judge_output="rank"),
-    ],
-    ids=lambda s: s.kind,
-)
-def test_declared_kinds_without_an_implementation_are_refused(tmp_path, declared):
-    """Defect: a declared-but-unimplemented kind is admitted or runs."""
-    admission = admit(value=declared)
-    assert [r.code for r in admission.refusals] == ["kind_not_implemented"]
-    value = invocation(tmp_path, strategy=declared, rubric=None)
+def test_every_declared_kind_is_implemented_and_an_unregistered_kind_is_refused(
+    tmp_path, monkeypatch
+):
+    """Defect: a kind declared in the LLMStrategy union has no implementation (admission
+    would refuse every use of it), or an unregistered kind is admitted or runs."""
+    members = get_args(get_args(LLMStrategy)[0])
+    declared = {get_args(member.model_fields["kind"].annotation)[0] for member in members}
+    assert declared == set(IMPLEMENTED_KINDS)
+    monkeypatch.setattr("workflows.judge_strategies.admission.IMPLEMENTED_KINDS", {}, raising=True)
+    monkeypatch.setattr("workflows.judge_strategies.kinds.IMPLEMENTED_KINDS", {}, raising=True)
+    assert [r.code for r in admit().refusals] == ["kind_not_implemented"]
     with pytest.raises(StrategyError, match="not implemented"):
-        run(value, StubBridge(), tmp_path)
+        run(invocation(tmp_path), StubBridge(), tmp_path)
 
 
 def rubric_request() -> CallRequest:
@@ -677,6 +674,8 @@ def test_rubric_fold_cannot_reach_metric_owners_and_replay_cannot_reach_a_provid
         "rubric_rank.py",
         "judge_merge.py",
         "primary_advisors.py",
+        "debate_judge.py",
+        "debate_templates.py",
         "synthesis.py",
     ):
         imported = _imports(package / module)

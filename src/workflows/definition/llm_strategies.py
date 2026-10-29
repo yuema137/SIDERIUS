@@ -12,7 +12,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
-from agent.schemas.judge_task import RubricRef
+from agent.schemas.judge_task import MAX_DEBATE_ROUNDS, RubricRef
 
 from .adaptor_strategies import MAX_ADAPTOR_OUTPUTS, Fallback
 from .base import DeclarationModel
@@ -30,7 +30,7 @@ class _LLMStrategyCommon(DeclarationModel):
 
 class DebateJudgeStrategy(_LLMStrategyCommon):
     kind: Literal["debate-judge/v1"] = "debate-judge/v1"
-    rounds: Annotated[int, Field(ge=1, le=4)]
+    rounds: Annotated[int, Field(ge=1, le=MAX_DEBATE_ROUNDS)]
     critic: bool
     judge_output: Literal["rank", "synthesize"]
     synthesize_count: Annotated[int, Field(ge=1, le=MAX_ADAPTOR_OUTPUTS)] | None = None

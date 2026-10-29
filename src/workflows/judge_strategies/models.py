@@ -139,16 +139,22 @@ class RubricScore(JudgeModel):
 
 
 class ItemRanking(JudgeModel):
-    """Every invocation item, best first; ``scores`` aligned with ``order``."""
+    """Every invocation item, best first.
+
+    ``scores`` (aligned with ``order``) for a rubric ranking; omitted for an ordinal
+    judge ranking (``debate-judge/v1`` rank mode), which has no values.
+    """
 
     order: tuple[str, ...] = Field(min_length=1)
-    scores: tuple[RubricScore, ...]
+    scores: tuple[RubricScore, ...] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def aligned(self) -> Self:
         if len(set(self.order)) != len(self.order):
             raise ValueError("a ranking lists each item once")
-        if tuple(score.item_id for score in self.scores) != self.order:
+        if self.scores is not None and tuple(s.item_id for s in self.scores) != self.order:
             raise ValueError("rubric scores must align with the ranking order")
         return self
 
@@ -194,7 +200,8 @@ PRECALL_FAILURES: frozenset[str] = frozenset({"insufficient_items", "primary_una
 class StrategyOutcome(JudgeModel):
     """The decision one invocation produced; re-derived exactly on replay."""
 
-    status: Literal["decided", "fallback", "failed"]
+    # ``skipped``: a ranking kind with one item; its trivial ranking, no call.
+    status: Literal["decided", "skipped", "fallback", "failed"]
     ranking: ItemRanking | None
     # Omitted when absent, so ranking-kind evidence bytes do not carry the field.
     combined: CombinedItems | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -203,13 +210,15 @@ class StrategyOutcome(JudgeModel):
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
-        decided = self.status == "decided"
+        decided = self.status in ("decided", "skipped")
         produced = (self.ranking is not None) + (self.combined is not None)
         if (produced == 1) != decided or produced > 1 or decided == (self.failure_code is not None):
             raise ValueError(
-                "a ranking or combined items are recorded exactly when decided; "
+                "a ranking or combined items are recorded exactly when decided or skipped; "
                 "a failure code otherwise"
             )
+        if self.status == "skipped" and self.ranking is None:
+            raise ValueError("only a ranking kind is skipped")
         if (self.status == "fallback") != (self.fallback_combine is not None):
             raise ValueError("a fallback combine is named exactly when the status is fallback")
         return self
@@ -229,7 +238,8 @@ class StrategyEvidence(JudgeModel):
     def bounded(self) -> Self:
         if len(self.calls) > self.static_call_bound:
             raise ValueError("recorded calls exceed the static call bound")
-        if (not self.calls) != (self.outcome.failure_code in PRECALL_FAILURES):
+        precall = self.outcome.failure_code in PRECALL_FAILURES
+        if (not self.calls) != (precall or self.outcome.status == "skipped"):
             raise ValueError("an invocation makes no call exactly when it fails before any call")
         return self
 

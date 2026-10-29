@@ -61,9 +61,12 @@ class StrategyFoldFailure(Exception):
 class StrategyKind:
     """An implemented LLM kind: its static call bound, call planner and pure fold.
 
-    A kind without ``output_count`` folds to an ``ItemRanking`` of every item (SELECT
-    bounds it); a kind with one folds to ``output_count(strategy)`` new values
-    (``CombinedItems``, ``select=all/v1``). ``min_items`` is the fewest admissible
+    A kind folds to an ``ItemRanking`` of every item (SELECT bounds it) when it has
+    no ``output_count`` or ``output_count(strategy)`` is ``None``; otherwise to that
+    many new values (``CombinedItems``, ``select=all/v1``). A ranking kind declares
+    ``threshold_basis`` iff ``threshold/v1`` may read its ranking values. ``trivial``
+    returns the ranking of an invocation that needs no call (one item): the outcome
+    is ``skipped``. ``min_items`` is the fewest admissible
     items the kind can run on; with fewer, no call is made and the outcome is
     ``insufficient_items``. ``precheck`` names any other strategy failure known
     before the first call (e.g. a declared primary that is not admissible).
@@ -75,7 +78,9 @@ class StrategyKind:
     min_items: Callable[[Any], int]
     plan_call: Callable[[StrategyInvocation, tuple[Any, ...]], PlannedCall | None]
     fold: Callable[[StrategyInvocation, tuple[Any, ...]], ItemRanking | CombinedItems]
-    output_count: Callable[[Any], int] | None = None  # combined kinds only
+    output_count: Callable[[Any], int | None] | None = None  # combined output count
+    threshold_basis: str | None = None
+    trivial: Callable[[StrategyInvocation], ItemRanking | None] | None = None
     precheck: Callable[[StrategyInvocation], StrategyFailureCode | None] | None = None
     # Kind-specific static refusals over the adaptor's declared input ports.
     admit_parameters: Callable[[Any, tuple[InputPort, ...]], tuple[StrategyRefusal, ...]] | None = (
@@ -95,8 +100,9 @@ def precall_failure(
 def next_call(
     kind: StrategyKind, invocation: StrategyInvocation, calls: tuple[JudgeCallEvidence, ...]
 ) -> PlannedCall | None:
-    """The call after the decided ``calls``, or ``None``; never a call after a pre-call failure."""
-    if precall_failure(kind, invocation) is not None:
+    """The call after the decided ``calls``, or ``None``; no call is planned for an
+    invocation that fails before any call or is skipped."""
+    if precall_failure(kind, invocation) is not None or _trivial(kind, invocation) is not None:
         return None
     return kind.plan_call(invocation, tuple(call.payload for call in calls))
 
@@ -161,6 +167,10 @@ def call_path(evidence_dir: Path, index: int, role: CallRole) -> Path:
     return evidence_dir / CALLS_DIR / f"{index:03d}_{role}.json"
 
 
+def _trivial(kind: StrategyKind, invocation: StrategyInvocation) -> ItemRanking | None:
+    return None if kind.trivial is None else kind.trivial(invocation)
+
+
 def _decided(result: ItemRanking | CombinedItems) -> StrategyOutcome:
     ranking = result if isinstance(result, ItemRanking) else None
     combined = result if isinstance(result, CombinedItems) else None
@@ -196,6 +206,13 @@ def decide(
         if calls:
             raise StrategyError(f"a strategy that fails before any call ({precall}) recorded one")
         return _failed(invocation, precall)
+    trivial = _trivial(kind, invocation)
+    if trivial is not None:
+        if calls:
+            raise StrategyError("a skipped strategy invocation recorded a call")
+        return StrategyOutcome(
+            status="skipped", ranking=trivial, failure_code=None, fallback_combine=None
+        )
     failed = next((call for call in calls if call.status != "decided"), None)
     pending = None if failed is not None else next_call(kind, invocation, calls)
     if pending is not None:
