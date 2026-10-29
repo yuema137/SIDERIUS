@@ -16,7 +16,8 @@ HEADERS = [
     (b"x-frame-options", b"DENY"),
     (
         b"content-security-policy",
-        b"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+        b"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; "
+        b"frame-ancestors 'none'; form-action 'self'",
     ),
 ]
 

@@ -13,6 +13,7 @@ import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -38,6 +39,7 @@ async function waitUntil(predicate) {
 try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
   const faults = [], posts = [];
   page.on('pageerror', error => faults.push(error.message));
@@ -46,10 +48,10 @@ try {
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   const status = () => page.locator('#editor-status').textContent();
-  await waitUntil(async () => (await status()).includes('Opened supported'));
+  await waitUntil(async () => (await status()).includes('Opened '));
   const open = async project => {
     await page.locator('#editor-project').selectOption(project);
-    await waitUntil(async () => (await page.locator('.circuit-card').count()) === 5 && (await status()).includes('Opened supported'));
+    await waitUntil(async () => (await page.locator('.circuit-card').count()) === 5 && (await status()).includes('Opened '));
   };
   const boxes = () => page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => {
     const box = card.getBoundingClientRect();
@@ -70,7 +72,7 @@ try {
     await page.locator('#editor-review').click();
     await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
     await page.locator('#editor-save').click();
-    await waitUntil(async () => (await status()).includes('Saved reviewed'));
+    await waitUntil(async () => (await status()).includes('Saved as "'));
     assert.deepEqual(posts.map(item => item.path.split('/').at(-1)), ['review', 'save']);
     return posts[0].body.proposal.document;
   };
@@ -81,9 +83,9 @@ try {
   for (const mode of ['light', 'dark']) {
     await theme.selectOption(mode);
     assert.equal(await page.locator('html').getAttribute('data-theme'), mode);
-    assert.equal(await page.locator('#circuit-node-interpret .capability-name').textContent(), 'INTERPRET');
+    assert.equal(await page.locator('#circuit-node-interpret .capability-name').textContent(), 'Interpret results');
     assert.deepEqual(await page.locator('.circuit-card .capability-name').allTextContents(),
-      ['INTERPRET', 'PROPOSE', 'IMPLEMENT', 'VALIDATE', 'TRAIN & TUNE']);
+      ['Interpret results', 'Propose model', 'Implement', 'Validate', 'Train & tune']);
     assert.equal(await page.locator('.capability-generic').count(), 0, `${mode}: generic CAPABILITY card rendered`);
     const accent = await page.locator('.circuit-card[data-node="interpret"]').evaluate(card => {
       const style = getComputedStyle(card);
@@ -133,7 +135,7 @@ try {
     assert.deepEqual(byNode(reviewed.positions), moved, `${gesture}: every displayed position is persisted`);
     assert.deepEqual(byNode(parsed(metadata.five_node_partial_source).positions), moved);
     await page.locator('#editor-refresh').click();
-    await waitUntil(async () => (await status()).includes('Opened supported'));
+    await waitUntil(async () => (await status()).includes('Opened '));
     assert.deepEqual(await displayed(), moved, `${gesture}: reopened layout is the saved layout`);
     await assertDisjoint(`${gesture}: reopened layout`);
     await page.screenshot({path: join(evidence, `partial-${gesture}.png`), fullPage: true});

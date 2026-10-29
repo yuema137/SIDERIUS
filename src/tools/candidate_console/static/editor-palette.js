@@ -8,7 +8,8 @@
   // Drag payload is prefixed text/plain: custom MIME types are dropped by some drag
   // implementations (e.g. automated Chromium drags), so the drop would never arrive.
   const PREFIX = 'siderius-capability:';
-  let host = null, canvas = null, actions = null, catalog = null, loading = null, state = {enabled: false, pendingNode: null};
+  let host = null, canvas = null, actions = null, catalog = null, guide = null, loading = null, state = {enabled: false, pendingNode: null};
+  const guidance = () => window.editorPaletteGuidance, expanded = new Set();
   const element = (tag, text, parent, className) => {
     const value = document.createElement(tag); value.textContent = text;
     if (className) value.className = className;
@@ -16,9 +17,20 @@
   };
   const label = capability => window.editorCapabilityPresentation.label(capability);
   const routeText = entry => entry.protocol ? `from ${entry.protocol}` : 'from an external input';
+  // Empty-canvas guide: the start text is more prominent while no card is drawn.
+  function syncGuide() {
+    const box = host?.querySelector('.palette-guide');
+    if (!box) return;
+    const empty = !!catalog && !cards().length;
+    // Rebuild only when the text changes so an open "How it works" stays open.
+    const key = `${!!guide}:${empty}`;
+    if (box.dataset.key !== key) { box.dataset.key = key; box.hidden = !guidance().startGuide(box, guide, empty); }
+    box.classList.toggle('palette-guide-empty', empty);
+  }
   const cards = () => [...(canvas?.querySelectorAll('.circuit-card') || [])];
   function instanceId(capability) {
-    const taken = new Set(cards().map(card => card.dataset.node));
+    // Deleted (draft) and pending ids stay reserved too: the server refuses a reused id.
+    const taken = new Set([...cards().map(card => card.dataset.node), ...(window.workflowEditor?.state.nodeIds || [])]);
     let id = capability, n = 1;
     while (taken.has(id)) id = `${capability}${++n}`;
     return id;
@@ -36,32 +48,54 @@
   function add(entry, point = null) {
     if (!state.enabled || !actions) return;
     const {x, y} = placement(point);
-    actions.add({node: instanceId(entry.capability), capability: entry.capability, protocol: entry.protocol, x, y});
+    actions.add({node: instanceId(entry.capability), capability: entry.capability, protocol: entry.protocol, x, y, catalog: entry});
+  }
+  // `+` add-handle (editor-canvas-add.js): routes with an argument that carries the source
+  // card's output contract (presentation filter; the server inspection still decides).
+  const accepting = (entry, contractId) => entry.protocol ? entry.arguments.filter(item => item.contract.id === contractId) : [];
+  function connectable(contractId) { return (catalog || []).filter(entry => accepting(entry, contractId).length); }
+  /** Add `entry` 5 grid units right of `sourceNode`, its matching argument bound to that output (one draft edit). */
+  function addConnected(entry, sourceNode, contractId) {
+    const card = cards().find(item => item.dataset.node === sourceNode);
+    const argument = accepting(entry, contractId).sort((a, b) => Number(b.required) - Number(a.required))[0];
+    if (!state.enabled || !actions || !card?._position || !argument) return false;
+    actions.add({node: instanceId(entry.capability), capability: entry.capability, protocol: entry.protocol,
+      x: card._position.x + card.offsetWidth + 80, y: card._position.y, catalog: entry,
+      arguments: [{name: argument.name, source: {kind: 'result', node: sourceNode, port: 'result'}}]});
+    return true;
   }
   function renderList() {
-    const list = host.querySelector('.palette-list'); list.replaceChildren();
-    if (!catalog) { element('p', loading ? 'Loading capabilities…' : 'Connect to load the capability catalog.', list, 'palette-empty'); return; }
+    const list = host.querySelector('.palette-list'); list.replaceChildren(); guidance().hide(canvas); syncGuide();
+    if (!catalog) { element('p', loading ? 'Loading modules…' : 'Connect to load the modules.', list, 'palette-empty'); return; }
     const query = host.querySelector('.palette-search').value.trim().toLowerCase();
     const groups = new Map();
     catalog.forEach((entry, index) => {
-      const text = `${label(entry.capability)} ${entry.capability} ${entry.protocol || 'external'} ${entry.input_contract.id}`.toLowerCase();
+      const description = guidance().guideFor(guide, entry.capability)?.description || '';
+      const text = `${label(entry.capability)} ${entry.capability} ${entry.protocol || 'external'} ${entry.input_contract.id} ${description}`.toLowerCase();
       if (query && !text.includes(query)) return;
       if (!groups.has(entry.capability)) groups.set(entry.capability, []);
       groups.get(entry.capability).push([entry, index]);
     });
-    if (!groups.size) { element('p', 'No capability matches the search.', list, 'palette-empty'); return; }
-    for (const [capability, entries] of groups) {
-      const group = element('details', '', list, 'palette-category'); group.open = true; group.dataset.capability = capability;
-      element('summary', `${label(capability)} · ${entries.length} route${entries.length === 1 ? '' : 's'}`, group);
+    if (!groups.size) { element('p', 'No module matches the search.', list, 'palette-empty'); return; }
+    // Groups follow the server's research-stage order (guide.capabilities[].stage).
+    for (const capability of guidance().order(guide, groups.keys())) {
+      const entries = groups.get(capability);
+      // Compact stack: one collapsed row per capability; a search opens matching rows,
+      // and open/closed state survives re-renders (search, catalog reload).
+      const group = element('details', '', list, 'palette-category'); group.dataset.capability = capability;
+      group.open = !!query || expanded.has(capability);
+      group.addEventListener('toggle', () => { if (!query) { if (group.open) expanded.add(capability); else expanded.delete(capability); } });
+      guidance().heading(element('summary', '', group, 'palette-row'), capability, guide, entries.length);
+      const detail = guidance().details(group, capability, guide, entries.map(([entry]) => entry));
       for (const [entry, index] of entries) {
         // Chromium never starts an HTML5 drag from <button>, so the entry is a focusable
         // role=button element; aria-disabled (not `disabled`) gates click, keys and drag.
-        const button = element('div', `${label(capability)} ${routeText(entry)}`, group, 'palette-entry');
+        const button = element('div', '', detail, 'palette-entry');
         button.setAttribute('role', 'button'); button.tabIndex = 0; button.draggable = true; button.dataset.capability = capability; button.dataset.protocol = entry.protocol || '';
-        const inputs = entry.arguments.length ? entry.arguments.map(item => `${item.name} (${item.required ? 'required' : 'optional'}, ${item.contract.id})`).join('; ') : `request (${entry.input_contract.id})`;
-        button.title = `Add a ${capability} node ${routeText(entry)}. Inputs: ${inputs}. Output: ${entry.output_contract.id}. Click to add, or drag onto the canvas.`;
+        guidance().card(button, entry);
         button.setAttribute('aria-label', `Add ${label(capability)} ${routeText(entry)}`);
         button.setAttribute('aria-disabled', String(!state.enabled));
+        guidance().attach(button, entry, guide, canvas);
         button.addEventListener('click', () => add(entry));
         button.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); add(entry); } });
         button.addEventListener('dragstart', event => {
@@ -76,32 +110,35 @@
   async function load() {
     if (catalog || loading || !window.consoleSession?.connected || !visible()) return;
     const revision = window.consoleSession.revision; loading = revision; renderList();
-    try { const value = await window.consoleSession.request('editor/node-catalog'); if (revision === window.consoleSession.revision) catalog = value.entries; }
-    catch (error) { if (!error.stale) host.querySelector('.palette-note').textContent = 'Capability catalog unavailable: ' + error.message; }
-    finally { if (loading === revision) loading = null; if (host) renderList(); }
+    try { const value = await window.consoleSession.request('editor/node-catalog'); if (revision === window.consoleSession.revision) { catalog = value.entries; guide = value.guide || null; } }
+    catch (error) { if (!error.stale) host.querySelector('.palette-note').textContent = 'Modules unavailable: ' + error.message; }
+    finally { if (loading === revision) loading = null; if (host) renderList(); window.dispatchEvent(new Event('editor-node-catalog')); }
   }
   function mount(container, graphElement, callbacks) {
     host = container; canvas = graphElement; actions = callbacks; host.replaceChildren();
     // Side rail beside the canvas (editor-palette.css keeps it sticky in view); under 900px
     // it collapses to a drawer opened by this toggle. Click-to-add works in both layouts.
-    element('h3', 'Add capability', host);
-    const toggle = element('button', 'Add capability', host, 'palette-toggle');
+    element('h3', 'Modules', host);
+    const toggle = element('button', 'Modules', host, 'palette-toggle');
     toggle.type = 'button'; toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', 'editor-palette-body');
+    toggle.prepend(window.consoleIcons?.make('plus', 20) || '');
     toggle.addEventListener('click', () => toggle.setAttribute('aria-expanded', String(host.classList.toggle('open'))));
     const body = element('div', '', host, 'palette-body'); body.id = 'editor-palette-body';
     const search = element('input', '', body, 'palette-search');
-    search.type = 'search'; search.placeholder = 'Search capabilities'; search.setAttribute('aria-label', 'Search capabilities');
+    search.type = 'search'; search.placeholder = 'Search modules'; search.setAttribute('aria-label', 'Search modules');
     search.addEventListener('input', renderList);
+    const start = element('div', '', body, 'palette-guide'); start.hidden = true; start.setAttribute('role', 'note');
     element('div', '', body, 'palette-list');
-    const cancel = element('button', 'Cancel new node', body, 'palette-cancel');
+    const cancel = element('button', 'Cancel new module', body, 'palette-cancel secondary');
     cancel.type = 'button'; cancel.hidden = true; cancel.addEventListener('click', () => actions.cancel());
-    element('p', 'Click or drag a capability onto the canvas. A new node stays a local draft until its required inputs are connected and you review and save.', body, 'palette-note').setAttribute('role', 'status');
+    element('p', 'Click or drag a module onto the canvas. It stays a draft until its required inputs are connected and you save.', body, 'palette-note').setAttribute('role', 'status');
     canvas.addEventListener('dragover', event => { if (state.enabled && [...event.dataTransfer.types].includes('text/plain')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } });
     canvas.addEventListener('drop', event => {
       const data = event.dataTransfer.getData('text/plain'), index = data.startsWith(PREFIX) ? data.slice(PREFIX.length) : '';
       if (!state.enabled || index === '' || !catalog?.[Number(index)]) return;
       event.preventDefault(); add(catalog[Number(index)], {x: event.clientX, y: event.clientY});
     });
+    new MutationObserver(syncGuide).observe(canvas, {childList: true, subtree: true});
     window.consoleSession?.subscribe(() => { if (window.consoleSession.connected) void load(); });
     window.addEventListener('console-view', event => { if (event.detail.view === 'workflow') void load(); });
     renderList(); void load();
@@ -111,7 +148,7 @@
     if (!host) return;
     for (const entry of host.querySelectorAll('.palette-entry')) entry.setAttribute('aria-disabled', String(!state.enabled));
     const cancel = host.querySelector('.palette-cancel');
-    cancel.hidden = !state.pendingNode; cancel.textContent = state.pendingNode ? `Cancel new node ${state.pendingNode}` : 'Cancel new node';
+    cancel.hidden = !state.pendingNode; cancel.textContent = state.pendingNode ? `Cancel new module ${state.pendingNode}` : 'Cancel new module';
     if (!catalog) void load();
   }
   // The pending node is drawn from the proposal plus server-projected ports (draft.view.ports).
@@ -137,11 +174,13 @@
   const draftMessage = view => view.status === 'complete'
     ? `New node ${view.proposal.node} is complete. Review the exact Python insertion, then save.`
     : `New node ${view.proposal.node} is a draft (${view.status}): ${view.diagnostics.join(' ')} Connect its inputs on the canvas or in Selection.`;
+  // Delete: a trash icon in the Selection header (tour #15); always succeeds in the draft, Undo restores.
   function inspectorActions(parent, nodeId, options) {
-    const button = element('button', 'Remove capability', parent, 'editor-remove-node');
+    const button = element('button', '', parent, 'editor-remove-node secondary icon-button');
     button.type = 'button'; button.disabled = !options.enabled;
-    button.setAttribute('aria-label', `Remove ${nodeId}`);
-    button.title = 'Review shows the exact source removal and refuses while other capabilities still read this one.';
+    button.append(window.consoleIcons?.make('trash', 16) || '');
+    element('span', 'Delete module', button, 'sr-only');
+    button.setAttribute('aria-label', `Delete ${nodeId}`); button.title = 'Delete module (Undo brings it back)';
     button.addEventListener('click', () => options.remove([nodeId]));
   }
   let menu = null;
@@ -150,11 +189,12 @@
     event.preventDefault(); closeMenu();
     menu = element('div', '', document.body, 'node-context-menu'); menu.setAttribute('role', 'menu');
     menu.style.left = event.clientX + 'px'; menu.style.top = event.clientY + 'px';
-    const item = element('button', `Remove ${nodeId}`, menu); item.type = 'button'; item.setAttribute('role', 'menuitem');
+    const item = element('button', 'Delete module', menu); item.type = 'button'; item.setAttribute('role', 'menuitem');
     item.addEventListener('click', () => { closeMenu(); remove([nodeId]); });
     item.focus();
   }
   document.addEventListener('pointerdown', event => { if (menu && !menu.contains(event.target)) closeMenu(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu(); });
-  window.editorNodePalette = Object.freeze({mount, setState, project, bind, draftMessage, inspectorActions, contextMenu});
+  window.editorNodePalette = Object.freeze({mount, setState, project, bind, draftMessage, inspectorActions, contextMenu, connectable, addConnected,
+    get enabled() { return state.enabled; }});
 })();

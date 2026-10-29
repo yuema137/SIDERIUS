@@ -283,6 +283,7 @@ def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
 
     from tools.workflow_authoring.models import NativeContract
     from workflows.definition.catalog import CONTRACTS, PROTOCOLS
+    from workflows.definition.contract_names import contract_name
 
     ports = {(item.node, item.argument): item for item in view.port_inventory}
     optional_context = ports[("validate", "constraint_context")]
@@ -315,9 +316,13 @@ def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
     assert serialized_optional["required"] is False
     assert serialized_optional["bound"] is False
     assert serialized_optional["source"] is None
+    # Presentation travels with the id on every projected contract (additive fields).
     assert serialized_optional["socket_contract"] == {
         "id": "optional.constraint-context",
         "native_type": CONTRACTS["optional.constraint-context"],
+        "name": "Run constraints",
+        "description": contract_name("optional.constraint-context").description,
+        "kind": "setting",
     }
     assert serialized_optional["protocol_mapping"]["id"] == "implementation-to-validation"
     reviewed_base = editor.review(
@@ -529,3 +534,75 @@ def test_bound_save_refuses_including_pin_removal(editor, current_bound, propose
         )
     assert editor.project.source_file.read_text() == original
     assert not tuple(editor.project.recovery_directory.iterdir())
+
+
+def test_review_reports_comments_the_checked_bytes_remove(editor):
+    """Fails if a structured edit's re-render silently drops hand-written comments (red-team
+    S-1), or if repeated comment texts are counted once (a set would hide the second loss)."""
+    from tools.workflow_authoring.models import DocumentProposal
+
+    commented = "# my note\n# repeated\n" + SOURCE + "# repeated\n"
+    editor.project.source_file.write_text(commented)
+    base = editor.read()
+    assert base.document is not None
+    rendered = editor.review(
+        ReviewRequest(
+            expected_sha256=base.sha256,
+            proposal=DocumentProposal(kind="document", document=base.document),
+        )
+    )
+    assert rendered.removed_comments == ("# my note", "# repeated", "# repeated")
+    one_kept = "# repeated\n" + SOURCE.replace("old.json", "new.json")
+    partial = editor.review(
+        ReviewRequest(
+            expected_sha256=base.sha256,
+            proposal=SourceProposal(kind="source", source=one_kept),
+        )
+    )
+    assert partial.removed_comments == ("# my note", "# repeated")
+    kept = editor.review(
+        ReviewRequest(
+            expected_sha256=base.sha256,
+            proposal=SourceProposal(kind="source", source=commented.replace("old", "new")),
+        )
+    )
+    assert kept.removed_comments == ()
+
+
+def test_save_refuses_a_read_only_source_without_writing(editor):
+    """Fails if temp + rename replaces a file its owner made read-only (red-team E-3):
+    the refusal is typed ``read_only`` and leaves bytes, mode and recovery untouched."""
+    proposal = request(editor, SOURCE.replace("old.json", "new.json"))
+    editor.project.source_file.chmod(0o444)
+    try:
+        with pytest.raises(AuthoringError, match="This file is read-only on disk") as refused:
+            editor.save(proposal)
+        assert refused.value.code == "read_only"
+        assert editor.project.source_file.read_text() == SOURCE
+        assert editor.project.source_file.stat().st_mode & 0o777 == 0o444
+        assert list(editor.project.recovery_directory.iterdir()) == []
+    finally:
+        editor.project.source_file.chmod(0o644)
+
+
+def test_open_failures_name_the_reason_and_the_path(editor):
+    """Fails if a missing, unreadable or oversized file reaches the browser as a generic
+    unavailable/unsaved error without its path (red-team E-4)."""
+    path = editor.project.source_file
+    path.write_bytes(b"#" * 32769)
+    with pytest.raises(AuthoringError, match="larger than the 32 KiB editor limit") as large:
+        editor.read()
+    assert str(path) in str(large.value)
+    path.write_text(SOURCE)
+    if os.geteuid() != 0:
+        path.chmod(0o000)
+        try:
+            with pytest.raises(AuthoringError) as unreadable:
+                editor.read()
+            assert unreadable.value.code == "not_readable" and str(path) in str(unreadable.value)
+        finally:
+            path.chmod(0o644)
+    path.rename(path.with_name("aside.py"))
+    with pytest.raises(AuthoringError) as missing:
+        editor.read()
+    assert missing.value.code == "not_found" and str(path) in str(missing.value)

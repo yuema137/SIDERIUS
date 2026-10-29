@@ -8,6 +8,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[key], `Set ${key}`);
@@ -27,6 +28,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}}), faults = [], posts = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => { if (request.method() === 'POST') posts.push({url: request.url(), body: request.postDataJSON()}); });
@@ -35,7 +37,7 @@ try {
   await page.locator('#access-form button').click();
   const statusText = () => page.locator('#editor-status').textContent();
   const pendingText = () => page.locator('#editor-pending').textContent();
-  await waitUntil(async () => (await statusText()).includes('Opened supported'), 'open');
+  await waitUntil(async () => (await statusText()).includes('Opened '), 'open');
   const original = await readFile(metadata.source, 'utf8');
   assert.match(original, /# author note: keep me/);
 
@@ -52,12 +54,12 @@ try {
   await entry.click();
   await page.locator('#circuit-node-validation').waitFor();
   await waitUntil(async () => (await pendingText()).includes('Pending new node validation · incomplete'), 'incomplete draft');
-  assert.match(await page.locator('#circuit-input-validation-output').textContent(), /Required · unbound/);
-  assert.equal(await entry.getAttribute('aria-disabled'), 'true', 'Palette is inactive while a new node is pending');
+  assert.match(await page.locator('#circuit-input-validation-output').textContent(), /Required · Not connected/);
+  assert.equal(await entry.getAttribute('aria-disabled'), 'false', 'Palette stays active while a new node is pending');
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'A draft node never touches disk');
-  assert.ok(posts.some(item => item.url.endsWith('/node-draft') && item.body.proposal.capability === 'validation' && item.body.proposal.arguments.length === 0));
+  assert.ok(posts.some(item => item.url.endsWith('/nodes-draft') && item.body.proposal.nodes[0].capability === 'validation' && item.body.proposal.nodes[0].arguments.length === 0));
 
   // Bind its inputs on the canvas and in Selection; the draft becomes complete.
   await page.locator('#circuit-output-implement').click();
@@ -70,34 +72,43 @@ try {
   const diff = await page.locator('#editor-diff').textContent();
   assert.match(diff, /\+\s+id='validation'/);
   assert.doesNotMatch(diff, /^-(?!--)/m, 'Adding a node only inserts lines');
-  assert.match(await statusText(), /Adds validation node 'validation'/);
+  assert.match(await statusText(), /Adds 1 node\(s\) \(validation\)/);
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await statusText()).includes('Saved reviewed'), 'save add');
+  await waitUntil(async () => (await statusText()).includes('Saved as "'), 'save add');
   const added = await readFile(metadata.source, 'utf8');
   assert.match(added, /# author note: keep me/);
   assert.match(added, /# implement keeps its comment/);
   assert.match(added, /id='validation'/);
 
-  // Delete key on a capability that others read: refused with an explanation, no write.
+  // Delete key on a module that others read: deleted in the draft without confirmation; its
+  // reader becomes a problem, Save is blocked, and Undo brings everything back (no write).
   await page.locator('#circuit-node-implement').focus();
   await page.keyboard.press('Delete');
-  await waitUntil(async () => (await statusText()).includes('Cannot remove implement'), 'dependants refusal');
-  assert.match(await statusText(), /validate\.output reads implement\.result/);
+  await waitUntil(async () => (await page.locator('#circuit-node-implement').count()) === 0, 'deleted in the draft');
+  await waitUntil(async () => (await pendingText()).includes('deletion of implement'), 'deletion is a pending edit');
+  await waitUntil(async () => /Required · Not connected/.test(await page.locator('#circuit-input-validate-output').textContent()), 'reader disconnected');
+  await page.locator('#problems-chip').waitFor({state: 'visible'});
+  assert.equal(await page.locator('#editor-review').isDisabled(), true, 'An invalid draft cannot be saved');
+  await page.locator('#editor-undo').click();
+  await page.locator('#circuit-node-implement').waitFor();
+  await waitUntil(async () => (await pendingText()) === 'No pending edits.', 'undo restores the module and its reader');
   assert.equal(await readFile(metadata.source, 'utf8'), added);
 
   // Context menu offers removal and closes on Escape.
   await page.locator('#circuit-node-validate').click({button: 'right'});
-  assert.equal(await page.locator('.node-context-menu [role="menuitem"]').textContent(), 'Remove validate');
+  assert.equal(await page.locator('.node-context-menu [role="menuitem"]').textContent(), 'Delete module');
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.node-context-menu').count(), 0);
 
   // Inspector removal of the added node restores the original bytes exactly.
   await page.locator('#circuit-node-validation').click();
-  await page.locator('button[aria-label="Remove validation"]').click();
+  await page.locator('button[aria-label="Delete validation"]').click();
+  await waitUntil(async () => (await pendingText()).includes('deletion of validation · complete'), 'deletion checked');
+  await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()), 'review removal');
-  assert.match(await statusText(), /Removes validation with its layout position/);
+  assert.match(await statusText(), /Removes 1 node\(s\) \(validation\); all other source bytes are unchanged/);
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await statusText()).includes('Saved reviewed'), 'save removal');
+  await waitUntil(async () => (await statusText()).includes('Saved as "'), 'save removal');
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'add then remove is byte-identical');
 
   // Drag a palette entry onto the canvas, then cancel the draft without a request to review.
@@ -123,14 +134,14 @@ try {
   await page.locator('#editor-undo').click();
   await page.locator('#circuit-node-proposal').waitFor();
   await waitUntil(async () => (await pendingText()).includes('Pending new node proposal'), 'undo restores pending node');
-  assert.equal(await source.getAttribute('aria-disabled'), 'true');
+  assert.equal(await source.getAttribute('aria-disabled'), 'false');
   await palette.locator('.palette-cancel').click();
   await waitUntil(async () => (await pendingText()) === 'No pending edits.', 'cancel');
   assert.equal(await page.locator('#circuit-node-proposal').count(), 0);
   assert.equal(posts.filter(item => item.url.endsWith('/review')).length, reviews);
   assert.equal(await readFile(metadata.source, 'utf8'), original);
   assert.deepEqual(faults, []);
-  console.log('PASS palette search/click/drag add, incomplete draft gate, bind+review+save with comments, refused dependant removal, context menu, byte-identical removal, discard/undo of a pending node, cancel.');
+  console.log('PASS palette search/click/drag add, incomplete draft gate, bind+review+save with comments, draft deletion of a read module with undo, context menu, byte-identical removal, discard/undo of a pending node, cancel.');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');
