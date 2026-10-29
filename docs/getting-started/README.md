@@ -66,7 +66,7 @@ you own; the console workspace is created inside it) and
    ```
 
    Success: the build prints the zip's path, for example
-   `/absolute/downloads/siderius-example-quickstart-1.0.0.zip`, and `unzip`
+   `/absolute/downloads/siderius-example-quickstart-1.1.0.zip`, and `unzip`
    creates `/absolute/downloads/siderius-example-quickstart-<version>/`. The
    bundle holds a small synthetic task package and a ready experiment setup.
 
