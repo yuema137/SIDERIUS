@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -502,17 +503,41 @@ def test_actual_native_launch_and_terminal_receipt(
                 # only after the real observer has committed a live sample.
                 with gate.open("r+b", buffering=0) as barrier, monkeypatch.context() as patch:
                     released = False
+                    expired = False
+                    release_lock = threading.Lock()
+
+                    def expire_barrier():
+                        nonlocal released, expired
+                        with release_lock:
+                            if not released:
+                                expired = True
+                                barrier.write(b"1")
+                                released = True
+
+                    # Bound a broken observation handshake without sleep polling.
+                    timer = threading.Timer(60.0, expire_barrier)
 
                     def release_after_observation():
                         nonlocal released
                         decision = actual_check()
-                        if not released and observer.protection_receipt().valid_live_samples:
-                            barrier.write(b"1")
-                            released = True
+                        with release_lock:
+                            if not released and observer.protection_receipt().valid_live_samples:
+                                barrier.write(b"1")
+                                released = True
+                                timer.cancel()
                         return decision
 
                     patch.setattr(observer, "check_control", release_after_observation)
-                    return actual_supervise(replacement, **kwargs)
+                    timer.start()
+                    try:
+                        return actual_supervise(replacement, **kwargs)
+                    finally:
+                        timer.cancel()
+                        timer.join()
+                        if expired:
+                            pytest.fail(
+                                "GPU observation barrier was not released within 60 seconds"
+                            )
             else:
                 assert "--inference_startup_json" in cmd
                 path = Path(cmd[cmd.index("--inference_startup_json") + 1])
