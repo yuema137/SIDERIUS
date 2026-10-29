@@ -47,6 +47,7 @@ try {
     const request = route.request(), url = new URL(request.url());
     const reply = (json, status = 200) => route.fulfill({status, json});
     if (url.pathname.startsWith('/api/editor/')) return reply({error: {message: 'Fixture project unavailable'}}, 409);
+    if (url.pathname.startsWith('/api/settings')) return reply({error: {message: 'Fixture settings unavailable'}}, 409);
     if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: [], ...(hostLedger ? {host_ledger: true} : {})});
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') {
@@ -87,16 +88,22 @@ try {
   // Native chains say they are serial-only rather than silently ignoring the ledger.
   assert.match(await page.locator('#native-chain-serial').textContent(), /never reserved in the host ledger/);
 
-  // Without a host ledger the panel is hidden and nothing is sent; the reason is stated.
+  // The panel lives on the Run view; visibility below is only meaningful there.
+  await page.locator('nav a[href="#run"]').click();
+  // Without a host ledger the panel is hidden and nothing is sent; the reason is shown.
   await page.evaluate(() => window.consoleSession.choices());
-  assert.equal(await page.locator('#scheduling').isHidden(), true, 'No ledger: no resources panel');
+  await page.locator('#scheduling-unavailable').waitFor({state: 'visible'});
   assert.match(await page.locator('#scheduling-unavailable').textContent(), /host ledger that the operator configures/);
+  assert.equal(await page.locator('#scheduling').isHidden(), true, 'No ledger: no resources panel');
   assert.deepEqual(await page.evaluate(() => window.runScheduling.read()), {value: {}});
-  // With a ledger the panel appears, starts empty and validates in the browser.
+  // With a ledger (the stub's choices now declare one) the panel appears, starts empty
+  // and validates in the browser.
   hostLedger = true;
   await page.evaluate(() => window.consoleSession.choices());
-  await page.locator('#scheduling-unavailable').waitFor({state: 'hidden'});
+  await page.locator('#scheduling').waitFor({state: 'visible'});
+  assert.equal(await page.locator('#scheduling-unavailable').isHidden(), true);
   await page.evaluate(() => { document.getElementById('scheduling').open = true; });
+  await page.locator('#scheduling-declare').waitFor({state: 'visible'});
   for (const id of ['scheduling-vram', 'scheduling-memory', 'scheduling-cpus']) {
     assert.equal(await page.locator('#' + id).inputValue(), '', `${id} is not prefilled`);
   }
