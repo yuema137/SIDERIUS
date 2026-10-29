@@ -4,28 +4,32 @@
 .workflow-templates h2 { margin: 0; grid-column: 1; font-size: 14px; line-height: 20px; }
 .workflow-templates p { margin: 0; grid-column: 1; }
 .workflow-templates #editor-template-open { grid-column: 2; grid-row: 1 / span 2; }
-.template-gallery { width: min(960px, 94vw); max-height: 90vh; padding: var(--space-4, 16px); border: 1px solid var(--border); border-radius: var(--radius-2, 8px); background: var(--panel); color: var(--text); }
+.template-gallery { box-sizing: border-box; width: min(1200px, 96vw); max-width: 96vw; max-height: 90vh; padding: var(--space-4, 16px); border: 1px solid var(--border); border-radius: var(--radius-2, 8px); background: var(--panel); color: var(--text); }
 .template-gallery::backdrop { background: #0006; }
 .template-gallery h2 { margin: 0 0 var(--space-1, 4px); font-size: 14px; line-height: 20px; }
 .template-gallery p { margin: 0; }
-.template-body { display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: var(--space-4, 16px); margin-top: var(--space-3, 12px); }
+.template-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: var(--space-4, 16px); margin-top: var(--space-3, 12px); }
 .template-list { display: flex; flex-direction: column; gap: var(--space-2, 8px); }
 .template-card { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: var(--space-2, 8px); padding: var(--space-2, 8px) var(--space-3, 12px); border: 1px solid var(--control-border); border-radius: var(--radius-2, 8px); background: var(--control); color: var(--text); text-align: left; cursor: pointer; }
 .template-card-text { display: grid; gap: var(--space-1, 4px); }
 .template-card-text span { font-size: 12px; line-height: 16px; }
+.template-card:not(:disabled):hover { background: var(--bg); }
 .template-card[aria-pressed="true"] { border-color: var(--focus); box-shadow: 0 0 0 2px var(--focus); }
 .template-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .template-icon { color: var(--primary); }
-.template-detail { display: grid; align-content: start; gap: var(--space-2, 8px); }
+.template-detail { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--space-2, 8px); min-width: 0; }
 .template-detail h3 { margin: 0; font-size: 14px; line-height: 20px; }
+.template-advanced { margin: 0; }
 .template-advanced summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .template-footer { display: flex; justify-content: space-between; align-items: center; gap: var(--space-4, 16px); margin-top: var(--space-3, 12px); }
-.template-thumbnail { width: 100%; height: auto; max-height: 224px; }
+.template-preview { min-width: 0; overflow-x: auto; padding-bottom: var(--space-1, 4px); }
+.template-thumbnail { display: block; width: 100%; height: auto; }
+.template-thumbnail:not(.large) { max-height: 224px; }
 .template-node rect { fill: var(--capability-generic-tint); stroke: var(--capability-generic); stroke-width: 3; }
-.template-node text { fill: var(--text); font: 600 20px system-ui, sans-serif; }
+.template-node text { fill: var(--text); font: 600 22px system-ui, sans-serif; }
 .template-edge, .template-loop { fill: none; stroke: var(--edge); stroke-width: 3; }
 .template-loop { stroke-dasharray: 10 7; }
-.template-loop-label { fill: var(--muted); font: 18px system-ui, sans-serif; }
+.template-loop-label { fill: var(--muted); font: 20px system-ui, sans-serif; }
 .template-arrow { fill: var(--edge); }
 .template-node.capability-interpretation rect { fill: var(--capability-interpretation-tint); stroke: var(--capability-interpretation); }
 .template-node.capability-literature rect { fill: var(--capability-literature-tint); stroke: var(--capability-literature); }
@@ -33,7 +37,11 @@
 .template-node.capability-implementation rect { fill: var(--capability-implementation-tint); stroke: var(--capability-implementation); }
 .template-node.capability-validation rect { fill: var(--capability-validation-tint); stroke: var(--capability-validation); }
 .template-node.capability-tuning rect { fill: var(--capability-tuning-tint); stroke: var(--capability-tuning); }
-@media (max-width: 900px) { .template-body { grid-template-columns: minmax(0, 1fr); } }
+/* Narrow: cards wrap in rows above the detail, which keeps the full width. */
+@media (max-width: 900px) {
+  .template-body { grid-template-columns: minmax(0, 1fr); }
+  .template-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+}
 /* Human advice: first and most prominent input of the inspector. */
 .advice-field { display: grid; gap: var(--space-1, 4px); margin: var(--space-2, 8px) 0 var(--space-3, 12px); padding: var(--space-3, 12px); border: 2px solid var(--capability-proposal); border-radius: var(--radius-2, 8px); background: var(--capability-proposal-tint); }
 .advice-field .advice-label { font-weight: 600; font-size: 14px; line-height: 20px; }

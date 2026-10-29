@@ -1244,11 +1244,21 @@ Templates and advice (`editor-templates.js`, `editor-advice.js`,
 `tools/workflow_authoring/authoring-contract.md`): the gallery opens from the canvas
 header **Templates** button (`#editor-template-open`), the empty-canvas primary action
 (`#workflow-start-template`), Home **Start from a template** and the page-bar `⋯` menu
-(`window.editorTemplates.open()`). Its dialog lists compact cards (icon, title, one
-sentence), first **Blank workflow** (`data-template="blank"`: changes nothing, closes
-the dialog and focuses the module search), then the server templates with the graph
-preview of the chosen one and loop details collapsed, before **Use template**
-(`#editor-template-import`). Use calls `window.workflowEditor.importSource(source,
+(`window.editorTemplates.open()`). Its dialog (`min(1200px, 96vw)`) lists compact
+cards (icon, title, one sentence) in a 260 px left column (at <= 900 px viewport: wrapping
+rows above the detail), first **Blank workflow** (`data-template="blank"`: changes
+nothing, closes the dialog and focuses the module search), then the server templates;
+the detail shows the graph preview of the chosen one and loop details collapsed, before
+**Use template** (`#editor-template-import`). The preview is presentation only: it takes
+the step order from the server positions (which the canvas keeps unchanged) and folds
+it client-side (`foldedLayout`) into a 1100-unit-wide viewBox of aspect 2:1 to 2.6:1.
+Up to three steps form one row; longer chains fold into two rows in snake order (the
+second row right to left, its last step under the first), so the loop from the last
+step back to the first closes the ring along the left column. Edges run between card
+borders; a same-row edge that would pass through a card arcs outside the row instead.
+The loop label sits in a gap of the dashed loop line (below the line when the line is
+not vertical). The svg's inline `min-width` keeps labels at >= 13.5 CSS px; the
+`.template-preview` frame would scroll horizontally only below that width. Use calls `window.workflowEditor.importSource(source,
 label)` inside `editorPageBar.quietly(...)`, which runs the ordinary source check
 without opening the save step; the result folds into the draft as one undoable step
 and Save is still required. Typed Advanced source is not a draft state, so while it is
@@ -1264,7 +1274,12 @@ coalesced undo step per node, disabled while a palette node is pending.
 `tests/browser/scenario_template_parameters.mjs` (import refused over typed source,
 import loop, edit a training parameter, review, save) and `tests/browser/scenario_template_advice.mjs` (import
 the advice loop, write advice, review, save; contrast warning on the plain loop;
-documents the B6-blocked three-review aggregation scenario) use the same variables.
+documents the B6-blocked three-review aggregation scenario) use the same variables;
+`tests/browser/template_preview_legibility.mjs` checks every template preview at 1920,
+1280 and 900 px, light and dark: no horizontal overflow of the dialog or the preview
+frame, frame and **Use template** inside the dialog, aspect 2:1 to 2.6:1, all marks
+inside the viewBox, no edge through a foreign card, no edge or loop path through the
+loop label, and labels >= 15 CSS px from 1280 px (>= 13 at 900).
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser

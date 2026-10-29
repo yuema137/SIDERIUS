@@ -20,43 +20,97 @@
     parent.append(value); return value;
   };
   const label = capability => window.editorCapabilityPresentation?.label(capability) || capability;
-  const NODE_W = 220, NODE_H = 64;
+  // Preview geometry (viewBox units). The preview is presentation only: the server positions
+  // (one row on the canvas grid) give the step order; the editor canvas keeps them untouched.
+  const VIEW_W = 1100, PAD = 40, NODE_H = 84, ROW_GAP = 180, MAX_GAP = 320, NODE_FONT = 22, MIN_FONT_PX = 13.5;
+  const MAX_ASPECT = 2.6;
 
-  /** Thumbnail of the template graph from the server preview (positions, edges, loop). */
+  /** Folded layout: up to three steps in one row; longer chains fold into two rows in snake
+   * order (the second row runs right to left, its last step under the first), so a loop
+   * from the last step back to the first closes the ring along the left column. */
+  function foldedLayout(preview) {
+    const order = [...preview.nodes].sort((a, b) => a.x - b.x || a.y - b.y).map(n => n.id);
+    const cols = order.length <= 3 ? order.length : Math.ceil(order.length / 2);
+    const nodeW = cols >= 3 ? 260 : 300;
+    const gap = cols > 1 ? Math.min((VIEW_W - 2 * PAD - cols * nodeW) / (cols - 1), MAX_GAP) : 0;
+    const left = (VIEW_W - cols * nodeW - (cols - 1) * gap) / 2;
+    const rows = order.length > cols ? 2 : 1;
+    const content = 2 * PAD + rows * NODE_H + (rows - 1) * ROW_GAP;
+    const height = Math.max(content, VIEW_W / MAX_ASPECT), top = (height - content) / 2 + PAD;
+    const cell = (col, row) => ({x: left + col * (nodeW + gap), y: top + row * (NODE_H + ROW_GAP), w: nodeW, h: NODE_H});
+    const at = {};
+    order.slice(0, cols).forEach((id, col) => { at[id] = cell(col, 0); });
+    const rest = order.slice(cols);
+    rest.forEach((id, index) => {
+      // First under the last column, last under the first column, the others spread between.
+      const col = rest.length === 1 ? cols - 1 : Math.round((cols - 1) * (1 - index / (rest.length - 1)));
+      at[id] = cell(col, 1);
+    });
+    return {width: VIEW_W, height, at};
+  }
+
+  const center = r => ({x: r.x + r.w / 2, y: r.y + r.h / 2});
+  /** Point where the ray from the centre of `r` towards `toward` leaves the rectangle. */
+  function border(r, toward) {
+    const c = center(r), dx = toward.x - c.x, dy = toward.y - c.y;
+    const t = Math.min(dx ? (r.w / 2) / Math.abs(dx) : Infinity, dy ? (r.h / 2) / Math.abs(dy) : Infinity);
+    return {x: c.x + t * dx, y: c.y + t * dy};
+  }
+  /** Whether the segment p-q passes through rectangle r (sampled; cards are large). */
+  function crosses(p, q, r) {
+    for (let i = 1; i < 40; i++) {
+      const x = p.x + (q.x - p.x) * i / 40, y = p.y + (q.y - p.y) * i / 40;
+      if (x > r.x + 2 && x < r.x + r.w - 2 && y > r.y + 2 && y < r.y + r.h - 2) return true;
+    }
+    return false;
+  }
+
+  /** Graph preview of a template (server preview: nodes, edges, loop), folded to a balanced
+   * aspect. Every mark lies inside the viewBox; the loop label interrupts the dashed loop line. */
   function thumbnail(preview, large) {
-    const xs = preview.nodes.map(n => n.x), ys = preview.nodes.map(n => n.y);
-    const minX = Math.min(...xs), minY = Math.min(...ys), pad = 24, loopPad = preview.loop ? 70 : 0;
-    const width = Math.max(...xs) - minX + NODE_W + 2 * pad, height = Math.max(...ys) - minY + NODE_H + 2 * pad + loopPad;
+    const {width, height, at} = foldedLayout(preview);
     const svg = document.createElementNS(svgNs, 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('class', `template-thumbnail${large ? ' large' : ''}`);
+    // Never shrink labels below MIN_FONT_PX; a frame narrower than that scrolls instead.
+    if (large) svg.style.minWidth = `${Math.ceil(width * MIN_FONT_PX / NODE_FONT)}px`;
     svg.setAttribute('role', 'img');
     const steps = preview.nodes.map(n => label(n.capability)).join(' → ');
     svg.setAttribute('aria-label', preview.loop ? `${steps}, repeated up to ${preview.loop.final_iteration} time(s) from ${preview.loop.source} back to ${preview.loop.target}` : steps);
-    const at = Object.fromEntries(preview.nodes.map(n => [n.id, {x: n.x - minX + pad, y: n.y - minY + pad}]));
     const defs = svgElement('defs', {}, svg), marker = svgElement('marker', {id: `arrow-${large ? 'l' : 's'}`, viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse'}, defs);
     svgElement('path', {d: 'M0 0 10 5 0 10z', class: 'template-arrow'}, marker);
     const arrow = `url(#arrow-${large ? 'l' : 's'})`;
+    const rects = Object.values(at);
     // One line per connected pair; several arguments between the same nodes draw once.
-    const pairs = new Set(preview.edges.map(edge => `${edge.source}>${edge.target}`));
-    for (const pair of pairs) {
+    for (const pair of new Set(preview.edges.map(edge => `${edge.source}>${edge.target}`))) {
       const [source, target] = pair.split('>'), a = at[source], b = at[target];
-      const straight = Math.abs(b.x - a.x) <= NODE_W + 120;
-      const y1 = a.y + NODE_H / 2, y2 = b.y + NODE_H / 2, x1 = a.x + NODE_W, x2 = b.x;
-      // Skipping edges arc above the row so they do not hide the cards they pass.
-      const d = straight ? `M${x1} ${y1} L${x2} ${y2}` : `M${x1 - 30} ${a.y} C${x1} ${a.y - 40}, ${x2 + 30} ${b.y - 40}, ${x2 + 30} ${b.y}`;
-      svgElement('path', {d, class: 'template-edge', 'marker-end': arrow}, svg);
+      const p = border(a, center(b)), q = border(b, center(a));
+      let d = `M${p.x} ${p.y} L${q.x} ${q.y}`;
+      if (rects.some(r => r !== a && r !== b && crosses(p, q, r))) {
+        // A same-row skip would pass through the cards between: arc outside the rows instead.
+        const up = a.y === rects[0].y, y = up ? a.y : a.y + a.h, lift = up ? -40 : 40; // rises 30 < PAD
+        d = `M${a.x + a.w / 2} ${y} C${a.x + a.w / 2} ${y + lift}, ${b.x + b.w / 2} ${y + lift}, ${b.x + b.w / 2} ${y}`;
+      }
+      svgElement('path', {d, class: 'template-edge', 'data-source': source, 'data-target': target, 'marker-end': arrow}, svg);
     }
     if (preview.loop) {
-      const s = at[preview.loop.source], t = at[preview.loop.target], bottom = Math.max(s.y, t.y) + NODE_H + 50;
-      svgElement('path', {d: `M${s.x + NODE_W / 2} ${s.y + NODE_H} C${s.x + NODE_W / 2} ${bottom}, ${t.x + NODE_W / 2} ${bottom}, ${t.x + NODE_W / 2} ${t.y + NODE_H}`,
-        class: 'template-loop', 'marker-end': arrow}, svg);
-      const text = svgElement('text', {x: String((s.x + t.x + NODE_W) / 2), y: String(bottom - 4), 'text-anchor': 'middle', class: 'template-loop-label'}, svg);
+      const s = at[preview.loop.source], t = at[preview.loop.target];
+      const p = border(s, center(t)), q = border(t, center(s)), mid = {x: (p.x + q.x) / 2, y: (p.y + q.y) / 2};
+      const vertical = Math.abs(q.y - p.y) >= Math.abs(q.x - p.x);
+      // Vertical loop line: the label sits in a gap of the line. Otherwise it sits just below it.
+      let d = `M${p.x} ${p.y} L${q.x} ${q.y}`, labelY = mid.y + 30;
+      if (vertical) {
+        const dir = Math.sign(q.y - p.y), half = 24;
+        d = `M${p.x} ${p.y} L${mid.x} ${mid.y - dir * half} M${mid.x} ${mid.y + dir * half} L${q.x} ${q.y}`;
+        labelY = mid.y + 7;
+      }
+      svgElement('path', {d, class: 'template-loop', 'marker-end': arrow}, svg);
+      const text = svgElement('text', {x: String(mid.x), y: String(labelY), 'text-anchor': 'middle', class: 'template-loop-label'}, svg);
       text.textContent = `feedback · up to ${preview.loop.final_iteration} iteration${preview.loop.final_iteration === 1 ? '' : 's'}`;
     }
     for (const n of preview.nodes) {
-      const {x, y} = at[n.id], group = svgElement('g', {class: `template-node capability-${n.capability}`}, svg);
-      svgElement('rect', {x: String(x), y: String(y), width: String(NODE_W), height: String(NODE_H), rx: '12'}, group);
-      const text = svgElement('text', {x: String(x + NODE_W / 2), y: String(y + NODE_H / 2 + 8), 'text-anchor': 'middle'}, group);
+      const r = at[n.id], group = svgElement('g', {class: `template-node capability-${n.capability}`}, svg);
+      svgElement('rect', {x: String(r.x), y: String(r.y), width: String(r.w), height: String(r.h), rx: '12'}, group);
+      const text = svgElement('text', {x: String(r.x + r.w / 2), y: String(r.y + r.h / 2 + 8), 'text-anchor': 'middle'}, group);
       text.textContent = label(n.capability);
     }
     return svg;
@@ -98,7 +152,8 @@
     if (!template) { element('p', 'Choose a template to preview its workflow.', detail, 'muted'); return; }
     element('h3', template.title, detail);
     element('p', template.description, detail, 'muted');
-    detail.append(thumbnail(template.preview, true));
+    // Own frame: a preview wider than the dialog scrolls inside it instead of widening the dialog.
+    element('div', '', detail, 'template-preview').append(thumbnail(template.preview, true));
     if (template.preview.loop) {
       // Template-specific loop details stay collapsed; the Research loop panel edits them after import.
       const more = element('details', '', detail, 'template-advanced'); element('summary', 'Loop details', more);
