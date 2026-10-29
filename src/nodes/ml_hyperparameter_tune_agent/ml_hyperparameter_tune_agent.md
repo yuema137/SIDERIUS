@@ -679,11 +679,13 @@ Training classifies the normalized decision against the core authority
 `admission.RESOURCE_REJECTIONS`; it does not maintain another stopping-code set.
 `runtime.normalize_training_admission_refusal` defaults a missing/empty reason
 code to `policy_unavailable` before recording or deciding whether to stop. If
-full admission validation fails, it emits a valid infrastructure refusal with
+full admission validation fails, it emits a valid refusal with
 the original message and raw payload under `evidence.invalid_admission`. A
-recognized infrastructure code is retained; unknown codes or malformed resource
-verdicts become `policy_unavailable`. This yields one refusal record and an
-immediate stop, never a second attempt-failure record followed by a retry.
+recognized code is retained, including `insufficient_headroom`, whose resource
+record status and retry path remain unchanged despite incomplete evidence.
+Only missing/unknown codes become `policy_unavailable`. An infrastructure refusal
+yields one refusal record and an immediate stop, never a second attempt-failure
+record followed by a retry.
 
 The complete admission vocabulary in `core/runtime_control/admission.py` is
 these three reasons plus `insufficient_headroom`. The latter remains retryable:

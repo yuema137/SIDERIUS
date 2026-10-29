@@ -182,3 +182,19 @@ def test_incomplete_admission_stops_without_duplicate_record(tmp_path: Path, mis
     )
     assert refusal.reason_code == saved[0]["memory"]["reason_code"] == expected_code
     assert refusal.reason == _MESSAGE
+
+
+def test_incomplete_resource_refusal_preserves_code_status_and_retries(tmp_path: Path):
+    """A recognized resource verdict survives missing AdmissionDecision fields."""
+    status = {
+        "status": "skipped_resource_admission",
+        "message": "Measured demand exceeds headroom; reduce settings.",
+        "admission": {"reason_code": "insufficient_headroom"},
+    }
+    output, plans, training_calls, saved = _drive(tmp_path, status)
+    assert output.total_attempts == training_calls == plans == 9
+    assert len(saved) == len(output.all_records) == 9
+    assert {record["status"] for record in saved} == {"skipped_resource_admission"}
+    assert {record["memory"]["reason_code"] for record in saved} == {"insufficient_headroom"}
+    assert output.termination_reason == "aborted_fail_rounds"
+    assert output.environment_admission_refusal is None

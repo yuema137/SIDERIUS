@@ -29,7 +29,7 @@ from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, Re
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.record_role import observed_attempt_role
-from core.runtime_control.admission import RESOURCE_REJECTIONS, AdmissionDecision, AdmissionReason
+from core.runtime_control.admission import AdmissionDecision, AdmissionReason
 from core.runtime_control.records import AdmissionRecord
 from core.runtime_control.session import RuntimeControlPolicy, WatchdogConfig
 from core.sandbox_executor import TidmadSandbox
@@ -134,8 +134,8 @@ def _time_skip_memory_extra(time_check: dict, plan) -> dict:
 def normalize_training_admission_refusal(status: dict) -> AdmissionDecision:
     """Normalize once for both the refusal record and the training stop decision.
 
-    Malformed evidence is an infrastructure refusal, never another model attempt.
-    Keep the raw payload for diagnosis when the full decision cannot validate.
+    Preserve recognized reason codes even when the full decision cannot validate.
+    Missing/unknown codes become policy_unavailable; retain raw evidence for diagnosis.
     """
     raw = status.get("admission") or {}
     admission = dict(raw) if isinstance(raw, dict) else {}
@@ -146,8 +146,6 @@ def normalize_training_admission_refusal(status: dict) -> AdmissionDecision:
         try:
             reason_code = TypeAdapter(AdmissionReason).validate_python(admission["reason_code"])
         except ValidationError:
-            reason_code = "policy_unavailable"
-        if reason_code in RESOURCE_REJECTIONS:
             reason_code = "policy_unavailable"
         return AdmissionDecision(
             admitted=False,
