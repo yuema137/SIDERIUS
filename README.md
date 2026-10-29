@@ -4,9 +4,9 @@
 **I**ntegrated **U**sing multi-agent **S**ystems
 
 **Turn your dataset and research question into an iterative ML experiment.**
-Work with your coding agent to define the task; SIDERIUS then helps propose
-models, implement them, train and evaluate them, and use the results to guide
-the next attempt.
+Work with your coding agent to define the task and write the experiment as a
+short Python workflow file; SIDERIUS then helps propose models, implement them,
+train and evaluate them, and use the results to guide the next attempt.
 
 ![Physics time-series results: SIDERIUS validation R² against S4D references](docs/assets/results/physics.svg)
 
@@ -26,25 +26,6 @@ Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
 See [supported providers and models](docs/reference/model-qualification.md) for
 required model capabilities and the configurations tested so far.
 
-## Your first hour
-
-The quickest way to learn SIDERIUS is to run a small ready-made example in the
-browser console, then repeat the same steps with your own task. Both stages are
-written out command by command, with the output to expect, in the
-[first-hour path](docs/getting-started/README.md#your-first-hour-from-the-example-to-your-own-task).
-
-1. **Run the example.** Install, get the example bundle, create a console
-   workspace with `init --credential-file`, write the example data, register it
-   with `add-task --from-bundle`, start the console with `serve` and open it.
-   Then follow the tabs **Task → Workflow → Run → Monitor**.
-2. **Bring your own task.** Package your task with your coding agent, place it in
-   `siderius_workspace/tasks/<id>/`, register it with `add-task`, restart the
-   console, build a workflow for it and run it.
-
-You need a Linux machine with an NVIDIA GPU and bubblewrap; the first-hour path
-lists the [prerequisites](docs/getting-started/README.md#before-you-start) and
-defines its three terms: task, experiment setup and run.
-
 <a id="start-with-your-coding-agent"></a>
 
 ## Quick start with your coding agent
@@ -57,13 +38,14 @@ any model call and says so. Setup checks and the synthetic Quickstart checks
 run on CPU.
 Use this checkout's own `.venv/bin/python` after installation. Provider keys
 are needed for real model calls; offline setup checks need none.
-The command line and the browser console read them from different places; see
+The command line and the experimental browser console read them from different places; see
 [API keys](docs/getting-started/installation.md#api-keys).
-The optional browser console also needs Linux with bubblewrap; run the
-[bubblewrap check](src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works).
+Preparing and running a workflow uses the Linux sandbox bubblewrap; run the
+[bubblewrap check](src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works)
+once on that machine.
 
 Follow [getting started](docs/getting-started/README.md) for the ordered setup,
-where to put credentials, and how to open the candidate console.
+where to put credentials, and the commands that prepare and run a workflow.
 
 Clone the repository and open it in your coding agent:
 
@@ -73,9 +55,10 @@ cd SIDERIUS
 uv sync --group dev --frozen
 ```
 
-**Both Professional and Assistant start with a short request.** They describe
-how you collaborate with your coding agent, not software mode switches.
-You can also prepare everything by hand.
+**Professional and Assistant are the main ways to use SIDERIUS 1.1.** Both
+start with a short request to your coding agent. They describe how you
+collaborate, not software mode switches; both produce the same files and use
+the same commands. You can also write everything by hand.
 
 | Way of working | Who leads? |
 | --- | --- |
@@ -88,10 +71,13 @@ For a lightweight fixed workflow, paste:
 
 ```text
 Use SIDERIUS in Professional style. My MNIST images and labels are in /data/mnist.
-Build a digit-classification task and a three-iteration fixed-workflow experiment
-in ~/mnist-research. Keep the test split out of search feedback; optimize validation
-accuracy. Help me set model routing and GPU/time budgets, then show me the saved
-configuration, launch script and result paths before running.
+Build a digit-classification task package in ~/mnist-research, then write the
+experiment as a workflow declaration ~/mnist-research/workflow.py: the interpreted
+training workflow as a research loop of at most three iterations. Keep the test
+split out of search feedback; optimize validation accuracy. Help me set model
+routing, training budgets and stop conditions, then show me workflow.py, the
+LLM profile, the preparation request and the result paths before preparing
+or launching anything.
 ```
 
 For orchestration, replace the execution request with:
@@ -113,7 +99,8 @@ Paste:
 Use SIDERIUS in Assistant style. I have MNIST images and labels in /data/mnist;
 help me build and evaluate a digit classifier. Follow this repository's setup
 guidance, help me choose workflow or orchestration, and prepare an external
-project with the environment, task, experiment and launch script.
+project with the environment, task package, workflow declaration (workflow.py)
+and the commands to prepare and run it.
 ```
 
 Your agent follows the [setup guidance](docs/agent-reference/siderius-setup-review/SKILL.md):
@@ -128,10 +115,28 @@ missing decisions before launching. A [configuration review and HTML report](src
 is optional. See [getting started](docs/getting-started/README.md) for installation
 and detailed setup.
 
-Your agent can also save the experiment as an editable workflow file. The optional
-[browser console](src/tools/candidate_console/README.md) opens that file, can repeat
-it as a research loop that ends at an iteration limit or a stop condition you set,
-and lets you stop, pause and later resume the loop between iterations.
+### What your agent sets up
+
+With a fixed workflow, in either style, the experiment is an ordinary Python
+file in your project, so you can read every setting before anything runs:
+
+1. **Task package**: `task.yaml` and the plugins it names (data access, splits,
+   model input and output, main score, Health checks).
+2. **Workflow declaration** (`workflow.py`): which research steps run, your
+   advice to each step, training budgets and, for a research loop, its
+   iteration limit and stop conditions. Ready-made starting points are in
+   [`examples/workflow_declarations/`](examples/workflow_declarations/).
+3. **LLM profile** (`llm.json`): which model and provider serve each role.
+4. **Preparation and launch**: the agent prepares the workflow offline with
+   `python -m tools.candidate_prepare --reusable-request ...`, shows you what was
+   captured, and launches only when you say so with
+   `python -m tools.candidate_operations submit ...`. The same tool reports
+   status and logs, and stops, pauses or resumes a research loop between
+   iterations, optionally with new advice.
+
+The [workflow guide](docs/getting-started/README.md#write-and-run-a-workflow-declaration)
+lists these steps with their commands. An experimental browser console can also
+show and run the same files; see [below](#try-the-browser-console-experimental).
 
 ### Choose the execution: workflow or orchestration
 
@@ -178,6 +183,30 @@ without changing the workflow code. See the [configuration guide](configs/llm/RE
 to copy a profile into your project and select it at launch. Model selection does
 not set a spending limit or guarantee better scores; paper replay keeps its
 [recorded experiment configurations](https://github.com/yuema137/siderius-exp).
+
+## Try the browser console (experimental)
+
+The browser console is **experimental** in SIDERIUS 1.1. It is useful for
+seeing every step once on a small example, and it can open, edit and run a
+workflow file, but its screens and settings may change between releases. Use
+the coding-agent route above for your research runs, and check the saved
+`workflow.py` rather than the screen when you need to know exactly what runs.
+
+The console path has two stages, written out command by command, with the
+output to expect, in the
+[console first-hour path](docs/getting-started/README.md#your-first-hour-from-the-example-to-your-own-task):
+
+1. **Run the example.** Install, get the example bundle, create a console
+   workspace with `init --credential-file`, write the example data, register it
+   with `add-task --from-bundle`, start the console with `serve` and open it.
+   Then follow the tabs **Task → Workflow → Run → Monitor**.
+2. **Bring your own task.** Package your task with your coding agent, place it in
+   `siderius_workspace/tasks/<id>/`, register it with `add-task`, restart the
+   console, build a workflow for it and run it.
+
+The console needs a Linux machine with an NVIDIA GPU and bubblewrap; the
+first-hour path lists the [prerequisites](docs/getting-started/README.md#before-you-start)
+and defines its three terms: task, experiment setup and run.
 
 ## Try an existing task with siderius-exp
 
@@ -264,7 +293,7 @@ and first-run references.
 | Choice | What it controls |
 | --- | --- |
 | Task package | Data meaning, model input/output, objective, metrics and validity checks |
-| Workflow | Which research steps run and what evidence passes between them |
+| Workflow (`workflow.py`) | Which research steps run, what evidence passes between them, advice, training budgets and loop stop conditions |
 | Experiment settings | Provider/model routing, data scope, iterations, Trial/Formal rounds and resource budgets |
 | Workspace | Where the run records its identity, generated models and results |
 
