@@ -12,6 +12,7 @@ from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_valida
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.run_invariants import RunInvariants
+from core.runtime_control.scheduling import HostBudget
 from core.seeding import SeedCoordinates
 from workflows.llm_config import resolve_standard_tuner_llm_options
 from workflows.run_bindings import WorkflowRunBindings
@@ -42,6 +43,7 @@ def prepare_native_tuner_input(
     constraint_context: ConstraintContext | None,
     chain_formal_incumbent_reference: float | None,
     seed_coordinates: SeedCoordinates,
+    host_budget: HostBudget | None = None,
 ) -> HyperparamTuningInput:
     """Build the native tuner request from already admitted workflow context.
 
@@ -200,6 +202,9 @@ def prepare_native_tuner_input(
         scientific_evidence_order=run_invariants.scientific_evidence_order,
         baseline_isolation=run_invariants.baseline_isolation,
     )
+    if host_budget is not None:
+        # B3-4b — only so the tuner's lock matches the worker's parallel-v1 lock.
+        tune_input = tune_input.model_copy(update={"host_budget": host_budget})
     if launch.human_advice_tune is not None:
         tune_input.human_advice = launch.human_advice_tune
     # Task config injection (T4a) — substituted into the {TASK_DESCRIPTION}

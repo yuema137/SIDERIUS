@@ -134,6 +134,7 @@ def replay_readiness(
     decisions: tuple[RouteEvaluationOutput, ...] = (),
     routing: Mapping[str, readiness.NodeRouting] | None = None,
     skipped_inputs: Mapping[str, GraphReason] | None = None,
+    drained: frozenset[str] = frozenset(),
 ) -> None:
     """Replay readiness only, never native execution, over recorded terminal states.
 
@@ -141,6 +142,11 @@ def replay_readiness(
     every node it dispatches must have been dispatched (succeeded, rejected or
     failed), so a node run inside a non-selected arm or a skip readiness would not
     produce is refused. Uncertainty (a failure) stops later effects.
+
+    ``drained`` (trace v2, ``parallel-v1``): nodes whose receipts prove they were
+    already running when the body's first failure ended. Such a node may carry
+    its real outcome where the serial replay closes it as blocked, but only when
+    its own sources permit it (no abort).
     """
     recorded = {item.node_id: item for item in nodes}
     complete: dict[str, GraphNodeEvidence] = {}
@@ -162,7 +168,22 @@ def replay_readiness(
         elif step.terminal:
             node_id, state, reason = step.terminal[0]
             item = recorded[node_id]
-            valid = (item.state, item.reason) == (state, reason)
+            valid = (item.state, item.reason) == (state, reason) or (
+                aborted
+                and node_id in drained
+                and item.state in ("succeeded", "rejected", "failed")
+                and readiness.may_run(
+                    node_id,
+                    readiness.readiness_input(
+                        nodes,
+                        complete,
+                        aborted=False,
+                        decisions=decisions,
+                        routing=routing,
+                        skipped_inputs=skipped_inputs,
+                    ),
+                )
+            )
         else:
             raise ValueError("graph trace violates serial readiness or failure stop")
         if not valid:
@@ -279,11 +300,15 @@ def verify_graph_trace(
     )
     # Index skips come from the recomputed outcomes, so the replay refuses a node
     # that ran on a non-emitted adaptor output (or was skipped despite one).
+    from .parallel_evidence import drained_entries
+
+    drained = drained_entries(request, initial, trace, iteration=iteration)
     replay_readiness(
         (*trace.nodes, *trace.adaptors),
         decisions=decisions,
         routing=routing,
         skipped_inputs=skipped_inputs(definition, outcomes),
+        drained=drained,
     )
     status, validation_passed = body_outcome(shape, definition, trace)
     if (

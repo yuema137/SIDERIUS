@@ -54,6 +54,7 @@ def prepare_tuning_request(
         # Issue #983 — the tuner's seed scope: the global loop iteration (which
         # a resumed segment continues) and the authored tuning node.
         seed_coordinates=tuning_seed_scope(admitted.iteration, admitted.node_id),
+        host_budget=admitted.host_budget,
     )
 
 

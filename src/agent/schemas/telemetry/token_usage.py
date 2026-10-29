@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class LLMBridgeContextError(RuntimeError):
@@ -188,3 +188,23 @@ class TokenUsageRow(BaseModel):
         "marker='iter_end', etc.). Kept loose so callers can add "
         "context without a schema migration.",
     )
+    unit_id: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="B3-4b: the graph unit that wrote this row under parallel "
+        "dispatch (``agent.token_unit``). Omitted otherwise, so serial rows "
+        "keep their bytes.",
+    )
+    unit_sequence: int | None = Field(
+        default=None,
+        ge=1,
+        exclude_if=lambda value: value is None,
+        description="B3-4b: this row's position among its unit's rows (1-based); "
+        "with ``unit_id`` it orders rows independently of append order.",
+    )
+
+    @model_validator(mode="after")
+    def _unit_pair(self) -> TokenUsageRow:
+        if (self.unit_id is None) != (self.unit_sequence is None):
+            raise ValueError("unit_id and unit_sequence are recorded together")
+        return self

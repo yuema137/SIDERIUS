@@ -624,6 +624,7 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         ),
         runtime_completion_policy=agent_input.runtime_completion_policy,
         runtime_verifier_identity=agent_input.runtime_verifier_identity,
+        host_budget=agent_input.host_budget,
         judge_routes=agent_input.judge_routes,
         **run_seed_lock_fields(agent_input.run_seed),
     )

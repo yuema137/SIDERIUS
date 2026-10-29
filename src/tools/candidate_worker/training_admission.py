@@ -15,6 +15,7 @@ from core.run_invariants import RunInvariants, ensure_run_invariants
 from core.run_seed_lock import WorkspaceRunSeed, adopt_bound_run_seed
 from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+from core.runtime_control.scheduling import HostBudget
 from core.seeding import MissingRunSeed
 from execute_tools.dataset_config import DataScope
 from execute_tools.evaluation_execution import candidate_evaluation_executor
@@ -47,6 +48,9 @@ class TrainingAdmission:
     #: The global loop iteration this body trains in (1 outside a loop); with
     #: ``node_id`` it is the tuner's seed scope (issue #983).
     iteration: int
+    #: B3-4b — the run's parallel scheduling budget, locked as ``parallel-v1``;
+    #: ``None`` for a serial run.
+    host_budget: HostBudget | None = None
 
 
 def admitted_workspace_seed(initial: CandidateRunReceipt) -> WorkspaceRunSeed:
@@ -129,6 +133,7 @@ def admit_training(
     config: WorkflowLLMConfig,
     *,
     iteration: int = 1,
+    host_budget: HostBudget | None = None,
 ) -> TrainingAdmission:
     """Resolve actual scope, Health, hardware and measurement using native owners."""
     definition = request.preview.document.definition
@@ -192,6 +197,7 @@ def admit_training(
         llm_config=config,
         task_composition=composition,
         run_seed=run_seed,
+        host_budget=host_budget,
         **{
             name: getattr(settings, name)
             for name in type(settings).model_fields
@@ -236,5 +242,10 @@ def admit_training(
         str(control / "training_settings.json"), settings.model_dump_json(indent=2).encode()
     )
     return TrainingAdmission(
-        settings, bindings, workflow_constraint_context(launch, composition), node.id, iteration
+        settings,
+        bindings,
+        workflow_constraint_context(launch, composition),
+        node.id,
+        iteration,
+        host_budget,
     )

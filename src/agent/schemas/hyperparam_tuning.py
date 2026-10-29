@@ -65,6 +65,7 @@ from core.runtime_control.inference_verification_evidence import InferenceVerifi
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.pair_admission import PositiveGpuGiB
 from core.runtime_control.records import RuntimeObservation
+from core.runtime_control.scheduling import HostBudget
 from core.runtime_control.training_budget import TrainingBudgetReceipt
 from core.runtime_control.validation_limits import validate_phase_deadline
 from core.runtime_control.verifier_provider import (
@@ -2252,6 +2253,17 @@ class HyperparamTuningInput(BaseModel):
             "therefore REFUSED at startup when the bound golden metric is "
             "lower-is-better — not negated, not reinterpreted. ``None`` is "
             "direction-free and always accepted."
+        ),
+    )
+
+    # --- Parallel scheduling (B3-4b) ---
+    host_budget: HostBudget | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "B3-4b — the parallel-v1 run's scheduling budget, threaded only so the "
+            "tuner's run lock matches the worker's (scheduling_mode is canonical). "
+            "Never read for training behaviour; None for serial runs."
         ),
     )
 
