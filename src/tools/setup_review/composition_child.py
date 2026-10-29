@@ -107,6 +107,15 @@ def compose_in_child(job: CompositionJob) -> CompositionResult:
                     candidate = check_candidate(composition, job.candidate_check, job.scratch)
             except Exception as error:
                 return CompositionResult.failed(job, "candidate_check", error, task=task)
+        package = None
+        if job.summary is not None:
+            try:
+                from tools.setup_review.package_facts import project_package_facts
+
+                with bind_code_package(composition.code_package):
+                    package = project_package_facts(composition, job.summary)
+            except Exception as error:
+                return CompositionResult.failed(job, "package_facts", error, task=task)
         return CompositionResult(
             request_sha256=job.digest,
             manifest_sha256=job.manifest_sha256,
@@ -115,6 +124,7 @@ def compose_in_child(job: CompositionJob) -> CompositionResult:
             planner_strategy_identity=identity,
             task_settings=settings,
             candidate_check=candidate,
+            package=package,
         )
 
 

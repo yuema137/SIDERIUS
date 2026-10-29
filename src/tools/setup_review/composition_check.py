@@ -96,9 +96,11 @@ def observe_composition(
     scratch.mkdir(mode=0o700)
     request_path = scratch / CHILD_REQUEST_NAME
     publish_bytes_write_once(str(request_path), (job.model_dump_json() + "\n").encode())
+    # Only a task-summary job reads the data root (task-owned scope volume/counts).
+    data = (Path(job.summary.data_root),) if job.summary is not None else ()
     profile = SandboxProfile(
         workspace=scratch,
-        read_only=(*read_only, request_path),
+        read_only=(*read_only, *data, request_path),
         network=False,
         devices=(),
         environment_names=(),
