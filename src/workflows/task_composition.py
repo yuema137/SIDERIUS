@@ -2599,6 +2599,19 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         return _compose_resolved_task_bindings(raw, resolved_manifest, package)
 
 
+def compose_judge_declarations(manifest_path: str) -> JudgeTaskDeclarations | None:
+    """The manifest's ``judge_blocks:``/``rubrics:`` only, by the same owner as the full
+    composition (``_compose_judge_task``): no plugin, data or code-package I/O.
+
+    For readback that must rebuild an LLM strategy invocation without composing the
+    whole task (``tools.candidate_worker.adaptor_llm``).
+    """
+    resolved_manifest = os.path.abspath(manifest_path)
+    raw = _read_manifest(resolved_manifest)
+    declarations, _ = _compose_judge_task(raw, os.path.dirname(resolved_manifest))
+    return declarations
+
+
 def _compose_resolved_task_bindings(
     raw: dict[str, Any], resolved_manifest: str, package: CapturedCodePackage | None
 ) -> RunTaskComposition:

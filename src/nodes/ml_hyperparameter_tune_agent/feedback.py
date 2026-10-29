@@ -170,7 +170,7 @@ def _collect_disallowed_patterns(
             continue
 
         vram_factor = None
-        if vram_budget_gb and vram_budget_gb > 0:
+        if vram_budget_gb is not None:
             vram_est = mem.get("vram_estimate_gb")
             if vram_est is not None:
                 vram_factor = float(vram_est) / float(vram_budget_gb)

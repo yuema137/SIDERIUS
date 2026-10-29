@@ -19,10 +19,11 @@ from workflows.llm_config import WorkflowLLMConfig
 
 from .artifacts import capture_record, verify_artifacts
 from .budget import WorkerBudget
-from .inputs import NativeInputs
+from .inputs import NativeInputs, consumed_input_sha256
 from .invocation import FixedInvocationContext
 from .layout import proposal_input_path
 from .models import CandidateRunReceipt, CandidateRunRequest
+from .record_json import artifact_json
 
 
 def run_proposal(
@@ -47,7 +48,7 @@ def run_proposal(
     input_path.parent.mkdir(parents=True, exist_ok=True)
     publish_bytes_write_once(
         str(input_path),
-        seed.model_dump_json(indent=2).encode(),
+        artifact_json(seed, kind="internal", indent=2),
     )
 
     proposer = MLModelProposalAgent(**config.get("propose"))
@@ -104,6 +105,10 @@ def run_implementation(
         reference_code={},
         previous_validation_failure=None,
     )
+    if _judged_branch(request, context.node_id):
+        implementation = implementation.model_copy(
+            update={"consumed_input_sha256": consumed_input_sha256(seed, proposal)}
+        )
     implementor = MLModelImplementor(
         **config.get("implement"), probe_seed=context_probe_seed(context, initial)
     )
@@ -125,6 +130,19 @@ def context_probe_seed(
         node_id=context.node_id,
         attempt=context.attempt,
     )
+
+
+def _judged_branch(request: CandidateRunRequest, node_id: str) -> bool:
+    """Only a judged branch (``native-proposal-judged/v1``) stamps its consumed input, so
+    every other implementation record keeps its bytes."""
+    if request.preview.execution_profile is None:
+        return False
+    from workflows.definition.fanout import execution_families
+
+    shape = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    )
+    return shape.judged_source(node_id) is not None
 
 
 def run_validation(

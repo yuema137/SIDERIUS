@@ -426,13 +426,15 @@ def _exercise_real_standard_main(
         with pytest.raises(SystemExit) as stopped:
             launch_reviewed(launch_request)
     assert stopped.value.code == 0
-    assert len(projected) == 1
-    assert workflow.call_args.kwargs["launch"] is projected[0]
-    assert projected[0].max_rounds == env.launch_settings["max_rounds"]
+    # main() also projects once, before workspace binding, for the launch
+    # admission check (#1045); the run receives the post-resolution projection.
+    assert len(projected) == 2
+    assert workflow.call_args.kwargs["launch"] is projected[-1]
+    assert projected[-1].max_rounds == env.launch_settings["max_rounds"]
     if gpu_policy is not None:
         assert len(invariant_calls) == 1
         lock_identity, invariants = invariant_calls[0]
-        selected = projected[0].gpu_execution_policy
+        selected = projected[-1].gpu_execution_policy
         assert selected.model_dump(mode="json") == gpu_policy
         assert lock_identity.gpu_execution_policy is selected
         assert invariants.gpu_execution_policy is selected

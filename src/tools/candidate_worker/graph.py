@@ -1,6 +1,7 @@
 """Serial typed readiness; each dispatched node runs as one unit process (B3-3)."""
 
 import traceback
+from dataclasses import replace
 from pathlib import Path
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
@@ -14,10 +15,12 @@ from workflows.task_composition import RunTaskComposition
 from workflows.termination import infrastructure_abort_reason
 
 from . import readiness, route_phase, unit_runner
+from .adaptor_llm import judge_adaptor_context
 from .adaptor_phase import (
     body_outcome,
     execute_adaptor,
     expected_adaptors,
+    judged_proposal,
     skipped_inputs,
     tuning_branch,
 )
@@ -25,6 +28,7 @@ from .budget import WorkerBudget
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
 from .graph_models import GraphNodeEvidence, GraphRouteEvidence, GraphTrace
+from .inputs import NativeInputs
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .training_admission import admit_training
 from .unit_dispatch import node_invocation
@@ -52,6 +56,9 @@ def execute_fanout(
         if shape.tuning
         else None
     )
+    # Before any effect: LLM COMBINE adaptors' routes, rubrics, guidance and the run's
+    # static judge call sum against max_judge_calls (B6-8a; D3, D4).
+    judge = judge_adaptor_context(request, initial, composition.judge_task)
     inputs = materialize_fanout(
         request,
         Path(initial.workspace),
@@ -102,6 +109,7 @@ def execute_fanout(
                 workspace=Path(initial.workspace),
                 iteration=iteration,
                 skips=route_phase.skip_citations(evidence, routes, routing),
+                judge=judge,
             )
             if outcome is not None:
                 outcomes[decision.next] = outcome
@@ -126,6 +134,12 @@ def execute_fanout(
                     )
                 )
             selected = inputs[shape.families[0].proposal if node.id == shape.tuning else node.id]
+            judged = judged_proposal(shape, outcomes, node.id)
+            if judged is not None:
+                # B6-8b: the branch's task facts come from the selected proposal's seed.
+                owner = inputs[judged[1]]
+                assert isinstance(selected, NativeInputs) and isinstance(owner, NativeInputs)
+                selected = replace(selected, proposal=owner.proposal)
             output, path = unit_runner.unit_output(
                 node_invocation(
                     request,
