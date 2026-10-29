@@ -7,6 +7,7 @@ from tools.candidate_prepare import (
     VerifiedReusablePreparation,
     verify_reusable_preparation,
 )
+from tools.candidate_worker.models import CandidateRunRequest
 
 from .files import canonical, overlap
 from .models import CandidateOperation, OperationFailure, OperationStoreConfig
@@ -53,8 +54,14 @@ def build_reusable_operation(
     config: OperationStoreConfig,
     selection: ReusablePreparedSelection,
     request_id: UUID,
+    run_seed: int | None = None,
 ) -> CandidateOperation:
-    """Review a retained selection under store policy; submit rechecks it before claiming."""
+    """Review a retained selection under store policy; submit rechecks it before claiming.
+
+    ``run_seed`` is the operator's explicit candidate seed (issue #983), the one
+    field a candidate may add to the prepared request; ``None`` leaves the
+    prepared request, and its digest, unchanged.
+    """
     # Keep store validation independent of this read boundary and its mutable files.
     from .store import validate_config, validate_submission
 
@@ -67,8 +74,14 @@ def build_reusable_operation(
         raise OperationFailure(
             "reusable_preparation", "reusable preparation no longer matches the retained selection"
         ) from error
+    request = verified.request
+    if run_seed is not None:
+        # Revalidate so an out-of-range seed is refused here, not at admission.
+        request = CandidateRunRequest.model_validate_json(
+            request.model_copy(update={"run_seed": run_seed}).model_dump_json()
+        )
     submission = CandidateOperation(
-        request_id=request_id, request=verified.request, reusable_preparation=selection
+        request_id=request_id, request=request, reusable_preparation=selection
     )
     validate_submission(config, submission)
     return submission

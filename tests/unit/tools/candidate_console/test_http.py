@@ -78,6 +78,39 @@ def test_auth_before_any_body_receive_and_stream_limit(console_config):
     assert calls == ["receive", "receive"]
 
 
+@pytest.mark.parametrize("port", [8740, 9123])
+def test_rejected_browser_host_shows_bind_url_without_changing_admission(console_config, port):
+    """Reverting the fix loses the plain-text bind URL; other admission stays unchanged."""
+    config = console_config.model_copy(update={"port": port})
+    api = client(config)
+    headers = {"Host": f"localhost:{port}", "Accept": "text/html,application/xhtml+xml"}
+    response = api.get("/", headers=headers)
+    assert response.status_code == 403
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.text == f"Request host is not allowed.\nOpen http://127.0.0.1:{port}/\n"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "default-src 'none'" in response.headers["content-security-policy"]
+    assert "location" not in response.headers
+    allowed = api.get("/", headers={**headers, "Host": f"127.0.0.1:{port}"})
+    assert allowed.status_code == 200
+    assert allowed.headers["content-type"].startswith("text/html")
+    for refused in (
+        api.get("/api/choices", headers=headers),
+        api.get("/", headers={**headers, "Accept": "application/json"}),
+        api.get("/", headers={**headers, "Forwarded": "host=localhost"}),
+        api.get("/", headers={**headers, "X-Forwarded-Host": "localhost"}),
+        api.get("/", headers=[*headers.items(), ("Host", "evil.invalid")]),
+        api.post("/", headers=headers),
+    ):
+        assert refused.status_code == 403
+        assert refused.json() == {
+            "error": {"code": "host", "message": "request host is not allowed"}
+        }
+
+
 def test_host_origin_content_and_sanitized_errors(console_config):
     api = client(console_config)
     assert api.get("/api/choices").status_code == 200
@@ -162,8 +195,59 @@ def test_apps_do_not_share_task_choices(console_config):
     first = client(console_config)
     task = console_config.tasks[0].model_copy(update={"label": "Other task"})
     second = client(console_config.model_copy(update={"tasks": (task,)}))
-    assert first.get("/api/choices").json()[0]["label"] == "Synthetic task"
-    assert second.get("/api/choices").json()[0]["label"] == "Other task"
+    assert first.get("/api/choices").json()["tasks"][0]["label"] == "Synthetic task"
+    assert second.get("/api/choices").json()["tasks"][0]["label"] == "Other task"
+
+
+def test_choices_store_id_is_opaque_and_follows_store_identity(console_config, tmp_path):
+    """Browser intents are keyed by this id: two stores must differ, one store must not."""
+    store = console_config.operation_store
+    first = client(console_config).get("/api/choices").json()["operations_store_id"]
+    again = client(console_config).get("/api/choices").json()["operations_store_id"]
+    moved = console_config.model_copy(
+        update={"operation_store": store.model_copy(update={"state_root": str(tmp_path / "s2")})}
+    )
+    other = client(moved).get("/api/choices").json()["operations_store_id"]
+    # Output roots are not the store: editing them and restarting keeps the id, so a
+    # retained unresolved launch stays visible and Launch stays blocked.
+    (tmp_path / "p2").mkdir()
+    (tmp_path / "c2").mkdir()
+    rooted = console_config.model_copy(
+        update={
+            "operation_store": store.model_copy(
+                update={
+                    "preparation_roots": (*store.preparation_roots, str(tmp_path / "p2")),
+                    "candidate_roots": (*store.candidate_roots, str(tmp_path / "c2")),
+                }
+            )
+        }
+    )
+    kept = client(rooted).get("/api/choices").json()["operations_store_id"]
+    assert first == again == kept and first != other
+    assert str(tmp_path) not in first and "/" not in first
+
+
+def test_unknown_operation_is_typed_only_after_a_store_read(prepared, tmp_path):
+    """Forget may follow ``unknown_operation`` only; a missing record file is not absence."""
+    service, selection, _ = prepared
+    api = client(service.config)
+    unknown = api.get(f"/api/operations/{uuid4()}")
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "unknown_operation"
+    assert api.get(f"/api/operations/{selection.operation_id}").status_code == 200
+    # An admitted directory whose record is unreadable must not read as unknown.
+    record = Path(service.config.operation_store.state_root) / "operations"
+    record = record / str(selection.operation_id) / "request.json"
+    record.rename(tmp_path / "request.json.aside")
+    hidden = api.get(f"/api/operations/{selection.operation_id}")
+    assert hidden.status_code == 404 and hidden.json()["error"]["code"] == "not_found"
+    # A store root that is not there cannot prove absence either.
+    gone = service.config.operation_store.model_copy(
+        update={"state_root": str(tmp_path / "never-created")}
+    )
+    missing = client(service.config.model_copy(update={"operation_store": gone}))
+    response = missing.get(f"/api/operations/{uuid4()}")
+    assert response.json()["error"]["code"] != "unknown_operation"
 
 
 def test_unexpected_failure_has_secured_sanitized_response(console_config, monkeypatch, caplog):
@@ -281,5 +365,15 @@ def test_navigation_assets_keep_exact_static_security_boundary(console_config):
         assert response.headers["x-frame-options"] == "DENY"
         assert api.get("/" + name, headers={"Host": "evil.invalid"}).status_code == 403
     assert api.get("/session.js.map").status_code == 404
+    # The header and Home logos are <img> assets: allowlisted by exact name and permitted by
+    # img-src 'self' (default-src 'none' alone would block them).
+    # icons.js fetches the vendored Lucide sprite at runtime (index.html never names it), so an
+    # allowlist omission would silently drop every icon.
+    for name in ("siderius-logo-light.svg", "siderius-logo-dark.svg", "icons.svg"):
+        response = api.get("/" + name, headers={"Authorization": ""})
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/svg+xml"
+        assert "img-src 'self'" in response.headers["content-security-policy"]
+    assert api.get("/siderius-logo.svg").status_code == 404
     assert api.get("/../console-contract.md").status_code == 404
     assert api.get("/api/choices", headers={"Authorization": ""}).status_code == 401

@@ -13,6 +13,7 @@
 #editor-inspector label.field-problem { padding: .3rem .4rem; border-left: 4px solid var(--error); }
 #editor-inspector label.field-problem select { border-color: var(--error); }
 #editor-inspector h3 { margin: 1rem 0 .3rem; font-size: .95rem; }
+.field-problem-text { color: var(--error); }
 
 .training-settings { margin: 1rem 0; }
 .training-settings > summary { font-weight: bold; }
@@ -26,3 +27,19 @@
 .training-field .field-help { display: block; color: var(--muted); }
 .training-reset { margin: .2rem 0; font-size: .8rem; }
 .model-hyperparameters dd, .model-hyperparameters dt { overflow-wrap: anywhere; }
+/* Training settings (tour #11, spec §8.2): Default chip, a reset icon only when changed,
+ * the error under its own field. */
+.training-field .field-error { display: block; color: var(--error); }
+.training-field .field-error:empty { display: none; }
+.training-field .training-reset { width: 28px; min-width: 28px; height: 28px; min-height: 28px; margin: 0 0 0 var(--space-1); padding: 0; vertical-align: middle; }
+.training-field .training-reset[hidden] { display: none; }
+
+/* Required run-policy choices (L-1b): an unset choice is marked on the field itself. */
+.training-policy { margin: var(--space-3) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-1); }
+.training-policy legend { font-weight: 600; padding: 0 var(--space-1); }
+.training-choice { display: grid; gap: var(--space-1); margin-bottom: var(--space-3); }
+.training-choice:last-child { margin-bottom: 0; }
+.training-choice label { display: grid; gap: var(--space-1); }
+.training-choice[data-problem="true"] select { border-color: var(--error); box-shadow: 0 0 0 1px var(--error); }
+.training-choice .field-error { display: block; color: var(--error); }
+.training-choice .field-error:empty { display: none; }

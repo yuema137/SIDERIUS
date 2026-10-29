@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {join, resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) {
@@ -52,24 +53,25 @@ async function waitUntil(predicate) {
 try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
   const faults = [];
   page.on('pageerror', error => faults.push(error.message));
   await page.goto(metadata.origin + '/editor.html');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   const status = page.locator('#editor-status');
   const reopen = async () => {
     await page.locator('#editor-refresh').click();
-    await waitUntil(async () => (await status.textContent()).includes('Opened supported'));
+    await waitUntil(async () => (await status.textContent()).includes('Opened '));
   };
   const reviewAndSave = async () => {
     await page.locator('#editor-review').click();
     await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
     const diff = await page.locator('#editor-diff').textContent();
     await page.locator('#editor-save').click();
-    await waitUntil(async () => (await status.textContent()).includes('Saved reviewed'));
+    await waitUntil(async () => (await status.textContent()).includes('Saved as "'));
     return diff;
   };
   await page.locator('#editor-project').selectOption('interpretation');
@@ -85,7 +87,7 @@ try {
   const limit = page.locator('#editor-loop-final-iteration');
   assert.equal(await limit.inputValue(), '1');
   const feedback = await page.locator('#editor-loop-feedback').textContent();
-  assert.match(feedback, /^TRAIN & TUNE fit → .+ interpret$/);
+  assert.match(feedback, /^Train & tune fit → .+ interpret$/);
   for (const invalid of ['0', '2.5', '']) {
     await limit.fill(invalid);
     assert.equal(await page.locator('#editor-review').isDisabled(), true, `invalid limit ${JSON.stringify(invalid)} must block Review`);
@@ -113,7 +115,7 @@ try {
   // Stop conditions: add both kinds, incomplete values block Review, review shows them.
   const loopedBytes = await readFile(metadata.interpretation_source);
   await page.locator('#editor-loop-stop-conditions').filter({hasText: 'None. The loop runs until its iteration limit.'}).waitFor();
-  assert.equal(await page.locator('#editor-loop-add-judge').count(), 0, 'judge stopping is never offered');
+  assert.equal(await page.locator('#editor-loop-add-judge').count(), 1, 'a judge stop is offered (B2-5)');
   await page.locator('#editor-loop-add-metric-threshold').click();
   assert.equal(await page.locator('#editor-loop-add-metric-threshold').count(), 0, 'one condition per kind');
   assert.equal(await page.locator('#editor-review').isDisabled(), true, 'an incomplete threshold blocks Review');
@@ -158,9 +160,28 @@ try {
   ]);
   await page.screenshot({path: join(evidence, 'research-loop-stop-conditions-reopened.png'), fullPage: true});
 
+  // B2-5: a judge stop carries only JudgeStop's declared fields; an empty criterion blocks Review.
+  await page.locator('#editor-loop-add-judge').click();
+  assert.equal(await page.locator('#editor-loop-add-judge').count(), 0, 'one judge per loop');
+  assert.equal(await page.locator('#editor-review').isDisabled(), true, 'an empty judge criterion blocks Review');
+  assert.match(await page.locator('[data-stop-kind="judge"]').textContent(), /set by the console operator/);
+  await page.locator('#editor-loop-stop-criterion').fill('Stop once a body adds no new insight.');
+  assert.equal(await page.locator('#editor-loop-stop-min-completed-bodies').inputValue(), '1');
+  await page.locator('#editor-loop-stop-on-failure').selectOption('continue');
+  const judgeDiff = await reviewAndSave();
+  assert.match(judgeDiff, /JudgeStop\(/);
+  assert.match(judgeDiff, /criterion='Stop once a body adds no new insight\.'/);
+  assert.match(judgeDiff, /on_failure='continue'/);
+  await reopen();
+  assert.equal(await page.locator('#editor-loop-stop-criterion').inputValue(), 'Stop once a body adds no new insight.');
+  assert.equal(await page.locator('#editor-loop-stop-on-failure').inputValue(), 'continue');
+  assert.deepEqual(parsed().definition.loop.stop_conditions.at(-1),
+    {kind: 'judge', criterion: 'Stop once a body adds no new insight.', min_completed_bodies: 1, on_failure: 'continue'});
+
   // Remove both conditions: the condition-free loop bytes return exactly.
   await page.locator('#editor-loop-remove-metric-threshold').click();
   await page.locator('#editor-loop-remove-no-improvement').click();
+  await page.locator('#editor-loop-remove-judge').click();
   await page.locator('#editor-loop-add-metric-threshold').waitFor();
   const unstopDiff = await reviewAndSave();
   assert.match(unstopDiff, /-\s+MetricThresholdStop\(/);

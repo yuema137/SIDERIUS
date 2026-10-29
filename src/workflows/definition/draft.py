@@ -63,7 +63,15 @@ class DraftProblem(DeclarationModel):
     failures carry the validator location in ``field`` and no node.
     """
 
-    code: Literal["required_unbound", "external_binding_required", "declaration_invalid"]
+    # ``loop_feedback_missing`` / ``workflow_empty``: a draft deleted the loop's feedback
+    # module or every module (authoring node drafts); Save stays refused until fixed.
+    code: Literal[
+        "required_unbound",
+        "external_binding_required",
+        "declaration_invalid",
+        "loop_feedback_missing",
+        "workflow_empty",
+    ]
     node: Identifier | None = None
     field: str | None = None
     message: str
@@ -159,5 +167,5 @@ def _unbound(node: str, field: str) -> DraftProblem:
         code="required_unbound",
         node=node,
         field=field,
-        message=f"{node}.{field}: required input is unbound",
+        message=f"{node}.{field}: required input is not connected",
     )

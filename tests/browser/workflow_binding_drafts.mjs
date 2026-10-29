@@ -6,6 +6,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[key], `Set ${key}`);
@@ -33,28 +34,40 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}}), faults = [], posts = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => { if (request.method() === 'POST') posts.push({url: request.url(), body: request.postDataJSON()}); });
   await page.goto(metadata.origin + '/#workflow');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   const original = await readFile(metadata.source, 'utf8');
   const wire = page.locator('path.circuit-wire-target[data-from="propose"][data-to="implement"][data-argument="output"]');
   const output = page.locator('#circuit-output-propose'), input = page.locator('#circuit-input-implement-output');
   assert.equal(await wire.count(), 1);
 
+  // As a user would: at Actual size, pan the canvas viewport (its own scroll, never the window)
+  // until the wire is in the middle of it; off-screen points have no hit target.
+  await page.locator('#circuit-zoom-reset').click();
+  const panned = await wire.evaluate(path => {
+    const viewport = path.closest('.circuit-viewport'), frame = viewport.getBoundingClientRect(), box = path.getBoundingClientRect();
+    viewport.scrollTop += box.top + box.height / 2 - (frame.top + frame.height / 2);
+    viewport.scrollLeft += box.left + box.width / 2 - (frame.left + frame.width / 2);
+    const after = path.getBoundingClientRect();
+    return {scrollY, inside: after.bottom > frame.top && after.top < frame.bottom && after.right > frame.left && after.left < frame.right};
+  });
+  assert.deepEqual(panned, {scrollY: 0, inside: true}, 'The viewport pans to the wire; the window does not scroll');
   const wirePoint = await hitPoint(wire);
   assert.ok(wirePoint);
   assert.equal(await page.evaluate(({x, y}) => document.elementFromPoint(x, y)?.classList.contains('circuit-wire-target'), wirePoint), true, 'A visible wire stroke receives pointer hits');
   await page.mouse.click(wirePoint.x, wirePoint.y);
-  assert.equal(await wire.getAttribute('aria-label'), 'Connection propose.result to implement.output');
+  assert.equal(await wire.getAttribute('aria-label'), 'Propose model sends Model plan to Implement');
   assert.equal(await wire.getAttribute('aria-pressed'), 'true');
   assert.ok(await page.locator('.circuit-wire.selected').count());
   await page.locator('.circuit-disconnect').click();
   await waitUntil(async () => (await page.locator('#editor-pending').textContent()).includes('incomplete'));
-  assert.match(await input.textContent(), /Required · unbound/);
+  assert.match(await input.textContent(), /Required · Not connected/);
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
   assert.equal(await page.evaluate(() => window.workflowEditor.state.dirty), true);
@@ -81,7 +94,7 @@ try {
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
   assert.equal(await page.locator('#editor-rebase').isDisabled(), true);
-  assert.match(await page.locator('#editor-conflict-diff').textContent(), /Disconnect implement.output/);
+  assert.match(await page.locator('#editor-conflict-proposal').textContent(), /Disconnect implement.output/);
   await page.locator('#editor-discard').click();
   await waitUntil(async () => !(await page.locator('#editor-pending').textContent()).includes('Pending binding draft'));
   assert.match(await page.locator('#editor-source').inputValue(), /external edit/);
@@ -106,11 +119,11 @@ try {
   assert.match(await page.locator('#editor-diff').textContent(), /llm_provider/);
   assert.equal(await readFile(metadata.source, 'utf8'), original + '\n# external edit\n', 'Review has no disk side effect');
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   assert.doesNotMatch(await readFile(metadata.source, 'utf8'), /llm_provider/);
   await page.locator('#editor-refresh').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
-  assert.match(await page.locator('#editor-inspector').textContent(), /llm_provider.*Optional · unbound/);
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
+  assert.match(await page.locator('#editor-inspector .inspector-input', {has: page.locator('code', {hasText: /^llm_provider$/})}).textContent(), /Optional · Not connected/);
   assert.deepEqual(faults, []);
   console.log('PASS SVG pointer selection/button disconnect, keyboard Delete, required incomplete gate, stale-base refusal/discard, optional disconnect, valid review/save and disk reload.');
 } finally {
