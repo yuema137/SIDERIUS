@@ -24,6 +24,7 @@ from .settings_models import (
     SETTINGS_SCHEMA,
     WORKSPACE_DATA_ROOT,
     AdviceFileChoice,
+    AllowlistRef,
     Allowlists,
     DataRootChoice,
     FileRef,
@@ -67,15 +68,56 @@ def read_settings(path: Path) -> tuple[GlobalSettings | None, str | None]:
         settings = GlobalSettings.model_validate_json(payload)
     except ValidationError as error:
         raise SettingsInvalid(
-            f"global settings file is not valid {SETTINGS_SCHEMA} JSON at {invalid_fields(error)}"
+            f"global settings file is not valid {SETTINGS_SCHEMA} JSON at {invalid_fields(error, payload)}"
         ) from None
     return settings, hashlib.sha256(payload).hexdigest()
 
 
-def invalid_fields(error: ValidationError) -> str:
-    """Field locations only (Pydantic ``loc``), never the offending values."""
-    locations = sorted({".".join(map(str, item["loc"])) or "(document)" for item in error.errors()})
-    return ", ".join(locations[:5])
+def _schema_names() -> frozenset[str]:
+    names: set[str] = {"allowlist", "library"}  # FileRef discriminator tags
+    for model in (GlobalSettings, AllowlistRef, LibraryRef, FolderRef):
+        names.update(model.model_fields)
+    return frozenset(names)
+
+
+MAPPING_FIELDS = frozenset({"data_folders"})  # values keyed by file-supplied task IDs
+
+
+def _entry_index(payload: bytes | None, field: str, key: object) -> str:
+    """Position of a mapping entry in the file, so several entries are told apart."""
+    import json
+
+    if payload is None:
+        return ".<key>"
+    try:
+        return f"[{list(json.loads(payload)[field]).index(key)}]"
+    except (ValueError, TypeError, KeyError):
+        return ".<key>"
+
+
+def invalid_fields(error: ValidationError, payload: bytes | None = None) -> str:
+    """Field locations only (Pydantic ``loc``), never offending values or file text.
+
+    A segment in the schema vocabulary (field names, ``FileRef`` tags, list
+    indexes and Pydantic's constant ``[key]`` token for a bad mapping key) is
+    shown verbatim. A mapping key under ``data_folders`` is shown by its position
+    in the file (``data_folders[2].subpath``); any other segment is ``<key>``.
+    """
+    known = _schema_names()
+    locations: set[str] = set()
+    for item in error.errors():
+        text, previous = "", None
+        for part in item["loc"]:
+            if previous in MAPPING_FIELDS:
+                text += _entry_index(payload, previous, part)
+            elif isinstance(part, int):
+                text += f"[{part}]"
+            else:
+                segment = part if part in known or part == "[key]" else "<key>"
+                text += ("." if text else "") + segment
+            previous = part
+        locations.add(text or "(document)")
+    return ", ".join(sorted(locations)[:5])
 
 
 def allowlists(
