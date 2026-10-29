@@ -19,6 +19,12 @@ from tools.workspace_sandbox.runner import ExecutionResult
 REPO = Path(__file__).resolve().parents[4]
 
 
+@pytest.fixture(autouse=True)
+def no_host_gpu(monkeypatch):
+    """add-task detects this host's GPUs; tests see a GPU-less host unless they patch one."""
+    monkeypatch.setattr("tools.candidate_console.add_task.host_gpu_devices", lambda: ())
+
+
 def copy_quickstart_package(parent: Path) -> tuple[Path, Path]:
     """The quickstart manifest and the package folder it references, copied under ``parent``.
 

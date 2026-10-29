@@ -102,22 +102,23 @@ you own; the console workspace is created inside it) and
    data before the next step, because the next step ends with a check that
    needs this folder.
 
-5. **Register the task and its experiment setup.** Pass the GPU device files
-   runs may use (list yours with `ls /dev/nvidia*`):
+5. **Register the task and its experiment setup.**
+   `add-task` finds this machine's NVIDIA GPUs (`/dev/nvidia<N>`) and passes
+   them to runs; add `--no-gpu` for a CPU-only task:
 
    ```bash
    .venv/bin/python -m tools.candidate_console add-task \
      --config /absolute/project/siderius_workspace/settings/console.json \
-     --from-bundle /absolute/downloads/siderius-example-quickstart-<version> \
-     --device /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm
+     --from-bundle /absolute/downloads/siderius-example-quickstart-<version>
    ```
 
    Success: the output names the copied package
-   (`siderius_workspace/tasks/quickstart`), prints the task entry it added,
+   (`siderius_workspace/tasks/quickstart`), prints `candidate_devices: /dev/nvidia0
+   (NVIDIA GPU found on this machine; ...)` and the task entry it added,
    reports `Created experiment setup 'quickstart-research-loop'` and ends with
    `Restart the console to load the new task.` The
    [bundle README](../../examples/console_bundle/README.md#run-the-example)
-   explains each refusal and the GPU warning you may see.
+   explains each refusal.
 
 6. **Start the console** in a terminal that stays open (on a remote server, a
    `tmux` or `screen` session):
@@ -172,8 +173,7 @@ you own; the console workspace is created inside it) and
    ```bash
    .venv/bin/python -m tools.candidate_console add-task \
      --config /absolute/project/siderius_workspace/settings/console.json \
-     --manifest /absolute/project/siderius_workspace/tasks/wine/task.yaml \
-     --device /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm
+     --manifest /absolute/project/siderius_workspace/tasks/wine/task.yaml
    ```
 
    Success: it prints the entry it added and ends with

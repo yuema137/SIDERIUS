@@ -98,10 +98,11 @@ SIDERIUS checkout's root folder.
    .venv/bin/python -m tools.candidate_console add-task \
      --config /absolute/project/siderius_workspace/settings/console.json \
      --manifest /absolute/project/siderius_workspace/tasks/iris/task.yaml \
-     --label "Iris species" \
-     --device /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm
+     --label "Iris species"
    ```
 
+   `add-task` passes this machine's NVIDIA GPUs (`/dev/nvidia<N>`) to runs and
+   prints them as `candidate_devices: ...`; add `--no-gpu` for a CPU-only task.
    Success: it prints the entry it added and ends with
    `Restart the console to load the new task.` `add-task` checks the console
    entry and folders; it does not read your CSV files. The next step does.
