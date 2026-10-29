@@ -168,6 +168,8 @@ even when using the default models.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
    resumed as a new segment of the same run, which shows its own results.
    A loop ended early by a declared stop condition says why, in plain words.
+   A loop with a judge stop condition lists each judge decision under it, with
+   the judge's own reason when the call decided.
    To stop a running candidate now, press **Stop run** and confirm. The run
    ends within about 1.5 seconds (half a second to notice, then up to one second
    before it is force-killed), including a model call in progress. It cannot be
@@ -208,6 +210,9 @@ even when using the default models.
    **View** shows what changed, and **Restore this version as a draft** loads an older
    version as unsaved changes that you save like any other edit.
    The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
+   A **Judge** stop condition takes what the judge should look for, the first body it
+   judges after, and what a failed judge call does; the judge model and its call limit
+   come from the console operator's model settings.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
    Until the canvas has a module, it says what to do next and offers **Start from a
    template**; the 4-step tour is a link below it and under **Help**.
@@ -405,7 +410,7 @@ See the [reusable configuration contract](console-contract.md#reusable-capture-c
    is offline and does not need provider keys. **Check status** or **Monitor
    preparation** shows its outcome. Saving and preparation never launch a candidate.
 4. Once preparation reports **prepared**, select **Open prepared run**, then
-   **Review capture**. Check model routes and credential readiness. Existing runs
+   **Review capture**. Leave **Seed** (under **Optional settings**) blank; SIDERIUS picks one and records it. Check model routes and credential readiness. Existing runs
    made through Python or CLI can instead be selected from **Prepared run**.
 5. Select **Launch captured run** explicitly. This runs Propose → Implement →
    Validate and, when declared, native Tune with the captured inputs. It may call

@@ -68,6 +68,28 @@ try {
   await page.locator('#capture-task').selectOption('synthetic');
   await open(metadata.captures[0]);
   assert.match(await page.locator('#capture-summary').textContent(), /hypothesis → build → check/);
+  // Issue #983 S6: the optional Seed lives in step 2's Optional settings, reaches the
+  // review line, and a value outside RunSeed's [0, 2**53 - 1] is refused before any
+  // review request (the server's Pydantic RunSeed refuses it again; unit-tested).
+  assert.equal(await page.locator('#capture-optional #capture-seed').count(), 1, 'Seed belongs to Optional settings');
+  assert.match(await page.locator('#capture-summary').textContent(), /Seed: generated at launch/);
+  await page.locator('#capture-optional').evaluate(el => { el.open = true; });
+  await page.locator('#capture-seed').fill('4503599627370497');
+  await page.locator('#capture-review').click();
+  await page.locator('#capture-summary').filter({hasText: 'Seed: 4503599627370497 (you set)'}).waitFor();
+  const seedRefusal = await page.evaluate(() => window.consoleSeed.message);
+  assert.match(seedRefusal, /0 to 9007199254740991/);
+  for (const invalid of ['-1', '9007199254740992']) {
+    const before = requests.length;
+    await page.locator('#capture-seed').fill(invalid);
+    await page.locator('#capture-review').click();
+    await page.locator('#capture-status').filter({hasText: seedRefusal}).waitFor();
+    assert.equal(requests.length, before, `invalid seed ${invalid} must not reach review`);
+  }
+  await page.locator('#capture-seed').fill('');
+  await page.locator('#capture-review').click();
+  await page.locator('#capture-summary').filter({hasText: 'Seed: generated at launch'}).waitFor();
+  await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
   assert.match(await page.locator('#capture-details').textContent(), /Prefer a small interpretable baseline/);
   // A late review for another selection cannot restore its launch affordance.
   let releaseReview, reviewWaiting = false;

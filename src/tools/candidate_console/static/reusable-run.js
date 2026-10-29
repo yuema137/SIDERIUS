@@ -21,6 +21,7 @@
   function stopCondition(condition) {
     if (condition.kind === 'metric_threshold') return `${condition.metric_id} reaches ${condition.threshold} (task metric direction)`;
     if (condition.kind === 'no_improvement') return `${condition.completed_bodies} completed bod${condition.completed_bodies === 1 ? 'y' : 'ies'} pass without improvement`;
+    if (condition.kind === 'judge') return `a language-model judge decides to stop ("${condition.criterion}"), first after ${condition.min_completed_bodies} completed bod${condition.min_completed_bodies === 1 ? 'y' : 'ies'}; a failed judge call ${condition.on_failure === 'continue' ? 'is recorded as an abstention' : 'ends the loop as failed'}`;
     return `unsupported condition ${condition.kind}`;
   }
   let editor = window.workflowEditor.state, generation = 0, selected = null, review = null;
@@ -244,6 +245,8 @@
   window.addEventListener('console-reachability', () => controls());
   $('task').addEventListener('change', () => { invalidate(); $('run').replaceChildren(option('', 'Choose a prepared run')); void list(); });
   $('run').addEventListener('change', invalidate);
+  // A changed seed changes the request digest: the capture stays selected, the review is redone.
+  $('seed').addEventListener('input', () => { generation++; review = null; $('summary').replaceChildren(); $('details').textContent = ''; controls(); });
   $('refresh').addEventListener('click', () => { generation++; void list(); });
   $('more').addEventListener('click', () => { generation++; void list(true); });
   $('open').addEventListener('click', async () => {
@@ -255,12 +258,16 @@
   });
   $('review').addEventListener('click', async () => {
     if (!session.connected || !selected) return;
+    const seed = window.consoleSeed.parse($('seed').value);
+    if (!seed.ok) { status(window.consoleSeed.message); return; }
     const scheduling = window.runScheduling.read();
     if (scheduling.error) { window.runScheduling.show(scheduling.error); status('Review not sent: ' + scheduling.error); return; }
     const version = ++generation, revision = session.revision; review = null; $('summary').replaceChildren(); $('details').textContent = ''; controls();
+    const {run_seed: _previous, ...capture} = selected;
     try {
-      // Host resources and parallel nodes are part of what is reviewed (bound into its digest).
-      const value = await api('/review', {...selected, ...scheduling.value}); if (!current(version, revision)) return; review = value;
+      // The seed, host resources and parallel nodes are all part of what is reviewed.
+      const reviewed = {...(seed.value === undefined ? capture : {...capture, run_seed: seed.value}), ...scheduling.value};
+      const value = await api('/review', reviewed); if (!current(version, revision)) return; review = value;
       const profile = profileDescriptions[value.execution_profile]
         || (value.execution_profile ? ' Proposal fanout executed serially.' : '');
       const nodes = value.nodes.map(item => item[0]).join(value.execution_profile ? ', ' : ' → ');
@@ -271,6 +278,7 @@
       if (value.literature_settings && Object.keys(value.literature_settings).length) {
         $('details').textContent += '\nCaptured literature settings (omitted fields use native defaults):\n' + JSON.stringify(value.literature_settings, null, 2);
       }
+      const seedLine = document.createElement('p'); seedLine.textContent = value.seed; $('summary').append(seedLine);
       const workspace = document.createElement('p'); workspace.textContent = 'Output workspace: ' + value.workspace; $('summary').append(workspace);
       const loop = document.createElement('p'); loop.id = 'capture-loop'; loop.textContent = researchLoop(value); $('summary').append(loop);
       const hostSummary = document.createElement('p'); hostSummary.id = 'capture-scheduling-review'; hostSummary.textContent = 'Host resources: ' + window.runScheduling.describe(value.selection); $('summary').append(hostSummary);

@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import Field, JsonValue
 
 from agent.schemas.output_types import OutputTypeName
+from core.seeding import RunSeed
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare import ReusablePreparedSelection
 from tools.workflow_preview.models import PreviewModel
@@ -23,6 +24,10 @@ class ReusableCaptureSelection(ReusableCaptureChoice, RunResourcesSelection):
     """The reviewed capture plus the operator's scheduling inputs (B3-4c)."""
 
     preparation: ReusablePreparedSelection
+    #: Optional operator seed for the candidate run (issue #983); omitted means
+    #: the operation generates and records one at admission. The reviewed
+    #: request digest binds it.
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ReusableCaptureLaunch(PreviewModel):
@@ -88,6 +93,8 @@ class ReusableCaptureReview(PreviewModel):
     # Display-only Save name of source_sha256 in the project's version record (B8-3); the
     # SHA-256 stays the bound identity. Absent when the bytes were never saved here.
     source_version_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: ``seed_labels.review_label`` wording of the selection's seed.
+    seed: str
 
 
 class ReusableAdmissionNotAttempted(OperationFailure):

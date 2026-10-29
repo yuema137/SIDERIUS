@@ -471,7 +471,7 @@ Authentication precedes body receive/JSON decoding/business validation. Authoriz
 JSON mutation bodies are buffered to at most 256 KiB using actual received bytes,
 not Content-Length. Non-JSON returns415; oversized returns413. Only `/` and the exact static allowlist in `app.py` are unauthenticated; no
 filesystem directory mount
-or interactive API documentation exists. Other errors use
+or interactive API documentation exists. GET/HEAD non-API requests accepting `text/html` with one rejected Host and no forwarding headers receive a secured plain-text 403 directing the browser to `http://{bind_host}:{port}/`; other errors use
 `{"error":{"code":"...","message":"..."}}`: auth401, Host/Origin403,
 missing operation/resource404, invalid fields422, busy/conflict/stale/integrity/
 policy/credential errors409, unexpected500. Validation responses do not echo
@@ -643,8 +643,16 @@ exists; counts are cumulative over the run). `stop_reason` is the receipt's
 verified `loop_trace.stop_reason`, present only when a declared stop condition
 completed the loop early; Monitor renders it in plain words ("Research loop
 stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
-higher is better; best at body 3)", or "… no improvement for 2 bodies …") from
-the existing status poll, with recorded values unrounded. The receipt's body
+higher is better; best at body 3)", "… no improvement for 2 bodies …", or "… the judge
+decided to stop") from the existing status poll, with recorded values unrounded.
+`judge_verdicts` (B2-5, read-only; omitted when empty) lists the receipt's verified
+`loop_trace.judge_verdicts` in boundary order as `JudgeVerdictView{iteration, decision,
+rationale, confidence}`: `decision` is `stop`/`continue`, or `null` for a recorded
+abstention; `rationale`/`confidence` are copied from that verdict's judge evidence file,
+read by `agent.judge.evidence.read_call_evidence` (digest-checked, inside the run
+workspace) and left `null` for an abstention or an unreadable/foreign file, which never
+fails the status read. Monitor lists them under the loop state (`#loop-judge`) as
+"Judge after body N: stop · <rationale> (confidence …)". The receipt's body
 numbers (`attempted_iterations`, `stop_reason.iteration` and its incumbent
 iterations) are whole-run indices, so a resumed segment's line says "Body numbers
 count the whole run, including earlier segments." The console never
@@ -1011,8 +1019,19 @@ from `editorCapabilityPresentation.label`, read-only endpoints). Remove deletes 
 loop. Loop-only edits review as `LoopProposal` on the draft's anchor source; with
 other draft edits pending, the document or draft proposal carries them. A third
 fieldset, Stop conditions, adds/removes at most one `metric_threshold` (metric id
-text plus threshold; the editor does not know the task metric) and one
-`no_improvement` (completed bodies); `judge` is never offered. All stop-condition
+text plus threshold; the editor does not know the task metric), one
+`no_improvement` (completed bodies) and one `judge` (B2-5: `criterion` text,
+`min_completed_bodies`, `on_failure` fail/continue; exactly `JudgeStop`'s declared
+fields). The judge route and `max_judge_calls` are operator-owned
+(`WorkflowLLMConfig.judge`) and are not authored here; the row says so. The capture
+review summary states a judge as "a language-model judge decides to stop ("…"), first
+after N completed bodies; a failed judge call …". The capture launch review refuses a judge the captured
+model settings cannot run, before any launch (409 `judge_route`, the owner's own
+message forwarded): `reusable_candidate.admit_captured_judge_route` calls the worker's
+`candidate_worker.loop_judge.admit_judge_route` with the reviewed loop and the request's
+captured `llm_config` file (digest-checked; default settings when none, as the worker
+loads them), so a missing `judge.stop` route, a missing `max_judge_calls`, or a static
+call bound above it is named at review, not at worker start. All stop-condition
 UI logic lives in `editor-loop-controls.js`, mutating the draft loop through one
 `edit` action from `editor.js`. Empty, padded, non-finite or non-integer values
 stay local in the loop draft state (`loopDrafts`, separate from training drafts)
@@ -1995,11 +2014,12 @@ training, API access or GPU execution.
 
 The same saved-source New run / retained-capture controllers accept reusable
 four-stage declarations. Settings are edited in the tuning inspector or source,
-then reviewed and saved; neither NewRunSelection nor launch payloads add overrides.
+then reviewed and saved; neither NewRunSelection nor launch payloads add setting
+overrides (their only addition is the optional `run_seed`, [Run seed](#run-seed-issue-983)).
 The source hash binds sparse authored presence. Preparation resolves settings and
 seed through native owners; launch invokes the existing native tuner. Old three-stage
-source is never automatically upgraded. The inspector labels epoch ceilings and
-separate sampling/training seeds, exposes omission/null/value, preserves advanced
+source is never automatically upgraded. The inspector labels epoch ceilings
+and has no seed control (per-purpose seed pins are retired), exposes omission/null/value, preserves advanced
 rules and disables numeric/checkbox/default/null controls while source is dirty.
 Invalid numeric drafts survive node navigation and block Review/Save until repaired
 or explicitly replaced by default/null. Read-only rule summaries disclose task
@@ -2010,6 +2030,40 @@ Offline browser and code witnesses exercise detached operations, native admissio
 protocol/staging and terminal output verification with provider, measurement and
 tuner effects substituted. They establish transport and artifact integrity, not
 real scientific training, historical replay, API access or GPU qualification.
+
+## Run seed (issue #983)
+
+The console shows and accepts only the 53-bit `run_seed`
+([seeding](../../../docs/agent-reference/mechanisms/seeding.md)); derived 63-bit
+seeds stay in record files. `seed_labels.py` owns every seed sentence.
+
+- **Input.** Step 2 of the Run lane (Prepared run, `reusable-run.js`) has an
+  optional **Seed** field under **Optional settings** (`#capture-optional`);
+  `seed-input.js` accepts blank or a whole number in `[0, 2**53 - 1]` before
+  sending, and Pydantic (`RunSeed`) validates again. It is sent as
+  `ReusableCaptureSelection.run_seed`, and review/launch build the candidate
+  with `build_reusable_operation(..., run_seed)`, so the reviewed
+  `request_digest` binds the seed and a changed seed requires a new review.
+  Step 1 (Prepare) has no Seed field: a preparation generates and records its
+  own seed. The API still accepts `NewRunSelection.run_seed` (it becomes
+  `ReusableCandidatePreparationRequest.run_seed`; a retained intent whose seed
+  differs from the admitted request is refused like any other changed run
+  metadata). Blank omits the key: selection bytes and request digests are the
+  pre-seed ones.
+  Configured native chains take the seed only from the capture declaration
+  (`run.run_seed`); the browser cannot add one.
+- **Review.** `NewRunReview.seed`, `ReusableCaptureReview.seed` and
+  `NativeChainReviewView.seed` carry `review_label`: `Seed: N (you set)` or
+  `Seed: generated at launch`.
+- **Readback.** `StatusView.run_seed` is the operation record's
+  `RunSeedBinding` (omitted when absent); `StatusView.seed` and
+  `OperationListItemView.seed` carry `readback_label`: `Seed: N (you set)`,
+  `Seed: N (generated)` or `Seed: unrecorded (pre-seed run)`. Native chains use
+  the lock readback checked against the declaration
+  (`NativeChainObservation.run_seed`): before the lock exists the line says it is
+  not recorded yet, and `run_seed_anomaly` shows `Seed: not shown (the run lock
+  contradicts the reviewed declaration)`, never the value. Status shows the line
+  in its facts list; the operation list appends it to each row.
 
 ## Configured native chains
 

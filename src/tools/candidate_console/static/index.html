@@ -59,6 +59,7 @@
   <script src="/run-steps.js" defer></script>
   <script src="/run-scheduling.js" defer></script>
   <script src="/reusable-run.js" defer></script>
+  <script src="/seed-input.js" defer></script>
   <script src="/new-run.js" defer></script>
   <script src="/browser-data.js" defer></script>
   <script src="/native-chain.js" defer></script>
@@ -272,6 +273,10 @@
     <p id="capture-source"></p>
     <button id="capture-prepare-current" type="button" class="secondary" hidden>Prepare the current version instead</button>
     <div id="capture-summary"></div>
+    <details class="run-optional" id="capture-optional"><summary>Optional settings</summary>
+      <label for="capture-seed">Seed</label><input id="capture-seed" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-describedby="capture-seed-help">
+      <p id="capture-seed-help" class="muted">Leave Seed blank; SIDERIUS picks one and records it.</p>
+    </details>
     <p id="capture-credentials" class="run-credentials" hidden></p>
     <p id="scheduling-unavailable" class="muted">Parallel nodes and host resources need a host ledger that the operator configures for this console. Without one, runs use one node at a time.</p>
     <details id="scheduling" class="run-scheduling" hidden>
@@ -325,7 +330,7 @@
     <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="monitor-cause" class="monitor-cause" hidden></p><p id="operation-observed" class="muted"></p><details data-ui-flag="developer"><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
     <div id="operation-stop-group" class="actions" hidden><button id="operation-stop-button" type="button">Stop run</button><p class="muted">Ends the run now, including any model call in progress. It cannot be resumed and produces no candidate result; files written so far stay in the run folder.</p></div>
     <p id="operation-stop-status" role="status"></p>
-    <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p>
+    <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p><ul id="loop-judge" class="loop-judge" aria-label="Judge verdicts" hidden></ul>
       <div id="loop-stop-group" class="actions" hidden><button id="loop-stop" type="button">Stop at next boundary</button><p class="muted">The current body completes; no partial body is kept as a result.</p></div>
       <div id="loop-pause-group" class="actions" hidden><button id="loop-pause" type="button">Pause at next boundary</button><p class="muted">The current body completes; this run can then be reviewed and resumed from the next body.</p></div>
       <p id="loop-stop-status" role="status"></p>

@@ -8,14 +8,20 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from tests.unit.tools.candidate_prepare.test_reusable_preparation import direct_child, reusable
 from tests.unit.tools.candidate_prepare.test_reusable_selection import published
 from tools.candidate_console.reusable_candidate import ReusableCandidate
-from tools.candidate_console.reusable_models import ReusableCaptureChoice, ReusableCaptureLaunch
+from tools.candidate_console.reusable_models import (
+    ReusableCaptureChoice,
+    ReusableCaptureLaunch,
+    ReusableCaptureSelection,
+)
 from tools.candidate_console.service import CandidateConsole, preparation_request
 from tools.candidate_operations import build_reusable_operation, operation_request_digest
 from tools.candidate_operations.models import OperationFailure
+from tools.candidate_operations.store import load_record
 from tools.workflow_authoring.models import Project
 
 
@@ -353,10 +359,28 @@ def test_launch_review_refuses_a_request_loop_absent_from_the_capture(captured, 
         adapter.review(project.project_id, selected)
 
 
-@pytest.fixture
-def looped_capture(reusable, direct_child, console_config, monkeypatch):
+# B2-5: a JudgeStop authored in the editor reaches the launch review as declared.
+JUDGE = {
+    "kind": "judge",
+    "criterion": "Stop once a body adds no new insight.",
+    "min_completed_bodies": 2,
+    "on_failure": "continue",
+}
+
+
+# The operator's judge route (WorkflowLLMConfig.judge); the declaration never names it.
+JUDGE_ROUTE = {
+    "provider": "openai",
+    "model_id": "judge-fixture",
+    "max_output_tokens": 800,
+    "max_retries": 2,
+}
+
+
+def _looped_capture(reusable, console_config, monkeypatch, llm: dict):
     """A real five-node interpretation source with an authored loop and stop conditions,
-    captured through the same preparation child as every reusable capture."""
+    captured with ``llm`` as its model settings through the ordinary preparation child."""
+    Path(reusable.llm_config_file).write_text(json.dumps(llm))
     from tests.browser.workflow_editor_server import interpretation_profile_source
     from tools.candidate_prepare import prepare_reusable_candidate, select_reusable_preparation
     from workflows.definition import parse_workflow_source, render_workflow_source
@@ -370,6 +394,7 @@ def looped_capture(reusable, direct_child, console_config, monkeypatch):
     raw["definition"]["loop"]["stop_conditions"] = [
         {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85},
         {"kind": "no_improvement", "completed_bodies": 2},
+        JUDGE,
     ]
     source = Path(reusable.source_path)
     source.write_text(render_workflow_source(type(document).model_validate_json(json.dumps(raw))))
@@ -381,6 +406,40 @@ def looped_capture(reusable, direct_child, console_config, monkeypatch):
     envelope = Path(receipt.envelope)
     published = (request, envelope, select_reusable_preparation(receipt.envelope))
     return _captured(published, console_config, monkeypatch)
+
+
+@pytest.fixture
+def looped_capture(reusable, direct_child, console_config, monkeypatch):
+    # final_iteration 4, judged from body 2: a static bound of 2 judge calls fits a cap of 3.
+    llm = {"judge": {"stop": JUDGE_ROUTE, "max_judge_calls": 3}}
+    return _looped_capture(reusable, console_config, monkeypatch, llm)
+
+
+@pytest.mark.parametrize(
+    ("judge", "message"),
+    [
+        (None, "requires a WorkflowLLMConfig.judge.stop route"),
+        (
+            {"stop": JUDGE_ROUTE, "max_judge_calls": 1},
+            "may make 2 judge calls; max_judge_calls is 1",
+        ),
+    ],
+    ids=["missing-route", "cap-below-bound"],
+)
+def test_launch_review_refuses_a_judge_the_captured_settings_cannot_run(
+    reusable, direct_child, console_config, monkeypatch, judge, message
+):
+    """B2-5: Fails if a JudgeStop the captured model settings cannot run (no judge route,
+    or a static call bound above max_judge_calls) passes review and is only refused by
+    the worker after launch. The refusal is the worker owner's, typed ``judge_route``."""
+    adapter, project, choice, _ = _looped_capture(
+        reusable, console_config, monkeypatch, {} if judge is None else {"judge": judge}
+    )
+    selected = adapter.select(project.project_id, choice)
+    with pytest.raises(OperationFailure) as refused:
+        adapter.review(project.project_id, selected)
+    assert refused.value.detail.code == "judge_route"
+    assert message in refused.value.detail.message
 
 
 def test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops(looped_capture):
@@ -400,6 +459,7 @@ def test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops(loope
         "stop_conditions": [
             {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85},
             {"kind": "no_improvement", "completed_bodies": 2},
+            JUDGE,
         ],
     }
 
@@ -450,3 +510,30 @@ def _share_host_ledger(console, tmp_path):
     root = tmp_path / "host-ledger"
     root.mkdir(mode=0o700)
     console.host = HostScheduling(ledger_root=str(root), budget=_budget())
+
+
+#: Issue #983 S6. Above 2**52, so a float round-trip would corrupt it.
+SEED = 4_503_599_627_370_497
+
+
+def test_capture_seed_is_bound_by_the_reviewed_digest_and_admitted(captured):
+    """Fails if the candidate seed is not part of the reviewed request digest
+    (a launch could then run a seed the operator never reviewed) or is not the
+    seed the admitted operation records."""
+    adapter, project, choice, _ = captured
+    chosen = adapter.select(project.project_id, choice)
+    assert "run_seed" not in chosen.model_dump_json()
+    blank = adapter.review(project.project_id, chosen)
+    seeded = adapter.review(project.project_id, chosen.model_copy(update={"run_seed": SEED}))
+    native = build_reusable_operation(
+        adapter.console.config.operation_store, chosen.preparation, uuid4(), SEED
+    )
+    assert seeded.request_digest == operation_request_digest(native) != blank.request_digest
+    assert (blank.seed, seeded.seed) == ("Seed: generated at launch", f"Seed: {SEED} (you set)")
+    handle = adapter.launch(project.project_id, launch_payload(seeded))
+    record = load_record(adapter.console.config.operation_store, handle.operation_id)
+    assert (record.run_seed.value, record.run_seed.source) == (SEED, "operator")
+    with pytest.raises(ValidationError):
+        ReusableCaptureSelection.model_validate(
+            {**chosen.model_dump(mode="json"), "run_seed": 2**53}
+        )
