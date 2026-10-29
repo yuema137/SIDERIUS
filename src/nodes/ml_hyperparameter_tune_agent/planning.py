@@ -865,7 +865,7 @@ def prepare_attempt(
         task_parameters={"seg_size": declared_segmentation_size},
     )
 
-    plan = resolve_training_batch_plan(
+    plan, resolved_training_rows = resolve_training_batch_plan(
         plan,
         bindings=bindings,
         trial_config=trial_config,
@@ -975,6 +975,7 @@ def prepare_attempt(
         train_sample_set=train_sample_set,
         eval_sample_set=eval_sample_set,
         task_scopes=task_scopes,
+        resolved_training_rows=resolved_training_rows,
         train_psd_segments=train_psd_segments,
         eval_psd_segments=eval_psd_segments,
         ordering=ordering,

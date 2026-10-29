@@ -1,7 +1,11 @@
 """Issue 1205: one resolved batch must reach probes, training and provenance."""
 
 import sys
+import time
 from dataclasses import replace
+from importlib import import_module
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -13,7 +17,12 @@ from core.training_seeds import TrainingSeedPlan
 from execute_tools.task_data_path import bind_task_data_path
 from execute_tools.task_probe_batch import _first_training_batch
 from execute_tools.train_engine_sandbox import refuse_zero_optimizer_steps
-from nodes.ml_hyperparameter_tune_agent.contracts import AttemptIdentity, AttemptOrdering
+from nodes.ml_hyperparameter_tune_agent.contracts import (
+    AttemptIdentity,
+    AttemptOrdering,
+    AttemptStage,
+    RunBindings,
+)
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
 from nodes.ml_hyperparameter_tune_agent.training_batch_plan import TrainingBatchPlanError
 from tests.unit.nodes.ml_hyperparameter_tune_agent.test_c12p_b11_composed_seg_size_authoring import (
@@ -29,8 +38,11 @@ class _Rows(_ScopeRecorder):
         super().__init__()
         self.rows = rows
         self.sampling = None
+        self.constructions = 0
+        self.bindings: RunBindings | None = None
 
     def training_dataset(self, scope, params):
+        self.constructions += 1
         assert scope == {"leg": "training"}
         self.sampling = params
         count = min(self.rows, params.max_samples or self.rows)
@@ -83,6 +95,7 @@ def _prepare(
         brain=_Plan(drop_last, authored_batch),
         max_rounds=2 if trial else 1,
     )
+    source.bindings = bindings
     with bind_task_data_path(source):
         prepared = prepare_attempt(
             bindings,
@@ -174,7 +187,7 @@ def test_scope_fit_reaches_real_probe_training_and_identity(tmp_path, capsys, mo
         baseline.setattr(
             sys.modules[prepare_attempt.__module__],
             "resolve_training_batch_plan",
-            lambda plan, **kwargs: plan,
+            lambda plan, **kwargs: (plan, None),
         )
         fitting, _ = _prepare(tmp_path, 2_010_000_000)
     assert large.plan.model_dump_json() == fitting.plan.model_dump_json()
@@ -231,3 +244,78 @@ def test_sampling_ceiling_and_tail_policy_keep_constraints(tmp_path):
     ) == (64, 12, 12)
     assert restored.execution_provenance.model_dump()["training_batch_fit"]["role"] == "formal"
     assert restored.record_params["training_batch_fit"] == receipt.model_dump()
+    trial, _ = _prepare(tmp_path, 12, trial=True)
+    inherited_trial, _ = _prepare(
+        tmp_path,
+        100,
+        winner={
+            "exp_id": "clamped_trial",
+            "denoising_score": 1.0,
+            "params": {
+                **trial.record_params,
+                "train_config": {**trial.plan.train_cfg, "lr": 0.001},
+            },
+        },
+    )
+    assert inherited_trial.plan.train_cfg["batch_size"] == 12
+    assert inherited_trial.execution_provenance.training_batch_fit is None
+
+
+@pytest.mark.parametrize("rows", [12, 2_010_000_000])
+def test_preflight_reuses_count_and_both_probe_routes_use_owner_sampling(
+    tmp_path, monkeypatch, rows
+):
+    """Dropping the cached-row handoff constructs twice; wrong sampling changes the spec."""
+    prepared, source = _prepare(tmp_path, rows)
+    bindings = source.bindings
+    assert bindings is not None
+    assert prepared.resolved_training_rows == rows
+    counted_sampling = source.sampling
+    assert source.constructions == 1
+    execution = import_module("nodes.ml_hyperparameter_tune_agent.execution")
+    gpu = import_module("nodes.ml_hyperparameter_tune_agent.gpu_execution")
+    probe = import_module("nodes.ml_hyperparameter_tune_agent.probe_data")
+    monkeypatch.setattr(probe, "active_task_manifest_path", lambda: str(tmp_path / "task.yaml"))
+    monkeypatch.setattr(
+        probe,
+        "resolve_task_scope_capability",
+        lambda _: SimpleNamespace(serialize_scope=lambda scope: str(scope)),
+    )
+    reference = bindings.agent_input.task_composition_ref
+    bindings.agent_input.task_composition_ref = reference.model_copy(
+        update={"segmentation_applicability": "temporal"}
+    )
+    bindings.sandbox.plugin_dir = None
+    bindings.sandbox.loss_dir = None
+    bindings.sandbox.device_identity = SimpleNamespace(uuid="GPU-test")
+
+    class ProbeReached(Exception):
+        pass
+
+    captured = []
+
+    def capture(**kwargs):
+        captured.append(kwargs["task_probe_data"])
+        raise ProbeReached
+
+    monkeypatch.setattr(execution, "run_production_preflight", capture)
+    with bind_task_data_path(source), pytest.raises(ProbeReached):
+        execution.run_admission_preflight(
+            bindings,
+            prepared,
+            AttemptIdentity(round_index=1, attempt_in_round=1, is_formal_round=True),
+            AttemptStage("guardrails"),
+            formal_trial_winner=None,
+            physical_rejections_buffer=[],
+        )
+    assert source.constructions == 1
+    assert captured[0].sampling == counted_sampling
+
+    # Stop at construction of the real GPU request, before any worker launch.
+    monkeypatch.setattr(gpu, "GpuMeasurementSpec", capture)
+    state = Mock()
+    state.policy.worker_rss_limit_bytes = 1024**3
+    with bind_task_data_path(source), pytest.raises(ProbeReached):
+        gpu._spec(bindings, prepared, "training", state, time.monotonic() + 60, tmp_path)
+    assert captured[1].sampling == counted_sampling
+    assert source.constructions == 1

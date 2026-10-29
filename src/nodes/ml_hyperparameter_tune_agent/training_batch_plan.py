@@ -1,14 +1,14 @@
 """Resolve one executable batch size before measurement and execution diverge."""
 
-from collections.abc import Sized
-
 from agent.schemas.execution_provenance import ExecutionProvenance, TrainingBatchFit
 from agent.schemas.hyperparam_tuning import ExperimentPlan, TrialConfig
 from agent.schemas.parameter_rules import apply_parameter_rules
-from core.training_seeds import TrainingSeedPlan
-from execute_tools.task_data_path import EpochSamplingParams, TrainingScopeError
+from execute_tools.task_data_path import TrainingScopeError
+from execute_tools.training_batches import optimizer_steps_for_rows
+from execute_tools.workload_resolvers import resolve_task_training_rows
 from ml_models.models_format_sandbox import TrainConfig
 from nodes.ml_hyperparameter_tune_agent.contracts import RunBindings
+from nodes.ml_hyperparameter_tune_agent.probe_data import epoch_zero_training_sampling
 from nodes.ml_hyperparameter_tune_agent.provenance import ResolutionTracker
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import AttemptScopes
 
@@ -47,38 +47,35 @@ def resolve_training_batch_plan(
     scopes: AttemptScopes,
     resolution: ResolutionTracker,
     model_type: str,
-) -> ExperimentPlan:
+) -> tuple[ExperimentPlan, int | None]:
     """Keep fitting plans byte-identical; adjust only an empty full-batch epoch.
 
     Count the task's materialized first-epoch dataset with the same seed,
-    portion and row ceiling that training/measurement consume. No sample is
-    read by this owner. Dataset construction costs remain task-owned, as in
-    the existing task workload resolver. Legacy uncomposed scopes are unchanged.
+    portion and row ceiling that training/measurement consume. Construction may
+    eagerly read samples (including TIDMAD HDF5 data). Return the row count for
+    guardrail reuse; do not retain the dataset. Legacy uncomposed scopes are unchanged.
     """
     if scopes.training is None:
-        return plan
+        return plan, None
     inputs = bindings.agent_input
     config = TrainConfig.model_validate(plan.train_cfg)
     if not bindings.time_data_dir:
         raise TrainingBatchPlanError("Training batch planning requires the resolved data root")
-    dataset = bindings.run_task_data_path.training_dataset(
+    rows = resolve_task_training_rows(
         scopes.training,
-        EpochSamplingParams(
+        epoch_zero_training_sampling(
+            trial_config,
             data_dir=bindings.time_data_dir,
-            epoch_seed=TrainingSeedPlan(trial_config.seed_context).epoch(0).subsample,
-            train_portion=trial_config.train_portion,
             max_samples=inputs.validation_max_train_samples,
         ),
+        data_path=bindings.run_task_data_path,
     )
-    if not isinstance(dataset, Sized):
-        raise TrainingBatchPlanError("Training batch planning requires a sized training dataset")
-    rows = len(dataset)
     if rows == 0:
         raise TrainingBatchPlanError(
             f"{trial_config.mode} training scope contains no training samples"
         )
-    if not config.drop_last or rows >= config.batch_size:
-        return plan
+    if optimizer_steps_for_rows(rows, config.batch_size, drop_last=config.drop_last) > 0:
+        return plan, rows
     lock = _batch_lock(bindings)
     if lock is not None:
         raise TrainingBatchPlanError(
@@ -109,4 +106,4 @@ def resolve_training_batch_plan(
         f"[training_batch] {trial_config.mode} batch_size clamped from "
         f"{config.batch_size} to {rows}: the training scope has {rows} samples"
     )
-    return adjusted
+    return adjusted, rows

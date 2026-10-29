@@ -1702,16 +1702,27 @@ is the sole authority for loss semantics.
 `training_batch_plan.resolve_training_batch_plan` runs once in `prepare_attempt`
 after role-specific task scope acquisition and parameter-rule enforcement, before
 resource probing and construction of execution/record parameters. For a composed
-training scope it asks `RunBindings.run_task_data_path.training_dataset` for the
-dataset length using the resolved data root, first-epoch subsample seed,
-`TrialConfig.train_portion`, and `validation_max_train_samples`. It does not read
-individual samples or reapply task-owned subsampling. Dataset construction may
-perform task-owned I/O, as in the task workload resolver.
+training scope it calls `workload_resolvers.resolve_task_training_rows`, the
+single dataset row-count owner. `probe_data.epoch_zero_training_sampling` builds
+the shared `EpochSamplingParams` from the resolved data root, first-epoch
+subsample seed, `TrialConfig.train_portion`, and `validation_max_train_samples`.
+Both structural preflight and GPU measurement use that same sampling helper.
+Dataset construction may eagerly read samples, including TIDMAD HDF5 data;
+counting is not a metadata-only operation. The parent constructs this dataset
+once during planning, retains only its count as
+`PreparedAttempt.resolved_training_rows`, and releases the dataset. Admission
+guardrails pass that count to `resolve_task_scope_training_workload` without
+constructing a second dataset. The count is attempt-local and already reflects
+task-owned portion/ceiling selection; it is never reused across attempts or
+subsampled again. Legacy standalone workload callers without a resolved count
+still construct through the same owner with their existing row-count seed.
 
 With `drop_last=True`, a nonempty scope smaller than the planned batch resolves
 an unlocked `train_config.batch_size` to its materialized row count: 12 rows and
 batch 32 become batch 12 for both probing and formal/trial execution. This is
 the largest batch that produces at least one full optimizer step. The same
+`optimizer_steps_for_rows` authority used by workload resolution determines
+whether the original batch produces zero steps. The same
 resolved config enters `PreparedAttempt.plan`, `active_params`, `record_params`,
 and downstream measurement identities. No reduced-batch measurement or memory
 extrapolation is introduced; existing admission and zero-step guards remain.
@@ -1739,10 +1750,19 @@ their plan bytes unchanged and add no clamp event or log line. This resolution
 checks first-epoch geometry; the trainer still owns actual per-epoch zero-step
 refusal if a task later changes its materialized cardinality.
 
+A successful trial's persisted `params.train_config.batch_size` is its clamped
+value. Under `formal_round_strategy="full_clone"`, the existing winner
+inheritance copies that value into the formal plan. The formal role then checks
+its own scope: it retains the inherited batch if it fits, or applies this same
+lock-preserving resolution if it does not. No original oversized proposal is
+restored by inheritance.
+
 Regression evidence lives in `test_training_batch_plan.py`: real planning,
 full probe loading and a CPU optimizer step; task/workflow/operator locks;
 empty scope; sampling ceiling; tail policy; non-exact constraints; and
 byte-identical large-scope plans/measurement identities against the pre-fit path.
+The planning-to-admission regression counts dataset constructions and checks
+both probe routes' sampling against the request observed by the row-count owner.
 
 ## The reflector is told what RESOLVED, not what was proposed (Lane D / F15)
 
