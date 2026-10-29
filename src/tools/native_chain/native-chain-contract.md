@@ -12,7 +12,7 @@ The request envelope has a 1 MiB ceiling; `input_max_bytes` bounds declaration,
 individual pinned files, generated argv and final capture reads. Export uses an
 inherited descriptor containing UTF-8 NUL-separated tokens; human stdout has no
 control meaning. Existing scientific repeats retain native last-value behavior.
-Protected controls and aliases cannot appear in `chain_args`.
+Protected controls, aliases and normalized prefixes cannot appear in `chain_args`; refusal names the typed option and protected expansion using the standard parser's option table and the declaration's shell-only protected controls.
 
 The capture preserves successful task/settings observations, installation and
 finite owner-selected file pins, exact source bytes and exact argv. It publishes

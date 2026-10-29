@@ -14,6 +14,7 @@ from core.seeding import RunSeed
 from tools.setup_review.composition_models import TaskCheckSettings
 from tools.setup_review.environment_models import EnvironmentPreviewReport
 from workflows.reviewed_launch_binding import BindingModel, Digest, InputFilePin
+from workflows.standard_cli import build_parser
 
 PositiveInt = Annotated[int, Field(gt=0, strict=True)]
 
@@ -90,10 +91,30 @@ class NativeChainDeclaration(BindingModel):
 
     @model_validator(mode="after")
     def protected_controls(self):
+        parser = build_parser()
+        # Include shell-only controls already owned by the declaration policy.
+        controls = {f"--{name}" for name in PROTECTED}
+        controls.update(
+            option
+            for option in parser._option_string_actions
+            if option.lstrip("-").replace("-", "_").startswith("chain_")
+            or option.lstrip("-").replace("-", "_") in PROTECTED
+        )
         for token in self.chain_args:
-            name = token.split("=", 1)[0].lstrip("-").replace("-", "_")
-            if token.startswith("-") and (name in PROTECTED or name.startswith("chain_")):
-                raise ValueError("protected_chain_control")
+            option = token.split("=", 1)[0]
+            name = option.lstrip("-").replace("-", "_")
+            if token.startswith("-") and (
+                name in PROTECTED or (not token.startswith("--") and name.startswith("chain_"))
+            ):
+                raise ValueError(f"protected_chain_control: {option} expands to --{name}")
+            if not token.startswith("--"):
+                continue
+            for registered in sorted(controls):
+                control = registered.lstrip("-").replace("-", "_")
+                if control.startswith(name):
+                    raise ValueError(f"protected_chain_control: {option} expands to {registered}")
+            if name.startswith("chain_"):
+                raise ValueError(f"protected_chain_control: {option} expands to --{name}")
         return self
 
     def shell_arguments(self, *, start_iteration: int = 1) -> tuple[str, ...]:
