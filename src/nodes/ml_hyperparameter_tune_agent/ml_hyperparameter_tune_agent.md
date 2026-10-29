@@ -89,7 +89,7 @@ them. Dataset row counts are separate from physical-segment counts.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `is_trial` | `bool` | No | `False` | `True` allows trial and formal rounds (the planner chooses; task-owned scopes for composed tasks). `False` makes every round `single_file` (`planning.py` mode resolution): no task-owned scopes, and the training child loads one TIDMAD training file by `file_index`. A composed run whose dataset profile declares no TIDMAD topology is therefore refused at startup (`runtime.validate_training_mode_startup`, right after `validate_watchdog_startup`, before any model call) with `execute_tools.dataset_config.single_file_mode_refusal`'s message. Un-composed and TIDMAD-topology runs are unchanged. |
+| `is_trial` | `bool` | No | `False` | `True` allows trial and formal rounds (the planner chooses; task-owned scopes for composed tasks). `False` makes every round `single_file` (`planning.py` mode resolution): no task-owned scopes, and the training child loads one TIDMAD training file by `file_index`. A composed run whose dataset profile declares no TIDMAD topology is therefore refused at startup (`runtime.validate_training_mode_startup`, after the `storage.local` check and `resolve_dataset_profile`, before any model call) with `execute_tools.dataset_config.single_file_mode_refusal`'s message. Un-composed and TIDMAD-topology runs are unchanged. |
 | `trial_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Sampling strategy: `snapshot` (all 20 files), `anchors` (files 0/10/19), `target` (specific files via `target_files`). |
 | `trial_portion` | `float \| None` | No | `None` (schema); CLI flag default `0.1` | Fraction of segments per file for the training scope. **TRANSIT ONLY (Lane F2)**: the tuner's executed trial workload never reads this input field — it reads the (possibly overridden) plan; the operator lock for portions is `plan_overrides` (this node's CLI bundles it under `--is_trial`; the chain's typed `--trial_portion` merges via `frozen_portion_overrides`). Its one real consumer chain is the proposer's resource-estimation preflight. The old `0.1` default shown here was doc drift — the schema default was always `None`. |
 | `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
@@ -266,11 +266,13 @@ Two consumers now SKIP rather than fabricate instead of dying:
 
 Under an un-composed legacy physical-data caller, every fact
 `AttemptTopologyFacts` reports and both legacy SampleSets remain unchanged.
-Composition presence, never a task name, selects the task-owned scope path.
-When no SampleSet is built, composed attempts print the task-owned scope
-notice regardless of mode or physical geometry. The `Legacy mode: file_index`
-notice is reserved for uncomposed single-file attempts. This log distinction
-does not change mode selection or scope acquisition.
+Composition presence, never a task name, selects the task-owned scope path
+for trial/formal rounds. Single-file rounds acquire no task-owned scopes.
+When no SampleSet is built, composed trial/formal attempts print the task-owned
+scope notice regardless of physical geometry. Single-file attempts print
+`Legacy mode: file_index=<index>` whether composed or uncomposed, because
+training uses that file index. This log distinction does not change mode
+selection or scope acquisition.
 
 ### Resource and time planning (Step-05b)
 

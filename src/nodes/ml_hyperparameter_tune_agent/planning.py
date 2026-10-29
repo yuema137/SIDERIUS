@@ -282,14 +282,13 @@ def _disclosed_epoch_caps(agent_input: Any) -> tuple[int | None, int | None]:
     )
 
 
-def _no_sample_set_notice(mode: str, file_index: int | None, *, composed: bool = False) -> str:
+def _no_sample_set_notice(mode: str, file_index: int | None, *, composed: bool) -> str:
     """What to print when no SampleSet was built.
 
-    Composition presence selects the task-owned notice, independently of
-    mode or physical geometry. Only an uncomposed single-file round gets
-    the legacy file-index notice.
+    Composed trial/formal rounds use task-owned scopes. Single-file rounds
+    train by file index even when composed, so retain the legacy notice.
     """
-    if composed:
+    if composed and mode != "single_file":
         return "  Task-owned scope: no legacy SampleSet is built for a composed task"
     if mode == "single_file":
         return f"  Legacy mode: file_index={file_index}"
