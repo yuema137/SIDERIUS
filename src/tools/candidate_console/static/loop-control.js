@@ -89,6 +89,7 @@
   const pauseRecorded = status => !!(request?.pause.acknowledged || status.loop?.pause_requested);
   function describe(status) {
     const loop = status.loop, segment = status.kind === 'candidate_loop_resume' ? 'Resumed segment. ' : '';
+    if (status.reason === 'loop_process_exiting') return segment + 'The worker exited, but its remaining processes are not confirmed stopped. The result is still unresolved; ending the loop and starting new work remain blocked.';
     if (status.reason === 'loop_process_exited') return segment + 'The worker exited without a result. No final body count is available for this segment. ' + (segment
       ? 'Open the paused predecessor to end the loop once its worker processes have stopped; Resume again is unavailable.'
       : 'This run cannot be resumed. New work can start once its worker processes have stopped.');

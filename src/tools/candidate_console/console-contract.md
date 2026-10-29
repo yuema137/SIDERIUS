@@ -984,6 +984,11 @@ operations omit the field. `StatusView.successor_operation_id` forwards the
 operations readback for a segment that a Resume has continued; the segment keeps
 its own receipt.
 
+An authored-loop observation with `state="unknown", reason="loop_process_exiting"`
+reports that the wrapper exited but its remaining processes are not confirmed
+stopped. Monitor keeps the outcome unresolved, offers no End or Resume, and does
+not classify it as terminal/failed.
+
 For an authored-loop root or resume operation with `state="operation_failed"` and
 `reason="loop_process_exited"`, Monitor says the worker was interrupted without a
 result and that no final body count is available. A resumed segment directs the

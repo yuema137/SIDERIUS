@@ -155,15 +155,18 @@ def _read_record(
         ):
             return read_resume_chain(record)
         identity = optional(path / "process.json", ProcessIdentity)
+        if identity is not None:
+            bound(record, identity)
+            # Read terminal markers after observing exit: the child may publish
+            # its completion immediately before it disappears.
+            process = observe(identity)
         failure = optional(path / "spawn_failure.json", SpawnFailure)
         completion = optional(path / "completion.json", Completion)
-        for marker in (identity, failure, completion):
+        for marker in (failure, completion):
             if marker is not None:
                 bound(record, marker)
         if completion is not None and completion.host_placement is not None:
             _require_recorded_placement(path, completion)
-        if identity is not None:
-            process = observe(identity)
         if failure is not None:
             if identity is not None or completion is not None:
                 raise OperationFailure("integrity", "spawn failure contradicts child evidence")
@@ -234,15 +237,18 @@ def _read_record(
             )
         waiting = is_queued(path) and not os.path.lexists(path / PLACEMENT_FILE)
         if is_authored_loop(record) and process.status == "exited":
+            from .loop_recovery import sessions_ended
+
+            ended = sessions_ended(record)
             return OperationSnapshot(
                 operation_id=operation_id,
                 kind=record.submission.kind,
                 request_digest=record.request_digest,
                 observed_at=observed_at,
-                state="operation_failed",
+                state="operation_failed" if ended else "unknown",
                 process=process,
                 cancel_requested=cancel is not None,
-                reason="loop_process_exited",
+                reason="loop_process_exited" if ended else "loop_process_exiting",
             )
         state = "unknown" if process.status != "alive" else "queued" if waiting else "active"
         return OperationSnapshot(

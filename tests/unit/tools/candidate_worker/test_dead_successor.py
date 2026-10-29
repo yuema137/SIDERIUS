@@ -237,3 +237,94 @@ def test_dead_loop_root_releases_admission_for_new_prepare(
     assert (
         ActiveOperation.model_validate_json(active.read_bytes()).operation_id == request.request_id
     )
+
+
+@pytest.fixture
+def dead_loop_observation(prepared, monkeypatch, tmp_path):
+    """Admit a root without dispatch, then simulate same-boot wrapper exit."""
+    from tools.candidate_operations.process import current_identity
+
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    operation_id = uuid4()
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", lambda *_: None)
+    submit_operation(
+        config,
+        CandidateOperation(
+            request_id=operation_id, request=loop_request(prepared, final_iteration=2)
+        ),
+        launch_environment={"OPENAI_API_KEY": "offline-stub"},
+    )
+    record = load_record(config, operation_id)
+    path = Path(config.state_root) / "operations" / str(operation_id)
+    identity = current_identity(record).model_copy(update={"pid": 2000000000})
+    publish(path / "process.json", identity)
+
+    def absent(_):
+        raise FileNotFoundError()
+
+    monkeypatch.setattr("tools.candidate_operations.process._stat", absent)
+    monkeypatch.setattr("tools.candidate_operations.host_liveness.session_members", lambda _: 0)
+    return config, record, path, identity
+
+
+@pytest.mark.parametrize("sandbox_state", ["alive", "unknown"])
+def test_dead_wrapper_is_not_failed_while_sandbox_is_unresolved(
+    dead_loop_observation, monkeypatch, sandbox_state
+):
+    """N1: terminal failure must not be displayed while another writer may survive."""
+    config, record, path, identity = dead_loop_observation
+    sandbox = identity.model_copy(update={"pid": identity.pid + 1})
+    publish(path / "sandbox.json", sandbox)
+
+    def stat(pid):
+        if pid == identity.pid:
+            raise FileNotFoundError()
+        if sandbox_state == "unknown":
+            raise PermissionError()
+        return "S", sandbox.start_ticks
+
+    monkeypatch.setattr("tools.candidate_operations.process._stat", stat)
+    monkeypatch.setattr(
+        "tools.candidate_operations.host_liveness.session_members",
+        lambda pid: 0 if pid == identity.pid else 1 if sandbox_state == "alive" else None,
+    )
+    snapshot = read_operation(config, record.submission.request_id)
+    assert snapshot.state == "unknown"
+    assert snapshot.reason == "loop_process_exiting"
+    assert snapshot.process.status == "exited"
+    assert not snapshot.receipt_available
+    assert not releasable(config, record.submission.request_id)
+
+
+@pytest.mark.parametrize("read_kind", ["snapshot", "release"])
+def test_completion_published_before_observed_exit_is_not_missed(
+    dead_loop_observation, monkeypatch, read_kind
+):
+    """N3: a completion published during observation must govern that same read."""
+    from tools.candidate_operations.models import Completion, ProcessObservation
+
+    config, record, path, _ = dead_loop_observation
+
+    def exit_after_completion(_):
+        publish(
+            path / "completion.json",
+            Completion(
+                operation_id=record.submission.request_id,
+                request_digest=record.request_digest,
+                outcome="unknown",
+                reason="native_outcome_unresolved",
+            ),
+        )
+        return ProcessObservation(status="exited", reason="pid_absent")
+
+    monkeypatch.setattr("tools.candidate_operations.read.observe", exit_after_completion)
+    if read_kind == "release":
+        assert not releasable(config, record.submission.request_id)
+    else:
+        snapshot = read_operation(config, record.submission.request_id)
+        assert snapshot.state == "unknown"
+        assert snapshot.reason == "native_outcome_unresolved"

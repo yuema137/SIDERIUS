@@ -485,6 +485,10 @@ setsid session leaders; bwrap itself is not exercised).
 ## Outcome and process projection
 
 `read_operation` revalidates saved requests and marker identity on each read.
+It binds and observes the process identity before reading completion/spawn-failure
+markers. A completion published immediately before the observed wrapper exit
+therefore participates in that same read, including an `unknown` completion that
+must keep admission blocked.
 Linux process observation compares boot ID, PID and `/proc/PID/stat` start ticks.
 Readers and operation processes must share the same host PID namespace. PID
 reuse and zombies establish original-process exit within that namespace. Unreadable/malformed
@@ -500,8 +504,8 @@ Release requires a validated terminal native/pre-dispatch outcome plus positivel
 observed wrapper exit, or a definite failed spawn. Missing identity or uncertain
 outcome keeps admission blocked even after apparent process death.
 The bounded exception is an abandoned authored-loop root or resume segment with no
-completion or receipt: its verified wrapper exit projects `operation_failed`,
-and its sessions must also be confirmed ended before release, as specified under
+completion or receipt: its verified wrapper exit and confirmed ended sessions project `operation_failed`,
+and release rechecks those sessions, as specified under
 Authored completed-boundary Pause/Resume below. This does not infer whether any
 provider work occurred or create a scientific outcome.
 
@@ -1267,14 +1271,18 @@ dispatched orphan record (possibly with an unreferenced
 orphan is not releasable, so the store stays `busy` and admits no new ID until it is
 resolved. A crash or spawn failure after `successor.json` exists remains fail-closed
 and never re-dispatches: reservations are not recycled and uncertain dispatch is
-never automatically retried. A verified dead authored-loop root or resume wrapper without completion or
-native receipt projects `state="operation_failed", reason="loop_process_exited"`.
+never automatically retried. An authored-loop root or resume without completion or
+native receipt projects `state="operation_failed", reason="loop_process_exited"`
+only when both its wrapper exit and ended wrapper/sandbox sessions are verified.
+Wrapper exit with live or unobservable sessions stays `state="unknown",
+reason="loop_process_exiting"`; it is not a terminal failure.
 `process.observe` binds boot ID and PID start ticks: absent PIDs on an observable
 `/proc`, reused PIDs, zombies/dead processes and a different boot prove exit;
 unreadable identities stay unknown. Marker integrity and native receipt validation
 still precede this projection; no completion or scientific receipt is fabricated.
-Release additionally requires `host_liveness.reservation_evidence` to prove that
-the wrapper session and any published sandbox session ended. Missing sandbox
+Both failure projection and release require `host_liveness.reservation_evidence`
+to prove that the wrapper session and any published sandbox session ended;
+release independently rechecks that evidence. Missing sandbox
 identity follows that owner's die-with-parent rule; unknown or live session
 evidence blocks release. The paused predecessor retains its successor UUID and
 receipt, with `reason="loop_successor_failed"` only when this recovery is safe.
