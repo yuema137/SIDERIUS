@@ -332,8 +332,10 @@ Stop conditions travel inside the same `LoopProposal.loop` as
 validator. The declaration stays authoritative: request parsing refuses a
 `metric_threshold` without a non-empty `metric_id` or with a non-finite/non-number
 `threshold`, a non-integer or non-positive `no_improvement.completed_bodies`, and
-the reserved `judge` kind (all 422 `validation`); canonical rendering refuses more
-than one condition per kind and `completed_bodies >= final_iteration` (422
+a `judge` (`JudgeStop`) without its `criterion` or with a non-positive
+`min_completed_bodies` (all 422 `validation`); the declaration refuses more than one
+condition per kind, `completed_bodies >= final_iteration` and a judge
+`min_completed_bodies >= final_iteration` (422
 `source` diagnostics with `field_path`, messages never forwarded). Refusals write
 nothing. An empty tuple is omitted from source with its unused constructors, so a
 condition-free loop keeps its bytes and add-then-remove restores them. The editor

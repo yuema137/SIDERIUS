@@ -249,6 +249,7 @@ assert not any(n.startswith(('agent.', 'nodes.', 'torch')) and n not in {'agent.
 
 
 def test_catalog_matches_exact_native_protocol_signatures():
+    """Catch missing native arguments, including the validation join's human_advice."""
     from agent.llm_settings import ProviderName
     from agent.schemas.constraint_disclosure import ConstraintContext
     from agent.schemas.hyperparam_tuning import (
@@ -273,6 +274,7 @@ def test_catalog_matches_exact_native_protocol_signatures():
     from agent.schemas.storage import StorageConfig
     from agent.schemas.validator import ValidatorInput, ValidatorOutput
     from workflows.candidate_training_settings import CandidateTrainingSettings
+    from workflows.candidate_validation_join import proposed_implementation_to_validation
 
     native = {
         "interpretation.input": InterpretationInput,
@@ -311,12 +313,14 @@ def test_catalog_matches_exact_native_protocol_signatures():
         ("literature-to-proposal", local_typed_evidence),
         ("literature-collection-to-proposal", local_typed_evidence_many),
         ("proposal-to-implementation", local_full_spec),
+        ("proposed-implementation-to-validation", proposed_implementation_to_validation),
         ("implementation-to-validation", local_all_fields),
     ]:
         descriptor = PROTOCOLS[key]
         assert descriptor.owner == f"{function.__module__}.{function.__name__}"
         signature = inspect.signature(function)
-        hints = get_type_hints(function)
+        # Resolve forward references imported only under TYPE_CHECKING by native owners.
+        hints = get_type_hints(function, localns=locals())
         if key == "interpretation-to-proposal":
             # This profile exposes an explicit subset, not an alternative adapter.
             assert {arg.name for arg in descriptor.arguments} <= signature.parameters.keys()

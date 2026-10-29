@@ -21,7 +21,7 @@
   function renderReview(result) {
     const dl = document.createElement('dl'); dl.className = 'facts';
     const a = result.admission, r = result.credential_readiness;
-    const rows = [['Run', a.run_name], ['Recipe', a.recipe], ['Final iteration', a.final_iteration], ['Workspace', a.workspace],
+    const rows = [['Run', a.run_name], ['Seed', result.seed], ['Recipe', a.recipe], ['Final iteration', a.final_iteration], ['Workspace', a.workspace],
       ['Capture', result.capture_path], ['Capture identity', a.capture_sha256], ['Request identity', result.request_digest],
       ['Checkout', a.checkout], ['Git directory', a.git_directory], ['Git common directory', a.git_common_directory],
       ['Original input identities', a.input_files.map(f => `${f.path}\n${f.sha256} · ${f.size_bytes} bytes`).join('\n') || '(none)'],
