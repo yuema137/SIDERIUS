@@ -327,7 +327,7 @@ def test_profile_admission_refusals(prepared, findings):
     for change, match in (
         (
             lambda raw: raw.update(execution_profile="native-literature-split/v1"),
-            "executes only under the native-literature-judged/v1 profile",
+            "executes only under the native-literature-judged/v1",
         ),
         (lambda raw: adaptor(raw)["combine"].update(max_calls=4), "call_bound_exceeds_max_calls"),
         (lambda raw: adaptor(raw)["inputs"][0].pop("max_items"), "unbounded_port"),

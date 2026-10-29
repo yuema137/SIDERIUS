@@ -31,7 +31,7 @@ from tools.candidate_worker import launch_candidate
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.candidate_worker.unit_runner import spawn_unit as real_spawn_unit
 
-from .conftest import REPO, _prepare_request
+from .conftest import QUICKSTART, REPO, _prepare_request
 from .test_graph import initial
 from .test_native import Provider, native_runner
 from .test_training import training_runner

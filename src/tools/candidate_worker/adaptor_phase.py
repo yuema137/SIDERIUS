@@ -392,6 +392,26 @@ def _replay_context(
     return replay_context(request, initial, anchors)
 
 
+def judged_proposal(
+    shape: ProposalFamilies, outcomes: Mapping[str, AdaptorOutcome], node_id: str
+) -> tuple[BaseModel, str] | None:
+    """B6-8b: (proposal value, owning proposal node) a judged branch node consumes.
+
+    The value is the adaptor output its branch reads; the owner is the first input
+    that output cites (the ranked proposal, or a synthesized value's first parent),
+    whose seed supplies the branch's task facts. ``None`` outside a judged branch.
+    """
+    source = shape.judged_source(node_id)
+    if source is None:
+        return None
+    outcome = outcomes[source.adaptor]
+    output = next(item for item in outcome.outputs if item.index == source.index)
+    owner = output.inputs[0].source
+    if not isinstance(owner, ResultSource):
+        raise ValueError("a judged branch's proposal has no producing node")
+    return adaptor_value(outcome, source), owner.node
+
+
 def tuning_branch(
     shape: ProposalFamilies, outcomes: Mapping[str, AdaptorOutcome]
 ) -> tuple[str, str]:

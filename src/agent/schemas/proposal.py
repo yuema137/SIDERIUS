@@ -10,6 +10,7 @@ for consumption by both ml_model_implementor and tune_ml_hyperparam_agent.
 from __future__ import annotations
 
 import re
+import uuid
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
@@ -54,6 +55,19 @@ from execute_tools.dataset_config import (
 
 
 # B.1 — Falsifiable prediction
+
+
+def mint_candidate_id(content_sha256: str | None = None) -> str:
+    """The one owner of a proposal's ``candidate_id`` (``cand_<32 hex>``), system-minted.
+
+    The proposer mints a random identity (``None``). A framework-synthesized proposal (an
+    LLM COMBINE output under ``native-proposal-judged/v1``) derives it from the value's
+    canonical content digest, so replay reproduces it. Never LLM-generated: the author
+    leaves ``candidate_id`` unset (catalog ``PROTECTED_FIELDS``).
+    """
+    return f"cand_{uuid.uuid4().hex if content_sha256 is None else content_sha256[:32]}"
+
+
 class FalsifiablePrediction(BaseModel):
     """A concrete numerical prediction tied to a measurable metric.
 

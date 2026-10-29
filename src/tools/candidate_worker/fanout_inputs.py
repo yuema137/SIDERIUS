@@ -9,7 +9,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.chain_state import ChainState
 from workflows.attempt_storage import impl_attempt_storage
 from workflows.definition import ExternalRequest, ExternalSource, ProtocolRequest
-from workflows.definition.fanout import execution_families
+from workflows.definition.fanout import ProposalFamilies, execution_families
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 
@@ -101,6 +101,7 @@ def materialize_fanout(
         proposal.forward_contract = composition.forward_contract
         proposal.proposal_blocks = composition.proposal_blocks
         interpreted_payload = artifact_json(proposal, kind="internal", exclude_unset=True)
+    judged: dict[tuple[str, str], NativeInputs] = {}
     for family in shape.families:
         proposal_request = nodes[family.proposal].request
         if interpreted_payload is not None:
@@ -137,7 +138,8 @@ def materialize_fanout(
         )
         if seed_binding is not None:
             used.add(seed_binding)
-        for implementation, validation in family.branches:
+        owned = family.branches or (_judged_branches(shape) if shape.proposal_selection else ())
+        for implementation, validation in owned:
             attempt = impl_attempt_storage(
                 str(
                     graph_instance_dir(
@@ -163,8 +165,19 @@ def materialize_fanout(
                 )
             )
             inputs = NativeInputs(seed, attempt, provider, model)
-            result[implementation] = result[validation] = inputs
-        result[family.proposal] = result[family.branches[0][0]]
+            if family.branches:
+                result[implementation] = result[validation] = inputs
+            else:
+                # B6-8b: a judged branch is reconciled against every proposal seed it may
+                # receive; its seed is bound at dispatch from the adaptor's selection.
+                judged[(implementation, validation)] = inputs
+        if family.branches:
+            result[family.proposal] = result[family.branches[0][0]]
+        else:
+            first = next(iter(judged.values()))
+            result[family.proposal] = NativeInputs(seed, first.attempt, provider, model)
+    for (implementation, validation), inputs in judged.items():
+        result[implementation] = result[validation] = inputs
     if shape.literature is not None:
         edge = shape.literature
         candidate = result[edge.proposal]
@@ -210,6 +223,13 @@ def materialize_fanout(
     if used != set(externals):
         raise ValueError("unused external inputs are unsupported by the candidate worker")
     return result
+
+
+def _judged_branches(shape: ProposalFamilies) -> tuple[tuple[str, str], ...]:
+    assert shape.proposal_selection is not None
+    return tuple(
+        (item.implementation, item.validation) for item in shape.proposal_selection.branches
+    )
 
 
 def captured_contents(

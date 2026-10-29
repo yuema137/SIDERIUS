@@ -281,8 +281,12 @@ B6-4 literature profiles `fanout.LITERATURE_COLLECTION_PROFILE`
 (`native-literature-collection/v1`, S2) and `fanout.LITERATURE_SPLIT_PROFILE`
 (`native-literature-split/v1`, S3; candidate-worker contract, "Literature adaptor
 profiles"), and the B6-8a `fanout.LITERATURE_JUDGED_PROFILE`
-(`native-literature-judged/v1`), the only profile that executes an LLM COMBINE
-kind; `fanout.ADAPTOR_PROFILES` lists all five. `AdaptorInstance.combine` is
+(`native-literature-judged/v1`) and B6-8b `fanout.PROPOSAL_JUDGED_PROFILE`
+(`native-proposal-judged/v1`, `proposal_judged.proposal_judged_candidate`;
+`ProposalFamilies.proposal_selection` names the adaptor and its
+`JudgedBranch(index, implementation, validation)`s), the only profiles
+(`fanout.LLM_PROFILES`) that execute an LLM COMBINE kind; `fanout.ADAPTOR_PROFILES`
+lists all six. `AdaptorInstance.combine` is
 `llm_strategies.AdaptorCombine` (the deterministic kinds plus the four B2 LLM kinds);
 declaration validation applies the table rows that need no B2 owner (a ranking LLM
 kind feeds `top-k/v1`/`all/v1`; `threshold/v1` basis `rubric` reads only
