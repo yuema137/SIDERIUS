@@ -12,7 +12,12 @@ from pathlib import Path
 from agent.judge.call import JudgeBridge, JudgeRunContext, bridge_for_route, run_judge_call
 from agent.judge.evidence import evidence_sha256
 from agent.schemas.data_analysis.common import canonical_json_bytes, canonical_sha256
-from agent.schemas.judge import JudgeCallEvidence, JudgeRoute, JudgeRoutes
+from agent.schemas.judge import (
+    MAX_JUDGE_PROMPT_CHARS,
+    JudgeCallEvidence,
+    JudgeRoute,
+    JudgeRoutes,
+)
 from core.durable_io import publish_bytes_write_once
 
 from .kinds import implemented_kind
@@ -24,7 +29,16 @@ from .models import (
     StrategyResult,
     invocation_sha256,
 )
-from .plan import call_path, call_request, decide, strategy_route
+from .plan import (
+    budget_refusal,
+    call_path,
+    call_request,
+    decide,
+    next_call,
+    prompt_chars,
+    require_call_capacity,
+    strategy_route,
+)
 
 
 def _require_fresh(evidence_dir: Path) -> None:
@@ -56,12 +70,19 @@ def run_llm_strategy(
         raise StrategyError(
             f"{strategy.kind} needs {bound} calls; max_calls is {strategy.max_calls}"
         )
+    require_call_capacity(invocation)
     _require_fresh(invocation.evidence_dir)
     digest = invocation_sha256(invocation)
     calls: tuple[JudgeCallEvidence, ...] = ()
-    while (planned := kind.plan_call(invocation, len(calls))) is not None:
+    while (planned := next_call(kind, invocation, len(calls))) is not None:
+        request = call_request(digest, planned, calls)
+        size = prompt_chars(planned, request)
+        if size > MAX_JUDGE_PROMPT_CHARS:
+            if not calls:
+                raise budget_refusal(invocation, 0, size)  # nothing sent, nothing written
+            break  # recorded: decide() derives prompt_too_large for the unsent call
         evidence = run_judge_call(
-            call_request(digest, planned, calls),
+            request,
             template=planned.template,
             route=route,
             context=context,

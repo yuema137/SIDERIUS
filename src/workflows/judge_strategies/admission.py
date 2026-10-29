@@ -9,12 +9,13 @@ from workflows.definition.adaptor_strategies import (
     ThresholdSelect,
     TopKSelect,
 )
-from workflows.definition.catalog import METRIC_SCORED_CONTRACTS
+from workflows.definition.catalog import CUSTOM_EMITTABLE, METRIC_SCORED_CONTRACTS
 from workflows.definition.llm_strategies import LLMStrategy, RubricRankStrategy
 from workflows.definition.models import InputPort
 
 from .kinds import IMPLEMENTED_KINDS
-from .models import StrategyAdmission, StrategyRefusal
+from .models import StrategyAdmission, StrategyRefusal, StrategyRefusalCode, lists_every_item
+from .plan import StrategyKind
 from .projection import ITEM_PROJECTORS
 
 
@@ -31,15 +32,19 @@ def _item_capacity(inputs: tuple[InputPort, ...]) -> int | None:
     return capacity
 
 
-def _select_refusals(kind: str, contract: str, select: SelectStrategy) -> list[StrategyRefusal]:
-    """SELECT rules for a rubric ranking (the only implemented kind)."""
+def _refusal(code: StrategyRefusalCode, message: str) -> StrategyRefusal:
+    return StrategyRefusal(code=code, message=message)
+
+
+def _ranking_refusals(kind: str, contract: str, select: SelectStrategy) -> list[StrategyRefusal]:
+    """SELECT rules for a rubric ranking."""
     refusals: list[StrategyRefusal] = []
     rubric_threshold = isinstance(select, ThresholdSelect) and select.basis == "rubric"
     if not (isinstance(select, AllSelect | TopKSelect) or rubric_threshold):
         refusals.append(
-            StrategyRefusal(
-                code="select_incompatible",
-                message=f"{kind} ranks by rubric; {select.kind} cannot consume it"
+            _refusal(
+                "select_incompatible",
+                f"{kind} ranks by rubric; {select.kind} cannot consume it"
                 + (
                     " (threshold basis must be 'rubric')"
                     if isinstance(select, ThresholdSelect)
@@ -50,13 +55,105 @@ def _select_refusals(kind: str, contract: str, select: SelectStrategy) -> list[S
     if contract in METRIC_SCORED_CONTRACTS and isinstance(select, TopKSelect):
         # Q-B2-2: an LLM may filter metric-scored items, never reorder them against the metric.
         refusals.append(
-            StrategyRefusal(
-                code="metric_scored_reorder",
-                message=f"{contract} carries formal metric results; {kind} may only feed "
+            _refusal(
+                "metric_scored_reorder",
+                f"{contract} carries formal metric results; {kind} may only feed "
                 "threshold/v1 (basis rubric) or all/v1",
             )
         )
     return refusals
+
+
+def _combined_refusals(
+    strategy: LLMStrategy,
+    count: int,
+    contract: str,
+    select: SelectStrategy,
+    cardinality: CardinalityBound,
+) -> list[StrategyRefusal]:
+    """Rules for a kind that synthesizes ``count`` new values of ``contract``."""
+    refusals: list[StrategyRefusal] = []
+    if contract not in CUSTOM_EMITTABLE:
+        refusals.append(
+            _refusal(
+                "output_not_emittable",
+                f"{strategy.kind} cannot synthesize {contract}: authority contracts stay "
+                "with the framework",
+            )
+        )
+    if not isinstance(select, AllSelect):
+        refusals.append(
+            _refusal(
+                "select_incompatible",
+                f"{strategy.kind} produces new values, not a ranking; it feeds all/v1 only",
+            )
+        )
+    if not cardinality.min <= count <= cardinality.max:
+        refusals.append(
+            _refusal(
+                "cardinality_mismatch",
+                f"{strategy.kind} produces {count} values; SELECT/DISTRIBUTE take "
+                f"{cardinality.min}..{cardinality.max}",
+            )
+        )
+    return refusals
+
+
+def _contract_refusals(
+    strategy: LLMStrategy, inputs: tuple[InputPort, ...], output_contract: str
+) -> tuple[str, list[StrategyRefusal]]:
+    """The one input contract and the refusals about input and output contracts."""
+    refusals: list[StrategyRefusal] = []
+    contracts = sorted({port.contract for port in inputs})
+    if len(contracts) != 1:
+        refusals.append(_refusal("mixed_contracts", f"input contracts differ: {contracts}"))
+    contract = contracts[0]
+    if contract not in ITEM_PROJECTORS:
+        refusals.append(
+            _refusal(
+                "unprojectable_contract", f"no LLM item projector is registered for {contract!r}"
+            )
+        )
+    if output_contract != contract:
+        refusals.append(
+            _refusal(
+                "output_contract_mismatch",
+                f"{strategy.kind} emits {contract} values over {contract} inputs, "
+                f"not {output_contract}",
+            )
+        )
+    return contract, refusals
+
+
+def _capacity_refusals(
+    kind: StrategyKind, strategy: LLMStrategy, capacity: int | None
+) -> list[StrategyRefusal]:
+    """The ports' item capacity: bounded, enough for the kind, within the per-call cap."""
+    if capacity is None:
+        return [
+            _refusal(
+                "unbounded_port",
+                "every 'many' port of an LLM strategy declares max_items (static call bound)",
+            )
+        ]
+    if capacity < kind.min_items(strategy):
+        return [
+            _refusal(
+                "insufficient_capacity",
+                f"{strategy.kind} needs at least {kind.min_items(strategy)} items; "
+                f"the ports hold at most {capacity}",
+            )
+        ]
+    if lists_every_item(strategy) and capacity > MAX_SCORED_ITEMS_PER_CALL:
+        hint = "; use per_item scoring" if isinstance(strategy, RubricRankStrategy) else ""
+        return [
+            _refusal(
+                "batch_too_large",
+                f"{strategy.kind} lists every item in one call; up to {capacity} items "
+                f"exceed {MAX_SCORED_ITEMS_PER_CALL} items per call{hint}",
+            )
+        ]
+    return []
 
 
 def admit_llm_strategy(
@@ -69,77 +166,40 @@ def admit_llm_strategy(
 ) -> StrategyAdmission:
     """Every reason ``strategy`` cannot occupy this adaptor's COMBINE slot.
 
-    ``cardinality`` (B6 ``derive_cardinality``) bounds combining kinds' output count;
-    a ranking kind returns a permutation that SELECT bounds, so it does not use it.
+    ``cardinality`` (B6 ``derive_cardinality``) bounds a combining kind's output
+    count; a ranking kind returns a permutation that SELECT bounds, so it does not
+    use it.
     Fallback admissibility is B6's: it validates ``on_failure.combine`` in place of
     the LLM kind with the deterministic validation table.
     """
-    del cardinality  # used by combining kinds only (none implemented yet)
     slot = strategy.route_slot
     kind = IMPLEMENTED_KINDS.get(strategy.kind)
-    if kind is None:
-        refusal = StrategyRefusal(
-            code="kind_not_implemented",
-            message=f"{strategy.kind} is declared but its implementation has not landed",
+    if kind is None or not inputs:
+        refusal = (
+            _refusal(
+                "kind_not_implemented",
+                f"{strategy.kind} is declared but its implementation has not landed",
+            )
+            if kind is None
+            else _refusal("no_input_ports", "an adaptor declares no input port")
         )
         return StrategyAdmission(
             static_call_bound=None, required_route_slot=slot, refusals=(refusal,)
         )
-    if not inputs:
-        refusal = StrategyRefusal(
-            code="no_input_ports", message="an adaptor declares no input port"
-        )
-        return StrategyAdmission(
-            static_call_bound=None, required_route_slot=slot, refusals=(refusal,)
-        )
-    refusals: list[StrategyRefusal] = []
-    contracts = sorted({port.contract for port in inputs})
-    if len(contracts) != 1:
-        refusals.append(
-            StrategyRefusal(code="mixed_contracts", message=f"input contracts differ: {contracts}")
-        )
-    contract = contracts[0]
-    if contract not in ITEM_PROJECTORS:
-        refusals.append(
-            StrategyRefusal(
-                code="unprojectable_contract",
-                message=f"no LLM item projector is registered for {contract!r}",
-            )
-        )
-    if output_contract != contract:
-        refusals.append(
-            StrategyRefusal(
-                code="output_contract_mismatch",
-                message=f"a ranking passes {contract} values through, not {output_contract}",
-            )
-        )
-    refusals += _select_refusals(strategy.kind, contract, select)
+    contract, refusals = _contract_refusals(strategy, inputs, output_contract)
+    if kind.output_count is None:
+        refusals += _ranking_refusals(strategy.kind, contract, select)
+    else:
+        count = kind.output_count(strategy)
+        refusals += _combined_refusals(strategy, count, contract, select, cardinality)
     capacity = _item_capacity(inputs)
+    refusals += _capacity_refusals(kind, strategy, capacity)
     bound = None if capacity is None else kind.call_bound(strategy, capacity)
-    if capacity is None:
-        refusals.append(
-            StrategyRefusal(
-                code="unbounded_port",
-                message="every 'many' port of an LLM strategy declares max_items (static call bound)",
-            )
-        )
-    elif (
-        isinstance(strategy, RubricRankStrategy)
-        and strategy.scoring == "batch"
-        and capacity > MAX_SCORED_ITEMS_PER_CALL
-    ):
-        refusals.append(
-            StrategyRefusal(
-                code="batch_too_large",
-                message=f"batch scoring of up to {capacity} items exceeds "
-                f"{MAX_SCORED_ITEMS_PER_CALL} items per call; use per_item scoring",
-            )
-        )
     if bound is not None and bound > strategy.max_calls:
         refusals.append(
-            StrategyRefusal(
-                code="call_bound_exceeds_max_calls",
-                message=f"{strategy.kind} may make {bound} calls; max_calls is {strategy.max_calls}",
+            _refusal(
+                "call_bound_exceeds_max_calls",
+                f"{strategy.kind} may make {bound} calls; max_calls is {strategy.max_calls}",
             )
         )
     return StrategyAdmission(

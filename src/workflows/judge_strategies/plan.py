@@ -13,10 +13,14 @@ from typing import Any
 from agent.judge.evidence import chain_prior_turns
 from agent.judge.template import JudgeTemplate
 from agent.schemas.judge import (
+    MAX_JUDGE_PROMPT_CHARS,
+    MAX_SCORED_ITEMS_PER_CALL,
     CallContent,
     CallRequest,
     CallRole,
+    FailureCode,
     JudgeCallEvidence,
+    JudgedItem,
     JudgeRoute,
     JudgeRoutes,
 )
@@ -24,10 +28,15 @@ from workflows.definition.llm_strategies import LLMStrategy
 
 from .models import (
     CALLS_DIR,
+    CombinedItems,
     ItemRanking,
+    PromptBudgetExceeded,
     StrategyError,
+    StrategyFailureCode,
     StrategyInvocation,
     StrategyOutcome,
+    invocation_sha256,
+    lists_every_item,
 )
 
 
@@ -38,13 +47,70 @@ class PlannedCall:
     content: CallContent
 
 
+class StrategyFoldFailure(Exception):
+    """A complete, decided chain the pure fold cannot turn into a valid result."""
+
+    def __init__(self, code: StrategyFailureCode, message: str) -> None:
+        super().__init__(message)
+        self.code: StrategyFailureCode = code
+
+
 @dataclass(frozen=True)
 class StrategyKind:
-    """An implemented LLM kind: its static call bound, call planner and pure fold."""
+    """An implemented LLM kind: its static call bound, call planner and pure fold.
+
+    A kind without ``output_count`` folds to an ``ItemRanking`` of every item (SELECT
+    bounds it); a kind with one folds to ``output_count(strategy)`` new values
+    (``CombinedItems``, ``select=all/v1``). ``min_items`` is the fewest admissible
+    items the kind can run on; with fewer, no call is made and the outcome is
+    ``insufficient_items``.
+    """
 
     call_bound: Callable[[Any, int], int]
+    min_items: Callable[[Any], int]
     plan_call: Callable[[StrategyInvocation, int], PlannedCall | None]
-    fold: Callable[[StrategyInvocation, tuple[Any, ...]], ItemRanking]
+    fold: Callable[[StrategyInvocation, tuple[Any, ...]], ItemRanking | CombinedItems]
+    output_count: Callable[[Any], int] | None = None  # combined kinds only
+
+
+def next_call(kind: StrategyKind, invocation: StrategyInvocation, done: int) -> PlannedCall | None:
+    """The call after ``done`` decided calls, or ``None``; never a call on insufficient items."""
+    if len(invocation.items) < kind.min_items(invocation.strategy):
+        return None
+    return kind.plan_call(invocation, done)
+
+
+def require_call_capacity(invocation: StrategyInvocation) -> None:
+    """Refuse (``StrategyError``) more items than one call may list, before any call."""
+    strategy = invocation.strategy
+    if lists_every_item(strategy) and len(invocation.items) > MAX_SCORED_ITEMS_PER_CALL:
+        raise StrategyError(
+            f"{strategy.kind} lists every item in one call; {len(invocation.items)} items "
+            f"exceed {MAX_SCORED_ITEMS_PER_CALL} items per call"
+        )
+
+
+def prompt_chars(planned: PlannedCall, request: CallRequest) -> int:
+    """Rendered size (system + user characters) of one planned call."""
+    system, user = planned.template.render(request)
+    return len(system) + len(user)
+
+
+def budget_refusal(invocation: StrategyInvocation, index: int, size: int) -> PromptBudgetExceeded:
+    strategy = invocation.strategy
+    per_item = " or scoring='per_item'" if getattr(strategy, "scoring", None) == "batch" else ""
+    return PromptBudgetExceeded(
+        f"{strategy.kind} call {index} renders {size} prompt characters; the judge prompt "
+        f"budget MAX_JUDGE_PROMPT_CHARS is {MAX_JUDGE_PROMPT_CHARS}. Use fewer items, shorter "
+        f"task judge guidance{per_item}"
+    )
+
+
+def judged_items(invocation: StrategyInvocation) -> tuple[JudgedItem, ...]:
+    """Every invocation item as a judge sees it, in B6 declared order."""
+    return tuple(
+        JudgedItem(item_id=item.item_id, projection=item.projection) for item in invocation.items
+    )
 
 
 def strategy_route(strategy: LLMStrategy, routes: JudgeRoutes) -> JudgeRoute:
@@ -74,26 +140,53 @@ def call_path(evidence_dir: Path, index: int, role: CallRole) -> Path:
     return evidence_dir / CALLS_DIR / f"{index:03d}_{role}.json"
 
 
-def decide(
-    kind: StrategyKind, invocation: StrategyInvocation, calls: tuple[JudgeCallEvidence, ...]
+def _decided(result: ItemRanking | CombinedItems) -> StrategyOutcome:
+    ranking = result if isinstance(result, ItemRanking) else None
+    combined = result if isinstance(result, CombinedItems) else None
+    return StrategyOutcome(
+        status="decided",
+        ranking=ranking,
+        combined=combined,
+        failure_code=None,
+        fallback_combine=None,
+    )
+
+
+def _failed(
+    invocation: StrategyInvocation, code: FailureCode | StrategyFailureCode | None
 ) -> StrategyOutcome:
-    """Outcome of a finished chain: the first failed call ends it under ``on_failure``."""
-    failed = next((call for call in calls if call.status != "decided"), None)
-    if failed is None:
-        payloads = tuple(call.payload for call in calls)
-        return StrategyOutcome(
-            status="decided",
-            ranking=kind.fold(invocation, payloads),
-            failure_code=None,
-            fallback_combine=None,
-        )
-    if failed is not calls[-1]:
-        raise StrategyError("a strategy call chain continued after a failed call")
+    """A failure under the declared ``on_failure``: ``failed``, or B6's deterministic fallback."""
     on_failure = invocation.strategy.on_failure
     fallback = None if on_failure == "fail" else on_failure.combine.kind
     return StrategyOutcome(
         status="failed" if fallback is None else "fallback",
         ranking=None,
-        failure_code=failed.failure_code,
+        failure_code=code,
         fallback_combine=fallback,
     )
+
+
+def decide(
+    kind: StrategyKind, invocation: StrategyInvocation, calls: tuple[JudgeCallEvidence, ...]
+) -> StrategyOutcome:
+    """Outcome of a finished chain: the first failed call ends it under ``on_failure``."""
+    if len(invocation.items) < kind.min_items(invocation.strategy):
+        if calls:
+            raise StrategyError("a strategy with insufficient items recorded a call")
+        return _failed(invocation, "insufficient_items")
+    failed = next((call for call in calls if call.status != "decided"), None)
+    pending = None if failed is not None else next_call(kind, invocation, len(calls))
+    if pending is not None:
+        # A decided chain stops early only where its next call would exceed the budget.
+        request = call_request(invocation_sha256(invocation), pending, calls)
+        if not calls or prompt_chars(pending, request) <= MAX_JUDGE_PROMPT_CHARS:
+            raise StrategyError("strategy evidence ends before the planned call chain is complete")
+        return _failed(invocation, "prompt_too_large")
+    if failed is None:
+        try:
+            return _decided(kind.fold(invocation, tuple(call.payload for call in calls)))
+        except StrategyFoldFailure as failure:
+            return _failed(invocation, failure.code)
+    if failed is not calls[-1]:
+        raise StrategyError("a strategy call chain continued after a failed call")
+    return _failed(invocation, failed.failure_code)

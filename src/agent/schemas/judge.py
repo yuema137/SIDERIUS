@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Self, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.judge_task import JudgeTaskBlocks, RubricSpec
@@ -118,8 +118,15 @@ class StopJudgeRequest(JudgeModel):
 #: Deterministic projection bounds: one item never dominates a prompt.
 MAX_PROJECTED_FIELDS = 64
 MAX_PROJECTED_CHARS = 4000
-#: Items one scoring call may list, so a batch prompt has a fixed size bound.
+#: Items any one judge call may list (rubric batch scoring, merge, revision, debate),
+#: so every prompt that lists all items has a fixed size bound.
 MAX_SCORED_ITEMS_PER_CALL = 16
+#: Rendered characters (system + user) one judge call may send. No context-size owner
+#: exists in the LLM bridge or ``WorkflowLLMConfig``, so this is declared here: about
+#: 100k tokens at ~4 characters per token, which leaves output room in the 128k-token
+#: windows of the routed judge models. It counts everything rendered, including the
+#: task's ``JudgeTaskBlocks`` guidance; a call over it is never sent.
+MAX_JUDGE_PROMPT_CHARS = 400_000
 
 
 class ProjectedField(JudgeModel):
@@ -163,12 +170,44 @@ class RubricScoringRequest(JudgeModel):
         return self
 
 
+def _distinct_items(items: tuple[JudgedItem, ...]) -> None:
+    ids = [item.item_id for item in items]
+    if len(set(ids)) != len(ids):
+        raise ValueError("a judge call lists each item once")
+
+
+class MergeRequest(JudgeModel):
+    """One ``judge-merge/v1`` call: synthesize ``synthesize_count`` new values from ``items``.
+
+    ``output_contract`` names the catalogue contract every synthesized value must
+    satisfy; each value cites at least ``min_parents`` distinct listed items.
+    """
+
+    kind: Literal["merge"] = "merge"
+    criterion: str = Field(min_length=1, max_length=2000)
+    output_contract: str = Field(min_length=1)
+    synthesize_count: int = Field(ge=1)
+    min_parents: int = Field(ge=2)
+    items: tuple[JudgedItem, ...] = Field(min_length=2, max_length=MAX_SCORED_ITEMS_PER_CALL)
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        _distinct_items(self.items)
+        if self.min_parents > len(self.items):
+            raise ValueError("min_parents cannot exceed the listed items")
+        return self
+
+
 # Role content kind -> the call roles that may carry it. Further strategy content
 # kinds join the CallContent union and this table in their own changes.
-CallContent = Annotated[StopJudgeRequest | RubricScoringRequest, Field(discriminator="kind")]
+CallContent = Annotated[
+    StopJudgeRequest | RubricScoringRequest | MergeRequest, Field(discriminator="kind")
+]
 _ROLES_BY_CONTENT: dict[str, frozenset[str]] = {
     "stop": frozenset({"stop"}),
     "rubric_scoring": frozenset({"scorer"}),
+    "merge": frozenset({"merger"}),
 }
 
 
@@ -220,8 +259,25 @@ class RubricVerdict(JudgeModel):
     rationale: str = Field(min_length=1, max_length=2000)
 
 
+class SynthesizedDraft(JudgeModel):
+    """One synthesized value as the LLM wrote it, before contract validation and stamping.
+
+    ``value`` is checked against the request's output contract by the consumer's
+    ``check_payload``; ``parents`` are the listed item ids it draws on.
+    """
+
+    parents: tuple[str, ...] = Field(min_length=1)
+    value: dict[str, JsonValue]
+
+
+class SynthesisVerdict(JudgeModel):
+    kind: Literal["synthesis"]
+    items: tuple[SynthesizedDraft, ...] = Field(min_length=1)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
 # Further strategy payload kinds join this union in their own changes.
-CallPayload = Annotated[StopVerdict | RubricVerdict, Field(discriminator="kind")]
+CallPayload = Annotated[StopVerdict | RubricVerdict | SynthesisVerdict, Field(discriminator="kind")]
 
 
 class PromptIdentity(JudgeModel):

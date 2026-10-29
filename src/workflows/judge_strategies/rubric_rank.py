@@ -22,7 +22,7 @@ from .models import (
     StrategyError,
     StrategyInvocation,
 )
-from .plan import PlannedCall
+from .plan import PlannedCall, judged_items
 
 
 def call_bound(strategy: RubricRankStrategy, n_items: int) -> int:
@@ -35,10 +35,13 @@ def _parts(invocation: StrategyInvocation) -> tuple[RubricRankStrategy, list[Jud
     strategy = invocation.strategy
     if not isinstance(strategy, RubricRankStrategy):
         raise StrategyError(f"rubric-rank/v1 cannot plan {strategy.kind}")
-    judged = [
-        JudgedItem(item_id=item.item_id, projection=item.projection) for item in invocation.items
-    ]
-    return strategy, judged
+    return strategy, list(judged_items(invocation))
+
+
+def min_items(strategy: RubricRankStrategy) -> int:
+    """A single item is scored too: ``threshold(basis="rubric")`` reads its weighted mean."""
+    del strategy
+    return 1
 
 
 def plan_call(invocation: StrategyInvocation, call_index: int) -> PlannedCall | None:

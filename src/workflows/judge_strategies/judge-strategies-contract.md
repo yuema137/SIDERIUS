@@ -1,9 +1,10 @@
 # `workflows/judge_strategies/` — LLM COMBINE strategies for adaptors
 
 Technical contract for the LLM strategy framework (advanced design B2, PR B2-6).
-Source and tests determine current behavior. Implemented kind: `rubric-rank/v1`.
-The other three declared kinds (`debate-judge/v1`, `primary-advisors-llm/v1`,
-`judge-merge/v1`) are refused until their PRs (B2-7, B2-8, B2-9) land. No
+Source and tests determine current behavior. Implemented kinds: `rubric-rank/v1`
+(ranking) and `judge-merge/v1` (combining, B2-9). The other two declared kinds
+(`debate-judge/v1`, `primary-advisors-llm/v1`) are refused until their PRs
+(B2-7, B2-8) land. No
 adaptor can declare or run an LLM kind yet: the adaptor wiring (B6-8) makes the
 union declarable in `AdaptorInstance.combine` and calls this package.
 
@@ -15,13 +16,15 @@ union declarable in `AdaptorInstance.combine` and calls this package.
 | `admission.py` | `admit_llm_strategy` (pure, no I/O) |
 | `projection.py` | `ITEM_PROJECTORS` (contract → projector), `project_item`, `strategy_items` |
 | `kinds.py` | `IMPLEMENTED_KINDS`, `implemented_kind`, `strategy_call_bound` |
-| `plan.py` | `PlannedCall`, `StrategyKind`, `strategy_route`, `call_request`, `call_path`, `decide` (shared by run and replay) |
-| `rubric_rank.py` | `rubric-rank/v1`: `call_bound`, `plan_call`, `fold` (pure) |
+| `plan.py` | `PlannedCall`, `StrategyKind`, `StrategyFoldFailure`, `judged_items`, `next_call`, `strategy_route`, `call_request`, `call_path`, `decide` (shared by run and replay) |
+| `rubric_rank.py` | `rubric-rank/v1`: `call_bound`, `min_items`, `plan_call`, `fold` (pure) |
+| `judge_merge.py` | `judge-merge/v1`: `MERGE_TEMPLATE` (`judge.merge/v1`, role `merger`, usage label `judge.judge-merge`, response `SynthesisVerdict`), `call_bound`, `min_items`, `output_count`, `plan_call`, `fold` |
+| `synthesis.py` | Combining kinds' values: `output_facts` (contract JSON schema + framework-owned fields for the prompt), `check_draft`, `provenance_label`, `combined_items` |
 | `run.py` | `run_llm_strategy`: the only provider effect in the package |
 | `replay.py` | `replay_llm_strategy`: readback; its direct imports include no provider module (`agent.llm_bridge`, `agent.judge.call`) |
-| `models.py` | `StrategyItem`, `StrategyInvocation`, `invocation_sha256`, `RubricScore`, `CriterionValue`, `ItemRanking`, `StrategyOutcome`, `StrategyEvidence`, `StrategyResult`, `StrategyAdmission`, `StrategyRefusal`, `StrategyError` |
+| `models.py` | `StrategyItem`, `StrategyInvocation`, `invocation_sha256`, `RubricScore`, `CriterionValue`, `ItemRanking`, `CombinedItem`, `CombinedItems`, `StrategyFailureCode`, `StrategyOutcome`, `StrategyEvidence`, `StrategyResult`, `StrategyAdmission`, `StrategyRefusal`, `StrategyError` |
 | `agent/judge/rubric_template.py` | `RUBRIC_TEMPLATE` (`judge.rubric/v1`, role `scorer`, usage label `judge.rubric-rank`, response `RubricVerdict`) |
-| `agent/schemas/judge.py` | Call-level types: `RubricScoringRequest` (`CallContent` kind `rubric_scoring`), `JudgedItem`, `ItemProjection`, `ProjectedField`, `RubricVerdict` (`CallPayload` kind `rubric`) |
+| `agent/schemas/judge.py` | Call-level types: `RubricScoringRequest` (`CallContent` kind `rubric_scoring`), `MergeRequest` (kind `merge`, role `merger`), `JudgedItem`, `ItemProjection`, `ProjectedField`, `RubricVerdict` (`CallPayload` kind `rubric`), `SynthesisVerdict` (kind `synthesis`) with `SynthesizedDraft(parents, value)` |
 
 Not owned here: every judge call, its evidence file and its readback
 ([judge contract](../../agent/judge/judge-contract.md): `run_judge_call`,
@@ -56,17 +59,20 @@ admitted iff `refusals` is empty. Refusal codes:
 | --- | --- |
 | `kind_not_implemented` | the kind is not in `IMPLEMENTED_KINDS` (only refusal reported; `static_call_bound=None`) |
 | `no_input_ports` | `inputs` is empty (only refusal reported; `static_call_bound=None`) |
-| `batch_too_large` | `scoring="batch"` with an item capacity above `MAX_SCORED_ITEMS_PER_CALL` (16; `agent/schemas/judge.py`), so one batch prompt has a fixed size bound; use `per_item` |
+| `batch_too_large` | a kind that lists every item in one call (`lists_every_item`: every kind except `rubric-rank` with `scoring="per_item"`) over an item capacity above `MAX_SCORED_ITEMS_PER_CALL` (16; `agent/schemas/judge.py`), so every prompt has a fixed size bound; rubric-rank: use `per_item` |
 | `unbounded_port` | a `many` port without `max_items`: the static call bound needs the item capacity (`one` port = 1, `many` port = `max_items`) |
 | `mixed_contracts` | ports of more than one contract |
 | `unprojectable_contract` | no projector in `ITEM_PROJECTORS` (v1: `proposal.output`, `literature.output`) |
-| `output_contract_mismatch` | a ranking passes values through, so the output contract must equal the input contract |
-| `select_incompatible` | a rubric ranking feeds only `all/v1`, `top-k/v1` or `threshold/v1` with `basis="rubric"` |
+| `output_contract_mismatch` | the output contract must equal the input contract (a ranking passes values through; a combining kind synthesizes values of the same contract) |
+| `select_incompatible` | a rubric ranking feeds only `all/v1`, `top-k/v1` or `threshold/v1` with `basis="rubric"`; a combining kind feeds only `all/v1` |
+| `output_not_emittable` | a combining kind's output contract is not in `catalog.CUSTOM_EMITTABLE` (authority contracts such as `tuning.output` are never synthesized) |
+| `cardinality_mismatch` | a combining kind's declared output count (`judge-merge`: `synthesize_count`) lies outside `cardinality` |
+| `insufficient_capacity` | the ports hold fewer items than the kind's `min_items` (`judge-merge`: `min_parents`) |
 | `metric_scored_reorder` | Q-B2-2: over `METRIC_SCORED_CONTRACTS` items an LLM ranking may feed only `all/v1` or `threshold(basis="rubric")`, never `top-k/v1` (B6 `select` re-checks at run time) |
 | `call_bound_exceeds_max_calls` | `strategy_call_bound(strategy, capacity) > max_calls` |
 
-`cardinality` bounds combining kinds' output count and is not used by a ranking
-kind. `on_failure` fallback admissibility is B6's: it validates
+`cardinality` bounds a combining kind's output count and is not used by a
+ranking kind. `on_failure` fallback admissibility is B6's: it validates
 `Fallback.combine` in place of the LLM kind with its deterministic validation
 table. The run-level `JudgeRoutes.max_judge_calls` sum (adaptors × iterations +
 the JudgeStop bound) is enforced by the B6-8 wiring.
@@ -88,9 +94,8 @@ with the omitted count recorded as a field. `proposal.output` projects
 `confidence` are not projected.
 
 `StrategyInvocation(adaptor_id, iteration, strategy, items, output_contract,
-expected_count, rubric, task_guidance, evidence_dir)` refuses: duplicate items;
-batch scoring of more than `MAX_SCORED_ITEMS_PER_CALL` items;
-items of more than one contract; a `rubric` that is absent for `rubric-rank/v1`,
+expected_count, rubric, task_guidance, evidence_dir)` refuses (pydantic
+`ValidationError`): duplicate items; items of more than one contract; a `rubric` that is absent for `rubric-rank/v1`,
 present for another kind, or whose `rubric_ref(rubric)` differs from
 `strategy.rubric` (content digest); `task_guidance` present iff
 `strategy.guidance == "task_blocks"` (B6 supplies the task's composed
@@ -135,12 +140,49 @@ exactly: `Fraction(RankEntry.exact) >= Fraction(repr(at_least))`. `RubricScore` 
 metric: it never enters `MetricOrder`, tuning records, the incumbent, Health or
 stop conditions.
 
+## `judge-merge/v1`
+
+Parameters: `synthesize_count: 1..MAX_ADAPTOR_OUTPUTS`, `min_parents: ≥ 2`.
+Static call bound: 1. `min_items = min_parents`: with fewer admissible items no
+call is made and the outcome is `insufficient_items` (zero recorded calls,
+replayable). The one `merger` call carries `MergeRequest(criterion,
+output_contract, synthesize_count, min_parents, items, guidance)`; the
+`judge.merge/v1` prompt shows the criterion, the requested count and
+`min_parents`, the projected items, the output contract's JSON schema and its
+catalogued framework-owned fields (`PROTECTED_FIELDS`), and task guidance when
+present. The prompt therefore depends on the output contract's native schema:
+a schema change moves `prompt_sha256` and old evidence no longer replays.
+
+The verdict `SynthesisVerdict(kind="synthesis", items=[{parents, value}],
+rationale)`. `check_payload` (→ `inadmissible_choice`) requires, per draft:
+distinct parents, all listed, at least `min_parents` of them; and a value that
+validates as the output contract's native type
+(`workflows.custom_adaptors.contracts`) with every framework-owned field unset
+(`workflows.custom_adaptors.protected`). The count is checked by the fold: a
+count other than `synthesize_count`, or outside `expected_count`, is the
+strategy failure `cardinality_mismatch` (never truncated). The fold validates,
+stamps `adaptor:<adaptor_id>/judge-merge/v1` into the `stamp-source` fields and
+re-validates each value, returning `CombinedItems(contract, items=[CombinedItem(
+output_index, parents, value, value_sha256)])`. A merged proposal is a new
+candidate; downstream training still needs its own implementation and
+validation (B6 profile admission). No score arithmetic is involved.
+
 ## Run (`run_llm_strategy`)
 
 1. Refuse with `StrategyError`, before any provider contact: unimplemented kind;
    no route for `route_slot` in `routes`; `context.iteration !=
    invocation.iteration`; `strategy_call_bound(strategy, len(items)) >
-   max_calls`; a non-empty `evidence_dir` (evidence is never reused). A
+   max_calls`; more than `MAX_SCORED_ITEMS_PER_CALL` items for a kind that lists
+   every item in one call (`require_call_capacity`; replay refuses the same way; the
+   same cap is the request schemas' `max_length`, e.g. `MergeRequest.items`); a
+   non-empty `evidence_dir` (evidence is never reused); and the subclass
+   `PromptBudgetExceeded` when the first call's rendered prompt (system + user
+   characters, including task `JudgeTaskBlocks` guidance) exceeds
+   `MAX_JUDGE_PROMPT_CHARS` (400 000, `agent/schemas/judge.py`: about 100k tokens,
+   leaving output room in a 128k-token window; no context-size owner exists in the
+   bridge or `WorkflowLLMConfig`). The message names the budget, the measured size
+   and the remedy (fewer items, shorter guidance, `per_item` scoring); nothing is
+   written. A
    `JudgeCallRefused` or `ExecutionDeadlineExceeded` from the call core
    propagates; any published call files then stay without a `strategy.json`, and
    a rerun of that invocation refuses.
@@ -148,8 +190,14 @@ stop conditions.
    context, evidence_path=<evidence_dir>/calls/<NNN>_<role>.json,
    max_calls=bound)`. Each request names `invocation_sha256` and lists the
    `evidence_sha256` of every earlier call (`prior_turns`). The chain stops at the
-   first call whose status is not `decided`.
-3. `decide`: all decided → `StrategyOutcome(status="decided", ranking=fold(...))`;
+   first call whose status is not `decided`, or before a later call whose rendered
+   prompt exceeds `MAX_JUDGE_PROMPT_CHARS` (that call is never sent).
+3. `decide`: fewer items than `min_items` → no call, `insufficient_items`; all
+   decided → `StrategyOutcome(status="decided", ranking=...)` for a ranking kind or
+   `combined=...` for a combining kind (`combined` is omitted from the JSON when
+   absent), unless the fold raises `StrategyFoldFailure` (`cardinality_mismatch`);
+   a decided chain that stopped before an over-budget call → `prompt_too_large`
+   (re-derived on replay by re-rendering that call; any other early end refuses);
    otherwise `failed` with the call's `failure_code`, or `fallback` with
    `fallback_combine = on_failure.combine.kind` when a `Fallback` is declared
    (B6 then runs that deterministic combine on the same items; partial LLM output
@@ -198,7 +246,9 @@ The adaptor wiring (B6-8) is the only intended caller. It must:
    run lock's `JudgeRoutes` and a `JudgeRunContext` of the same iteration.
 4. **Consume.** `decided` → map `ItemRanking` to a B6 `Ranking(basis="rubric")`
    with `RankEntry.value = weighted_mean` and `RankEntry.exact = weighted_mean_exact`
-   (a rubric ranking without `exact` is refused), then SELECT/DISTRIBUTE;
+   (a rubric ranking without `exact` is refused), then SELECT/DISTRIBUTE; or,
+   for `combined`, validate each `CombinedItem.value` with the output contract's
+   native type, record its `parents` as lineage and DISTRIBUTE them (`all/v1`);
    `fallback` → run `fallback_combine` deterministically on the same items;
    `failed` → adaptor `failed`, reason `judge_failure`. Record
    `(<evidence_dir>/strategy.json, evidence_sha256)` in
@@ -208,6 +258,15 @@ The adaptor wiring (B6-8) is the only intended caller. It must:
    never call `run_llm_strategy` on readback or resume.
 
 ## Validation evidence
+
+`tests/unit/workflows/test_judge_merge.py` (B2-9): stamped values with parents
+in one call and replay; `min_parents` violated, repeated or foreign parents
+refused; too few items → no call, `insufficient_items`, replayable; a value
+missing a required field, setting provenance or a forbidden trust level refused;
+a surplus value → `cardinality_mismatch` with the declared fallback; an edited
+merged value refused on replay; admission rows (`select_incompatible`,
+`cardinality_mismatch`, `insufficient_capacity`, `output_contract_mismatch`,
+`output_not_emittable`); pinned `judge.merge/v1` digests.
 
 `tests/unit/workflows/test_judge_strategies.py`: hand-computed weighted means
 and input-order ties; per-criterion median of repeats; LLM-supplied total
