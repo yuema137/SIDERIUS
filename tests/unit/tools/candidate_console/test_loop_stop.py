@@ -37,6 +37,14 @@ def _stop_calls(monkeypatch, failure=None):
     return calls
 
 
+def without_requests(loop):
+    """Request flags are covered against real markers in test_loop_resume; drop them here."""
+    if loop is None:
+        return None
+    assert (loop.pop("stop_requested"), loop.pop("pause_requested")) == (False, False)
+    return loop
+
+
 def test_stop_route_delegates_once_and_acknowledges_only_a_request(console_config, monkeypatch):
     """Fails if the route skips the owner, calls it twice, or claims termination."""
     calls = _stop_calls(monkeypatch)
@@ -235,6 +243,13 @@ def test_status_loop_bound_from_submission_and_bodies_only_from_receipt(
     condition-completed receipt's verified stop reason is dropped or reshaped."""
     operation_id = uuid4()
     monkeypatch.setattr(
+        "tools.candidate_console.service.operation_admitted", lambda config, value: True
+    )
+    monkeypatch.setattr(
+        "tools.candidate_console.service.loop_control_requests",
+        lambda config, value: (False, False),
+    )
+    monkeypatch.setattr(
         "tools.candidate_console.service.read_operation",
         lambda config, value: _snapshot(value, receipt),
     )
@@ -245,4 +260,74 @@ def test_status_loop_bound_from_submission_and_bodies_only_from_receipt(
         ),
     )
     status = client(console_config).get(f"/api/operations/{operation_id}").json()
-    assert status.get("loop") == expected
+    assert without_requests(status.get("loop")) == expected
+
+
+def test_status_projects_judge_verdicts_with_rationale_only_from_their_evidence(
+    console_config, monkeypatch, tmp_path
+):
+    """B2-5: Fails if a recorded judge verdict is dropped, if its rationale is taken from
+    anywhere but the digest-checked evidence file, or if an unreadable/foreign evidence
+    file breaks the status read instead of leaving the rationale absent."""
+    from agent.judge.evidence import evidence_sha256
+    from tests.unit.agent.judge.test_judge_call import StubBridge, run
+    from tools.candidate_worker.loop_stop import JudgeBoundaryVerdict, JudgeStopReason
+
+    evidence = run(tmp_path, StubBridge())  # writes judge/0.json under tmp_path
+    digest = evidence_sha256(evidence)
+    stop = JudgeBoundaryVerdict(
+        iteration=3,
+        decision="stop",
+        evidence_path="judge/0.json",
+        evidence_sha256=digest,
+        request_sha256=evidence.request_sha256,
+    )
+    abstained = stop.model_copy(update={"iteration": 2, "decision": None})
+    foreign = stop.model_copy(
+        update={"iteration": 1, "decision": "continue", "evidence_sha256": "0" * 64}
+    )
+    receipt = CandidateRunReceipt.model_construct(
+        run_id="f" * 32,
+        status="completed",
+        workspace=str(tmp_path),
+        loop_trace=LoopTrace.model_construct(
+            attempted_iterations=3,
+            stop_reason=JudgeStopReason(
+                condition_index=0,
+                iteration=3,
+                evidence_path="judge/0.json",
+                evidence_sha256=digest,
+                request_sha256=evidence.request_sha256,
+            ),
+            judge_verdicts=(foreign, abstained, stop),
+            judge_abstentions=1,
+        ),
+    )
+    operation_id = uuid4()
+    monkeypatch.setattr(
+        "tools.candidate_console.service.operation_admitted", lambda config, value: True
+    )
+    monkeypatch.setattr(
+        "tools.candidate_console.service.loop_control_requests",
+        lambda config, value: (False, False),
+    )
+    monkeypatch.setattr(
+        "tools.candidate_console.service.read_operation",
+        lambda config, value: _snapshot(value, receipt),
+    )
+    monkeypatch.setattr(
+        "tools.candidate_console.service.loop_root_operation",
+        lambda config, value: _loop_submission(value, 5),
+    )
+    loop = client(console_config).get(f"/api/operations/{operation_id}").json()["loop"]
+    assert loop["stop_reason"]["kind"] == "judge"
+    assert loop["judge_verdicts"] == [
+        {"iteration": 1, "decision": "continue", "rationale": None, "confidence": None},
+        {"iteration": 2, "decision": None, "rationale": None, "confidence": None},
+        {
+            "iteration": 3,
+            "decision": "stop",
+            "rationale": "Two bodies without improvement.",
+            "confidence": "medium",
+        },
+    ]

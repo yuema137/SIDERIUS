@@ -83,8 +83,16 @@ def test_two_reusable_runs_reach_native_proposal_and_tuner(
     from tools.candidate_worker.training_evidence import verify_training_evidence
 
     monkeypatch.setenv("OPENAI_API_KEY", "offline-not-a-secret")
+    # This checks native settings/seed propagation, not elapsed time. Leave room
+    # for real child imports and validator pytest startup on a loaded host.
     request = add_training(
-        reusable.model_copy(update={"candidate_environment_names": ("OPENAI_API_KEY",)})
+        reusable.model_copy(
+            update={
+                "candidate_environment_names": ("OPENAI_API_KEY",),
+                "preparation_timeout_seconds": 300.0,
+                "candidate_timeout_seconds": 300.0,
+            }
+        )
     )
     original = Path(request.source_path).read_bytes()
     workspaces = []

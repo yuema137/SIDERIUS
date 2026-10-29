@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 
 from agent.schemas.output_types import OutputTypeName
+from core.seeding import RunSeedBinding
 from execute_tools.run_report import MetricView, RunHeadline
 from tools.candidate_operations import OperationStoreConfig
 from tools.candidate_operations.models import OperationKind, ProcessObservation
@@ -167,6 +168,18 @@ class ChoiceView(PreviewModel):
     reusable_runs_root: str | None = None
 
 
+class ChoicesView(PreviewModel):
+    """Configured tasks plus an opaque identity of this console's operation store.
+
+    ``operations_store_id`` lets a browser key retained operation intents by store
+    without learning a server path; it changes whenever the admitted store
+    configuration (state root or allowed output roots) changes.
+    """
+
+    operations_store_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    tasks: tuple[ChoiceView, ...]
+
+
 class RouteView(PreviewModel):
     node_id: str
     provider: str | None
@@ -197,6 +210,21 @@ class PreparedReview(PreviewModel):
     read_only: tuple[str, ...]
 
 
+class JudgeVerdictView(PreviewModel):
+    """One recorded JudgeStop boundary verdict, read-only (B2-5).
+
+    ``decision`` comes from the receipt's verified ``loop_trace.judge_verdicts``
+    (``None`` = a recorded abstention). ``rationale``/``confidence`` are copied from that
+    verdict's digest-checked judge evidence file; they are ``None`` when the call did not
+    decide or the evidence cannot be read, never inferred.
+    """
+
+    iteration: int = Field(gt=0)
+    decision: Literal["stop", "continue"] | None
+    rationale: str | None = None
+    confidence: Literal["low", "medium", "high"] | None = None
+
+
 class LoopStatusView(PreviewModel):
     """Declared finite-loop bound plus the receipt's verified attempted bodies.
 
@@ -209,6 +237,15 @@ class LoopStatusView(PreviewModel):
     # The receipt's verified reason when a declared stop condition completed the loop
     # before its limit; absent otherwise (and absent while no receipt exists).
     stop_reason: StopReason | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Durable Stop/Pause requests recorded for this run (Stop) or segment (Pause), read
+    # from the worker's own marker files; the receipt still decides what took effect.
+    stop_requested: bool = False
+    pause_requested: bool = False
+    # Recorded JudgeStop verdicts of the whole run, in boundary order (B2-5); absent for
+    # loops that never consulted a judge, so their status bytes are unchanged.
+    judge_verdicts: tuple[JudgeVerdictView, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
 
 class LoopStopSelection(PreviewModel):
@@ -285,6 +322,11 @@ class StatusView(PreviewModel):
     )
     loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
     reason: str
+    #: The operation record's admitted seed (issue #983); omitted for a pre-seed
+    #: record and for native chains, whose seed is read from the chain's lock.
+    run_seed: RunSeedBinding | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: Display wording from ``seed_labels.readback_label``.
+    seed: str
 
 
 class GraphRunSummary(PreviewModel):
@@ -338,6 +380,8 @@ class OperationListItemView(PreviewModel):
     state: Literal["queued", "active", "completed", "operation_failed", "unknown"]
     native_status: str | None
     loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: Display wording from ``seed_labels.readback_label`` (issue #983).
+    seed: str
 
 
 class OperationListView(PreviewModel):

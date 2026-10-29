@@ -5,6 +5,18 @@
   let choices = [], preparation = null, review = null, launch = null;
   let monitorId = '', cursor = 0, logText = '', polling = false, connected = false, graphResultsAttemptedFor = '';
   let monitorEpoch = 0, generation = 0, invalidRoute = false;
+  // Monitor stops reading an operation after one full read of a terminal state (M-5) or a
+  // typed unknown_operation (M-3); re-entering its route reads it once more.
+  let settled = '', lastStatus = null;
+  // Display only: strip ANSI CSI sequences (colour/cursor codes); the source log is unchanged (M-6).
+  const plainLog = text => text.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
+  const localTime = value => { const time = new Date(value); return Number.isNaN(time.getTime()) ? String(value) : time.toLocaleString(); };
+  function observedLine(id, status, final) {
+    const element = document.getElementById('operation-observed');
+    const at = status?.observed_at;
+    say('operation-observed', (final ? 'Final status · observed ' : 'Observed ') + (at ? localTime(at) : 'unavailable'));
+    if (at) element.title = 'Operation ' + id + ' · ' + at; else element.title = 'Operation ' + id;
+  }
   const say = (id, value) => { if (document.getElementById(id).textContent !== value) document.getElementById(id).textContent = value; };
   const remember = id => { try { localStorage.setItem('siderius.operation_id', id); } catch { /* Storage may be unavailable. */ } };
   try { $('operation-id').value = localStorage.getItem('siderius.operation_id') || ''; if ($('operation-id').value) say('remembered-operation', 'Last opened on this browser.'); } catch { /* Optional convenience. */ }
@@ -39,7 +51,7 @@
   async function loadChoices() {
     const selectedTask = $('task').value;
     try {
-      choices = await api('choices');
+      choices = (await window.consoleSession.choices()).tasks;
       $('task').replaceChildren();
       for (const task of choices) {
         const option = document.createElement('option'); option.value = task.task_id; option.textContent = task.label; $('task').append(option);
@@ -62,7 +74,7 @@
   window.consoleSession.subscribe(state => {
     connected = state.connected; monitorEpoch++;
     controls();
-    if (connected) { if (window.consoleNavigation?.view !== 'slow-control') void loadChoices(); void poll(); }
+    if (connected) { if (window.consoleNavigation?.view !== 'monitor') void loadChoices(); void poll(); }
     else {
       if (monitorId) say('monitor-status', 'Observation unconfirmed. Reconnect to refresh; last displayed facts are retained.');
       if (preparation?.pending) say('prepare-status', 'Submission unconfirmed after connection change. Read this UUID or retry the same frozen request.');
@@ -73,6 +85,7 @@
     invalidRoute = !event.detail.valid;
     if (invalidRoute) { monitorEpoch++; return; }
     if (event.detail.operation) setMonitor(event.detail.operation);
+    if (event.detail.view === 'monitor') settled = '';
     if (connected && event.detail.view === 'home' && !choices.length) void loadChoices();
     if (connected) void poll();
   });
@@ -168,31 +181,36 @@
   });
   function setMonitor(id) {
     if (monitorId.toLowerCase() === id.toLowerCase()) return;
-    monitorEpoch++; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorStop.render(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
+    monitorEpoch++; settled = ''; lastStatus = null; $('monitor-cause').hidden = true; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorStop.render(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
     $('token-rows').replaceChildren(); $('tokens-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
     say('remembered-operation', '');
-    say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: Unavailable');
+    observedLine(id, null, false);
     say('tokens-status', 'Reading reported tokens…');
     say('monitor-status', 'Reading operation ' + id + '…');
   }
   $('monitor-form').addEventListener('submit', async event => {
     event.preventDefault(); const id = $('operation-id').value.trim();
     if (!window.consoleNavigation.isOperationId(id)) { say('monitor-status', 'Enter a complete operation UUID.'); $('operation-id').focus(); return; }
-    setMonitor(id); location.hash = 'slow-control/' + id; await poll();
+    // An explicit Read always re-reads, also for an operation already settled.
+    setMonitor(id); settled = ''; location.hash = 'monitor/' + id; await poll();
   });
   $('log-kind').addEventListener('change', () => { monitorEpoch++; cursor = 0; logText = ''; say('log', ''); void poll(); });
   async function readMonitor() {
-    if (!monitorId) return;
+    if (!monitorId || settled === monitorId) return;
     const id = monitorId, epoch = monitorEpoch, kind = $('log-kind').value;
+    let terminal = false;
     try {
       const status = await api('operations/' + id);
       if (epoch !== monitorEpoch) return;
+      terminal = window.operationOutcome.terminal(status); lastStatus = status;
       window.renderNativeChain(status); window.renderLoopControl(status); monitorStop.render(status);
-      say('monitor-status', describe(status));
-      say('operation-observed', 'Operation UUID: ' + id + ' · Observed at: ' + (status.observed_at || 'Unavailable'));
-      facts($('operation-facts'), [['Operation UUID', status.operation_id], ['Kind', status.kind], ['Observed at', status.observed_at],
+      // One plain outcome sentence (M-2); the raw enums stay in developer facts.
+      const finishing = status.finishing ? ' The result is in; the worker is still finishing.' : '';
+      say('monitor-status', window.operationOutcome.sentence(status) + finishing);
+      observedLine(id, status, terminal);
+      facts($('operation-facts'), [['Operation UUID', status.operation_id], ['Kind', status.kind], ['State', status.state], ['Native status', status.native_status || '(none)'], ['Observed at', status.observed_at],
         ['Process observation', `${status.process.status}: ${status.process.reason || '(no reason supplied)'}`], ['Native ID', status.native_id],
-        ['Validation passed', status.validation_passed === null ? 'Not available' : String(status.validation_passed)], ['Reason', status.reason || '(none)'], ['Native receipt available', String(status.receipt_available)]]);
+        ['Validation passed', status.validation_passed === null ? 'Not available' : String(status.validation_passed)], ['Reason', status.reason || '(none)'], ['Native receipt available', String(status.receipt_available)], ['Seed', status.seed]]);
       if (['candidate', 'candidate_loop_resume'].includes(status.kind) && status.state === 'completed' && graphResultsAttemptedFor !== id) {
         graphResultsAttemptedFor = id;
         try {
@@ -209,18 +227,30 @@
       const chunk = await api(`operations/${id}/log?kind=${kind}&offset=${cursor}&max_bytes=65536`);
       if (epoch !== monitorEpoch) return;
       cursor = chunk.next_offset;
-      logText = (chunk.truncated ? '[Source log truncated; cursor reset by server]\n' : '') + logText + chunk.text;
+      logText = (chunk.truncated ? '[Source log truncated; cursor reset by server]\n' : '') + logText + plainLog(chunk.text);
       if (logText.length > 262144) logText = '[Earlier displayed text omitted]\n' + logText.slice(-262144);
       say('log', logText);
+      // L-2: a failed run names its cause in one line, taken from the log shown below.
+      const failure = window.operationOutcome.failed(lastStatus) ? window.operationOutcome.cause(logText) : null;
+      $('monitor-cause').hidden = !failure;
+      say('monitor-cause', failure ? 'Cause (from the log): ' + failure : '');
       say('log-status', chunk.missing ? 'Log not available yet.' : `Log observed: ${chunk.observed_size} source bytes · Next byte offset: ${cursor}`);
+      // One full read after a terminal state, then no further polling of this operation.
+      if (terminal && epoch === monitorEpoch && (chunk.missing || cursor >= chunk.observed_size)) settled = id;
     } catch (error) {
       if (error.stale) return;
-      if (epoch === monitorEpoch) monitorStop.observation(true);
-      if (epoch === monitorEpoch) say('monitor-status', 'Observation stale or unavailable: ' + error.message + '. Last displayed facts are retained; disconnection does not mean stopped.');
+      if (epoch !== monitorEpoch) return;
+      monitorStop.observation(true);
+      if (error.code === 'unknown_operation') {
+        settled = id;
+        say('monitor-status', 'This console has no operation with this ID. It may belong to another console or operation store.');
+        return;
+      }
+      say('monitor-status', (error.unreachable ? 'Can\'t check: the server is unreachable. ' : 'Observation stale or unavailable: ' + error.message + '. ') + 'Last displayed facts are retained; disconnection does not mean stopped.');
     }
   }
   async function readTokens() {
-    if (!monitorId) return;
+    if (!monitorId || settled === monitorId) return;
     const id = monitorId, epoch = monitorEpoch;
     try {
       const snapshot = await api(`operations/${id}/tokens`);

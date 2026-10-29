@@ -21,7 +21,7 @@ def test_private_file_states_are_names_only_and_launch_rereads(prepared, tmp_pat
     path = tmp_path / "keys.json"
     service.config = service.config.model_copy(update={"credential_file": str(path)})
     selected = PreparedSelection(prepare_operation_id=selection.operation_id)
-    assert service.review(selected).credential_readiness.file_status == "unavailable"
+    assert service.review(selected).credential_readiness.file_status == "missing"
     path.write_text('{"EXTRA": "SECRET-MARKER", invalid')
     path.chmod(0o600)
     assert service.review(selected).credential_readiness.file_status == "unavailable"

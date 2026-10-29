@@ -29,6 +29,8 @@ A captured native chain carries an explicit seed as its declaration's
 `run.run_seed`, rendered into the reviewed shell vector as `--run_seed N`;
 otherwise iteration 1's startup generates it
 ([native chain](../../../src/tools/native_chain/native-chain-contract.md#run-seed-issue-983)).
+The console's optional Seed input and seed readback are owned by the
+[console contract](../../../src/tools/candidate_console/console-contract.md#run-seed-issue-983).
 The tuner derives every attempt seed from the locked seed
 ([Tuner attempt seeds](#tuner-attempt-seeds)) and hands the trainer a
 `SeedContext`, so a tuner-driven trainer never generates its own seed. The
@@ -361,6 +363,5 @@ carry it (constructor arguments, never prompt input).
 
 These belong to later #983 PRs:
 
-- Console seed input and display (S6).
 - Generated-program seeding and the generated-seed scan (S7c).
 - The RNG census guard (S8).

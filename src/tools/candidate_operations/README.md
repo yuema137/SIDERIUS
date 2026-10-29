@@ -304,7 +304,7 @@ for request fields, byte limits, recovery and evidence meanings.
 
 ## Read reported tokens
 
-Read the same provider-reported counts shown in Slow control:
+Read the same provider-reported counts shown in Monitor:
 
 ```sh
 .venv/bin/python -m tools.candidate_operations tokens \
@@ -349,7 +349,7 @@ defines the full rules.
 ## Stop, pause or resume a research loop
 
 These steps are for a saved workflow that repeats as a research loop. The
-browser console offers the same actions in Slow control.
+browser console offers the same actions in Monitor.
 
 1. Stop ends the whole run after the current iteration. Pause ends only the
    current part of the run (a segment) after the current iteration, and you can
