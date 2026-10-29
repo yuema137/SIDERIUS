@@ -509,7 +509,11 @@ Notes:
   null (`{exact: null}` locks a null value); a null `range`, `allowed` or
   `predicate` is refused rather than read as an exact-null lock. `range`
   bounds must be JSON/YAML numbers: booleans and numeric strings are refused
-  rather than coerced. Write exponent bounds with a decimal point in YAML,
+  rather than coerced. `exact` and `allowed` values must be finite at any
+  nesting depth (`inf`, `-inf` and `NaN` are refused), like `range` bounds.
+  A self-referencing YAML anchor or nesting deeper than 64 levels is refused
+  the same way; reusing one alias in two places is fine.
+  Write exponent bounds with a decimal point in YAML,
   for example `1.0e-5`, not `1e-5`: YAML 1.1 reads `1e-5` as a string, which
   is then refused. Predicate names
   must be registered with `register_parameter_predicate`; executable Python

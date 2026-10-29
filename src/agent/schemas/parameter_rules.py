@@ -15,6 +15,8 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
+from decimal import Decimal
+from numbers import Real
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
@@ -266,6 +268,42 @@ register_parameter_predicate("odd_integer", _is_odd_integer)
 register_parameter_predicate("even_integer", _is_even_integer)
 
 
+# Rule values come from YAML/JSON, so real nesting is shallow; the bound only
+# turns a cyclic (YAML anchor) or pathological value into a validation error.
+_MAX_RULE_VALUE_DEPTH = 64
+
+
+def _rule_value_problem(
+    value: Any, depth: int = 0, path: frozenset[int] = frozenset()
+) -> str | None:
+    """Why a rule value cannot be transported, or None when it can.
+
+    Refuses a non-finite real (inf, -inf or NaN) anywhere in the value,
+    including mapping keys, and a cyclic or deeper-than-bounded structure.
+    A container shared by two branches (a YAML alias used twice) is fine.
+    """
+    if isinstance(value, (Real, Decimal)) and not isinstance(value, bool):
+        if math.isfinite(value):
+            return None
+        return "a non-finite number (inf, -inf or NaN); declare a finite value"
+    if isinstance(value, Mapping):
+        children: Iterable[Any] = [*value.keys(), *value.values()]
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        children = value
+    else:
+        return None
+    if id(value) in path:
+        return "a cyclic reference"
+    if depth >= _MAX_RULE_VALUE_DEPTH:
+        return f"nesting deeper than {_MAX_RULE_VALUE_DEPTH} levels"
+    inner = path | {id(value)}
+    for child in children:
+        problem = _rule_value_problem(child, depth + 1, inner)
+        if problem is not None:
+            return problem
+    return None
+
+
 class NumericRange(BaseModel):
     """Inclusive numeric interval for one resolved parameter."""
 
@@ -322,6 +360,12 @@ class ParameterRule(BaseModel):
                 )
         if self.allowed is not None and not self.allowed:
             raise ValueError("allowed must contain at least one value")
+        # Range bounds are already finite (NumericRange). A non-finite exact or
+        # allowed value cannot round-trip through standard JSON transport.
+        declared = self.exact if self.kind == "exact" else self.allowed
+        problem = _rule_value_problem(declared)
+        if problem is not None:
+            raise ValueError(f"{self.kind} rule must not contain {problem}")
         if self.predicate is not None and not self.predicate.strip():
             raise ValueError("predicate name must not be empty")
         return self
