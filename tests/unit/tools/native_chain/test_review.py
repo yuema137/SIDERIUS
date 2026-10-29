@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from core.layout import checkout_root
+from tools.native_chain import models
 from tools.native_chain.models import PROTECTED, NativeChainDeclaration, NativeChainRunBinding
 from tools.native_chain.review import export_argv
 from workflows.standard_cli import build_parser
@@ -61,18 +62,57 @@ def test_controls_cannot_override_dedicated_recipe(tmp_path, flag):
     [
         ("--seed_pat", "X", "--seed_paths"),
         ("--run_se", "3", "--run_seed"),
-        ("--chai", "3", "--chain_capture_input_max_bytes"),
         ("--chain_export_f", "3", "--chain_export_fd"),
         ("--seed-pat=X", None, "--seed_paths"),
         ("--run_se=3", None, "--run_seed"),
     ],
 )
 def test_abbreviated_controls_are_refused(tmp_path, option, value, control):
-    # Removing the prefix check admits overrides before review/export can run.
+    # Removing action resolution admits overrides before review/export can run.
     args = (option,) if value is None else (option, value)
     with pytest.raises(ValueError, match="protected_chain_control") as error:
         declaration(tmp_path, *args)
     assert f"{option.split('=', 1)[0]} expands to {control}" in str(error.value)
+
+
+@pytest.mark.parametrize("option", ["--run_", "--chai"])
+def test_ambiguous_controls_are_refused(tmp_path, option):
+    with pytest.raises(ValueError, match=f"ambiguous_chain_option: {option}"):
+        declaration(tmp_path, option, "3")
+
+
+def test_single_dash_control_follows_argparse(tmp_path):
+    parser = build_parser()
+    _, unknown = parser.parse_known_args(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--run_name",
+            "test",
+            *declaration(tmp_path).chain_args,
+            "-run_seed",
+            "3",
+        ]
+    )
+    assert unknown == ["-run_seed", "3"]
+    assert declaration(tmp_path, *unknown).chain_args[-2:] == ("-run_seed", "3")
+
+
+def test_protected_destination_alias_is_refused(tmp_path, monkeypatch):
+    parser = build_parser()
+    parser.add_argument("--alternate-seed", dest="run_seed")
+    monkeypatch.setattr(models, "build_parser", lambda: parser)
+    models._control_parser.cache_clear()
+    try:
+        with pytest.raises(ValueError, match="protected_chain_control: --alternate-seed"):
+            declaration(tmp_path, "--alternate-seed", "3")
+    finally:
+        models._control_parser.cache_clear()
+
+
+def test_bare_option_terminator_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="chain_option_terminator: bare --"):
+        declaration(tmp_path, "--")
 
 
 def test_nonprotected_abbreviation_remains_accepted(tmp_path):
