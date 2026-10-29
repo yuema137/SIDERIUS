@@ -138,6 +138,10 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
                 "editor_policy": "project is not enabled for candidate runs",
                 "task_policy": "preparation does not match the configured task policy",
                 "not_prepared": "preparation has no verified candidate to review",
+                "host_ledger_missing": "host resources and parallel nodes need a host ledger "
+                "in the console configuration; review without them",
+                "resources_required": "this console shares a host ledger: declare the run's "
+                "host resources, then review again",
             }.get(error.detail.code, "native operation could not be verified")
         )
         if isinstance(error, UnknownOperation):

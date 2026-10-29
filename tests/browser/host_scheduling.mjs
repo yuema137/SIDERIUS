@@ -1,8 +1,9 @@
 /** Host-ledger outcomes and controls over a stubbed API (B3-4c UI; no provider/GPU effects):
  * a queued run reads as queued in the list and Monitor and keeps being refreshed; a run
  * cancelled while queued reads as "cancelled before start", never as a failure (#1074);
- * the native-chain card states native chains are serial-only; the Run lane's host
- * resources panel starts empty and refuses an incomplete declaration in the browser.
+ * the native-chain card states native chains are serial-only; without a host ledger the
+ * Run lane hides the host resources panel and says why; with one, the panel starts empty
+ * and refuses an incomplete declaration in the browser.
  * Required: EDITOR_PYTHON, CONSOLE_PLAYWRIGHT_MODULE, CONSOLE_BROWSER_EXECUTABLE. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -38,6 +39,7 @@ try {
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}}), faults = [];
   page.on('pageerror', error => faults.push(error.message));
   const lists = [];
+  let hostLedger = false;
   const base = (id, fields) => ({operation_id: id, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: '2026-10-28T16:15:41.432Z',
     process: {status: 'alive', reason: 'observed'}, finishing: false, receipt_available: false, native_status: null,
     native_id: null, validation_passed: null, ...fields});
@@ -45,7 +47,7 @@ try {
     const request = route.request(), url = new URL(request.url());
     const reply = (json, status = 200) => route.fulfill({status, json});
     if (url.pathname.startsWith('/api/editor/')) return reply({error: {message: 'Fixture project unavailable'}}, 409);
-    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: [], ...(hostLedger ? {host_ledger: true} : {})});
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') {
       lists.push(Date.now());
@@ -85,7 +87,15 @@ try {
   // Native chains say they are serial-only rather than silently ignoring the ledger.
   assert.match(await page.locator('#native-chain-serial').textContent(), /never reserved in the host ledger/);
 
-  // The Run lane's panel starts empty and validates in the browser.
+  // Without a host ledger the panel is hidden and nothing is sent; the reason is stated.
+  await page.evaluate(() => window.consoleSession.choices());
+  assert.equal(await page.locator('#scheduling').isHidden(), true, 'No ledger: no resources panel');
+  assert.match(await page.locator('#scheduling-unavailable').textContent(), /host ledger that the operator configures/);
+  assert.deepEqual(await page.evaluate(() => window.runScheduling.read()), {value: {}});
+  // With a ledger the panel appears, starts empty and validates in the browser.
+  hostLedger = true;
+  await page.evaluate(() => window.consoleSession.choices());
+  await page.locator('#scheduling-unavailable').waitFor({state: 'hidden'});
   await page.evaluate(() => { document.getElementById('scheduling').open = true; });
   for (const id of ['scheduling-vram', 'scheduling-memory', 'scheduling-cpus']) {
     assert.equal(await page.locator('#' + id).inputValue(), '', `${id} is not prefilled`);
@@ -110,7 +120,7 @@ try {
   assert.match(await page.evaluate(selection => window.runScheduling.describe(selection), (await read()).value),
     /Reserves one GPU with 3 GiB, 8 GiB host memory and 2 CPU slots\. Runs these node kinds in parallel: validation\./);
   assert.deepEqual(faults, []);
-  console.log('PASS: queued and cancelled-before-start outcomes, list refresh, native serial note, empty validated scheduling panel');
+  console.log('PASS: queued and cancelled-before-start outcomes, list refresh, native serial note, ledger-gated empty validated scheduling panel');
 } finally {
   await browser?.close();
   server.kill();

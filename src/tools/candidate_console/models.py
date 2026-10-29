@@ -230,6 +230,9 @@ class ChoicesView(PreviewModel):
 
     operations_store_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     tasks: tuple[ChoiceView, ...]
+    #: B3-4c: the console shares an operator-configured host ledger, so the Run
+    #: lane offers host resources and parallel nodes. Omitted when false.
+    host_ledger: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class RouteView(PreviewModel):

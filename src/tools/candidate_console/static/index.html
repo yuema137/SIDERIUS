@@ -273,7 +273,8 @@
     <button id="capture-prepare-current" type="button" class="secondary" hidden>Prepare the current version instead</button>
     <div id="capture-summary"></div>
     <p id="capture-credentials" class="run-credentials" hidden></p>
-    <details id="scheduling" class="run-scheduling">
+    <p id="scheduling-unavailable" class="muted">Parallel nodes and host resources need a host ledger that the operator configures for this console. Without one, runs use one node at a time.</p>
+    <details id="scheduling" class="run-scheduling" hidden>
       <summary>Host resources and parallel nodes (optional)</summary>
       <p class="muted">Nothing here is filled in for you. Leave it empty to run as before, one node at a time. When this console shares a host ledger, declare what the run needs; it waits its turn when the host is busy. Changing anything here needs a new review.</p>
       <fieldset id="scheduling-resources"><legend><label><input type="checkbox" id="scheduling-declare"> Declare this run's resources</label></legend>

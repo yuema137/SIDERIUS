@@ -133,3 +133,25 @@ def test_a_serial_launch_keeps_its_operation_bytes_and_resources_attach_after_re
     assert launched.resources == resources
     assert launched.request.parallel == parallel
     assert launched.request_id == operation.request_id
+
+
+def test_review_refuses_what_the_launch_would_refuse_or_ignore(ledgered, console_config):
+    """Without a ledger, declared resources were shown as reserved, then ignored at launch;
+    with one, a resource-less review passed and only Launch refused. Both now refuse at review."""
+    from tools.candidate_operations.models import OperationFailure
+
+    resources = OperationResources(
+        gpu_count=0, host_memory_gib=2.0, cpu_slots=1, time_budgeted=False
+    )
+    serial = CandidateConsole(console_config)
+    assert "host_ledger" not in serial.choices_view().model_dump_json()
+    serial.require_reviewable_resources(RunResourcesSelection())  # serial review as before
+    with pytest.raises(OperationFailure) as refused:
+        serial.require_reviewable_resources(RunResourcesSelection(resources=resources))
+    assert refused.value.detail.code == "host_ledger_missing"
+    shared = CandidateConsole(ledgered)
+    assert shared.choices_view().host_ledger is True
+    shared.require_reviewable_resources(RunResourcesSelection(resources=resources))
+    with pytest.raises(OperationFailure) as missing:
+        shared.require_reviewable_resources(RunResourcesSelection())
+    assert missing.value.detail.code == "resources_required"

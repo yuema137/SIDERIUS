@@ -292,8 +292,10 @@
   $('retry').addEventListener('click', () => { problem = ''; void launchRetained(false); });
   // A reviewed launch carries exactly the reviewed host resources: any edit needs a new review.
   window.runScheduling.changed(() => {
+    // Always: a review still in flight was sent with the old values and must not land.
+    generation++;
     if (!review) return;
-    generation++; review = null; $('summary').replaceChildren(); $('details').textContent = '';
+    review = null; $('summary').replaceChildren(); $('details').textContent = '';
     status('Host resources changed. Review again before launching.'); controls();
   });
   async function check() {

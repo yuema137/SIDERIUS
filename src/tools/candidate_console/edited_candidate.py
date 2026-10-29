@@ -96,6 +96,7 @@ class EditedCandidate:
         )
 
     def review(self, project_id: str, selection: EditedRunSelection) -> EditedRunReview:
+        self.console.require_reviewable_resources(selection)
         review = self._checked_review(project_id, selection)
         return review.model_copy(
             update={

@@ -62,8 +62,16 @@
     }
     return {value: Object.keys(capabilities).length ? {capabilities} : null};
   }
+  // Shown only when the console shares a host ledger: without one, the backend has no
+  // budget to reserve or schedule against and refuses these fields at review.
+  const available = () => window.consoleSession?.hostLedger === true;
+  function reflect() {
+    document.getElementById('scheduling').hidden = !available();
+    $('unavailable').hidden = available();
+  }
   /** The fields to add to a review selection, or an error to show instead of reviewing. */
   function read() {
+    if (!available()) return {value: {}};
     const resources = readResources(); if (resources.error) return resources;
     const parallel = readParallel(); if (parallel.error) return parallel;
     const value = {};
@@ -86,8 +94,9 @@
   function show(problem) { $('problem').textContent = problem || ''; }
   function changed(callback) { listeners.push(callback); }
   document.addEventListener('DOMContentLoaded', () => {
-    build();
+    build(); reflect();
     document.getElementById('scheduling').addEventListener('input', () => { show(''); listeners.forEach(callback => callback()); });
+    window.addEventListener('console-host-ledger', () => { reflect(); listeners.forEach(callback => callback()); });
   });
   window.runScheduling = Object.freeze({read, describe, show, changed});
 })();
