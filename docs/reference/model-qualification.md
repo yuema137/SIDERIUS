@@ -1,34 +1,37 @@
-# Supported providers and model qualification
+# Supported providers and models
 
-A supported provider means SIDERIUS has an adapter for that service. A model is
-qualified only for the operations and configuration actually tested. Use the
-records below to choose an initial route, then test the roles your workflow
-will assign to it. A successful connection is not evidence of scientific quality.
+![SIDERIUS model qualification: text, JSON and single-tool selection](../assets/model-capabilities.svg)
 
-## Capabilities to qualify
+<p align="center">
+  <a href="#at-a-glance">Provider overview</a> ·
+  <a href="#qualification-records">Model records</a> ·
+  <a href="#capabilities-to-qualify">Capability requirements</a> ·
+  <a href="../getting-started/installation.md#api-keys">API keys &amp; setup</a>
+</p>
 
-Nodes use `LLMBridge`. Test through that gateway, not only through a vendor SDK.
-A model needs the operations used by its assigned roles; a model intended for
-all roles should pass all three output paths.
+Choose a provider, check the tested model, then expand its record for the exact
+scope. Adapter support and model qualification are different: a basic smoke pass
+is not a completed research workflow or evidence of scientific quality.
 
-| Capability | What to verify |
-| --- | --- |
-| Text (`generate_text`) | Nonempty, complete output that follows the instruction. Reasoning and code-generation roles need this path. |
-| JSON (`generate`) | A parseable object with the required fields and types, accepted by the downstream node schema. JSON-looking text alone is insufficient. |
-| Tool selection (`tool_call`) | Exactly one declared tool, object arguments that meet its schema, and a nonempty call ID. Selecting a tool does not execute it. |
-| Completion and limits | The chosen output ceiling accommodates the response; truncation or refusal must not be accepted as a complete result. Test representative prompt and output sizes. |
-| Usage observability | Record requested and served model identities and available token counts. Missing usage is unknown, never measured zero. |
-| Operational behavior | Check authentication, quotas, rate limits, timeouts and retry behavior for the intended workload. These can change independently of model capability. |
+## At a glance
 
-For Anthropic, JSON uses an output tool. Other optional providers use native
-JSON-object output when their model profile supports it, otherwise the output
-tool path. Tool support therefore matters even for some JSON-only roles.
-The optional adapter is one-shot: these records do not establish streaming,
-multi-turn thinking/tool continuation, multiple simultaneous tool calls, or
-multimodal support. See the authoritative [transport contract](../../src/agent/llm_transport/transport-contract.md)
-for request, response and accounting semantics.
+**Live checks: 2026-10-28** · Text, JSON and tool selection through `LLMBridge`.
 
-## Providers and recorded models
+| Provider | Recorded model | Text | JSON | Tool | Usage |
+| --- | --- | :---: | :---: | :---: | :---: |
+| <img src="../assets/providers/openai.svg" width="28" height="28" alt="OpenAI logo"> **OpenAI** | No record here yet | — | — | — | — |
+| <img src="../assets/providers/gemini-color.svg" width="28" height="28" alt="Gemini logo"> **Gemini** | No record here yet | — | — | — | — |
+| <img src="../assets/providers/deepseek-color.svg" width="28" height="28" alt="DeepSeek logo"> **DeepSeek** | No record here yet | — | — | — | — |
+| <img src="../assets/providers/claude-color.svg" width="28" height="28" alt="Claude logo"> **Claude** | `claude-sonnet-5-5` | ✅ | ✅ | ✅ | ✅ |
+| <img src="../assets/providers/kimi-color.svg" width="28" height="28" alt="Kimi logo"> **Kimi** | `kimi-k3` | ✅ | ✅ | ↻ Pass | ✅ |
+| <img src="../assets/providers/zai.svg" width="28" height="28" alt="Z.AI logo"> **GLM** | `glm-5.3` | ✅ | ✅ | ✅ | ✅ |
+
+**Legend:** ✅ passed / usage recorded · **↻ Pass** succeeded on a separate retry
+following HTTP 429 · **—** no qualification record in this page, not a failed test.
+All six provider adapters are available. None of these records claims full-workflow
+qualification. [View test settings and receipts →](model-qualification-evidence.md)
+
+## Qualification records
 
 The live smoke records below were observed on 2026-10-28. Their tested revision
 and exact configuration are preserved in the linked evidence.
@@ -110,6 +113,29 @@ Provider: `zai`. Three successful calls; no full workflow was run.
 [Configuration and evidence](model-qualification-evidence.md).
 
 </details>
+
+## Capabilities to qualify
+
+Nodes use `LLMBridge`. Test through that gateway, not only through a vendor SDK.
+A model needs the operations used by its assigned roles; a model intended for
+all roles should pass all three output paths.
+
+| Capability | What to verify |
+| --- | --- |
+| Text (`generate_text`) | Nonempty, complete output that follows the instruction. Reasoning and code-generation roles need this path. |
+| JSON (`generate`) | A parseable object with the required fields and types, accepted by the downstream node schema. JSON-looking text alone is insufficient. |
+| Tool selection (`tool_call`) | Exactly one declared tool, object arguments that meet its schema, and a nonempty call ID. Selecting a tool does not execute it. |
+| Completion and limits | The chosen output ceiling accommodates the response; truncation or refusal must not be accepted as a complete result. Test representative prompt and output sizes. |
+| Usage observability | Record requested and served model identities and available token counts. Missing usage is unknown, never measured zero. |
+| Operational behavior | Check authentication, quotas, rate limits, timeouts and retry behavior for the intended workload. These can change independently of model capability. |
+
+For Anthropic, JSON uses an output tool. Other optional providers use native
+JSON-object output when their model profile supports it, otherwise the output
+tool path. Tool support therefore matters even for some JSON-only roles.
+The optional adapter is one-shot: these records do not establish streaming,
+multi-turn thinking/tool continuation, multiple simultaneous tool calls, or
+multimodal support. See the authoritative [transport contract](../../src/agent/llm_transport/transport-contract.md)
+for request, response and accounting semantics.
 
 ## Add or refresh a qualification record
 
