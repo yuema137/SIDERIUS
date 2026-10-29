@@ -267,6 +267,10 @@ Two consumers now SKIP rather than fabricate instead of dying:
 Under an un-composed legacy physical-data caller, every fact
 `AttemptTopologyFacts` reports and both legacy SampleSets remain unchanged.
 Composition presence, never a task name, selects the task-owned scope path.
+When no SampleSet is built, composed attempts print the task-owned scope
+notice regardless of mode or physical geometry. The `Legacy mode: file_index`
+notice is reserved for uncomposed single-file attempts. This log distinction
+does not change mode selection or scope acquisition.
 
 ### Resource and time planning (Step-05b)
 

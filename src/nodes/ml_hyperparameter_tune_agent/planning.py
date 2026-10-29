@@ -282,14 +282,15 @@ def _disclosed_epoch_caps(agent_input: Any) -> tuple[int | None, int | None]:
     )
 
 
-def _no_sample_set_notice(mode: str, file_index: int | None) -> str:
+def _no_sample_set_notice(mode: str, file_index: int | None, *, composed: bool = False) -> str:
     """What to print when no SampleSet was built.
 
-    TWO different states share that branch and saying so matters: the legacy
-    single-file round has always been there, and a composed task that declares
-    no physical geometry joins it because its scope is the one
-    ``acquire_attempt_scopes`` builds, not a SampleSet.
+    Composition presence selects the task-owned notice, independently of
+    mode or physical geometry. Only an uncomposed single-file round gets
+    the legacy file-index notice.
     """
+    if composed:
+        return "  Task-owned scope: no legacy SampleSet is built for a composed task"
     if mode == "single_file":
         return f"  Legacy mode: file_index={file_index}"
     return (
@@ -822,7 +823,13 @@ def prepare_attempt(
     else:
         train_sample_set = None
         eval_sample_set = None
-        print(_no_sample_set_notice(trial_config.mode, file_index))
+        print(
+            _no_sample_set_notice(
+                trial_config.mode,
+                file_index,
+                composed=agent_input.task_composition_ref is not None,
+            )
+        )
 
     # Step 12 / PR-12bc B5 — task-owned scope acquisition. A CALLED boundary,
     # never a branch family here (§J). Un-composed runs acquire nothing and
