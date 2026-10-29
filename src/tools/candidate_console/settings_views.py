@@ -46,6 +46,7 @@ class SettingsView(PreviewModel):
     active_sha256: str | None
     restart_required: bool
     problem: str | None  # the settings file on disk cannot be used, and how to recover
+    notice: str | None = None  # a completed save whose durability is not confirmed
     rows: tuple[SettingRow, ...]
     llm_profiles: tuple[ProfileCard, ...]
     advice_files: tuple[AdviceCard, ...]

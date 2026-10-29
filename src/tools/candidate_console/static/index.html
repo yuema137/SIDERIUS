@@ -356,6 +356,16 @@
     </form>
     <p id="settings-pending" role="status"></p>
   </section>
+  <section class="card" aria-labelledby="settings-export-heading">
+    <h2 id="settings-export-heading">Export a workflow</h2>
+    <p class="muted">Writes the saved workflow, the task's model profile and the workflow's own advice as plain files on the server, then lets you download them. Credentials are never exported.</p>
+    <label for="settings-export-project">Workflow project</label><select id="settings-export-project"></select>
+    <label for="settings-export-task">Task</label><select id="settings-export-task"></select>
+    <label for="settings-export-name">Export name</label><input id="settings-export-name" type="text" maxlength="80" value="my-export">
+    <div class="actions"><button type="button" id="settings-export">Export</button></div>
+    <p id="settings-export-status" role="status"></p>
+    <ul id="settings-export-files"></ul>
+  </section>
   <section class="card" aria-labelledby="settings-workspace-heading">
     <h2 id="settings-workspace-heading">Workspace</h2>
     <dl id="settings-workspace" class="facts"></dl>

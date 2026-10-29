@@ -279,6 +279,9 @@
       ].join('\n');
       credentials(value.credential_readiness);
       status('Inputs checked. Prepare copies the saved workflow and its inputs; it does not start the run.');
+      void window.consoleSettings?.originLines(selection.task_id, {llm_profile: value.llm_config_file, data_root: value.data_root}).then(lines => {
+        if (lines.length && review === value) $('details').textContent += '\n' + lines.join('\n');
+      });
     } catch (error) { if (!error.stale && current(version, revision, project)) status('Inputs not accepted: ' + error.message); }
     controls();
   });

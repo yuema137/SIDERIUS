@@ -162,6 +162,9 @@ try {
   // R-5: the name-only credential precheck is shown before Prepare, read by the server.
   assert.equal(await page.locator('#new-run-credentials').isVisible(), true);
   assert.match(await page.locator('#new-run-credentials').textContent(), /Credentials|No credentials/);
+  // The review names where its resolved model profile and data folder come from.
+  await page.locator('#new-run-details').filter({hasText: 'Model profile source: Set in console.json'}).waitFor();
+  assert.match(await page.locator('#new-run-details').textContent(), /Data folder source: Set in console\.json/);
   // An unrelated unresolved candidate survives editing and blocks preparation.
   // Intents are keyed by operations store and project (R-3), never per origin.
   const candidateKey = await page.evaluate(() => window.reusableIntents.key('candidate'));
