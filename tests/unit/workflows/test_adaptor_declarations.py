@@ -51,6 +51,7 @@ from workflows.definition.catalog import (
     SPLITTABLE_ITEMS,
 )
 from workflows.definition.fanout import execution_families
+from workflows.definition.llm_strategies import AdaptorCombine
 
 TASK = TaskReferences(manifest="task.json", data_root="data", workspace="run")
 FORMAT = "siderius.adaptors/v1"
@@ -571,7 +572,7 @@ def _union_kinds(union) -> dict[str, type]:
 def test_strategy_catalogue_matches_the_declarable_strategy_models():
     """A kind added to a union without a catalogue row (or the reverse) fails here."""
     stages = {
-        "combine": _union_kinds(adaptor_strategies.DeterministicCombine),
+        "combine": _union_kinds(AdaptorCombine),
         "select": _union_kinds(adaptor_strategies.SelectStrategy),
         "distribute": _union_kinds(adaptor_strategies.DistributeStrategy),
     }

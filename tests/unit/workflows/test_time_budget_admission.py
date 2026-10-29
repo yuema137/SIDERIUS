@@ -65,7 +65,7 @@ def test_iteration_cli_refuses_malformed_budget_before_workspace_binding(
             run_one_iteration.main()
         assert error.value.code == 2
         message = capsys.readouterr().err
-        assert field in message and "finite positive" in message
+        assert f"is refused by HyperparamTuningInput.{field}" in message
     else:
         with pytest.raises(_StartupReached):
             run_one_iteration.main()
@@ -80,7 +80,7 @@ def test_direct_workflow_refuses_malformed_budget_before_composition(
 ):
     workspace = tmp_path / "uncreated-run"
     monkeypatch.setattr(model_exploration, "verify_composition_is_bound", _stop_startup)
-    with pytest.raises(ValueError, match=f"{field} must be a finite positive"):
+    with pytest.raises(ValueError, match=f"is refused by HyperparamTuningInput.{field}"):
         model_exploration.run_workflow(
             workspace=str(workspace),
             run_name="preflight",

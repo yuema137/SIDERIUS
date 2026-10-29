@@ -10,11 +10,8 @@ from pydantic import Field
 
 from core.canonical_json import canonical_sha256
 from execute_tools.evaluation_metric import MetricDirection
-from workflows.definition.adaptor_strategies import (
-    DeterministicCombine,
-    DistributeStrategy,
-    SelectStrategy,
-)
+from workflows.definition.adaptor_strategies import DistributeStrategy, SelectStrategy
+from workflows.definition.llm_strategies import AdaptorCombine
 
 from .combine import Ranking, Role
 from .items import AdaptorInputRef, AdaptorModel, Digest, ItemAdmission
@@ -37,6 +34,17 @@ class OutputDigest(AdaptorModel):
     sha256: Digest | None
 
 
+class StrategyEvidenceRef(AdaptorModel):
+    """Anchor of an LLM COMBINE invocation's ``strategy.json`` (B2 ``StrategyResult``).
+
+    ``path`` is relative to the adaptor directory, so the record is host-independent;
+    ``sha256`` is the digest readback passes to ``replay_llm_strategy``.
+    """
+
+    path: str = Field(min_length=1)
+    sha256: Digest
+
+
 class AdaptorRecord(AdaptorModel):
     schema_version: Literal["siderius.adaptor-record/v1"] = "siderius.adaptor-record/v1"
     adaptor_id: str = Field(min_length=1)
@@ -52,17 +60,22 @@ class AdaptorRecord(AdaptorModel):
     contributions: tuple[AdaptorContribution, ...]
     outputs: tuple[OutputDigest, ...]
     fallback: str | None = None  # Fallback.combine kind actually run (B2 status "fallback")
+    # LLM COMBINE kinds only; omitted otherwise so deterministic records keep their bytes.
+    strategy_evidence: StrategyEvidenceRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 def build_adaptor_record(
     *,
     adaptor_id: str,
     iteration: int,
-    combine: DeterministicCombine,
+    combine: AdaptorCombine,
     select: SelectStrategy,
     distribute: DistributeStrategy,
     outcome: AdaptorOutcome,
     fallback: str | None = None,
+    strategy_evidence: StrategyEvidenceRef | None = None,
 ) -> AdaptorRecord:
     parameters = {
         "combine": combine.model_dump(mode="json"),
@@ -98,4 +111,5 @@ def build_adaptor_record(
             for output in outcome.outputs
         ),
         fallback=fallback,
+        strategy_evidence=strategy_evidence,
     )

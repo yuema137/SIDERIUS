@@ -6,7 +6,7 @@ B3-4b); both loops share the per-node steps of ``GraphBody``.
 """
 
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -23,10 +23,12 @@ from workflows.task_composition import RunTaskComposition
 from workflows.termination import infrastructure_abort_reason
 
 from . import readiness, route_phase, unit_runner
+from .adaptor_llm import JudgeAdaptorContext, judge_adaptor_context
 from .adaptor_phase import (
     body_outcome,
     execute_adaptor,
     expected_adaptors,
+    judged_proposal,
     skipped_inputs,
     tuning_branch,
 )
@@ -34,6 +36,7 @@ from .budget import WorkerBudget
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
 from .graph_models import GraphNodeEvidence, GraphRouteEvidence, GraphTrace
+from .inputs import NativeInputs
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .readiness import NodeRouting
 from .training_admission import TrainingAdmission, admit_training
@@ -99,6 +102,8 @@ class GraphBody:
     admitted: TrainingAdmission | None
     inputs: dict[str, SelectedInput]
     slots: dict[str, GraphNodeEvidence]
+    #: LLM COMBINE adaptors' admitted routes, rubrics and judge budget (B6-8a).
+    judge: JudgeAdaptorContext | None
     results: dict[str, NodeOutput] = field(default_factory=dict)
     evidence: dict[str, GraphNodeEvidence] = field(default_factory=dict)
     outcomes: dict[str, AdaptorOutcome] = field(default_factory=dict)
@@ -129,6 +134,9 @@ class GraphBody:
             if shape.tuning
             else None
         )
+        # Before any effect: LLM COMBINE adaptors' routes, rubrics, guidance and the run's
+        # static judge call sum against max_judge_calls (B6-8a; D3, D4).
+        judge = judge_adaptor_context(request, initial, composition.judge_task)
         inputs = materialize_fanout(
             request,
             Path(initial.workspace),
@@ -159,6 +167,7 @@ class GraphBody:
             admitted,
             inputs,
             slots,
+            judge,
         )
 
     @property
@@ -207,6 +216,7 @@ class GraphBody:
             workspace=Path(self.initial.workspace),
             iteration=self.iteration,
             skips=route_phase.skip_citations(self.evidence, self.routes, self.routing),
+            judge=self.judge,
         )
         if outcome is not None:
             self.outcomes[node_id] = outcome
@@ -238,6 +248,12 @@ class GraphBody:
                 )
             )
         selected = self.inputs[shape.families[0].proposal if node_id == shape.tuning else node_id]
+        judged = judged_proposal(shape, self.outcomes, node_id)
+        if judged is not None:
+            # B6-8b: the branch's task facts come from the selected proposal's seed.
+            owner = self.inputs[judged[1]]
+            assert isinstance(selected, NativeInputs) and isinstance(owner, NativeInputs)
+            selected = replace(selected, proposal=owner.proposal)
         return node_invocation(
             self.request,
             self.initial,

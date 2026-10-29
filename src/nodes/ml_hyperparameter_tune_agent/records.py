@@ -1077,6 +1077,21 @@ def _resume_progress(
     return len(completed_round_indices), max(attempt_suffixes, default=0)
 
 
+def publish_run_output(output_path: str, agent_output: HyperparamTuningOutput) -> None:
+    """Persist ``run_output`` through the storage owner.
+
+    Coerce float('-inf') no-signal sentinels (and NaN) to JSON null at the
+    storage boundary: ``model_dump_json`` would otherwise emit non-standard
+    ``-Infinity`` tokens that break the dashboard's ``JSON.parse``.
+    S2 / U5: serialise-first + atomic replace. ``run_output`` is the artifact
+    the iteration manifest hashes, so a crash mid-write must leave either the
+    previous file or the complete new one, never a truncated one that the next
+    iteration's replay check then reports as a tamper.
+    """
+    safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
+    publish_json_atomically(output_path, safe_output, indent=4)
+
+
 def finalize_run_output(
     bindings: RunBindings,
     exit_snapshot: RunExitSnapshot,
@@ -1323,17 +1338,7 @@ def finalize_run_output(
     # See docs/V8_Gap_Report.md Domain 2c.
     try:
         agent_output = HyperparamTuningOutput.model_validate(agent_output_dict)
-        # Coerce float('-inf') no-signal sentinels to JSON null at the
-        # storage boundary — model_dump_json would otherwise emit
-        # non-standard ``-Infinity`` tokens that break the dashboard's
-        # ``JSON.parse``.
-        safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
-        # S2 / U5: serialise-first + atomic replace. `run_output` is the
-        # artifact the iteration manifest hashes, so a crash mid-write must
-        # leave either the previous file or the complete new one — never a
-        # truncated one that the next iteration's replay check then reports
-        # as a tamper.
-        publish_json_atomically(output_path, safe_output, indent=4)
+        publish_run_output(output_path, agent_output)
         print(f"Output validated and saved -> {output_path}")
     except Exception as e:
         print(
