@@ -436,7 +436,8 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
     with _open_directory(base) as directory:
         if not _owned(directory):
             raise WorkspaceRefused(
-                "workspace parent must be owned by you without group/other write"
+                f"workspace parent {base} must be owned by you without group/other write; "
+                f"fix it with: chmod 700 {base}"
             )
         root = ensure_owned_directory(directory, WORKSPACE_DIRECTORY, WORKSPACE_DIRECTORY)
     opened = {"": root}

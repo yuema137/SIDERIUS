@@ -319,8 +319,9 @@ def test_init_refuses_a_directory_owned_by_another_user(tmp_path, monkeypatch):
 
     real = os.getuid()
     monkeypatch.setattr(workspace.os, "getuid", lambda: real + 1)
-    with pytest.raises(WorkspaceRefused, match="owned by you"):
+    with pytest.raises(WorkspaceRefused, match="owned by you") as refusal:
         init_workspace(str(tmp_path))
+    assert f"chmod 700 {tmp_path.resolve()}" in str(refusal.value)
     assert not (tmp_path / "siderius_workspace").exists()
 
 
