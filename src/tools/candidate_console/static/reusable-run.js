@@ -22,7 +22,7 @@
   }
   function stopCondition(condition) {
     if (condition.kind === 'metric_threshold') return `${condition.metric_id} reaches ${condition.threshold} (task metric direction)`;
-    if (condition.kind === 'no_improvement') return `${condition.completed_bodies} completed bod${condition.completed_bodies === 1 ? 'y' : 'ies'} pass without improvement`;
+    if (condition.kind === 'no_improvement') return `${condition.completed_bodies} completed bod${condition.completed_bodies === 1 ? 'y' : 'ies'} pass${condition.completed_bodies === 1 ? 'es' : ''} without improvement`;
     if (condition.kind === 'judge') return `a language-model judge decides to stop ("${condition.criterion}"), first after ${condition.min_completed_bodies} completed bod${condition.min_completed_bodies === 1 ? 'y' : 'ies'}; a failed judge call ${condition.on_failure === 'continue' ? 'is recorded as an abstention' : 'ends the loop as failed'}`;
     return `unsupported condition ${condition.kind}`;
   }
@@ -70,6 +70,13 @@
     if (!coordinator.eligible()) return 'Waiting for the preparation status…';
     return '';
   }
+  function idleStatus() {
+    if (selected || intent || busy || storageProblem) return;
+    status(!session.connected ? 'Connect to prepare or open a run.'
+      : !editor.projectId ? 'Open an experiment setup to prepare or open a run.'
+      : !editor.candidateEnabled ? NOT_ENABLED
+      : 'Prepare a run in step 1, or open an earlier prepared run below.');
+  }
   function controls() {
     const enabled = session.connected && editor.candidateEnabled && !!editor.projectId && !busy;
     $('task').disabled = !enabled;
@@ -108,6 +115,26 @@
       ? 'Credentials ready (names only checked; no value is shown or sent to this page).'
       : `Credentials not ready${missing.length ? ': missing ' + missing.join(', ') : ''}. ${readiness.instructions.join(' ')}`;
   }
+  function renderFacts(value) {
+    const line = (label, text) => {
+      const p = document.createElement('p'); p.textContent = `${label}: ${text}`; p.style.whiteSpace = 'pre-wrap'; $('summary').append(p);
+    };
+    for (const [label, key] of [['Proposal advice', 'proposal_advice'], ['Implementation advice', 'implementation_advice'], ['Validation advice', 'validation_advice']]) line(label, value[key] || 'none');
+    const training = value.facts?.training;
+    if (training) {
+      line('Health mode', ({observe_only: 'Record only', blocking: 'Block on failure'})[training.healthgate_mode] || 'Not declared');
+      for (const phase of ['trial', 'formal']) {
+        const budget = training[`${phase}_time_budget_minutes`];
+        const epochs = training[`${phase}_max_epochs`];
+        line(phase === 'trial' ? 'Trial training' : 'Formal training', `Time budget: ${budget == null ? 'not set' : budget + ' minutes'}; epoch ceiling: ${epochs == null ? 'not set (uses shared ceiling)' : epochs}`);
+      }
+      line('Shared epoch ceiling', training.max_epochs ?? 'not set');
+    } else line('Training settings', 'This workflow has no training stage.');
+    for (const [label, rules] of [['Task locked parameters', value.facts?.task_parameter_rules], ['Workflow parameter constraints', training?.workflow_parameter_rules]]) {
+      const entries = Object.entries(rules?.rules || {});
+      line(label, entries.length ? entries.map(([path, rule]) => `${path}: ${JSON.stringify(rule)}`).join('\n') : 'none');
+    }
+  }
   // Issue #1136: native training (a `tuning` node) needs an NVIDIA GPU and refuses a
   // sandbox without one. Presentation only, from the reviewed nodes and devices, then the
   // server's device warnings (walkthrough N2: the same wording `check` prints, for
@@ -142,7 +169,9 @@
   showIntent();
   function displayOperation(value) {
     if (!coordinator.observe('candidate', intent, value)) return;
+    const changed = observed?.operation_id !== value.operation_id || observed?.state !== value.state;
     observed = value; problem = '';
+    if (changed) window.dispatchEvent(new CustomEvent('setup-run-observed', {detail: {project: intent.project}}));
     terminal = coordinator.dismissible('candidate', intent);
     const sentence = !value.state && value.observation === 'existing'
       ? 'This run already exists (no second one was started); checking its status…'
@@ -240,12 +269,13 @@
       if (session.connected && editor.sourceAvailable && !editor.saving && !selected) void list();
     }
     if (previous.projectId !== editor.projectId) { invalidate(); $('run').replaceChildren(option('', 'Choose a prepared run')); if (session.connected) void list(); }
-    if (notEnabled()) status(NOT_ENABLED);
+    idleStatus();
     controls();
   });
   session.subscribe(() => {
     if (!session.connected) { generation++; review = null; $('summary').replaceChildren(); $('details').textContent = ''; credentials(null); }
     controls();
+    idleStatus();
     if (session.connected && ['workflow', 'run'].includes(window.consoleNavigation?.view)) void loadTasks();
     if (session.connected) { void checkPreparation(); if (intent) void check(); }
   });
@@ -284,6 +314,7 @@
       const nodes = value.nodes.map(item => item[0]).join(value.execution_profile ? ', ' : ' → ');
       $('summary').textContent = `${value.run_name} · ${value.task_label} · Captured workflow.${profile} Nodes: ${nodes}.`;
       credentials(value.credential_readiness);
+      renderFacts(value);
       const routes = value.routes.map(route => `${route.node_id}: ${route.provider || 'unresolved'} / ${route.model || 'unresolved'}`).join('\n');
       $('details').textContent = `Task manifest: ${value.task_manifest}\nDataset: ${value.data_root}\nLLM config: ${value.llm_config_file}\nInputs: ${value.inputs}\nWorkspace: ${value.workspace}\nRoutes:\n${routes}\nTimeout: ${value.candidate_timeout_seconds} s\nNetwork: ${value.network}\nDevices: ${value.devices.join(', ') || 'none'}\nEnvironment names: ${value.environment_names.join(', ') || 'none'}\nRead-only paths:\n${value.read_only.join('\n')}\nOutput types: ${value.allowed_output_types?.join(', ') || 'unconstrained'}\nProposal advice: ${value.proposal_advice || 'none'}\nImplementation advice: ${value.implementation_advice || 'none'}\nValidation advice: ${value.validation_advice || 'none'}\nSource: ${value.source_path}\nSource version: ${value.source_sha256}\nComposition: ${value.composition_fingerprint}\nRequest: ${value.request_digest}\n${researchLoop(value)}`;
       if (value.literature_settings && Object.keys(value.literature_settings).length) {

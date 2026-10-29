@@ -12,6 +12,7 @@ from tools.candidate_prepare import ReusablePreparedSelection
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import AuthoredLoop
 
+from .capture_facts import CaptureFacts
 from .models import CredentialReadiness, RouteView, RunResourcesSelection
 
 
@@ -50,6 +51,8 @@ class ReusableCapturePage(PreviewModel):
 
 
 class ReusableCaptureReview(PreviewModel):
+    facts: CaptureFacts
+
     execution_profile: (
         Literal[
             "native-proposal-fanout/v1",

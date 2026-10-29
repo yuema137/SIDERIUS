@@ -26,6 +26,7 @@ from tools.candidate_worker.models import CandidateRunRequest
 from tools.workflow_authoring.versions import recorded_name
 from workflows.definition import AuthoredLoop
 
+from .capture_facts import capture_facts
 from .files import credentials
 from .models import RouteView, TaskChoice
 from .package_mounts import device_warnings
@@ -179,6 +180,7 @@ class ReusableCandidate:
             )
             literature_settings = {selected[0]: authored}
         return ReusableCaptureReview(
+            facts=capture_facts(request),
             loop=loop,
             literature_settings=literature_settings,
             execution_profile=profile,

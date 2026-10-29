@@ -335,6 +335,32 @@ ledger's own launch code, so nothing reaches Launch that Launch would refuse or
 silently ignore. `ChoicesView.host_ledger` (omitted when false) tells the browser
 whether a ledger is configured.
 
+Prepared review facts (`capture_facts.py`): `ReusableCaptureReview.facts` carries
+`training` (nullable `TrainingReview`) and `task_parameter_rules` (nullable
+`ParameterRules`). The adapter reads the reviewed request's `proposal.input` external observation,
+or `optional.task-composition-ref` for interpretation-led workflows. Both profiles
+read `native-training.settings` when present. Reads are bounded and recheck SHA-256
+before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
+`CandidateTrainingSettings`. Task locks come from the proposal's
+`task_composition_ref.parameter_rules` or the separate `TaskCompositionRef.parameter_rules`;
+training controls come from the captured settings' native launch schema, including
+its defaults. No task import or current editor/settings lookup occurs. Review
+refuses changed input bytes. The projection does not alter launch or its digest.
+
+The ordinary `#capture-summary` displays all three captured advice strings, Health
+mode (`observe_only`: Record only; `blocking`: Block on failure), trial/formal time
+budgets in minutes, their configured epoch ceilings and the shared ceiling, task
+locks and separate workflow constraints. Null caps/budgets are labeled not set;
+per-role unset caps reference the shared ceiling, without browser default resolution.
+Rule JSON preserves exact null values. A workflow without training states that it
+has no training stage. Idle step 2 distinguishes disconnected, no open setup,
+runs disabled, and ready to prepare/open a run; singular no-improvement text says
+"1 completed body passes", plural says "2 completed bodies pass". The HTML declares
+the existing same-origin logo as favicon to prevent the browser's unsupported `/favicon.ico` fetch.
+Targeted witnesses: `test_review_projects_prepared_training_and_task_locks` and
+`tests/browser/run_page_review.mjs` (real prepared review and launch/list refresh;
+synthetic response variants for plural grammar and blocking Health presentation).
+
 Compute requirement (issue #1136, presentation only). A reviewed run whose
 captured workflow has a `tuning` node (native training, which refuses a sandbox
 without a CUDA device) shows `#capture-compute-review` "Compute: NVIDIA GPU
@@ -1244,14 +1270,18 @@ next-step lines then say "check the inputs" only. Admission is unchanged
 (`configured_capture` still refuses another task).
 
 **Runs of this setup** (`setup-runs.js`, `#setup-runs`, shown while a setup is open):
-on Run entry, a setup change and Refresh (`#setup-runs-refresh`) it reads
+on Run entry, a setup change, reconnect and Refresh (`#setup-runs-refresh`) it reads
 `GET /api/operations?limit=50&project_id=<setup_id>` and lists each run as a link to
 `#monitor/<UUID>` (run name and local admission time; outcome sentence below). A newer read
 (another setup, Refresh) replaces an in-flight one; only the newest renders. The status
 line counts the runs, "No runs of this setup yet." when none (complete), "No runs found;
 older runs may be missing." when none and `incomplete`, and with runs plus `incomplete`
 says older runs may be missing (the store scan limit), never claiming a complete
-history; unverifiable records are counted.
+history; unverifiable records are counted. The retained candidate controller emits
+`setup-run-observed` when an accepted operation id/state changes (including first
+launch acknowledgement or recovery). The matching setup invalidates its cached list
+and rereads immediately while Run is visible, so the launched operation appears
+without manual Refresh. Existing server attribution/filtering remains authoritative.
 
 **Metric threshold prefill (F11):** `task-tab.js` also reads the selected task's summary
 on Workflow entry and fills `<datalist id="task-metric-ids">` with the declared metric
