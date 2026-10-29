@@ -1372,7 +1372,8 @@ it is runnable, else the first runnable project; when none is runnable the dialo
 failure shows "Couldn't open <project>: <reason>" in the dialog and keeps the button
 for a retry; a project that then does not finish loading within 20 s shows the
 editor's status instead of hanging (L-3). After the import, focus moves to the first
-advice field (L-6).
+advice field (L-6); the bounded re-focus stops at the author's first click or key, so a
+module they select is not reselected over.
 **Open research loop** selects that project through the editor's ordinary project
 change (its pending-edits confirmation applies), waits for the saved source, then calls
 `editorTemplates.importById('single-loop-with-advice')`, the gallery's existing import

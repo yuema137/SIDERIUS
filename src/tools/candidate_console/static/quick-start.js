@@ -94,11 +94,22 @@
         dialog.close(); state.textContent = '';
         // Advice is the first thing to write (L-6). The import's own focus ran while this
         // modal still made the page inert, and the inspector may re-render once more after
-        // the draft settles; re-focus until the advice field holds focus (bounded).
-        for (const wait of [0, 150, 400, 800]) {
-          await new Promise(done => setTimeout(done, wait));
-          if (document.activeElement?.classList.contains('advice-input')) break;
-          await window.editorAdvice?.focusFirst();
+        // the draft settles; re-focus until the advice field holds focus (bounded). The
+        // author's own first click or key ends this at once: re-focusing afterwards would
+        // reselect the advice module over the module they just chose.
+        let acted = false;
+        const act = () => { acted = true; };
+        document.addEventListener('pointerdown', act, {capture: true, once: true});
+        document.addEventListener('keydown', act, {capture: true, once: true});
+        try {
+          for (const wait of [0, 150, 400, 800]) {
+            await new Promise(done => setTimeout(done, wait));
+            if (acted || document.activeElement?.classList.contains('advice-input')) break;
+            await window.editorAdvice?.focusFirst();
+          }
+        } finally {
+          document.removeEventListener('pointerdown', act, {capture: true});
+          document.removeEventListener('keydown', act, {capture: true});
         }
         return;
       }

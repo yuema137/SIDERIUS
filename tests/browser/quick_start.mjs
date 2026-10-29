@@ -78,6 +78,10 @@ try {
   await page.locator('#editor-loop-stop-conditions').waitFor({state: 'visible'});
   // Training settings are on the Train & tune module.
   await page.locator('#circuit-node-train').click();
+  // The author's choice wins over Quick start's bounded advice re-focus (L-6): the clicked
+  // module stays selected after that window has passed.
+  await page.waitForTimeout(1600);
+  assert.equal(await page.locator('#circuit-node-train').getAttribute('aria-pressed'), 'true', 'Train & tune stays selected');
   await page.locator('#editor-training-settings').waitFor({state: 'visible'});
   assert.ok(await page.locator('#editor-training-settings [data-training="trial_max_epochs"]').count() === 1);
   await page.screenshot({path: join(evidence, 'quick-start-draft.png'), fullPage: true});
