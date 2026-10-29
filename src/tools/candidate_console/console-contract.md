@@ -954,7 +954,13 @@ text plus threshold; the editor does not know the task metric), one
 fields). The judge route and `max_judge_calls` are operator-owned
 (`WorkflowLLMConfig.judge`) and are not authored here; the row says so. The capture
 review summary states a judge as "a language-model judge decides to stop ("…"), first
-after N completed bodies; a failed judge call …". All stop-condition
+after N completed bodies; a failed judge call …". The capture launch review refuses a judge the captured
+model settings cannot run, before any launch (409 `judge_route`, the owner's own
+message forwarded): `reusable_candidate.admit_captured_judge_route` calls the worker's
+`candidate_worker.loop_judge.admit_judge_route` with the reviewed loop and the request's
+captured `llm_config` file (digest-checked; default settings when none, as the worker
+loads them), so a missing `judge.stop` route, a missing `max_judge_calls`, or a static
+call bound above it is named at review, not at worker start. All stop-condition
 UI logic lives in `editor-loop-controls.js`, mutating the draft loop through one
 `edit` action from `editor.js`. Empty, padded, non-finite or non-integer values
 stay local in the loop draft state (`loopDrafts`, separate from training drafts)

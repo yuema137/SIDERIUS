@@ -364,10 +364,19 @@ JUDGE = {
 }
 
 
-@pytest.fixture
-def looped_capture(reusable, direct_child, console_config, monkeypatch):
+# The operator's judge route (WorkflowLLMConfig.judge); the declaration never names it.
+JUDGE_ROUTE = {
+    "provider": "openai",
+    "model_id": "judge-fixture",
+    "max_output_tokens": 800,
+    "max_retries": 2,
+}
+
+
+def _looped_capture(reusable, console_config, monkeypatch, llm: dict):
     """A real five-node interpretation source with an authored loop and stop conditions,
-    captured through the same preparation child as every reusable capture."""
+    captured with ``llm`` as its model settings through the ordinary preparation child."""
+    Path(reusable.llm_config_file).write_text(json.dumps(llm))
     from tests.browser.workflow_editor_server import interpretation_profile_source
     from tools.candidate_prepare import prepare_reusable_candidate, select_reusable_preparation
     from workflows.definition import parse_workflow_source, render_workflow_source
@@ -393,6 +402,40 @@ def looped_capture(reusable, direct_child, console_config, monkeypatch):
     envelope = Path(receipt.envelope)
     published = (request, envelope, select_reusable_preparation(receipt.envelope))
     return _captured(published, console_config, monkeypatch)
+
+
+@pytest.fixture
+def looped_capture(reusable, direct_child, console_config, monkeypatch):
+    # final_iteration 4, judged from body 2: a static bound of 2 judge calls fits a cap of 3.
+    llm = {"judge": {"stop": JUDGE_ROUTE, "max_judge_calls": 3}}
+    return _looped_capture(reusable, console_config, monkeypatch, llm)
+
+
+@pytest.mark.parametrize(
+    ("judge", "message"),
+    [
+        (None, "requires a WorkflowLLMConfig.judge.stop route"),
+        (
+            {"stop": JUDGE_ROUTE, "max_judge_calls": 1},
+            "may make 2 judge calls; max_judge_calls is 1",
+        ),
+    ],
+    ids=["missing-route", "cap-below-bound"],
+)
+def test_launch_review_refuses_a_judge_the_captured_settings_cannot_run(
+    reusable, direct_child, console_config, monkeypatch, judge, message
+):
+    """B2-5: Fails if a JudgeStop the captured model settings cannot run (no judge route,
+    or a static call bound above max_judge_calls) passes review and is only refused by
+    the worker after launch. The refusal is the worker owner's, typed ``judge_route``."""
+    adapter, project, choice, _ = _looped_capture(
+        reusable, console_config, monkeypatch, {} if judge is None else {"judge": judge}
+    )
+    selected = adapter.select(project.project_id, choice)
+    with pytest.raises(OperationFailure) as refused:
+        adapter.review(project.project_id, selected)
+    assert refused.value.detail.code == "judge_route"
+    assert message in refused.value.detail.message
 
 
 def test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops(looped_capture):
