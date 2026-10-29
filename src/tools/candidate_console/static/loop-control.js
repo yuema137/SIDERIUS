@@ -89,6 +89,9 @@
   const pauseRecorded = status => !!(request?.pause.acknowledged || status.loop?.pause_requested);
   function describe(status) {
     const loop = status.loop, segment = status.kind === 'candidate_loop_resume' ? 'Resumed segment. ' : '';
+    if (status.reason === 'loop_process_exited') return segment + 'The worker exited without a result. No final body count is available for this segment. ' + (segment
+      ? 'Open the paused predecessor to end the loop once its worker processes have stopped; Resume again is unavailable.'
+      : 'This run cannot be resumed. New work can start once its worker processes have stopped.');
     if (window.operationOutcome?.cancelledBeforeStart(status)) return segment + 'Research loop segment cancelled before start: it never ran.';
     if (status.state === 'operation_failed' && !status.receipt_available) return segment + 'Research loop outcome unavailable: the operation failed without a native receipt.';
     if (!status.receipt_available) {
@@ -102,12 +105,14 @@
     return segment + outcome(status, loop) + (segment && ' Body numbers count the whole run, including earlier segments.');
   }
   function endedSentence(status) {
-    if (status?.native_status !== 'paused' || !status.receipt_available || status.successor_operation_id || !status.loop?.stop_requested) return null;
+    if (status?.native_status !== 'paused' || !status.receipt_available || (status.successor_operation_id && status.reason !== 'loop_successor_failed') || !status.loop?.stop_requested) return null;
+    if (status.reason === 'loop_successor_failed') return 'Ended by you after the resumed segment was interrupted.';
     return status.loop.attempted_iterations == null ? 'Ended by you at the pause.' : `Ended by you at the pause after body ${status.loop.attempted_iterations}.`;
   }
   function outcome(status, loop) {
     const ended = endedSentence(status);
     if (ended) return ended + ' Completed results are kept; this run cannot be resumed.';
+    if (status.reason === 'loop_successor_failed') return counted(loop, 'Research loop paused at a completed body boundary') + ' The resumed segment was interrupted without a result. End loop here to keep completed results and close the run. Resume again is unavailable.';
     if (status.native_status === 'cancelled') return 'Research loop stopped by you before it finished. Files written so far stay in the run folder; this run cannot be resumed.';
     if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
     if (status.native_status === 'paused' && loop.input_request) {
@@ -162,12 +167,14 @@
     }
     // A recorded Stop makes a paused run terminal: the owner refuses Resume, so none is offered.
     const resumable = status.native_status === 'paused' && !successor && !status.finishing && !stopRecorded(status);
+    const endable = status.native_status === 'paused' && status.reason === 'loop_successor_failed' && !status.finishing && !stopRecorded(status);
     const resume = request.resume, review = resume.review;
-    $('loop-resume-group').hidden = !resumable;
+    $('loop-resume-group').hidden = !(resumable || endable);
+    $('loop-resume-review').hidden = !resumable;
     $('loop-resume-review').disabled = resume.pending || pending || !connected;
     $('loop-end').disabled = resume.pending || pending || !connected;
-    $('loop-resume').hidden = !review;
-    $('loop-resume-advice-group').hidden = !review;
+    $('loop-resume').hidden = !resumable || !review;
+    $('loop-resume-advice-group').hidden = !resumable || !review;
     $('loop-resume-advice').readOnly = !!resume.locked;
     $('loop-resume').disabled = resume.pending || pending || !connected || !review?.credential_readiness.ready;
     $('loop-resume-summary').textContent = !review ? '' : `Resume continues with body ${review.completed_iterations + 1} of ${review.final_iteration} in a new segment of the same run. ` +
@@ -239,7 +246,7 @@
     }
   }
   $('loop-end').addEventListener('click', () => {
-    if (!last || last.native_status !== 'paused' || last.successor_operation_id || last.finishing || stopRecorded(last) || request.stop.pending || request.resume.pending || !session().connected) return;
+    if (!last || last.native_status !== 'paused' || (last.successor_operation_id && last.reason !== 'loop_successor_failed') || last.finishing || stopRecorded(last) || request.stop.pending || request.resume.pending || !session().connected) return;
     if (window.confirm('End this research loop here? Completed results are kept. This run cannot be resumed.')) void control('stop');
   });
   window.loopEndedSentence = endedSentence;

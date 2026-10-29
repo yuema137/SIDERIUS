@@ -15,6 +15,9 @@
     if (value.state === 'queued') return `${what} is queued: it starts by itself when earlier runs free the host resources it needs.`;
     if (value.state === 'active' || value.finishing) return `${what} in progress.`;
     if (cancelledBeforeStart(value)) return `${what} cancelled before start: it never ran, and nothing was produced.`;
+    if (value.state === 'operation_failed' && value.reason === 'loop_process_exited') return `${what} was interrupted: its worker exited without reporting a result. ` + (value.kind === 'candidate_loop_resume'
+      ? 'Open the paused predecessor to end the loop once its worker processes have stopped. This segment cannot be resumed.'
+      : 'This run cannot be resumed. New work can start once its worker processes have stopped.');
     if (value.state === 'operation_failed') return value.reason === 'spawn_failed'
       ? `${what} did not start: the worker could not be launched.`
       : `${what} failed before reporting a result.`;

@@ -984,6 +984,21 @@ operations omit the field. `StatusView.successor_operation_id` forwards the
 operations readback for a segment that a Resume has continued; the segment keeps
 its own receipt.
 
+For an authored-loop root or resume operation with `state="operation_failed"` and
+`reason="loop_process_exited"`, Monitor says the worker was interrupted without a
+result and that no final body count is available. A resumed segment directs the
+operator to the paused predecessor to end the loop once worker processes have
+stopped; a root explains that new work may start once those processes stop. It does
+not promise a future receipt or offer Resume again. The operations owner projects
+`reason="loop_successor_failed"` on the verified paused predecessor only after
+the abandoned successor's sessions ended. Monitor preserves the successor link
+and shows **End loop here**, while hiding **Review resume** and **Resume loop**.
+The Stop endpoint rechecks recovery under the store lock. After the run-wide Stop
+is recorded, Monitor says the loop was ended after the resumed segment was
+interrupted; the historical paused receipt remains unchanged. No status schema
+or endpoint is added. `tests/browser/dead_loop_successor.mjs` executes these
+renderers with an in-memory DOM/API to check the controls, request and wording.
+
 `CandidateConsole.request_loop_stop(UUID)` delegates once to
 `candidate_operations.request_loop_stop`, which owns admission, identity checks,
 idempotency and the write-once marker. HTTP POST `/api/operations/{UUID}/loop-stop`
@@ -1002,9 +1017,10 @@ before its running check); a 200 is therefore an idempotent acknowledgement,
 never evidence that the loop is still running.
 
 For an exited, verified paused tail, the same route records Stop after the
-operations owner checks its clean pause and absence of a successor under the
-admission lock. No receipt is rewritten and no new operation/status is invented.
-An existing successor refuses the request; a Stop recorded first blocks Resume.
+operations owner checks its clean pause and either absence of a successor or the
+verified abandoned-successor recovery above under the admission lock. No receipt
+is rewritten and no new operation/status is invented. Other existing successors
+refuse the request; a Stop recorded first blocks Resume.
 
 Monitor: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
@@ -1078,7 +1094,8 @@ Pending Stop and Resume requests disable competing actions. Success triggers a
 fresh Monitor read, including its status sentence and observation label; a
 reload derives the ended display from the durable marker. An unstopped paused
 receipt is labelled "Current status", not "Final status". A continued predecessor
-never offers End, even when a descendant later records Stop.
+offers End only for the verified abandoned-successor recovery above, never merely
+because a descendant later records Stop.
 
 The client generates one request UUID per reviewed digest
 and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
