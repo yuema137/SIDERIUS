@@ -78,6 +78,16 @@ def decode_transport[Transported: BaseModel](
     return value
 
 
+def constants_json(value: BaseModel, *, indent: int | None = None, **dump: Any) -> bytes:
+    """A model's JSON with inf/NaN as JSON constants, the unit-transport encoding.
+
+    For worker-internal documents a later phase rereads with
+    ``model_validate_json``, which parses these constants back exactly.
+    Finite documents are byte-identical to ``model_dump_json``.
+    """
+    return to_json(value.model_dump(mode="json", **dump), indent=indent, inf_nan_mode="constants")
+
+
 def _encoded(value: BaseModel) -> bytes:
     tree = json.dumps(_set_tree(value), separators=(",", ":")).encode()
     # Keep inf/NaN as JSON constants: scoring sentinels and launch knobs use them.
