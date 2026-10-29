@@ -124,7 +124,7 @@ try {
   // Operations the server marks not cancellable offer no Stop run; state does not leak across operations.
   for (const id of [finished, preparing]) {
     await page.evaluate(value => { location.hash = 'slow-control/' + value; }, id);
-    await page.locator('#operation-observed').filter({hasText: id}).waitFor();
+    await page.locator(`#operation-observed[title*="${id}"]`).waitFor(); // M-2: the UUID is in the observed line's title
     await page.locator('#monitor-status').filter({hasText: /in progress\.|^Finished/}).waitFor();
     await page.waitForTimeout(300);
     assert.ok(await stop.isHidden(), `no Stop run for ${id}`);

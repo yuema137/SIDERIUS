@@ -114,7 +114,9 @@ try {
   const intent = await page.evaluate(() => localStorage.getItem(window.reusableIntents.key('candidate')));
   assert.equal(JSON.parse(intent).payload.candidate_operation_id, admitted.operation_id);
   await page.route('**/api/operations/' + admitted.operation_id, route => route.fulfill({status: 401, json: {error: {message: 'Fixture token expired'}}}));
-  await page.locator('#capture-check').click(); await page.locator('#access-status').filter({hasText: 'Connection unavailable'}).waitFor();
+  // The Run page re-reads an unresolved run by itself every 2 s (R-1), so its next read meets
+  // the expired token without a click (a click would race that read, which disconnects first).
+  await page.locator('#access-status').filter({hasText: 'Connection unavailable'}).waitFor();
   assert.equal(await page.locator('#capture-retry').isDisabled(), true);
   assert.equal(await page.evaluate(() => localStorage.getItem(window.reusableIntents.key('candidate'))), intent);
   assert.match(await page.locator('#editor-source').inputValue(), /pending browser draft/);
