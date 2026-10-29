@@ -16,10 +16,12 @@ from .loop_models import LoopContinuation, LoopPause, LoopStop, LoopTrace, admit
 from .loop_stop import (
     BodyScore,
     JudgeBoundaryVerdict,
-    StopReason,
+    LoopInputRequest,
+    StopEvaluationOutput,
     admit_stop_conditions,
     captured_metric,
     evaluate_stop,
+    input_request,
     needs_stop_judge,
     project_body_score,
     stop_input,
@@ -91,16 +93,21 @@ def execute_loop(
     completed: tuple[CandidateRunReceipt, ...] = ()
     # Whole-run judge verdicts; the predecessor's verified trace supplies earlier ones.
     verdicts: tuple[JudgeBoundaryVerdict, ...] = ()
+    # Last boundary where a ``request_input`` condition paused the run (0 = none).
+    anchor = 0
     if continuation is not None:
         from .loop_resume import resume_history
 
-        history, completed, scores, verdicts = resume_history(request, initial, continuation)
+        history, completed, scores, verdicts, anchor = resume_history(
+            request, initial, continuation
+        )
         last = completed[-1]
         attempted = continuation.completed_iterations
         segment_id = continuation.operation_id
     resumed_at = attempted
     status = "completed"
     reason = None
+    asked: LoopInputRequest | None = None
     for iteration in range(attempted + 1, loop.final_iteration + 1):
         if stop_requested(initial):
             status = "stopped"
@@ -128,14 +135,19 @@ def execute_loop(
             break
         advance_body(request, initial, last, history)
         if loop.stop_conditions:
-            # A met condition completes the loop before any pending Stop/Pause is read.
+            # A met condition completes (``stop``) or pauses (``request_input``) the loop
+            # before any pending Stop/Pause is read.
             scores = (*scores, project_body_score(request, last, iteration))
             completed = (*completed, last)
-            reason, verdict = _boundary_reason(
-                request, initial, completed, scores, prior_calls=len(verdicts)
+            decided, asked, verdict = _boundary_decision(
+                request, initial, completed, scores, prior_calls=len(verdicts), anchor=anchor
             )
             verdicts = verdicts if verdict is None else (*verdicts, verdict)
-            if reason is not None:
+            if decided.decision == "stop":
+                reason = decided.reason
+                break
+            if asked is not None:
+                status = "paused"
                 break
     return initial.model_copy(
         update={
@@ -144,6 +156,7 @@ def execute_loop(
                 attempted_iterations=attempted,
                 segment_id=segment_id,
                 stop_reason=reason,
+                input_request=asked,
                 judge_verdicts=verdicts,
                 judge_abstentions=sum(item.decision is None for item in verdicts),
             ),
@@ -152,27 +165,29 @@ def execute_loop(
     )
 
 
-def _boundary_reason(
+def _boundary_decision(
     request: CandidateRunRequest,
     initial: CandidateRunReceipt,
     completed: tuple[CandidateRunReceipt, ...],
     scores: tuple[BodyScore, ...],
     *,
     prior_calls: int,
-) -> tuple[StopReason | None, JudgeBoundaryVerdict | None]:
+    anchor: int,
+) -> tuple[StopEvaluationOutput, LoopInputRequest | None, JudgeBoundaryVerdict | None]:
     """Deterministic conditions first; the judge is called only when the boundary needs it.
 
-    A judgeable boundary pre-empted by a deterministic stop records a skip marker.
+    A judgeable boundary pre-empted by a deterministic decision records a skip marker.
     """
     from .loop_judge import call_stop_judge, mark_skipped_stop_judge
 
     loop = request.preview.document.definition.loop
     assert loop is not None
-    value = stop_input(loop, captured_metric(request, initial), scores)
+    value = stop_input(loop, captured_metric(request, initial), scores, input_anchor=anchor)
     verdict = None
     if needs_stop_judge(value):
         verdict = call_stop_judge(request, initial, completed, value, prior_calls=prior_calls)
         value = value.model_copy(update={"judge_verdict": verdict})
     else:
         mark_skipped_stop_judge(initial, value)
-    return evaluate_stop(value).reason, verdict
+    decided = evaluate_stop(value)
+    return decided, input_request(value, decided), verdict

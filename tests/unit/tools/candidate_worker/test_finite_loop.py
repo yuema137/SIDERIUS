@@ -666,3 +666,127 @@ def test_candidate_llm_requests_are_seed_invariant(
         assert not any("run_seed" in item for item in recorded)
     first, second = runs.values()
     assert first == second
+
+
+def test_met_input_request_pauses_with_summary_and_leaves_next_slot_unused(
+    prepared, loop_tuner, monkeypatch
+):
+    """Fails if a met ``request_input`` condition completes or continues the loop, records
+    its pause as a stop reason, or summarizes facts other than the verified scores."""
+    from tools.candidate_worker.loop_stop import InputRequestSummary, NoImprovementReason
+    from workflows.definition import NoImprovementStop
+
+    metric, _, (low, high) = threshold_for(prepared)
+    request = loop_request(
+        prepared,
+        final_iteration=4,
+        stop_conditions=(NoImprovementStop(completed_bodies=2, on_met="request_input"),),
+    )
+    scored_bodies(monkeypatch, (high, low, low, high))
+    receipt = launch_candidate(request)
+    assert receipt.status == "paused", receipt.error
+    trace = receipt.loop_trace
+    assert trace.attempted_iterations == 3 and trace.stop_reason is None
+    assert trace.input_request.reason == NoImprovementReason(
+        condition_index=0,
+        iteration=3,
+        k=2,
+        non_improving_bodies=2,
+        last_improvement_iteration=1,
+        incumbent=high,
+    )
+    assert trace.input_request.summary == InputRequestSummary(
+        iteration=3,
+        final_iteration=4,
+        metric_id=metric.id,
+        direction=metric.direction,
+        incumbent=high,
+        incumbent_iteration=1,
+        non_improving_bodies=2,
+        input_anchor=0,
+        bodies_since_input=3,
+    )
+    control = Path(receipt.workspace) / "candidate_run"
+    assert not (control / "iteration_004").exists()
+    # A condition pause needs no operator Pause marker; readback re-derives it instead.
+    assert not (control / "pause.json").exists()
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    assert len(verify_loop(request, parent, receipt)) == 3
+
+
+def test_operator_pause_and_condition_request_at_one_boundary_record_the_request(
+    prepared, loop_tuner, monkeypatch
+):
+    """Fails if an operator Pause pending at a boundary where a ``request_input``
+    condition fires hides the request (the condition is decided first), or if readback
+    then depends on the marker either way."""
+    from tools.candidate_worker.loop_models import LoopPause
+    from tools.candidate_worker.models import CandidateRunReceipt
+    from workflows.definition import NoImprovementStop
+
+    _, _, (low, high) = threshold_for(prepared)
+    request = loop_request(
+        prepared,
+        final_iteration=4,
+        stop_conditions=(NoImprovementStop(completed_bodies=2, on_met="request_input"),),
+    )
+    control = Path(request.preview.document.definition.task.workspace) / "candidate_run"
+
+    def pause_during_third(iteration):
+        if iteration == 3:
+            launched = CandidateRunReceipt.model_validate_json(
+                (control / "launch.json").read_bytes()
+            )
+            (control / "pause.json").write_text(
+                LoopPause(
+                    run_id=launched.run_id, declaration_digest=launched.declaration_digest
+                ).model_dump_json()
+            )
+
+    scored_bodies(monkeypatch, (high, low, low, high), on_body=pause_during_third)
+    receipt = launch_candidate(request)
+    assert receipt.status == "paused", receipt.error
+    assert receipt.loop_trace.attempted_iterations == 3
+    assert receipt.loop_trace.input_request.reason.iteration == 3
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    assert len(verify_loop(request, parent, receipt)) == 3
+    # The re-derived request alone justifies the pause: moving the marker aside changes nothing.
+    (control / "pause.json").rename(control / "pause.json.aside")
+    assert len(verify_loop(request, parent, receipt)) == 3
+
+
+def test_readback_refuses_a_segment_that_continued_past_a_condition_input_request(
+    prepared, loop_tuner, monkeypatch
+):
+    """Fails if readback accepts bodies dispatched after a re-derived ``request_input``
+    boundary that is not a resumed checkpoint (the loop must have paused there)."""
+    from workflows.definition import NoImprovementStop
+
+    _, _, (low, high) = threshold_for(prepared)
+    request = loop_request(prepared, final_iteration=4)
+    scored_bodies(monkeypatch, (high, low, low, low))
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    loop = request.preview.document.definition.loop
+    asking = loop.model_copy(
+        update={"stop_conditions": (NoImprovementStop(completed_bodies=2, on_met="request_input"),)}
+    )
+    # The same verified bodies replayed under a declaration that asks after body 3.
+    replayed = request.model_copy(
+        update={
+            "preview": request.preview.model_copy(
+                update={
+                    "document": request.preview.document.model_copy(
+                        update={
+                            "definition": request.preview.document.definition.model_copy(
+                                update={"loop": asking}
+                            )
+                        }
+                    )
+                }
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="loop continued past a condition input request"):
+        verify_loop(replayed, parent, receipt)

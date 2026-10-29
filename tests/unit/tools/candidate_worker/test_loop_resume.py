@@ -446,7 +446,7 @@ def test_paused_continuation_resumes_again_across_two_hops(
     assert binding.completed_iterations == 2
     # Ancestry B -> A -> root verifies, and B resumed after two completed bodies.
     initial = CandidateRunReceipt.model_validate_json((root / "launch.json").read_bytes())
-    assert verify_segment(initial, second.receipt) == 2
+    assert verify_segment(initial, second.receipt).resumed_at == 2
     assert {path: path.read_bytes() for path in paused_tree} == paused_tree
     historical = read_operation(config, root_id)
     assert historical.receipt.status == "paused"
@@ -1046,3 +1046,72 @@ def test_budgeted_resume_reaches_its_segment_placed_or_queued(
     assert (path / "sandbox.json").exists(), "on_sandbox_spawn never reached the segment"
     resumed = read_operation(config, next_id)
     assert resumed.receipt is not None and resumed.receipt.status == "completed", resumed
+
+
+def test_condition_input_pause_resumes_without_pause_marker_and_refuses_forgery(
+    prepared, loop_tuner, interpretation_provider, process_segments, tmp_path
+):
+    """A ``request_input`` pause is a verified checkpoint without ``pause.json``.
+
+    Fails if readback still demands an operator Pause marker for a condition pause (the
+    successor's ``verify_loop`` raises), if a resumed condition re-fires at the very next
+    boundary instead of counting from its anchor, or if a forged or edited input request
+    on the paused receipt is accepted.
+    """
+    from tools.candidate_worker.loop_evidence import verify_loop
+    from tools.candidate_worker.models import CandidateRunReceipt
+    from workflows.definition import NoImprovementStop
+
+    # Every body scores 0.75: body 1 improves, bodies 2 and 3 tie, so k=2 asks after 3.
+    request = loop_request(
+        prepared,
+        final_iteration=5,
+        stop_conditions=(NoImprovementStop(completed_bodies=2, on_met="request_input"),),
+    )
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    root_id, next_id = uuid4(), uuid4()
+    submit_operation(
+        config, CandidateOperation(request_id=root_id, request=request), launch_environment=env
+    )
+    process_segments()
+    paused = read_operation(config, root_id).receipt
+    assert paused.status == "paused", paused
+    assert paused.loop_trace.attempted_iterations == 3
+    assert paused.loop_trace.input_request.reason.iteration == 3
+    root = Path(paused.workspace) / "candidate_run"
+    assert not (root / "pause.json").exists()
+    launched = CandidateRunReceipt.model_validate_json((root / "launch.json").read_bytes())
+    # Forged pause: dropping or editing the recorded request disagrees with the replay.
+    request_value = paused.loop_trace.input_request
+    edited = request_value.model_copy(
+        update={"summary": request_value.summary.model_copy(update={"incumbent": 0.5})}
+    )
+    for forged in (None, edited):
+        trace = paused.loop_trace.model_copy(update={"input_request": forged})
+        with pytest.raises(ValueError, match="disagrees"):
+            verify_loop(request, launched, paused.model_copy(update={"loop_trace": trace}))
+
+    review = review_loop_resume(config, root_id)
+    submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=root_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment=env,
+    )
+    process_segments()
+    resumed = read_operation(config, next_id).receipt
+    # Counting from the anchor (body 3), body 4 is one body later: no second request.
+    assert resumed.status == "completed", resumed
+    assert resumed.loop_trace.attempted_iterations == 5
+    assert resumed.loop_trace.input_request is None
+    assert not (root / "pause.json").exists()
+    assert len(verify_loop(request, launched, resumed)) == 5

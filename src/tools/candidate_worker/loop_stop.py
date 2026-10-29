@@ -24,6 +24,7 @@ from workflows.definition.models import (
     JudgeStop,
     MetricThresholdStop,
     NoImprovementStop,
+    StopAction,
     StopCondition,
 )
 
@@ -116,6 +117,10 @@ class StopEvaluationInput(StopModel):
     metric: MetricSpec | None
     # The judged boundary's verdict; only a boundary ``needs_stop_judge`` names has one.
     judge_verdict: JudgeBoundaryVerdict | None = None
+    # Last earlier boundary where a ``request_input`` condition paused the loop (0 = none).
+    # Only ``request_input`` conditions read it; ``stop`` conditions count the whole run.
+    # Derived by replay at every boundary, never persisted.
+    input_anchor: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def contiguous(self) -> Self:
@@ -123,17 +128,58 @@ class StopEvaluationInput(StopModel):
             raise ValueError("stop evaluation requires every completed body 1..iteration")
         if self.judge_verdict is not None and self.judge_verdict.iteration != self.iteration:
             raise ValueError("a judge verdict belongs to the boundary it was recorded at")
+        if self.input_anchor >= self.iteration:
+            raise ValueError("the input anchor must be an earlier boundary")
         return self
 
 
 class StopEvaluationOutput(StopModel):
-    decision: Literal["continue", "stop"]
+    """``stop`` completes the loop; ``request_input`` pauses it and asks the operator."""
+
+    decision: Literal["continue", "stop", "request_input"]
     reason: StopReason | None = None
 
     @model_validator(mode="after")
-    def reason_iff_stop(self) -> Self:
-        if (self.decision == "stop") != (self.reason is not None):
-            raise ValueError("a stop decision requires exactly one reason")
+    def reason_iff_decided(self) -> Self:
+        if (self.decision != "continue") != (self.reason is not None):
+            raise ValueError("a stop or input-request decision requires exactly one reason")
+        return self
+
+
+class InputRequestSummary(StopModel):
+    """Bounded deterministic facts shown when a condition pauses the loop for input."""
+
+    iteration: int = Field(gt=0)
+    final_iteration: int = Field(gt=0)
+    metric_id: str = Field(min_length=1)
+    direction: MetricDirection
+    incumbent: float | None = Field(allow_inf_nan=False)
+    incumbent_iteration: int | None = Field(gt=0)
+    non_improving_bodies: int = Field(ge=0)
+    input_anchor: int = Field(ge=0)  # previous input pause boundary; 0 = none
+    bodies_since_input: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        if (
+            self.iteration >= self.final_iteration
+            or self.bodies_since_input != self.iteration - self.input_anchor
+            or (self.incumbent is None) != (self.incumbent_iteration is None)
+        ):
+            raise ValueError("input request summary is incoherent")
+        return self
+
+
+class LoopInputRequest(StopModel):
+    """A met ``request_input`` condition paused the loop at ``reason.iteration``."""
+
+    reason: StopReason
+    summary: InputRequestSummary
+
+    @model_validator(mode="after")
+    def same_boundary(self) -> Self:
+        if self.reason.iteration != self.summary.iteration:
+            raise ValueError("input request reason and summary name different boundaries")
         return self
 
 
@@ -153,18 +199,36 @@ def incumbent_fold(bodies: tuple[BodyScore, ...], order: MetricOrder) -> Incumbe
     )
 
 
+def _threshold_met(
+    bodies: tuple[BodyScore, ...], order: MetricOrder, condition: MetricThresholdStop
+) -> bool:
+    incumbent = incumbent_fold(bodies, order).incumbent
+    return incumbent is not None and order.is_at_least(incumbent, condition.threshold)
+
+
 def _deterministic_reason(
-    value: StopEvaluationInput, metric: MetricSpec
+    value: StopEvaluationInput, metric: MetricSpec, action: StopAction
 ) -> MetricThresholdReason | NoImprovementReason | None:
-    """First met deterministic condition in declared order; a judge is skipped here."""
+    """First met deterministic condition of ``action`` in declared order; a judge is skipped.
+
+    A ``request_input`` condition counts from ``input_anchor``: ``no_improvement`` needs
+    ``k`` bodies since the last input pause, and ``metric_threshold`` fires once, at the
+    boundary where the incumbent first reaches it after that pause.
+    """
     order = MetricOrder(metric)
     fold = incumbent_fold(value.bodies, order)
     incumbent, incumbent_iteration = fold.incumbent, fold.incumbent_iteration
+    anchored = action == "request_input"
     for index, condition in enumerate(value.conditions):
+        if condition.on_met != action:
+            continue
         match condition:
             case MetricThresholdStop():
-                if incumbent is not None and order.is_at_least(incumbent, condition.threshold):
-                    assert incumbent_iteration is not None
+                if _threshold_met(value.bodies, order, condition) and not (
+                    anchored
+                    and _threshold_met(value.bodies[: value.input_anchor], order, condition)
+                ):
+                    assert incumbent is not None and incumbent_iteration is not None
                     return MetricThresholdReason(
                         condition_index=index,
                         iteration=value.iteration,
@@ -175,7 +239,12 @@ def _deterministic_reason(
                         incumbent_iteration=incumbent_iteration,
                     )
             case NoImprovementStop():
-                if fold.non_improving >= condition.completed_bodies:
+                counted = (
+                    min(fold.non_improving, value.iteration - value.input_anchor)
+                    if anchored
+                    else fold.non_improving
+                )
+                if counted >= condition.completed_bodies:
                     return NoImprovementReason(
                         condition_index=index,
                         iteration=value.iteration,
@@ -192,7 +261,11 @@ def _deterministic_reason(
 
 
 def _decide(value: StopEvaluationInput) -> StopEvaluationOutput | tuple[int, JudgeStop]:
-    """A decision, or the judge condition this boundary must consult before deciding."""
+    """A decision, or the judge condition this boundary must consult before deciding.
+
+    Precedence: met ``stop`` deterministic conditions, then met ``request_input``
+    deterministic conditions (each in declared order), then the judge.
+    """
     if value.iteration >= value.final_iteration or not value.conditions:
         # The final limit owns its boundary: completion there carries no stop reason.
         return StopEvaluationOutput(decision="continue")
@@ -201,13 +274,20 @@ def _decide(value: StopEvaluationInput) -> StopEvaluationOutput | tuple[int, Jud
             f"stop condition 0 ({value.conditions[0].kind}) requires a run metric; none is bound"
         )
     require_threshold_metrics(value.conditions, value.metric)
-    reason = _deterministic_reason(value, value.metric)
-    if reason is not None:
-        return StopEvaluationOutput(decision="stop", reason=reason)
+    for action in ("stop", "request_input"):
+        reason = _deterministic_reason(value, value.metric, action)
+        if reason is not None:
+            return StopEvaluationOutput(decision=action, reason=reason)
     judged = pending_judge(value.conditions)
-    if judged is None or value.iteration < judged[1].min_completed_bodies:
+    if judged is None or not _judge_eligible(value, judged[1]):
         return StopEvaluationOutput(decision="continue")
     return judged
+
+
+def _judge_eligible(value: StopEvaluationInput, judge: JudgeStop) -> bool:
+    """A ``request_input`` judge counts its minimum from the last input pause."""
+    start = value.input_anchor if judge.on_met == "request_input" else 0
+    return value.iteration - start >= judge.min_completed_bodies
 
 
 def pending_judge(conditions: tuple[StopCondition, ...]) -> tuple[int, JudgeStop] | None:
@@ -229,7 +309,7 @@ def skipped_stop_judge(value: StopEvaluationInput) -> tuple[int, int] | None:
     boundary the judge would otherwise have been consulted at; else ``None``.
     """
     judged = pending_judge(value.conditions)
-    if judged is None or not judged[1].min_completed_bodies <= value.iteration:
+    if judged is None or not _judge_eligible(value, judged[1]):
         return None
     decided = _decide(value)
     if not isinstance(decided, StopEvaluationOutput) or decided.reason is None:
@@ -249,13 +329,15 @@ def needs_stop_judge(value: StopEvaluationInput) -> bool:
 def evaluate_stop(value: StopEvaluationInput) -> StopEvaluationOutput:
     """Pure decision at one completed-body boundary.
 
-    Deterministic conditions decide first, in declared order; a declared judge decides
-    only when none fired, from the boundary's recorded verdict (an abstention continues).
+    Deterministic conditions decide first (``stop`` before ``request_input``, each in
+    declared order); a declared judge decides only when none fired, from the boundary's
+    recorded verdict (an abstention continues). A judge "stop" verdict takes its
+    condition's ``on_met`` action.
     """
     decided = _decide(value)
     if isinstance(decided, StopEvaluationOutput):
         return decided
-    index, _ = decided
+    index, judge = decided
     verdict = value.judge_verdict
     if verdict is None:
         raise StopConditionError(
@@ -270,7 +352,35 @@ def evaluate_stop(value: StopEvaluationInput) -> StopEvaluationOutput:
         evidence_sha256=verdict.evidence_sha256,
         request_sha256=verdict.request_sha256,
     )
-    return StopEvaluationOutput(decision="stop", reason=reason)
+    return StopEvaluationOutput(decision=judge.on_met, reason=reason)
+
+
+def input_summary(value: StopEvaluationInput) -> InputRequestSummary:
+    """The deterministic facts shown with an input request at this boundary (O(1) size)."""
+    assert value.metric is not None
+    order = MetricOrder(value.metric)
+    fold = incumbent_fold(value.bodies, order)
+    return InputRequestSummary(
+        iteration=value.iteration,
+        final_iteration=value.final_iteration,
+        metric_id=value.metric.id,
+        direction=order.direction,
+        incumbent=fold.incumbent,
+        incumbent_iteration=fold.incumbent_iteration,
+        non_improving_bodies=fold.non_improving,
+        input_anchor=value.input_anchor,
+        bodies_since_input=value.iteration - value.input_anchor,
+    )
+
+
+def input_request(
+    value: StopEvaluationInput, output: StopEvaluationOutput
+) -> LoopInputRequest | None:
+    """The recorded input request for a ``request_input`` decision, else ``None``."""
+    if output.decision != "request_input":
+        return None
+    assert output.reason is not None
+    return LoopInputRequest(reason=output.reason, summary=input_summary(value))
 
 
 def require_threshold_metrics(conditions: tuple[StopCondition, ...], metric: MetricSpec) -> None:
@@ -314,7 +424,11 @@ def admit_stop_conditions(
 
 
 def stop_input(
-    loop: AuthoredLoop, seed_metric: MetricSpec | None, bodies: tuple[BodyScore, ...]
+    loop: AuthoredLoop,
+    seed_metric: MetricSpec | None,
+    bodies: tuple[BodyScore, ...],
+    *,
+    input_anchor: int = 0,
 ) -> StopEvaluationInput:
     """Build the evaluator input; the metric is reconciled once over seed and body stamps."""
     metric = reconcile_stop_metric(
@@ -331,6 +445,7 @@ def stop_input(
         conditions=loop.stop_conditions,
         bodies=bodies,
         metric=metric,
+        input_anchor=input_anchor,
     )
 
 

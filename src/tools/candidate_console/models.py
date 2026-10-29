@@ -22,7 +22,7 @@ from tools.candidate_operations.native_chain_models import NativeChainObservatio
 from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.graph_models import GraphReason, GraphState, GraphTrace
-from tools.candidate_worker.loop_stop import StopReason
+from tools.candidate_worker.loop_stop import LoopInputRequest, StopReason
 from tools.candidate_worker.parallel_models import ParallelDispatch
 from tools.workflow_authoring.models import Project
 from tools.workflow_preview.models import PreviewModel
@@ -295,6 +295,11 @@ class LoopStatusView(PreviewModel):
     # The receipt's verified reason when a declared stop condition completed the loop
     # before its limit; absent otherwise (and absent while no receipt exists).
     stop_reason: StopReason | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The receipt's verified request when a declared ``request_input`` condition paused
+    # the loop to ask the operator; absent otherwise, so other loops' bytes are unchanged.
+    input_request: LoopInputRequest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Durable Stop/Pause requests recorded for this run (Stop) or segment (Pause), read
     # from the worker's own marker files; the receipt still decides what took effect.
     stop_requested: bool = False

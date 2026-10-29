@@ -251,3 +251,88 @@ def test_evaluator_module_never_imports_a_provider_or_the_judge_effect():
         for alias in node.names
     ]
     assert not [name for name in imported if name.startswith(("agent.llm_bridge", "agent.judge"))]
+
+
+def anchored(scores, conditions, *, anchor=0, final=10, decision="absent"):
+    return judged_input(scores, conditions, final=final, decision=decision).model_copy(
+        update={"input_anchor": anchor}
+    )
+
+
+@pytest.mark.parametrize("ask_first", [False, True])
+def test_met_stop_condition_beats_a_met_input_request_in_either_declared_order(ask_first):
+    """Fails if a met ``request_input`` condition pauses a loop a met ``stop`` must end,
+    or if declared order alone (not the action) decided between them."""
+    ask = MetricThresholdStop(metric_id="score", threshold=0.8, on_met="request_input")
+    stop = NoImprovementStop(completed_bodies=1)
+    conditions = [ask, stop] if ask_first else [stop, ask]
+    output = decide((0.9, 0.85), conditions)
+    assert output.decision == "stop"
+    assert output.reason.kind == "no_improvement"
+    assert output.reason.condition_index == conditions.index(stop)
+    # With the stop condition unmet, the same boundary asks instead.
+    alone = decide((0.5, 0.9), conditions)
+    assert alone.decision == "request_input"
+    assert alone.reason.condition_index == conditions.index(ask)
+
+
+def test_input_request_refires_only_after_a_fresh_stretch_from_its_anchor():
+    """Fails if a resumed ``request_input`` condition re-fires at the very next boundary
+    (whole-run counting), if a threshold asks twice, or if a ``stop`` condition starts
+    counting from the anchor."""
+    ask = NoImprovementStop(completed_bodies=2, on_met="request_input")
+    scores = (0.9, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)
+    # Paused after body 5 (anchor 5): body 6 is one body later, body 7 is two.
+    assert evaluate_stop(anchored(scores[:6], [ask], anchor=5)).decision == "continue"
+    asked = evaluate_stop(anchored(scores, [ask], anchor=5))
+    assert asked.decision == "request_input"
+    assert asked.reason.non_improving_bodies == 6
+    # Without an anchor the whole-run count already fires at body 3.
+    assert evaluate_stop(anchored(scores[:3], [ask])).decision == "request_input"
+    threshold = MetricThresholdStop(metric_id="score", threshold=0.8, on_met="request_input")
+    assert evaluate_stop(anchored((0.5, 0.9), [threshold])).decision == "request_input"
+    for count in (3, 4):
+        later = anchored((0.5, 0.9, 0.95, 0.99)[:count], [threshold], anchor=2)
+        assert evaluate_stop(later).decision == "continue"
+    stop = NoImprovementStop(completed_bodies=2)
+    assert evaluate_stop(anchored(scores[:6], [stop], anchor=5)).decision == "stop"
+
+
+def test_input_request_judge_counts_its_minimum_from_the_anchor():
+    """Fails if a ``request_input`` judge is consulted (a provider call) before
+    ``min_completed_bodies`` have passed since the last pause, or if a ``stop`` judge
+    starts honouring the anchor."""
+    from tools.candidate_worker.loop_stop import needs_stop_judge, skipped_stop_judge
+    from workflows.definition import JudgeStop
+
+    ask = JudgeStop(criterion="plateau", min_completed_bodies=2, on_met="request_input")
+    scores = (0.5, 0.6, 0.7, 0.8, 0.9)
+    assert not needs_stop_judge(anchored(scores[:4], [ask], anchor=3))
+    assert needs_stop_judge(anchored(scores, [ask], anchor=3))
+    stop = JudgeStop(criterion="plateau", min_completed_bodies=2)
+    assert needs_stop_judge(anchored(scores[:4], [stop], anchor=3))
+    # Skip telemetry uses the same eligibility: no skip below the anchored minimum.
+    threshold = MetricThresholdStop(metric_id="score", threshold=0.1)
+    assert skipped_stop_judge(anchored(scores[:4], [ask, threshold], anchor=3)) is None
+    assert skipped_stop_judge(anchored(scores, [ask, threshold], anchor=3)) == (0, 1)
+    # A judge "stop" verdict takes the condition's action.
+    output = evaluate_stop(anchored(scores, [ask], anchor=3, decision="stop"))
+    assert output.decision == "request_input" and output.reason.kind == "judge"
+
+
+def test_input_summary_reports_the_incumbent_and_the_stretch_since_the_last_pause():
+    """Fails if the Monitor summary reads a recomputed or segment-local fact."""
+    from tools.candidate_worker.loop_stop import InputRequestSummary, input_summary
+
+    value = anchored((0.5, 0.9, 0.4, None, 0.3), [NoImprovementStop(completed_bodies=2)], anchor=2)
+    assert input_summary(value) == InputRequestSummary(
+        iteration=5,
+        final_iteration=10,
+        metric_id="score",
+        direction="higher",
+        incumbent=0.9,
+        incumbent_iteration=2,
+        non_improving_bodies=3,
+        input_anchor=2,
+        bodies_since_input=3,
+    )

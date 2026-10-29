@@ -178,6 +178,23 @@ try {
   assert.deepEqual(parsed().definition.loop.stop_conditions.at(-1),
     {kind: 'judge', criterion: 'Stop once a body adds no new insight.', min_completed_bodies: 1, on_failure: 'continue'});
 
+  // "When met": Pause and ask me declares on_met; Stop clears it and restores the bytes.
+  const judgedBytes = await readFile(metadata.interpretation_source);
+  const onMet = page.locator('#editor-loop-stop-on-met-no-improvement');
+  assert.equal(await onMet.inputValue(), 'stop');
+  await onMet.selectOption('request_input');
+  const askDiff = await reviewAndSave();
+  assert.match(askDiff, /on_met='request_input'/);
+  await reopen();
+  assert.equal(await page.locator('#editor-loop-stop-on-met-no-improvement').inputValue(), 'request_input');
+  assert.equal(await page.locator('#editor-loop-stop-on-met-judge').inputValue(), 'stop');
+  assert.deepEqual(parsed().definition.loop.stop_conditions[1], {kind: 'no_improvement', completed_bodies: 2, on_met: 'request_input'});
+  await page.screenshot({path: join(evidence, 'research-loop-pause-and-ask.png'), fullPage: true});
+  await page.locator('#editor-loop-stop-on-met-no-improvement').selectOption('stop');
+  await reviewAndSave();
+  await reopen();
+  assert.ok((await readFile(metadata.interpretation_source)).equals(judgedBytes), 'choosing Stop again must omit on_met and restore the bytes');
+
   // Remove both conditions: the condition-free loop bytes return exactly.
   await page.locator('#editor-loop-remove-metric-threshold').click();
   await page.locator('#editor-loop-remove-no-improvement').click();

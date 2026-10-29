@@ -15,8 +15,10 @@
     if (!value.loop) return 'Research loop: none (one workflow body).';
     const capability = id => window.editorCapabilityPresentation.label(value.nodes.find(item => item[0] === id)?.[1]);
     const edge = value.loop.feedback;
-    const stops = (value.loop.stop_conditions || []).map(stopCondition);
-    return `Research loop: up to ${value.loop.final_iteration} iteration${value.loop.final_iteration === 1 ? '' : 's'} · feedback ${capability(edge.source.node)} ${edge.source.node} → ${capability(edge.target)} ${edge.target}${stops.length ? ' · stops early when ' + stops.join(' or ') : ''}.`;
+    const conditions = value.loop.stop_conditions || [];
+    const stops = conditions.filter(item => (item.on_met ?? 'stop') === 'stop').map(stopCondition);
+    const asks = conditions.filter(item => item.on_met === 'request_input').map(stopCondition);
+    return `Research loop: up to ${value.loop.final_iteration} iteration${value.loop.final_iteration === 1 ? '' : 's'} · feedback ${capability(edge.source.node)} ${edge.source.node} → ${capability(edge.target)} ${edge.target}${stops.length ? ' · stops early when ' + stops.join(' or ') : ''}${asks.length ? ' · pauses and asks you when ' + asks.join(' or ') : ''}.`;
   }
   function stopCondition(condition) {
     if (condition.kind === 'metric_threshold') return `${condition.metric_id} reaches ${condition.threshold} (task metric direction)`;

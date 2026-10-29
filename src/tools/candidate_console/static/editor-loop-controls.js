@@ -92,11 +92,27 @@
       if (target) target.on_failure = select.value;
     }, 'Stop condition changed locally. Review and save to update the source.'));
   }
+  // What a met condition does (StopCondition.on_met). "Stop" is the declaration default and
+  // is saved by omitting on_met, so a condition left on Stop keeps its existing bytes.
+  function onMet(row, condition, actions) {
+    const wrapper = node('label', 'When met ', row);
+    const select = control(node('select', '', wrapper));
+    select.id = `editor-loop-stop-on-met-${condition.kind.replaceAll('_', '-')}`;
+    for (const [value, text] of [['stop', 'Stop'], ['request_input', 'Pause and ask me']]) {
+      const option = node('option', text, select); option.value = value;
+    }
+    select.value = condition.on_met ?? 'stop';
+    select.addEventListener('change', () => actions.edit(loop => {
+      const target = loop.stop_conditions?.find(item => item.kind === condition.kind);
+      if (!target) return;
+      if (select.value === 'stop') delete target.on_met; else target.on_met = select.value;
+    }, 'Stop condition changed locally. Review and save to update the source.'));
+  }
   function stopConditions(parent, state, actions) {
     const group = node('fieldset', '', parent); group.id = 'editor-loop-stop-conditions'; node('legend', 'Stop conditions', group);
     const conditions = state.loop.stop_conditions || [];
     node('p', conditions.length
-      ? 'The loop completes early when any condition below is met after a completed body (checked in this order). The iteration limit still applies.'
+      ? 'After each completed body the conditions below are checked in this order: conditions set to Stop first, then those set to Pause and ask me. Stop completes the loop early. Pause and ask me pauses it and waits for you on Monitor; Resume continues with the next body. The iteration limit still applies.'
       : 'None. The loop runs until its iteration limit.', group);
     for (const condition of conditions) {
       const row = node('div', '', group); row.className = 'editor-loop-stop'; row.dataset.stopKind = condition.kind;
@@ -112,7 +128,11 @@
         stopField(row, condition, 'criterion', 'What the judge looks for', state, actions);
         stopField(row, condition, 'min_completed_bodies', 'First judged after bodies', state, actions);
         onFailure(row, condition, actions);
-        node('small', 'A language-model judge decides at each completed body boundary, after the other conditions continue, never at the final iteration. The judge model and the maximum number of judge calls are set by the console operator in the run\'s model settings, not here.', row);
+        node('small', 'A language-model judge decides at each completed body boundary, after the other conditions continue, never at the final iteration. When set to Pause and ask me, a judge decision to stop pauses the loop instead. The judge model and the maximum number of judge calls are set by the console operator in the run\'s model settings, not here.', row);
+      }
+      onMet(row, condition, actions);
+      if (condition.on_met === 'request_input') {
+        node('small', 'Pause and ask me fires again only after a new stretch counted from the last pause; a metric threshold asks once.', row);
       }
       const remove = control(node('button', 'Remove', row));
       remove.type = 'button'; remove.id = `editor-loop-remove-${condition.kind.replaceAll('_', '-')}`;

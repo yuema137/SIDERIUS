@@ -333,12 +333,15 @@ validator. The declaration stays authoritative: request parsing refuses a
 `metric_threshold` without a non-empty `metric_id` or with a non-finite/non-number
 `threshold`, a non-integer or non-positive `no_improvement.completed_bodies`, and
 a `judge` (`JudgeStop`) without its `criterion` or with a non-positive
-`min_completed_bodies` (all 422 `validation`); the declaration refuses more than one
+`min_completed_bodies`, or any `on_met` other than `"stop"`/`"request_input"` (all 422
+`validation`); the declaration refuses more than one
 condition per kind, `completed_bodies >= final_iteration` and a judge
 `min_completed_bodies >= final_iteration` (422
 `source` diagnostics with `field_path`, messages never forwarded). Refusals write
 nothing. An empty tuple is omitted from source with its unused constructors, so a
-condition-free loop keeps its bytes and add-then-remove restores them. The editor
+condition-free loop keeps its bytes and add-then-remove restores them; likewise the
+default `on_met="stop"` is omitted, so switching **When met** back to Stop restores
+the condition's bytes. The editor
 does not know the task's declared metric: `metric_id` is a validated text field,
 and a mismatch with the run metric fails the loop at execution (the worker
 contract), not at Review.

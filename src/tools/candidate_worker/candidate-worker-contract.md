@@ -1449,8 +1449,10 @@ loop before `final_iteration` (declaration fields: the workflow definition contr
 They are evaluated by `tools.candidate_worker.loop_stop.evaluate_stop`, a pure,
 stateless function of a typed `StopEvaluationInput` (`iteration`, `final_iteration`,
 `conditions`, every completed body's `BodyScore(iteration, valid_formal,
-metric_spec)` from 1 to now, and the reconciled run `metric`) returning a typed
-`StopEvaluationOutput(decision="continue"|"stop", reason)`. `BodyScore` is projected
+metric_spec)` from 1 to now, the reconciled run `metric` and the replay-derived
+`input_anchor`) returning a typed
+`StopEvaluationOutput(decision="continue"|"stop"|"request_input", reason)` (a reason
+iff the decision is not `continue`). `BodyScore` is projected
 from each verified body's committed tuning record; the evaluator never reads or
 mutates `ChainState` or native history. The metric is reconciled once over the
 captured seed metric and every body stamp. A declared `JudgeStop` enters the same
@@ -1465,7 +1467,9 @@ the threshold (ties stop); `no_improvement` stops after `completed_bodies`
 consecutive bodies that did not strictly improve the incumbent (a body without a
 valid Formal score is non-improving; the first valid value is an improvement).
 Deterministic conditions are any-of in declared order; the first met condition
-wins. `incumbent_fold` is the one fold every decision and judge request reads.
+wins, except that every met `on_met="stop"` condition precedes every met
+`on_met="request_input"` condition (each group in declared order). `incumbent_fold`
+is the one fold every decision and judge request reads.
 
 Evaluation happens once per completed-body boundary, after the body is verified,
 published and folded. Precedence: a body that is not completed ends the loop with
@@ -1491,6 +1495,70 @@ A resumed segment rebuilds its score carrier from the same whole-run replay, so 
 incumbent and the no-improvement window span segments. A condition-completed run is
 `completed`, not a resumable checkpoint. Receipts and source without conditions are
 byte-identical to those before this feature.
+
+### Condition input pause
+
+A condition declared with `on_met="request_input"` ("Pause and ask me") pauses the
+loop instead of completing it. Owners: the decision is `loop_stop` (`evaluate_stop`,
+`input_summary`, `input_request`, `InputRequestSummary`, `LoopInputRequest`); the
+driver is `loop.execute_loop`; readback is `loop_evidence.verify_loop` with
+`loop_resume.verify_segment`.
+
+Precedence at boundary `N` (below `final_iteration`; the final boundary always
+continues): met `stop` deterministic conditions, then met `request_input`
+deterministic conditions, then the judge (whose "stop" verdict takes its own
+`on_met`). A `request_input` decision ends the segment `paused` with
+`LoopTrace.input_request = LoopInputRequest(reason, summary)` and `stop_reason`
+absent (`stop_reason` keeps meaning "completed before the limit"; the model refuses
+both, and requires `input_request.reason.iteration == attempted_iterations`). Like a
+stop, it is decided before any pending Stop/Pause is read, so no operator Pause
+marker (`pause.json`) exists or is needed. The next body slot stays unused.
+
+Input anchor. `input_anchor` is the last earlier boundary where a `request_input`
+decision fired (0 = none); it is derived by replay (`derive_stop`), never persisted,
+and a continuation receives it from `resume_history`. Only `request_input`
+conditions read it, so a resumed run does not ask again at the very next boundary:
+`no_improvement` fires iff `min(non_improving, N - anchor) >= completed_bodies`
+(non-improvement is still measured against the whole-run incumbent);
+`metric_threshold` fires iff the incumbent meets the threshold now and the
+incumbent of bodies `1..anchor` did not (it asks once); a `request_input` judge is
+consulted iff `N - anchor >= min_completed_bodies`. `stop` conditions count the
+whole run and ignore the anchor. Edge case: when two `request_input` conditions are
+met at one boundary, the first declared one fires and moves the anchor, so a
+threshold met there never asks separately.
+
+Summary. `InputRequestSummary(iteration, final_iteration, metric_id, direction,
+incumbent, incumbent_iteration, non_improving_bodies, input_anchor,
+bodies_since_input)` is O(1) and deterministic (`incumbent_fold`), so the receipt
+stays within `bounded_terminal`. Per-body results come from the existing graph
+results view; no LLM summary is written.
+
+Readback. `derive_stop` returns `LoopDerivation(stop_reason, verdicts,
+input_requests, input_anchor)`: every re-derived `request_input` boundary with its
+request, moving the anchor as the driver does; a met `stop` below the last boundary
+still refuses ("loop continued past a met stop condition"). `verify_segment` returns
+`SegmentAncestry(resumed_at, checkpoints)` without judging why each predecessor
+paused; each checkpoint carries `(completed_iterations, pause_marker,
+input_request)` from the digest-bound predecessor receipt. `verify_loop` then
+requires: the receipt's own request (its last boundary, when its segment dispatched
+a body) to equal the re-derived one, and its status `paused` without a Pause marker;
+every other re-derived request boundary to be a resumed checkpoint whose
+predecessor recorded an equal request ("loop continued past a condition input
+request" otherwise); and every other checkpoint to hold an operator Pause marker
+and record no request ("predecessor lacks Pause request"). A dropped, added or
+edited `input_request` refuses ("disagrees"). Stop recorded while waiting makes the
+run terminal: the paused receipt stays valid, and Review refuses Resume ("loop is
+terminal"). Resume is the existing reviewed Resume; operator advice on resume is not
+part of this version.
+
+Byte compatibility: `on_met="stop"` and an absent `input_request` are omitted from
+serialization, so declarations, digests, canonical source, receipts and judge
+request digests of loops without `request_input` are unchanged.
+
+Tests: `test_loop_stop.py` (precedence in both declared orders, re-fire from the
+anchor, anchored judge eligibility, summary), `test_finite_loop.py` (driver pause,
+summary, unused next slot), `test_loop_resume.py` (process-separated condition pause
+without `pause.json`, resume without re-asking, forged/edited request refused).
 
 ### Judge stop condition
 
@@ -1522,23 +1590,28 @@ predicate; the worker calls iff it is true, readback requires evidence iff it is
 1. a body that is not completed ends the loop with its status; no evaluation, no call;
 2. `N == final_iteration` completes at the limit without a reason; no call;
 3. deterministic conditions decide first, whatever the judge's declared position; a
-   met condition stops with its reason and the judge is not called. When the judge
-   would otherwise have been consulted there (`N >= min_completed_bodies`,
+   met condition stops (or, for `on_met="request_input"`, pauses) with its reason and
+   the judge is not called. When the judge would otherwise have been consulted there
+   (`N - start >= min_completed_bodies`, where `start` is the input anchor for a
+   `request_input` judge and 0 otherwise;
    `skipped_stop_judge`), `mark_skipped_stop_judge` records a usage marker row
    through the bridge's `emit_marker` (label `judge.stop.skipped`, extra `reason=
-   "deterministic_stop"`, `judge_condition_index`, `deciding_condition_index`); no
+   "deterministic_stop"`, `judge_condition_index`, `deciding_condition_index`; the
+   same reason value also when the deciding condition is a `request_input` one); no
    call and no evidence. The marker is best-effort telemetry: `emit_judge_marker`
    checks no execution deadline, and a failure to build or bind the bridge (for
    example a missing credential) or to write the row is reported on stderr and
    never changes the loop's outcome;
-4. otherwise, when `N >= min_completed_bodies`, `call_stop_judge` makes exactly one
+4. otherwise, when `N - start >= min_completed_bodies`, `call_stop_judge` makes exactly one
    call (`run_judge_call`, template `judge.stop/v1`, usage label `judge.stop`,
    `max_calls=1`, run context `(workspace, N, run_name, run_id)`) and publishes
    write-once evidence at `candidate_control_dir(workspace, iteration=N) /
    "judge/stop.json"` (`candidate_run/judge/stop.json` for body 1); the evaluator
-   then decides from the verdict: `stop` completes with `JudgeStopReason(kind="judge",
+   then decides from the verdict: `stop` takes the judge's `on_met` action (completes,
+   or pauses with an input request) with `JudgeStopReason(kind="judge",
    condition_index, iteration, evidence_path, evidence_sha256, request_sha256)`
-   (`evidence_path` relative to the workspace); `continue` proceeds;
+   (`evidence_path` relative to the workspace); `continue` proceeds. The prompt and
+   request are unchanged by `on_met`, so request digests are unchanged;
 5. pending Stop/Pause are read afterwards, unchanged: a judge `stop` wins over them
    like any condition; a `continue` leaves them in force.
 

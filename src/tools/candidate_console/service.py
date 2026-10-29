@@ -136,6 +136,7 @@ def loop_status(
         final_iteration=loop.final_iteration,
         attempted_iterations=None if trace is None else trace.attempted_iterations,
         stop_reason=None if trace is None else trace.stop_reason,
+        input_request=None if trace is None else trace.input_request,
         stop_requested=stop,
         pause_requested=pause,
         judge_verdicts=()

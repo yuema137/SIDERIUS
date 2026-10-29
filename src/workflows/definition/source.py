@@ -193,6 +193,13 @@ _OMITTED_WHEN_EMPTY = frozenset(
         (ReusableWorkflowDefinition, "adaptors"),
     }
 )
+# Fields omitted from canonical source when equal to their default, matching their
+# ``exclude_if`` serialization, so declarations written before the field keep their bytes.
+_OMITTED_WHEN_DEFAULT: dict[tuple[type[BaseModel], str], object] = {
+    (MetricThresholdStop, "on_met"): "stop",
+    (NoImprovementStop, "on_met"): "stop",
+    (JudgeStop, "on_met"): "stop",
+}
 _FIELD_NAMES = frozenset(name for model in _CONSTRUCTORS.values() for name in model.model_fields)
 
 
@@ -449,6 +456,10 @@ def _render_value(value: object, depth: int) -> str:
             for name in type(value).model_fields
             if not ((type(value), name) in _OMITTED_WHEN_NONE and getattr(value, name) is None)
             and not ((type(value), name) in _OMITTED_WHEN_EMPTY and not getattr(value, name))
+            and not (
+                (type(value), name) in _OMITTED_WHEN_DEFAULT
+                and getattr(value, name) == _OMITTED_WHEN_DEFAULT[(type(value), name)]
+            )
         ]
         return f"{type(value).__name__}(\n" + "\n".join(fields) + f"\n{indentation})"
     if isinstance(value, tuple):

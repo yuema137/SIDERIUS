@@ -494,6 +494,73 @@ def test_loop_without_stop_conditions_keeps_pre_stop_source_bytes_and_digest():
     )
 
 
+# Pinned at b5438c288, before ``on_met`` existed: (source sha256, declaration digest).
+PRE_ON_MET_GOLDEN = {
+    "metric_threshold": (
+        "45779a2ddbaecf48f9a3f11ec5d79e92f577f1fa37e47cc39b88569e91b8545e",
+        "7fea37ad4e07b036ab5708af29f110da5383c7de4ebd56d83a9ab094d0bddff7",
+    ),
+    "no_improvement": (
+        "a074ce67c73106693a9bb460de862c46eaa189b7c52977cfc8470fa2c1e1a8ff",
+        "83bec847f8bd88590bdaf7879853c6f97b15b693c423438b3779615d8c84369d",
+    ),
+    "judge": (
+        "1c289be89186740427740eb2a12e51e588ce4d838a4872845a6e072cb27e5edf",
+        "794f9e3fcea0062348e26a907d1f6463717da1888befcba53192bc9dbdcbd8c4",
+    ),
+    "all": (
+        "57ca9ce768a0296425d085fb68e4f4fe502a235ba99d789422b59c63ce75e32c",
+        "f9eb9ddac764419a31b079dcc3bef73678859b1b619ff255c245f99dd6ee96a8",
+    ),
+}
+
+
+def pre_on_met_conditions(kind):
+    from workflows.definition import JudgeStop, MetricThresholdStop, NoImprovementStop
+
+    threshold = MetricThresholdStop(metric_id="accuracy", threshold=0.9)
+    plateau = NoImprovementStop(completed_bodies=2)
+    criterion = "Stop when the model stops improving."
+    return {
+        "metric_threshold": (threshold,),
+        "no_improvement": (plateau,),
+        "judge": (JudgeStop(criterion=criterion, min_completed_bodies=2, on_failure="continue"),),
+        "all": (threshold, plateau, JudgeStop(criterion=criterion)),
+    }[kind]
+
+
+@pytest.mark.parametrize("kind", sorted(PRE_ON_MET_GOLDEN))
+def test_default_on_met_keeps_pre_existing_source_bytes_and_digest(kind):
+    """Fails if the default ``on_met="stop"`` leaks into canonical source or the digest,
+    which would change every stop-condition loop declared before the field existed."""
+    import hashlib
+
+    document = loop_document(*pre_on_met_conditions(kind))
+    source = render_workflow_source(document)
+    assert (
+        hashlib.sha256(source.encode()).hexdigest(),
+        document.definition.declaration_digest(),
+    ) == PRE_ON_MET_GOLDEN[kind]
+    assert "on_met" not in source
+
+
+def test_request_input_action_roundtrips_and_changes_identity():
+    """Fails if a non-default ``on_met`` is dropped by the renderer or the digest."""
+    from workflows.definition import JudgeStop, MetricThresholdStop, NoImprovementStop
+
+    for condition in (
+        MetricThresholdStop(metric_id="accuracy", threshold=0.9, on_met="request_input"),
+        NoImprovementStop(completed_bodies=2, on_met="request_input"),
+        JudgeStop(criterion="plateau", on_met="request_input"),
+    ):
+        document = loop_document(condition)
+        source = render_workflow_source(document)
+        assert "on_met='request_input'" in source
+        assert parse_workflow_source(source) == document
+        default = loop_document(condition.model_copy(update={"on_met": "stop"}))
+        assert document.definition.declaration_digest() != default.definition.declaration_digest()
+
+
 def test_stop_conditions_roundtrip_and_refuse_duplicates_and_unreachable_bounds():
     from pydantic import ValidationError
 

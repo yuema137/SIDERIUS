@@ -168,6 +168,12 @@ even when using the default models.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
    resumed as a new segment of the same run, which shows its own results.
    A loop ended early by a declared stop condition says why, in plain words.
+   A condition set to **Pause and ask me** pauses the loop instead and reads
+   "Waiting for your input", followed by what was met, for example "No improvement
+   for 3 bodies (best 0.81 at body 4, higher is better). Paused after body 7 of 12."
+   Check the per-iteration results, then choose **Review resume** and **Resume loop**
+   to continue with the next body. If you pressed Stop while it was waiting, the run
+   cannot continue and no Resume is offered.
    A loop with a judge stop condition lists each judge decision under it, with
    the judge's own reason when the call decided.
    To stop a running candidate now, press **Stop run** and confirm. The run
@@ -213,6 +219,11 @@ even when using the default models.
    A **Judge** stop condition takes what the judge should look for, the first body it
    judges after, and what a failed judge call does; the judge model and its call limit
    come from the console operator's model settings.
+   Each stop condition has **When met**: **Stop** (the default) ends the loop early;
+   **Pause and ask me** pauses it and waits for you on Monitor. After you resume, the
+   same condition asks again only after a new stretch counted from that pause (a
+   no-improvement condition needs its full number of bodies again; a metric threshold
+   asks once). Conditions set to Stop are checked first.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
    Until the canvas has a module, it says what to do next and offers **Start from a
    template**; the 4-step tour is a link below it and under **Help**.
