@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 from tools.workflow_preview.models import PreviewModel
 
-from .loop_stop import JudgeBoundaryVerdict, StopReason
+from .loop_stop import JudgeBoundaryVerdict, LoopInputRequest, StopReason
 
 
 class LoopTrace(PreviewModel):
@@ -20,6 +20,11 @@ class LoopTrace(PreviewModel):
     segment_id: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
     # Present only when a declared stop condition completed the loop before its limit.
     stop_reason: StopReason | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Present only when a met ``request_input`` condition paused the loop at its last
+    # attempted boundary; ``stop_reason`` keeps meaning "completed before the limit".
+    input_request: LoopInputRequest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Every judged boundary's verified verdict, ``continue`` and abstentions included:
     # the evidence digest each one carries anchors that boundary's judge record.
     judge_verdicts: tuple[JudgeBoundaryVerdict, ...] = Field(
@@ -37,6 +42,11 @@ class LoopTrace(PreviewModel):
             raise ValueError("judge verdicts must be increasing attempted boundaries")
         if self.judge_abstentions != sum(item.decision is None for item in self.judge_verdicts):
             raise ValueError("judge_abstentions must count the abstained judge verdicts")
+        if self.input_request is not None and (
+            self.stop_reason is not None
+            or self.input_request.reason.iteration != self.attempted_iterations
+        ):
+            raise ValueError("an input request pauses the last attempted boundary, never a stop")
         return self
 
 

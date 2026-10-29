@@ -666,3 +666,49 @@ def test_candidate_llm_requests_are_seed_invariant(
         assert not any("run_seed" in item for item in recorded)
     first, second = runs.values()
     assert first == second
+
+
+def test_met_input_request_pauses_with_summary_and_leaves_next_slot_unused(
+    prepared, loop_tuner, monkeypatch
+):
+    """Fails if a met ``request_input`` condition completes or continues the loop, records
+    its pause as a stop reason, or summarizes facts other than the verified scores."""
+    from tools.candidate_worker.loop_stop import InputRequestSummary, NoImprovementReason
+    from workflows.definition import NoImprovementStop
+
+    metric, _, (low, high) = threshold_for(prepared)
+    request = loop_request(
+        prepared,
+        final_iteration=4,
+        stop_conditions=(NoImprovementStop(completed_bodies=2, on_met="request_input"),),
+    )
+    scored_bodies(monkeypatch, (high, low, low, high))
+    receipt = launch_candidate(request)
+    assert receipt.status == "paused", receipt.error
+    trace = receipt.loop_trace
+    assert trace.attempted_iterations == 3 and trace.stop_reason is None
+    assert trace.input_request.reason == NoImprovementReason(
+        condition_index=0,
+        iteration=3,
+        k=2,
+        non_improving_bodies=2,
+        last_improvement_iteration=1,
+        incumbent=high,
+    )
+    assert trace.input_request.summary == InputRequestSummary(
+        iteration=3,
+        final_iteration=4,
+        metric_id=metric.id,
+        direction=metric.direction,
+        incumbent=high,
+        incumbent_iteration=1,
+        non_improving_bodies=2,
+        input_anchor=0,
+        bodies_since_input=3,
+    )
+    control = Path(receipt.workspace) / "candidate_run"
+    assert not (control / "iteration_004").exists()
+    # A condition pause needs no operator Pause marker; readback re-derives it instead.
+    assert not (control / "pause.json").exists()
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    assert len(verify_loop(request, parent, receipt)) == 3

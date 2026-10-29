@@ -4,7 +4,7 @@ import hashlib
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 from uuid import UUID
 
 from core.control_json import encode_control
@@ -30,7 +30,7 @@ from .parallel_models import (
 if TYPE_CHECKING:
     from core.chain_state import ChainState
 
-    from .loop_stop import BodyScore, JudgeBoundaryVerdict
+    from .loop_stop import BodyScore, JudgeBoundaryVerdict, LoopInputRequest
 
 
 def segment_control(initial: CandidateRunReceipt, segment_id: UUID | None) -> Path:
@@ -90,10 +90,25 @@ def predecessor(initial: CandidateRunReceipt, binding: LoopContinuation) -> Cand
     return receipt
 
 
-def verify_segment(initial: CandidateRunReceipt, receipt: CandidateRunReceipt) -> int:
+class Checkpoint(NamedTuple):
+    """One resumed paused boundary of the ancestry; ``verify_loop`` judges why it paused."""
+
+    completed_iterations: int
+    pause_marker: bool
+    input_request: "LoopInputRequest | None"  # as recorded by the predecessor receipt
+
+
+class SegmentAncestry(NamedTuple):
+    resumed_at: int  # completed bodies where the receipt's own segment resumed (0 at root)
+    checkpoints: tuple[Checkpoint, ...]  # newest first
+
+
+def verify_segment(initial: CandidateRunReceipt, receipt: CandidateRunReceipt) -> SegmentAncestry:
     """Validate immutable ancestry without recursion or an arbitrary segment limit.
 
-    Returns the completed-body count at which the receipt's own segment resumed (0 at root).
+    Each checkpoint is a clean, digest-bound paused predecessor. Whether it paused
+    legitimately (an operator Pause marker or a re-derived condition input request) is
+    decided by ``verify_loop``, which owns the stop-condition replay.
     """
     from .loop import pause_requested
 
@@ -102,6 +117,7 @@ def verify_segment(initial: CandidateRunReceipt, receipt: CandidateRunReceipt) -
     seen = set()
     upper = receipt.loop_trace.attempted_iterations
     first = 0
+    checkpoints: list[Checkpoint] = []
     while segment_id is not None:
         if segment_id in seen:
             raise ValueError("loop continuation cycle")
@@ -112,12 +128,17 @@ def verify_segment(initial: CandidateRunReceipt, receipt: CandidateRunReceipt) -
         if len(seen) == 1:
             first = binding.completed_iterations
         prior = predecessor(initial, binding)
-        if not pause_requested(initial, binding.predecessor_segment):
-            raise ValueError("predecessor lacks Pause request")
-        upper = binding.completed_iterations
         assert prior.loop_trace is not None
+        checkpoints.append(
+            Checkpoint(
+                binding.completed_iterations,
+                pause_requested(initial, binding.predecessor_segment),
+                prior.loop_trace.input_request,
+            )
+        )
+        upper = binding.completed_iterations
         segment_id = prior.loop_trace.segment_id
-    return first
+    return SegmentAncestry(first, tuple(checkpoints))
 
 
 def has_successor(initial: CandidateRunReceipt, receipt: CandidateRunReceipt) -> bool:
@@ -143,22 +164,24 @@ def resume_history(
     tuple[CandidateRunReceipt, ...],
     tuple["BodyScore", ...],
     tuple["JudgeBoundaryVerdict", ...],
+    int,
 ]:
     """Run under the native lease: recheck the binding, then rebuild history by replay.
 
     Returns the history, every completed body receipt (the last one feeds the next
-    body), the stop-score carrier and the predecessor's judge verdicts (its trace was
-    just verified against the evidence), so conditions, judge requests and the
-    anchored verdicts span segments. A paused boundary already holds its judge
-    evidence; the continuation starts at the next boundary, so none is judged twice.
+    body), the stop-score carrier, the predecessor's judge verdicts (its trace was
+    just verified against the evidence) and the re-derived input anchor, so conditions,
+    judge requests and the anchored verdicts span segments. A paused boundary already
+    holds its judge evidence; the continuation starts at the next boundary, so none is
+    judged twice.
     """
     from .loop import stop_requested
-    from .loop_evidence import replay_completed, require_unused_next, verify_loop
+    from .loop_evidence import replay_completed, require_unused_next, verified_loop
 
     if read_continuation(initial, binding.operation_id) != binding:
         raise ValueError("resume binding changed")
     prior = predecessor(initial, binding)
-    verify_loop(request, initial, prior)
+    anchor = verified_loop(request, initial, prior).input_anchor
     if stop_requested(initial):
         raise ValueError("stopped loop cannot resume")
     require_unused_next(request, initial, binding.completed_iterations)
@@ -167,7 +190,7 @@ def resume_history(
     if last is None or last.status != "completed":
         raise ValueError("resume requires completed required feedback")
     assert prior.loop_trace is not None
-    return state, bodies, scores, prior.loop_trace.judge_verdicts
+    return state, bodies, scores, prior.loop_trace.judge_verdicts, anchor
 
 
 def launch_continuation(
