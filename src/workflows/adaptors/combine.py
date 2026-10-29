@@ -5,6 +5,7 @@ nothing here reads a direction from a metric name or a field value.
 """
 
 from collections.abc import Callable
+from fractions import Fraction
 from functools import cmp_to_key
 from typing import Literal, Self
 
@@ -31,6 +32,7 @@ from workflows.definition.catalog import (
 )
 from workflows.definition.models import ResultSource
 
+from .exact import ExactRational
 from .items import AdaptorInputRef, AdaptorItem, AdaptorModel, AdaptorStrategyError, tuning_output
 
 Role = Literal["selected", "collected", "concatenated", "replicated"]
@@ -79,6 +81,14 @@ class RankEntry(AdaptorModel):
     unit: int = Field(ge=0)
     ref: AdaptorInputRef
     value: float | None = Field(allow_inf_nan=False)  # None for an ordinal-only judge ranking
+    # Exact computed value (rubric weighted mean); ``value`` is then its display float.
+    exact: ExactRational | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def exact_matches_value(self) -> Self:
+        if self.exact is not None and self.value != float(Fraction(self.exact)):
+            raise ValueError("a rank entry's value must be the float of its exact value")
+        return self
 
 
 class Ranking(AdaptorModel):
@@ -99,6 +109,10 @@ class Ranking(AdaptorModel):
             raise ValueError(
                 "a ranking names metric_id and direction if and only if its basis is 'metric'"
             )
+        if self.basis == "rubric" and any(
+            entry.value is not None and entry.exact is None for entry in self.entries
+        ):
+            raise ValueError("a rubric ranking carries the exact value of every scored entry")
         return self
 
 

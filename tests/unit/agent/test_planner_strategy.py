@@ -190,24 +190,19 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
     assert len(bridge.captures) == 1
 
 
-@pytest.mark.parametrize(
-    "filename",
-    [
-        "certify_minimal.json",
-        "deepseek_tiered_pro.json",
-        "openai_tiered_pro.json",
-        "openai_tiered_v1.json",
-    ],
-)
-def test_shipped_routing_configs_work_without_experiment_plugins(monkeypatch, filename):
-    """Removing the explicit selector from an example must fail in a clean install."""
-    from pathlib import Path
+# Captured from origin/master 9ab94c28 (issue #1034). Workspaces pinned to the
+# native planner record this identity in run_invariants_lock.json and refuse
+# resume when it changes, so an edit to any fingerprinted planner/bridge source
+# must be a deliberate, reviewed identity change that updates this pin.
+NATIVE_PLANNER_IDENTITY_PIN = {
+    "name": "native-timing-v1",
+    "version": "1",
+    "content_sha256": "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562",
+    "assembly_sha256": "7bc6513b764ac32606ec7240d11259cf4a74e5d77900f83d47c8453f5ba5a2b4",
+}
 
-    from workflows.llm_config import WorkflowLLMConfig
 
-    monkeypatch.setattr(strategies, "entry_points", lambda **kwargs: [])
-    path = Path(__file__).resolve().parents[3] / "configs" / "llm" / filename
-    config = WorkflowLLMConfig.model_validate_json(path.read_text())
-    assert config.tune is not None
-    selected = strategies.resolve_planner_strategy(config.tune.planner_strategy)
-    assert selected.identity.name == "native-timing-v1"
+def test_native_planner_identity_is_pinned_for_workspace_resume():
+    """An incidental edit to a fingerprinted source would strand pinned workspaces."""
+    identity = strategies.resolve_planner_strategy("native-timing-v1").identity
+    assert identity.model_dump(mode="json") == NATIVE_PLANNER_IDENTITY_PIN

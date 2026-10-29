@@ -4,6 +4,8 @@ SELECT returns unit indices; values are never edited here. ``all`` and
 ``threshold`` keep declared order; only ``top-k`` follows a ranking.
 """
 
+from fractions import Fraction
+
 from execute_tools.evaluation_metric import MetricSpec
 from execute_tools.metric_order import MetricOrder
 from workflows.definition.adaptor_strategies import (
@@ -16,6 +18,7 @@ from workflows.definition.adaptor_strategies import (
 from workflows.definition.catalog import METRIC_SCORED_CONTRACTS
 
 from .combine import Combined, Ranking, Unit, with_list
+from .exact import decimal_fraction
 from .items import AdaptorStrategyError
 
 
@@ -94,10 +97,12 @@ def _threshold(
             if entry.value is not None and order.is_at_least(entry.value, strategy.at_least)
         }
     else:
-        # A rubric total is higher-is-better by the rubric type, never by a metric.
+        # A rubric mean is higher-is-better by the rubric type, never by a metric, and
+        # is compared exactly: a computed true 4 must clear at_least=4.
+        floor = decimal_fraction(strategy.at_least)
         kept = {
             entry.unit
             for entry in ranking.entries
-            if entry.value is not None and entry.value >= strategy.at_least
+            if entry.exact is not None and Fraction(entry.exact) >= floor
         }
     return tuple(sorted(kept))

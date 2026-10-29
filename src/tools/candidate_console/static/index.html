@@ -41,12 +41,13 @@
   <script src="/new-run.js" defer></script>
   <script src="/native-chain.js" defer></script>
   <script src="/page-guidance.js" defer></script>
+  <script src="/settings.js" defer></script>
 </head>
 <body>
 <header class="console-header"><div class="brand">SIDERIUS <span>Local candidate console</span></div><details class="console-intro"><summary>About this console</summary><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></details>
   <div class="theme-control"><label for="theme-preference">Color theme</label><select id="theme-preference"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
 </header>
-<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#slow-control">Slow control</a></nav>
+<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#slow-control">Slow control</a><a href="#settings">Settings</a></nav>
 <main>
 <p id="route-status" role="status"></p>
   <section class="card" id="access-section" aria-labelledby="access-heading">
@@ -279,7 +280,44 @@
       <p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
     </section>
   </section>
-</section></main>
+</section>
+<section id="view-settings" data-view="settings" hidden><h1 tabindex="-1">Settings</h1>
+  <section class="card" aria-labelledby="settings-global-heading">
+    <h2 id="settings-global-heading">Global settings</h2>
+    <p>A workflow's own values are used for that workflow. Values set for a task in console.json also take priority over this page.</p>
+    <p id="settings-host" class="muted"></p>
+    <p id="settings-status" role="status">Connect to load settings.</p>
+    <form id="settings-form" hidden>
+      <fieldset><legend>Models</legend><p class="muted">Used by tasks whose console.json entry leaves out <code>llm_config_file</code>.</p><div id="settings-models"></div><label for="settings-import-llm">Import from this computer…</label><input id="settings-import-llm" type="file" accept=".json,application/json"></fieldset>
+      <fieldset><legend>Advice</legend><p class="muted">Not applied to runs from here; workflows record their own advice.</p><div id="settings-advice"></div><label for="settings-import-advice">Import from this computer…</label><input id="settings-import-advice" type="file" accept=".json,application/json"></fieldset>
+      <fieldset><legend>Data folder</legend><div id="settings-data"></div></fieldset>
+      <div class="actions"><button type="submit" id="settings-save">Save settings</button><button type="button" id="settings-reload" class="secondary">Reload</button></div>
+    </form>
+    <p id="settings-pending" role="status"></p>
+  </section>
+  <section class="card" aria-labelledby="settings-export-heading">
+    <h2 id="settings-export-heading">Export a workflow</h2>
+    <p class="muted">Writes the saved workflow, the task's model profile and the workflow's own advice as plain files on the server, then lets you download them. Credentials are never exported.</p>
+    <label for="settings-export-project">Workflow project</label><select id="settings-export-project"></select>
+    <label for="settings-export-task">Task</label><select id="settings-export-task"></select>
+    <label for="settings-export-name">Export name</label><input id="settings-export-name" type="text" maxlength="80" value="my-export">
+    <div class="actions"><button type="button" id="settings-export">Export</button></div>
+    <p id="settings-export-status" role="status"></p>
+    <ul id="settings-export-files"></ul>
+  </section>
+  <section class="card" aria-labelledby="settings-workspace-heading">
+    <h2 id="settings-workspace-heading">Workspace</h2>
+    <dl id="settings-workspace" class="facts"></dl>
+    <ul id="settings-workspace-problems"></ul>
+    <p id="settings-init" hidden>Create the missing folders on the server with: <code id="settings-init-command"></code></p>
+  </section>
+  <section class="card" aria-labelledby="settings-effective-heading">
+    <h2 id="settings-effective-heading">Values in effect</h2>
+    <p class="muted">Values marked “Set in console.json” are fixed by the server and are not editable here; change console.json and restart.</p>
+    <div class="token-table" role="region" aria-labelledby="settings-effective-heading" tabindex="0"><table><thead><tr><th scope="col">Task</th><th scope="col">Setting</th><th scope="col">Source</th><th scope="col">Choice</th><th scope="col">Server path</th></tr></thead><tbody id="settings-rows"></tbody></table></div>
+  </section>
+</section>
+</main>
 <footer>Candidate generation and validation, with native training when declared. Inspect native outputs for scientific results.</footer>
 </body>
 </html>

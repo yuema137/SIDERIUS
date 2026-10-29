@@ -8,7 +8,7 @@ from tools.native_chain.observation import NativeChainEvidence
 
 from .models import OperationRecord, OperationSnapshot
 from .native_chain_models import NativeChainContinuation, NativeChainObservation
-from .native_chain_read import chain_context, chain_evidence, chain_state
+from .native_chain_read import chain_context, chain_evidence, chain_seed, chain_state
 from .native_resume_lineage import ChainLineage, read_lineage
 from .store import now
 
@@ -140,5 +140,6 @@ def read_resume_chain(record: OperationRecord) -> OperationSnapshot:
                 head_state=head_state,
                 lifecycle=lifecycle,
             ),
+            **chain_seed(record).model_dump(),
         ),
     )

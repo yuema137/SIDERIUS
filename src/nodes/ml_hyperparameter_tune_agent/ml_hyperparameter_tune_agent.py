@@ -35,6 +35,7 @@ from agent.schemas.hyperparam_tuning import (
     serialize_expert_advice,
     validate_runtime_config,
 )
+from agent.schemas.parameter_rules import validate_model_parameter_rules
 from agent.schemas.task_config import ForwardContract
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import get_or_create
@@ -1143,6 +1144,16 @@ class HyperparamTuningAgent:
             )
             print(f"[Tuner] Seed plugin staged: {os.path.basename(copied)} -> {sandbox.plugin_dir}")
 
+        # A fixed model executes every attempt, so a model_config rule it would
+        # drop is refused once here, before any LLM call or attempt budget.
+        if model_type_setting != "auto":
+            composition_ref = agent_input.task_composition_ref
+            validate_model_parameter_rules(
+                model_type_setting,
+                task_rules=composition_ref.parameter_rules if composition_ref else None,
+                workflow_rules=agent_input.workflow_parameter_rules,
+            )
+
         brain = self._bridge_factory(**_bridge_kwargs_from_input(agent_input))
 
         # Apply deposited run-context (workflow → set_run_context → here).
@@ -1458,7 +1469,9 @@ class HyperparamTuningAgent:
             # (c) ``best_trial_score < resolved_skip_formal_threshold`` —
             # the startup-resolved value (V19 PR 1: single-source
             # arithmetic; ``None`` = no chain incumbent = gate inert).
-            # Disabled by ``skip_formal_min_delta=float('-inf')``.
+            # Inert while the chain-incumbent gates are off (the default: omit
+            # --enable_chain_incumbent_formal_gates); a nonfinite operator
+            # delta is refused at launch.
             # V20 PR D (D-C3): the winner is resolved ONCE here and reused
             # by the skip gate, the bypass gate and the log line below.
             # Three independent `_best_trial_winner` calls would agree only

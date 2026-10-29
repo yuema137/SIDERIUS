@@ -23,6 +23,7 @@ from .interpretation import prepare_interpretation
 from .layout import candidate_control_dir, graph_instance_dir, proposal_debug_dir
 from .literature_inputs import materialize_literature
 from .models import CandidateRunRequest
+from .record_json import artifact_json
 
 if TYPE_CHECKING:
     from .training_admission import TrainingAdmission
@@ -99,7 +100,7 @@ def materialize_fanout(
         proposal.task_description = composition.task_description
         proposal.forward_contract = composition.forward_contract
         proposal.proposal_blocks = composition.proposal_blocks
-        interpreted_payload = proposal.model_dump_json(exclude_unset=True).encode()
+        interpreted_payload = artifact_json(proposal, kind="internal", exclude_unset=True)
     for family in shape.families:
         proposal_request = nodes[family.proposal].request
         if interpreted_payload is not None:
@@ -246,5 +247,5 @@ def captured_contents(
             if value.local is None or value.local.workspace not in slots:
                 raise ValueError("loop storage is not an initial managed body slot")
             value.local.workspace = slots[value.local.workspace]
-            contents[key] = value.model_dump_json().encode()
+            contents[key] = artifact_json(value, kind="internal")
     return contents

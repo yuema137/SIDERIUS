@@ -271,6 +271,9 @@ startup controls. `SUPPORTED_LAUNCH_FIELDS`, `INACTIVE_LAUNCH_FIELDS` and
 direct workflow, not automatic CLI host-profile resolution. Inactive history,
 outer iteration/retry, omitted-stage/advice, raw `plan_overrides`, cooperative
 allocation, and chain-incumbent controls must equal their native defaults.
+The chain-incumbent controls include the two formal deltas
+(`skip_formal_min_delta`, `bypass_formal_time_budget_min_delta`): only those
+gates consume them, and the gates stay off on this ingress (issue #1012).
 Those defaults do not activate omitted phases or outer retries. Tuning advice,
 ordinary budgets, epoch limits, typed frozen portions, retention, parameter
 rules and runtime controls use the native owners. `data_dir` must match the
@@ -310,7 +313,39 @@ constraint sections refuse; incomplete context is completed from
 `workflow_constraint_context`. Implementation and validation external context
 bindings are checked against that same result. The admitted proposal is saved
 before its first call; resolved settings are saved to
-`candidate_run/training_settings.json`.
+`candidate_run/training_settings.json`. `CandidateTrainingSettings` serializes
+an accepted nonfinite value of a typed `float` field as the JSON string
+`"Infinity"`, `"-Infinity"` or `"NaN"` (`ser_json_inf_nan="strings"`), so
+admission's own JSON round trip and the saved document preserve it exactly;
+finite values are byte-identical. This covers floats on `WorkflowLaunchConfig`
+and nested dataclasses, which inherit the setting; a nested `BaseModel` uses its
+own config, so a launch float there must refuse inf/NaN or carry the same
+setting (guarded by
+`test_candidate_settings_nonfinite_floats_inherit_the_string_encoding`).
+Parameter-rule bounds and `ParameterRule.exact` / `allowed` values refuse
+non-finite numbers at their owners (`NumericRange`, `ParameterRule`), so no such
+value reaches transport.
+Ingress may write such a value as a string (for example `"-inf"`).
+
+Every other candidate-worker JSON write declares its artifact class through
+`record_json.artifact_json` (issue #1046), and the class picks one existing
+owner; there is no third encoding:
+
+- `record`: files that people and the dashboard read, namely captured node
+  records such as `run_output_<run_name>.json` and the request/receipt control
+  documents. These use the storage owner
+  `execute_tools.scoring_utils.coerce_nonfinite_to_none`: strict JSON, with
+  inf/NaN written as `null`, exactly as the native tuner writes `run_output`.
+- `internal`: documents a later worker phase rereads and compares, namely node
+  inputs, the proposal seed, fan-out payloads and the graph tuning input. These
+  use the unit-transport JSON-constant encoding
+  (`unit_transport.constants_json`), so an inf/NaN value survives the reread.
+
+`capture_record` compares an existing native record with the returned output
+after projecting the output through the same storage owner. A `-inf` no-signal
+sentinel or a NaN therefore no longer reads as "native record disagrees", and
+the in-memory output, with `-inf` intact, is what the worker passes on.
+Whether a value may be nonfinite stays with its owner (issue #1012).
 
 Passed validation returns typed in-memory outputs to training. Missing model
 or loss sources refuse before construction/staging. The shared construction

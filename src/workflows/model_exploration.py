@@ -1440,6 +1440,7 @@ def _run_composed_data_analysis(
     chain_workspace: str | None = None,
     literature_output=None,
     generated_skill_registry=None,
+    run_seed: int | None = None,
 ):
     """Run and log the optional analysis phase outside the core orchestrator.
 
@@ -1471,6 +1472,7 @@ def _run_composed_data_analysis(
         chain_workspace=chain_workspace,
         literature_output=literature_output,
         generated_skill_registry=generated_skill_registry,
+        run_seed=run_seed,
     )
     if output is not None:
         print(
@@ -2324,6 +2326,7 @@ def run_workflow(
                 chain_workspace=bindings.workspace,
                 literature_output=literature_output,
                 generated_skill_registry=_generated_skill_registry,
+                run_seed=_run_invariants.run_seed,
             )
 
         def _run_literature_for_evidence(

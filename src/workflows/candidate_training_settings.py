@@ -26,7 +26,6 @@ SUPPORTED_LAUNCH_FIELDS = frozenset(
         "attempts_per_formal_round",
         "attempts_per_round",
         "baseline_isolation",
-        "bypass_formal_time_budget_min_delta",
         "bypass_formal_time_budget_minutes",
         "cleanup_denoised",
         "degenerate_penalty_score",
@@ -73,7 +72,6 @@ SUPPORTED_LAUNCH_FIELDS = frozenset(
         "runtime_watchdog_enabled",
         "runtime_watchdog_floor_seconds",
         "runtime_watchdog_safety_factor",
-        "skip_formal_min_delta",
         "train_portion",
         "train_validation_align",
         "training_validation_portion",
@@ -101,6 +99,9 @@ INACTIVE_LAUNCH_FIELDS = frozenset(
         "data_analysis_enabled",
         "debug_dump_prompts",
         "enable_chain_incumbent_formal_gates",
+        # #1012: consumed only by the chain-incumbent gates, inactive above.
+        "skip_formal_min_delta",
+        "bypass_formal_time_budget_min_delta",
         "exploration_mode",
         "human_advice_analysis",
         "human_advice_implement",
@@ -140,7 +141,12 @@ MANAGED_LAUNCH_FIELDS = frozenset(
 class CandidateTrainingSettings(BaseModel):
     """Child-validated native launch and the seven run-level startup controls."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, revalidate_instances="always")
+    # An accepted nonfinite value (for example ``degenerate_penalty_score``)
+    # must survive this document's own JSON round trip: the default "null"
+    # turned it into a silent None at admission (#1012).
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, revalidate_instances="always", ser_json_inf_nan="strings"
+    )
     launch: WorkflowLaunchConfig = Field(default_factory=WorkflowLaunchConfig)
     # These seven defaults follow run_workflow's public startup signature.
     data_scope: DataScope | None = None

@@ -217,8 +217,9 @@ def validate_formal_launch(
             f"{', '.join(non_finite)}. Every comparison against NaN or an "
             f"infinity is False, so the gate would be silently disabled "
             f"rather than loudly refused — the run would look enforced and "
-            f"gate nothing. Configure finite deltas, or disable the gates "
-            f"explicitly with --no-enable_chain_incumbent_formal_gates. "
+            f"gate nothing. Configure finite deltas, or keep the gates off: "
+            f"they are off by default, so omit --enable_chain_incumbent_formal_gates "
+            f"(or set enable_chain_incumbent_formal_gates=false). "
             f"(The internally resolved -inf comparison reference is a "
             f"different thing and remains legal.)"
         )
