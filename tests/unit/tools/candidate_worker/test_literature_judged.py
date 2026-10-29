@@ -240,24 +240,22 @@ def test_run_level_max_judge_calls_refuses_before_any_effect(
     assert not literature_sdk[0] and not native_runner.calls and bridge.calls == []
 
 
-def _absolute(value, base: Path):
-    """The quickstart manifest's relative refs, resolved for a copy written elsewhere."""
-    if isinstance(value, dict):
-        return {key: _absolute(item, base) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_absolute(item, base) for item in value]
-    if isinstance(value, str) and value.startswith(("../", "./")):
-        return str((base / value).resolve())
-    return value
-
-
 @pytest.fixture
 def prepared_rubric(tmp_path, monkeypatch):
-    """The quickstart task plus a task-declared rubric (``rubrics:``), as a test manifest."""
-    task = tmp_path / "project" / "task"  # inside the mounted project root
+    """The quickstart task plus a task-declared rubric (``rubrics:``), as a test manifest.
+
+    The shipped manifest's refs are kept verbatim (``../../examples/...``): plugin module
+    identity derives from the authored ref spelling, so a respelled ref would register
+    the same plugin under a second identity in a shared test process. The manifest sits
+    two levels below the mounted project root, beside an ``examples`` link to the
+    checkout's ``examples/``, so the verbatim refs resolve to the shared files.
+    """
+    project = tmp_path / "project"
+    task = project / "task" / "judged"
     task.mkdir(parents=True)
+    (project / "examples").symlink_to(QUICKSTART.parents[2] / "examples")
     (task / "rubric.yaml").write_text(yaml.safe_dump(SCORED_RUBRIC.model_dump(mode="json")))
-    raw = _absolute(yaml.safe_load(QUICKSTART.read_text()), QUICKSTART.parent)
+    raw = yaml.safe_load(QUICKSTART.read_text())
     raw["rubrics"] = [{"config": str(task / "rubric.yaml")}]
     manifest = task / "manifest.yaml"
     manifest.write_text(yaml.safe_dump(raw))
