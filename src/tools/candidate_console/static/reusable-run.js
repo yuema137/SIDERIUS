@@ -61,7 +61,7 @@
   // Why Launch is disabled, in one inline sentence beside it (R-2); never a tooltip.
   function launchReason(enabled) {
     if (!session.connected) return session.reachable === false ? 'Can\'t check: the server is unreachable.' : 'Connect to launch.';
-    if (!enabled) return busy ? 'Working…' : 'Open a runnable project first.';
+    if (!enabled) return busy ? 'Working…' : 'Open an experiment setup whose runs are enabled first.';
     if (intent) return '';
     if (storageProblem) return 'This browser\'s saved run state is unreadable; clear this site\'s storage, then reload.';
     if (!selected) return '';

@@ -19,7 +19,7 @@
   function usage(parent, state) {
     const binding = state.savedBinding;
     const text = !state.connected && !state.projectOpen ? 'Connect to see which task package and version this workflow uses.'
-      : !state.projectOpen ? 'Open a project to see which task package and version its workflow uses.'
+      : !state.projectOpen ? 'Open an experiment setup to see which task package and version its workflow uses.'
         : binding ? `This workflow uses task package ${binding.package_id}, version ${binding.revision}.`
           : 'This workflow is not bound to a task package version; its task references are used as written (legacy / unbound). Ordinary editing remains available.';
     const line = node('p', text, parent); line.id = 'editor-task-state';
@@ -65,8 +65,9 @@
         }
         const update = node('button', 'Update workflow references', parent); update.type = 'button';
         update.id = 'editor-task-update'; update.disabled = !state.canUpdate;
-        // The review findings open in the Workflow save step, beside the diff and Save.
-        update.addEventListener('click', () => { if (!state.canUpdate) return; actions.update(); location.hash = 'workflow'; });
+        // A review (passed or blocked) opens in the Workflow save step beside the diff and Save;
+        // a refused request keeps the user here, where the message names the reason.
+        update.addEventListener('click', async () => { if (state.canUpdate && await actions.update()) location.hash = 'workflow'; });
       } else unavailable(parent, state);
       const message = node('p', state.message, parent); message.id = 'editor-task-message'; message.setAttribute('role', 'status');
       const retry = node('button', 'Refresh task choices', parent); retry.type = 'button';

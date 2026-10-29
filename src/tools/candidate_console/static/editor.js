@@ -54,7 +54,7 @@
     nodeIds: [...new Set([...(anchor?.document?.definition.nodes || []).map(n => n.id), ...(graph?.definition.nodes || []).map(n => n.id), ...pendingNodes.map(n => n.node)])],
     taskBinding: base?.document?.task_binding ? {package_id: base.document.task_binding.package_id, revision: base.document.task_binding.revision} : null});
   // importSource: a template's unsaved source enters the ordinary source Review (editor-templates.js).
-  window.workflowEditor = Object.freeze({get state() { return projection(); }, importSource: (source, label) => {
+  window.workflowEditor = Object.freeze({get state() { return projection(); }, useSetups: (list, preferred) => useSetups(list, preferred), importSource: (source, label) => {
     // Typed Python is not a draft state; folding the import would drop it beyond Undo.
     if (sourceDirty) { status('Save or revert your typed Python text first, then use a template.'); return Promise.resolve(false); }
     return reviewProposal({kind: 'source', source}, label);
@@ -110,7 +110,8 @@
     }
     taskSelection = choice ? {kind: 'task_references', selected_choice_id: choice.choice_id, expected_task_binding: clone(choice.binding)} : null;
     taskMessage = '';
-    if (hasBindings()) { reviewed = null; controls(); return; }
+    // A new choice invalidates an earlier acknowledgement in both branches.
+    if (hasBindings()) { reviewed = null; taskAcknowledged = false; taskAdopted = false; controls(); return; }
     invalidate();
   }
   async function loadTaskChoices() {
@@ -134,9 +135,14 @@
       }
     } finally { if (taskLoadingRevision === revision) taskLoadingRevision = null; }
   }
+  // Resolves true once a task reference review exists (passed or blocked, shown in the
+  // Workflow save step); otherwise the reason stays in the Task tab's message.
   async function updateTask() {
-    if (!canUpdateTask()) return;
+    if (!canUpdateTask()) return false;
     await reviewProposal(clone(taskSelection));
+    if (taskReview()) return true;
+    taskMessage = `Workflow references were not updated: ${$('status').textContent}`; controls();
+    return false;
   }
   // Red-team A-2: typed Python stays pending when advanced tools are hidden; say so in the
   // beginner view (Show / Discard) instead of locking the canvas without a reason.
@@ -601,20 +607,34 @@
       if (current(id, version)) { sourceAvailable = false; controls(); status(`Can't open ${id}: ${problem(error)}${pending() ? ' Your unsaved changes are kept.' : ''}`); }
     }
   }
-  let projectsLoaded = false, loadingRevision = null;
-  async function openProjects() {
-    if (!window.consoleSession.connected || projectsLoaded || loadingRevision === window.consoleSession.revision) return;
-    const revision = window.consoleSession.revision; loadingRevision = revision;
+  // The setup list (experiment-setups.js) fills the select: the selected task's setups,
+  // then legacy projects that match no configured task. Opening a list keeps the open
+  // setup when it is listed; pending edits are never dropped without confirmation.
+  let projectsLoaded = false;
+  function openProjects() {
+    if (!window.consoleSession.connected) return;
     void loadTaskChoices();
-    try {
-      const choices = await api('projects');
-      $('project').replaceChildren();
-      choices.forEach(choice => { const entry = node('option', choice.project_id, $('project')); entry.value = choice.project_id; entry.dataset.runnable = String(choice.candidate_run_enabled); });
-      projectsLoaded = true;
-      project = choices[0]?.project_id || ''; candidateEnabled = !!choices[0]?.candidate_run_enabled; resetProjectState();
-      if (project) await refresh(false); else status('No editor projects configured. Monitoring remains available.');
-    } catch (error) { if (!error.stale) status(error.message); }
-    finally { if (loadingRevision === revision) loadingRevision = null; }
+    window.experimentSetups?.load();
+  }
+  function useSetups(list, preferred = null) {
+    const listed = id => list.some(item => item.id === id);
+    let next = listed(preferred) ? preferred : listed(project) ? project : list[0]?.id || '';
+    if (project && next !== project && pending() && !window.confirm('Discard pending edits and open another experiment setup?')) {
+      list = [...list, {id: project, label: `${project} (unsaved edits)`, runnable: candidateEnabled, group: 'other'}]; next = project;
+    }
+    const select = $('project'); select.replaceChildren();
+    let others = null;
+    for (const item of list) {
+      if (item.group === 'other' && !others) { others = node('optgroup', '', select); others.label = 'Other workflows (no configured task)'; }
+      const entry = node('option', item.label, others || select); entry.value = item.id; entry.dataset.runnable = String(item.runnable);
+    }
+    select.value = next;
+    const changed = next !== project || !projectsLoaded;
+    projectsLoaded = true;
+    candidateEnabled = !!list.find(item => item.id === next)?.runnable;
+    if (!changed) { controls(); return; }
+    project = next; resetProjectState();
+    if (project) void refresh(false); else { status('This task has no experiment setup yet. Create one with New setup….'); controls(); }
   }
   function connection() {
     if (!window.consoleSession.connected) { if (taskReview()) invalidate(); else controls(); return; }
@@ -622,17 +642,17 @@
     if (projectsLoaded) {
       void loadTaskChoices();
       if (!base && project && !pending()) void refresh(false);
-    } else if (['workflow', 'run'].includes(window.consoleNavigation?.view)) void openProjects();
+    } else if (['workflow', 'run'].includes(window.consoleNavigation?.view)) openProjects();
   }
   window.consoleSession.subscribe(connection);
-  window.addEventListener('console-view', event => { if (['workflow', 'run'].includes(event.detail.view)) void openProjects(); });
+  window.addEventListener('console-view', event => { if (['workflow', 'run'].includes(event.detail.view)) openProjects(); });
   // The version name field (editor-versions.js) refuses invisible characters and used names as typed.
   window.addEventListener('editor-version-name', () => controls());
   window.addEventListener('beforeunload', event => { if (pending()) { event.preventDefault(); event.returnValue = ''; } });
   $('inspect').addEventListener('click', () => { $('advanced').open = true; $('source').focus(); });
   $('project').addEventListener('change', () => {
     if (!window.consoleSession.connected) { $('project').value = project; return; }
-    if (pending() && !window.confirm('Discard pending edits and change project?')) { $('project').value = project; return; }
+    if (pending() && !window.confirm('Discard pending edits and open another experiment setup?')) { $('project').value = project; return; }
     project = $('project').value; candidateEnabled = $('project').selectedOptions[0]?.dataset.runnable === 'true'; resetProjectState(); refresh(false);
   });
   $('refresh').addEventListener('click', () => refresh());

@@ -1,5 +1,5 @@
-/** L-1 witness (red-team report 7): Home → Quick start → the default research-loop
- * template, then Run. With the launch policy unset in the Train & tune inspector, the
+/** L-1 witness (red-team report 7): the default research-loop template (gallery import on a
+ * runnable legacy project; Quick start itself is quick_start.mjs), then Run. With the launch policy unset in the Train & tune inspector, the
  * field is marked required and the Run page's Check inputs refuses with the launch
  * policy owner's message before anything is prepared; with the template's declared
  * pair (Record only / Diagnostic) Check inputs passes and the launched run gets past
@@ -54,20 +54,18 @@ try {
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
 
-  // Quick start: a project (L-7 wording), runnable ones first, then the template draft.
-  await page.locator('#home-quick-start').click();
-  const dialog = page.locator('#quick-start-dialog');
-  await until(() => dialog.evaluate(el => el.open));
-  assert.equal(await dialog.locator('label[for="quick-start-project"]').textContent(), 'Project (its task and data)');
-  await page.locator('#quick-start-project option[value="capture"]').waitFor({state: 'attached'});
-  assert.equal(await page.locator('#quick-start-project option').first().getAttribute('value'), 'capture', 'Runnable projects first');
-  await page.locator('#quick-start-project').selectOption('disabled');
-  assert.match(await page.locator('#quick-start-warning').textContent(), /edit this project but not run it/);
-  await page.locator('#quick-start-project').selectOption('capture');
-  await page.locator('#quick-start-open').click();
-  await until(async () => !(await dialog.evaluate(el => el.open)), 30000);
+  // The research-loop template on the runnable legacy project. Quick start itself creates
+  // an experiment setup (quick_start.mjs); this fixture has no workspace to create one in,
+  // so the same template is imported through the gallery, Quick start's former path.
+  await view('workflow');
+  await page.locator('#editor-project option[value="capture"]').waitFor({state: 'attached'});
+  if ((await page.locator('#editor-project').inputValue()) !== 'capture') await page.locator('#editor-project').selectOption('capture');
+  await until(async () => (await status()).includes('Opened capture'));
+  await page.locator('#editor-template-open').click();
+  await page.locator('.template-card[data-template="single-loop-with-advice"]').click();
+  await page.locator('#editor-template-import').click();
   await page.locator('#circuit-node-train').waitFor();
-  // L-6: the advice field has focus after Quick start, as after a gallery import.
+  // L-6: the advice field has focus after the gallery import, as after Quick start.
   await until(() => page.evaluate(() => document.activeElement?.classList.contains('advice-input')));
   // The focused field is Propose model's, and its advice input is connected (no warning):
   // what the user types reaches the proposal agent.

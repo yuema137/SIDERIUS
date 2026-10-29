@@ -38,7 +38,8 @@
   // Stop conditions: the declaration (AuthoredLoop.stop_conditions) and Review are
   // authoritative; these checks only keep obviously incomplete values out of Review.
   const STOP_KINDS = Object.freeze({
-    metric_threshold: {title: 'Metric threshold', add: 'Add metric threshold', initial: () => ({kind: 'metric_threshold', metric_id: '', threshold: 0}), drafts: {metric_id: '', threshold: ''}},
+    // F11: the task's main score metric id (task-tab.js) prefills the field when known.
+    metric_threshold: {title: 'Metric threshold', add: 'Add metric threshold', initial: () => ({kind: 'metric_threshold', metric_id: window.consoleTaskSummary?.mainMetricId || '', threshold: 0}), drafts: {metric_id: '', threshold: ''}},
     no_improvement: {title: 'No improvement', add: 'Add no-improvement stop', initial: () => ({kind: 'no_improvement', completed_bodies: 1}), drafts: {}},
     // JudgeStop (B2-5): only the declared fields (JudgeStop: criterion, min_completed_bodies,
     // on_failure). The judge route and max_judge_calls are operator-owned in the run's
@@ -63,7 +64,8 @@
     const wrapper = node('label', label + ' ', row);
     const input = control(node(field === 'criterion' ? 'textarea' : 'input', '', wrapper));
     input.id = `editor-loop-stop-${field.replaceAll('_', '-')}`; input.required = true;
-    if (field === 'metric_id') { input.type = 'text'; input.placeholder = 'for example accuracy'; input.spellcheck = false; }
+    // The task's declared metric ids are offered as suggestions (datalist #task-metric-ids).
+    if (field === 'metric_id') { input.type = 'text'; input.placeholder = 'for example accuracy'; input.spellcheck = false; input.setAttribute('list', 'task-metric-ids'); }
     else if (field === 'criterion') { input.rows = 3; input.maxLength = 2000; input.placeholder = 'for example: stop once the last two bodies add no new insight'; }
     else { input.type = 'number'; input.step = field === 'threshold' ? 'any' : '1'; if (field !== 'threshold') input.min = '1'; }
     const key = draftKey(condition.kind, field), draft = state.drafts.get(key);
@@ -149,8 +151,10 @@
       add.type = 'button'; add.id = `editor-loop-add-${kind.replaceAll('_', '-')}`;
       add.addEventListener('click', () => actions.edit(loop => {
         if ((loop.stop_conditions || []).some(item => item.kind === kind)) return;
-        loop.stop_conditions = [...(loop.stop_conditions || []), spec.initial()];
-        for (const [field, value] of Object.entries(spec.drafts)) state.drafts.set(draftKey(kind, field), value);
+        const condition = spec.initial();
+        loop.stop_conditions = [...(loop.stop_conditions || []), condition];
+        // A prefilled text field (the task's metric id) is already a valid value, not a draft.
+        for (const [field, value] of Object.entries(spec.drafts)) if (!(typeof condition[field] === 'string' && condition[field])) state.drafts.set(draftKey(kind, field), value);
       }, `${spec.title} stop added locally. Complete its fields, then review and save to update the source.`, true));
     }
   }

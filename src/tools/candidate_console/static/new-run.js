@@ -61,6 +61,10 @@
     $('review').disabled = !ready() || !$('task').value || !$('name').value || busy;
     $('prepare').disabled = !ready() || !review || busy || !!intent || !coordinator.eligible();
     $('task').disabled = $('name').disabled = !!intent;
+    // A setup belongs to one task: the task is a fact, not a choice (setups.py admission).
+    const locked = lockedTask();
+    $('task').hidden = !!locked; document.querySelector('label[for="new-run-task"]').hidden = !!locked;
+    $('task-fact').hidden = !locked; $('task-fact').textContent = locked ? `Task: ${locked.label}` : '';
     $('check').disabled = !session.connected || !intent || busy;
     const unresolved = !!intent && !prepared() && !state?.released;
     $('retry').hidden = !(unresolved && (problem === 'unknown' || problem === 'unresolved'));
@@ -74,8 +78,8 @@
       !coordinator.same('preparation', intent) || !prepared();
     $('prerequisites').textContent = !session.connected ? 'Connect to prepare a run.'
       : intent ? 'This run uses the task and name below; start over to change them.'
-      : ready() ? 'Choose the task and resources, then check the inputs.'
-        : 'Open a runnable project and save your edits first.';
+      : ready() ? (lockedTask() ? 'Check the inputs.' : 'Choose the task and resources, then check the inputs.')
+        : 'Open an experiment setup whose runs are enabled and save your edits first.';
     window.dispatchEvent(new CustomEvent('new-run-gate', {detail: {ready: !!ready()}}));
     window.dispatchEvent(new CustomEvent('run-step-state', {detail: {
       source: 'prepare', reviewed: !!review, intent: !!intent, prepared: prepared(), problem
@@ -203,6 +207,17 @@
     if (state?.released || problem === 'refused' || (problem === 'unknown' && !state?.confirming)) return;
     void check();
   }, POLL_MS);
+  function lockedTask() {
+    const setup = window.experimentSetups?.current;
+    return setup?.group === 'task' ? window.consoleTask.tasks.find(task => task.task_id === setup.taskId) || null : null;
+  }
+  // Keep the locked task selected (unless a retained run already names its own task).
+  function applyLock() {
+    const locked = lockedTask();
+    if (locked && !intent && $('task').value !== locked.task_id && [...$('task').options].some(v => v.value === locked.task_id)) { $('task').value = locked.task_id; invalidate(); }
+    controls();
+  }
+  window.addEventListener('experiment-setup', applyLock);
   async function tasks() {
     if (!session.connected || !['workflow', 'run'].includes(window.consoleNavigation?.view) || tasksRevision === session.revision) return;
     const version = generation;
@@ -226,6 +241,7 @@
       if (intent) $('task').value = intent.payload.selection.task_id;
       else if ($('task').value !== previous) invalidate();
       if (!choices.length) status('No task is configured for runs of saved workflows on this console.');
+      applyLock();
     } catch (error) { if (!error.stale && current(version, revision, project)) { tasksRevision = null; status(error.message); } }
     controls();
   }

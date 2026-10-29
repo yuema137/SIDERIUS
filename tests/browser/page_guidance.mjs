@@ -83,7 +83,7 @@ try {
   assert.match(await page.locator('#step-indicator li[data-step="task"]').getAttribute('class') || '', /done/);
   // The first project is not runnable: the handoff stays closed and says why.
   assert.equal(await next.isDisabled(), true);
-  assert.match(await page.locator('#workflow-next-state').textContent(), /not enabled for runs.*saved version/);
+  assert.match(await page.locator('#workflow-next-state').textContent(), /Runs are not enabled for this setup.*saved version/);
   assert.equal(await page.evaluate(() => window.newRunGate.ready), false);
 
   // A runnable, saved, unchanged reusable workflow opens the gate; Next goes to #run.
@@ -91,7 +91,7 @@ try {
   await waitUntil(async () => !(await next.isDisabled()));
   assert.equal(await page.evaluate(() => window.newRunGate.ready), true, 'Next follows the New run gate');
   const saved = await page.evaluate(() => window.workflowEditor.state.savedSha256);
-  assert.match(await page.locator('#workflow-next-state').textContent(), new RegExp(`The current file of project reusable \\(version ${saved.slice(0, 12)}\\) is ready to run`));
+  assert.match(await page.locator('#workflow-next-state').textContent(), new RegExp(`The current file of setup reusable \\(version ${saved.slice(0, 12)}\\) is ready to run`));
   await next.click(); await page.locator('#view-run').waitFor();
   assert.equal(new URL(page.url()).hash, '#run');
   assert.equal(await page.title(), 'SIDERIUS · Run');

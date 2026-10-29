@@ -127,7 +127,7 @@
   function editorBlock() {
     const state = window.workflowEditor?.state;
     if (!window.consoleSession.connected) return 'Connect first.';
-    if (!state?.projectId || !state.sourceAvailable) return 'Open a workflow project first: a template keeps that project\'s task and data references.';
+    if (!state?.projectId || !state.sourceAvailable) return 'Open an experiment setup first: a template keeps that setup\'s task and data references.';
     if (state.saving) return 'Saving the workflow.';
     if (state.conflict) return 'Resolve the source conflict first.';
     // Typed Python is not a draft state: an import would drop it beyond Undo (like restoring a version).

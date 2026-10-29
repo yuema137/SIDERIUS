@@ -55,6 +55,11 @@ try {
     if (url.pathname.startsWith('/api/editor/')) return reply({error: {message: 'Fixture project unavailable'}}, 409);
     if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
     // One configured task: selected automatically, so Workflow and Run stay open.
+    // The selected task's experiment setups (Workflow and Run read them): none.
+    if (url.pathname.endsWith('/setups') && url.pathname.startsWith('/api/tasks/')) return reply({setups: []});
+    if (url.pathname === '/api/tasks/synthetic/summary') return reply({task_id: 'synthetic', label: 'Synthetic task', state: 'unavailable', data_root: '/fixture/data',
+      run_policy: {preparation_timeout_seconds: 300, candidate_timeout_seconds: 3600, candidate_network: false, candidate_devices: [], candidate_environment_names: [], allowed_output_types: null},
+      unavailable: {reason: 'sandbox_missing', hint: 'Fixture hint.'}});
     if (url.pathname === '/api/tasks') return reply({tasks: [{task_id: 'synthetic', label: 'Synthetic task', revision: null}]});
     if (['/api/native-chain/choices', '/api/recorded-examples'].includes(url.pathname)) return reply([]);
     if (url.pathname === '/api/operations') {

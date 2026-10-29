@@ -19,7 +19,7 @@
     if (className) element.className = className;
     if (parent) parent.append(element); return element;
   };
-  const historyStatus = node('p', 'Connect and open a project to see its saved versions.', host);
+  const historyStatus = node('p', 'Connect and open an experiment setup to see its saved versions.', host);
   historyStatus.id = 'editor-history-status'; historyStatus.setAttribute('role', 'status');
   const list = node('ol', '', host, 'editor-history-list'); list.id = 'editor-history-list';
   const detail = node('section', '', host, 'editor-history-detail'); detail.id = 'editor-history-detail';
@@ -126,7 +126,7 @@
   async function load() {
     const version = ++generation, id = project;
     listing = null; detail.hidden = true; render();
-    if (!session.connected || !id) { historyStatus.textContent = 'Connect and open a project to see its saved versions.'; return; }
+    if (!session.connected || !id) { historyStatus.textContent = 'Connect and open an experiment setup to see its saved versions.'; return; }
     try {
       const value = await session.request(`editor/${encodeURIComponent(id)}/versions`);
       if (version !== generation) return;

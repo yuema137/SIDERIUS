@@ -41,6 +41,8 @@ try {
     const reply = json => route.fulfill({status: 200, json});
     if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
     // One configured task: selected automatically, so Workflow and Run stay open.
+    // The selected task's experiment setups (Workflow and Run read them): none.
+    if (url.pathname.endsWith('/setups') && url.pathname.startsWith('/api/tasks/')) return reply({setups: []});
     if (url.pathname === '/api/tasks') return reply({tasks: [{task_id: 'synthetic', label: 'Synthetic task', revision: null}]});
     if (url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
     // Monitor lists this console's operations once per connection, also on UUID routes.
