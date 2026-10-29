@@ -107,6 +107,18 @@
       ? 'Credentials ready (names only checked; no value is shown or sent to this page).'
       : `Credentials not ready${missing.length ? ': missing ' + missing.join(', ') : ''}. ${readiness.instructions.join(' ')}`;
   }
+  // Issue #1136: native training (a `tuning` node) needs an NVIDIA GPU and refuses a
+  // sandbox without one. Presentation only, from the reviewed nodes and devices.
+  function computeReview(value) {
+    if (!value.nodes.some(([, capability]) => capability === 'tuning')) {
+      return [['capture-compute-review', 'Compute: this workflow has no training node, so no GPU check applies.']];
+    }
+    const lines = [['capture-compute-review', 'Compute: NVIDIA GPU required']];
+    if (!value.devices.some(device => /^\/dev\/nvidia\d+$/.test(device))) {
+      lines.push(['capture-compute-warning', 'This task does not pass a GPU into the run sandbox; the run will be refused.']);
+    }
+    return lines;
+  }
   function invalidate() { generation++; selected = null; review = null; handedVersion = null; $('summary').replaceChildren(); $('details').textContent = ''; credentials(null); controls(); }
   function showIntent() {
     $('intent').hidden = !intent;
@@ -283,6 +295,7 @@
       const seedLine = document.createElement('p'); seedLine.textContent = value.seed; $('summary').append(seedLine);
       const workspace = document.createElement('p'); workspace.textContent = 'Output workspace: ' + value.workspace; $('summary').append(workspace);
       const loop = document.createElement('p'); loop.id = 'capture-loop'; loop.textContent = researchLoop(value); $('summary').append(loop);
+      for (const [id, text] of computeReview(value)) { const line = document.createElement('p'); line.id = id; line.textContent = text; if (id === 'capture-compute-warning') line.className = 'warning'; $('summary').append(line); }
       const hostSummary = document.createElement('p'); hostSummary.id = 'capture-scheduling-review'; hostSummary.textContent = 'Host resources: ' + window.runScheduling.describe(value.selection); $('summary').append(hostSummary);
       const routeSummary = document.createElement('p'); routeSummary.textContent = 'Model routes: ' + value.routes.map(route => `${route.node_id} → ${route.provider || '?'} / ${route.model || '?'}`).join('; '); $('summary').append(routeSummary);
       status(value.credential_readiness.ready

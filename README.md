@@ -32,6 +32,10 @@ required model capabilities and the configurations tested so far.
 
 Before you start, you need **Python 3.12+ and uv**, your dataset location, and a
 project directory outside this checkout for your task, settings and results.
+A real run trains models and needs an **NVIDIA GPU with CUDA** on the machine
+that runs it; there is no CPU mode. A run on a machine without one stops before
+any model call and says so. Setup checks and the synthetic Quickstart checks
+run on CPU.
 Use this checkout's own `.venv/bin/python` after installation. Provider keys
 are needed for real model calls; offline setup checks need none.
 The command line and the browser console read them from different places; see
@@ -229,8 +233,8 @@ uv sync --group dev --frozen
   tests/unit/examples/test_quickstart_pack.py::test_shipped_manifest_composes_with_the_declared_values -q
 ```
 
-A real run needs a task package, external data, model/provider routing and a
-workspace for results. Preview the chosen launch command before execution;
+A real run needs a task package, external data, model/provider routing, a
+workspace for results and an NVIDIA GPU with CUDA. Preview the chosen launch command before execution;
 the chain's `--dry-run` prints child commands but does not prove that a task,
 provider account or training attempt will succeed. The
 [getting-started guide](docs/getting-started/README.md) leads to the exact setup

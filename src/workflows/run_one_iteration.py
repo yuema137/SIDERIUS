@@ -165,6 +165,7 @@ from workflows.standard_cli import (
 )
 from workflows.standard_launch import (
     build_standard_launch_config,
+    is_real_launch,
 )
 from workflows.standard_launch import (
     parse_allowed_output_types as parse_allowed_output_types,
@@ -1187,6 +1188,22 @@ _UNRESOLVED_IDENTITY = LaunchIdentity(
 )
 
 
+def _refuse_real_launch_without_cuda(args: argparse.Namespace) -> None:
+    """Exit 2 with the GPU-requirement sentence when a real launch sees no CUDA device.
+
+    Pseudo launches are untouched. The check reads the hardware-discovery
+    owner (``core.hardware_context.discover``) and writes nothing.
+    """
+    if not is_real_launch(args):
+        return
+    from core import gpu_requirement
+
+    refusal = gpu_requirement.real_launch_gpu_refusal()
+    if refusal is not None:
+        print(f"[run_one_iteration] LAUNCH REFUSED: {refusal}", file=sys.stderr)
+        sys.exit(2)
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -1372,6 +1389,13 @@ def _run_bound_iteration(
     # have already occurred; plugin effects/stdout are not suppressed.
     if args.print_resolved_launch_config:
         sys.exit(print_resolved_launch_config(args))
+
+    # Issue #1136 — a real launch needs a CUDA GPU (no CPU execution mode
+    # exists). Refuse here, after the dry-run view (which stays available on
+    # any host) and before the halt/brake checks, iteration directory, run
+    # lock or any LLM call. No manifest is written, so the consecutive-failure
+    # brake never counts this refusal as a failed iteration.
+    _refuse_real_launch_without_cuda(args)
 
     # --- Consecutive-failure brake preflight (Stage 4 / Commit 4.6) ---
     # Two cheap on-disk checks before we touch anything else. Runs before

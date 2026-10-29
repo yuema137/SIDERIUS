@@ -91,14 +91,22 @@ def observe_composition(
 ) -> CompositionObservation:
     """Run the existing inspection child; callers supply trusted explicit source roots."""
     job = CompositionJob.model_validate_json(job.model_dump_json())
+    if job.summary is not None:
+        # The mounted root is the job's; the validated root must be the same one.
+        summary_root = Path(job.summary.data_root)
+        if data_root is not None and data_root != summary_root:
+            raise ValueError("data_root differs from the task-summary job's data_root")
+        data_root = summary_root
     scratch = Path(job.scratch)
     validate_observation_locations(scratch, read_only, Path(job.manifest), data_root)
     scratch.mkdir(mode=0o700)
     request_path = scratch / CHILD_REQUEST_NAME
     publish_bytes_write_once(str(request_path), (job.model_dump_json() + "\n").encode())
+    # Only a task-summary job reads the data root (task-owned scope volume/counts).
+    data = (data_root,) if job.summary is not None and data_root is not None else ()
     profile = SandboxProfile(
         workspace=scratch,
-        read_only=(*read_only, request_path),
+        read_only=(*read_only, *data, request_path),
         network=False,
         devices=(),
         environment_names=(),

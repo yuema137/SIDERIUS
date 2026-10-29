@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.gpu_requirement import gpu_required_message
 from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
 from core.runtime_control.estimator import shared_runtime_components
 from core.runtime_control.measurement_capability import (
@@ -98,6 +99,10 @@ def run_launch_self_test(
 
     available, detail = _probe_runner_availability(capability)
     if require_probe_runner and not available:
+        if capability is not None and capability.accelerator_unavailable:
+            # Issue #1136: the commonest cause, said plainly. Same exception and
+            # fail-closed behavior; only the wording names the requirement.
+            raise LaunchGuardFailure(gpu_required_message(detail))
         raise LaunchGuardFailure(
             "this launch requires a real bounded-probe runner and the "
             f"environment cannot build one: {detail}. A formal runtime "
