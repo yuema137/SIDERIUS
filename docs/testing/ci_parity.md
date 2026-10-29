@@ -567,11 +567,23 @@ collection per job, after `prepare` (~3 min). Expected critical path is about
 10–17 min against per-job ceilings of 25 min (`unit`) and 15 min (`prepare`,
 `sensitive`). The first matrix run's manifests replace this estimate.
 
-The residual imbalance comes from `weights.json`, which is calibrated to the
-24-core lab host (§7) and still names a split file that no longer exists (the
-harness drops that split and says so). CI-calibrated weights would bring the
-heaviest of 8 shards to ~495 contended test-seconds; regenerating them is a
-separate change (#1004).
+The committed `src/tools/ci/weights.json` contains lab-calibrated measurements,
+not CI-runner measurements. Its `_provenance` identifies a local 24-core run
+at `65c58786`. No calibration generator is provided in the current repository;
+the measurements remain unchanged pending a reproducible calibration path and
+declared CI-runner evidence. The historical ~495 contended test-second estimate
+for CI-calibrated weights in issue #1004 is not a validated replacement calibration.
+
+Stale entry to drop during the next calibration: both `weights` and `splits`
+name `tests/unit/agent/tune_ml_hyperparam_agent/test_step02b_checkpoint_c_live_integration.py`,
+which is absent from the tracked tree. Collection validation drops this split
+and emits a diagnostic to stderr. Only selected test files receive weights;
+stale weight entries do not add tests to the plan. With measurements loaded,
+a selected test file absent from `weights` receives `DEFAULT_WEIGHT` via
+`measured.get(f, DEFAULT_WEIGHT)` in
+[`src/tools/ci/__main__.py:183`](../../src/tools/ci/__main__.py#L183).
+[`src/tools/ci/weights.py:24`](../../src/tools/ci/weights.py#L24) defines that
+default as `1.0`. These fallback costs do not establish CI timing accuracy.
 
 ### Why declared rather than detected
 
@@ -642,8 +654,9 @@ git diff --name-status -z origin/master...HEAD \
   --changed-from /tmp/siderius-ci-changed.json
 ```
 
-`plan` prints selection and shard metadata only. Use `bulk` in place of `plan`
-only when the selected tests should actually execute. An absent or invalid
+On success, `plan` prints only a JSON document to stdout; selection messages
+and diagnostics, including dropped stale splits, go to stderr. Use `bulk` in
+place of `plan` only when the selected tests should actually execute. An absent or invalid
 changed-path file deliberately produces a full plan.
 
 ## Ordinary documentation fast path
