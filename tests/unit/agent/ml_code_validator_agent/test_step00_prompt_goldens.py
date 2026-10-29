@@ -22,6 +22,7 @@ from nodes.ml_code_validator_agent.ml_code_validator_agent import (
 from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
+from tests.helpers.probe_seed import PROBE_SEED
 
 GOLDENS = Path(__file__).parent / "goldens"
 
@@ -64,7 +65,7 @@ def fixture_input() -> ValidatorInput:
 
 class TestPB6CodeReview:
     def test_clean_branch(self):
-        agent = MLCodeValidatorAgent(bridge_factory=_ReviewRecorder)
+        agent = MLCodeValidatorAgent(bridge_factory=_ReviewRecorder, probe_seed=PROBE_SEED)
         agent._llm_review(fixture_input(), _FIXTURE_PLUGIN_SRC)
         assert len(agent.bridge.captures) == 1
         method, label, system, user = agent.bridge.captures[0]
@@ -79,7 +80,7 @@ class TestPB6CodeReview:
         )
 
     def test_error_branch_with_frozen_errors(self):
-        agent = MLCodeValidatorAgent(bridge_factory=_ReviewRecorder)
+        agent = MLCodeValidatorAgent(bridge_factory=_ReviewRecorder, probe_seed=PROBE_SEED)
         agent._llm_review(
             fixture_input(),
             _FIXTURE_PLUGIN_SRC,

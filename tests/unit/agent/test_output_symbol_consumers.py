@@ -9,8 +9,10 @@ import pytest
 
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.skills.task_model_validation import run_task_model_tests
+from core.probe_seeds import probe_seed_env
 from nodes.ml_code_validator_agent.ml_code_validator_agent import _check_instantiation_and_gradient
 from nodes.ml_model_implementor.ml_model_implementor import _assemble_test, _smoke_test_plugin
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.unit.agent.test_task_model_probe import declared_task
 
 
@@ -67,13 +69,17 @@ PLUGIN_MODEL_CLASS = Model
 
 def verdicts(tmp_path, io, *, context=None, **candidate_kwargs):
     path, source = candidate(tmp_path, **candidate_kwargs)
-    smoke = _smoke_test_plugin(source, path.stem, io, model_probe_context=context)
-    direct = _check_instantiation_and_gradient(str(path), io, model_probe_context=context)
+    smoke = _smoke_test_plugin(
+        source, path.stem, io, model_probe_context=context, probe_seed=PROBE_SEED
+    )
+    direct = _check_instantiation_and_gradient(
+        str(path), io, model_probe_context=context, probe_seed=PROBE_SEED
+    )
     tests = tmp_path / "tests"
     tests.mkdir(exist_ok=True)
     generated = tests / "test_output_geometry_candidate.py"
     generated.write_text(_assemble_test(path.stem, io, model_probe_context=context))
-    passed, output = run_task_model_tests(str(generated))
+    passed, output = run_task_model_tests(str(generated), seed_env=probe_seed_env(PROBE_SEED))
     return smoke, direct, passed, output
 
 

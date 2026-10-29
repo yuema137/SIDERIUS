@@ -28,6 +28,7 @@ from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_code_validator_agent.ml_code_validator_agent import (
     _check_instantiation_and_gradient,
 )
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.unit.agent.ml_code_validator_agent.test_validator_agent import (
     make_input as make_validator_input,
 )
@@ -157,7 +158,9 @@ _BROKEN_INIT_PLUGIN = textwrap.dedent(
 def _measure(tmp_path, src: str):
     path = tmp_path / "plugin.py"
     path.write_text(src)
-    inst_ok, grad_ok, otype_ok, err, total, trainable = _check_instantiation_and_gradient(str(path))
+    inst_ok, grad_ok, otype_ok, err, total, trainable = _check_instantiation_and_gradient(
+        str(path), probe_seed=PROBE_SEED
+    )
     return inst_ok, grad_ok, otype_ok, err, total, trainable
 
 
@@ -210,6 +213,7 @@ class TestBothConventions:
 class TestVerdictIndependenceAndPersistence:
     def _run_node(self, tmp_path):
         agent = MLCodeValidatorAgent.__new__(MLCodeValidatorAgent)
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent.bridge.generate.return_value = {
             "passed": True,
@@ -241,6 +245,7 @@ class TestVerdictIndependenceAndPersistence:
         plugin_path = tmp_path / "zero.py"
         plugin_path.write_text(_ZERO_PARAM_PLUGIN)
         agent = MLCodeValidatorAgent.__new__(MLCodeValidatorAgent)
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent.bridge.generate.return_value = {
             "passed": True,

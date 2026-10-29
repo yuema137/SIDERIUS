@@ -69,6 +69,7 @@ from nodes.ml_code_validator_agent import (
     _check_plugin,
     _run_tests,
 )
+from tests.helpers.probe_seed import PROBE_SEED
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -215,7 +216,9 @@ class TestRunTests:
         with patch(
             "nodes.ml_code_validator_agent.run_generated_pytest", return_value=(True, "ok")
         ) as launched:
-            MLCodeValidatorAgent(**_AGENT_KWARGS).run(make_input(tmp_path), test_limit=declared)
+            MLCodeValidatorAgent(**_AGENT_KWARGS, probe_seed=PROBE_SEED).run(
+                make_input(tmp_path), test_limit=declared
+            )
         assert launched.call_args.kwargs["limit"] is declared
 
     # --- Branch B empty/nonexistent-path guard (v16 fix) ---
@@ -226,7 +229,7 @@ class TestRunTests:
         invoked — an empty positional arg triggers full-project discovery
         (the v16 loss-chain false-negative bug)."""
         with patch("nodes.ml_code_validator_agent.run_generated_pytest") as mocked:
-            ok, output = _run_tests("")
+            ok, output = _run_tests("", probe_seed=PROBE_SEED)
         assert ok is True
         assert "Skipped" in output
         assert "Branch B model reuse" in output
@@ -236,7 +239,9 @@ class TestRunTests:
         """Nonexistent path also skips — same guard, defensive against a
         stale/cleaned path (v16 iter_015 pytest-tmp-dir race)."""
         with patch("nodes.ml_code_validator_agent.run_generated_pytest") as mocked:
-            ok, output = _run_tests("/nonexistent/path/that/does/not/exist.py")
+            ok, output = _run_tests(
+                "/nonexistent/path/that/does/not/exist.py", probe_seed=PROBE_SEED
+            )
         assert ok is True
         assert "Skipped" in output
         mocked.assert_not_called()
@@ -345,7 +350,7 @@ class TestCheckInstantiationAndGradient:
         path = tmp_path / "valid_plugin.py"
         path.write_text(VALID_PLUGIN_SRC)
         inst_ok, grad_ok, _otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert inst_ok is True
         assert grad_ok is True
@@ -355,7 +360,7 @@ class TestCheckInstantiationAndGradient:
         path = tmp_path / "bad_import.py"
         path.write_text("import nonexistent_module_xyz_abc\n")
         inst_ok, grad_ok, _otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert inst_ok is False
         assert grad_ok is False
@@ -387,7 +392,7 @@ class TestCheckInstantiationAndGradient:
         path = tmp_path / "wrong_shape.py"
         path.write_text(wrong_shape_src)
         inst_ok, grad_ok, _otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert inst_ok is False
         assert grad_ok is False
@@ -424,7 +429,7 @@ class TestCheckInstantiationAndGradient:
         path = tmp_path / "no_grad.py"
         path.write_text(no_grad_src)
         inst_ok, grad_ok, _otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         # instantiation and forward pass succeed (correct shape)
         assert inst_ok is True
@@ -489,7 +494,7 @@ class TestDeclaredOutputContract:
         path = tmp_path / "regressor_plugin.py"
         path.write_text(_regressor_plugin_src())
         inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
 
@@ -503,7 +508,7 @@ class TestDeclaredOutputContract:
             )
         )
         inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
 
@@ -514,7 +519,7 @@ class TestDeclaredOutputContract:
         path = tmp_path / "legacy_plugin.py"
         path.write_text(VALID_PLUGIN_SRC)  # no PLUGIN_OUTPUT_TYPE at all
         inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
 
@@ -528,7 +533,7 @@ class TestDeclaredOutputContract:
         path = tmp_path / "lying_regressor.py"
         path.write_text(src)
         inst_ok, _grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert inst_ok is False
         assert otype_ok is False
@@ -541,7 +546,7 @@ class TestDeclaredOutputContract:
         path = tmp_path / "lying_classifier.py"
         path.write_text(_regressor_plugin_src(declared='"classifier"'))
         inst_ok, _grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert inst_ok is False
         assert otype_ok is False
@@ -554,7 +559,7 @@ class TestDeclaredOutputContract:
         path = tmp_path / "nonsense_contract.py"
         path.write_text(_regressor_plugin_src(declared='"nonsense"'))
         inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert (inst_ok, grad_ok, otype_ok) == (False, False, False)
         assert err is not None
@@ -587,7 +592,7 @@ class TestDeclaredOutputContract:
         path = tmp_path / "tuple_out.py"
         path.write_text(src)
         inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-            str(path)
+            str(path), probe_seed=PROBE_SEED
         )
         assert (inst_ok, grad_ok, otype_ok) == (False, False, False)
         assert err is not None
@@ -653,7 +658,7 @@ class TestMLCodeValidatorAgentRun:
         Grouped rather than merged: each assertion below keeps its own message,
         so a failure still says which half of the contract broke.
         """
-        agent = MLCodeValidatorAgent(**_AGENT_KWARGS)
+        agent = MLCodeValidatorAgent(**_AGENT_KWARGS, probe_seed=PROBE_SEED)
         out = agent.run(make_input(tmp_path))
 
         assert out.passed is True, "the overall verdict"
@@ -676,9 +681,9 @@ class TestMLCodeValidatorAgentRun:
         bad_plugin = tmp_path / "bad.py"
         bad_plugin.write_text("import broken_import_xyz\n")
         inp = make_input(tmp_path, model_file_path=str(bad_plugin))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            inp
-        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(inp)
         assert out.passed is False
         assert out.plugin_registered is False
 
@@ -688,9 +693,9 @@ class TestMLCodeValidatorAgentRun:
         bad_plugin = tmp_path / "bad.py"
         bad_plugin.write_text("import broken_import_xyz\n")
         inp = make_input(tmp_path, model_file_path=str(bad_plugin))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            inp
-        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(inp)
         assert out.error_message is not None
 
     def test_test_failure_sets_passed_false(self, tmp_path, mock_llm_bridge):
@@ -700,7 +705,7 @@ class TestMLCodeValidatorAgentRun:
         mock_result.stderr = ""
         with _pytest_returns(mock_result):
             out = MLCodeValidatorAgent(
-                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
             ).run(make_input(tmp_path))
         assert out.passed is False
         assert out.tests_passed is False
@@ -712,7 +717,7 @@ class TestMLCodeValidatorAgentRun:
         mock_result.stderr = ""
         with _pytest_returns(mock_result):
             out = MLCodeValidatorAgent(
-                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
             ).run(make_input(tmp_path))
         assert out.test_output is not None
         assert "FAILED" in out.test_output
@@ -723,17 +728,17 @@ class TestMLCodeValidatorAgentRun:
         desc_path = subdir / "description.md"
         desc_path.write_text("too short")
         inp = make_input(tmp_path, description_file_path=str(desc_path))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            inp
-        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(inp)
         assert out.passed is False
         assert out.description_valid is False
 
     def test_config_fields_failure_sets_passed_false(self, tmp_path, passing_mocks):
         inp = make_input(tmp_path, config_fields={"depth": 2, "bad": [1, 2, 3]})
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            inp
-        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(inp)
         assert out.passed is False
         assert out.config_fields_valid is False
 
@@ -751,7 +756,7 @@ class TestMLCodeValidatorAgentRun:
                 config_fields={"bad": [1, 2]},
             )
             out = MLCodeValidatorAgent(
-                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
             ).run(inp)
         assert out.passed is False
         assert out.plugin_registered is False
@@ -759,16 +764,16 @@ class TestMLCodeValidatorAgentRun:
         assert out.config_fields_valid is False
 
     def test_test_output_included_on_pass(self, tmp_path, passing_mocks):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            make_input(tmp_path)
-        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(make_input(tmp_path))
         assert out.test_output is not None
         assert "passed" in out.test_output
 
     def test_llm_review_fields_in_output(self, tmp_path, passing_mocks):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            make_input(tmp_path)
-        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(make_input(tmp_path))
         assert out.llm_review_spec_alignment is True
         assert out.llm_review_trainability_concerns == []
         assert out.llm_review_implementation_issues == []
@@ -789,7 +794,7 @@ class TestFilePersistence:
         holds the check fields, and that `model_type` is right. One write, one
         read, all four claims.
         """
-        agent = MLCodeValidatorAgent(**_AGENT_KWARGS)
+        agent = MLCodeValidatorAgent(**_AGENT_KWARGS, probe_seed=PROBE_SEED)
         agent.run(make_input(tmp_path, run_name="myrun"))
 
         path = tmp_path / "validation_myrun.json"
@@ -815,7 +820,9 @@ class TestFilePersistence:
         nested = tmp_path / "deep" / "workspace"
         inp = make_input(tmp_path)
         inp = inp.model_copy(update={"storage": make_storage(nested, "r1")})
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(inp)
         assert (nested / "validation_r1.json").exists()
 
 
@@ -830,7 +837,7 @@ class TestLLMReview:
             instance = MockBridge.return_value
             instance.generate.return_value = FAKE_LLM_REVIEW
             agent = MLCodeValidatorAgent(
-                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
             )
             inp = make_input(tmp_path)
             agent.run(inp)
@@ -847,7 +854,7 @@ class TestLLMReview:
             instance = MockBridge.return_value
             instance.generate.return_value = FAKE_LLM_REVIEW
             agent = MLCodeValidatorAgent(
-                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
             )
             out = agent.run(make_input(tmp_path))
             assert out.llm_review_passed is True
@@ -867,7 +874,7 @@ class TestLLMReview:
             instance = MockBridge.return_value
             instance.generate.return_value = failing_review
             agent = MLCodeValidatorAgent(
-                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
             )
             out = agent.run(make_input(tmp_path))
             assert out.llm_review_passed is False
@@ -885,7 +892,9 @@ class TestLLMReview:
                 instance = MockBridge.return_value
                 instance.generate.return_value = FAKE_LLM_REVIEW
                 agent = MLCodeValidatorAgent(
-                    provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                    provider="gemini",
+                    model_id="gemini-3.1-flash-lite-preview",
+                    probe_seed=PROBE_SEED,
                 )
                 agent.run(make_input(tmp_path))
                 user_prompt = instance.generate.call_args[0][1]
@@ -898,7 +907,7 @@ class TestLLMReview:
             instance = MockBridge.return_value
             instance.generate.return_value = FAKE_LLM_REVIEW
             agent = MLCodeValidatorAgent(
-                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
             )
             agent.run(make_input(tmp_path))
             user_prompt = instance.generate.call_args[0][1]
@@ -933,7 +942,7 @@ class TestLLMReview:
             instance = MockBridge.return_value
             instance.generate.return_value = FAKE_LLM_REVIEW
             agent = MLCodeValidatorAgent(
-                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
             )
             agent.run(make_input(tmp_path, model_file_path=str(plugin_path)))
             user_prompt = instance.generate.call_args[0][1]
@@ -1025,9 +1034,9 @@ class TestInheritanceDecoupledFromPassed:
                 )
             ],
         )
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            inp
-        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(inp)
         assert out.passed is True
         assert out.inheritance_check_passed is False
         assert out.inheritance_deviation_notes is not None
@@ -1049,9 +1058,9 @@ class TestInheritanceDecoupledFromPassed:
                 )
             ],
         )
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            inp
-        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(inp)
         assert out.error_message is None
 
     def test_inheritance_pass_leaves_deviation_notes_none(self, tmp_path, passing_mocks):
@@ -1071,9 +1080,9 @@ class TestInheritanceDecoupledFromPassed:
                 )
             ],
         )
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            inp
-        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
+        ).run(inp)
         assert out.inheritance_check_passed is True
         assert out.inheritance_deviation_notes is None
         assert out.unverified_inherited_components == []
@@ -1102,7 +1111,7 @@ class TestInheritanceDecoupledFromPassed:
                 ],
             )
             out = MLCodeValidatorAgent(
-                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview", probe_seed=PROBE_SEED
             ).run(inp)
         assert out.passed is False
         assert out.tests_passed is False
@@ -1121,3 +1130,26 @@ def test_constraints_reach_validator_review(tmp_path):
     agent.bridge.generate.return_value = FAKE_LLM_REVIEW
     agent._llm_review(inp, "class Model: pass")
     assert '"train_config.lr"' in agent.bridge.generate.call_args.args[1]
+
+
+def test_validator_records_seeds_the_generated_plugin_hard_codes(tmp_path, passing_mocks):
+    """Issue #983 (Q4): fails if a generated plugin's own seed calls are not
+    recorded on ValidatorOutput, or if recording them changes the plugin."""
+    from nodes.ml_code_validator_agent import MLCodeValidatorAgent
+
+    inp = make_input(tmp_path)
+    plugin = Path(inp.model_file_path)
+    source = VALID_PLUGIN_SRC.replace("import torch\n", "import torch\ntorch.manual_seed(42)\n", 1)
+    assert source != VALID_PLUGIN_SRC
+    plugin.write_text(source)
+    out = MLCodeValidatorAgent(probe_seed=PROBE_SEED).run(inp)
+    assert [(c.line, c.call) for c in out.generated_seed_calls] == [
+        (
+            source.splitlines().index("torch.manual_seed(42)") + 1,
+            "torch.manual_seed(42)",
+        )
+    ]
+    assert plugin.read_text() == source
+    (tmp_path / "clean").mkdir()
+    clean = MLCodeValidatorAgent(probe_seed=PROBE_SEED).run(make_input(tmp_path / "clean"))
+    assert "generated_seed_calls" not in clean.model_dump(exclude_defaults=False, mode="json")

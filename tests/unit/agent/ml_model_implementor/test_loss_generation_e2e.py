@@ -36,6 +36,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 from core.generated_library import generated_losses_dir
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
+from tests.helpers.probe_seed import PROBE_SEED
 
 # ---------------------------------------------------------------------------
 # Fake LLM responses for the loss-generation flow
@@ -149,6 +150,7 @@ def index_path(tmp_path: Path) -> str:
 def agent_with_mocks(index_path):
     """``MLModelImplementor`` with the bridge mocked + a tmp registry."""
     agent = MLModelImplementor.__new__(MLModelImplementor)
+    agent._probe_seed = PROBE_SEED
     agent.bridge = MagicMock()
     agent.bridge.generate_text.return_value = FAKE_LOSS_REASONING
     agent.bridge.generate.return_value = GOOD_LOSS_CODE

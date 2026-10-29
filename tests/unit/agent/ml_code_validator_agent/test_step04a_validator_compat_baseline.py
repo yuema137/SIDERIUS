@@ -34,6 +34,7 @@ import pytest
 from ml_models import plugin_loader
 from nodes.ml_code_validator_agent import _check_instantiation_and_gradient
 from tests.helpers.golden import assert_json_golden
+from tests.helpers.probe_seed import PROBE_SEED
 
 GOLDENS = Path(__file__).parent / "goldens"
 
@@ -116,7 +117,9 @@ def _verdict(tmp_path: Path, case: tuple[str, int, bool, str | None]) -> dict:
         ),
         encoding="utf-8",
     )
-    inst_ok, grad_ok, otype_ok, err, total, trainable = _check_instantiation_and_gradient(str(path))
+    inst_ok, grad_ok, otype_ok, err, total, trainable = _check_instantiation_and_gradient(
+        str(path), probe_seed=PROBE_SEED
+    )
     return {
         "case": case_id,
         "instantiation_ok": inst_ok,
@@ -164,7 +167,7 @@ def test_legacy_undeclared_plugin_still_resolves_through_the_fallback(tmp_path):
     assert "PLUGIN_OUTPUT_TYPE" not in path.read_text(encoding="utf-8")
 
     inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
-        str(path)
+        str(path), probe_seed=PROBE_SEED
     )
     assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
 
@@ -177,7 +180,7 @@ def test_legacy_undeclared_plugin_still_resolves_through_the_fallback(tmp_path):
         encoding="utf-8",
     )
     inst_ok, _grad_ok, _otype_ok, err, _t, _tt = _check_instantiation_and_gradient(
-        str(regressor_shaped)
+        str(regressor_shaped), probe_seed=PROBE_SEED
     )
     assert inst_ok is False
     assert err is not None and "does not match expected" in err

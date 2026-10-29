@@ -42,6 +42,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
 from nodes.ml_hyperparameter_tune_agent.loss_inventory import resolve_run_custom_loss_inventory
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.helpers.run_seed import TEST_RUN_SEED
 from workflows.model_exploration import (
     _commit_candidate_capabilities,
@@ -192,7 +193,7 @@ def _admit(proposal, composition, storage):
         passed=True,
         notes="Synthetic fixture review.",
     ).model_dump()
-    verdict = MLCodeValidatorAgent(bridge_factory=lambda **_: bridge).run(
+    verdict = MLCodeValidatorAgent(bridge_factory=lambda **_: bridge, probe_seed=PROBE_SEED).run(
         local_all_fields(output, storage)
     )
     assert verdict.passed, verdict.error_message
