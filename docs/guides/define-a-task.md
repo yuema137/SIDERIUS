@@ -77,6 +77,13 @@ composed scope construction refuses missing methods with
 `TaskScopeCapabilityError` before launching child processes. Your serialisation
 must be **canonical**: the framework hashes it to verify scope transport.
 
+Scope builders receive no data folder, so a scope over your own files cannot
+list rows or carry labels read from them. Record a selection rule (file,
+portion, concrete seed) instead and resolve rows in the stages that receive the
+data folder; the metric reads labels from `data_dir`. The
+[data-path contract](../agent-reference/mechanisms/data-path-and-scope.md#scopes-for-file-backed-data)
+states the rule, and the CSV classification template implements it.
+
 > ✅ Scopes built this way reach **all three** child processes — training,
 > inference and scoring — as a hash-verified artifact; each child recomputes the
 > digest before deserializing. See
@@ -264,6 +271,27 @@ been decided. Do not reconstruct filenames or copy artifact parsing into the
 provider; doing so couples Health to one storage convention and lets the metric
 and Health readers drift apart.
 
+A working classification Health declaration has four parts, all task-owned:
+
+- `facts:` — `encoding_family` and `symbol_cardinality` (the number of
+  classes). Both categorical checks require `symbol_cardinality`; without it
+  they are inapplicable, never passed.
+- `plugins:` — a view-provider file that calls `register_view_provider` with a
+  provider exposing `categorical_predictions` (a 1-D class-index array built
+  from `ctx.load_evaluation_payload()`).
+- `providers:` — the provider's `provider_id`.
+- `roster:` — one entry per gate: `gate_id`, `check`, `disposition`,
+  `parameters` (thresholds) and `reason`.
+
+A composed attempt with Health enabled also requires the task data path to
+implement `validate_health_coverage(request) -> HealthCoverageResult`,
+confirming that the evaluation scope covers what Health reads; without it the
+attempt is refused before execution. The
+[CSV classification template](../../examples/task_templates/csv_classification/README.md)
+ships all of these: `declared/task_health.yaml`,
+`plugins/_csv_health_views.py` and `validate_health_coverage` in
+`plugins/_csv_task.py`.
+
 ## Step 7 — Decide who names the deliverables
 
 Two legitimate shapes, and the framework distinguishes them honestly:
@@ -312,7 +340,7 @@ deliverable:
 
 ```
 my_task/
-├── composition.yaml
+├── task.yaml
 ├── declared/
 │   ├── dataset_profile.json
 │   ├── task_config.yaml
@@ -323,9 +351,17 @@ my_task/
     └── my_metric.py
 ```
 
-Use `file:` references for your plugins if the package lives outside the SIDERIUS
-tree. Paths resolve against the manifest's own directory, so the package is
-relocatable.
+Name the manifest `task.yaml`: the console's `add-task --manifest` and its
+`siderius_workspace/tasks/<id>/task.yaml` layout use that name, and the CLI's
+`--task_composition` accepts the same file. Use `file:` references for your
+plugins if the package lives outside the SIDERIUS tree. Paths resolve against
+the manifest's own directory, so the package is relocatable.
+
+For tabular classification data in CSV files, copy
+[`examples/task_templates/csv_classification/`](../../examples/task_templates/csv_classification/README.md)
+instead of starting from this tree: it implements every step above, including
+a complete Health declaration and a parameter lock, and marks each value to
+change with `EDIT HERE`.
 
 ### When your plugins share helpers
 
@@ -419,14 +455,20 @@ bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace /path/to/workspace \
     --run_name my_task_v1 \
-    --task_composition /path/to/my_task/composition.yaml \
+    --task_composition /path/to/my_task/task.yaml \
     --data_dir /path/to/data \
-    --llm_config configs/llm/openai_tiered_pro.json \
+    --llm_config /path/to/your/llm.json \
     --healthgate_mode blocking \
     --result_authority scientific \
     --num_iterations 2 \
     --max_rounds 3
 ```
+
+`--mode` selects the execution backend: `lilab` runs each iteration as a
+foreground subprocess on the current machine (the name is historical; it works
+on any Linux host), and `sdsc` submits Slurm jobs. `--llm_config` is your saved
+[LLM profile](../../configs/llm/README.md); for a first process check, copy the
+Luna test profile it describes.
 
 Start with `--dry-run` to see the exact child commands before spending anything.
 

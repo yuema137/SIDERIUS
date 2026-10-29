@@ -74,6 +74,45 @@ estimate. The VRAM probe chooses only from batches at or below it, and generic
 inference verifies the same ceiling before materializing a dataset. Tasks that
 omit the capability retain resource-derived inference batching unchanged.
 
+## Scopes for file-backed data
+
+`ScopeBuildRequest` carries framework selection knobs only (`round_kind`,
+`selection_strategy`, `portion`, `seed`, `max_samples`, `target_partitions`,
+`subset_ref`, `task_parameters`); it has **no data root**. `build_training_scope`
+and `build_eval_scope` therefore cannot read the dataset. The stages that do
+receive the physical data root are:
+
+| stage | data root |
+| --- | --- |
+| `training_dataset` | `EpochSamplingParams.data_dir` |
+| `validation_dataset` | `EvalMaterializationParams.data_dir` |
+| `write_deliverable` | `DeliverableWriteRequest.source_context.data_dir` (set by generic inference) |
+| metric `_compute` in the scoring child | `data_dir` keyword, with the task data path bound (`require_bound_task_data_path()`) |
+| `storage_read_scope` | `data_dir` argument |
+
+For data that exists only as files (the common case for a user's own dataset),
+the supported pattern is:
+
+- The scope records a **row selection rule**, not rows or labels: which file,
+  the portion, a concrete seed and the sample ceiling. When `request.seed` is
+  `None` and the selection samples, the builder draws a seed and stores it, so
+  every later stage resolves the same subset.
+- Every stage above resolves rows with one task-owned function from the scope
+  and the file, so the training child, inference child and scoring child agree
+  on membership and order.
+- The metric reads ground truth from `data_dir` through the bound task data
+  path's own reader, so data and metric share one parser. (Alternatively,
+  `write_deliverable` may copy source-aligned values into the deliverable
+  through `source_context`, as `examples/synthetic_masked_regression` does.)
+
+Consequence: the scope digest pins the selection rule, not row membership. A
+changed data file changes the rows a stored scope resolves to; data identity is
+a separate task/data concern. Carrying labels inside the scope (as
+`examples/quickstart` does) is valid only when the scope builder can
+regenerate the data itself, for example from a fixed seed.
+`examples/task_templates/csv_classification/plugins/_csv_task.py` implements
+the file-backed pattern.
+
 ## `DatasetProfile`
 
 Frozen. Generic identity plus an opaque payload:
@@ -190,7 +229,7 @@ the digest before deserializing.
 | Parent subprocess boundaries | `src/core/sandbox_executor.py`: `execute_training`, `execute_inference`, `execute_scoring` |
 | Child consumption | `src/execute_tools/train_engine_sandbox.py`, `inference_single.py`, `denoising_score_single.py` |
 | Physical data root | `src/execute_tools/data_paths.py`: bind, active and resolve functions |
-| Shipped implementation examples | `examples/quickstart/plugins/_quickstart_task.py`, `examples/synthetic_masked_regression/plugins/_masked_task.py`; scientific implementations are external |
+| Shipped implementation examples | `examples/quickstart/plugins/_quickstart_task.py`, `examples/synthetic_masked_regression/plugins/_masked_task.py`, file-backed template `examples/task_templates/csv_classification/plugins/_csv_task.py`; scientific implementations are external |
 
 ## Related
 

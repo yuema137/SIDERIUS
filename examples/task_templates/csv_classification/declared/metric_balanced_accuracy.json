@@ -1,0 +1,9 @@
+{
+  "id": "balanced_accuracy",
+  "direction": "higher",
+  "aggregation": "mean_per_class_recall_over_validation_rows",
+  "scoreability": {"contract_id": "deliverable_presence"},
+  "references": [],
+  "transform": null,
+  "transform_params": {}
+}

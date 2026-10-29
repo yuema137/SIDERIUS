@@ -184,8 +184,11 @@ To bring your own task, follow stage 2 of the
 [first-hour path](https://github.com/yuema137/SIDERIUS/blob/master/docs/getting-started/README.md#stage-2-bring-your-own-task):
 package it with your coding agent, place it in `siderius_workspace/tasks/<id>/`,
 register it with `add-task --manifest`, restart the console and build a workflow
-for it. The `tasks/quickstart/` folder this import created is a complete example
-of the package layout.
+for it. For a classification dataset in CSV files, start from the
+[CSV classification template](https://github.com/yuema137/SIDERIUS/blob/master/examples/task_templates/csv_classification/README.md)
+in your checkout (`examples/task_templates/csv_classification/`): copy it and
+change the lines it marks. The quickstart package generates its data from a
+seed, so it is not a pattern for reading your own files.
 
 ## Building this bundle (maintainers)
 

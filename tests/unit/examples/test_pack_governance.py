@@ -49,6 +49,11 @@ WORKFLOW_DECLARATIONS_DIR = "workflow_declarations"
 #: Python file is the bundle's data writer, shipped as a file, never imported.
 CONSOLE_BUNDLE_DIR = "console_bundle"
 CONSOLE_BUNDLE_SOURCES = frozenset({"examples/console_bundle/fetch_data.py"})
+#: Copyable task package templates (``examples/task_templates/<name>/``). Each
+#: is a self-contained package with its own package-relative ``task.yaml``,
+#: copied by users rather than run as a maturity-tracked demonstration pack,
+#: so it carries no STATUS/PROVENANCE and its plugins sit one level deeper.
+TASK_TEMPLATES_DIR = "task_templates"
 WORKFLOW_DECLARATION_SOURCES = frozenset(
     {
         "examples/workflow_declarations/managed_reusable_candidate.py",
@@ -74,14 +79,16 @@ def _composition_bound_task_configs(repo_root: Path) -> frozenset[Path]:
     Step 12 / PR-12d D5 — the evidence that re-scopes guard (a). A pack's own
     task config is legitimate exactly when a manifest RESOLVES it; a YAML
     nobody binds is still the hand-written parallel copy the guard was written
-    against. Refs resolve against the manifest's own directory, which is the
+    against. Shipped manifests are ``configs/task_composition/*.yaml`` and each
+    task template's own ``examples/task_templates/<name>/task.yaml``. Refs resolve against the manifest's own directory, which is the
     rule ``workflows/task_composition.py::_resolve_path`` applies.
     """
     bound: set[Path] = set()
     manifests = repo_root / "configs" / "task_composition"
     if not manifests.is_dir():
         return frozenset()
-    for manifest in sorted(manifests.glob("*.yaml")):
+    template_manifests = (repo_root / "examples" / TASK_TEMPLATES_DIR).glob("*/task.yaml")
+    for manifest in [*sorted(manifests.glob("*.yaml")), *sorted(template_manifests)]:
         payload = yaml.safe_load(manifest.read_text(encoding="utf-8"))
         section = payload.get("task_config") if isinstance(payload, dict) else None
         ref = section.get("config") if isinstance(section, dict) else None
@@ -151,6 +158,7 @@ def _pack_dirs(examples_root: Path) -> list[Path]:
     }
     names.discard(WORKFLOW_DECLARATIONS_DIR)
     names.discard(CONSOLE_BUNDLE_DIR)
+    names.discard(TASK_TEMPLATES_DIR)
     return sorted(examples_root / name for name in names)
 
 
@@ -231,6 +239,8 @@ def test_negative_an_UNBOUND_pack_task_config_is_still_an_offender() -> None:
     """
     bound = _composition_bound_task_configs(REPO_ROOT)
     shipped = [pack / "declared" / "task_config.yaml" for pack in _pack_dirs(EXAMPLES_ROOT)]
+    # A template's task config is bound by the template's own task.yaml.
+    shipped += sorted((EXAMPLES_ROOT / TASK_TEMPLATES_DIR).glob("*/declared/task_config.yaml"))
     assert shipped, "no pack ships a task config, so this proves nothing"
     for path in shipped:
         assert path.resolve() in bound, f"{path} is shipped but no manifest binds it"
@@ -253,12 +263,15 @@ def _is_sanctioned_plugin_source(rel_posix: str) -> bool:
     ``examples/<pack>/plugins/*.py``. The four explicit workflow declaration
     examples and the example bundle's ``fetch_data.py`` are also sanctioned;
     these exact-path exceptions do not permit other Python files in those
-    framework-owned namespaces."""
+    framework-owned namespaces. A task template's plugin source lives at
+    exactly ``examples/task_templates/<template>/plugins/*.py``."""
     parts = rel_posix.split("/")
     if len(parts) >= 2 and parts[:2] == ["examples", WORKFLOW_DECLARATIONS_DIR]:
         return rel_posix in WORKFLOW_DECLARATION_SOURCES
     if len(parts) >= 2 and parts[:2] == ["examples", CONSOLE_BUNDLE_DIR]:
         return rel_posix in CONSOLE_BUNDLE_SOURCES
+    if len(parts) >= 2 and parts[:2] == ["examples", TASK_TEMPLATES_DIR]:
+        return len(parts) == 5 and parts[3] == "plugins"
     return len(parts) == 4 and parts[0] == "examples" and parts[2] == "plugins"
 
 
@@ -318,15 +331,21 @@ def test_negative_python_under_examples_mirror_is_detected(tmp_path: Path) -> No
     (workflow / "unexpected.py").write_text("pass\n")
     (workflow / "plugins").mkdir()
     (workflow / "plugins" / "intrusion.py").write_text("pass\n")
+    template = tmp_path / "examples" / TASK_TEMPLATES_DIR / "some_template"
+    (template / "plugins").mkdir(parents=True)
+    (template / "plugins" / "_task.py").write_text("pass\n")
+    (template / "helper.py").write_text("pass\n")
     found = _python_files_under(tmp_path / "examples")
     rels = [p.relative_to(tmp_path).as_posix() for p in found]
     offenders = [r for r in rels if not _is_sanctioned_plugin_source(r)]
     assert offenders == [
         "examples/some_pack/loader.py",
+        "examples/task_templates/some_template/helper.py",
         "examples/workflow_declarations/plugins/intrusion.py",
         "examples/workflow_declarations/unexpected.py",
     ]
     assert "examples/some_pack/plugins/model.py" in rels  # detected, sanctioned
+    assert "examples/task_templates/some_template/plugins/_task.py" in rels
     assert "examples/workflow_declarations/native_training.py" in rels
 
 

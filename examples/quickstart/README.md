@@ -85,10 +85,14 @@ capability; [provenance](PROVENANCE.md) records their revisions and limitations.
 | Scientific declarations | [declared/](declared/README.md) |
 | Data, metric and model implementations | [plugins/](plugins/README.md) |
 | Manifest selecting them | [quickstart.yaml](../../configs/task_composition/quickstart.yaml) |
-| Your own task | [Task definition reference](../../docs/guides/define-a-task.md) |
+| Your own CSV classification data | [CSV classification template](../task_templates/csv_classification/README.md) |
+| Any other task | [Task definition reference](../../docs/guides/define-a-task.md) |
 
-Indexed artifact naming and task-owned artifact naming are different contracts;
-follow the task reference rather than copying a plugin method blindly.
-The historical example-governance design is
+This package generates its data from a seed, so its evaluation scope can carry
+the labels. A package for your own files cannot: start from the
+[CSV classification template](../task_templates/csv_classification/README.md),
+which reads labels from the data folder when a model is scored. The checks for
+this package are in `tests/unit/examples/test_quickstart_pack.py`; the rules
+for framework example packs are in
 [siderius_generic_framework_upgrade.md](../../docs/design/siderius_generic_framework_upgrade.md)
-§22.23. Current checks live in `tests/unit/examples/test_quickstart_pack.py`.
+§22.23.

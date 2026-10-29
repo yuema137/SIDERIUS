@@ -1,0 +1,11 @@
+{
+  "partition_count": 2,
+  "anchor_selection_files": [0],
+  "health_peek_files": [1],
+  "topology": {
+    "modality": "tabular",
+    "partition_unit": "csv_file",
+    "partitions": {"0": "training file", "1": "validation file"},
+    "source": "EDIT HERE: one sentence on where the data comes from and how it was split"
+  }
+}
