@@ -42,17 +42,31 @@ def resolve_analysis_sampling_seed(
     return derive_seed(run_seed, "data_analysis.sampling", SAMPLING_COORDINATES), "derived"
 
 
+def program_seed(run_seed: int, *, iteration: int | None, index: int, attempt: int = 1) -> int:
+    """The ``data_analysis.program`` seed of one generated-program execution.
+
+    Coordinates: the analysis ``iteration`` (``None`` outside a workflow), no
+    node id (the native chain has none), ``branch`` = the invocation's
+    0-based position in the accepted (persisted) plan, and the execution
+    ``attempt``. Distinct programs and attempts draw independent streams; the
+    same position reproduces on resume.
+    """
+    at = SeedCoordinates(iteration=iteration, node_id=None, branch=index, attempt=attempt)
+    return derive_seed(run_seed, "data_analysis.program", at)
+
+
 def apply_sampling_seed(
     resolved: tuple[ResolvedAnalysisInvocation, ...],
     *,
     envelope: AnalysisResourceEnvelope,
     run_seed: int,
+    iteration: int | None,
 ) -> tuple[tuple[ResolvedAnalysisInvocation, ...], AnalysisSamplingSeeds]:
     """Give every accepted invocation the executed seed; record what replaced what."""
     seed, source = resolve_analysis_sampling_seed(envelope, run_seed)
     executed: list[ResolvedAnalysisInvocation] = []
     records: list[InvocationSamplingSeed] = []
-    for item in resolved:
+    for index, item in enumerate(resolved):
         sampling = item.invocation.sampling_plan
         planned = sampling.policy.seed
         if source == "derived":
@@ -69,11 +83,8 @@ def apply_sampling_seed(
                 invocation_id=item.invocation.invocation_id,
                 sampling_seed=seed,
                 sampling_seed_source=source,
+                program_seed=program_seed(run_seed, iteration=iteration, index=index),
                 llm_plan_seed_ignored=planned if source == "derived" else None,
             )
         )
-    return tuple(executed), AnalysisSamplingSeeds(
-        run_seed=run_seed,
-        invocations=tuple(records),
-        program_seed=derive_seed(run_seed, "data_analysis.program", SAMPLING_COORDINATES),
-    )
+    return tuple(executed), AnalysisSamplingSeeds(run_seed=run_seed, invocations=tuple(records))

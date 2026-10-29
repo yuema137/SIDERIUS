@@ -30,6 +30,24 @@ def validate_generated_input_formats(input_slots: tuple[SkillInputSlot, ...]) ->
         raise ValueError(f"unsupported generated-program view formats: {unsupported}")
 
 
+#: A generated program's declared seed also seeds legacy NumPy, whose seed
+#: range is ``[0, 2**32 - 1]``. A larger value would alias, so it is refused.
+DECLARED_PROGRAM_SEED_MAX = 2**32 - 1
+
+
+def require_declared_seed_range(seed: int | None) -> None:
+    """Refuse a declared program seed outside the NumPy legacy seed range.
+
+    Enforced by validators, not the field schema, so the LLM-visible JSON
+    schema (and its prompt bytes) is unchanged.
+    """
+    if seed is not None and seed > DECLARED_PROGRAM_SEED_MAX:
+        raise ValueError(
+            f"a generated program's declared seed must be at most {DECLARED_PROGRAM_SEED_MAX} "
+            f"(2**32 - 1, the NumPy legacy seed range); got {seed}"
+        )
+
+
 class GeneratedParameterDeclaration(FrozenModel):
     name: NonEmptyStr
     value_type: Literal["string", "integer", "number", "boolean"]
@@ -158,6 +176,7 @@ class GeneratedAnalysisProgram(FrozenModel):
             raise ValueError("generated artifact declarations exceed the resource request")
         if self.determinism == "deterministic" and self.seed is None:
             raise ValueError("deterministic generated programs require an explicit seed")
+        require_declared_seed_range(self.seed)
         return self
 
     def parameter_schema_body(self) -> list[dict[str, Any]]:

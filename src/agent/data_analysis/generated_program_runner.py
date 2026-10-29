@@ -55,11 +55,10 @@ def main() -> int:
     args = parser.parse_args()
 
     request = json.loads(Path(args.request).read_text(encoding="utf-8"))
-    # Issue #983: every program runs seeded (the request's seed is the declared
-    # one for a deterministic program, else the run-derived program seed).
-    seed = request["seed"]
-    random.seed(seed)
-    np.random.seed(seed % 2**32)
+    # Issue #983: every program runs seeded. The parent supplies both seeds
+    # (``executed_program_seeds``); nothing is reduced or aliased here.
+    random.seed(request["seed"])
+    np.random.seed(request["numpy_seed"])
     analyze = _load_analyze(Path(args.source))
     payload = analyze(
         _load_inputs(request["inputs"]),
