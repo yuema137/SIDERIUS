@@ -40,6 +40,15 @@ def parse_allowed_output_types(raw: str | None) -> tuple[OutputTypeName, ...] | 
     return cast("tuple[OutputTypeName, ...]", parts)
 
 
+def is_real_launch(args: argparse.Namespace) -> bool:
+    """Whether this launch trains for real (no pseudo LLM or pseudo training).
+
+    The one predicate behind ``require_probe_runner`` and the early CUDA
+    preflight in ``run_one_iteration`` (issue #1136), so both refuse the same set.
+    """
+    return not (args.is_pseudo_training or args.is_pseudo_llm)
+
+
 def build_standard_launch_config(
     args: argparse.Namespace,
     launch_identity: LaunchIdentity,
@@ -56,7 +65,7 @@ def build_standard_launch_config(
     """
     return WorkflowLaunchConfig(
         source_paths=resolved_paths,
-        require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm),
+        require_probe_runner=is_real_launch(args),
         healthgate_mode=args.healthgate_mode,
         result_authority=args.result_authority,
         max_iterations=1,

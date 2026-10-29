@@ -17,6 +17,27 @@ setting on resume is refused. See the [tuner contract](../../src/nodes/ml_hyperp
 for selection, provenance and supported routes. This is an experimental policy,
 not the test-only `--validation_max_samples` workload ceiling.
 
+## Compute requirement (issue #1136)
+
+A real launch (neither `--is_pseudo_llm` nor `--is_pseudo_training`; predicate
+`workflows.standard_launch.is_real_launch`) requires a CUDA device visible to
+PyTorch. No CPU training mode exists. `run_one_iteration` checks this through
+`core.gpu_requirement.real_launch_gpu_refusal` (which reads
+`core.hardware_context.discover()`) after the formal-launch policy and the
+`--print_resolved_launch_config` view, and before the halt/brake checks, the
+iteration directory, the run lock and any LLM call. On refusal it prints
+`[run_one_iteration] LAUNCH REFUSED: SIDERIUS real training needs an NVIDIA GPU
+with CUDA, and none is visible here (...)` to stderr and exits `2`. No manifest is
+written, so the consecutive-failure brake does not count it; `run_chain.sh`
+records the iteration as failed (`iter:2`) and the chain ends incomplete. The
+runtime-control launch guard raises `LaunchGuardFailure` with the same sentence
+when its measurement capability reports `accelerator_unavailable`; other
+unavailability reasons (for example a missing dataset) keep the bounded-probe
+wording. The chain header prints `Compute device   : NVIDIA GPU with CUDA required
+(checked before any model call)` for real chains and `not checked (pseudo-mode; ...)`
+for pseudo chains, including under `--dry-run`. Pseudo launches, `--dry-run` and
+`--print_resolved_launch_config` are not checked.
+
 For exhaustive flag lists, run each entrypoint with `--help`. This page covers
 the flags that decide *what a run is*.
 

@@ -35,6 +35,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.runtime_control.phases import RuntimePhase
 
+#: Unavailability reasons that mean "no usable accelerator here", as opposed to
+#: a missing dataset or caller input. The launch guard words its refusal as the
+#: GPU requirement (issue #1136) only for these.
+NO_TORCH_REASON = "torch is not importable"
+NO_CUDA_REASON = "no CUDA device is visible"
+_ACCELERATOR_REASONS = frozenset({NO_TORCH_REASON, NO_CUDA_REASON})
+
 
 class ResolvedMeasurementCapability(BaseModel):
     """What this environment can measure, resolved once and passed around.
@@ -93,6 +100,11 @@ class ResolvedMeasurementCapability(BaseModel):
             )
         return f"{self.task_identity}: not measurable — {self.unavailability_reason}"
 
+    @property
+    def accelerator_unavailable(self) -> bool:
+        """True when measurement is refused because no accelerator is usable."""
+        return not self.probe_available and self.unavailability_reason in _ACCELERATOR_REASONS
+
 
 def resolve_measurement_capability(
     *,
@@ -128,9 +140,9 @@ def resolve_measurement_capability(
     try:
         import torch
     except ImportError:
-        return _no("torch is not importable")
+        return _no(NO_TORCH_REASON)
     if not torch.cuda.is_available():
-        return _no("no CUDA device is visible")
+        return _no(NO_CUDA_REASON)
     if not dataset_root:
         return _no("no dataset root was supplied by the caller")
     if not os.path.isdir(dataset_root):

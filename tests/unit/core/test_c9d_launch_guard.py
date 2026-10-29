@@ -78,6 +78,46 @@ class TestLaunchSelfTest:
         with pytest.raises(LaunchGuardFailure, match="requires a real bounded-probe runner"):
             run_launch_self_test(require_probe_runner=True)
 
+    def test_a_missing_accelerator_is_refused_as_the_gpu_requirement(self):
+        """Issue #1136: a CPU-only operator got "requires a real bounded-probe
+        runner", which never said a GPU was needed. Fails if the guard stops
+        naming the requirement, or stops refusing (fail-closed)."""
+        from core.runtime_control.measurement_capability import (
+            NO_CUDA_REASON,
+            ResolvedMeasurementCapability,
+        )
+
+        capability = ResolvedMeasurementCapability(
+            task_identity="t",
+            dataset_adapter="a",
+            data_shape_class="s",
+            probe_available=False,
+            unavailability_reason=NO_CUDA_REASON,
+        )
+        with pytest.raises(LaunchGuardFailure) as refused:
+            run_launch_self_test(require_probe_runner=True, capability=capability)
+        message = str(refused.value)
+        assert "needs an NVIDIA GPU with CUDA" in message
+        assert NO_CUDA_REASON in message
+        assert "candidate_devices" in message
+
+    def test_a_missing_dataset_is_not_misreported_as_a_gpu_problem(self, tmp_path):
+        """The GPU wording is only for accelerator reasons: a host WITH a GPU
+        but no dataset must not be told to find a GPU."""
+        from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+
+        capability = ResolvedMeasurementCapability(
+            task_identity="t",
+            dataset_adapter="a",
+            data_shape_class="s",
+            probe_available=False,
+            unavailability_reason=f"dataset directory not present at {str(tmp_path)!r}",
+        )
+        with pytest.raises(LaunchGuardFailure) as refused:
+            run_launch_self_test(require_probe_runner=True, capability=capability)
+        assert "NVIDIA GPU" not in str(refused.value)
+        assert "dataset directory not present" in str(refused.value)
+
     def test_it_catches_a_policy_that_lets_static_evidence_block(self, monkeypatch):
         """The wave-1 regression, caught at startup instead of mid-campaign."""
         import core.runtime_control.launch_guard as guard
@@ -415,10 +455,16 @@ class TestProbeRequirementIsExplicit:
         from tests.helpers.launcher_bindings import workflow_call_bindings
 
         source = Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
-        assert (
-            workflow_call_bindings(source)["require_probe_runner"]
-            == "not (args.is_pseudo_training or args.is_pseudo_llm)"
-        )
+        assert workflow_call_bindings(source)["require_probe_runner"] == "is_real_launch(args)"
+        # The shared predicate (also behind the #1136 CUDA preflight) keeps
+        # its meaning: either pseudo flag makes the launch not real.
+        from argparse import Namespace
+
+        from workflows.standard_launch import is_real_launch
+
+        assert is_real_launch(Namespace(is_pseudo_training=False, is_pseudo_llm=False))
+        assert not is_real_launch(Namespace(is_pseudo_training=True, is_pseudo_llm=False))
+        assert not is_real_launch(Namespace(is_pseudo_training=False, is_pseudo_llm=True))
 
     def test_the_guard_still_runs_every_behavioral_check_without_a_device(self, monkeypatch):
         """Not requiring a device must not mean skipping the checks."""

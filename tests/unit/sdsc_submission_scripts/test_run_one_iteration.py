@@ -1410,6 +1410,79 @@ class TestPseudoModeFactoryWiring:
         assert "LLM + training" in err
 
 
+def _hardware(device_available: bool):
+    from datetime import UTC, datetime
+
+    from core.hardware_models import HardwareContext
+
+    return HardwareContext(
+        device_name="Fixture GPU" if device_available else "cpu",
+        total_memory_bytes=8 * 1024**3 if device_available else 0,
+        compute_capability=(8, 0) if device_available else (0, 0),
+        multiprocessor_count=1 if device_available else 0,
+        torch_version="fixture",
+        hostname="fixture-host",
+        device_available=device_available,
+        discovered_at=datetime.now(UTC),
+    )
+
+
+@pytest.mark.real_gpu_preflight
+class TestRealLaunchGpuPreflight:
+    """Issue #1136: a real launch on a host without CUDA used to get past
+    startup and fail later with an opaque LaunchGuardFailure. The CLI now
+    refuses first, through the hardware-discovery owner, with exit 2."""
+
+    def test_cpu_host_refuses_before_iteration_dir_lock_or_llm(
+        self, tmp_path, isolated_registries, monkeypatch, capsys
+    ):
+        """Fails if the preflight is removed or moved after iteration setup:
+        exit code, the missing iter_001/ and run lock, and the untouched
+        LLMBridge/run_workflow each witness a different late placement."""
+        from agent import llm_bridge
+        from core import hardware_context
+
+        monkeypatch.setattr(hardware_context, "discover", lambda: _hardware(False))
+        bridges: list[object] = []
+        original_init = llm_bridge.LLMBridge.__init__
+
+        def _record_bridge(self, *args, **kwargs):
+            bridges.append(args)
+            original_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(llm_bridge.LLMBridge, "__init__", _record_bridge)
+        workspace = tmp_path / "ws"
+        with patch("workflows.model_exploration.run_workflow") as run_workflow:
+            code = _run_main(["--workspace", str(workspace), "--start_iteration", "1"])
+
+        assert code == 2
+        err = capsys.readouterr().err
+        assert "LAUNCH REFUSED: SIDERIUS real training needs an NVIDIA GPU with CUDA" in err
+        assert not (workspace / "iter_001").exists()
+        assert not list(workspace.glob("**/*run_invariants*"))
+        assert bridges == []
+        run_workflow.assert_not_called()
+
+    def test_gpu_host_proceeds_to_the_workflow(self, tmp_path, isolated_registries, monkeypatch):
+        """No behavior change on GPU hosts: fails if the preflight refuses a
+        host whose discovered context has a device."""
+        from core import hardware_context
+
+        monkeypatch.setattr(hardware_context, "discover", lambda: _hardware(True))
+        code, _kwargs = TestPseudoModeFactoryWiring()._invoke(tmp_path)
+        assert code == 0
+
+    def test_pseudo_run_is_not_checked(self, tmp_path, isolated_registries, monkeypatch):
+        """Pseudo smokes keep running on CPU-only hosts (CI): fails if the
+        preflight stops honouring the shared is_real_launch predicate."""
+        from core import hardware_context
+
+        monkeypatch.setattr(hardware_context, "discover", lambda: _hardware(False))
+        code, kwargs = TestPseudoModeFactoryWiring()._invoke(tmp_path, "--is_pseudo_training")
+        assert code == 0
+        assert kwargs["sandbox_factory"] is not None
+
+
 class TestLitReviewCLI:
     """Commit 6 sub-step 6f (commit 596b206, 2026-06-12) — the two
     ``--ml_lit_review_*`` CLI flags.

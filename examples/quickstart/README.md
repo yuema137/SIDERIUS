@@ -3,7 +3,9 @@
 This example shows how a task package supplies data access, a model contract
 and a metric to SIDERIUS. It classifies 256 seeded four-feature vectors into two
 classes. Data preparation and component checks run on CPU without downloads or
-API keys. A real research-chain launch makes provider calls.
+API keys. A real research-chain launch makes provider calls and trains models,
+so it needs an NVIDIA GPU with CUDA; on a machine without one it stops before
+any model call.
 
 Browse [quickstart.ipynb](quickstart.ipynb) or its [HTML rendering](quickstart.html)
 for the worked example. Saved live-run excerpts are dated historical evidence;
