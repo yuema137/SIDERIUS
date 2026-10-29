@@ -520,7 +520,7 @@ def test_research_loop_add_limit_remove_round_trip_over_editor_routes(editor_con
 
 def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_config):
     """Fails if a GUI stop-condition edit bypasses the typed declaration (invalid k,
-    missing metric id, duplicate kind or the reserved judge reach disk), if a
+    missing metric id, duplicate kind or an incomplete judge reach disk), if a
     condition-free loop's bytes drift, or if add-then-remove does not restore them."""
     from tests.browser.workflow_editor_server import interpretation_profile_source
     from workflows.definition import parse_workflow_source
@@ -533,6 +533,13 @@ def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_co
     }
     threshold = {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85}
     patience = {"kind": "no_improvement", "completed_bodies": 1}
+    # B2-5: the editor's judge row carries only JudgeStop's declared fields.
+    judge = {
+        "kind": "judge",
+        "criterion": "Stop once a body adds no new insight.",
+        "min_completed_bodies": 1,
+        "on_failure": "continue",
+    }
     with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
         base = client.get("/api/editor/example", headers=headers).json()
         loop = base["document"]["definition"]["loop"]
@@ -586,6 +593,7 @@ def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_co
         for invalid in (
             [{"kind": "no_improvement", "completed_bodies": 2}],  # == final_iteration
             [threshold, {**threshold, "threshold": 0.9}],
+            [{**judge, "min_completed_bodies": 2}],  # never judged before the final boundary
         ):
             _, refused = review(invalid)
             assert refused.status_code == 422, (invalid, refused.text)
@@ -611,6 +619,17 @@ def test_research_loop_stop_conditions_review_refuse_and_restore_bytes(editor_co
         # Remove one, then the other: the condition-free bytes return exactly.
         review_and_save([patience])
         assert "MetricThresholdStop" not in path.read_text()
+        review_and_save([])
+        assert path.read_bytes() == original
+
+        # A judge condition from the editor reviews and saves through the same declaration;
+        # removing it restores the condition-free bytes.
+        view = review_and_save([judge])
+        assert any(
+            "JudgeStop(" in line for line in view["diff"].splitlines() if line.startswith("+ ")
+        ), view["diff"]
+        saved = parse_workflow_source(path.read_text()).model_dump(mode="json")
+        assert saved["definition"]["loop"]["stop_conditions"] == [judge]
         review_and_save([])
         assert path.read_bytes() == original
 

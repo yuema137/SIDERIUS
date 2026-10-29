@@ -147,6 +147,7 @@ PROTOCOLS = MappingProxyType(
                 ArgumentContract("llm_provider", "llm-provider", False),
                 ArgumentContract("llm_model_id", "optional.model-id", False),
                 ArgumentContract("constraint_context", "optional.constraint-context", False),
+                ArgumentContract("human_advice", "optional.text", False),
             ),
         ),
         "implementation-to-validation": ProtocolContract(

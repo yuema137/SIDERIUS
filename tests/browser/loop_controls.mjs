@@ -21,6 +21,7 @@ const digest = 'c'.repeat(64);
 const thresholdStop = '77777777-7777-4777-8777-777777777777';
 const patienceStop = '88888888-8888-4888-8888-888888888888';
 const resumedStop = '99999999-9999-4999-8999-999999999999';
+const judgeStop = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 let browser;
 try {
   const metadata = await new Promise((accept, reject) => {
@@ -100,6 +101,15 @@ try {
       const value = {...terminal(resumedStop, 'completed', 3), kind: 'candidate_loop_resume'};
       value.loop = {final_iteration: 5, attempted_iterations: 3, stop_reason: {kind: 'no_improvement', condition_index: 0, iteration: 3,
         k: 2, non_improving_bodies: 2, last_improvement_iteration: 1, incumbent: 0.75}};
+      return reply(value);
+    }
+    if (url.pathname === `/api/operations/${judgeStop}`) {
+      // B2-5: the receipt's judge verdicts, rationale copied from their evidence by the server.
+      const value = terminal(judgeStop, 'completed', 3), evidence = {evidence_path: 'judge/2.json', evidence_sha256: 'e'.repeat(64), request_sha256: 'f'.repeat(64)};
+      value.loop = {final_iteration: 5, attempted_iterations: 3, stop_reason: {kind: 'judge', condition_index: 0, iteration: 3, ...evidence},
+        judge_verdicts: [{iteration: 1, decision: null, rationale: null, confidence: null},
+          {iteration: 2, decision: 'continue', rationale: 'Still improving.', confidence: 'medium'},
+          {iteration: 3, decision: 'stop', rationale: 'Two bodies add no new insight.', confidence: 'high'}]};
       return reply(value);
     }
     throw new Error('unexpected path ' + url.pathname);
@@ -213,6 +223,15 @@ try {
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-stop-reason.png'), fullPage: true});
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, resumedStop);
   await state.filter({hasText: 'Resumed segment. Research loop stopped early after body 3 of up to 5: no improvement for 2 bodies (condition: 2 bodies; best 0.75 at body 1). Body numbers count the whole run, including earlier segments.'}).waitFor();
+  assert.equal(await page.locator('#loop-judge').isHidden(), true, 'no judge list without judge verdicts');
+  // B2-5: a judge-stopped loop names the judge and lists each recorded verdict with its reason.
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, judgeStop);
+  await state.filter({hasText: 'Research loop stopped early after body 3 of up to 5: the judge decided to stop.'}).waitFor();
+  assert.deepEqual(await page.locator('#loop-judge li').allTextContents(), [
+    'Judge after body 1: abstained (the judge call failed)',
+    'Judge after body 2: continue · Still improving. (confidence medium)',
+    'Judge after body 3: stop · Two bodies add no new insight. (confidence high)',
+  ]);
   assert.equal(resumePosts.length, 1);
   assert.equal(posts.length, 1);
   assert.deepEqual(faults, []);

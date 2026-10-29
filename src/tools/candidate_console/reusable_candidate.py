@@ -1,5 +1,6 @@
 """Configured capture consumption through preparation and operation owners."""
 
+import hashlib
 import heapq
 import os
 from pathlib import Path
@@ -21,7 +22,9 @@ from tools.candidate_prepare.reusable_selection import (
     inspect_current_reusable_binding,
     inspect_reusable_binding,
 )
+from tools.candidate_worker.models import CandidateRunRequest
 from tools.workflow_authoring.versions import recorded_name
+from workflows.definition import AuthoredLoop
 
 from .files import credentials
 from .models import RouteView, TaskChoice
@@ -36,6 +39,7 @@ from .reusable_models import (
     ReusableCaptureSelection,
 )
 from .reusable_policy import capture_path, check_capture_policy, configured_capture
+from .seed_labels import review_label
 from .service import CandidateConsole, with_run_resources
 
 
@@ -129,6 +133,7 @@ class ReusableCandidate:
             self.console.config.operation_store,
             selection.preparation,
             operation_id,
+            selection.run_seed,
         )
         return task, inspected, operation
 
@@ -151,6 +156,8 @@ class ReusableCandidate:
                 "reusable_preparation",
                 "candidate research loop differs from captured reusable declaration",
             )
+        if loop is not None:
+            admit_captured_judge_route(loop, request)
         literature_settings = {}
         if profile == "native-literature-candidate/v1":
             from tools.candidate_prepare.reusable_literature import review_settings
@@ -209,6 +216,7 @@ class ReusableCandidate:
             source_version_name=recorded_name(
                 Path(binding.original_source.path), binding.original_source.sha256
             ),
+            seed=review_label(selection.run_seed),
         )
 
     def launch(self, project_id: str, launch: ReusableCaptureLaunch) -> OperationHandle:
@@ -237,3 +245,32 @@ class ReusableCandidate:
         except OperationFailure as error:
             raise ReusableAdmissionNotAttempted(error.detail.code, error.detail.message) from error
         return self.console.submit(operation, launch_environment=environment)
+
+
+def admit_captured_judge_route(loop: AuthoredLoop, request: CandidateRunRequest) -> None:
+    """Refuse at review what the worker would refuse at loop start (B2-5, Q-B2-10).
+
+    Calls the worker's own ``admit_judge_route`` with the reviewed loop and the model
+    settings the worker will load: the request's captured ``llm_config`` file, else the
+    default settings, exactly as ``candidate_worker.native`` does. A missing judge route
+    or a static call bound above ``max_judge_calls`` is a typed ``judge_route`` refusal
+    before any launch; the owner's message names the route or the bound and the cap.
+    """
+    from tools.candidate_worker.loop_judge import admit_judge_route
+    from tools.candidate_worker.loop_stop import StopConditionError
+    from tools.workflow_preview.config import parse_config
+    from workflows.llm_config import WorkflowLLMConfig
+
+    config = WorkflowLLMConfig.default()
+    for observation in request.files:
+        if observation.reference == "llm_config":
+            data = Path(observation.path).read_bytes()
+            if hashlib.sha256(data).hexdigest() != observation.sha256:
+                raise OperationFailure(
+                    "reusable_preparation", "captured model settings changed since preparation"
+                )
+            config = parse_config(data)
+    try:
+        admit_judge_route(loop, config)
+    except StopConditionError as error:
+        raise OperationFailure("judge_route", str(error)) from error
