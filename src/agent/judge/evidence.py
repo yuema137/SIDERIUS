@@ -74,17 +74,29 @@ def verify_call_evidence(
     return evidence
 
 
-def verify_call_chain(evidences: Sequence[JudgeCallEvidence]) -> None:
-    """Require one invocation's calls in recorded order, each covering all earlier ones."""
+def verify_call_chain(
+    evidences: Sequence[JudgeCallEvidence], *, content_kinds: Sequence[str]
+) -> None:
+    """Require one invocation's calls in recorded order, each covering all earlier ones.
+
+    ``content_kinds`` is the consumer's declared content-kind sequence for exactly
+    these calls (one entry per call): a strategy may mix kinds (``advice`` then
+    ``revision``; ``advocacy``/``critique`` then ``debate_verdict``), but never in an
+    order its planner did not declare.
+    """
+    if len(content_kinds) != len(evidences):
+        raise JudgeEvidenceError("judge call chain length differs from its declared kinds")
     if not evidences:
         return
     first = evidences[0].request
-    for index, evidence in enumerate(evidences):
+    for index, (evidence, declared) in enumerate(zip(evidences, content_kinds, strict=True)):
         request = evidence.request
         if request.invocation_sha256 != first.invocation_sha256:
             raise JudgeEvidenceError("judge call chain mixes invocations")
-        if request.content.kind != first.content.kind:
-            raise JudgeEvidenceError("judge call chain mixes request content kinds")
+        if request.content.kind != declared:
+            raise JudgeEvidenceError(
+                f"judge call {index} carries {request.content.kind!r}, not the declared {declared!r}"
+            )
         if request.call_index != index:
             raise JudgeEvidenceError(f"judge call {index} records call_index {request.call_index}")
         if request.prior_turns != chain_prior_turns(evidences[:index]):

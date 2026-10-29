@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="256" viewBox="0 0 960 256" role="img" aria-labelledby="title desc">
+  <title id="title">One gateway, three output contracts</title>
+  <desc id="desc">SIDERIUS LLMBridge checks text, structured JSON and single-tool selection. A basic smoke pass is distinct from workflow qualification.</desc>
+  <rect width="960" height="256" rx="20" fill="#101c2e"/>
+  <circle cx="916" cy="22" r="125" fill="#172b43"/>
+  <text x="32" y="35" font-family="sans-serif" font-size="12" letter-spacing="2" fill="#8ecce5">SIDERIUS / MODEL QUALIFICATION</text>
+  <text x="32" y="70" font-family="sans-serif" font-size="27" font-weight="700" fill="#ffffff">One gateway. Three output contracts.</text>
+  <g font-family="sans-serif">
+    <rect x="32" y="94" width="288" height="106" rx="12" fill="#1b3045" stroke="#38536a"/>
+    <rect x="48" y="110" width="32" height="30" rx="8" fill="#254f68"/>
+    <text x="64" y="131" text-anchor="middle" font-size="18" font-weight="700" fill="#9dddf3">Aa</text>
+    <text x="92" y="131" font-size="18" font-weight="700" fill="#ffffff">Text</text>
+    <text x="48" y="161" font-family="monospace" font-size="15" fill="#9dddf3">READY</text>
+    <text x="48" y="184" font-size="12" fill="#c4d2e1">Complete, instruction-following output</text>
+    <rect x="336" y="94" width="288" height="106" rx="12" fill="#1b3045" stroke="#38536a"/>
+    <rect x="352" y="110" width="32" height="30" rx="8" fill="#3c355a"/>
+    <text x="368" y="131" text-anchor="middle" font-family="monospace" font-size="18" font-weight="700" fill="#d7c2ff">{ }</text>
+    <text x="396" y="131" font-size="18" font-weight="700" fill="#ffffff">JSON</text>
+    <text x="352" y="161" font-family="monospace" font-size="15" fill="#d7c2ff">{"ok": true, "count": 3}</text>
+    <text x="352" y="184" font-size="12" fill="#c4d2e1">Parseable output, validated fields</text>
+    <rect x="640" y="94" width="288" height="106" rx="12" fill="#1b3045" stroke="#38536a"/>
+    <rect x="656" y="110" width="32" height="30" rx="8" fill="#234d45"/>
+    <path d="M664 120h13m-5-5 5 5-5 5m-8 7h14" fill="none" stroke="#a0e4cb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="700" y="131" font-size="18" font-weight="700" fill="#ffffff">Tool selection</text>
+    <text x="656" y="161" font-family="monospace" font-size="15" fill="#a0e4cb">inspect(name="candidate")</text>
+    <text x="656" y="184" font-size="12" fill="#c4d2e1">One declared tool, valid arguments</text>
+    <circle cx="38" cy="229" r="4" fill="#eac678"/>
+    <text x="50" y="233" font-size="13" fill="#d5deea">A smoke pass verifies these small calls. Workflow qualification is a separate step.</text>
+  </g>
+</svg>

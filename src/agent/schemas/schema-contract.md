@@ -69,11 +69,30 @@ no hidden contracts, no silent defaults.
 - Record vocabularies (statuses, verdicts as persisted strings) are declared
   here and are load-bearing for persisted history — additive evolution only.
 - `extra="forbid"` on record-facing types where a misspelled key must refuse.
-- `ParameterRules` checks fixed `train_config` paths against the consuming
-  `TrainConfig.model_fields` and nested model annotations, including optional
-  unions. The shared document resolver repeats this check so a mutated rule
-  dictionary cannot introduce a silently ignored execution lock. Exact rules
-  may insert omitted valid leaves; model plugin paths remain extensible.
+- `ParameterRule` declares exactly one kind by key presence. Only `exact`
+  accepts null; a null `range` / `allowed` / `predicate` is refused instead
+  of falling back to an exact-null kind, and `NumericRange` bounds are strict
+  numbers (no bool or string coercion). `exact` / `allowed` values may not
+  contain a non-finite real number (float, Decimal, numpy scalar) at any
+  nesting depth, including mapping keys, and may not be cyclic or nested more
+  than 64 levels; each is a validation error naming the rule path. Range
+  bounds are finite.
+- `ParameterRules` checks fixed `train_config` and `loss_config` paths against
+  the consuming `TrainConfig` / `LossConfig` `model_fields` and nested model
+  annotations, including optional unions. The shared document resolver
+  repeats this check so a mutated rule dictionary cannot introduce a silently
+  ignored execution lock. Exact rules may insert omitted valid leaves. The
+  resolver also checks `model_config` paths against the executed model's
+  config class (`get_config_class(executed_model_type)`; the caller passes
+  `force_model` or the plan's top-level `model_type`, which is the default).
+  A `model_config.model_type` rule is validated against the executed type and
+  never selects it. The tuner fails closed when the class is unregistered;
+  only proposal-baseline resolution (`defer_unknown_model`, with the proposed
+  model name as `executed_model_type`) defers. `extra="allow"` configs accept
+  unknown keys. `validate_model_parameter_rules` runs the full resolver once at
+  tuner launch for a fixed `force_model`, on an empty model configuration with
+  only planner-chosen values deferred. The same target check refuses boolean
+  `exact` / `allowed` values on a field whose type does not admit `bool`.
   See the [parameter-rule contract](../../../docs/reference/task-composition.md)
   for sampling ownership, composition conflicts and value-validation boundaries.
 

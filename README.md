@@ -23,6 +23,9 @@ Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
 - **Choose how to explore:** start with a lightweight fixed workflow or let an
   LLM orchestrator compose research steps. Select models independently by role.
 
+See [supported providers and models](docs/reference/model-qualification.md) for
+required model capabilities and the configurations tested so far.
+
 <a id="start-with-your-coding-agent"></a>
 
 ## Quick start with your coding agent

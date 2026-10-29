@@ -246,6 +246,8 @@ def project_stop_request(
 def _boundary_verdict(
     evidence: JudgeCallEvidence, workspace: str, path: Path, index: int, condition: JudgeStop
 ) -> JudgeBoundaryVerdict:
+    stop = evidence.request.content
+    assert isinstance(stop, StopJudgeRequest)  # verified against STOP_TEMPLATE's request
     if evidence.status == "decided":
         assert isinstance(evidence.payload, StopVerdict)
         decision = evidence.payload.decision
@@ -253,11 +255,11 @@ def _boundary_verdict(
         decision = None  # A recorded abstention: deterministic bounds still govern.
     else:
         raise JudgeStopError(
-            f"stop condition {index} (judge) failed at body {evidence.request.content.iteration}: "
+            f"stop condition {index} (judge) failed at body {stop.iteration}: "
             f"{evidence.failure_code}: {evidence.failure_message}"
         )
     return JudgeBoundaryVerdict(
-        iteration=evidence.request.content.iteration,
+        iteration=stop.iteration,
         decision=decision,
         evidence_path=str(path.relative_to(workspace)),
         evidence_sha256=evidence_sha256(evidence),

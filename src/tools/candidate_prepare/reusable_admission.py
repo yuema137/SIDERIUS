@@ -198,12 +198,14 @@ def inspect_reusable_source(
     return _inspect_source(request)[0]
 
 
-def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation:
+def capture(
+    request: ReusableCandidatePreparationRequest, *, protected: tuple[Path, ...] = ()
+) -> CapturedPreparation:
     inspected, payload = _inspect_source(request)
     observed, document, locations = inspected.observation, inspected.document, inspected.locations
     native, resolved = inspected.request, inspected.resolved
     envelope = Path(locations.workspace).parent
-    captures = admit(native, future_parent=envelope)
+    captures = admit(native, future_parent=envelope, protected=protected)
     binding = ReusableBindingCapture(
         run_id=request.run_id,
         envelope=str(envelope),
@@ -225,10 +227,10 @@ def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation
 
 
 def preflight_reusable_candidate(
-    request: ReusableCandidatePreparationRequest,
+    request: ReusableCandidatePreparationRequest, *, protected: tuple[Path, ...] = ()
 ) -> ReusablePreparationPlan:
     """Return inert observations only; prepare always captures afresh."""
-    return capture(request).plan
+    return capture(request, protected=protected).plan
 
 
 def verify_origin(binding: ReusableBindingCapture) -> None:
