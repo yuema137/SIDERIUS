@@ -53,6 +53,8 @@ try {
       return route.continue();
     }
     if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    // The selected task's experiment setups (Workflow and Run read them): none.
+    if (url.pathname.endsWith('/setups') && url.pathname.startsWith('/api/tasks/')) return reply({setups: []});
     if (url.pathname === '/api/tasks') return reply({tasks});
     if (url.pathname.startsWith('/api/tasks/')) return reply({task_id: 'synthetic', label: 'Synthetic task', state: 'unavailable', data_root: '/fixture/data',
       run_policy: {preparation_timeout_seconds: 300, candidate_timeout_seconds: 3600, candidate_network: false, candidate_devices: [], candidate_environment_names: [], allowed_output_types: null},
@@ -138,7 +140,7 @@ try {
   assert.equal(await page.locator('nav a[href="#workflow"]').getAttribute('aria-disabled'), null);
   await page.locator('#task-summary-state[data-state="unavailable"]').waitFor();
   await page.locator('nav a[href="#workflow"]').click();
-  await page.locator('#editor-status').filter({hasText: 'Fixture project unavailable'}).waitFor();
+  await page.locator('#setup-state').filter({hasText: 'Fixture project unavailable'}).waitFor();
   // Run preparation has its own route; an unavailable project keeps its handoff closed.
   await page.locator('nav a[href="#run"]').click();
   assert.equal(await page.title(), 'SIDERIUS · Run');

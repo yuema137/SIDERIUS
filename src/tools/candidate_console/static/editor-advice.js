@@ -70,5 +70,24 @@
     return !!input;
   }
   window.consoleSession?.subscribe(({connected}) => { if (!connected) { targets = null; loading = null; } });
-  window.editorAdvice = Object.freeze({render, focusFirst});
+  /** focusFirst, repeated (bounded) until the advice field holds focus: the inspector may
+   * re-render once more after an import or an opened setup settles (L-6). The author's own
+   * first click or key ends it at once, so a module they choose is not reselected over. */
+  async function focusSettled() {
+    let acted = false;
+    const act = () => { acted = true; };
+    document.addEventListener('pointerdown', act, {capture: true, once: true});
+    document.addEventListener('keydown', act, {capture: true, once: true});
+    try {
+      for (const wait of [0, 150, 400, 800]) {
+        await new Promise(done => setTimeout(done, wait));
+        if (acted || document.activeElement?.classList.contains('advice-input')) break;
+        await focusFirst();
+      }
+    } finally {
+      document.removeEventListener('pointerdown', act, {capture: true});
+      document.removeEventListener('keydown', act, {capture: true});
+    }
+  }
+  window.editorAdvice = Object.freeze({render, focusFirst, focusSettled});
 })();

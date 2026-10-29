@@ -1100,7 +1100,7 @@ console.json only.
 
 | Route | Behaviour | Refusals |
 | --- | --- | --- |
-| `GET /api/tasks/{task_id}/setups` | `{"setups": [SetupView{setup_id, label, runnable, saved_version, refs_match_task}]}` for setups whose task is `task_id`; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
+| `GET /api/tasks/{task_id}/setups` | `SetupList{setups: [SetupView{setup_id, label, runnable, saved_version, refs_match_task}], browser_creatable}` for setups whose task is `task_id`; `browser_creatable` is `SetupStore.creatable`, the predicate `POST` enforces; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
 | `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
 
 **Run attribution.** The console records the selected setup on reusable runs:
@@ -1130,6 +1130,62 @@ from another process (or a hand edit) refuses with `stale` and leaves the file
 unchanged. `add-task --from-bundle` is the one other caller of
 `SetupStore.create` (see "Example bundles"). Templates for an opened project keep using `instantiate`, which now
 delegates to `render_shape`.
+
+### Experiment setups in the browser
+
+`experiment-setups.js` (presentation only; `editor.js` owns the open project) reads, on
+Workflow or Run entry for the selected task (and again after a reconnect, a task change
+or a creation), `GET /api/editor/projects` and `GET /api/tasks/<id>/setups` for every
+configured task. It hands `workflowEditor.useSetups(list, preferred)` the selected task's
+setups (option text = `label`), followed by an `optgroup` "Other workflows (no configured
+task)" holding legacy `editor_projects` that match no configured task (compatibility: they
+stay editable; a legacy project matched to another task is not listed). `useSetups` keeps
+the open setup when it is listed, else opens `preferred` or the first entry; pending edits
+are dropped only after "Discard pending edits and open another experiment setup?" (if
+declined, the open setup stays in its own group and task, labelled "<label> (unsaved
+edits)", and `experimentSetups.current` still names it). A task change clears the old
+task's list before the new one loads. `useSetups` returns the list it shows. An empty list says
+"This task has no experiment setup yet. Create one with New setup…."; a failed read shows
+`#setup-state` and `#setup-retry`.
+
+**New setup…** (`#setup-new`) opens `#setup-new-dialog`: radio cards for every
+`GET /api/editor/templates` entry (the research loop with advice preselected) and
+**Blank**, a required **Label** (`#setup-new-label`, ≤160 characters) and
+**Create setup** (`#setup-new-create`) → `POST /api/tasks/<id>/setups`
+`{label, template_id | null}`; on 201 the list reloads with the new `setup_id` preferred
+and the page shows Workflow. When the list says `browser_creatable: false`, `#setup-new` carries the explanation as its
+title and the dialog shows it ("…You can still open existing setups.") with
+**Create setup** disabled, before any click; Enter in the label field submits; the
+"Enter a label" hint clears once a label is typed. A refusal stays in `#setup-new-status`: 403 explains that the
+console operator turns on `"experiment_setups": {"browser_creatable": true}` in
+`settings/console.json` and restarts; 409 shows the server message and any `finding`.
+A listed setup with `refs_match_task: false` shows `#setup-drift` with
+`#setup-drift-update`, which opens the Task version card (the existing reference
+update). `experiment-setup` events carry `{setup, task}`.
+
+Run page: `#run-setup-header` reads "Setup: <label> · Task: <label of the setup's own task>" ("not bound to a
+configured task" for an "other" project). For a setup of the selected task, `new-run.js`
+hides `#new-run-task` and its label, shows `#new-run-task-fact` "Task: <label>" and keeps
+the select's value on that task (a retained preparation keeps its own task); the
+next-step lines then say "check the inputs" only. Admission is unchanged
+(`configured_capture` still refuses another task).
+
+**Runs of this setup** (`setup-runs.js`, `#setup-runs`, shown while a setup is open):
+on Run entry, a setup change and Refresh (`#setup-runs-refresh`) it reads
+`GET /api/operations?limit=50&project_id=<setup_id>` and lists each run as a link to
+`#monitor/<UUID>` (run name and local admission time; outcome sentence below). A newer read
+(another setup, Refresh) replaces an in-flight one; only the newest renders. The status
+line counts the runs, "No runs of this setup yet." when none (complete), "No runs found;
+older runs may be missing." when none and `incomplete`, and with runs plus `incomplete`
+says older runs may be missing (the store scan limit), never claiming a complete
+history; unverifiable records are counted.
+
+**Metric threshold prefill (F11):** `task-tab.js` also reads the selected task's summary
+on Workflow entry and fills `<datalist id="task-metric-ids">` with the declared metric
+ids (main score first, then observational metrics) when the summary is `ready`
+(`window.consoleTaskSummary.mainMetricId`). A newly added metric-threshold stop starts with
+that main score id (no draft, since it is a valid value) and its `#editor-loop-stop-metric-id`
+field suggests the datalist; without a ready summary it starts empty as before.
 
 ## Optional ordinary-file Editor
 
@@ -1795,9 +1851,9 @@ It infers neither scientific success nor complete billing.
 
 | Route | Primary content and action | Secondary content (Settings-gated unless noted) |
 | --- | --- | --- |
-| `#home` | Hero (theme-matched logo + one sentence); entry cards **Quick start** (`#home-quick-start`, see below), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** (the configured-task quick Prepare form; not a beginner entry, API unchanged for CLI/compatibility) |
-| `#task` | Intro line; `#task-list` (task buttons `.task-item[data-task-id]`, `aria-pressed` on the selected one, label and `Version <revision>` or `unversioned`; loading, `#task-list-error` + `#task-list-retry`, `#task-list-empty`); `#task-panel` with the read-only summary (see [Task panel](#task-panel-browser)) and footer (`#task-refresh`) | **Task version** card `#editor-task-panel` (version switch for the open workflow; **Update workflow references** returns to `#workflow`, whose save step shows the review) |
-| `#workflow` | Page bar (title + dirty badge, project select, task chip (read-only; opens the Task version card on `#task`), problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Version history (collapsed card below the frame); Exact Python changes, References, Advanced source, Reload from disk, canvas help, connection mappings (advanced); Details (developer) |
+| `#home` | Hero (theme-matched logo + one sentence); entry cards **Quick start** (`#home-quick-start`, see below: task, then a setup), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** (the configured-task quick Prepare form; not a beginner entry, API unchanged for CLI/compatibility) |
+| `#task` | Intro line; `#task-list` (task buttons `.task-item[data-task-id]`, `aria-pressed` on the selected one, label and `Version <revision>` or `unversioned`; loading, `#task-list-error` + `#task-list-retry`, `#task-list-empty`); `#task-panel` with the read-only summary (see [Task panel](#task-panel-browser)) and footer (`#task-refresh`) | **Task version** card `#editor-task-panel` (version switch for the open workflow; **Update workflow references** returns to `#workflow`, whose save step shows the review, only once a review exists (`updateTask` resolves true for a passed or blocked review); a refused request stays on `#task` with "Workflow references were not updated: <reason>" in `#editor-task-message`) |
+| `#workflow` | Page bar (title + dirty badge, experiment setup select + **New setup…**, task chip (read-only; opens the Task version card on `#task`), problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Version history (collapsed card below the frame); Exact Python changes, References, Advanced source, Reload from disk, canvas help, connection mappings (advanced); Details (developer) |
 | `#run` | Stepper `#run-stepper` (Prepare · Review and launch · Follow in Monitor) and one next-step line `#run-next`; saved-version state; **1 · Prepare** entry `#run-entry[data-run-entry="saved-workflow"]` (**Check inputs** then **Prepare**); **2 · Review and launch** (**Review prepared run** then **Launch run**, inline `#capture-launch-reason`) | Back to workflow; **Run an earlier prepared run instead** (collapsed list); Check status now, operation UUIDs and captured resources (developer) |
 | `#monitor` | Recent operations; Status and logs; loop controls; results; token summary | Operation UUID form, Recorded example (advanced); operation facts, token table (developer) |
 
@@ -1820,27 +1876,29 @@ on Workflow or Run entry. For a project that is not enabled for candidate runs,
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
 
-**Quick start** (`quick-start.js`): Home `#home-quick-start` routes to `#workflow` and
-opens `#quick-start-dialog`, whose **Project (its task and data)** select mirrors the
-editor's own `#editor-project` options, runnable projects first; an edit-only project
-is labelled and warns "You can edit this project but not run it from this console."
-(L-7). The preselection keeps an explicit earlier choice, else the editor's project when
-it is runnable, else the first runnable project; when none is runnable the dialog says
-"No project on this console can be run from here. …" (the fixture knob
-`EDITOR_RUNNABLE_PROJECTS` lets `quick_start.mjs` assert the preselection). **Open research loop** first reads the project (`GET /api/editor/<id>`): a
-failure shows "Couldn't open <project>: <reason>" in the dialog and keeps the button
-for a retry; a project that then does not finish loading within 20 s shows the
-editor's status instead of hanging (L-3). After the import, focus moves to the first
-advice field (L-6); the bounded re-focus stops at the author's first click or key, so a
-module they select is not reselected over.
-**Open research loop** selects that project through the editor's ordinary project
-change (its pending-edits confirmation applies), waits for the saved source, then calls
-`editorTemplates.importById('single-loop-with-advice')`, the gallery's existing import
-path: an unsaved draft, nothing written before Save. No task declares its own template
-yet, so that catalog entry is the default for every task. It is the loop whose Propose
-model `human_advice` socket is connected (managed `advice`), so the advice field Quick
-start focuses reaches the proposal agent; templates that leave the socket unconnected
-show the existing `.advice-warning` under that field. Rounds, stop conditions and
+**Quick start** (`quick-start.js`): Home `#home-quick-start` opens `#quick-start-dialog`
+on Home. **Choose a task** (`#quick-start-task`, from `consoleTask`) has four states in
+`#quick-start-task-state`: "Loading tasks…" while the list is read, "Tasks could not be
+loaded: <reason>" with `#quick-start-task-retry` (`consoleTask.reload()`), "No task is
+configured. …" with a link to the README setup step, or the list (#1131 items 1 and 3;
+never a permanent loading line). **Experiment setup** (`#quick-start-setup`, from
+`GET /api/tasks/<id>/setups`; loading/failure in `#quick-start-setup-state`, a failure with
+`#quick-start-setup-retry`) offers
+"Create a setup from the research-loop template" first, then the task's setups (a setup
+whose runs are off says "Runs are not enabled for this setup"). Creating needs a label
+(`#quick-start-label`, prefilled "<task label> research loop"); **Create and open** selects
+the task, POSTs `{label, template_id: "single-loop-with-advice"}` through
+`experimentSetups.create` (a refusal, including 403 `read_only`, stays in
+`#quick-start-status` with the dialog open) and opens the created setup; choosing an
+existing setup opens it without a request. With `browser_creatable: false` the create
+option is disabled ("turned off on this console"), the dialog says who turns it on, and an
+existing setup is preselected. When an existing setup does not open, the dialog names the
+real reason: the setups read failed, or the open setup's unsaved edits were kept. Then the dialog routes to `#workflow`, waits up
+to 20 s for the saved source (else shows the editor's status, L-3) and focuses the first
+advice field (L-6) through `editorAdvice.focusSettled()`, the bounded re-focus the
+gallery's template import also uses; it stops at the author's first click or key. The
+template is the loop whose Propose model `human_advice` socket is connected (managed
+`advice`), so that advice reaches the proposal agent. Rounds, stop conditions and
 training settings are then edited in the ordinary panel. The Run page's step-1 entry is
 one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
 handoff, so another entry can replace it. When this page created a preparation, the

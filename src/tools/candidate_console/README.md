@@ -214,8 +214,9 @@ overwrites an existing `tasks/` folder.
    **Disconnect console**. Reloading or opening a new tab requires Connect again;
    the password field clears immediately and the token stays only in this
    document's memory. Home offers three starting points: **Quick start** (choose a
-   task; its ready-made research loop opens in Workflow as an unsaved draft where you
-   set rounds, stop conditions and training settings), **Open a workflow** and
+   task, then create an experiment setup from the ready-made research loop or open an
+   existing one; it opens in Workflow, where you set rounds, stop conditions and
+   training settings), **Open a workflow** and
    **Monitor runs**. Before Workflow and Run open, choose a task on **Task**
    (see [Choose a task](#choose-a-task)). On **Run**, a stepper shows where you are: check the inputs and
    prepare, then review and launch; the page updates the status by itself.
@@ -499,6 +500,34 @@ coding agent, then press **Refresh**.
    missing), follow the hint shown and press **Refresh**.
 4. Open **Workflow**. Until a task is selected, Workflow and Run are greyed out
    ("Choose a task first") and their pages show a **Choose a task** button.
+
+## Create an experiment setup and run it
+
+An experiment setup is one workflow for one task. A task can have several setups (for
+example a research loop and a single step); every run belongs to one setup.
+
+1. Choose the task on **Task**, then open **Workflow**. The select in the page bar lists
+   this task's setups. Older workflows from `console.json` that match no configured task
+   appear under **Other workflows (no configured task)**.
+2. Select **New setup…**. Choose how it starts: a template (the research loop with your
+   own advice is preselected) or **Blank**. Enter a label and select **Create setup**.
+   The console writes `siderius_workspace/projects/<setup id>/workflow.py` and opens it.
+   If the dialog says creating setups is turned off, the console operator adds
+   `"experiment_setups": {"browser_creatable": true}` to
+   `siderius_workspace/settings/console.json` and restarts the console.
+3. Edit the workflow and select **Save**, name the version and **Save version**.
+4. Select **Next: Run**. The Run page names the setup and its task ("Setup: … · Task:
+   …"); the task is fixed by the setup, so you only check the inputs and prepare.
+5. **Runs of this setup** at the bottom of the Run page lists this setup's runs, newest
+   first; select one to follow it in **Monitor**.
+
+When you add a **Metric threshold** stop condition, the metric field starts with the
+task's main score and suggests the task's other metrics, once the Task tab has read the
+task package.
+
+If a setup's task references no longer match its task, the Workflow page shows a
+warning with a button that opens **Task version** on the Task tab, where you update them.
+**Quick start** on Home does steps 1 and 2 for you with the research-loop template.
 
 The **Task version** card below the panel is where you switch the task version an
 open workflow uses; its findings then open in the Workflow save step. See

@@ -58,8 +58,15 @@ try {
   assert.equal(requests.at(-1).body.task_reference_selection, undefined);
   await save.click(); await waitUntil(async () => (await readFile(metadata.source, 'utf8')).includes('# unbound edit first') && !(await page.evaluate(() => window.workflowEditor.state.dirty)));
   assert.ok(!(await readFile(metadata.source, 'utf8')).includes('TaskBinding('));
+  // A refused Update request (no review) keeps the user on Task with the reason visible.
+  await taskTab(); await choice.selectOption('synthetic');
+  await page.route('**/api/editor/*/review', route => route.fulfill({status: 409, json: {error: {code: 'unavailable', message: 'Fixture review refused'}}}), {times: 1});
+  await update.click();
+  await page.locator('#editor-task-message').filter({hasText: 'Workflow references were not updated'}).waitFor();
+  assert.match(await page.locator('#editor-task-message').textContent(), /Fixture review refused/);
+  assert.equal(new URL(page.url()).hash, '#task', 'No review: Update stays on the Task tab');
   // Update returns to Workflow, whose save step holds the findings and acknowledgements.
-  await taskTab(); await choice.selectOption('synthetic'); await update.click();
+  await update.click();
   await page.locator('#view-workflow').waitFor(); await page.locator('#editor-task-adopt').waitFor();
   assert.match(await page.locator('#editor-task-message').textContent(), /reviewed, not saved/);
   assert.ok(await save.isDisabled());

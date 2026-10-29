@@ -107,7 +107,7 @@ try {
 
   // 2. Tour: anchored steps, non-blocking, Back/Next/Done.
   const steps = [
-    ['Choose a task', '#editor-project'], ['Pick a module', '#editor-palette'],
+    ['Choose a setup', '#editor-project'], ['Pick a module', '#editor-palette'],
     ['Match connector names', '.circuit-viewport'], ['Save a version', '#editor-review'],
   ];
   const checkStep = async (index, theme) => {
@@ -170,12 +170,13 @@ try {
   await page.locator('#onboarding-close').click();
   assert.equal(await tourOpen(), false);
   await page.locator('#theme-preference').selectOption('light');
-  // Home "Quick start" opens its task chooser on Workflow (not the tour).
+  // Home "Quick start" opens its task chooser on Home (not the tour); Workflow opens after.
   await page.locator('nav a[href="#home"]').click();
   await page.locator('#home-quick-start').click();
-  await waitUntil(async () => new URL(page.url()).hash === '#workflow' && await page.locator('#quick-start-dialog').evaluate(dialog => dialog.open), 'Quick start from Home');
+  await waitUntil(async () => new URL(page.url()).hash === '#home' && await page.locator('#quick-start-dialog').evaluate(dialog => dialog.open), 'Quick start from Home');
   assert.equal(await tourOpen(), false);
-  await page.locator('#quick-start-dialog button.secondary').click();
+  await page.locator('#quick-start-dialog .actions button.secondary').click();
+  await page.evaluate(() => { location.hash = 'workflow'; });
   await page.reload();
   assert.equal(await tourOpen(), false, 'The tour does not reopen itself after reload');
   await connect();

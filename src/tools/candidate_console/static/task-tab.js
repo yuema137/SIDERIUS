@@ -101,7 +101,18 @@
 
   // --- Summary requests ----------------------------------------------------------------
   const path = (id, query = '') => `tasks/${encodeURIComponent(id)}/summary${query}`;
-  const active = () => session.connected && window.consoleNavigation?.view === 'task';
+  // Read on the Task tab, and on Workflow for the metric suggestions of stop conditions.
+  const active = () => session.connected && ['task', 'workflow'].includes(window.consoleNavigation?.view);
+  // Metric ids the task declares (main score first) for the loop's metric-threshold field.
+  function metricIds() {
+    const pkg = summary?.state === 'ready' && summary.task_id === selection.selectedId ? summary.package : null;
+    return pkg ? [pkg.main_score.metric_id, ...pkg.observational_metrics.map(metric => metric.metric_id)] : [];
+  }
+  function publishMetrics() {
+    const list = $('task-metric-ids'), ids = metricIds();
+    if ([...list.options].map(option => option.value).join('\n') === ids.join('\n')) return;
+    list.replaceChildren(...ids.map(id => { const option = document.createElement('option'); option.value = id; return option; }));
+  }
   async function read(query = '') {
     const id = selection.selectedId, revision = session.revision;
     if (!id || !session.connected) return;
@@ -111,7 +122,8 @@
       if (id !== selection.selectedId || revision !== session.revision) return;
       summary = view; failure = '';
       // Poll the plain URL while the sandboxed observation runs (never re-send refresh=1).
-      if (view.state === 'observing' && active()) timer = setTimeout(() => void read(), POLL_MS);
+      // Workflow reads once per entry (metric suggestions); only the Task tab polls.
+      if (view.state === 'observing' && session.connected && window.consoleNavigation?.view === 'task') timer = setTimeout(() => void read(), POLL_MS);
     } catch (error) {
       if (error.stale || id !== selection.selectedId || revision !== session.revision) return;
       failure = `The task summary could not be loaded: ${error.message}`;
@@ -265,6 +277,7 @@
   }
 
   function renderPanel() {
+    publishMetrics();
     const body = $('task-panel-body'), item = selection.selected;
     body.replaceChildren();
     $('task-refresh').disabled = !session.connected || !item || summary?.state === 'observing';
@@ -292,6 +305,7 @@
     renderPanel();
   }
   $('task-refresh').addEventListener('click', () => { counted = null; void read('?refresh=1'); });
+  window.consoleTaskSummary = Object.freeze({get mainMetricId() { return metricIds()[0] || null; }});
   window.addEventListener('console-task', sync);
   window.addEventListener('console-view', sync);
   session.subscribe(sync);

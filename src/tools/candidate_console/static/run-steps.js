@@ -20,7 +20,7 @@
     } else if (prepare.intent) {
       next = prepare.prepared ? 'Next: open the prepared run.' : prepare.problem ? 'The preparation needs attention below.' : 'Preparing… this page updates by itself.';
     } else if (!window.newRunGate?.ready) next = 'Save the workflow first, then come back here.';
-    else next = prepare.reviewed ? 'Next: prepare.' : 'Next: choose the task, then check the inputs.';
+    else next = prepare.reviewed ? 'Next: prepare.' : (window.experimentSetups?.current?.group === 'task' ? 'Next: check the inputs.' : 'Next: choose the task, then check the inputs.');
     const order = steps.map(item => item.dataset.runStep), at = order.indexOf(step);
     for (const [index, item] of steps.entries()) {
       if (index === at) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current');

@@ -35,7 +35,7 @@
   const status = message => { $('status').textContent = message; };
   // The reason a project cannot run outlives later task/list refreshes, which never apply to it.
   const notEnabled = () => !!editor.projectId && !editor.candidateEnabled;
-  const NOT_ENABLED = 'This project is editable but not enabled for candidate runs.';
+  const NOT_ENABLED = 'Runs are not enabled for this setup.';
   const api = (suffix, body, project = editor.projectId) => session.request(`editor/${encodeURIComponent(project)}/reusable-captures${suffix}`, body);
   const current = (version, revision) => generation === version && session.revision === revision;
   const option = (value, text) => { const el = document.createElement('option'); el.value = value; el.textContent = text; return el; };
@@ -61,7 +61,7 @@
   // Why Launch is disabled, in one inline sentence beside it (R-2); never a tooltip.
   function launchReason(enabled) {
     if (!session.connected) return session.reachable === false ? 'Can\'t check: the server is unreachable.' : 'Connect to launch.';
-    if (!enabled) return busy ? 'Working…' : 'Open a runnable project first.';
+    if (!enabled) return busy ? 'Working…' : 'Open an experiment setup whose runs are enabled first.';
     if (intent) return '';
     if (storageProblem) return 'This browser\'s saved run state is unreadable; clear this site\'s storage, then reload.';
     if (!selected) return '';
@@ -209,7 +209,7 @@
         $('run').value = previous;
       }
       cursor = page.next_cursor; $('more').hidden = !cursor;
-      $('guidance').textContent = page.captures.length ? 'Earlier preparations of this project, newest first. Listing does not verify them.' : 'No earlier prepared runs for this task.';
+      $('guidance').textContent = page.captures.length ? 'Earlier preparations of this experiment setup, newest first. Listing does not verify them.' : 'No earlier prepared runs for this task.';
       if (!selected && !intent) status('Prepare a run in step 1, or open an earlier prepared run below.');
     } catch (error) { if (!error.stale && current(version, revision)) status(error.message); }
     controls();

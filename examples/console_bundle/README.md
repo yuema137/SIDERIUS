@@ -142,11 +142,16 @@ with the version in the zip's name.
 1. **Task**: select *Quickstart (synthetic classification)*. The panel shows the
    task read from its package: its data folder, model input and output, and its
    main score (accuracy, higher is better).
-2. **Workflow**: open the setup `quickstart-research-loop`. It is a research
-   loop: interpret results, propose, implement, validate, train and tune, then
-   feed back. You can add your own advice for the proposal step before running.
-3. **Run**: review the run. The review lists the task, its data folder, the
-   GPU devices from step 4 and whether your API key name is set. Launch it.
+2. **Workflow**: the experiment setup select in the page bar lists this task's
+   setups; *Quickstart research loop* (`quickstart-research-loop`) opens by
+   itself when it is the only one. It is a research loop: interpret results,
+   propose, implement, validate, train and tune, then feed back. You can add your
+   own advice for the proposal step; save it, then select **Next: Run**.
+3. **Run**: the page header reads "Setup: Quickstart research loop · Task: …";
+   the task is fixed by the setup. Check the inputs and prepare, then review the
+   run. The review lists the task, its data folder, the GPU devices from step 4
+   and whether your API key name is set. Launch it. **Runs of this setup** at the
+   bottom of the page lists it, with a link to Monitor.
 4. **Monitor** (Results): follow the run's steps, logs and reported token usage
    until it finishes.
 
