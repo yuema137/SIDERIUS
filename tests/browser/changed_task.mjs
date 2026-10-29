@@ -11,6 +11,7 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {showAllConsoleSections} from './console_view_flags.mjs';
+import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[key], `Set ${key}`);
 await mkdir(process.env.CONSOLE_EVIDENCE_DIR, {recursive: false});
@@ -31,6 +32,7 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
+  chooseFirstConfiguredTask(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}}), faults = [], requests = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => {if (request.method() === 'POST') requests.push({path: new URL(request.url()).pathname, body: request.postDataJSON()});});
@@ -41,9 +43,13 @@ try {
   await page.locator('#editor-source').waitFor({state: 'attached'});
   await waitUntil(async () => (await page.locator('#editor-source').inputValue()).length > 0 && await page.locator('#editor-task-choice option').count() === 3);
   const choice = page.locator('#editor-task-choice'), save = page.locator('#editor-save');
+  // The Task version card lives on the Task tab; the canvas and Save stay on the Workflow page.
+  const taskTab = async () => { await page.evaluate(() => { location.hash = 'task'; }); await page.locator('#view-task').waitFor(); };
+  const workflowTab = async () => { await page.evaluate(() => { location.hash = 'workflow'; }); await page.locator('#view-workflow').waitFor(); };
   page.setDefaultTimeout(30000);
   const original = await readFile(metadata.source, 'utf8');
   const inspectTraining = async () => {
+    await workflowTab();
     const tuning = page.locator('[data-node="fit"].editor-node');
     await tuning.click();
     assert.equal(await page.locator('[data-training="trial_max_epochs"]').inputValue(), '3');
@@ -51,7 +57,7 @@ try {
     assert.equal(await page.locator('[data-training-mode="trial_max_epochs"]').inputValue(), 'supplied');
   };
   if (metadata.training) await inspectTraining();
-  await choice.selectOption('new');
+  await taskTab(); await choice.selectOption('new');
   assert.equal(await readFile(metadata.source, 'utf8'), original);
   await page.locator('#editor-task-update').click();
   await page.locator('#editor-task-acknowledge').waitFor();
@@ -62,10 +68,11 @@ try {
   if (metadata.profile === 'families') {
     assert.match(await page.locator('#editor-task-findings').textContent(), /2 proposal families and 3 implementation branches/);
   }
-  await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'changed-reviewed.png'), fullPage: true});
+  await taskTab(); await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'changed-reviewed.png'), fullPage: true});
   await page.locator('#editor-task-acknowledge').check();
   if (metadata.training) await inspectTraining();
   assert.ok(await save.isEnabled());
+  await workflowTab();
   const plugin = await readFile(metadata.plugin, 'utf8');
   await writeFile(metadata.plugin, plugin + '\n# changed after browser review\n');
   await save.click();
@@ -79,9 +86,9 @@ try {
   await writeFile(metadata.plugin, plugin);
   // Re-review the retained draft after restoring the selected task source.
   await page.locator('#editor-review').click();
-  await page.locator('#editor-task-acknowledge').waitFor();
-  await page.locator('#editor-task-acknowledge').check();
-  await save.click();
+  await page.locator('#editor-task-acknowledge').waitFor({state: 'attached'});
+  await taskTab(); await page.locator('#editor-task-acknowledge').check();
+  await workflowTab(); await save.click();
   await waitUntil(async () => !(await page.evaluate(() => window.workflowEditor.state.dirty)) && (await readFile(metadata.source, 'utf8')) !== original);
   if (metadata.training) await inspectTraining();
   const accepted = requests.findLast(item => item.path.endsWith('/save')).body.task_reference_acceptance;

@@ -147,7 +147,7 @@ try {
   assert.equal(await applied(), 'light');
   assert.equal(await page.evaluate(key => localStorage.getItem(key), key), 'light');
   await page.reload(); assert.equal(await theme.inputValue(), 'light'); assert.equal(await applied(), 'light');
-  await page.getByRole('link', {name: 'Workflow Editor', exact: true}).click();
+  await page.locator('nav.actions').getByRole('link', {name: 'Workflow', exact: true}).click();
   assert.equal(await theme.inputValue(), 'light'); assert.equal(await applied(), 'light');
   await theme.selectOption('system');
   assert.equal(await applied(), 'dark');

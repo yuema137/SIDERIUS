@@ -147,14 +147,15 @@ even when using the default models.
 
    Open **Home**, paste the console token, and select **Connect**. The token is
    required whether you connect on the same machine or through an SSH tunnel.
-   The connection stays available while you switch between Home, Workflow Editor, Run and Monitor,
+   The connection stays available while you switch between Home, Task, Workflow, Run and Monitor,
    and the connect card shrinks to a **Connected** line with **Change token** and
    **Disconnect console**. Reloading or opening a new tab requires Connect again;
    the password field clears immediately and the token stays only in this
    document's memory. Home offers three starting points: **Quick start** (choose a
    task; its ready-made research loop opens in Workflow as an unsaved draft where you
    set rounds, stop conditions and training settings), **Open a workflow** and
-   **Monitor runs**. On **Run**, a stepper shows where you are: check the inputs and
+   **Monitor runs**. Before Workflow and Run open, choose a task on **Task**
+   (see [Choose a task](#choose-a-task)). On **Run**, a stepper shows where you are: check the inputs and
    prepare, then review and launch; the page updates the status by itself.
    **Help** in the header reopens the tour at any time.
    Tools a first-time user does not need stay hidden until you turn them on in
@@ -172,7 +173,7 @@ even when using the default models.
    workspace, task, models, credential blockers and resource policy before
    **Launch candidate**, which starts code execution and may call paid APIs.
    Native Prepare generates its configured candidate independently of the declaration
-   selected in Workflow Editor. Preparation never launches automatically.
+   selected in Workflow. Preparation never launches automatically.
 7. To observe an existing operation, choose **Monitor** and select it under
    **Recent operations** (operations this console admitted, newest first), or
    enter its complete operation UUID (Settings › Show advanced tools). You can also open a link such as
@@ -217,7 +218,7 @@ even when using the default models.
    under `operation_store.candidate_roots`, with the expected native run ID.
    The view has no operation import or execution controls, and a missing saved
    source is shown as unavailable.
-8. To author a configured declaration, choose **Workflow Editor**. Select a node
+8. To author a configured declaration, choose **Workflow**. Select a node
    to inspect its supported bindings. With **Show advanced tools** on, expand
    **References** for task and external locations, or **Advanced source** for
    exact Python bytes. Review opens the
@@ -317,7 +318,7 @@ On **Settings**, **Export a workflow** copies three plain files into
 | --- | --- | --- |
 | `llm.json` | the model profile the selected task uses | the command-line `--llm_config` |
 | `advice.json` | the advice written in the workflow itself (proposal, implementation, validation and tuning advice), in the command-line advice format | the command-line `--advice` |
-| `workflow.py` | the workflow exactly as last saved in Workflow Editor | no command-line flag; keep it as a record or copy it into an editor project |
+| `workflow.py` | the workflow exactly as last saved in Workflow | no command-line flag; keep it as a record or copy it into an editor project |
 
 A workflow without advice of its own gets no `advice.json`. Credentials, the
 console token and the credential file path are never exported. The export uses
@@ -394,16 +395,62 @@ In a reusable workflow there is no path to type: the run supplies the input when
 is prepared (reusable preparation accepts only such managed inputs). Then click
 **Create and connect**. Undo, Redo and Revert to saved cover all of these edits.
 
+## Choose a task
+
+A task is your scientific problem as a package: its data, the model's input and
+output, the training objective, the main score, its Health checks and the settings
+it locks. Every workflow and run belongs to one task, so the console asks for the
+task first. The Task tab only shows the package; you change the package with your
+coding agent, then press **Refresh**.
+
+1. Connect, then open **Task** in the navigation bar (or the first step of the
+   Task › Workflow › Run › Results bar).
+2. The left list shows every task in your console configuration with its version
+   (`task_revision`) or **unversioned**. With exactly one task, the console selects
+   it for you. Otherwise select one. The browser remembers your choice for this
+   console.
+   - **No task is registered** means the console configuration lists no task. Put
+     your task package in `siderius_workspace/tasks/<id>/`, register it with your
+     coding agent (see [project setup](../../../docs/getting-started/README.md)),
+     and restart the console.
+   - **Tasks could not be loaded** shows the reason; select **Retry**.
+3. The right panel reads the package in the workspace sandbox. While it reads,
+   it says **Reading the task package in the sandbox…**; the page updates itself.
+   When it is ready, the panel shows these sections:
+
+   | Section | What it tells you |
+   | --- | --- |
+   | Identity | Label, task id and version. **Fingerprint** (collapsed) holds the package's exact identity. A warning appears when the configured version no longer matches the package on disk. |
+   | Data | The data folder, how many files it holds and their total size. The training and evaluation split sizes appear when the task declares them, otherwise "not declared by this task". **Count samples** asks the task to count its samples in the sandbox; this can take a while. |
+   | Model input and output | The tensor shapes and meanings a model must accept and produce. |
+   | Objective | The training loss the task fixes, or that the planner chooses it. |
+   | Main score | The metric that ranks candidates, whether higher or lower is better, and how it is aggregated. Metrics marked **Recording** are only measured and stored. |
+   | Health checks | Each gate, its checks and its effect: **Blocking** makes a failing candidate invalid; **Recording** only records the result. |
+   | Evaluation and model plugins | The task's code files, their symbols and what each one does. |
+   | Locked parameters | Settings no workflow can change, for example a fixed batch size. |
+   | Deliverable | How the task names its output files, when it declares this. |
+   | Run policy | Time limits, network access, the devices passed into the run sandbox (with a warning when no GPU is passed), and the names of the credentials a run receives. Credential values never appear. |
+
+   If the panel says the package **could not be read**, it names the stage and the
+   error: fix the package with your coding agent and press **Refresh**. If it says
+   the summary is **not available** (for example, the sandbox or the data folder is
+   missing), follow the hint shown and press **Refresh**.
+4. Open **Workflow**. Until a task is selected, Workflow and Run are greyed out
+   ("Choose a task first") and their pages show a **Choose a task** button.
+
+The **Task version** card below the panel is where you switch the task version an
+open workflow uses; see [Bind a task version](#bind-a-task-version).
+
 ## Bind a task version
 
 The task chip in the Workflow page bar shows the task package and version; click it
-to open the **Task package and version** card below the canvas. That card always states which task package and
+to open the **Task version** card on the **Task** tab. That card always states which task package and
 version the open workflow uses. Versions are offered only for configured tasks
 that declare `task_revision`; otherwise the panel says that none are configured.
 
-In Workflow builder, explicitly choose a configured task package/version and
+In the **Task version** card, explicitly choose a configured task package/version and
 **Update workflow references**. Inspect the Python diff and task findings, confirm
-them and **Save version**. An unbound reusable workflow requires a separate
+them on the Task tab, then return to **Workflow** and **Save version**. An unbound reusable workflow requires a separate
 confirmation to adopt its currently observed snapshot; save that binding before
 editing its scientific settings.
 
@@ -433,7 +480,7 @@ configuration. The source task references and output restrictions must agree wit
 the configured task; the browser does not rewrite them to match your selection.
 See the [reusable configuration contract](console-contract.md#reusable-capture-consumption).
 
-1. Connect and open **Workflow Editor**. Review and **Save** your source edits.
+1. Connect, choose the task on **Task**, and open **Workflow**. Review and **Save** your source edits.
    An already saved supported reusable declaration needs no extra Save. Resolve
    any source conflict before continuing. Select **Next: Run**; the
    **Run** page states which saved version it will use.
@@ -647,7 +694,7 @@ task; choose an installed planner strategy explicitly in the external LLM profil
 (for example the native `tune.planner_strategy: native-timing-v1`). The example's
 budgets and diagnostic settings are demonstration choices, not scientific defaults.
 
-Select **fit / tuning** in Workflow Editor. The small inspector edits trial/formal
+Select **fit / tuning** in Workflow. The small inspector edits trial/formal
 budget minutes, epoch ceilings, portions and retention flags. Open **Training
 settings** (collapsed, with the number of changed fields). **Default** removes the
 key; **None** explicitly stores null where supported. Empty numbers block review;

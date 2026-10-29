@@ -1407,11 +1407,30 @@ is unchanged) and `#log-notice` states that logs are shown as written and not re
 
 ## Persistent views, routing and session
 
-`index.html` owns a single document with persistent Home, Workflow, Run and Slow
-control sections. `navigation.js` owns `/#home`, `/#workflow`, `/#run`,
+`index.html` owns a single document with persistent Home, Task, Workflow, Run and Slow
+control sections. `navigation.js` owns `/#home`, `/#task`, `/#workflow`, `/#run`,
 `/#monitor` and `/#monitor/<UUID>` (the former `#slow-control[/<UUID>]` is rewritten to the matching
-`#monitor` route with `history.replaceState` before routing, so old links keep working); `document.title` names Workflow and
-Run. Empty fragments use Home. Complete UUID validation
+`#monitor` route with `history.replaceState` before routing, so old links keep working); `document.title` names Task, Workflow and
+Run. Navigation reads Home · Task · Workflow · Run · Monitor · Settings; the step bar
+`#step-indicator` reads Task (`#task`) › Workflow (`#workflow`) › Run (`#run`) ›
+Results (`#monitor`), its current step follows the view and Task is marked done
+when a task is selected.
+
+Task selection (`task-selection.js`, `window.consoleTask`) is browser session state:
+after each Connect (new session revision) it reads `GET /api/tasks`
+(`state` `loading` → `ready` | `error`), keeps a still-configured earlier choice,
+else the choice remembered under `siderius.selected-task.v1/<operations_store_id>`,
+else selects the only task when exactly one is configured. `select(id)`
+persists the choice for that store; `reload()` re-reads the list; every change
+dispatches `console-task`. `gated` is true while connected, the list was read
+(`ready` or `error`) and no task is selected. While gated, `navigation.js` sets
+`aria-disabled="true"` and `title="Choose a task first"` on the nav and step-bar
+links to `#workflow` and `#run` (a click on such a link does nothing), and those
+routes show the `task-required` panel (`#task-required-heading` names the view,
+`#task-required-state` with the `#task-required-choose` link to `#task`) instead of
+their section. Before Connect and while the list loads nothing is gated. The gate
+is presentation only: the editor and Run controllers keep their state and requests
+underneath, and no request carries the selection. Empty fragments use Home. Complete UUID validation
 precedes operation selection; invalid routes show a local error and suspend
 operation polling without mutating a native request. Bare Monitor retains
 selection; repeated identical UUIDs do not reset the monitor epoch/log cursor.
@@ -1492,7 +1511,8 @@ It infers neither scientific success nor complete billing.
 | Route | Primary content and action | Secondary content (Settings-gated unless noted) |
 | --- | --- | --- |
 | `#home` | Hero (theme-matched logo + one sentence); entry cards **Quick start** (`#home-quick-start`, see below), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** (the configured-task quick Prepare form; not a beginner entry, API unchanged for CLI/compatibility) |
-| `#workflow` | Page bar (title + dirty badge, project select, task chip, problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Task package and version, Version history (collapsed cards below the frame); Exact Python changes, References, Advanced source, Reload from disk, canvas help, connection mappings (advanced); Details (developer) |
+| `#task` | Intro line; `#task-list` (task buttons `.task-item[data-task-id]`, `aria-pressed` on the selected one, label and `Version <revision>` or `unversioned`; loading, `#task-list-error` + `#task-list-retry`, `#task-list-empty`); `#task-panel` with the read-only summary (see [Task panel](#task-panel-browser)) and footer (`#task-refresh`) | **Task version** card `#editor-task-panel` (version switch and task reference review for the open workflow) |
+| `#workflow` | Page bar (title + dirty badge, project select, task chip (read-only; opens the Task version card on `#task`), problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Version history (collapsed card below the frame); Exact Python changes, References, Advanced source, Reload from disk, canvas help, connection mappings (advanced); Details (developer) |
 | `#run` | Stepper `#run-stepper` (Prepare · Review and launch · Follow in Monitor) and one next-step line `#run-next`; saved-version state; **1 · Prepare** entry `#run-entry[data-run-entry="saved-workflow"]` (**Check inputs** then **Prepare**); **2 · Review and launch** (**Review prepared run** then **Launch run**, inline `#capture-launch-reason`) | Back to workflow; **Run an earlier prepared run instead** (collapsed list); Check status now, operation UUIDs and captured resources (developer) |
 | `#monitor` | Recent operations; Status and logs; loop controls; results; token summary | Operation UUID form, Recorded example (advanced); operation facts, token table (developer) |
 
@@ -1631,9 +1651,10 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
 - Page bar, left to right: `h1` + `#editor-dirty`; `#editor-project` (label visually
   hidden); `#editor-task-chip` (`Task: <package_id> · <revision>`, `Task: not bound` or
   `Task: not open`; `needs-attention` while a bound workflow has no selected configured
-  version or task findings are pending; click opens `#editor-task-panel`, a collapsed
-  `details.card` below the frame holding the unchanged `editor-task-controls.js` panel,
-  open by default when advanced tools are on); `#problems-chip`; `#editor-edit-actions`
+  version or task findings are pending; read-only: a click navigates to `#task` and
+  opens `#editor-task-panel` there, the **Task version** `details.card` holding the
+  unchanged `editor-task-controls.js` panel, open by default when advanced tools are on;
+  the save step's "Show task findings" and the `⋯` item do the same); `#problems-chip`; `#editor-edit-actions`
   (Undo `undo-2`, Redo `redo-2` icon buttons created by `editor-draft.js`, names via
   `aria-label`; **Revert to saved** keeps a visible label beside its `rotate-ccw` icon so
   it never reads as a second Undo, red-team A-5); Reload from disk (advanced);
@@ -1641,7 +1662,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   open bytes, or "Not saved here yet" for a file without a console-saved row, plus a
   dirty dot while edits are unsaved;
   primary **Save** (`#editor-review`); **Next: Run** (`#workflow-next-run`); `⋯`
-  (`details.overflow-menu`: New from template…, Take the tour, Task package and version,
+  (`details.overflow-menu`: New from template…, Take the tour, Task version,
   Version history, Advanced source (advanced only), Settings…).
 - Save step: **Save** is the ordinary editor Review (unchanged request and gating).
   When a check succeeds (`state.reviewed` turns true) the in-flow
@@ -1834,7 +1855,7 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Workflow | Problems list (`#editor-problems`) | Beginner | shown | Required inputs to fix before saving |
 | Workflow | Source conflict card (Reload from disk / Reapply my changes onto latest; whole current file advanced) | Beginner | shown when a conflict exists | Must stay reachable to resolve a conflict safely |
 | Workflow | Workflow project select and task chip (page bar) | Beginner | shown | Choose a task |
-| Workflow | Task package and version details (choose version, update references, findings) | Beginner | collapsed card below the frame; open by default with advanced tools | Opened from the task chip when a version must be chosen |
+| Task | Task version card (choose version, update references, findings) for the open workflow | Beginner | collapsed card below the task panel; open by default with advanced tools | Opened from the Workflow task chip when a version must be chosen; Save stays on Workflow |
 | Workflow | Module rail (palette) | Beginner | shown | Add modules |
 | Workflow | Canvas, bottom-right controls (Fit, zoom, Check the workflow, Tidy up), `+` add-handles, empty-canvas start state, Skip to canvas | Beginner | shown | Build and connect |
 | Workflow | Canvas controls help (keyboard-move hints) | Advanced | gated | Long control reference; the tour covers first use |
@@ -2221,7 +2242,7 @@ does not inspect files, compose/import tasks or start native observations; inter
 resource paths/settings and credentials are absent. Metadata is configured intent,
 not verification of current task contents or execution readiness.
 
-The Task package and version panel is always visible and never empty: it states
+The Task version panel (Task tab) is never empty: it states
 the saved binding (`This workflow uses task package …, version …`) or that the
 workflow is unbound, then either the version selector with Update workflow
 references (when choices exist) or `#editor-task-unavailable`, which explains that
@@ -2256,7 +2277,8 @@ Owners: `task_summary.py` (`TaskSummaries`, `TaskSummaryView`, `walk_data_root`)
 
 Routes (authenticated, `RequestBoundary`):
 
-- `GET /api/tasks` -> `{tasks: [{task_id, label}]}` from configured `TaskChoice`s.
+- `GET /api/tasks` -> `{tasks: [{task_id, label, revision}]}` from configured `TaskChoice`s
+  (`revision` is `task_revision.revision` or `null`).
   Experiment-setup counts are omitted until a setup registry exists.
 - `GET /api/tasks/{task_id}/summary[?refresh=1][&count_samples=1]` ->
   `TaskSummaryView` (`schema_version: siderius.console-task-summary/v1`); 404 for an
@@ -2323,6 +2345,37 @@ View fields:
   `validation_dataset` over those scopes; `not_countable` when the task builds no
   scopes or its datasets have no length. Counting may read the data; it runs in the
   same sandbox and timeout.
+
+### Task panel (browser)
+
+`task-tab.js` renders the selected task's `TaskSummaryView` into `#task-panel-body`
+(presentation only; every server string is written with `textContent`). It requests
+`tasks/<id>/summary` when the Task view is shown with a selected task and polls the
+plain URL every second while `state` is `observing` (only while the Task view is
+shown). `#task-summary-state[data-state]` carries the state: `observing` says the
+package is being read; `failed` shows the stage and message and asks for a fix and
+Refresh; `unavailable` shows a sentence for the `reason` and the server `hint`.
+Console facts (identity, data folder and volume, run policy) render in every state;
+package sections render only when `ready`. Section ids in order: `#task-identity`
+(label, task id, `package_id · revision` or unversioned, a warning when
+`revision_matches` is false, description, collapsed fingerprint/data path),
+`#task-data` (data folder, files, decimal KB/MB/GB size with exact bytes in the title,
+"(at least)" when `complete` is false, partitions, training/evaluation split
+`file_count · expected_on_disk_bytes` or "not declared by this task", the `basis`
+sentence, `#task-count-samples` → `?count_samples=1`, polled until not observing,
+result in `#task-sample-counts`), `#task-model-io` (non-empty `forward_contract`
+fields), `#task-objective` (non-null `LossConfig` fields, or "the planner chooses"),
+`#task-main-score` (metric id, `higher`/`lower` shown as "Higher/Lower is better",
+aggregation; `#task-observational-metrics` labels secondary metrics **Recording**),
+`#task-health` (`#task-health-gates`: gate, checks, Blocking/Recording/Undeclared from
+the declared `role`; "This task declares no Health checks" for zero gates),
+`#task-plugins` (`#task-plugin-table`: configured ref, symbol, roles; model types),
+`#task-locked` (`#task-locked-table`: path, rule, JSON value), `#task-deliverable`
+and `#task-run-policy` (timeouts, network, devices, GPU: the passed `/dev/nvidia<N>`
+nodes or the #1148 sentence "This task does not pass a GPU into the run sandbox;
+the run will be refused.", credential names, allowed output types). `#task-refresh`
+requests `?refresh=1` and is disabled while observing. `GET /api/tasks` items carry
+`revision` (the configured `task_revision.revision`, `null` when unversioned).
 
 `CompositionJob.summary` and `CompositionResult.package` are excluded when absent,
 so existing check/editor job digests and observations are byte-identical. The

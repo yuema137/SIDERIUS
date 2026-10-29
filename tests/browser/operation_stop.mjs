@@ -58,6 +58,8 @@ try {
     assert.equal(request.method(), 'GET');
     if (unreachable && url.pathname.startsWith('/api/operations/')) return route.abort('connectionrefused');
     if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
+    // One configured task: selected automatically, so Workflow and Run stay open.
+    if (url.pathname === '/api/tasks') return reply({tasks: [{task_id: 'synthetic', label: 'Synthetic task', revision: null}]});
     if (url.pathname === '/api/operations') {
       // The Slow-control operations list (operations-list.js) polls this; no assertion below reads it.
       assert.equal(url.searchParams.get('limit'), '50');

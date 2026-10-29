@@ -138,8 +138,11 @@ class TaskSummaryView(PreviewModel):
 
 
 class TaskListItem(PreviewModel):
+    """``revision`` is the configured ``task_revision.revision``; ``None`` when unversioned."""
+
     task_id: str
     label: str
+    revision: str | None
 
 
 class TaskListView(PreviewModel):
@@ -291,7 +294,11 @@ class TaskSummaries:
     def list_view(self) -> TaskListView:
         return TaskListView(
             tasks=tuple(
-                TaskListItem(task_id=task.task_id, label=task.label)
+                TaskListItem(
+                    task_id=task.task_id,
+                    label=task.label,
+                    revision=None if task.task_revision is None else task.task_revision.revision,
+                )
                 for task in self._tasks.values()
             )
         )

@@ -7,6 +7,7 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {showAllConsoleSections} from './console_view_flags.mjs';
+import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[key], `Set ${key}`);
@@ -27,6 +28,7 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
+  chooseFirstConfiguredTask(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}}), faults = [], posts = [], gets = [];
   page.on('pageerror', error => faults.push(error.message));
   page.on('request', request => {
@@ -40,6 +42,8 @@ try {
   await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   await page.locator('.workflow-task-details').evaluate(element => { element.open = true; });
   const source = page.locator('#editor-source'), taskChoice = page.locator('#editor-task-choice');
+  // The Task version card lives on the Task tab; the canvas and Save stay on the Workflow page.
+  const tab = async view => { await page.evaluate(name => { location.hash = name; }, view); await page.locator('#view-' + view).waitFor(); };
   const original = await readFile(metadata.source, 'utf8');
   assert.equal(await taskChoice.inputValue(), '', 'Opening a task-bound workflow does not select a version implicitly');
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
@@ -54,7 +58,7 @@ try {
   assert.equal(await page.evaluate(() => window.workflowEditor.state.dirty), true);
 
   assert.equal(await taskChoice.isEnabled(), true, 'A saved binding draft may select its review task');
-  await taskChoice.selectOption(metadata.choice_id);
+  await tab('task'); await taskChoice.selectOption(metadata.choice_id);
   assert.equal(await taskChoice.inputValue(), metadata.choice_id);
   assert.equal(await page.locator('#editor-task-update').isDisabled(), true, 'Task-reference mutation stays disabled during a binding draft');
   assert.equal(await page.locator('#editor-review').isDisabled(), false);
@@ -67,14 +71,14 @@ try {
   await waitUntil(async () => gets.length > beforeRefresh);
   assert.equal(await taskChoice.inputValue(), metadata.choice_id, 'Choice refresh preserves the selected saved identity');
   assert.equal(await page.locator('#editor-pending').textContent(), 'Pending binding draft · complete', 'Refresh does not stale the independent draft inspection');
-  await page.locator('#editor-review').click();
+  await tab('workflow'); await page.locator('#editor-review').click();
   await waitUntil(async () => posts.some(item => item.path.endsWith('/review')));
   const review = posts.findLast(item => item.path.endsWith('/review'));
   assert.equal(review.body.proposal.kind, 'draft');
   assert.equal(review.body.task_reference_selection.selected_choice_id, metadata.choice_id);
   assert.deepEqual(review.body.task_reference_selection.expected_task_binding, metadata.saved_binding);
   await waitUntil(async () => await page.locator('#editor-task-acknowledge').count() > 0 || !(await page.locator('#editor-save').isDisabled()));
-  if (await page.locator('#editor-task-acknowledge').count()) await page.locator('#editor-task-acknowledge').check();
+  if (await page.locator('#editor-task-acknowledge').count()) { await tab('task'); await page.locator('#editor-task-acknowledge').check(); await tab('workflow'); }
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   assert.match(await page.locator('#editor-diff').textContent(), /llm_provider/);
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'Review does not publish the bound draft');

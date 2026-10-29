@@ -1,0 +1,61 @@
+/* Task tab (task-tab.js): task list beside a read-only task panel. Presentation only. */
+.task-intro { margin: 0 0 var(--space-4); max-width: none; color: var(--muted); }
+.task-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.task-layout > .card { margin: 0; }
+.task-items { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.task-item {
+  display: grid; gap: 2px; width: 100%; min-height: var(--control-height); padding: var(--space-2) var(--space-3);
+  text-align: left; color: var(--text); background: var(--control); border: 1px solid var(--control-border); border-radius: var(--radius-2);
+}
+.task-item:not(:disabled):hover { background: var(--hover); }
+.task-item[aria-pressed="true"] { border-color: var(--primary); box-shadow: inset 3px 0 0 var(--primary); }
+.task-item-label { font-weight: 600; overflow-wrap: anywhere; }
+.task-item-revision { font-size: var(--font-label); color: var(--muted); }
+.task-list-empty { margin: 0; padding: var(--space-4); }
+.task-panel { min-width: 0; }
+.task-section { padding-top: var(--space-4); margin-top: var(--space-4); border-top: 1px solid var(--border); }
+.task-state + .task-section, #task-panel-body > .task-section:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.task-section h3 { margin: 0 0 var(--space-3); }
+.task-section > p { margin: var(--space-2) 0; max-width: var(--measure); }
+.task-facts { grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 0; }
+.task-facts .mono, .task-table .mono { font-size: var(--font-label); }
+.task-basis { font-size: var(--font-help); }
+.task-description { white-space: pre-wrap; }
+.task-fingerprint { margin: var(--space-3) 0 0; }
+.task-fingerprint > summary { font-weight: 400; color: var(--muted); font-size: var(--font-help); }
+.task-fingerprint .task-facts { margin-top: var(--space-2); }
+.task-count { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 0; }
+.task-count button { margin: 0; }
+.task-count .muted { font-size: var(--font-help); }
+#task-sample-counts .task-facts { margin-top: var(--space-3); }
+.task-table { max-width: 100%; overflow-x: auto; margin: var(--space-2) 0 0; }
+.task-table table { width: 100%; border-collapse: collapse; font-size: var(--font-body); }
+.task-table th, .task-table td { padding: var(--space-2) var(--space-3); text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.task-table th { background: var(--bg); color: var(--muted); font-weight: 600; font-size: var(--font-label); }
+.task-badge { display: inline-block; padding: 0 var(--space-2); border-radius: var(--radius-pill); font-size: var(--font-label); line-height: 20px; border: 1px solid currentColor; white-space: nowrap; }
+.task-badge.blocking { color: var(--error); }
+.task-badge.recording { color: var(--secondary); }
+.task-badge.undeclared { color: var(--muted); }
+.task-gpu-warning { color: var(--warning); font-weight: 600; }
+.task-state > p { margin: 0 0 var(--space-2); }
+.task-state:empty { display: none; }
+.task-state { margin-bottom: var(--space-4); }
+.task-failure-message { min-height: 0; max-height: 160px; margin: 0 0 var(--space-2); }
+.task-panel-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border); font-size: var(--font-help); }
+.task-panel-footer p { margin: 0; }
+.task-panel-footer button { margin: 0; }
+#view-task > .workflow-task-details { margin-top: var(--space-4); }
+.task-required { max-width: 560px; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); color: var(--text); font-size: var(--font-body); }
+a[aria-disabled="true"] { color: var(--muted); cursor: not-allowed; text-decoration: none; }
+@media (max-width: 900px) {
+  .task-layout { grid-template-columns: 1fr; }
+  .task-facts { grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: var(--space-2) var(--space-4); }
+  .task-facts dd { margin-bottom: 0; }
+}
+@media (max-width: 600px) {
+  .task-facts { grid-template-columns: 1fr; gap: 2px; }
+  .task-facts dd { margin-bottom: var(--space-2); }
+}
+.task-section > p, .task-description { font-size: var(--font-body); }
+.task-table + .task-facts { margin-top: var(--space-3); }
+.task-panel-footer { padding: var(--space-4) 0 0; }

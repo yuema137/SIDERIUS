@@ -3,7 +3,8 @@
  *   (editor.js Review); when that check succeeds, this step opens with the version name and
  *   #editor-save, which writes exactly the checked bytes (editor.js owns both requests).
  *   A template import's own check does not open it (quietly()).
- * - Task chip: the saved task package/version in one line; it opens the task details.
+ * - Task chip: the saved task package/version in one line (read-only); it opens the Task
+ *   tab, where the Task version card (version switch and reference review) lives.
  * - Undo/Redo/Revert as icon buttons (editor-draft.js creates them) and a `⋯` overflow menu.
  * - Workspace height: the docked rail | canvas | Selection frame fills the window below the
  *   page bar (--workspace-height); the rail and Selection scroll inside it.
@@ -28,7 +29,7 @@
   function summary(current) {
     const text = $('editor-save-summary'); text.replaceChildren();
     if (current.taskReview) {
-      text.append('This save also updates task references. Confirm the findings under Task package and version, then save. ');
+      text.append('This save also updates task references. Confirm the findings under Task version on the Task tab, then save here. ');
       const show = element('button', 'Show task findings', text, 'link-button'); show.type = 'button';
       show.addEventListener('click', () => openTaskPanel(true));
     } else text.textContent = current.reviewedTypedSource
@@ -78,9 +79,15 @@
 
   // --- Task chip -----------------------------------------------------------------------
   function openTaskPanel(focus) {
-    const panel = $('editor-task-panel'); panel.open = true;
-    panel.scrollIntoView({block: 'start'});
-    if (focus) (panel.querySelector('#editor-task-acknowledge, #editor-task-choice, button:not(:disabled)') || panel.querySelector('summary')).focus();
+    const panel = $('editor-task-panel');
+    const reveal = () => {
+      panel.open = true; panel.scrollIntoView({block: 'start'});
+      if (focus) (panel.querySelector('#editor-task-acknowledge, #editor-task-choice, button:not(:disabled)') || panel.querySelector('summary')).focus();
+    };
+    if (window.consoleNavigation.view === 'task') { reveal(); return; }
+    // After the route focuses the Task heading, move focus on to the version card.
+    window.addEventListener('console-view', () => setTimeout(reveal), {once: true});
+    location.hash = 'task';
   }
   function syncChip() {
     const current = state(), chip = $('editor-task-chip'), label = chip.querySelector('.chip-label');
@@ -89,7 +96,7 @@
     const needs = opened && !!binding && !current.taskSelected;
     label.textContent = !opened ? 'Task: not open' : binding ? `Task: ${binding.package_id} · ${binding.revision}` : 'Task: not bound';
     chip.classList.toggle('needs-attention', needs || current.taskReview);
-    chip.title = needs ? 'Choose the configured task version before saving.' : 'Show the task package and version this workflow uses.';
+    chip.title = needs ? 'Choose the configured task version on the Task tab before saving.' : 'Show the task and the version this workflow uses on the Task tab.';
   }
   $('editor-task-chip').addEventListener('click', () => openTaskPanel(true));
   // Advanced users see the task details open by default; beginners open them from the chip.
@@ -120,7 +127,7 @@
     const reveal = id => { const target = $(id); target.open = true; target.scrollIntoView({block: 'start'}); target.querySelector('summary')?.focus(); };
     item('New from template…', 'layout-template', () => window.editorTemplates?.open());
     item('Take the tour', 'circle-question-mark', () => window.consoleOnboarding?.open(0));
-    item('Task package and version', 'flask-conical', () => openTaskPanel(true));
+    item('Task version', 'flask-conical', () => openTaskPanel(true));
     // Beginner entry (red-team A-3): history lists saved versions and restores one as a draft.
     item('Version history', 'file-clock', () => reveal('editor-history'));
     item('Advanced source', 'code-xml', () => reveal('editor-advanced'), 'advanced');

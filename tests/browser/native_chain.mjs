@@ -175,6 +175,8 @@ async function projections(context, metadata, realStatus) {
     const reply = json => route.fulfill({json});
     // Read-only shell lists (recorded examples, Monitor operation list) are outside this witness.
     if (path === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: []});
+    // One configured task: selected automatically, so Workflow and Run stay open.
+    if (path === '/api/tasks') return reply({tasks: [{task_id: 'synthetic', label: 'Synthetic task', revision: null}]});
     if (path === '/api/recorded-examples') return reply([]);
     if (path === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     if (path === '/api/native-chain/choices') return reply([{choice_id: 'one', label: 'One'}, {choice_id: 'two', label: 'Two'}]);

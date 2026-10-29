@@ -14,6 +14,7 @@ import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {showAllConsoleSections} from './console_view_flags.mjs';
+import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 
 const checkout = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -44,6 +45,7 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
+  chooseFirstConfiguredTask(browser);
   const context = await browser.newContext({viewport: {width: 1440, height: 1000}}), page = await context.newPage();
   page.on('pageerror', error => faults.push(error.message));
   const status = () => page.locator('#editor-status').textContent();
