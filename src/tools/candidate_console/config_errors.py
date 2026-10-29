@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import get_args, get_origin
+from typing import get_args
 
 from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorType
@@ -20,9 +20,8 @@ class MissingConfigFile(ValueError):
         super().__init__(f"{item}: {field} file {display} is missing")
 
 
-def _vocabulary() -> tuple[set[str], set[str]]:
+def _vocabulary() -> set[str]:
     names: set[str] = set()
-    mappings: set[str] = set()
     visited: set[type[BaseModel]] = set()
 
     def visit(annotation: object) -> None:
@@ -32,15 +31,13 @@ def _vocabulary() -> tuple[set[str], set[str]]:
             visited.add(annotation)
             for name, field in annotation.model_fields.items():
                 names.add(name)
-                if get_origin(field.annotation) is dict:
-                    mappings.add(name)
                 visit(field.annotation)
         for argument in get_args(annotation):
             visit(argument)
 
     visit(ConsoleConfig)
     visit(ConsoleFile)
-    return names, mappings
+    return names
 
 
 def _safe_extra_name(name: str) -> bool:
@@ -60,16 +57,19 @@ def invalid_config_fields(error: ValidationError) -> tuple[str, ...]:
     Extra fields are locations too: show simple identifier-shaped names, but never
     arbitrary text (e.g. a pasted credential) as an unknown location segment.
     """
-    names, mappings = _vocabulary()
+    names = _vocabulary()
+    source = (
+        "console.json"
+        if error.title == ConsoleFile.__name__
+        else "resolved console configuration (console.json, global settings, workspace layout)"
+    )
     error_types = get_args(ErrorType)
     messages: list[str] = []
     for item in error.errors(include_input=False, include_context=False, include_url=False):
         location = ""
         parts = item["loc"]
         for index, part in enumerate(parts):
-            if index and parts[index - 1] in mappings:
-                segment = "<key>"
-            elif isinstance(part, int):
+            if isinstance(part, int):
                 location += f"[{part}]"
                 continue
             elif item["type"] == "extra_forbidden" and index == len(parts) - 1:
@@ -80,5 +80,5 @@ def invalid_config_fields(error: ValidationError) -> tuple[str, ...]:
                 segment = "<key>"
             location += ("." if location else "") + segment
         kind = item["type"] if item["type"] in error_types else "validation_error"
-        messages.append(f"console.json is invalid at {location or '(document)'} ({kind})")
+        messages.append(f"{source} is invalid at {location or '(document)'} ({kind})")
     return tuple(messages)

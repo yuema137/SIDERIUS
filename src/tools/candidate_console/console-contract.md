@@ -491,7 +491,10 @@ parent check only a same-user process, which already owns the workspace, can swa
 a parent.
 
 CLI `init`/`check`/`serve` preserve Pydantic validation failures as one stderr
-line per error: `console.json is invalid at <location> (<type>)`, exit 2.
+line per error: `<source> is invalid at <location> (<type>)`, exit 2.
+Raw `ConsoleFile` failures name `console.json`; validation of the resolved
+configuration names `resolved console configuration (console.json, global settings,
+workspace layout)` because values may come from any of those layers.
 `config_errors.invalid_config_fields` derives its field vocabulary from
 `ConsoleFile`, `ConsoleConfig` and nested models; list positions use `[index]`.
 Mapping keys and unknown union labels are redacted; extra-field names are shown
@@ -499,7 +502,10 @@ only when identifier-shaped, bounded to 32 characters and not token-like
 (credential prefixes or long, mostly alphanumeric strings). Input values, exception
 messages and context are never displayed. Document-level failures use `(document)`.
 `MissingConfigFile` names a missing task manifest/LLM file or experiment setup source using
-the validated item ID and configured path (control characters escaped).
+the validated item ID and configured path (control characters escaped). Missing-file
+failures also print workspace-readiness guidance when the configuration resolves.
+Manifest-reference inspection failures use a fixed category and the task
+`task_manifest` location; nested exception text is never displayed.
 `check_setup_project` owns missing-source diagnostics for both registry setups and
 legacy editor projects, labelled `experiment setup <id>`. Init schema failures end
 with `Nothing was deleted.`. Other
