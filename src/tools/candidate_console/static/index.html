@@ -57,6 +57,7 @@
   <script src="/operation-outcome.js" defer></script>
   <script src="/reusable-intents.js" defer></script>
   <script src="/run-steps.js" defer></script>
+  <script src="/run-scheduling.js" defer></script>
   <script src="/reusable-run.js" defer></script>
   <script src="/seed-input.js" defer></script>
   <script src="/new-run.js" defer></script>
@@ -111,6 +112,7 @@
 <h2 class="section-heading">Advanced</h2>
 <section class="card" aria-labelledby="native-chain-heading">
 <h2 id="native-chain-heading">Run a configured native chain</h2>
+<p id="native-chain-serial">Native chains always run one step at a time and are never reserved in the host ledger, even when this console shares one.</p>
 <p>Launch the captured native recipe independently of the workflow editor. Review the original capture for complete scientific settings. Each new destination needs a new externally reviewed capture and fresh envelope.</p>
 <label for="native-chain-choice">Native capture</label><select id="native-chain-choice" disabled><option value="">Connect to load native captures</option></select>
 <button id="native-chain-review" disabled>Review native capture</button>
@@ -276,6 +278,24 @@
       <p id="capture-seed-help" class="muted">Leave Seed blank; SIDERIUS picks one and records it.</p>
     </details>
     <p id="capture-credentials" class="run-credentials" hidden></p>
+    <p id="scheduling-unavailable" class="muted">Parallel nodes and host resources need a host ledger that the operator configures for this console. Without one, runs use one node at a time.</p>
+    <details id="scheduling" class="run-scheduling" hidden>
+      <summary>Host resources and parallel nodes (optional)</summary>
+      <p class="muted">Nothing here is filled in for you. Leave it empty to run as before, one node at a time. When this console shares a host ledger, declare what the run needs; it waits its turn when the host is busy. Changing anything here needs a new review.</p>
+      <fieldset id="scheduling-resources"><legend><label><input type="checkbox" id="scheduling-declare"> Declare this run's resources</label></legend>
+        <label>GPU <select id="scheduling-gpu"><option value="">Choose</option><option value="0">No GPU</option><option value="1">One GPU</option></select></label>
+        <label>GPU memory (GiB) <input id="scheduling-vram" type="number" min="0" step="any" inputmode="decimal"></label>
+        <label>Host memory (GiB) <input id="scheduling-memory" type="number" min="0" step="any" inputmode="decimal"></label>
+        <label>CPU slots <input id="scheduling-cpus" type="number" min="1" step="1" inputmode="numeric"></label>
+        <label><input type="checkbox" id="scheduling-timed"> Uses a training time budget</label>
+      </fieldset>
+      <table id="scheduling-parallel" class="run-scheduling-table">
+        <caption>Run these kinds of nodes at the same time (one row per kind; unticked kinds run one at a time)</caption>
+        <thead><tr><th scope="col">Node kind</th><th scope="col">Parallel</th><th scope="col">Uses a GPU</th><th scope="col">GPU memory (GiB)</th><th scope="col">Host memory (GiB)</th><th scope="col">CPU slots</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="scheduling-problem" class="muted" role="status"></p>
+    </details>
     <div class="actions"><button id="capture-review" class="secondary" disabled>Review prepared run</button><button id="capture-launch" disabled>Launch run</button></div>
     <p id="capture-launch-reason" class="muted"></p>
     <details data-ui-flag="developer"><summary>Captured resources and version</summary><pre id="capture-details"></pre></details>

@@ -260,10 +260,14 @@
     if (!session.connected || !selected) return;
     const seed = window.consoleSeed.parse($('seed').value);
     if (!seed.ok) { status(window.consoleSeed.message); return; }
+    const scheduling = window.runScheduling.read();
+    if (scheduling.error) { window.runScheduling.show(scheduling.error); status('Review not sent: ' + scheduling.error); return; }
     const version = ++generation, revision = session.revision; review = null; $('summary').replaceChildren(); $('details').textContent = ''; controls();
     const {run_seed: _previous, ...capture} = selected;
     try {
-      const value = await api('/review', seed.value === undefined ? capture : {...capture, run_seed: seed.value}); if (!current(version, revision)) return; review = value;
+      // The seed, host resources and parallel nodes are all part of what is reviewed.
+      const reviewed = {...(seed.value === undefined ? capture : {...capture, run_seed: seed.value}), ...scheduling.value};
+      const value = await api('/review', reviewed); if (!current(version, revision)) return; review = value;
       const profile = profileDescriptions[value.execution_profile]
         || (value.execution_profile ? ' Proposal fanout executed serially.' : '');
       const nodes = value.nodes.map(item => item[0]).join(value.execution_profile ? ', ' : ' → ');
@@ -277,6 +281,7 @@
       const seedLine = document.createElement('p'); seedLine.textContent = value.seed; $('summary').append(seedLine);
       const workspace = document.createElement('p'); workspace.textContent = 'Output workspace: ' + value.workspace; $('summary').append(workspace);
       const loop = document.createElement('p'); loop.id = 'capture-loop'; loop.textContent = researchLoop(value); $('summary').append(loop);
+      const hostSummary = document.createElement('p'); hostSummary.id = 'capture-scheduling-review'; hostSummary.textContent = 'Host resources: ' + window.runScheduling.describe(value.selection); $('summary').append(hostSummary);
       const routeSummary = document.createElement('p'); routeSummary.textContent = 'Model routes: ' + value.routes.map(route => `${route.node_id} → ${route.provider || '?'} / ${route.model || '?'}`).join('; '); $('summary').append(routeSummary);
       status(value.credential_readiness.ready
         ? 'Reviewed. Launch runs the captured stages, inputs and model routes, and may call paid model APIs.'
@@ -293,6 +298,14 @@
     intent = exact; terminal = false; showIntent(); controls(); await launchRetained(true);
   });
   $('retry').addEventListener('click', () => { problem = ''; void launchRetained(false); });
+  // A reviewed launch carries exactly the reviewed host resources: any edit needs a new review.
+  window.runScheduling.changed(() => {
+    // Always: a review still in flight was sent with the old values and must not land.
+    generation++;
+    if (!review) return;
+    review = null; $('summary').replaceChildren(); $('details').textContent = '';
+    status('Host resources changed. Review again before launching.'); controls();
+  });
   async function check() {
     if (!session.connected || !intent || busy || checking || !coordinator.same('candidate', intent)) return;
     const exact = intent; checking = true;

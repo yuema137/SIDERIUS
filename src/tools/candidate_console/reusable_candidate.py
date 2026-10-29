@@ -139,6 +139,7 @@ class ReusableCandidate:
 
     def review(self, project_id: str, selection: ReusableCaptureSelection) -> ReusableCaptureReview:
         selection = ReusableCaptureSelection.model_validate_json(selection.model_dump_json())
+        self.console.require_reviewable_resources(selection)
         task, inspected, operation = self._operation(project_id, selection, uuid4())
         operation = with_run_resources(operation, selection)
         binding, request = inspected.binding, operation.request

@@ -464,18 +464,26 @@ def test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops(loope
     }
 
 
-def test_reviewed_resources_bind_the_reusable_launch_and_replay_idempotently(captured):
+def test_reviewed_resources_bind_the_reusable_launch_and_replay_idempotently(
+    captured, tmp_path, monkeypatch
+):
     """B3-4c: the reservation is part of the reviewed request digest."""
     from tools.candidate_operations.models import OperationResources
 
     adapter, project, choice, _ = captured
+    plain = adapter.review(project.project_id, adapter.select(project.project_id, choice))
+    _share_host_ledger(adapter.console, tmp_path)
+    # A ledger binds the spawned child's identity; stand this live process in for it.
+    monkeypatch.setattr(
+        "tools.candidate_operations.submit.spawn",
+        lambda *args: __import__("types").SimpleNamespace(pid=__import__("os").getpid()),
+    )
     resources = OperationResources(
         gpu_count=0, host_memory_gib=2.0, cpu_slots=1, time_budgeted=False
     )
     selection = adapter.select(project.project_id, choice).model_copy(
         update={"resources": resources}
     )
-    plain = adapter.review(project.project_id, adapter.select(project.project_id, choice))
     review = adapter.review(project.project_id, selection)
     assert review.request_digest != plain.request_digest
     launch = launch_payload(review)
@@ -492,6 +500,16 @@ def test_reviewed_resources_bind_the_reusable_launch_and_replay_idempotently(cap
     )
     with pytest.raises(OperationFailure, match="review again"):
         adapter.launch(project.project_id, changed)
+
+
+def _share_host_ledger(console, tmp_path):
+    """Configure the console's host ledger as ``CandidateConsole`` would load it."""
+    from tests.unit.tools.candidate_console.test_host_ledger import _budget
+    from tools.candidate_operations.host_ledger import HostScheduling
+
+    root = tmp_path / "host-ledger"
+    root.mkdir(mode=0o700)
+    console.host = HostScheduling(ledger_root=str(root), budget=_budget())
 
 
 #: Issue #983 S6. Above 2**52, so a float round-trip would corrupt it.

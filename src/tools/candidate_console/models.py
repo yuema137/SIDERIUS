@@ -231,6 +231,9 @@ class ChoicesView(PreviewModel):
 
     operations_store_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     tasks: tuple[ChoiceView, ...]
+    #: B3-4c: the console shares an operator-configured host ledger, so the Run
+    #: lane offers host resources and parallel nodes. Omitted when false.
+    host_ledger: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class RouteView(PreviewModel):
@@ -437,6 +440,9 @@ class OperationListItemView(PreviewModel):
     loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
     #: Display wording from ``seed_labels.readback_label`` (issue #983).
     seed: str
+    #: The operation reason, carried only for ``operation_failed`` rows so the list can
+    #: tell "cancelled before start" from a failure (#1074); omitted otherwise.
+    reason: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class OperationListView(PreviewModel):

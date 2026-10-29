@@ -298,16 +298,24 @@ def test_reusable_saved_source_refuses_legacy_launch_before_preview(edited, monk
     assert "reusable declarations" in str(error.value)
 
 
-def test_reviewed_resources_bind_the_launch_and_replay_idempotently(edited):
+def test_reviewed_resources_bind_the_launch_and_replay_idempotently(edited, tmp_path, monkeypatch):
     """B3-4c: the reservation is reviewed. A retried launch carrying it replays as the
     same operation; a launch that changes it after review is stale."""
     from tools.candidate_operations.models import OperationResources
 
     adapter, project, selection = edited
+    plain = adapter.review(project.project_id, selection)  # before the ledger is shared
+    _share_host_ledger(adapter.console, tmp_path)
+    # A ledger binds the spawned child's identity; stand this live process in for it.
+    import os
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "tools.candidate_operations.submit.spawn", lambda *args: SimpleNamespace(pid=os.getpid())
+    )
     resources = OperationResources(
         gpu_count=0, host_memory_gib=2.0, cpu_slots=1, time_budgeted=False
     )
-    plain = adapter.review(project.project_id, selection)
     review = adapter.review(
         project.project_id, selection.model_copy(update={"resources": resources})
     )
@@ -325,3 +333,13 @@ def test_reviewed_resources_bind_the_launch_and_replay_idempotently(edited):
     )
     with pytest.raises(OperationFailure, match="review again"):
         adapter.launch(project.project_id, changed)
+
+
+def _share_host_ledger(console, tmp_path):
+    """Configure the console's host ledger as ``CandidateConsole`` would load it."""
+    from tests.unit.tools.candidate_console.test_host_ledger import _budget
+    from tools.candidate_operations.host_ledger import HostScheduling
+
+    root = tmp_path / "host-ledger"
+    root.mkdir(mode=0o700)
+    console.host = HostScheduling(ledger_root=str(root), budget=_budget())

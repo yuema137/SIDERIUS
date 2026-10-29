@@ -32,6 +32,7 @@ def setup(
     training: bool = False,
     families: bool = False,
     literature: bool = False,
+    host_ledger: bool = False,
 ) -> None:
     selected = selection.__wrapped__(root)
     config = console_config.__wrapped__(selected, root)
@@ -150,6 +151,8 @@ def setup(
             "port": int(origin.rsplit(":", 1)[1]),
         }
     )
+    if host_ledger:
+        config = config.model_copy(update={"host_ledger": _host_ledger(root)})
     CandidateConsole(config)
     (root / "console.json").write_text(config.model_dump_json(indent=2))
     metadata = {
@@ -191,6 +194,22 @@ def headless(root: Path) -> None:
     print(status.model_dump_json(), flush=True)
 
 
+def _host_ledger(root: Path):
+    """A private ledger directory and a CPU-only budget file (B3-4c browser witness)."""
+    from core.runtime_control.scheduling import HostBudget
+    from tools.candidate_console.models import ConsoleHostLedger
+
+    ledger = root / "host-ledger"
+    ledger.mkdir(mode=0o700)
+    budget = root / "host-budget.json"
+    budget.write_text(
+        HostBudget(
+            gpus=(), host_memory_gib=64.0, cpu_slots=16, max_concurrent_units=4, source="file"
+        ).model_dump_json(exclude={"source"})
+    )
+    return ConsoleHostLedger(ledger_root=str(ledger), budget_file=str(budget))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -203,6 +222,7 @@ def main():
     parser.add_argument("--training", action="store_true")
     parser.add_argument("--families", action="store_true")
     parser.add_argument("--literature", action="store_true")
+    parser.add_argument("--host-ledger", action="store_true")
     args = parser.parse_args()
     if args.mode == "provider":
         provider(args.root)
@@ -215,6 +235,7 @@ def main():
             args.training,
             args.families,
             args.literature,
+            args.host_ledger,
         )
     elif args.mode == "verify-training":
         from tests.browser.reusable_training_fixture import code_equivalent

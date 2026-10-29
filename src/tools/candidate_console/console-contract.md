@@ -97,8 +97,33 @@ different values therefore refuses `stale_review`, and a retried launch replays
 idempotently: the replay check recomputes the same bound digest from the stored
 operation. `with_run_resources` attaches them, revalidating through the
 operation and request owners; without them the reviewed operation is submitted
-byte for byte. Until the UI PR, these inputs are reachable through the HTTP API
-only; the console README documents `host_ledger` with that PR. Under the ledger, `parallel.budget` is refused
+byte for byte.
+
+Review-time refusals (B3-4c UI review). `CandidateConsole.require_reviewable_resources`
+runs at every candidate review (prepared, edited, reusable): without a host
+ledger, a selection carrying `resources` or `parallel` refuses
+`host_ledger_missing` (the console has no budget to reserve or schedule against);
+with a ledger, a selection without `resources` refuses `resources_required`, the
+ledger's own launch code, so nothing reaches Launch that Launch would refuse or
+silently ignore. `ChoicesView.host_ledger` (omitted when false) tells the browser
+whether a ledger is configured.
+
+Browser (B3-4c UI). The Run lane's **Host resources and parallel nodes** panel
+(`run-scheduling.js`, `#scheduling`) is shown only when `/api/choices` reports
+`host_ledger` (`consoleSession.hostLedger`); otherwise `#scheduling-unavailable`
+states that parallel nodes and host resources need an operator-configured host
+ledger, and nothing is sent. The panel has no prefilled value: an empty panel sends
+neither field. Every panel edit (and a ledger change) advances the review
+generation, so a review in flight with the old values is discarded. `runScheduling.read()` refuses an incomplete declaration in the
+browser (GPU choice, positive memory, whole CPU slots, GPU memory exactly for a
+GPU), and `reusable-run.js` adds the result to the `/review` selection, so the
+values bind into the reviewed digest; the review summary
+(`#capture-scheduling-review`) shows them as echoed in `review.selection`, and any
+panel edit after review discards the review. `operation-outcome.js` renders
+`queued` ("queued: it starts by itself…") and `operation_failed` with
+`reason="cancelled_while_queued"` as "cancelled before start" (not a failure;
+`OperationListItemView.reason` carries the reason for `operation_failed` rows
+only). The native-chain card states native chains are serial-only. Under the ledger, `parallel.budget` is refused
 `parallel_budget`; without a configured ledger a `parallel` launch without its
 own budget is refused `parallel_budget_required`. A loop resume inherits its
 root's `resources` and `parallel`. Every refusal reaches the browser as the

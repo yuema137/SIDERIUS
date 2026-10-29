@@ -11,7 +11,10 @@
   function sentence(value) {
     const what = subject(value.kind), native = value.native_status;
     if (!value.state) return `${what} request accepted; waiting for its first status.`;
+    // B3-5b: waiting in the host ledger for the GPU, memory or CPU it declared.
+    if (value.state === 'queued') return `${what} is queued: it starts by itself when earlier runs free the host resources it needs.`;
     if (value.state === 'active' || value.finishing) return `${what} in progress.`;
+    if (cancelledBeforeStart(value)) return `${what} cancelled before start: it never ran, and nothing was produced.`;
     if (value.state === 'operation_failed') return value.reason === 'spawn_failed'
       ? `${what} did not start: the worker could not be launched.`
       : `${what} failed before reporting a result.`;
@@ -37,7 +40,11 @@
     if (native === 'interrupted') return 'Failed: the run was interrupted before finishing.';
     return `Finished with status ${native || 'unknown'}.`;
   }
-  const failed = value => value?.state === 'operation_failed' ||
+  // A queued run the operator cancelled is a deliberate outcome, not a failure (#1074).
+  function cancelledBeforeStart(value) {
+    return value?.state === 'operation_failed' && value.reason === 'cancelled_while_queued';
+  }
+  const failed = value => (value?.state === 'operation_failed' && !cancelledBeforeStart(value)) ||
     ['failed', 'timed_out', 'interrupted'].includes(value?.native_status);
   // The last exception line a native or worker log printed, for example
   // "FormalLaunchPolicyError: a formal launch must declare …". Display only: it is the
@@ -51,5 +58,5 @@
   const plural = (count, one, many = one + 's') => `${count} ${count === 1 ? one : many}`;
   const terminal = value => ['completed', 'operation_failed'].includes(value?.state) &&
     value.process?.status === 'exited' && !value.finishing;
-  window.operationOutcome = Object.freeze({sentence, terminal, failed, cause, plural});
+  window.operationOutcome = Object.freeze({sentence, terminal, failed, cause, plural, cancelledBeforeStart});
 })();

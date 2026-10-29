@@ -198,6 +198,26 @@ class CandidateConsole:
         self.config = validate_config(config)
         self.host = host_scheduling(self.config)
 
+    def require_reviewable_resources(self, selection: RunResourcesSelection) -> None:
+        """Refuse at review what the launch would refuse or silently ignore (B3-4c).
+
+        Without a host ledger the console has no budget to reserve or schedule
+        against, so declared resources or parallel nodes are refused
+        (``host_ledger_missing``). With one, a candidate must declare its
+        resources (``resources_required``, the ledger's own code).
+        """
+        if self.host is None:
+            if selection.resources is not None or selection.parallel is not None:
+                raise OperationFailure(
+                    "host_ledger_missing",
+                    "host resources and parallel nodes need a host ledger in the console configuration",
+                )
+        elif selection.resources is None:
+            raise OperationFailure(
+                "resources_required",
+                "this console shares a host ledger; declare the run's host resources",
+            )
+
     def submit(
         self,
         submission: OperationSubmission,
@@ -242,7 +262,11 @@ class CandidateConsole:
         return hashlib.sha256(b"siderius-operation-store/v2\0" + state_root).hexdigest()[:32]
 
     def choices_view(self) -> ChoicesView:
-        return ChoicesView(operations_store_id=self.operations_store_id(), tasks=self.choices())
+        return ChoicesView(
+            operations_store_id=self.operations_store_id(),
+            tasks=self.choices(),
+            host_ledger=self.host is not None,
+        )
 
     def prepare(self, selection: PrepareSelection) -> OperationHandle:
         selection = PrepareSelection.model_validate_json(selection.model_dump_json())
@@ -283,6 +307,7 @@ class CandidateConsole:
         return prepared, matches[0]
 
     def review(self, selection: PreparedSelection) -> PreparedReview:
+        self.require_reviewable_resources(selection)
         prepared, task = self.resolve_prepared_context(selection)
         saved, request = prepared.preparation_request, prepared.request
         return PreparedReview(
@@ -383,6 +408,7 @@ class CandidateConsole:
                     native_status=snapshot.receipt.status if snapshot.receipt else None,
                     loop=loop,
                     seed=seed_readback(snapshot),
+                    reason=snapshot.reason if snapshot.state == "operation_failed" else None,
                 )
             )
         return OperationListView(

@@ -100,6 +100,10 @@ try {
   assert.equal(await page.locator('#capture-launch').isDisabled(), true);
   assert.equal(await page.locator('#capture-summary').textContent(), '');
   await page.unroute('**/reusable-captures/review'); await open(metadata.captures[0]);
+  // B3-4c: this fixture console shares no host ledger, so the Run lane hides the host
+  // resources panel, says why, and the plain review above is unaffected.
+  assert.equal(await page.locator('#scheduling').isHidden(), true);
+  assert.match(await page.locator('#scheduling-unavailable').textContent(), /host ledger/);
   // Explicit fresh pre-admission refusal can be dismissed, never silently retried.
   const receiptPath = join(metadata.captures[0].envelope, 'receipt.json'), receipt = await readFile(receiptPath);
   await writeFile(receiptPath, 'changed after review'); await page.locator('#capture-launch').click();

@@ -2,6 +2,8 @@
 (() => {
   'use strict';
   let token = '', revision = 0, connected = false, storeId = null;
+  // B3-4c: whether the console shares a host ledger (from GET /api/choices); null until read.
+  let hostLedger = null;
   const listeners = new Set();
   let changing = false;
   // Connected pages show one compact line; the token form returns only on request or disconnect.
@@ -73,6 +75,11 @@
     if (!value || typeof value.operations_store_id !== 'string' || !/^[0-9a-f]{32}$/.test(value.operations_store_id) || !Array.isArray(value.tasks)) {
       throw new Error('The console sent unreadable task choices.');
     }
+    const ledger = value.host_ledger === true;
+    if (hostLedger !== ledger) {
+      hostLedger = ledger;
+      window.dispatchEvent(new CustomEvent('console-host-ledger', {detail: {hostLedger}}));
+    }
     if (storeId !== value.operations_store_id) {
       storeId = value.operations_store_id;
       window.dispatchEvent(new CustomEvent('console-store', {detail: {operationsStoreId: storeId}}));
@@ -90,7 +97,7 @@
     }
     return response.blob();
   }
-  window.consoleSession = Object.freeze({request, download, choices, subscribe(listener) { listeners.add(listener); }, get connected() { return connected; }, get revision() { return revision; }, get reachable() { return reachable; }, get operationsStoreId() { return storeId; }});
+  window.consoleSession = Object.freeze({request, download, choices, subscribe(listener) { listeners.add(listener); }, get connected() { return connected; }, get revision() { return revision; }, get reachable() { return reachable; }, get operationsStoreId() { return storeId; }, get hostLedger() { return hostLedger; }});
   document.getElementById('access-form').addEventListener('submit', async event => {
     event.preventDefault();
     token = document.getElementById('token').value.trim(); document.getElementById('token').value = '';
@@ -107,7 +114,7 @@
     changing = true; present(); document.getElementById('token').focus();
   });
   document.getElementById('access-disconnect').addEventListener('click', () => {
-    token = ''; revision++; connected = false; storeId = null; publish();
+    token = ''; revision++; connected = false; storeId = null; hostLedger = null; publish();
     status('Disconnected. Enter the console token to reconnect; drafts and the selected operation are retained.');
     document.getElementById('token').focus();
   });
