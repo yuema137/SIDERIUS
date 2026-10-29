@@ -39,7 +39,13 @@
       const verdict = (loop.judge_verdicts || []).find(item => item.iteration === reason.iteration);
       met = `The judge asked for your input${verdict?.rationale ? ': ' + verdict.rationale : ''} (${best}).`;
     } else met = `Condition ${reason.kind} was met (${best}).`;
-    return `Waiting for your input. ${met} Paused after body ${summary.iteration} of ${summary.final_iteration}.`;
+    const tried = (summary.what_was_tried || []).map(body => {
+      const valid = body.validation_passed == null ? 'unknown' : body.validation_passed ? 'passed' : 'failed';
+      const score = body.best_valid_score == null ? 'no valid score' : `${body.metric_id} ${number(body.best_valid_score)} (${body.direction} is better)`;
+      return `Iteration ${body.iteration}: ${body.model_name}; validation ${valid}; ${score}${body.stop_reason ? '; stop reason: ' + body.stop_reason : ''}.`;
+    });
+    const attempts = tried.length ? ` What was tried (latest ${tried.length} completed iterations in this segment): ${tried.join(' ')}` : '';
+    return `Waiting for your input. ${met} Paused after body ${summary.iteration} of ${summary.final_iteration}.${attempts}`;
   }
   // Recorded JudgeStop verdicts (B2-5): each boundary's decision, with the judge's own
   // rationale from its evidence when the call decided; an abstention says so.

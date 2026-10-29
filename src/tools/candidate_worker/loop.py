@@ -145,7 +145,13 @@ def execute_loop(
             scores = (*scores, project_body_score(request, last, iteration))
             completed = (*completed, last)
             decided, asked, verdict = _boundary_decision(
-                request, initial, completed, scores, prior_calls=len(verdicts), anchor=anchor
+                request,
+                initial,
+                completed,
+                scores,
+                prior_calls=len(verdicts),
+                anchor=anchor,
+                resumed_at=resumed_at,
             )
             verdicts = verdicts if verdict is None else (*verdicts, verdict)
             if decided.decision == "stop":
@@ -178,11 +184,13 @@ def _boundary_decision(
     *,
     prior_calls: int,
     anchor: int,
+    resumed_at: int,
 ) -> tuple[StopEvaluationOutput, LoopInputRequest | None, JudgeBoundaryVerdict | None]:
     """Deterministic conditions first; the judge is called only when the boundary needs it.
 
     A judgeable boundary pre-empted by a deterministic decision records a skip marker.
     """
+    from .loop_evidence import summarize_tried_bodies
     from .loop_judge import call_stop_judge, mark_skipped_stop_judge
 
     loop = request.preview.document.definition.loop
@@ -195,4 +203,7 @@ def _boundary_decision(
     else:
         mark_skipped_stop_judge(initial, value)
     decided = evaluate_stop(value)
-    return decided, input_request(value, decided), verdict
+    asked = input_request(value, decided)
+    if asked is not None:
+        asked = summarize_tried_bodies(request, completed, scores, asked, resumed_at=resumed_at)
+    return decided, asked, verdict

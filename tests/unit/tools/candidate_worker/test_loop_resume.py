@@ -1065,7 +1065,7 @@ def test_condition_input_pause_resumes_without_pause_marker_and_refuses_forgery(
     # Every body scores 0.75: body 1 improves, bodies 2 and 3 tie, so k=2 asks after 3.
     request = loop_request(
         prepared,
-        final_iteration=5,
+        final_iteration=6,
         stop_conditions=(NoImprovementStop(completed_bodies=2, on_met="request_input"),),
     )
     config = OperationStoreConfig(
@@ -1110,9 +1110,12 @@ def test_condition_input_pause_resumes_without_pause_marker_and_refuses_forgery(
     process_segments()
     resumed = read_operation(config, next_id).receipt
     # Counting from the anchor (body 3), body 4 is one body later: no second request.
-    assert resumed.status == "completed", resumed
+    assert resumed.status == "paused", resumed
     assert resumed.loop_trace.attempted_iterations == 5
-    assert resumed.loop_trace.input_request is None
+    assert [item.iteration for item in resumed.loop_trace.input_request.summary.what_was_tried] == [
+        4,
+        5,
+    ]
     assert not (root / "pause.json").exists()
     assert len(verify_loop(request, launched, resumed)) == 5
 

@@ -1541,9 +1541,25 @@ threshold met there never asks separately.
 
 Summary. `InputRequestSummary(iteration, final_iteration, metric_id, direction,
 incumbent, incumbent_iteration, non_improving_bodies, input_anchor,
-bodies_since_input)` is O(1) and deterministic (`incumbent_fold`), so the receipt
-stays within `bounded_terminal`. Per-body results come from the existing graph
-results view; no LLM summary is written.
+bodies_since_input, what_was_tried=())` is bounded and deterministic. The numeric
+fold remains `incumbent_fold`. `loop_evidence.summarize_tried_bodies` projects the
+latest 20 completed iterations of the execution segment (after the preceding Resume,
+including one following an operator Pause), in ascending iteration order. Each
+`TriedBody` contains `iteration`, proposed `model_name` (first 128 characters),
+receipt `validation_passed` (including null), `best_valid_score` (the tuning
+record's best valid formal score, including null), reconciled `metric_id` and
+`direction`, and `stop_reason`. The latter is the tuning `termination_reason`
+unless it is `completed`, in which case it is null; the outer loop's pause reason
+remains `input_request.reason`. Only verified proposal/tuning records and body
+receipts supply these facts. No provider is called. Longer segments retain their
+latest 20 entries; complete results remain in the graph results view.
+
+Empty `what_was_tried` is omitted from serialization, preserving old summary
+bytes. Readback verifies every populated projection exactly; absent/empty legacy
+projections compare the original summary fields without rewriting receipts.
+`review-loop-resume` exposes the list in its JSON
+`receipt.loop_trace.input_request.summary.what_was_tried`; the Monitor pause card
+renders the same facts as text, including the retained entry count.
 
 Readback. `derive_stop` returns `LoopDerivation(stop_reason, verdicts,
 input_requests, input_anchor)`: every re-derived `request_input` boundary with its
