@@ -124,8 +124,8 @@ try {
   assert.match(await page.locator('#editor-pending').textContent(), /Pending binding draft/);
   await waitUntil(async () => !(await page.locator('#editor-review').isDisabled()));
   await page.locator('#editor-review').click();
-  await page.locator('#editor-task-acknowledge').waitFor({state: 'attached'});
-  await tab('task'); await page.locator('#editor-task-acknowledge').check(); await tab('workflow'); await page.locator('#editor-save').click();
+  await page.locator('#editor-task-acknowledge').waitFor();
+  await page.locator('#editor-task-acknowledge').check(); await page.locator('#editor-save').click();
   await waitUntil(async () => !(await dirty()) && (await readFile(metadata.source, 'utf8')) !== original);
   const saved = await readFile(metadata.source, 'utf8');
   assert.deepEqual(authored().map(item => item.path.split('/').at(-1)), ['review', 'save']);

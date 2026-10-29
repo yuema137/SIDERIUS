@@ -1,4 +1,7 @@
-/* Task-control view only: editor.js owns drafts, requests and acceptance. */
+/* Task-control view only: editor.js owns drafts, requests and acceptance.
+ * render(): the task version switch (Task tab, #editor-task-controls).
+ * renderReview(): the task reference review findings and acknowledgements (Workflow save
+ * step, #editor-task-review), beside the diff and Save they gate. */
 (() => {
   'use strict';
   const node = (tag, text, parent) => {
@@ -31,9 +34,15 @@
     const link = node('a', 'Bind a task version', why); link.href = GUIDE; link.target = '_blank'; link.rel = 'noopener noreferrer';
     why.append(document.createTextNode(' (src/tools/candidate_console/README.md).'));
   }
-  window.editorTaskControls = Object.freeze({render(parent, state, actions) {
+  // Re-rendering keeps keyboard focus on the control that had it.
+  function keepFocus(parent, draw, fallback) {
     const focusId = parent.contains(document.activeElement) ? document.activeElement.id : null;
-    try {
+    try { draw(); } finally {
+      if (focusId) (document.getElementById(focusId) || (fallback && document.getElementById(fallback)))?.focus({preventScroll: true});
+    }
+  }
+  function render(parent, state, actions) {
+    keepFocus(parent, () => {
       parent.replaceChildren();
       node('h2', 'Task package and version', parent);
       usage(parent, state);
@@ -56,12 +65,18 @@
         }
         const update = node('button', 'Update workflow references', parent); update.type = 'button';
         update.id = 'editor-task-update'; update.disabled = !state.canUpdate;
-        update.addEventListener('click', actions.update);
+        // The review findings open in the Workflow save step, beside the diff and Save.
+        update.addEventListener('click', () => { if (!state.canUpdate) return; actions.update(); location.hash = 'workflow'; });
       } else unavailable(parent, state);
       const message = node('p', state.message, parent); message.id = 'editor-task-message'; message.setAttribute('role', 'status');
       const retry = node('button', 'Refresh task choices', parent); retry.type = 'button';
       retry.id = 'editor-task-refresh';
       retry.disabled = !state.connected || state.saving; retry.addEventListener('click', actions.refresh);
+    }, 'editor-task-choice');
+  }
+  function renderReview(parent, state, actions) {
+    keepFocus(parent, () => {
+      parent.replaceChildren(); parent.hidden = !state.review;
       if (!state.review) return;
       const review = state.review;
       node('h3', 'Task reference review', parent);
@@ -88,8 +103,7 @@
       }
       check('editor-task-acknowledge', ' I reviewed every finding above and the exact Python diff.', state.acknowledged, actions.acknowledge);
       if (review.findings.some(item => item.code === 'current_snapshot_adoption')) check('editor-task-adopt', ' Adopt the currently observed snapshot; no historical task identity is claimed.', state.adopted, actions.adopt);
-    } finally {
-      if (focusId) (document.getElementById(focusId) || document.getElementById('editor-task-choice'))?.focus({preventScroll: true});
-    }
-  }});
+    });
+  }
+  window.editorTaskControls = Object.freeze({render, renderReview});
 })();

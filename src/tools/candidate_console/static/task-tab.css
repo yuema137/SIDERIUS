@@ -19,7 +19,7 @@
 .task-section > p { margin: var(--space-2) 0; max-width: var(--measure); }
 .task-facts { grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 0; }
 .task-facts .mono, .task-table .mono { font-size: var(--font-label); }
-.task-basis { font-size: var(--font-help); }
+.task-basis, .task-hint { font-size: var(--font-help); color: var(--muted); }
 .task-description { white-space: pre-wrap; }
 .task-fingerprint { margin: var(--space-3) 0 0; }
 .task-fingerprint > summary { font-weight: 400; color: var(--muted); font-size: var(--font-help); }

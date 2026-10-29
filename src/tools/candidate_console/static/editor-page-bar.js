@@ -4,7 +4,8 @@
  *   #editor-save, which writes exactly the checked bytes (editor.js owns both requests).
  *   A template import's own check does not open it (quietly()).
  * - Task chip: the saved task package/version in one line (read-only); it opens the Task
- *   tab, where the Task version card (version switch and reference review) lives.
+ *   tab, where the Task version card (the version switch) lives. Task reference review
+ *   findings and acknowledgements render in this save step (#editor-task-review).
  * - Undo/Redo/Revert as icon buttons (editor-draft.js creates them) and a `⋯` overflow menu.
  * - Workspace height: the docked rail | canvas | Selection frame fills the window below the
  *   page bar (--workspace-height); the rail and Selection scroll inside it.
@@ -28,11 +29,8 @@
   }
   function summary(current) {
     const text = $('editor-save-summary'); text.replaceChildren();
-    if (current.taskReview) {
-      text.append('This save also updates task references. Confirm the findings under Task version on the Task tab, then save here. ');
-      const show = element('button', 'Show task findings', text, 'link-button'); show.type = 'button';
-      show.addEventListener('click', () => openTaskPanel(true));
-    } else text.textContent = current.reviewedTypedSource
+    if (current.taskReview) text.textContent = 'This save also updates task references. Confirm the task findings below, then save.';
+    else text.textContent = current.reviewedTypedSource
       ? 'The workflow is checked. Save writes the Python text you typed in Advanced source as a new version.'
       : 'The workflow is checked. Save writes exactly the checked file as a new version.';
     // Red-team S-1: the server lists the comments these exact bytes drop; say so in plain words.
@@ -82,7 +80,7 @@
     const panel = $('editor-task-panel');
     const reveal = () => {
       panel.open = true; panel.scrollIntoView({block: 'start'});
-      if (focus) (panel.querySelector('#editor-task-acknowledge, #editor-task-choice, button:not(:disabled)') || panel.querySelector('summary')).focus();
+      if (focus) (panel.querySelector('#editor-task-choice, button:not(:disabled)') || panel.querySelector('summary')).focus();
     };
     if (window.consoleNavigation.view === 'task') { reveal(); return; }
     // After the route focuses the Task heading, move focus on to the version card.
@@ -95,7 +93,7 @@
     const binding = current.taskBinding;
     const needs = opened && !!binding && !current.taskSelected;
     label.textContent = !opened ? 'Task: not open' : binding ? `Task: ${binding.package_id} · ${binding.revision}` : 'Task: not bound';
-    chip.classList.toggle('needs-attention', needs || current.taskReview);
+    chip.classList.toggle('needs-attention', needs);
     chip.title = needs ? 'Choose the configured task version on the Task tab before saving.' : 'Show the task and the version this workflow uses on the Task tab.';
   }
   $('editor-task-chip').addEventListener('click', () => openTaskPanel(true));

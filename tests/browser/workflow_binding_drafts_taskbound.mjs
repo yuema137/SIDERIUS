@@ -78,7 +78,7 @@ try {
   assert.equal(review.body.task_reference_selection.selected_choice_id, metadata.choice_id);
   assert.deepEqual(review.body.task_reference_selection.expected_task_binding, metadata.saved_binding);
   await waitUntil(async () => await page.locator('#editor-task-acknowledge').count() > 0 || !(await page.locator('#editor-save').isDisabled()));
-  if (await page.locator('#editor-task-acknowledge').count()) { await tab('task'); await page.locator('#editor-task-acknowledge').check(); await tab('workflow'); }
+  if (await page.locator('#editor-task-acknowledge').count()) await page.locator('#editor-task-acknowledge').check();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   assert.match(await page.locator('#editor-diff').textContent(), /llm_provider/);
   assert.equal(await readFile(metadata.source, 'utf8'), original, 'Review does not publish the bound draft');

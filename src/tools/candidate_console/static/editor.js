@@ -85,19 +85,21 @@
     const savedBinding = base?.document?.task_binding;
     const matching = (taskChoices || []).filter(choice => bindingEqual(choice.binding, savedBinding));
     let message = taskMessage;
-    if (taskReview()) message = taskReview().save_supported ? 'Task references reviewed, not saved. Review the findings and confirm before saving.' : 'Task reference review is blocked. Keep your draft and inspect the findings.';
+    if (taskReview()) message = taskReview().save_supported ? 'Task references reviewed, not saved. Confirm the findings in the Workflow save step, then save.' : 'Task reference review is blocked. Keep your draft and inspect the findings.';
     else if (pending() && !message) message = "Save existing edits first, then update workflow references. To review a bound draft, select its matching configured task version.";
     // The view explains an empty or unloaded choice list next to the saved task state.
     else if (!taskChoices?.length && !message) message = '';
     else if (savedBinding && !matching.length && !taskSelection && !message) message = 'No configured choice matches the saved binding. Configure a matching choice before reviewing bound edits.';
     else if (!message) message = 'Choose a version, then explicitly update, review and save. Choosing alone does not change source. Switching checked versions requires a supported fresh candidate.';
-    window.editorTaskControls.render($('task-controls'), {choices: taskChoices, selection: taskSelection, matching, savedBinding,
+    const view = {choices: taskChoices, selection: taskSelection, matching, savedBinding,
       connected: window.consoleSession.connected, projectOpen: !!base?.document, saving, canUpdate: canUpdateTask(), message, review: taskReview(),
-      acknowledged: taskAcknowledged, adopted: taskAdopted}, {
-      select: selectTask, update: updateTask, refresh: () => loadTaskChoices(),
+      acknowledged: taskAcknowledged, adopted: taskAdopted};
+    const actions = {select: selectTask, update: updateTask, refresh: () => loadTaskChoices(),
       acknowledge: value => { taskAcknowledged = value; controls(); },
-      adopt: value => { taskAdopted = value; controls(); }
-    });
+      adopt: value => { taskAdopted = value; controls(); }};
+    // One state, two views: the version switch on the Task tab, the review in the save step.
+    window.editorTaskControls.render($('task-controls'), view, actions);
+    window.editorTaskControls.renderReview($('task-review'), view, actions);
   }
   function selectTask(choiceId) {
     if (!window.consoleSession.connected || saving) return;

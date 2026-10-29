@@ -43,7 +43,7 @@ try {
   await page.locator('#editor-source').waitFor({state: 'attached'});
   await waitUntil(async () => (await page.locator('#editor-source').inputValue()).length > 0 && await page.locator('#editor-task-choice option').count() === 3);
   const choice = page.locator('#editor-task-choice'), save = page.locator('#editor-save');
-  // The Task version card lives on the Task tab; the canvas and Save stay on the Workflow page.
+  // The version switch lives on the Task tab; findings, acknowledgement and Save on Workflow.
   const taskTab = async () => { await page.evaluate(() => { location.hash = 'task'; }); await page.locator('#view-task').waitFor(); };
   const workflowTab = async () => { await page.evaluate(() => { location.hash = 'workflow'; }); await page.locator('#view-workflow').waitFor(); };
   page.setDefaultTimeout(30000);
@@ -59,20 +59,19 @@ try {
   if (metadata.training) await inspectTraining();
   await taskTab(); await choice.selectOption('new');
   assert.equal(await readFile(metadata.source, 'utf8'), original);
-  await page.locator('#editor-task-update').click();
-  await page.locator('#editor-task-acknowledge').waitFor();
+  await page.locator('#editor-task-update').click(); // returns to Workflow
+  await page.locator('#view-workflow').waitFor(); await page.locator('#editor-task-acknowledge').waitFor();
   if (metadata.training) await inspectTraining();
   assert.ok(await save.isDisabled());
   assert.match(await page.locator('#editor-task-message').textContent(), /reviewed, not saved/);
-  assert.match(await page.locator('#editor-task-controls').textContent(), /fresh candidate|fresh target proposal/);
+  assert.match(await page.locator('#editor-task-review').textContent(), /fresh candidate|fresh target proposal/);
   if (metadata.profile === 'families') {
     assert.match(await page.locator('#editor-task-findings').textContent(), /2 proposal families and 3 implementation branches/);
   }
-  await taskTab(); await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'changed-reviewed.png'), fullPage: true});
+  await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'changed-reviewed.png'), fullPage: true});
   await page.locator('#editor-task-acknowledge').check();
   if (metadata.training) await inspectTraining();
   assert.ok(await save.isEnabled());
-  await workflowTab();
   const plugin = await readFile(metadata.plugin, 'utf8');
   await writeFile(metadata.plugin, plugin + '\n# changed after browser review\n');
   await save.click();
@@ -86,9 +85,9 @@ try {
   await writeFile(metadata.plugin, plugin);
   // Re-review the retained draft after restoring the selected task source.
   await page.locator('#editor-review').click();
-  await page.locator('#editor-task-acknowledge').waitFor({state: 'attached'});
-  await taskTab(); await page.locator('#editor-task-acknowledge').check();
-  await workflowTab(); await save.click();
+  await page.locator('#editor-task-acknowledge').waitFor();
+  await page.locator('#editor-task-acknowledge').check();
+  await save.click();
   await waitUntil(async () => !(await page.evaluate(() => window.workflowEditor.state.dirty)) && (await readFile(metadata.source, 'utf8')) !== original);
   if (metadata.training) await inspectTraining();
   const accepted = requests.findLast(item => item.path.endsWith('/save')).body.task_reference_acceptance;

@@ -53,6 +53,7 @@
   <script src="/editor.js" defer></script>
   <script src="/editor-templates.js" defer></script>
   <script src="/quick-start.js" defer></script>
+  <script src="/compute-requirement.js" defer></script>
   <script src="/task-selection.js" defer></script>
   <script src="/task-tab.js" defer></script>
   <script src="/navigation.js" defer></script>
@@ -163,7 +164,7 @@
   </div>
   </details></div></section>
 <section id="view-task" data-view="task" hidden><h1 tabindex="-1">Task</h1>
-  <p class="task-intro">A task is your scientific problem: its data, model input and output, main score and checks. Choose one; its workflows and runs use it.</p>
+  <p class="task-intro">A task is your scientific problem: its data, model input and output, main score and checks. Choose one to see its details; Workflow and Run open once a task is chosen.</p>
   <div class="task-layout">
     <section class="card task-list-card" aria-labelledby="task-list-heading"><h2 id="task-list-heading">Tasks</h2>
       <div id="task-list" aria-live="polite"><p class="muted">Connect to see the configured tasks.</p></div>
@@ -174,7 +175,7 @@
     </section>
   </div>
   <details class="card workflow-task-details" id="editor-task-panel"><summary>Task version</summary>
-    <p class="muted">Switch the task version the open workflow uses. Review the findings here, then save on the Workflow page.</p>
+    <p class="muted">Switch the task version the open workflow uses. Update workflow references opens the findings in the Workflow save step, where you confirm and save them.</p>
     <section class="editor-task-controls" id="editor-task-controls" aria-label="Task package and version"><h2>Task package and version</h2><p id="editor-task-state">Connect to see which task package and version this workflow uses.</p></section>
   </details>
 </section>
@@ -207,6 +208,7 @@
     <button id="editor-save-cancel" type="button" class="secondary">Cancel</button>
     <button id="editor-save" disabled data-icon="save">Save version</button>
     <p id="editor-version-help" class="muted">Each save is listed under this name in Version history.</p>
+    <section id="editor-task-review" class="editor-task-controls editor-task-review" aria-label="Task reference review" hidden></section>
     <details id="editor-review-disclosure" data-ui-flag="advanced"><summary>Exact Python changes</summary>
       <pre id="editor-diff"></pre>
       <p class="muted">Every edit invalidates the check. Save writes exactly these bytes.</p>

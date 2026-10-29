@@ -102,7 +102,8 @@ try {
   assert.equal(await page.locator('nav a[href="#workflow"]').getAttribute('aria-disabled'), 'true');
   listMode = 'empty'; await page.locator('#task-list-retry').click();
   await page.locator('#task-list-empty').waitFor();
-  assert.match(await page.locator('#task-list-empty').textContent(), /siderius_workspace\/tasks\/<id>\/ and register it \(see the README\)/);
+  assert.match(await page.locator('#task-list-empty').textContent(), /No task is configured. Add your task to siderius_workspace\/settings\/console.json, then restart the console/);
+  assert.match(await page.locator('#task-list-empty a').getAttribute('href'), /README.md#set-up-and-open-the-console$/);
   for (const link of ['nav a[href="#workflow"]', 'nav a[href="#run"]', '#step-indicator a[href="#workflow"]', '#step-indicator a[href="#run"]']) {
     assert.equal(await page.locator(link).getAttribute('aria-disabled'), 'true', link);
     assert.equal(await page.locator(link).getAttribute('title'), 'Choose a task first', link);
@@ -178,7 +179,7 @@ try {
   assert.match(await text('#task-data'), /not declared by this task/);
   assert.match(await text('#task-health'), /This task declares no Health checks/);
   assert.match(await text('#task-objective'), /planner chooses/);
-  assert.match(await text('#task-run-policy'), /does not pass a GPU into the run sandbox; the run will be refused/);
+  assert.match(await text('#task-run-policy'), /does not pass a GPU into the run sandbox; runs that train a model will be refused/);
 
   // The selection is remembered per store and survives a reload.
   await page.reload();

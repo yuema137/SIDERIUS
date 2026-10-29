@@ -286,6 +286,7 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
             "quick-start.js": "text/javascript",
             "browser-data.js": "text/javascript",
             "navigation.js": "text/javascript",
+            "compute-requirement.js": "text/javascript",
             "task-selection.js": "text/javascript",
             "task-tab.js": "text/javascript",
             "task-tab.css": "text/css",

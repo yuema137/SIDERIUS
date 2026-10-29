@@ -38,7 +38,7 @@ try {
   page.on('request', request => {if (request.method() === 'POST') requests.push({path: new URL(request.url()).pathname, body: request.postDataJSON()});});
   await page.goto(metadata.origin + '/#workflow');
   const connect = async token => {if (await page.locator('#access-change').isVisible()) await page.locator('#access-change').click(); await page.locator('#token').fill(token); await page.locator('#access-form button').click();};
-  // The Task version card lives on the Task tab; Save stays on the Workflow page.
+  // The version switch lives on the Task tab; findings, acknowledgements and Save on Workflow.
   const taskTab = async () => { await page.evaluate(() => { location.hash = 'task'; }); await page.locator('#view-task').waitFor(); };
   const workflowTab = async () => { await page.evaluate(() => { location.hash = 'workflow'; }); await page.locator('#view-workflow').waitFor(); };
   await connect(metadata.token);
@@ -58,8 +58,9 @@ try {
   assert.equal(requests.at(-1).body.task_reference_selection, undefined);
   await save.click(); await waitUntil(async () => (await readFile(metadata.source, 'utf8')).includes('# unbound edit first') && !(await page.evaluate(() => window.workflowEditor.state.dirty)));
   assert.ok(!(await readFile(metadata.source, 'utf8')).includes('TaskBinding('));
+  // Update returns to Workflow, whose save step holds the findings and acknowledgements.
   await taskTab(); await choice.selectOption('synthetic'); await update.click();
-  await page.locator('#editor-task-adopt').waitFor();
+  await page.locator('#view-workflow').waitFor(); await page.locator('#editor-task-adopt').waitFor();
   assert.match(await page.locator('#editor-task-message').textContent(), /reviewed, not saved/);
   assert.ok(await save.isDisabled());
   const updateRequest = requests.at(-1).body;
@@ -72,7 +73,7 @@ try {
   await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'editor-task-adopt');
   await page.keyboard.press('Space'); assert.ok(await save.isEnabled());
-  await workflowTab(); await save.click(); await waitUntil(async () => !(await page.evaluate(() => window.workflowEditor.state.dirty)) && (await readFile(metadata.source, 'utf8')).includes('TaskBinding('));
+  await save.click(); await waitUntil(async () => !(await page.evaluate(() => window.workflowEditor.state.dirty)) && (await readFile(metadata.source, 'utf8')).includes('TaskBinding('));
   const accepted = requests.findLast(item => item.path.endsWith('/save')).body.task_reference_acceptance;
   assert.deepEqual(accepted.selection.expected_task_binding, metadata.binding);
   assert.match(await readFile(metadata.source, 'utf8'), /native-proposal-fanout\/v1/);
@@ -88,9 +89,9 @@ try {
   await update.evaluate(element => {element.dispatchEvent(new MouseEvent('click', {bubbles: true}));});
   assert.equal(await forbiddenUpdate, false, 'Dirty Update must not reach HTTP');
   assert.equal(requests.length, before, 'Callback guard forbids dirty Update even on dispatched click');
-  await workflowTab(); await page.locator('#editor-review').click(); await page.locator('#editor-task-acknowledge').waitFor({state: 'attached'});
+  await workflowTab(); await page.locator('#editor-review').click(); await page.locator('#editor-task-acknowledge').waitFor();
   assert.equal(requests.at(-1).body.task_reference_selection.selected_choice_id, 'synthetic');
-  await taskTab(); await page.locator('#editor-task-acknowledge').check(); await workflowTab(); await save.click();
+  await page.locator('#editor-task-acknowledge').check(); await save.click();
   await waitUntil(async () => !(await page.evaluate(() => window.workflowEditor.state.dirty)) && (await readFile(metadata.source, 'utf8')).includes('# bound source edit'));
   const boundAcceptance = requests.findLast(item => item.path.endsWith('/save')).body.task_reference_acceptance;
   assert.equal(boundAcceptance.adopt_current_snapshot, false);
@@ -103,22 +104,23 @@ try {
   assert.equal(await page.evaluate(() => window.workflowEditor.state.dirty), false, 'A no-op input event is not a pending edit');
   await page.locator('#editor-graph .editor-node').first().focus(); await page.keyboard.press('Alt+ArrowDown');
   assert.ok(await update.isDisabled()); assert.ok(await source.isDisabled());
-  await page.locator('#editor-review').click(); await page.locator('#editor-task-acknowledge').waitFor({state: 'attached'});
+  await page.locator('#editor-review').click(); await page.locator('#editor-task-acknowledge').waitFor();
   assert.equal(requests.at(-1).body.proposal.kind, 'document');
   assert.equal(requests.at(-1).body.proposal.document.execution_profile, 'native-proposal-fanout/v1');
-  await taskTab(); await page.locator('#editor-task-acknowledge').check();
-  await choice.selectOption('changed'); assert.ok(await save.isDisabled(), 'Selection invalidates old acceptance');
+  await page.locator('#editor-task-acknowledge').check();
+  await taskTab(); await choice.selectOption('changed'); assert.ok(await save.isDisabled(), 'Selection invalidates old acceptance');
   await choice.selectOption('synthetic'); await workflowTab(); await page.locator('#editor-review').click();
-  await page.locator('#editor-task-acknowledge').waitFor({state: 'attached'}); await taskTab(); await page.locator('#editor-task-acknowledge').check();
+  await page.locator('#editor-task-acknowledge').waitFor(); await page.locator('#editor-task-acknowledge').check();
   await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'bound-review-light.png'), fullPage: true});
   await page.locator('#theme-preference').selectOption('dark');
   await page.screenshot({path: resolve(process.env.CONSOLE_EVIDENCE_DIR, 'bound-review-dark.png'), fullPage: true});
   await page.locator('#theme-preference').selectOption('light');
-  await workflowTab(); await save.click(); await waitUntil(async () => !(await page.evaluate(() => window.workflowEditor.state.dirty)) && (await choice.inputValue()) === '');
+  await save.click(); await waitUntil(async () => !(await page.evaluate(() => window.workflowEditor.state.dirty)) && (await choice.inputValue()) === '');
   // Unsupported identity stays blocked and canonical source never changes.
   const canonical = await readFile(metadata.source, 'utf8');
   assert.match(canonical, /native-proposal-fanout\/v1/);
-  await taskTab(); await choice.selectOption('changed'); await update.click();
+  // Update returns to Workflow; the findings render in its save step.
+  await taskTab(); await choice.selectOption('changed'); await update.click(); await page.locator('#view-workflow').waitFor();
   await page.locator('#editor-task-findings').filter({hasText: 'compatibility_unresolved'}).waitFor();
   assert.ok(await save.isDisabled()); assert.equal(await page.locator('#editor-task-acknowledge').count(), 0);
   assert.equal(await readFile(metadata.source, 'utf8'), canonical);
@@ -149,8 +151,9 @@ try {
   await page.locator('#editor-review').click(); await page.locator('#editor-conflict').waitFor();
   assert.match(await source.inputValue(), /newer than delayed review/);
   await page.locator('#editor-rebase').click(); assert.ok(await save.isDisabled());
-  await page.locator('#editor-review').click(); await page.locator('#editor-task-acknowledge').waitFor({state: 'attached'});
-  await taskTab(); await page.locator('#editor-task-acknowledge').check(); assert.ok(await save.isEnabled());
+  await page.locator('#editor-review').click(); await page.locator('#editor-task-acknowledge').waitFor();
+  await page.locator('#editor-task-acknowledge').check(); assert.ok(await save.isEnabled());
+  await taskTab();
   // Metadata drift is a separate synthetic transport witness, never a mocked review/save.
   await page.route('**/api/editor/task-choices', async route => {
     const response = await route.fetch(), value = await response.json();

@@ -144,3 +144,7 @@ button[data-icon] { justify-content: center; }
 #editor-version-problem { flex: 1 0 100%; margin: 0; font-size: var(--font-help); }
 #editor-check-again { min-height: 28px; }
 #editor-conflict pre { max-height: 18rem; overflow: auto; }
+/* Task reference review (editor-task-controls.js renderReview) beside the diff and Save. */
+.save-confirm .editor-task-review { flex: 1 0 100%; padding-top: var(--space-2); border-top: 1px solid var(--border); font-size: var(--font-help); }
+.save-confirm .editor-task-review h3 { margin: 0 0 var(--space-2); }
+.save-confirm .editor-task-review p, .save-confirm .editor-task-review ol { margin: 0 0 var(--space-2); }

@@ -6,14 +6,14 @@
   const $ = id => document.getElementById(id);
   const session = window.consoleSession, selection = window.consoleTask;
   const POLL_MS = 1000;
-  const EMPTY = 'No task is registered. Put your task package in siderius_workspace/tasks/<id>/ and register it (see the README).';
+  const EMPTY = 'No task is configured. Add your task to siderius_workspace/settings/console.json, then restart the console. ';
+  const SETUP_GUIDE = 'https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#set-up-and-open-the-console';
   const UNAVAILABLE = {
     sandbox_missing: 'The task sandbox is not available on this machine, so the task package cannot be read.',
     data_root_missing: "The task's data folder does not exist.",
     manifest_missing: "The task's manifest cannot be read.",
     llm_config_unreadable: "The task's model profile cannot be read."
   };
-  const GPU_WARNING = 'This task does not pass a GPU into the run sandbox; the run will be refused.';
   let summary = null, counted = null, failure = '', counting = false, timer = null, countTimer = null, shownFor = null;
 
   function el(tag, text, parent, className) {
@@ -83,7 +83,11 @@
       retry.addEventListener('click', () => selection.reload());
       return;
     }
-    if (!selection.tasks.length) { el('p', EMPTY, box, 'empty-state task-list-empty').id = 'task-list-empty'; return; }
+    if (!selection.tasks.length) {
+      const empty = el('p', EMPTY, box, 'empty-state task-list-empty'); empty.id = 'task-list-empty';
+      const link = el('a', 'How to add a task (step 2)', empty); link.href = SETUP_GUIDE; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      return;
+    }
     const list = el('ul', '', box, 'task-items');
     for (const task of selection.tasks) {
       const button = el('button', '', el('li', '', list), 'task-item'); button.type = 'button';
@@ -109,7 +113,7 @@
       // Poll the plain URL while the sandboxed observation runs (never re-send refresh=1).
       if (view.state === 'observing' && active()) timer = setTimeout(() => void read(), POLL_MS);
     } catch (error) {
-      if (error.stale || id !== selection.selectedId) return;
+      if (error.stale || id !== selection.selectedId || revision !== session.revision) return;
       failure = `The task summary could not be loaded: ${error.message}`;
     }
     renderPanel();
@@ -125,7 +129,7 @@
       if (view.state === 'observing' && session.connected) { countTimer = setTimeout(() => void countSamples(), POLL_MS); return; }
       counting = false;
     } catch (error) {
-      if (error.stale || id !== selection.selectedId) return;
+      if (error.stale || id !== selection.selectedId || revision !== session.revision) return;
       counting = false; counted = {state: 'failed', failure: {stage: 'console', message: error.message}};
     }
     renderPanel();
@@ -234,13 +238,13 @@
   }
   function runPolicy(parent, view) {
     const box = section(parent, 'Run policy', 'task-run-policy'), policy = view.run_policy;
-    const gpus = policy.candidate_devices.filter(device => /^\/dev\/nvidia\d+$/.test(device));
+    const gpus = window.consoleCompute.gpuDevices(policy.candidate_devices);
     facts(box, [
       ['Preparation time limit', duration(policy.preparation_timeout_seconds)],
       ['Candidate time limit', duration(policy.candidate_timeout_seconds)],
       ['Network', policy.candidate_network ? 'Allowed' : 'Blocked'],
       ['Devices', policy.candidate_devices.length ? mono(policy.candidate_devices.join(', ')) : 'None'],
-      ['GPU', gpus.length ? `Passed into the run sandbox (${gpus.join(', ')})` : el('span', GPU_WARNING, null, 'task-gpu-warning')],
+      ['GPU', gpus.length ? `Passed into the run sandbox (${gpus.join(', ')})` : el('span', window.consoleCompute.gpuWarning, null, 'task-gpu-warning')],
       ['Credential names', policy.candidate_environment_names.length ? mono(policy.candidate_environment_names.join(', ')) : 'None'],
       ['Allowed output types', policy.allowed_output_types ? policy.allowed_output_types.join(', ') : 'Any']
     ]);

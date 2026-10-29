@@ -409,10 +409,10 @@ coding agent, then press **Refresh**.
    (`task_revision`) or **unversioned**. With exactly one task, the console selects
    it for you. Otherwise select one. The browser remembers your choice for this
    console.
-   - **No task is registered** means the console configuration lists no task. Put
-     your task package in `siderius_workspace/tasks/<id>/`, register it with your
-     coding agent (see [project setup](../../../docs/getting-started/README.md)),
-     and restart the console.
+   - **No task is configured** means `siderius_workspace/settings/console.json`
+     lists no task. Add your task there as described in step 2 of
+     [Set up and open the console](#set-up-and-open-the-console), then restart the
+     console.
    - **Tasks could not be loaded** shows the reason; select **Retry**.
 3. The right panel reads the package in the workspace sandbox. While it reads,
    it says **Reading the task package in the sandbox…**; the page updates itself.
@@ -439,18 +439,19 @@ coding agent, then press **Refresh**.
    ("Choose a task first") and their pages show a **Choose a task** button.
 
 The **Task version** card below the panel is where you switch the task version an
-open workflow uses; see [Bind a task version](#bind-a-task-version).
+open workflow uses; its findings then open in the Workflow save step. See
+[Bind a task version](#bind-a-task-version).
 
 ## Bind a task version
 
 The task chip in the Workflow page bar shows the task package and version; click it
-to open the **Task version** card on the **Task** tab. That card always states which task package and
+to open the **Task version** card on the **Task** tab. That card states which task package and
 version the open workflow uses. Versions are offered only for configured tasks
 that declare `task_revision`; otherwise the panel says that none are configured.
 
 In the **Task version** card, explicitly choose a configured task package/version and
-**Update workflow references**. Inspect the Python diff and task findings, confirm
-them on the Task tab, then return to **Workflow** and **Save version**. An unbound reusable workflow requires a separate
+**Update workflow references**. The console returns to **Workflow**, where the save
+step shows the Python diff and the task findings; confirm them and **Save version**. An unbound reusable workflow requires a separate
 confirmation to adopt its currently observed snapshot; save that binding before
 editing its scientific settings.
 
