@@ -14,7 +14,7 @@ from collections import deque
 from collections.abc import Callable, Mapping
 from fractions import Fraction
 
-from core.runtime_control.scheduling import ResourceRequest
+from core.runtime_control.scheduling import HostBudget, ResourceRequest
 from workflows.definition.fanout import execution_families
 
 from .models import CandidateRunRequest
@@ -106,15 +106,64 @@ def _max_flow(capacity: dict[tuple, dict[tuple, Fraction | None]], source, sink)
         total += bottleneck
 
 
-def envelope_request(request: CandidateRunRequest, serial: ResourceRequest) -> ResourceRequest:
-    """The one reservation a parallel run takes: the per-quantity peak.
+class ParallelUnitTooLarge(ValueError):
+    """One declared unit cannot fit the host budget even alone (typed refusal)."""
 
-    ``serial`` is the operation's own declaration and the floor of every
-    quantity (undeclared units run alone under it; the run never reserves less
-    than it declared). Identity, wall time and the time-budget flag come from it. The GPU part is one slot holding
-    the peak VRAM sum, so every unit always fits its own envelope (multi-GPU
-    envelopes are later work).
+
+def require_units_fit(request: CandidateRunRequest, budget: HostBudget) -> None:
+    """Refuse a declared unit that fits no GPU slot, host memory or CPU slots alone.
+
+    This is the only parallel-specific refusal: anything larger than one unit is
+    clamped (``envelope_request``) and merely runs with less concurrency.
     """
+    by_capability = {node.id: node.capability for node in request.preview.document.definition.nodes}
+    slot = max(budget.gpus, key=lambda item: item.ceiling.effective_gib, default=None)
+    for node_id, item in declared_units(request).items():
+        capability = by_capability[node_id]
+        remedy = (
+            f"lower {capability!r} in parallel.capabilities, or remove {capability!r} from it "
+            "so its units run alone under the operation's resources declaration"
+        )
+        if item.gpu and item.vram_gib is not None:
+            if slot is None:
+                raise ParallelUnitTooLarge(
+                    f"parallel unit {node_id!r} ({capability}) needs {item.vram_gib:.2f} GiB VRAM "
+                    f"but the host budget declares no GPU slot; {remedy}"
+                )
+            if item.vram_gib > slot.ceiling.effective_gib:
+                raise ParallelUnitTooLarge(
+                    f"parallel unit {node_id!r} ({capability}) needs {item.vram_gib:.2f} GiB VRAM; "
+                    f"the largest GPU slot {slot.uuid} holds {slot.ceiling.effective_gib:.2f} GiB; "
+                    f"{remedy}"
+                )
+        if item.host_memory_gib > budget.host_memory_gib:
+            raise ParallelUnitTooLarge(
+                f"parallel unit {node_id!r} ({capability}) needs {item.host_memory_gib:.2f} GiB "
+                f"host memory; the host budget declares {budget.host_memory_gib:.2f} GiB; {remedy}"
+            )
+        if item.cpu_slots > budget.cpu_slots:
+            raise ParallelUnitTooLarge(
+                f"parallel unit {node_id!r} ({capability}) needs {item.cpu_slots} CPU slots; "
+                f"the host budget declares {budget.cpu_slots}; {remedy}"
+            )
+
+
+def envelope_request(
+    request: CandidateRunRequest, serial: ResourceRequest, budget: HostBudget
+) -> ResourceRequest:
+    """The one reservation a parallel run takes: its peak, clamped to the host's capacity.
+
+    Each quantity is the peak concurrent demand of the declared units, clamped
+    to what the budget can hold (VRAM to the largest slot's effective ceiling,
+    memory, CPU slots and unit slots to the budget totals), but never below the
+    largest single unit nor below ``serial``, the run's own declaration (the
+    run never reserves less than it declared; undeclared units run alone under
+    it). Units that do not fit together then wait in
+    FIFO order inside the grant: concurrency degrades, admission does not fail.
+    Identity, wall time and the time-budget flag come from ``serial``. The GPU
+    part is one slot (multi-GPU envelopes are later work).
+    """
+    require_units_fit(request, budget)
     units = declared_units(request)
     # Never below the run's own declaration: a reservation smaller than what the
     # run is declared to use would undercount it beside other runs.
@@ -124,12 +173,22 @@ def envelope_request(request: CandidateRunRequest, serial: ResourceRequest) -> R
     )
     ancestors = dependency_ancestors(dict(shape.predecessors))
 
-    def peak(weight: Callable[[CapabilityResources], float]) -> Fraction:
-        return max_weight_antichain(
-            {key: Fraction(weight(item)) for key, item in units.items()}, ancestors
+    def peak(weight: Callable[[CapabilityResources], float]) -> float:
+        return float(
+            max_weight_antichain(
+                {key: Fraction(weight(item)) for key, item in units.items()}, ancestors
+            )
         )
 
-    vram = max(float(peak(lambda item: item.vram_gib or 0.0)), _floor(floor, "vram_gib"))
+    def single(weight: Callable[[CapabilityResources], float]) -> float:
+        return max((weight(item) for item in units.values()), default=0.0)
+
+    def clamped(weight: Callable[[CapabilityResources], float], name: str, capacity: float):
+        least = max(single(weight), _floor(floor, name))
+        return max(min(max(peak(weight), _floor(floor, name)), capacity), least)
+
+    largest_slot = max((slot.ceiling.effective_gib for slot in budget.gpus), default=0.0)
+    vram = clamped(lambda item: item.vram_gib or 0.0, "vram_gib", largest_slot)
     gpu = vram > 0
     return ResourceRequest(
         unit_id=serial.unit_id,
@@ -137,13 +196,13 @@ def envelope_request(request: CandidateRunRequest, serial: ResourceRequest) -> R
         gpu_count=1 if gpu else 0,
         vram_gib=vram if gpu else None,
         vram_source="configured_cap" if gpu else None,
-        host_memory_gib=max(
-            float(peak(lambda item: item.host_memory_gib)), _floor(floor, "host_memory_gib")
+        host_memory_gib=clamped(
+            lambda item: item.host_memory_gib, "host_memory_gib", budget.host_memory_gib
         ),
-        cpu_slots=max(int(peak(lambda item: item.cpu_slots)), int(_floor(floor, "cpu_slots"))),
+        cpu_slots=int(clamped(lambda item: item.cpu_slots, "cpu_slots", budget.cpu_slots)),
         wall_seconds=serial.wall_seconds,
         time_budgeted=serial.time_budgeted,
-        unit_slots=max(int(peak(lambda item: 1)), 1),
+        unit_slots=int(max(min(peak(lambda item: 1), budget.max_concurrent_units), 1)),
     )
 
 

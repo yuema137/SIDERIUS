@@ -28,8 +28,9 @@ from tests.unit.tools.candidate_operations.test_operation_scheduler import (
 )
 from tests.unit.tools.candidate_worker.conftest import prepared
 from tools.candidate_operations import CandidateOperation, submit_operation
+from tools.candidate_operations.host_ledger import HostScheduling
 from tools.candidate_operations.host_queue import wait_for_placement
-from tools.candidate_operations.models import OperationResources
+from tools.candidate_operations.models import OperationFailure, OperationResources
 from tools.candidate_worker.parallel_envelope import dependency_ancestors, max_weight_antichain
 from tools.candidate_worker.parallel_models import (
     CapabilityResources,
@@ -190,6 +191,79 @@ def test_parallel_budget_has_exactly_one_authority(prepared, tmp_path, children)
     assert code == "parallel_budget_required"
     with pytest.raises(ValueError, match="exactly one budget"):
         admitted_run_budget(no_ledger.request.parallel, None)
+
+
+def _gpu_unit(name: str, ordinal: int, vram: float) -> ResourceRequest:
+    return ResourceRequest(
+        unit_id=name,
+        dispatch_ordinal=ordinal,
+        gpu_count=1,
+        vram_gib=vram,
+        vram_source="configured_cap",
+        host_memory_gib=1.0,
+        cpu_slots=1,
+        wall_seconds=60.0,
+    )
+
+
+def test_a_peak_above_capacity_is_admitted_and_runs_with_less_concurrency(
+    prepared, tmp_path, children
+):
+    """Both checks (2 x 3 GiB) could overlap, but the only slot holds 4 GiB.
+
+    Reserving the 6 GiB peak would refuse a run whose every unit fits; the
+    envelope is clamped to the slot (never below one 3 GiB unit), the run is
+    placed, and inside its grant the second check waits for the first.
+    """
+    host = _ledger(tmp_path)
+    operation = _parallel(prepared, validation_vram=3.0)
+    store = _store(tmp_path, "a")
+    assert submit_operation(store, operation, launch_environment=KEY, host=host).observation == (
+        "starting"
+    )
+    (reservation,) = _reservations(host)
+    assert reservation.placement.reserved.vram_gib == 4.0
+    grant = HostGrant.model_validate_json(
+        (_operation_dir(store, operation) / "host_grant.json").read_bytes()
+    )
+    budget = admitted_run_budget(operation.request.parallel, grant)
+    assert budget is not None
+    pair = plan_dispatch(
+        (_gpu_unit("check0", 0, 3.0), _gpu_unit("check1", 1, 3.0)), (), budget, on_refusal="halt"
+    )
+    assert [p.decision for p in pair.placements] == ["placed", "queued"]
+    total = sum(p.reserved.vram_gib or 0.0 for p in pair.placed)
+    assert total <= reservation.placement.reserved.vram_gib  # the grant is never exceeded
+
+
+def test_concurrency_is_clamped_to_the_budget_not_refused(prepared, tmp_path, children):
+    """A 2-unit peak under a 1-unit budget runs one unit at a time instead of failing."""
+    from tests.unit.tools.candidate_operations.test_operation_scheduler import _budget
+
+    root = tmp_path / "narrow"
+    root.mkdir(mode=0o700)
+    narrow = _budget().model_copy(update={"max_concurrent_units": 1})
+    host = HostScheduling(ledger_root=str(root), budget=narrow)
+    operation = _parallel(prepared)
+    handle = submit_operation(_store(tmp_path, "a"), operation, launch_environment=KEY, host=host)
+    assert handle.observation == "starting"
+    (reservation,) = _reservations(host)
+    assert reservation.placement.reserved.unit_slots == 1
+
+
+def test_only_a_unit_that_fits_no_slot_is_refused_and_the_refusal_names_it(
+    prepared, tmp_path, children
+):
+    """Clamping cannot shrink one unit below its own declaration: that is the refusal."""
+    host = _ledger(tmp_path)
+    store = _store(tmp_path, "a")
+    too_big = _parallel(prepared, validation_vram=5.0)
+    with pytest.raises(OperationFailure) as refused:
+        submit_operation(store, too_big, launch_environment=KEY, host=host)
+    assert refused.value.detail.code == "parallel_unit_exceeds_capacity"
+    message = str(refused.value)
+    assert "'check0'" in message and SLOT in message and "4.00 GiB" in message
+    assert "parallel.capabilities" in message
 
 
 def test_a_fully_declared_run_never_reserves_less_than_its_own_declaration(
