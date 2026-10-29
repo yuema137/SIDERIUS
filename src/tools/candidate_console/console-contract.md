@@ -1272,7 +1272,7 @@ until `.inspector-capability-heading` exists. The page-bar `#problems-chip` mirr
 and focuses the first problem. A step line (`#step-indicator`, `role="navigation"`, not a
 `<nav>` element) shows Task › Workflow › Run › Results on Workflow (Task until a source is
 open), Run and Monitor, with `aria-current="step"` and a done mark for completed steps; it
-is hidden on Home. Witness: `tests/browser/page_guidance.mjs`.
+is hidden on Home and on the global Settings page. Witness: `tests/browser/page_guidance.mjs`.
 
 ### Layout system, Settings and onboarding
 
