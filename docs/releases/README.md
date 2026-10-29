@@ -1,5 +1,6 @@
 # Releases
 
+- [v1.1.0](v1.1.0.md) — browser workflows, judged strategies, recorded run seeds and host scheduling.
 - [v0.2.1](v0.2.1.md) — bounded HDF5 reads, loader-inclusive timing and
   explicit cooperative training allocation.
 
