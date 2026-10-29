@@ -38,7 +38,7 @@ Node contract:
   run(input: ValidatorInput) -> ValidatorOutput
   CLI: --model_type, --model_file_path, --test_file_path, --description_file_path,
        --config_fields (JSON), --model_description, --mathematical_definition,
-       --llm_provider, --llm_model_id, --workspace, --run_name
+       --llm_provider, --llm_model_id, --workspace, --run_name, --run_seed
 """
 
 from __future__ import annotations
