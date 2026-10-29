@@ -21,7 +21,7 @@ import stat
 from collections.abc import Iterator
 from pathlib import Path
 
-from .files import canonical, config_bytes, open_directory
+from .files import canonical, config_bytes, open_directory, write_all
 from .readiness_models import WorkspaceEntry, WorkspaceReadiness, WorkspaceStatus
 from .settings_file import (
     SETTINGS_FILE,
@@ -355,7 +355,7 @@ def _create_token(settings: int) -> None:
     except FileExistsError:
         return  # left untouched; load_console validates it with files.token
     try:
-        os.write(descriptor, secrets.token_urlsafe(32).encode())
+        write_all(descriptor, secrets.token_urlsafe(32).encode())
         os.fsync(descriptor)
     finally:
         os.close(descriptor)

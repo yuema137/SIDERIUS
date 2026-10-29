@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from tools.candidate_operations.models import OperationFailure
 
-from .files import canonical, config_bytes, open_directory, private_bytes
+from .files import canonical, config_bytes, open_directory, private_bytes, write_all
 from .models import ConsoleConfig
 from .settings_export import (
     ExportFile,
@@ -98,12 +98,16 @@ def _library_entries(workspace: Path | None, kind: str) -> tuple[tuple[LibraryRe
     return tuple(cards)
 
 
-def _publish_private(path: Path, payload: bytes) -> None:
+def _publish_private(path: Path, payload: bytes) -> bool:
     """Atomic 0600 replace inside a parent opened with no-follow descriptors.
 
-    Temp file + fsync + ``os.replace`` relative to that descriptor, so a swapped
-    parent link cannot redirect the write (design §5.1). The temp file is removed
-    only if publishing fails.
+    Temp file (complete write) + fsync + ``os.replace`` relative to that descriptor,
+    so a swapped parent link cannot redirect the write (design §5.1). On any failure
+    before the replace, the temp file this call created is removed and the previous
+    file is untouched; a failed removal is recorded as a note on the original
+    exception, which is re-raised. Returns ``False`` when the file was replaced but
+    the directory fsync failed, so the new file is in place but its durability is
+    not confirmed.
     """
     import secrets
 
@@ -114,17 +118,28 @@ def _publish_private(path: Path, payload: bytes) -> None:
             temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory
         )
         try:
-            os.fchmod(descriptor, 0o600)
-            os.write(descriptor, payload)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        try:
+            try:
+                os.fchmod(descriptor, 0o600)
+                write_all(descriptor, payload)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
             os.replace(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
-        except BaseException:
-            os.unlink(temporary, dir_fd=directory)
+        except BaseException as error:
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup:
+                error.add_note(
+                    f"temporary file {temporary} could not be removed: {cleanup.strerror}"
+                )
             raise
-        os.fsync(directory)
+        try:
+            os.fsync(directory)
+        except OSError:
+            return False
+        return True
     finally:
         os.close(directory)
 
@@ -170,7 +185,7 @@ class ConsoleSettings:
                 digest,
                 (
                     f"settings/global_settings.json is not valid {SETTINGS_SCHEMA} JSON at "
-                    f"{invalid_fields(error)}. Fix or "
+                    f"{invalid_fields(error, payload)}. Fix or "
                     "restore the file and Reload, or choose values here and Save to replace it."
                 ),
             )
@@ -325,14 +340,26 @@ class ConsoleSettings:
                     422, "settings_invalid", "settings fail console validation; run check"
                 ) from None
             try:
-                _publish_private(path, payload)
-            except (OSError, OperationFailure):
+                durable = _publish_private(path, payload)
+            except (OSError, OperationFailure) as error:
+                leftover = any(
+                    "could not be removed" in note for note in getattr(error, "__notes__", ())
+                )
                 raise SettingsRefusal(
                     422,
                     "settings_invalid",
-                    "the settings folder is unavailable or contains a link; nothing was saved",
+                    "the settings folder is unavailable or contains a link; nothing was saved"
+                    + ("; a temporary file may remain in settings/" if leftover else ""),
                 ) from None
-        return self.view()
+        view = self.view()
+        if durable:
+            return view
+        return view.model_copy(
+            update={
+                "notice": "Saved, but the server could not confirm the save is on disk; "
+                "save again or check the disk before restarting."
+            }
+        )
 
     def upload(self, upload: LibraryUpload) -> LibraryRef:
         """Validate, then publish once into the workspace library; never replaces a file."""
