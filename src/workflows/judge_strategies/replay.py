@@ -30,6 +30,7 @@ from .plan import (
     call_request,
     decide,
     next_call,
+    prompt_chars,
     require_call_capacity,
     strategy_route,
 )
@@ -108,5 +109,14 @@ def replay_llm_strategy(
         raise StrategyError(f"strategy call chain is refused: {error}") from error
     if decide(kind, invocation, calls) != record.outcome:
         raise StrategyError("re-derived strategy outcome differs from the recorded outcome")
+    if record.outcome.failure_code == "prompt_too_large":
+        pending = next_call(kind, invocation, calls)
+        assert pending is not None  # decide() verified the over-budget pending call
+        request = call_request(digest, pending, calls)
+        if (
+            prompt_chars(pending, request) != record.unsent_prompt_chars
+            or pending.template.identity(request).prompt_sha256 != record.unsent_prompt_sha256
+        ):
+            raise StrategyError("re-derived unsent prompt size or digest differs from the record")
     _require_accounted(evidence_dir, accounted)
     return StrategyResult(outcome=record.outcome, evidence_sha256=expected_sha256)

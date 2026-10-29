@@ -233,9 +233,23 @@ class StrategyEvidence(JudgeModel):
     static_call_bound: int = Field(gt=0)
     calls: tuple[Digest, ...]
     outcome: StrategyOutcome
+    unsent_prompt_chars: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
+    )
+    unsent_prompt_sha256: Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def bounded(self) -> Self:
+        over_budget = self.outcome.failure_code == "prompt_too_large"
+        if any(
+            (value is not None) != over_budget
+            for value in (self.unsent_prompt_chars, self.unsent_prompt_sha256)
+        ):
+            raise ValueError(
+                "unsent prompt size and digest are required exactly for prompt_too_large"
+            )
         if len(self.calls) > self.static_call_bound:
             raise ValueError("recorded calls exceed the static call bound")
         precall = self.outcome.failure_code in PRECALL_FAILURES
