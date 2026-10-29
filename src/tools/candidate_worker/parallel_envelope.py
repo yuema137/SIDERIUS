@@ -109,15 +109,16 @@ def _max_flow(capacity: dict[tuple, dict[tuple, Fraction | None]], source, sink)
 def envelope_request(request: CandidateRunRequest, serial: ResourceRequest) -> ResourceRequest:
     """The one reservation a parallel run takes: the per-quantity peak.
 
-    ``serial`` is the operation's own declaration. It joins the peak only when a
-    node is undeclared (such a unit runs alone under it); identity, wall time and
-    the time-budget flag always come from it. The GPU part is one slot holding
+    ``serial`` is the operation's own declaration and the floor of every
+    quantity (undeclared units run alone under it; the run never reserves less
+    than it declared). Identity, wall time and the time-budget flag come from it. The GPU part is one slot holding
     the peak VRAM sum, so every unit always fits its own envelope (multi-GPU
     envelopes are later work).
     """
     units = declared_units(request)
-    alone = len(units) < len(request.preview.document.definition.nodes)
-    floor = serial if alone else None
+    # Never below the run's own declaration: a reservation smaller than what the
+    # run is declared to use would undercount it beside other runs.
+    floor = serial
     shape = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     )

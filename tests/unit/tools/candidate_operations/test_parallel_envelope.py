@@ -190,3 +190,52 @@ def test_parallel_budget_has_exactly_one_authority(prepared, tmp_path, children)
     assert code == "parallel_budget_required"
     with pytest.raises(ValueError, match="exactly one budget"):
         admitted_run_budget(no_ledger.request.parallel, None)
+
+
+def test_a_fully_declared_run_never_reserves_less_than_its_own_declaration(
+    prepared, tmp_path, children
+):
+    """Every capability declared at 1 GiB, the run declared 3.5 GiB: reserving the
+    1 GiB peak would undercount it beside other runs on the same GPU."""
+    host = _ledger(tmp_path)
+    operation = _parallel(prepared, validation_vram=0.5)
+    operation = operation.model_copy(
+        update={
+            "resources": OperationResources(
+                gpu_count=1,
+                vram_gib=3.5,
+                vram_source="configured_cap",
+                host_memory_gib=12.0,
+                cpu_slots=6,
+                time_budgeted=False,
+            )
+        }
+    )
+    submit_operation(_store(tmp_path, "a"), operation, launch_environment=KEY, host=host)
+    (reservation,) = _reservations(host)
+    reserved = reservation.placement.reserved
+    assert (reserved.vram_gib, reserved.host_memory_gib, reserved.cpu_slots) == (3.5, 12.0, 6)
+
+
+def test_a_parallel_request_without_a_graph_profile_is_refused_typed(prepared, tmp_path, children):
+    """The fixed (profile-less) chain used to surface a bare ValueError."""
+    from tests.unit.tools.candidate_operations.test_operation_scheduler import _code
+
+    host = _ledger(tmp_path)
+    operation = _parallel(prepared)
+    fixed = operation.model_copy(
+        update={
+            "request": operation.request.model_copy(
+                update={
+                    "preview": operation.request.preview.model_copy(
+                        update={"execution_profile": None}
+                    )
+                }
+            )
+        }
+    )
+    launch = lambda: submit_operation(  # noqa: E731
+        _store(tmp_path, "a"), fixed, launch_environment=KEY, host=host
+    )
+    assert _code(launch) == "parallel_profile"
+    assert _reservations(host) == ()

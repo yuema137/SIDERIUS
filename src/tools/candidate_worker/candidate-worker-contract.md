@@ -1623,9 +1623,9 @@ run reserves one entry, its envelope, computed from the graph:
   the maximum-weight antichain of the declared units
   (`max_weight_antichain`: weighted Dilworth via exact-rational max-flow). Each
   peak is reachable, though not necessarily in the same instant as the others;
-- `serial` (the operation's own `resources` declaration) joins the peak only
-  when some node is undeclared, since such a unit runs alone under it. Unit id,
-  ordinal, wall time and `time_budgeted` always come from it;
+- `serial` (the operation's own `resources` declaration) is the floor of every
+  quantity: the run never reserves less than it declared (undeclared units run
+  alone under it). Unit id, ordinal, wall time and `time_budgeted` come from it;
 - the GPU part is one slot holding the peak VRAM sum (`gpu_count=1`,
   `vram_source="configured_cap"`), so every unit always fits its own envelope.
   Multi-GPU envelopes are not supported; a peak above every slot's ceiling is
