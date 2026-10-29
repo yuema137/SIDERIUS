@@ -204,12 +204,14 @@ def test_fetch_data_refuses_a_group_writable_data_folder(bundle, workspace):
     """Defect: the data writer puts task data where another user could replace it.
 
     Fails if fetch_data exits 0 or writes a shard when ``data/`` is group-writable.
+    A relative label must not become a chmod command aimed at the caller's cwd.
     """
     root, _ = workspace
     (root / "data").chmod(0o770)
     result = _fetch(bundle, root)
     assert result.returncode == 2
     assert "data must not have group/other write permissions" in result.stderr
+    assert "chmod" not in result.stderr
     assert not (root / "data" / "quickstart").exists()
 
 
