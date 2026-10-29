@@ -6,6 +6,7 @@ from .logs import read_operation_log
 from .loop_resume import (
     loop_control_requests,
     loop_root_operation,
+    loop_segment_advice,
     request_loop_pause,
     review_loop_resume,
 )
@@ -75,6 +76,7 @@ __all__ = [
     "lookup_operation_request",
     "loop_control_requests",
     "loop_root_operation",
+    "loop_segment_advice",
     "operation_admitted",
     "operation_request_digest",
     "read_operation",

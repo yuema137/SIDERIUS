@@ -37,6 +37,7 @@ from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
 from .graph_models import GraphNodeEvidence, GraphRouteEvidence, GraphTrace
 from .inputs import NativeInputs
+from .loop_models import ResumeAdvice
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .readiness import NodeRouting
 from .training_admission import TrainingAdmission, admit_training
@@ -54,10 +55,22 @@ def execute_fanout(
     history: ChainState | None = None,
     budget: WorkerBudget | None = None,
     host_budget: HostBudget | None = None,
+    operator_advice: ResumeAdvice | None = None,
 ) -> CandidateRunReceipt:
-    """Run one body; ``host_budget`` is the admitted parallel budget (``None``: serial)."""
+    """Run one body; ``host_budget`` is the admitted parallel budget (``None``: serial).
+
+    ``operator_advice`` is the Resume advice of the segment dispatching this body.
+    """
     body = GraphBody.admit(
-        request, initial, composition, config, iteration, history, budget, host_budget
+        request,
+        initial,
+        composition,
+        config,
+        iteration,
+        history,
+        budget,
+        host_budget,
+        operator_advice=operator_advice,
     )
     if host_budget is None:
         dispatch_serial(body)
@@ -104,6 +117,8 @@ class GraphBody:
     slots: dict[str, GraphNodeEvidence]
     #: LLM COMBINE adaptors' admitted routes, rubrics and judge budget (B6-8a).
     judge: JudgeAdaptorContext | None
+    #: The dispatching segment's Resume advice, composed into the proposal input only.
+    operator_advice: ResumeAdvice | None = None
     results: dict[str, NodeOutput] = field(default_factory=dict)
     evidence: dict[str, GraphNodeEvidence] = field(default_factory=dict)
     outcomes: dict[str, AdaptorOutcome] = field(default_factory=dict)
@@ -121,6 +136,8 @@ class GraphBody:
         history: ChainState | None,
         budget: WorkerBudget | None,
         host_budget: HostBudget | None = None,
+        *,
+        operator_advice: ResumeAdvice | None = None,
     ) -> "GraphBody":
         definition = request.preview.document.definition
         shape = execution_families(definition, request.preview.execution_profile)
@@ -168,6 +185,7 @@ class GraphBody:
             inputs,
             slots,
             judge,
+            operator_advice,
         )
 
     @property
@@ -245,6 +263,7 @@ class GraphBody:
                     interpretation_output=interpreted,
                     admitted=self.admitted,
                     history=self.history,
+                    operator_advice=self.operator_advice,
                 )
             )
         selected = self.inputs[shape.families[0].proposal if node_id == shape.tuning else node_id]

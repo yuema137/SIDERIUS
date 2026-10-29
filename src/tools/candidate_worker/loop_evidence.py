@@ -29,7 +29,7 @@ from .loop_stop import (
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 if TYPE_CHECKING:
-    from .loop_resume import Checkpoint
+    from .loop_resume import AdviceSchedule, Checkpoint
 
 
 def initial_history(request: CandidateRunRequest, initial: CandidateRunReceipt) -> ChainState:
@@ -148,7 +148,14 @@ def verified_loop(
     successor = has_successor(initial, receipt)
     if trace.attempted_iterations < loop.final_iteration and not successor:
         require_unused_next(request, initial, trace.attempted_iterations)
-    _, bodies, scores = replay_completed(request, initial, trace.attempted_iterations)
+    from .loop_resume import segment_advice
+
+    _, bodies, scores = replay_completed(
+        request,
+        initial,
+        trace.attempted_iterations,
+        advice=segment_advice(initial, trace.segment_id),
+    )
     last = bodies[-1] if bodies else None
     derivation = derive_stop(request, initial, bodies, scores)
     derived, verdicts = derivation.stop_reason, derivation.verdicts
@@ -284,13 +291,20 @@ def require_unused_next(
 
 
 def replay_completed(
-    request: CandidateRunRequest, initial: CandidateRunReceipt, completed: int
+    request: CandidateRunRequest,
+    initial: CandidateRunReceipt,
+    completed: int,
+    *,
+    advice: "AdviceSchedule" = (),
 ) -> tuple[ChainState, tuple[CandidateRunReceipt, ...], tuple[BodyScore, ...]]:
     """Shared verified-prefix fold for readback and continuation history.
 
     Returns the folded history, the verified body receipts in iteration order and the
     completed bodies' scores, projected from the same records and never from the history.
+    ``advice`` (``segment_advice``) gives each body the Resume advice its segment received.
     """
+    from .loop_resume import body_advice
+
     state = initial_history(request, initial)
     bodies: list[CandidateRunReceipt] = []
     scores: list[BodyScore] = []
@@ -309,7 +323,14 @@ def replay_completed(
         ):
             if getattr(body, name) != getattr(initial, name):
                 raise ValueError("loop body identity changed")
-        verify_graph_trace(request, initial, body, iteration=iteration, history=state)
+        verify_graph_trace(
+            request,
+            initial,
+            body,
+            iteration=iteration,
+            history=state,
+            operator_advice=body_advice(advice, iteration),
+        )
         bodies.append(body)
         if body.status != "completed" and iteration != completed:
             raise ValueError("loop continued without successful required feedback")

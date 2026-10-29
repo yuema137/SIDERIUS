@@ -186,13 +186,18 @@ even when using the default models.
    A running authored research loop shows **Stop at next boundary**: the current
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
-   resumed as a new segment of the same run, which shows its own results.
+   resumed, optionally with your advice, as a new segment of the same run, which
+   shows its own results.
    A loop ended early by a declared stop condition says why, in plain words.
    A condition set to **Pause and ask me** pauses the loop instead and reads
    "Waiting for your input", followed by what was met, for example "No improvement
    for 3 bodies (best 0.81 at body 4, higher is better). Paused after body 7 of 12."
    Check the per-iteration results, then choose **Review resume** and **Resume loop**
-   to continue with the next body. If you pressed Stop while it was waiting, the run
+   to continue with the next body. After **Review resume** you can type advice for
+   the next bodies (up to 4000 characters). Their proposal step receives it, and it
+   replaces any advice an earlier resume gave. The box starts with this segment's
+   advice. It locks once you select **Resume loop**, so a retry sends the same text.
+   The resumed segment then shows "Resumed with your advice: …". If you pressed Stop while it was waiting, the run
    cannot continue and no Resume is offered.
    A loop with a judge stop condition lists each judge decision under it, with
    the judge's own reason when the call decided.

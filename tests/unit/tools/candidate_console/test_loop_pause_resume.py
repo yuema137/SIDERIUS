@@ -253,7 +253,38 @@ def test_resume_submits_reviewed_digest_with_root_credential_names(console_confi
     assert submission.request_id == request_id
     assert submission.request.predecessor_operation_id == predecessor
     assert submission.request.expected_receipt_digest == DIGEST
+    assert submission.request.operator_advice is None
     assert environment == {"OPENAI_API_KEY": "private-value"}
+
+
+def test_resume_passes_trimmed_advice_and_refuses_invalid_advice_with_422(
+    console_config, monkeypatch
+):
+    """Fails if the console drops or alters the operator's Resume advice on its way to the
+    operations owner, or submits (or echoes) advice the owner's type refuses."""
+    config = _credentials(console_config, '{"OPENAI_API_KEY":"private-value"}')
+    submitted = []
+
+    def submit(store, submission, launch_environment, *, host, **_options):
+        submitted.append(submission)
+        return _handle(submission.request_id, "starting")
+
+    monkeypatch.setattr(SERVICE + "loop_root_operation", lambda *_: _root())
+    monkeypatch.setattr(SERVICE + "submit_operation", submit)
+    api = client(config)
+    payload = {
+        "request_id": str(uuid4()),
+        "predecessor_operation_id": str(uuid4()),
+        "expected_receipt_digest": DIGEST,
+    }
+    response = api.post("/api/loop-resumes", json=payload | {"operator_advice": " Go wider.\n"})
+    assert response.status_code == 202, response.text
+    assert [item.request.operator_advice for item in submitted] == ["Go wider."]
+    for invalid in ("", "secret\x1b[2J", "x" * 4001):
+        response = api.post("/api/loop-resumes", json=payload | {"operator_advice": invalid})
+        assert response.status_code == 422
+        assert "secret" not in response.text
+    assert len(submitted) == 1
 
 
 def test_resume_missing_credentials_refuses_with_names_only(console_config, monkeypatch):
@@ -313,21 +344,40 @@ def test_repeated_resume_request_replays_before_credential_reads(console_config,
 
 
 @pytest.mark.parametrize(
-    ("kind", "receipt", "successor", "expected_loop"),
+    ("kind", "receipt", "successor", "advice", "expected_loop"),
     (
-        ("candidate_loop_resume", None, None, {"final_iteration": 3, "attempted_iterations": None}),
-        ("candidate", _paused(1), uuid4(), {"final_iteration": 3, "attempted_iterations": 1}),
+        (
+            "candidate_loop_resume",
+            None,
+            None,
+            None,
+            {"final_iteration": 3, "attempted_iterations": None},
+        ),
+        (
+            "candidate_loop_resume",
+            None,
+            None,
+            "Try a smaller width.",
+            {
+                "final_iteration": 3,
+                "attempted_iterations": None,
+                "operator_advice": "Try a smaller width.",
+            },
+        ),
+        ("candidate", _paused(1), uuid4(), None, {"final_iteration": 3, "attempted_iterations": 1}),
     ),
-    ids=("active-resume-segment", "paused-root-with-successor"),
+    ids=("active-resume-segment", "advised-resume-segment", "paused-root-with-successor"),
 )
 def test_status_projects_resume_segment_bound_and_successor(
-    console_config, monkeypatch, kind, receipt, successor, expected_loop
+    console_config, monkeypatch, kind, receipt, successor, advice, expected_loop
 ):
-    """Fails if a resume segment loses its root bound (hiding Stop/Pause) or the
-    successor link is dropped or breaks the strict status view."""
+    """Fails if a resume segment loses its root bound (hiding Stop/Pause), the
+    successor link is dropped or breaks the strict status view, a segment's Resume advice
+    is not shown, or an advice-free segment's status gains an ``operator_advice`` key."""
     operation_id = uuid4()
     monkeypatch.setattr(SERVICE + "operation_admitted", lambda config, value: True)
     monkeypatch.setattr(SERVICE + "loop_control_requests", lambda config, value: (False, False))
+    monkeypatch.setattr(SERVICE + "loop_segment_advice", lambda config, value: advice)
     monkeypatch.setattr(
         SERVICE + "read_operation",
         lambda config, value: _snapshot(value, kind=kind, receipt=receipt, successor=successor),

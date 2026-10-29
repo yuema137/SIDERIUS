@@ -18,7 +18,7 @@ from tools.workspace_sandbox.runner import (
 )
 
 from .graph_evidence import read_graph_control
-from .loop_models import LoopContinuation
+from .loop_models import LoopContinuation, ResumeAdvice
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .parallel_models import (
     GRANT_CONTROL_FILE,
@@ -54,6 +54,36 @@ def read_continuation(initial: CandidateRunReceipt, segment_id: UUID) -> LoopCon
     if linked != value:
         raise ValueError("continuation does not match reserved successor")
     return value
+
+
+AdviceSchedule = tuple[tuple[int, ResumeAdvice | None], ...]
+
+
+def segment_advice(initial: CandidateRunReceipt, segment_id: UUID | None) -> AdviceSchedule:
+    """``(resume point, Resume advice)`` of every resumed segment up to ``segment_id``.
+
+    Oldest first; the root segment has no advice. Read from the verified continuation
+    bindings, so readback replays each body's proposal with the advice it received.
+    """
+    entries: list[tuple[int, ResumeAdvice | None]] = []
+    seen: set[UUID] = set()
+    while segment_id is not None:
+        if segment_id in seen:
+            raise ValueError("loop continuation cycle")
+        seen.add(segment_id)
+        binding = read_continuation(initial, segment_id)
+        entries.append((binding.completed_iterations, binding.resume_advice()))
+        segment_id = binding.predecessor_segment
+    return tuple(reversed(entries))
+
+
+def body_advice(schedule: AdviceSchedule, iteration: int) -> ResumeAdvice | None:
+    """The advice of the segment that dispatched body ``iteration`` (it replaces earlier)."""
+    advice = None
+    for resumed_at, item in schedule:
+        if resumed_at < iteration:
+            advice = item
+    return advice
 
 
 def require_clean(control: Path) -> ObservedExecutionResult:
@@ -185,7 +215,12 @@ def resume_history(
     if stop_requested(initial):
         raise ValueError("stopped loop cannot resume")
     require_unused_next(request, initial, binding.completed_iterations)
-    state, bodies, scores = replay_completed(request, initial, binding.completed_iterations)
+    state, bodies, scores = replay_completed(
+        request,
+        initial,
+        binding.completed_iterations,
+        advice=segment_advice(initial, binding.predecessor_segment),
+    )
     last = bodies[-1] if bodies else None
     if last is None or last.status != "completed":
         raise ValueError("resume requires completed required feedback")

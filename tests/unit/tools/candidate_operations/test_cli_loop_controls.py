@@ -195,3 +195,69 @@ def test_refused_review_writes_no_resume_request(store, tmp_path, monkeypatch, c
     )
     assert (status, json.loads(err)["code"]) == (2, "loop_resume")
     assert not output.exists()
+
+
+def test_advice_file_is_saved_in_the_resume_request_and_invalid_advice_writes_nothing(
+    store, tmp_path, monkeypatch, capsys
+):
+    """Fails if ``--advice-file`` text does not reach the saved request (trimmed, so a
+    resubmission is byte-identical), or if invalid advice is echoed, reaches review, or
+    leaves a request file behind."""
+    _, path = store
+    reviews = []
+
+    def review(config_arg, operation_id):
+        reviews.append(operation_id)
+        return SimpleNamespace(receipt_digest=DIGEST)
+
+    monkeypatch.setattr(cli, "review_loop_resume", review)
+    args = ("--store-config", str(path), "--operation-id", str(UUID(int=7)))
+    advice = tmp_path / "advice.txt"
+    advice.write_text("  Try a smaller hidden width.\n")
+    output = tmp_path / "advised.json"
+    status, _, _ = invoke(
+        monkeypatch,
+        capsys,
+        "write-loop-resume",
+        *args,
+        "--output",
+        str(output),
+        "--advice-file",
+        str(advice),
+    )
+    assert status == 0
+    saved = CandidateLoopResumeOperation.model_validate_json(output.read_bytes())
+    assert saved.request.operator_advice == "Try a smaller hidden width."
+    # A CRLF (Windows) file binds the same text as its LF form.
+    advice.write_bytes(b"First line.\r\nSecond line.\r\n")
+    crlf = tmp_path / "crlf.json"
+    status, _, _ = invoke(
+        monkeypatch,
+        capsys,
+        "write-loop-resume",
+        *args,
+        "--output",
+        str(crlf),
+        "--advice-file",
+        str(advice),
+    )
+    assert status == 0
+    saved = CandidateLoopResumeOperation.model_validate_json(crlf.read_bytes())
+    assert saved.request.operator_advice == "First line.\nSecond line."
+    marker = "secret\x1b[31m control"
+    for invalid in (marker.encode(), b"   ", b"\xff\xfe", b"x" * 4001, b"secret\rcr"):
+        advice.write_bytes(invalid)
+        refused = tmp_path / "refused.json"
+        status, out, err = invoke(
+            monkeypatch,
+            capsys,
+            "write-loop-resume",
+            *args,
+            "--output",
+            str(refused),
+            "--advice-file",
+            str(advice),
+        )
+        assert (status, out, json.loads(err)["code"]) == (2, "", "invalid_input_or_record")
+        assert "secret" not in err and not refused.exists()
+    assert len(reviews) == 2

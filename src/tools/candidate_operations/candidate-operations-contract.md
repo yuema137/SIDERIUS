@@ -1219,8 +1219,18 @@ partial next body already invalidates the paused readback, so the review finds n
 verified paused segment. The review constructs no process and reads no credentials.
 
 Submit `CandidateLoopResumeOperation(request_id=..., request=CandidateLoopResumeRequest(
-predecessor_operation_id=..., expected_receipt_digest=review.receipt_digest))` through
-`submit_operation`. The ordinary store lock serializes review, immutable operation
+predecessor_operation_id=..., expected_receipt_digest=review.receipt_digest,
+operator_advice=None))` through `submit_operation`. `operator_advice` is optional
+untrusted text for the resumed segment's proposals (the worker's `OperatorAdvice`:
+surrounding whitespace removed, 1..4000 characters, no `Cc`/`Cf` (control or format) characters except
+newline and tab; invalid advice refuses at validation). It is omitted when absent, so
+advice-free requests keep their bytes and request digest. Reusing a request ID with
+different advice is a `conflict`. Reservation copies it into
+`LoopContinuation.operator_advice`, and `read_segment` refuses with `integrity` when
+the native binding's advice disagrees with the admitted request. Delivery and replay
+belong to the worker contract ("Resume advice"). `loop_segment_advice(config,
+operation_id)` is the read-only accessor: the admitted advice of a resume operation,
+`None` for a root or an advice-free resume. The ordinary store lock serializes review, immutable operation
 claim and predecessor successor reservation before dispatch. Reusing the same request
 ID returns the existing operation before mutable checks. Before claiming, admission
 re-verifies the root's captured input files and source snapshot (the same identity
@@ -1282,9 +1292,13 @@ admission, refusals and idempotency are the owner's:
 | `stop-loop` | `request_loop_stop(config, operation_id)` | `LoopStop` marker (requested) |
 | `pause-loop` | `request_loop_pause(config, operation_id)` | `LoopPause` marker (requested) |
 | `review-loop-resume` | `review_loop_resume(config, operation_id)` | paused `OperationSnapshot` with `receipt_digest` |
-| `write-loop-resume ... --output FILE` | review, then construct the request below | the saved `CandidateLoopResumeOperation` |
+| `write-loop-resume ... --output FILE [--advice-file TEXT_FILE]` | review, then construct the request below | the saved `CandidateLoopResumeOperation` |
 
-`write-loop-resume` reviews the paused segment and creates `FILE` once; an existing
+`--advice-file` reads UTF-8 operator advice into `operator_advice`. Invalid advice
+(non-UTF-8, empty after trimming, over 4000 characters, control or format
+characters; CRLF line breaks are first normalized to LF, a lone CR is refused) exits 2
+with `invalid_input_or_record`. It never echoes the text, and nothing is reviewed or
+written. `write-loop-resume` reviews the paused segment and creates `FILE` once; an existing
 file refuses with `output_exists` and is left unchanged, so a retry after a lost
 response submits the same request ID. It does not launch. Launch is the ordinary
 `submit --store-config FILE --request FILE`, which reads the launching process
@@ -1312,6 +1326,7 @@ resume = CandidateLoopResumeOperation(
     request=CandidateLoopResumeRequest(
         predecessor_operation_id=segment,
         expected_receipt_digest=review.receipt_digest,
+        operator_advice="Try a smaller hidden width.",  # optional; omit for none
     ),
 )
 # Create the file once, as the CLI does. FileExistsError means a saved request

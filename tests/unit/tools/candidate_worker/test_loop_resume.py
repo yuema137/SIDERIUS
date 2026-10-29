@@ -1115,3 +1115,206 @@ def test_condition_input_pause_resumes_without_pause_marker_and_refuses_forgery(
     assert resumed.loop_trace.input_request is None
     assert not (root / "pause.json").exists()
     assert len(verify_loop(request, launched, resumed)) == 5
+
+
+ADVICE = "Try a smaller hidden width before adding layers."
+
+
+def test_resume_advice_reaches_only_the_resumed_proposals_and_tampering_is_refused(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """Advice given at Resume reaches the resumed bodies' proposer under
+    ``human:human_advice``, after the declared advice, and never the earlier body.
+
+    Fails if the advice is dropped on the way to the proposal input, leaks into body 1,
+    is not anchored in the binding (an edited binding replays unchanged), or a retry with
+    the same request ID but different advice is accepted.
+    """
+    from agent.schemas.proposal import ProposalInput
+    from tools.candidate_console.service import loop_status
+    from tools.candidate_operations.loop_resume import read_segment
+    from tools.candidate_operations.store import load_record
+    from tools.candidate_worker import training
+    from tools.candidate_worker.layout import proposal_input_path
+    from tools.candidate_worker.loop_evidence import verify_loop
+    from tools.candidate_worker.loop_models import LoopContinuation
+    from tools.candidate_worker.models import CandidateRunReceipt
+    from workflows.definition.fanout import execution_families
+
+    request = loop_request(prepared, final_iteration=2)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    root_id, next_id = uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_at_first(self, value):
+        output = real_tune(self, value)
+        if "iteration_001" in value.storage.local.workspace:
+            request_loop_pause(config, root_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_at_first)
+    submit_operation(
+        config, CandidateOperation(request_id=root_id, request=request), launch_environment=env
+    )
+    process_segments()
+    review = review_loop_resume(config, root_id)
+    submission = CandidateLoopResumeOperation(
+        request_id=next_id,
+        request=CandidateLoopResumeRequest(
+            predecessor_operation_id=root_id,
+            expected_receipt_digest=review.receipt_digest,
+            operator_advice=f"  {ADVICE}\n",
+        ),
+    )
+    submit_operation(config, submission, launch_environment=env)
+    process_segments()
+    resumed = read_operation(config, next_id)
+    assert resumed.receipt.status == "completed", resumed
+    workspace = Path(resumed.receipt.workspace)
+    shape = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    )
+    proposer = shape.interpretation.proposal
+
+    def human(iteration):
+        path = proposal_input_path(
+            workspace, request.preview.execution_profile, proposer, iteration=iteration
+        )
+        value = ProposalInput.model_validate_json(path.read_bytes())
+        return [
+            item.content for item in value.expert_context if item.source_ref == "human:human_advice"
+        ]
+
+    (declared,) = human(1)
+    assert "Operator advice" not in declared
+    assert human(2) == [f"{declared}\n\nOperator advice after body 1:\n{ADVICE}"]
+    assert loop_status(config, resumed).operator_advice == ADVICE
+    assert loop_status(config, read_operation(config, root_id)).operator_advice is None
+    root = workspace / "candidate_run"
+    launched = CandidateRunReceipt.model_validate_json((root / "launch.json").read_bytes())
+    assert len(verify_loop(request, launched, resumed.receipt)) == 2
+
+    # Same request ID, different advice: a conflict, never a second reading of the request.
+    with pytest.raises(OperationFailure) as conflict:
+        submit_operation(
+            config,
+            submission.model_copy(
+                update={
+                    "request": submission.request.model_copy(
+                        update={"operator_advice": "Something else."}
+                    )
+                }
+            ),
+            launch_environment=env,
+        )
+    assert conflict.value.detail.code == "conflict"
+
+    # An edited binding (both copies, consistently) no longer replays body 2's proposal
+    # input, and disagrees with the admitted operation request.
+    paths = (root / f"continuations/{next_id}/continuation.json", root / "successor.json")
+    originals = [path.read_bytes() for path in paths]
+    edited = LoopContinuation.model_validate_json(originals[0]).model_copy(
+        update={"operator_advice": "Use a much larger model."}
+    )
+    for path in paths:
+        path.chmod(0o600)
+        path.write_text(edited.model_dump_json())
+    try:
+        with pytest.raises(ValueError, match="proposal input does not match"):
+            verify_loop(request, launched, resumed.receipt)
+        with pytest.raises(OperationFailure, match="native binding"):
+            read_segment(load_record(config, next_id))
+    finally:
+        for path, payload in zip(paths, originals, strict=True):
+            path.write_bytes(payload)
+    assert len(verify_loop(request, launched, resumed.receipt)) == 2
+
+
+def test_resume_without_advice_replaces_earlier_advice_across_three_segments(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """Advice belongs to the segment whose Resume gave it; a later Resume without advice
+    gives none. Fails if the body dispatched by the third (advice-free) segment receives
+    the second segment's advice, or if readback carries earlier advice forward (the
+    resumed receipt would then refuse), or if the ancestry schedule is misread."""
+    from agent.schemas.proposal import ProposalInput
+    from tools.candidate_worker import training
+    from tools.candidate_worker.layout import proposal_input_path
+    from tools.candidate_worker.loop_evidence import verify_loop
+    from tools.candidate_worker.loop_models import ResumeAdvice
+    from tools.candidate_worker.loop_resume import segment_advice
+    from tools.candidate_worker.models import CandidateRunReceipt
+    from workflows.definition.fanout import execution_families
+
+    request = loop_request(prepared, final_iteration=3)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    root_id, advised_id, plain_id = uuid4(), uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+    pause_during = {"iteration_001": root_id, "iteration_002": advised_id}
+
+    def pause_by_slot(self, value):
+        output = real_tune(self, value)
+        for slot, operation_id in pause_during.items():
+            if slot in value.storage.local.workspace:
+                request_loop_pause(config, operation_id)
+        return output
+
+    def resume(predecessor_id, request_id, advice):
+        review = review_loop_resume(config, predecessor_id)
+        submit_operation(
+            config,
+            CandidateLoopResumeOperation(
+                request_id=request_id,
+                request=CandidateLoopResumeRequest(
+                    predecessor_operation_id=predecessor_id,
+                    expected_receipt_digest=review.receipt_digest,
+                    operator_advice=advice,
+                ),
+            ),
+            launch_environment=env,
+        )
+        process_segments()
+        return read_operation(config, request_id)
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_by_slot)
+    submit_operation(
+        config, CandidateOperation(request_id=root_id, request=request), launch_environment=env
+    )
+    process_segments()
+    assert resume(root_id, advised_id, ADVICE).receipt.status == "paused"
+    last = resume(advised_id, plain_id, None)
+    assert last.receipt.status == "completed", last
+    assert last.receipt.loop_trace.attempted_iterations == 3
+    workspace = Path(last.receipt.workspace)
+    proposer = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    ).interpretation.proposal
+
+    def human(iteration):
+        path = proposal_input_path(
+            workspace, request.preview.execution_profile, proposer, iteration=iteration
+        )
+        value = ProposalInput.model_validate_json(path.read_bytes())
+        return [i.content for i in value.expert_context if i.source_ref == "human:human_advice"]
+
+    (declared,) = human(1)
+    assert human(2) == [f"{declared}\n\nOperator advice after body 1:\n{ADVICE}"]
+    assert human(3) == [declared]
+    launched = CandidateRunReceipt.model_validate_json(
+        (workspace / "candidate_run/launch.json").read_bytes()
+    )
+    assert segment_advice(launched, plain_id) == (
+        (1, ResumeAdvice(after_body=1, text=ADVICE)),
+        (2, None),
+    )
+    assert len(verify_loop(request, launched, last.receipt)) == 3

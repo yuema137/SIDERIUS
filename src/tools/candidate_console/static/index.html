@@ -336,13 +336,17 @@
     <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="monitor-cause" class="monitor-cause" hidden></p><p id="operation-observed" class="muted"></p><details data-ui-flag="developer"><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
     <div id="operation-stop-group" class="actions" hidden><button id="operation-stop-button" type="button">Stop run</button><p class="muted">Ends the run now, including any model call in progress. It cannot be resumed and produces no candidate result; files written so far stay in the run folder.</p></div>
     <p id="operation-stop-status" role="status"></p>
-    <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p><ul id="loop-judge" class="loop-judge" aria-label="Judge verdicts" hidden></ul>
+    <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p><p id="loop-advice" class="muted" hidden></p><ul id="loop-judge" class="loop-judge" aria-label="Judge verdicts" hidden></ul>
       <div id="loop-stop-group" class="actions" hidden><button id="loop-stop" type="button">Stop at next boundary</button><p class="muted">The current body completes; no partial body is kept as a result.</p></div>
       <div id="loop-pause-group" class="actions" hidden><button id="loop-pause" type="button">Pause at next boundary</button><p class="muted">The current body completes; this run can then be reviewed and resumed from the next body.</p></div>
       <p id="loop-stop-status" role="status"></p>
       <p id="loop-continued" hidden>Continued by <a id="loop-successor"></a></p>
       <div id="loop-resume-group" hidden><div class="actions"><button id="loop-resume-review" type="button">Review resume</button><button id="loop-resume" type="button" hidden>Resume loop</button></div>
-        <p id="loop-resume-summary" class="muted"></p><p id="loop-resume-status" role="status"></p></div></section>
+        <p id="loop-resume-summary" class="muted"></p>
+        <div id="loop-resume-advice-group" hidden><label for="loop-resume-advice">Your advice for the next bodies (optional)</label>
+          <textarea id="loop-resume-advice" rows="4" maxlength="4000"></textarea>
+          <p class="muted">Plain text, up to 4000 characters. It is given to the proposal step of every body this resume runs and replaces any earlier advice. It is fixed once you select Resume loop.</p></div>
+        <p id="loop-resume-status" role="status"></p></div></section>
     <section id="native-chain-observation" hidden></section>
     <section id="graph-results-observation" hidden aria-live="polite"></section>
     <h3 id="tokens-heading">Reported LLM tokens</h3>
