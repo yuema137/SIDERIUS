@@ -2808,7 +2808,9 @@ States: `observing` (child running; poll the same URL), `ready`, `failed`
 `unavailable` (`unavailable: {reason, hint}`; `reason` is `sandbox_missing`,
 `data_root_missing`, `manifest_missing` or `llm_config_unreadable`). The model
 profile is read because the child resolves its planner strategy exactly as the
-editor's task observation does.
+editor's task observation does. Console-side failure messages are truncated to
+`tools.setup_review.composition_models.FAILURE_MESSAGE_MAX_CHARS`, the same cap
+used for child failures.
 
 Observation: the request thread reads the manifest digest and model profile, then
 builds `CompositionJob(summary=TaskSummaryRequest(data_root, count_samples))` with
@@ -2831,7 +2833,11 @@ View fields:
   file is read; no secret value can appear.
 - `data_volume`: `{files, bytes, complete, entry_cap}` from a no-follow walk
   (`os.scandir`, symlinks counted as entries and never followed), capped at
-  100 000 entries; `complete=false` when the cap was reached.
+  100 000 entries and a five-second monotonic wall-time budget. Entries on a
+  different `st_dev` from the data root are skipped (including mounted
+  subdirectories). Entry/time caps, skipped devices and filesystem errors yield
+  `complete=false` with partial totals. The deadline is checked between filesystem
+  operations; it cannot interrupt an already-blocked kernel call.
 - `package` (only when `ready`): `identity` (`semantic_fingerprint`,
   `task_data_path_id`, configured `task_revision`, `revision_matches`),
   `description` and `model_io` (the composed `task_description` and

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ from agent.schemas.output_types import OutputTypeName
 from execute_tools.health_checks.roster_projection import HealthRosterProjection
 from tools.setup_review.composition_check import observe_composition
 from tools.setup_review.composition_models import (
+    FAILURE_MESSAGE_MAX_CHARS,
     CompositionJob,
     CompositionObservation,
     DataScopeFacts,
@@ -36,6 +38,7 @@ from workflows.llm_config import parse_llm_config_bytes
 from .models import TaskChoice
 
 DATA_WALK_ENTRY_CAP = 100_000
+DATA_WALK_SECONDS = 5.0
 SummaryState = Literal["observing", "ready", "failed", "unavailable"]
 UnavailableReason = Literal[
     "sandbox_missing", "data_root_missing", "manifest_missing", "llm_config_unreadable"
@@ -157,26 +160,43 @@ class TaskListView(PreviewModel):
 def walk_data_root(root: Path, cap: int = DATA_WALK_ENTRY_CAP) -> DataVolume:
     """Count regular files and bytes; symlinks are counted as entries, never followed.
 
-    An unreadable entry or subdirectory, like the cap, makes the result incomplete.
+    Entry/time caps, unreadable entries and other devices make totals incomplete.
+    The deadline is cooperative: it cannot interrupt a blocked filesystem call.
     """
     files = size = entries = 0
     complete = True
+    deadline = time.monotonic() + DATA_WALK_SECONDS
+    try:
+        device = root.stat().st_dev
+    except OSError:
+        return DataVolume(files=0, bytes=0, complete=False, entry_cap=cap)
     pending = [str(root)]
     while pending:
+        if time.monotonic() >= deadline:
+            complete = False
+            break
         try:
             with os.scandir(pending.pop()) as listing:
                 for entry in listing:
                     entries += 1
-                    if entries > cap:
+                    if entries > cap or time.monotonic() >= deadline:
                         return DataVolume(files=files, bytes=size, complete=False, entry_cap=cap)
+                    info = entry.stat(follow_symlinks=False)
+                    if time.monotonic() >= deadline:
+                        return DataVolume(files=files, bytes=size, complete=False, entry_cap=cap)
+                    if info.st_dev != device:
+                        complete = False
+                        continue
                     if entry.is_dir(follow_symlinks=False):
                         pending.append(entry.path)
                     elif entry.is_file(follow_symlinks=False):
-                        size += entry.stat(follow_symlinks=False).st_size
+                        size += info.st_size
                         files += 1
         except OSError:
             complete = False
-    return DataVolume(files=files, bytes=size, complete=complete, entry_cap=cap)
+    return DataVolume(
+        files=files, bytes=size, complete=complete and time.monotonic() < deadline, entry_cap=cap
+    )
 
 
 def _metric(spec: dict[str, JsonValue]) -> MetricView:
@@ -369,7 +389,8 @@ class TaskSummaries:
                 entry.failure = SummaryFailure(stage=failure.stage, message=failure.message)
         except Exception as error:
             entry.failure = SummaryFailure(
-                stage="console", message=f"{type(error).__name__}: {error}"
+                stage="console",
+                message=f"{type(error).__name__}: {error}"[:FAILURE_MESSAGE_MAX_CHARS],
             )
         with self._lock:
             self._entries[key] = entry
