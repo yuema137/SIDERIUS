@@ -44,6 +44,11 @@ PARALLEL_COPY_KEYS = ("task_description", "forward_contract")
 REQUIRED_PACK_DOCS = ("README.md", "PROVENANCE.md", "STATUS.md")
 MATURITY_LEVEL = re.compile(r"\bL[0-4]\b")
 WORKFLOW_DECLARATIONS_DIR = "workflow_declarations"
+#: Framework-owned release sources of the quickstart example bundle
+#: (``tools.release.build_example_bundle``): not a scientific pack, and its one
+#: Python file is the bundle's data writer, shipped as a file, never imported.
+CONSOLE_BUNDLE_DIR = "console_bundle"
+CONSOLE_BUNDLE_SOURCES = frozenset({"examples/console_bundle/fetch_data.py"})
 WORKFLOW_DECLARATION_SOURCES = frozenset(
     {
         "examples/workflow_declarations/managed_reusable_candidate.py",
@@ -145,6 +150,7 @@ def _pack_dirs(examples_root: Path) -> list[Path]:
         if len(Path(p).parts) > 2
     }
     names.discard(WORKFLOW_DECLARATIONS_DIR)
+    names.discard(CONSOLE_BUNDLE_DIR)
     return sorted(examples_root / name for name in names)
 
 
@@ -245,11 +251,14 @@ def test_negative_an_UNBOUND_pack_task_config_is_still_an_offender() -> None:
 def _is_sanctioned_plugin_source(rel_posix: str) -> bool:
     """D14 re-scope: reference plugin SOURCE lives at exactly
     ``examples/<pack>/plugins/*.py``. The four explicit workflow declaration
-    examples are also sanctioned; this exact-path exception does not permit
-    other Python files in that framework-owned namespace."""
+    examples and the example bundle's ``fetch_data.py`` are also sanctioned;
+    these exact-path exceptions do not permit other Python files in those
+    framework-owned namespaces."""
     parts = rel_posix.split("/")
     if len(parts) >= 2 and parts[:2] == ["examples", WORKFLOW_DECLARATIONS_DIR]:
         return rel_posix in WORKFLOW_DECLARATION_SOURCES
+    if len(parts) >= 2 and parts[:2] == ["examples", CONSOLE_BUNDLE_DIR]:
+        return rel_posix in CONSOLE_BUNDLE_SOURCES
     return len(parts) == 4 and parts[0] == "examples" and parts[2] == "plugins"
 
 

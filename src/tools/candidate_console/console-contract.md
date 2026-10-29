@@ -61,6 +61,194 @@ Undeclared entries are ignored and never logged. Parse refusals are raised
 outside the parser's exception handler, so neither message nor chained cause
 quotes bytes or values; missing declared names are reported by name only.
 
+### Task package mounts (`check`)
+
+Owners: `package_mounts.py` (console admission), `workflows/task_package_refs.py`
+(manifest reference listing; `task_composition._resolve_path` delegates to its
+`resolve_manifest_ref`, so both resolve a ref against the manifest directory).
+
+A reference must be visible to both sandboxed stages. Both mount the manifest
+file, `data_root` and `task_read_only` (preparation also mounts `llm_config_file`;
+the candidate run in `candidate_prepare/bundle.py` does not, so it does not count),
+plus what `workspace_sandbox/command.py` binds for every profile: the serving
+checkout (`runtime_roots()`), `SYSTEM_DIRECTORIES` and `SYSTEM_FILES` (imported
+from `workspace_sandbox.profile`; network files are excluded because preparation
+is offline). `validate_config` (so `check`, `serve` and `CandidateConsole`) calls
+`check_package_mounts(task)` for every task. `manifest_references` reads the
+manifest as YAML without importing task code and lists only what the composition
+resolves: a string `file`, `declaration`, `dir` or `config` value at any depth;
+inside a `config` mapping (task-owned constructor arguments, passed unchanged by
+`_validated_task_config_mapping`) only exact `{ref: <str>}` envelope values, never
+other keys at any depth; and `code_package.root` plus its `files`. A `dir` must
+exist as a directory and the other keys as files; an envelope path has no
+existence requirement (composition only resolves it, so it may be a directory or
+not exist yet). Every listed path's real path (`Path.resolve()`) must equal or lie
+inside the real path of a mounted path. With `--external`, an envelope contributes
+its folder when it is an existing directory, otherwise its parent. Otherwise a
+`SettingsInvalid` names the task, the manifest location and the path, for example
+`task quickstart manifest task_data_path.file names /abs/plugins/_task.py, which is
+outside every mounted path (manifest, data folder, task_read_only, serving
+checkout, system directories); add its package directory to task_read_only`. A manifest that is not a
+YAML mapping is refused the same way. Limits: references inside referenced files
+(for example a Health config naming another file) are not followed; composition
+validity is still decided only by the composition child. The sandbox profile is
+unchanged.
+
+GPU prerequisite (#1145 item 5; no `/sys` is added anywhere): when a task's
+`candidate_devices` contains a `/dev/nvidia<N>` node and `"/sys"` is not in its
+`task_read_only`, `check`/`serve` print to stderr, without failing,
+`Warning: Task <id>: GPU devices are passed but /sys is not mounted read-only; CUDA
+may fail to start inside the run sandbox (see README).`
+
+### Registering a task: `add-task`
+
+Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
+<console.json> (--manifest <path> | --from-bundle DIR) [--task-id ID] [--label TEXT]
+[--env NAME ...] [--network|--no-network] [--device PATH ...] [--prepare-timeout S]
+[--candidate-timeout S] [--external] [--dry-run]`. Exactly one of `--manifest` and
+`--from-bundle` is required; `--from-bundle` is specified in the next section.
+
+- `--config` and `--manifest` must be absolute, normalized and canonical (no
+  symlinks); a relative path is refused with its absolute spelling as a hint.
+- Requires a `console.json` with `workspace_root` that validates as `ConsoleFile`.
+- Package location: without `--external` the canonical manifest must be inside
+  `<workspace_root>/tasks/<name>/` (a manifest directly in `tasks/` is refused);
+  `task_read_only` becomes `[<workspace_root>/tasks/<name>]`. With `--external` any
+  canonical manifest is accepted and `task_read_only` becomes the outermost set of
+  directories holding its referenced files (`dir` references count as themselves),
+  sorted; a missing referenced file is refused. A folder that is `/`, is or
+  contains the home folder (`Path.home()`), or overlaps a console private path
+  (`settings_file.protected_paths`: token, credential file, `settings/`,
+  `library/`, `projects/`, operation and output roots) is refused with
+  `--external would mount <folder>, which ...; move the package files into
+  <workspace>/tasks/<name>/ instead`.
+- `task_id` defaults to `<name>` (external: the manifest's directory name) and must
+  match `^[a-zA-Z0-9_-]{1,80}$`; an existing `task_id` is refused. `label` defaults
+  to `task_id`.
+- The five `TaskChoice` fields without defaults are always written explicitly.
+  `STARTER_VALUES` (one constant) supplies `preparation_timeout_seconds=300.0`,
+  `candidate_timeout_seconds=3600.0` and `candidate_network=true` unless
+  `--prepare-timeout`, `--candidate-timeout` or `--no-network` is given; they are
+  starting values for the operator to review, not resource limits the framework
+  chooses. `candidate_devices` is `--device` when given; otherwise, when stdin is a
+  TTY and `/dev/nvidia*` character devices exist, the command lists them and asks
+  whether to pass them (no answer, EOF or Ctrl-C refuses with exit 2); else it is
+  `[]` and the command prints
+  `candidate_devices: none (...)`. `candidate_environment_names` is
+  `credential_requirements(routes, ()).required_names` (the worker preflight owner)
+  for every route of the task's resolved LLM profile
+  (`setup_review.routes.standard_llm_routes` with literature and analysis enabled,
+  since a task cannot know which nodes its workflows will select), followed by any
+  `--env` names, de-duplicated. No credential value is read.
+- Location fields (`data_root`, `llm_config_file`, output roots) stay omitted, so
+  the layout and global settings fill them. Before writing, the resolved console
+  must validate and `check_package_mounts` must pass for the new task.
+- Write: the new entry is appended to `tasks[]` of the parsed document (other keys
+  keep their order), serialized with `json.dumps(indent=2)`. `publish_task` re-reads
+  the file and refuses when its bytes differ from the bytes read
+  (`console.json changed since add-task read it; nothing was written`), then
+  publishes through `settings_service._publish_private` (temp file 0600, fsync,
+  `os.replace` inside a no-follow parent). `--dry-run` prints the entry and writes
+  nothing.
+- After the write: `init` on the workspace parent creates the task's derived output
+  roots (never `data/<task_id>`) when the file is `<workspace_root>/settings/console.json`;
+  then the same load and report as `check` run, and the command prints
+  `Restart the console to load the new task.` (exit 0). Refusals before the write
+  exit 2 with `add-task refused: ...` and leave the file unchanged; a failing check
+  after the write exits 2 and says the task was added.
+
+### Example bundles: `add-task --from-bundle`
+
+Owners: `example_bundle.py` (format, verification, copy, first setup) and
+`tools.release.build_example_bundle` (the zip). `--from-bundle DIR` takes an
+unpacked bundle folder and reuses every other `add-task` option except
+`--external` (refused) and `--manifest` (derived).
+
+**Bundle layout** (zip `siderius-example-quickstart-<version>.zip`, one top folder
+`siderius-example-quickstart-<version>/`):
+
+| Path | Content |
+| --- | --- |
+| `task/task.yaml` | the task composition manifest; every reference package-relative |
+| `task/declared/*`, `task/plugins/*` | the package files the manifest names |
+| `setup/setup.json` | `BundleSetup{schema_version: "siderius.example-bundle-setup/v1", template_id: TemplateId, label: Label}` (`PreviewModel`: strict, extra fields refused) |
+| `console-task.json` | `BundleTask{schema_version: "siderius.example-bundle-task/v1", task_id: Id, label: Label, preparation_timeout_seconds, candidate_timeout_seconds, candidate_network}`; import reads only `task_id` and `label` (defaults for `--task-id`/`--label`); the resource values are informational and equal `STARTER_VALUES` at build |
+| `fetch_data.py`, `README.md` | data writer and human instructions |
+| `SHA256SUMS` | `<64 hex>  <path>` per line (`sha256sum -c` format), sorted by path, unique, every file except itself; paths must be relative POSIX without `.`, `..` or empty parts |
+
+**Verification** (`read_bundle`, before any write): `DIR` absolute, normalized and
+canonical; `SHA256SUMS` must list `task/task.yaml`, `setup/setup.json` and
+`console-task.json`; each listed file is opened component by component with
+`O_NOFOLLOW`, must be a regular file of at most 16 MiB, and its sha256 must match.
+The verified bytes are kept in memory and are the only bytes used later; files
+not listed are ignored and never copied. Errors: `<path> does not match
+SHA256SUMS; download and unpack the bundle again`, `<path> is missing, a symlink or
+unreadable`, `SHA256SUMS line N is not '<sha256>  <path>'`, and invalid
+descriptors (`setup/setup.json is not a valid ... descriptor`).
+
+**Pre-copy checks** (`plan_import`): console.json validates and resolves, has
+`workspace_root`, and `experiment_setups.browser_creatable` is true (else
+refused: the first setup could not be created); `task_id` (`--task-id`, else
+`console-task.json`) matches `^[a-zA-Z0-9_-]{1,80}$`, is not configured, and
+`<workspace>/tasks/<task_id>` does not exist (`lexists`). `--dry-run` stops here:
+it prints the bundle, destination, file list and setup descriptor as JSON and
+writes nothing.
+
+**Effects, in order** (each refusal exits 2 with `add-task refused: ...`):
+
+1. `copy_package`: `tasks/` via `ensure_owned_directory`; `mkdir tasks/<task_id>`
+   0700 (an existing folder refuses with `already exists; nothing was copied`);
+   subfolders 0700 via `ensure_owned_directory`; every verified `task/` file
+   write-once 0600 (`O_CREAT|O_EXCL|O_NOFOLLOW`).
+2. `plan_task` + `publish_task` with `--manifest <workspace>/tasks/<task_id>/task.yaml`
+   and the bundle label, i.e. exactly the `add-task` contract above (starter
+   values, devices, credential names, package mount, CAS, 0600 publish).
+3. `create_folders` (as `add-task`).
+4. `create_first_setup`: `resolve_console` of the written console.json,
+   `SetupStore.load(config, workspace, setups_policy)`, then
+   `SetupStore.create(config, task_id, SetupCreate(label, template_id))`, the owner
+   behind `POST /api/tasks/{task_id}/setups` (render through
+   `templates.render_shape`, folder and registry write as specified in
+   "Experiment setups"). The setup ID is the label slug.
+5. The same load and report as `check`, then `Restart the console to load the new
+   task.` (exit 0).
+
+The first setup is created by the CLI, not deferred to the console's first
+start: one creation owner and no pending state to persist. A running console
+holds the registry digest it loaded, so its next browser creation refuses
+`stale` until restarted, which the restart message already requires.
+
+Nothing is deleted. A refusal after step 1 says `<workspace>/tasks/<task_id> was
+left in place; remove it before running add-task again`. A setup refusal after
+step 2 exits 2 with `The task was added, but its first experiment setup was not
+created: <message>. Create one in the Workflow tab instead.`
+
+**Build** (`python -m tools.release.build_example_bundle --output-dir DIR
+[--version V]`, version default `pyproject.toml`): `task/task.yaml` is
+`configs/task_composition/quickstart.yaml` loaded with `yaml.safe_load`, every
+string starting `../../examples/quickstart/` made package-relative and any other
+absolute or `..` string refused, dumped with `sort_keys=False` under a generated
+header; `task/declared` and `task/plugins` are the `.py`/`.json`/`.yaml` files of
+`examples/quickstart/{declared,plugins}` (READMEs excluded: their links are
+checkout-relative); `setup/setup.json`, `fetch_data.py`, `README.md` come from
+`examples/console_bundle/`; `console-task.json` from `TASK_ID`, `TASK_LABEL` and
+`STARTER_VALUES`. Zip entries are sorted, `ZIP_STORED`, mtime 1980-01-01 00:00:00,
+Unix mode 0644; an existing output file is refused. Tests:
+`tests/unit/tools/release/test_build_example_bundle.py` (byte determinism;
+the bundle files in the checkout layout compose to the shipped manifest's
+`semantic_fingerprint`, and the bundle manifest composes on its own) and
+`tests/unit/tools/candidate_console/test_bundle_import.py`.
+
+**`fetch_data.py`** (run with the checkout's `.venv/bin/python`): loads
+`task/plugins/_quickstart_task.py` by file (bytecode writing disabled), renders the
+shards, and refuses unless every sha256 equals `task/declared/data_manifest.json`;
+then opens `--workspace` no-follow (`files.open_directory`), refuses it unless
+owned with no group/other write, opens `data/` and `data/<task_id>/` through
+`ensure_owned_directory` (created 0700), and writes each shard write-once 0600. An
+identical existing shard is kept; a different, symlinked or non-regular one is
+refused and left unchanged. `task_id` is `--task-id`, else `console-task.json`.
+Exit 0 on success, 2 on refusal.
+
 ### Host reservation ledger (B3-4c)
 
 Optional `host_ledger` (`ConsoleHostLedger`: `ledger_root`, `budget_file`;
@@ -148,7 +336,8 @@ work tracked with #1074. Tests: `tests/unit/tools/candidate_console/test_host_le
 ### Workspace layout and `init`
 
 Owners: `settings_models.py` (file schema), `workspace.py` (derivation,
-readiness, `init`), `config.load_console`, `__main__` (`check`, `serve`, `init`).
+readiness, `init`), `config.load_console`, `__main__` (`check`, `serve`, `init`,
+`add-task` dispatch).
 
 **File schema.** `ConsoleFile`/`TaskEntry` are generated from `ConsoleConfig`/`TaskChoice`
 with `pydantic.create_model`; every field keeps its owner's annotation and
@@ -190,7 +379,7 @@ an existing canonical directory. The command walks from `/` with
 created workspace directory to satisfy the ownership predicate: a directory,
 `st_uid == os.getuid()`, no group/other write bit. It creates only missing
 children with `mkdir(name, 0o700, dir_fd=…)` and `fchmod 0700`:
-`operations`, `preparations`, `candidates`, `runs`, `projects`, `library`,
+`operations`, `preparations`, `candidates`, `runs`, `projects`, `tasks`, `library`,
 `library/llm`, `library/advice`, `settings`, `data` (`exported_configs` is created
 lazily by its writer). It creates `settings/console-token` with
 `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0600, 32 random bytes URL-safe encoded;
@@ -938,7 +1127,8 @@ list never claims completeness the scan did not have.
 
 CAS: `SetupStore` holds the sha256 of the bytes it last read or wrote; a write
 from another process (or a hand edit) refuses with `stale` and leaves the file
-unchanged. Templates for an opened project keep using `instantiate`, which now
+unchanged. `add-task --from-bundle` is the one other caller of
+`SetupStore.create` (see "Example bundles"). Templates for an opened project keep using `instantiate`, which now
 delegates to `render_shape`.
 
 ### Experiment setups in the browser

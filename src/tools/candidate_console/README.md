@@ -21,6 +21,18 @@ console configuration; it does not create a project or edit those task settings.
 Save an explicit [LLM profile](../../../configs/llm/README.md) for the console,
 even when using the default models.
 
+## Start from the example bundle
+
+To see the whole console path once before you package your own task, start from
+the quickstart example bundle. It holds a small synthetic task package and a
+ready experiment setup. Its [README](../../../examples/console_bundle/README.md)
+lists six commands: unpack, `init`, write the data, import with
+`add-task --from-bundle`, `serve`, and open the console. The import checks every
+file against the bundle's `SHA256SUMS`, copies the package to
+`siderius_workspace/tasks/quickstart/`, registers it as step 2 below does, and
+creates the setup `quickstart-research-loop` from a workflow template. It never
+overwrites an existing `tasks/` folder.
+
 ## Set up and open the console
 
 1. Create the console workspace inside a directory you own, for example your
@@ -40,6 +52,7 @@ even when using the default models.
    | `operations/`, `preparations/`, `candidates/`, `runs/` | console state and run outputs |
    | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile as `library/llm/default-<12 hex characters>.json` |
    | `projects/` | a conventional place for workflow editor projects |
+   | `tasks/` | one folder per task package, `tasks/<name>/`: its manifest, plugins and declarations |
 
    On success it prints the configuration file, browser address, token file
    and connection instructions:
@@ -67,8 +80,54 @@ even when using the default models.
    `settings/console.json` or library file that is a symlink or has unexpected
    content. Each refusal names the folder or file, exits with status 2 and
    changes nothing that already exists.
-2. Add your task to `siderius_workspace/settings/console.json`. A task needs its
-   `task_id`, `label`, `task_manifest`, resource policy and time limits; the
+2. Register your task. A task package is a folder holding the task composition
+   manifest together with the plugins and declarations it names. Copy it to
+   `siderius_workspace/tasks/<name>/` (for example `tasks/my-task/task.yaml` and
+   `tasks/my-task/plugins/`), put the task data in `siderius_workspace/data/<task_id>/`
+   (the folder name, unless you pass `--task-id`), then run:
+
+   ```bash
+   .venv/bin/python -m tools.candidate_console add-task \
+     --config /absolute/project/siderius_workspace/settings/console.json \
+     --manifest /absolute/project/siderius_workspace/tasks/my-task/task.yaml
+   ```
+
+   `add-task` adds one entry to `tasks` in `console.json` and changes nothing
+   else there. The entry contains:
+
+   | Field | Value written |
+   | --- | --- |
+   | `task_id`, `label` | the folder name (`my-task`); change them with `--task-id` and `--label` |
+   | `task_read_only` | the package folder, so the run sandbox can read the plugins and declarations beside the manifest |
+   | `preparation_timeout_seconds`, `candidate_timeout_seconds` | starting values 300 and 3600 seconds; change them with `--prepare-timeout` and `--candidate-timeout` |
+   | `candidate_network` | `true`; use `--no-network` to run candidates offline |
+   | `candidate_devices` | the devices you pass with `--device`, for example `--device /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm`. Without `--device` in a terminal, it lists the machine's `/dev/nvidia*` devices and asks whether to pass them; in a script it passes none and says so |
+   | `candidate_environment_names` | the API key names your selected model profile needs (for example `OPENAI_API_KEY`), plus names you add with `--env` |
+
+   Read the printed entry and edit `console.json` if a starting value does not
+   fit your task. Add `--dry-run` to print the entry without writing anything. A
+   manifest outside `tasks/` is refused unless you add `--external`; then the
+   folders holding the files the manifest names are listed in `task_read_only`
+   instead; a folder that is `/`, your home folder or one holding the console's
+   settings, token or credentials is refused, so move such files into
+   `tasks/<name>/`. A task ID that already exists is refused. If someone else changes
+   `console.json` while `add-task` runs, it writes nothing and asks you to run it
+   again.
+
+   After writing, `add-task` creates the task's output folders and runs the same
+   check as step 3. It ends with `Restart the console to load the new task.`: a
+   running console reads `console.json` only when it starts.
+
+   **GPU runs.** Passing `/dev/nvidia*` devices alone may not be enough: CUDA can
+   also need `/sys` mounted read-only inside the run sandbox, which `add-task` does
+   not add. `check` then prints `GPU devices are passed but /sys is not mounted
+   read-only; CUDA may fail to start inside the run sandbox (see README).` If your
+   runs fail to find CUDA, adding `"/sys"` to the task's `task_read_only` is the
+   setting that warning refers to; decide whether exposing `/sys` is acceptable on
+   your machine.
+
+   You can also write the task entry yourself. A task needs its `task_id`,
+   `label`, `task_manifest`, resource policy and time limits; the
    [configuration example](console-contract.md#configuration) shows every field.
    You can leave out:
 
@@ -122,7 +181,10 @@ even when using the default models.
    validates configuration paths, file shape and permissions, without proving task
    composition, required key presence, sandbox availability or provider access.
    When a required field has no value, the check names it, for example
-   `task my-task needs llm_config_file`. When a workspace folder is missing or
+   `task my-task needs llm_config_file`. When the manifest names a file the run
+   sandbox cannot read (outside the manifest, the data folder, `task_read_only`,
+   this checkout and the system folders such as `/usr`), the check names that file; add its package folder to
+   `task_read_only`. When a workspace folder is missing or
    unusable, it lists the folder (for example `data/my-task: missing`) and, if
    `init` can create it, prints the `init` command to run.
    Only `127.0.0.1` binding is supported.

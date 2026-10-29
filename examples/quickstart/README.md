@@ -7,6 +7,10 @@ API keys. A real research-chain launch makes provider calls and trains models,
 so it needs an NVIDIA GPU with CUDA; on a machine without one it stops before
 any model call.
 
+To run this task from the browser console instead, use the
+[example bundle](../console_bundle/README.md): it packages this task with a
+ready experiment setup.
+
 Browse [quickstart.ipynb](quickstart.ipynb) or its [HTML rendering](quickstart.html)
 for the worked example. Saved live-run excerpts are dated historical evidence;
 your current checkout and a new run can produce different results.
