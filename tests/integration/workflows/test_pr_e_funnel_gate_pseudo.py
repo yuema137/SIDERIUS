@@ -47,6 +47,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationOutput
 from execute_tools.funnel_assembly import assemble_iteration_funnel
+from tests.helpers.probe_seed import PROBE_SEED
 from workflows.run_config import WorkflowLaunchConfig
 
 pytestmark = pytest.mark.dual_mode
@@ -136,6 +137,7 @@ def _real_implementor_cls():
     class _RealImplementorMockBridge:
         def __init__(self, *a, **kw):
             agent = MLModelImplementor.__new__(MLModelImplementor)
+            agent._probe_seed = PROBE_SEED
             agent.bridge = MagicMock()
             agent._registry = MagicMock()
             agent.bridge.generate_text.return_value = "Map four float features to two class logits."
@@ -161,6 +163,7 @@ def _real_validator_cls():
     class _RealValidatorMockBridge:
         def __init__(self, *a, **kw):
             agent = MLCodeValidatorAgent.__new__(MLCodeValidatorAgent)
+            agent._probe_seed = PROBE_SEED
             agent.bridge = MagicMock()
             agent.bridge.generate.return_value = {
                 "passed": True,
