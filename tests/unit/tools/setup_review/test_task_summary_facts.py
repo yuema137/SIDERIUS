@@ -98,3 +98,29 @@ def test_storage_volume_is_reported_only_when_the_task_declares_it(tmp_path):
     assert declared.scopes.evaluation.file_count == 1
     assert declared.sample_counts is None
     assert declared.objective is None and declared.health.declaration == "explicit_none"
+
+
+def test_quickstart_counts_describe_the_full_declared_split(tmp_path):
+    """Defect: the Task panel reports one run's sampled workload (e.g. the formal
+    training portion 0.1 -> 12 rows) instead of the task's declared split: the
+    quickstart declares two 64-row training shards and one 64-row evaluation shard."""
+    import sys
+    from pathlib import Path
+
+    from workflows.task_composition import compose_run_task_bindings
+
+    repo = Path(__file__).resolve().parents[4]
+    plugins = str(repo / "examples/quickstart/plugins")
+    sys.path.insert(0, plugins)
+    try:
+        from _quickstart_task import write_data_dir
+    finally:
+        sys.path.remove(plugins)
+    write_data_dir(tmp_path)
+    composition = compose_run_task_bindings(str(repo / "configs/task_composition/quickstart.yaml"))
+    facts = project_package_facts(
+        composition, TaskSummaryRequest(data_root=str(tmp_path), count_samples=True)
+    )
+    assert facts.sample_counts is not None
+    assert (facts.sample_counts.training, facts.sample_counts.evaluation) == (128, 64)
+    assert facts.scopes.basis.startswith("full task split")
