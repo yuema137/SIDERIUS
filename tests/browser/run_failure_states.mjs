@@ -1,7 +1,8 @@
 /** Issue #1145 witness: after a preparation or launch ends without success, the Run page's
  * next-step line (#run-next) says what happened and where to look, never "Preparing…" or
  * "The run has finished"; the step's status line names the cause from the log and, for a
- * preparation, its worker log location. Monitor reads a failed preparation as "Failed: …".
+ * preparation, its worker log location. A paused research loop says how it paused and
+ * where to resume. Monitor reads a failed preparation as "Failed: …".
  * Real console server (reusable_candidate_fixture); retained intents are seeded in this
  * browser and their operation status/log reads are stubbed, so nothing is prepared or
  * launched. Required: EDITOR_PYTHON, CONSOLE_PLAYWRIGHT_MODULE, CONSOLE_BROWSER_EXECUTABLE. */
@@ -149,12 +150,25 @@ try {
     line = await next(text);
     assert.ok(!/has finished/.test(line), line);
   }
+  // A paused research loop is not "finished": it says how it paused and where to resume.
+  const loop = fields => ({final_iteration: 3, attempted_iterations: 2, ...fields});
+  for (const [fields, text] of [
+    [{loop: loop({input_request: {reason: {kind: 'no_improvement'}, summary: {iteration: 2}}})},
+      'The research loop paused and is waiting for your input. Open it in Monitor to read the summary, add advice and resume.'],
+    [{loop: loop({})}, 'The research loop is paused at a completed body. Open it in Monitor to resume.'],
+    [{loop: loop({stop_requested: true})}, 'Stop was requested; this run cannot continue.'],
+  ]) {
+    observed[runId] = status(runId, 'candidate', runDigest, {native_status: 'paused', ...fields});
+    await retained('candidate');
+    line = await next(text);
+    assert.ok(!/has finished/.test(line), line);
+  }
   // A successful run still reads as finished.
   observed[runId] = status(runId, 'candidate', runDigest, {native_status: 'accepted', validation_passed: true});
   await retained('candidate');
   await next('The run has finished. Open it in Monitor for results and logs.');
   assert.deepEqual(faults, []);
-  console.log('PASS: failed/timed-out/not-started preparation and failed/timed-out/interrupted/cancelled/not-started launch headlines say what happened and where to look; causes from the log; running and accepted states unchanged');
+  console.log('PASS: failed/timed-out/not-started preparation and failed/timed-out/interrupted/cancelled/not-started launch and paused-loop headlines say what happened and where to look; causes from the log; running and accepted states unchanged');
 } finally {
   await browser?.close();
   for (const child of children) if (child.exitCode === null) child.kill('SIGTERM');

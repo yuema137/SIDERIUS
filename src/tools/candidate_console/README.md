@@ -607,7 +607,9 @@ the last error line of the log, such as "Cause (from the log): TaskCompositionEr
 plugin file … does not exist". A failed preparation also names its log file,
 `inputs/preparation/worker.log` in the run's folder; Monitor shows the same log under
 **Activity and logs** with log source **Native**. Fix the cause, then select **Start
-over** and prepare again.
+over** and prepare again. A paused research loop is not reported as finished either:
+the line says whether it is waiting for your input or was paused by you, and to open
+it in Monitor to resume.
 
 The browser retains preparation and candidate intents separately before sending
 either effect. Storage failure prevents dispatch. After a lost response or reload,

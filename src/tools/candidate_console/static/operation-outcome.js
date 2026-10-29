@@ -41,10 +41,12 @@
     if (preparation) return `Preparation finished without a prepared run (${native || 'no result'}).`;
     return `Finished with status ${native || 'unknown'}.`;
   }
-  // How an observed operation ended when it did not succeed (#1145): the Run page's
-  // next-step line names it instead of "finished" or "preparing". `null` while it is
-  // still running, unresolved, or ended normally (prepared, accepted, rejected, stopped,
-  // paused or completed).
+  // How an observed operation ended when it did not succeed or is waiting (#1145): the
+  // Run page's next-step line names it instead of "finished" or "preparing". A paused
+  // research loop is `paused_for_input` (a "Pause and ask me" condition), `paused`
+  // (operator Pause), `paused_stop_requested` (Stop recorded: it cannot continue) or
+  // `resumed` (a resumed segment continues it). `null` while it is still running,
+  // unresolved, or ended normally (prepared, accepted, rejected, stopped or completed).
   function ending(value) {
     if (value?.state === 'operation_failed') {
       return value.reason === 'spawn_failed' ? 'not_started'
@@ -52,6 +54,10 @@
     }
     if (value?.state !== 'completed') return null;
     const native = value.native_status;
+    if (native === 'paused') {
+      return value.successor_operation_id ? 'resumed' : value.loop?.stop_requested ? 'paused_stop_requested'
+        : value.loop?.input_request ? 'paused_for_input' : 'paused';
+    }
     if (['failed', 'timed_out', 'interrupted', 'cancelled'].includes(native)) return native;
     // A preparation is either prepared or it failed; any other result is not a run.
     if ((value.kind === 'prepare' || value.kind === 'prepare_reusable') && native !== 'prepared') return 'failed';

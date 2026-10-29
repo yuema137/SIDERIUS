@@ -1915,8 +1915,13 @@ look. `ending` is `not_started` (`operation_failed`/`spawn_failed`),
 `cancelled_before_start` (`operation_failed`/`cancelled_while_queued`), `operation_failed`
 (any other `operation_failed`), the native `failed`, `timed_out`, `interrupted` or
 `cancelled` of a `completed` operation, `failed` for a completed preparation whose native
-status is not `prepared`, and `null` otherwise (running, unresolved, prepared, accepted,
-rejected, stopped, paused). For example a failed preparation reads "The preparation
+status is not `prepared`; a native `paused` research loop is `resumed` (a
+`successor_operation_id`), `paused_stop_requested` (`loop.stop_requested`, "Stop was
+requested; this run cannot continue."), `paused_for_input` (`loop.input_request`, "The
+research loop paused and is waiting for your input. Open it in Monitor to read the
+summary, add advice and resume.") or `paused` ("The research loop is paused at a
+completed body. Open it in Monitor to resume."); `null` otherwise (running, unresolved,
+prepared, accepted, rejected, stopped). For example a failed preparation reads "The preparation
 failed. The cause and its log are named below; start over to try again." and a failed
 launch "The run failed. The cause is shown below; open it in Monitor for the full log."
 A typed `problem` (refused, unknown, unresolved) still takes precedence. Step 2 names the version its prepared run holds (`ReusableCaptureReview.

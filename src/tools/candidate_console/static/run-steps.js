@@ -4,8 +4,9 @@
   'use strict';
   const facts = {prepare: {}, launch: {}};
   const steps = [...document.querySelectorAll('#run-stepper [data-run-step]')];
-  // #1145: a step that ended without success says what happened and where to look; it
-  // never reads "finished" or "Preparing…". Keys are `operationOutcome.ending` values.
+  // #1145: a step that ended without success, or a paused research loop, says what
+  // happened and where to look; it never reads "finished" or "Preparing…". Keys are
+  // `operationOutcome.ending` values.
   const PREPARE_ENDED = {
     failed: 'The preparation failed. The cause and its log are named below; start over to try again.',
     timed_out: 'The preparation reached its time limit and was stopped. Its log is named below; start over to try again.',
@@ -22,6 +23,10 @@
     operation_failed: 'The run failed before reporting a result. Open it in Monitor for details.',
     not_started: 'The run did not start: its worker could not be launched. Open it in Monitor for details.',
     cancelled_before_start: 'The run was cancelled before it started: it never ran, and nothing was produced.',
+    paused_for_input: 'The research loop paused and is waiting for your input. Open it in Monitor to read the summary, add advice and resume.',
+    paused: 'The research loop is paused at a completed body. Open it in Monitor to resume.',
+    paused_stop_requested: 'The research loop is paused. Stop was requested; this run cannot continue.',
+    resumed: 'The research loop was resumed as a new segment. Follow it in Monitor.',
   };
   function render() {
     const prepare = facts.prepare, launch = facts.launch;
