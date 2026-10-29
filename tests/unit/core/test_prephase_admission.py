@@ -584,8 +584,8 @@ class TestInferenceAuthorityIsBoundToItsBatch:
         assert a.planned_config_hash == b.planned_config_hash
 
 
-def test_namespace_bound_refusal_is_unavailable_not_candidate_over_cap():
-    """#633: bounded measurement stays authoritative; outside uncertainty stops launch."""
+def test_namespace_coherent_bound_refusal_reports_insufficient_headroom():
+    """Coherent namespace accounting uses ordinary capacity refusal without candidate blame."""
     snapshot = _snapshot(other_mib=0).model_copy(
         update={
             "process_visibility": "namespace_limited",
@@ -596,8 +596,8 @@ def test_namespace_bound_refusal_is_unavailable_not_candidate_over_cap():
     )
     outcome = _decide(snapshot=snapshot, ceiling_gib=4.25)
     assert outcome.requirement.authoritative
-    assert outcome.disposition == "STOP_MEASUREMENT_UNAVAILABLE"
-    assert outcome.admission.reason_code == "environment_headroom_unproven"
+    assert outcome.disposition == "STOP_OVER_CAP"
+    assert outcome.admission.reason_code == "insufficient_headroom"
     assert not outcome.may_launch_formal_phase
     assert not outcome.carries_candidate_blame
     assert not outcome.permits_shrink_advice

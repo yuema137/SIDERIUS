@@ -19,7 +19,12 @@ ProcessVisibility = Literal["namespace_limited"]
 
 
 class IsolatedHeadroomPolicy(BaseModel):
-    """Selected isolation requires headroom evidence even in observe-only mode."""
+    """Isolated admission enforces proven demand and accounting in every phase mode.
+
+    Only missing phase requirements with a valid visibility declaration and a
+    current, UUID-bound, coherent snapshot use ordinary admission posture.
+    Missing or invalid accounting stays conservative even in observe-only mode.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
