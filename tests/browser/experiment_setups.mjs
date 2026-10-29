@@ -167,8 +167,19 @@ try {
   await page.locator('#editor-status').filter({hasText: 'Opened blank-one'}).waitFor();
   await reloadSetup('blank-one');
 
+  // Another tab can change the shared preference; refreshing this tab must keep
+  // its listed open setup rather than silently opening the other tab's choice.
+  await page.evaluate(async () => {
+    const key = `siderius.setup.v1:${window.consoleSession.operationsStoreId}:${window.consoleTask.selectedId}`;
+    localStorage.setItem(key, 'my-loop');
+    await window.experimentSetups.load(null, true);
+  });
+  assert.equal(await page.locator('#editor-project').inputValue(), 'blank-one',
+    'A forced list refresh preserves the open setup despite another stored choice');
+
   // Pending edits are never dropped silently: declining keeps the open setup, listed as it
   // was (its own label and task, not "Other workflows"); accepting switches.
+  // Reload collapsed Advanced; reopen it so the source field is visible for editing.
   await page.locator('#editor-advanced').evaluate(element => { element.open = true; });
   await page.locator('#editor-source').fill((await page.locator('#editor-source').inputValue()) + '\n# unsaved blank edit\n');
   await waitUntil(() => page.evaluate(() => window.workflowEditor.state.dirty));

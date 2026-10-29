@@ -52,7 +52,8 @@
       ];
       loadedKey = key; error = ''; say('');
       // The editor returns what it shows (a declined switch keeps the open setup listed).
-      list = window.workflowEditor.useSetups(list, preferred ?? remembered());
+      const restore = list.some(item => item.id === openId()) ? null : remembered();
+      list = window.workflowEditor.useSetups(list, preferred ?? restore);
     } catch (failure) {
       if (failure.stale || revision !== session.revision) return;
       error = failure.message; say(`Experiment setups could not be loaded: ${failure.message}`);
