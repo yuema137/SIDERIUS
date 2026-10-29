@@ -112,6 +112,7 @@ The CLI takes every required `ValidatorInput` field as an explicit argument — 
 | `--llm_model_id` | `str` | `gemini-3.1-flash-lite-preview` | Specific model id. |
 | `--workspace` | `str` | `./siderius_workspace` | Root directory for the `validation_{run_name}.json` output. |
 | `--run_name` | `str` | `v1` | Filename suffix. |
+| `--run_seed` | `int` in `[0, 2**53 - 1]` | none (generated) | Run seed for the model probes' `validation.probe` stream (issue #983). Omitted: a seed is generated through `core.seeding` and printed as `[seed] run_seed=N source=generated`. |
 
 ## Python API usage
 
