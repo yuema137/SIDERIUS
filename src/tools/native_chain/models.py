@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import hashlib
+from contextlib import redirect_stderr
+from functools import cache
+from io import StringIO
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from pydantic import AfterValidator, Field, model_validator
 
@@ -14,6 +18,7 @@ from core.seeding import RunSeed
 from tools.setup_review.composition_models import TaskCheckSettings
 from tools.setup_review.environment_models import EnvironmentPreviewReport
 from workflows.reviewed_launch_binding import BindingModel, Digest, InputFilePin
+from workflows.standard_cli import build_parser
 
 PositiveInt = Annotated[int, Field(gt=0, strict=True)]
 
@@ -64,6 +69,47 @@ PROTECTED = frozenset(
 )
 
 
+@cache
+def _control_parser() -> tuple[argparse.ArgumentParser, frozenset[str]]:
+    parser = build_parser()
+    # Shell-only controls also belong to the declaration, not chain_args.
+    for name in sorted(PROTECTED):
+        if f"--{name}" not in parser._option_string_actions:
+            parser.add_argument(f"--{name}")
+    protected_dests = frozenset(
+        action.dest
+        for action in parser._actions
+        if any(
+            option.lstrip("-").replace("-", "_") in PROTECTED
+            or option.lstrip("-").replace("-", "_").startswith("chain_")
+            for option in action.option_strings
+        )
+    )
+    return parser, protected_dests
+
+
+def _resolve_option(parser: argparse.ArgumentParser, token: str) -> argparse.Action | None:
+    # CPython ArgumentParser._parse_optional owns option/alias/abbreviation resolution.
+    # Early 3.12 returns one tuple and raises on ambiguity; 3.12.13 returns a list.
+    try:
+        with redirect_stderr(StringIO()):
+            result = cast(
+                list[tuple[argparse.Action | None, str, str | None, str | None]]
+                | tuple[argparse.Action | None, str, str | None]
+                | None,
+                parser._parse_optional(token),
+            )
+    except (SystemExit, argparse.ArgumentError) as exc:
+        raise ValueError(f"ambiguous_chain_option: {token.split('=', 1)[0]}") from exc
+    if result is None:
+        return None
+    if isinstance(result, list):
+        if len(result) != 1:
+            raise ValueError(f"ambiguous_chain_option: {token.split('=', 1)[0]}")
+        return result[0][0]
+    return result[0]
+
+
 class NativeChainRunBinding(BindingModel):
     workspace: CanonicalPath
     run_name: Text
@@ -90,10 +136,20 @@ class NativeChainDeclaration(BindingModel):
 
     @model_validator(mode="after")
     def protected_controls(self):
+        parser, protected_dests = _control_parser()
         for token in self.chain_args:
-            name = token.split("=", 1)[0].lstrip("-").replace("-", "_")
-            if token.startswith("-") and (name in PROTECTED or name.startswith("chain_")):
-                raise ValueError("protected_chain_control")
+            if token == "--":
+                raise ValueError("chain_option_terminator: bare -- is not allowed in chain_args")
+            action = _resolve_option(parser, token)
+            option = token.split("=", 1)[0]
+            # Preserve the declaration's normalized spelling policy for unknown options.
+            if action is None and option.startswith("--"):
+                normalized = "--" + option[2:].replace("-", "_")
+                action = _resolve_option(parser, normalized)
+            if action is not None and action.dest in protected_dests:
+                raise ValueError(
+                    f"protected_chain_control: {option} expands to {action.option_strings[0]}"
+                )
         return self
 
     def shell_arguments(self, *, start_iteration: int = 1) -> tuple[str, ...]:
