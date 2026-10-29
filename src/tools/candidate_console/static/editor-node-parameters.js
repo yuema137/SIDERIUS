@@ -73,6 +73,7 @@
     group.id = 'editor-training-settings';
     group.addEventListener('toggle', () => { trainingOpen = group.open; });
     const summary = node('summary', '', group);
+    node('p', 'Trial rounds are quick screening runs on planner-sized samples. Each iteration ends with a Formal round, which by default retrains its best trial setup on the operator-fixed sample set and scores it on the full evaluation split. Only Formal scores are comparable across candidates, and the run keeps the best valid Formal score.', group, 'muted').id = 'editor-training-trial-formal-help';
     for (const text of ['Epochs are ceilings; native planning resolves epochs. Task-owned rules may further constrain this run.',
       `Preparation output restriction: ${show(training.allowed_output_types)}`]) node('p', text, group, 'muted').dataset.uiFlag = 'advanced';
     const rows = [];

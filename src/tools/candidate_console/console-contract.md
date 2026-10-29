@@ -975,6 +975,11 @@ even when the loop has since become terminal (the backend replays the marker
 before its running check); a 200 is therefore an idempotent acknowledgement,
 never evidence that the loop is still running.
 
+For an exited, verified paused tail, the same route records Stop after the
+operations owner checks its clean pause and absence of a successor under the
+admission lock. No receipt is rewritten and no new operation/status is invented.
+An existing successor refuses the request; a Stop recorded first blocks Resume.
+
 Monitor: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
 **Stop at next boundary** is shown only for a status with `loop` (root or resumed
@@ -1032,14 +1037,24 @@ instead reads "Waiting for your input." followed by what was met in plain words 
 the request (for example "No improvement for 3 bodies (best 0.81 at body 4, higher
 is better). Paused after body 7 of 12."; a judge request adds the rationale of that
 boundary's `judge_verdicts` entry), then "Review and resume to continue with body
-N+1.", "A resumed segment continues this run." with a successor, or "Stop was
-requested; this run cannot continue." when `stop_requested`. The exact recorded
-values stay in the state's tooltip. A paused status with `stop_requested` (either
-pause kind) reads "Stop was requested; this run cannot continue." and offers no
-Resume: the owner refuses a stopped run. Resuming an input
+N+1." or "A resumed segment continues this run." with a successor. A recorded
+Stop without a successor instead uses the ended display below. The exact recorded
+values stay in the state's tooltip. A paused status with `stop_requested` and no successor (either pause kind)
+reads "Ended by you at the pause after body N." and offers no Resume or End:
+the owner refuses a stopped run. This is a terminal display derived from the
+paused receipt and durable Stop marker; the native status remains `paused`. Resuming an input
 request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
 resume** (one GET on click, never polled), then **Resume loop**, disabled unless
-credentials are ready. The client generates one request UUID per reviewed digest
+credentials are ready. **End loop here** is offered beside these actions on a
+paused tail that is no longer finishing. It confirms that completed results are
+kept and the run cannot resume, then posts `{}` to the existing `loop-stop` route.
+Pending Stop and Resume requests disable competing actions. Success triggers a
+fresh Monitor read, including its status sentence and observation label; a
+reload derives the ended display from the durable marker. An unstopped paused
+receipt is labelled "Current status", not "Final status". A continued predecessor
+never offers End, even when a descendant later records Stop.
+
+The client generates one request UUID per reviewed digest
 and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
 the POST; a retry reuses it, and the record is released once status shows the
 successor. After a review, `#loop-resume-advice` (a textarea, `maxlength=4000`) is
@@ -1823,8 +1838,7 @@ Operation facts. `#operation-observed` shows local time (ISO and UUID in its tit
 After a terminal state (`completed`/`operation_failed`, process `exited`, not
 `finishing`) has been read and its log drained to `observed_size`, the operation is
 no longer polled (status, log, tokens) and
-the line reads `Final status · observed …` (M-5), or `Paused · observed …` when
-`native_status == "paused"` (a paused loop can still be resumed); a 404 `unknown_operation` reads "This
+the line reads `Final status · observed …` (M-5); a 404 `unknown_operation` reads "This
 console has no operation with this ID…" and also stops polling (M-3). Re-entering
 Monitor or an explicit **Read operation** reads it again. Network failures keep the
 "stale" wording. Displayed log text has ANSI CSI sequences removed (M-6; the source log
@@ -2139,7 +2153,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
 - Canvas (at least 900 px wide): the canvas header holds **Templates**; the panel is a
   flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
   `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
-  height; the viewport scrolls and zooms inside it, so Fit fits the visible viewport.
+  height; the viewport scrolls and zooms inside it. Fit frames the union of every card's
+  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin, within the visible viewport.
   Open disclosures in the panel (port-type legend, canvas help and connection
   mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
   and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
@@ -2204,8 +2219,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   connection's reason is kept as `data-refusal` on the dimmed input. Icon-only canvas
   controls get a one-line tooltip from `data-tip-label`.
 - Cards fold every optional input that is not fed by a wire (not connected, or fed by an
-  external input) into one `+N optional` row. Fit to view never zooms below 75%; a larger
-  graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
+  external input) into one `+N optional` row. Fit to view never zooms below 75% (the legibility floor, `FIT_MIN`);
+  a larger graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
   zoom out still reaches 40%.
 - Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
   in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left

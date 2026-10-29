@@ -141,7 +141,7 @@ try {
   // A paused loop is settled for this read but may be resumed: never "Final status".
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, paused);
   await page.locator('#monitor-status').filter({hasText: 'Paused at a completed body boundary.'}).waitFor();
-  await page.locator('#operation-observed').filter({hasText: /^Paused · observed /}).waitFor();
+  await page.locator('#operation-observed').filter({hasText: /^Current status · observed /}).waitFor();
   assert.ok(!(await page.locator('#operation-observed').textContent()).includes('Final status'), 'A paused loop does not read as final');
 
   // M-3: a typed unknown_operation says so and stops polling.

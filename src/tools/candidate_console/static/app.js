@@ -14,9 +14,8 @@
   function observedLine(id, status, final) {
     const element = document.getElementById('operation-observed');
     const at = status?.observed_at;
-    // A paused loop is a settled read, not a final one: it may still be resumed.
-    const label = !final ? 'Observed ' : status?.native_status === 'paused' ? 'Paused · observed ' : 'Final status · observed ';
-    say('operation-observed', label + (at ? localTime(at) : 'unavailable'));
+    const paused = status?.native_status === 'paused' && !window.loopEndedSentence(status);
+    say('operation-observed', (paused ? 'Current status · observed ' : final ? 'Final status · observed ' : 'Observed ') + (at ? localTime(at) : 'unavailable'));
     if (at) element.title = 'Operation ' + id + ' · ' + at; else element.title = 'Operation ' + id;
   }
   const say = (id, value) => { if (document.getElementById(id).textContent !== value) document.getElementById(id).textContent = value; };
@@ -196,6 +195,9 @@
     // An explicit Read always re-reads, also for an operation already settled.
     setMonitor(id); settled = ''; location.hash = 'monitor/' + id; await poll();
   });
+  window.addEventListener('loop-control-changed', event => {
+    if (event.detail.operation_id === monitorId) { monitorEpoch++; settled = ''; void poll(); }
+  });
   $('log-kind').addEventListener('change', () => { monitorEpoch++; cursor = 0; logText = ''; say('log', ''); void poll(); });
   async function readMonitor() {
     if (!monitorId || settled === monitorId) return;
@@ -208,7 +210,7 @@
       window.renderNativeChain(status); window.renderLoopControl(status); monitorStop.render(status);
       // One plain outcome sentence (M-2); the raw enums stay in developer facts.
       const finishing = status.finishing ? ' The result is in; the worker is still finishing.' : '';
-      say('monitor-status', window.operationOutcome.sentence(status) + finishing);
+      say('monitor-status', (window.loopEndedSentence(status) || window.operationOutcome.sentence(status)) + finishing);
       observedLine(id, status, terminal);
       facts($('operation-facts'), [['Operation UUID', status.operation_id], ['Kind', status.kind], ['State', status.state], ['Native status', status.native_status || '(none)'], ['Observed at', status.observed_at],
         ['Process observation', `${status.process.status}: ${status.process.reason || '(no reason supplied)'}`], ['Native ID', status.native_id],

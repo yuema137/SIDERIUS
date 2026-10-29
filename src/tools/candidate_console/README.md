@@ -322,7 +322,6 @@ overwrites an existing `tasks/` folder.
    **Train & tune node execution** only says the node ran; **Train & tune outcome**
    says what training achieved, for example "No training round completed: 0
    completed rounds in 9 attempts …" when every attempt was refused or failed.
-   A paused loop's status line reads **Paused · observed …**, not **Final status**.
    A running authored research loop shows **Stop at next boundary**: the current
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
