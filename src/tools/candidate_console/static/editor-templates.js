@@ -76,6 +76,8 @@
     if (!state?.projectId || !state.sourceAvailable) return 'Open a workflow project first: a template keeps that project\'s task and data references.';
     if (state.saving) return 'Saving the workflow.';
     if (state.conflict) return 'Resolve the source conflict first.';
+    // Typed Python is not a draft state: an import would drop it beyond Undo (like restoring a version).
+    if (state.sourceDirty) return 'Save or revert your typed Python text first, then use a template.';
     return '';
   }
   function status(message) { const value = $('editor-template-status'); if (value) value.textContent = message; }

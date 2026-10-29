@@ -54,7 +54,11 @@
     nodeIds: [...new Set([...(anchor?.document?.definition.nodes || []).map(n => n.id), ...(graph?.definition.nodes || []).map(n => n.id), ...pendingNodes.map(n => n.node)])],
     taskBinding: base?.document?.task_binding ? {package_id: base.document.task_binding.package_id, revision: base.document.task_binding.revision} : null});
   // importSource: a template's unsaved source enters the ordinary source Review (editor-templates.js).
-  window.workflowEditor = Object.freeze({get state() { return projection(); }, importSource: (source, label) => reviewProposal({kind: 'source', source}, label),
+  window.workflowEditor = Object.freeze({get state() { return projection(); }, importSource: (source, label) => {
+    // Typed Python is not a draft state; folding the import would drop it beyond Undo.
+    if (sourceDirty) { status('Save or revert your typed Python text first, then use a template.'); return Promise.resolve(false); }
+    return reviewProposal({kind: 'source', source}, label);
+  },
     // Version history (editor-versions.js): an older version's bytes become an ordinary
     // checked source proposal; Undo brings back the edits it replaced; nothing is written.
     restoreVersion: (source, label) => {

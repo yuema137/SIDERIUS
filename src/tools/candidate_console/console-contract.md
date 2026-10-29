@@ -1154,15 +1154,18 @@ preview of the chosen one and loop details collapsed, before **Use template**
 (`#editor-template-import`). Use calls `window.workflowEditor.importSource(source,
 label)` inside `editorPageBar.quietly(...)`, which runs the ordinary source check
 without opening the save step; the result folds into the draft as one undoable step
-and Save is still required. Afterwards `editorAdvice.focusFirst()` selects the first
+and Save is still required. Typed Advanced source is not a draft state, so while it is
+unsaved **Use template** is disabled and `importSource` itself refuses ("Save or revert
+your typed Python text first, then use a template."), as restoring a version does;
+Quick start's import goes through the same path. Afterwards `editorAdvice.focusFirst()` selects the first
 canvas module whose capability has an advice target and focuses its advice field. The node inspector calls `window.editorAdvice.render` directly
 after the node heading, so "Your advice to the agents" (multi-line, help,
 example placeholder, and under it `.advice-privacy`: "Advice is sent to the model
 provider and kept in version history; don't paste secrets.", red-team SEC-2) is its
 first input; edits are draft document edits with one
 coalesced undo step per node, disabled while a palette node is pending.
-`tests/browser/scenario_template_parameters.mjs` (import loop, edit a training
-parameter, review, save) and `tests/browser/scenario_template_advice.mjs` (import
+`tests/browser/scenario_template_parameters.mjs` (import refused over typed source,
+import loop, edit a training parameter, review, save) and `tests/browser/scenario_template_advice.mjs` (import
 the advice loop, write advice, review, save; contrast warning on the plain loop;
 documents the B6-blocked three-review aggregation scenario) use the same variables.
 
