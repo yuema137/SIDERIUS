@@ -6,6 +6,9 @@
   // kept per opened graph and never reaches a document, so viewing never changes source.
   let view = {key: null, scale: 1, fitPending: false, arranged: false, scroll: null, expanded: new Set(), adapters: new Set()};
   const CARD_GAP = {x: 135, y: 90};
+  // Fit to view never goes below this zoom (text stays >= ~9px at the 12px label size); larger
+  // graphs scroll inside the viewport. Manual zoom out still reaches 40%.
+  const FIT_MIN = 0.75;
   const geometry = window.editorCircuitGeometry;
   const presentation = window.editorCapabilityPresentation;
   const contracts = window.editorContractPresentation;
@@ -15,6 +18,9 @@
     if (className) value.className = className;
     parent.append(value); return value;
   };
+  const wireLayer = () => host.querySelector('.circuit-world > svg');
+  // While a canvas gesture runs, nothing on the page is text-selectable (user-select: none).
+  const gesture = on => { document.body.classList.toggle('circuit-gesture', on); if (!on) getSelection()?.removeAllRanges(); };
   const say = text => { if (host) host.querySelector('.circuit-message').textContent = text; };
   function cancel(redraw = true) {
     const moved = drag;
@@ -38,14 +44,14 @@
       const compatible = source && option?.choices.some(value => same(value.source, source));
       input.classList.toggle('compatible', !!compatible);
       input.classList.toggle('incompatible', !!source && !compatible);
-      input.title = source ? (compatible ? 'Type-compatible source. Click to rebind; review before saving.' : refusal(source, input.dataset.node, option?.argument)) : 'Select an output socket first.';
+      if (source && !compatible) input.dataset.refusal = refusal(source, input.dataset.node, option?.argument); else delete input.dataset.refusal;
     }
     for (const output of host.querySelectorAll('[data-output]')) output.setAttribute('aria-pressed', String(output.dataset.node === pending?.node));
     for (const group of host.querySelectorAll('.circuit-optional')) {
       const compatible = [...group.querySelectorAll('[data-input]')].filter(input => input.classList.contains('compatible')).length;
       const summary = group.querySelector('summary');
       summary.classList.toggle('compatible', compatible > 0);
-      summary.title = compatible ? `${compatible} compatible optional input${compatible === 1 ? '' : 's'}; expand to connect.` : '';
+      summary.dataset.compatible = String(compatible);
     }
     const disconnect = host.querySelector('.circuit-disconnect');
     if (disconnect) { disconnect.hidden = !selectedWire; disconnect.disabled = !projection.enabled || projection.allowBindingChange === false; }
@@ -127,12 +133,13 @@
     view.fitPending = false;
     const content = sizeWorld(), max = parseFloat(getComputedStyle(viewport).maxHeight);
     const available = {width: viewport.clientWidth - 2, height: (Number.isFinite(max) ? max : viewport.clientHeight) - 2};
-    applyScale(geometry.fitScale(content, available));
+    applyScale(geometry.fitScale(content, available, FIT_MIN));
     viewport.scrollLeft = 0; viewport.scrollTop = 0; updateVisibility();
   }
   function draw() {
     if (!host) return;
-    const svg = host.querySelector('svg'); svg.replaceChildren();
+    // The wire layer is the world's own <svg>; toolbar buttons also hold (icon) svgs.
+    const svg = wireLayer(); svg.replaceChildren();
     const world = host.querySelector('.circuit-world');
     sizeWorld();
     const cards = [...world.querySelectorAll('.circuit-card')];
@@ -167,43 +174,37 @@
     }
     highlight(); updateVisibility();
   }
+  // "Connects with" for the socket tooltip: capability names of the server-offered sources
+  // (an input) or of the inputs that offer this result (an output). Server data only.
+  const capabilityOf = id => presentation.label(projection.document?.definition.nodes.find(item => item.id === id)?.capability);
+  function connectsWith(nodeId, metadata) {
+    const names = metadata
+      ? metadata.choices.map(choice => choice.source.kind === 'result' ? capabilityOf(choice.source.node) : 'an external input')
+      : projection.inventory.filter(item => item.choices.some(choice => choice.source.kind === 'result' && choice.source.node === nodeId)).map(item => capabilityOf(item.node));
+    return [...new Set(names)].join(', ');
+  }
   function port(parent, node, argument, output, metadata = null) {
     const snapshot = projection;
-    const label = output ? 'result' : argument || 'request';
-    const button = element('button', label, parent, `circuit-port ${output ? 'circuit-output' : 'circuit-input'}`);
-    button.type = 'button'; button.dataset.node = node.id;
-    if (metadata) {
-      const state = metadata.bound ? 'bound' : metadata.required ? 'required, unbound' : 'optional, unbound';
-      const contract = metadata.socket_contract;
-      const mapping = metadata.protocol_mapping ? `; mapped by ${metadata.protocol_mapping.owner} (${metadata.protocol_mapping.id}) to ${metadata.protocol_mapping.output_contract.id}` : '';
-      const offered = metadata.choices.length ? metadata.choices.map(value => `${value.label} [${value.contract.id}]`).join('; ') : 'no connections offered by the server';
-      const detail = `${node.id}.${label} input; ${state}; contract ${contract.id}: ${contract.native_type}${mapping}; server-offered connections: ${offered}`;
-      button.title = detail;
-      button.setAttribute('aria-label', detail);
-      element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
-      const type = element('span', contracts.describe(contract.id).name, button, 'circuit-port-contract');
-      type.setAttribute('aria-hidden', 'true');
-      element('span', metadata.bound ? (metadata.required ? 'required' : 'optional') : `${metadata.required ? 'Required' : 'Optional'} · unbound`, button,
-        `circuit-port-requirement${metadata.bound ? '' : ' circuit-port-unbound-label'}`);
-      button.classList.toggle('is-unbound', !metadata.bound);
+    // The visible label is the connector (schema) name; field names live in the advanced Mapping details.
+    const button = element('button', '', parent, `circuit-port ${output ? 'circuit-output' : 'circuit-input'}`);
+    button.type = 'button'; button.dataset.node = node.id; button.dataset.tip = 'port';
+    const contract = metadata ? metadata.socket_contract : projection.inventory.find(value => value.node === node.id)?.node_output_contract;
+    button.dataset.tipConnects = connectsWith(node.id, metadata);
+    if (contract) {
+      element('span', contracts.describe(contract).name, button, 'circuit-port-contract').setAttribute('aria-hidden', 'true');
       button.dataset.contract = contract.id;
-      button.dataset.required = String(metadata.required);
-      contracts.decorate(button, contract.id, metadata.required);
-    } else {
-      const contract = projection.inventory.find(value => value.node === node.id)?.node_output_contract;
-      const detail = `${node.id}.result output${contract ? `; contract ${contract.id}: ${contract.native_type}` : ''}`;
-      button.title = detail;
-      button.setAttribute('aria-label', detail);
-      element('span', detail, button, 'circuit-port-tooltip').setAttribute('role', 'tooltip');
-      if (contract) {
-        const type = element('span', contracts.describe(contract.id).name, button, 'circuit-port-contract');
-        type.setAttribute('aria-hidden', 'true');
-        button.dataset.contract = contract.id;
-        contracts.decorate(button, contract.id);
-      }
+      contracts.decorate(button, contract, metadata ? metadata.required : true);
     }
+    if (metadata) {
+      const state = metadata.bound ? (metadata.required ? 'Required' : 'Optional') : `${metadata.required ? 'Required' : 'Optional'} · Not connected`;
+      element('span', state, button, `circuit-port-requirement${metadata.bound ? '' : ' circuit-port-unbound-label'}`);
+      button.setAttribute('aria-label', `${state.replace(' · ', ', ')}.`);
+      button.classList.toggle('is-unbound', !metadata.bound);
+      button.dataset.required = String(metadata.required);
+    } else button.setAttribute('aria-label', 'Output.');
     if (output) { button.dataset.output = ''; button.setAttribute('aria-pressed', 'false'); }
     else { button.dataset.input = ''; button.dataset.argument = argument || ''; }
+    if (button.dataset.contract) contracts.direction(button, button.dataset.contract, output);
     element('span', '', button, 'circuit-socket');
     button.addEventListener('click', () => {
       if (projection !== snapshot || !projection.enabled) return;
@@ -219,30 +220,50 @@
       const preview = {kind: 'result', node: node.id, port: 'result'};
       button.addEventListener('pointerenter', () => { if (!pending && projection === snapshot && projection.enabled) highlight(preview); });
       button.addEventListener('pointerleave', () => { if (!pending && projection === snapshot) highlight(); });
-      button.addEventListener('pointerdown', event => { if (event.button === 0) { connecting = true; button.click(); } });
+      // preventDefault: a wire drag never starts a text selection (which would turn into a
+      // native drag of the selection and cancel the pointer gesture).
+      button.addEventListener('pointerdown', event => { if (event.button === 0) { event.preventDefault(); gesture(true); connecting = true; button.click(); } });
     }
     return button;
   }
-  const button = (parent, text, id, onClick) => {
+  const button = (parent, text, id, onClick, icon = null) => {
     const value = element('button', text, parent, 'circuit-view-button'); value.type = 'button'; value.id = id;
+    if (icon && window.consoleIcons) value.prepend(window.consoleIcons.make(icon));
     value.addEventListener('click', onClick); return value;
   };
+  // Icon-only canvas control (canvas-study V2): the name is the accessible label and a
+  // visually hidden text; the shared tooltip shows it on hover/focus.
+  const iconButton = (parent, label, id, onClick, icon) => {
+    const value = button(parent, '', id, onClick, icon);
+    value.classList.add('icon-button'); value.setAttribute('aria-label', label); value.dataset.tipLabel = label;
+    element('span', label, value, 'sr-only'); return value;
+  };
+  // Tidy up: one undoable layout edit (editor.js move) on the 16px grid; the view refits.
+  function tidyUp() {
+    if (!projection?.document || !projection.enabled || projection.allowMove === false) return;
+    const cards = [...host.querySelectorAll('.circuit-card')];
+    const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
+    const placed = geometry.tidy(projection.document.definition.nodes, size);
+    view.arranged = false; view.fitPending = true; view.scroll = null;
+    actions.move([...placed].map(([node, position]) => ({node, ...position})), 'Tidy up layout');
+  }
   // Re-render the current projection after a view-only change (arranged view).
   const rerender = () => { if (host && projection) render(host, projection, actions); };
   function toolbar(parent, value) {
     const bar = element('div', '', parent, 'circuit-toolbar');
     bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Canvas view');
-    button(bar, 'Fit to view', 'circuit-fit', fit).title = 'Scale the view so every capability is visible. Saved positions are unchanged.';
-    button(bar, '−', 'circuit-zoom-out', () => applyScale(Math.max(0.4, Math.round((view.scale - 0.1) * 10) / 10))).setAttribute('aria-label', 'Zoom out');
+    iconButton(bar, 'Zoom out', 'circuit-zoom-out', () => applyScale(Math.max(0.4, Math.round((view.scale - 0.1) * 10) / 10)), 'zoom-out');
     const zoom = element('span', `${Math.round(view.scale * 100)} %`, bar, 'circuit-zoom'); zoom.setAttribute('aria-label', 'Canvas zoom');
-    button(bar, '+', 'circuit-zoom-in', () => applyScale(Math.min(1, Math.round((view.scale + 0.1) * 10) / 10))).setAttribute('aria-label', 'Zoom in');
-    button(bar, 'Actual size', 'circuit-zoom-reset', () => applyScale(1));
-    const arrange = button(bar, view.arranged ? 'Show saved layout' : 'Arrange view', 'circuit-arrange', () => {
+    iconButton(bar, 'Zoom in', 'circuit-zoom-in', () => applyScale(Math.min(1, Math.round((view.scale + 0.1) * 10) / 10)), 'zoom-in');
+    iconButton(bar, 'Actual size', 'circuit-zoom-reset', () => applyScale(1), 'maximize');
+    iconButton(bar, 'Fit to view', 'circuit-fit', fit, 'scan');
+    const arrange = iconButton(bar, view.arranged ? 'Show saved layout' : 'Arrange view (display only)', 'circuit-arrange', () => {
       view.arranged = !view.arranged; view.fitPending = true; view.scroll = null; rerender();
-    });
+    }, 'workflow');
     arrange.setAttribute('aria-pressed', String(view.arranged));
-    arrange.title = 'Display a non-overlapping layout derived from the connections. Display only: saved positions change only if you then move a card, review and save.';
     arrange.disabled = !value.document;
+    const tidy = iconButton(bar, 'Tidy up', 'circuit-tidy', tidyUp, 'layout-grid');
+    tidy.disabled = !value.document || !value.enabled || value.allowMove === false;
     const note = element('p', '', parent, 'circuit-view-note'); note.setAttribute('aria-live', 'polite');
   }
   function render(container, value, callbacks) {
@@ -290,7 +311,7 @@
       });
       heading.addEventListener('pointerdown', event => {
         if (projection !== value || !projection.enabled || projection.allowMove === false || event.button !== 0 || drag) return;
-        heading.setPointerCapture(event.pointerId);
+        event.preventDefault(); gesture(true); heading.setPointerCapture(event.pointerId);
         drag = {pointerId: event.pointerId, node: node.id, card, startX: event.clientX, startY: event.clientY, position: {...card._position}, left: card.offsetLeft, top: card.offsetTop};
       });
       heading.addEventListener('pointermove', event => {
@@ -310,8 +331,13 @@
       // Server inventory marks required sockets; an unbound one flags the whole card.
       const missing = value.inventory.filter(item => item.node === node.id && item.required && !item.bound).length;
       card.classList.toggle('has-required-unbound', missing > 0);
-      if (missing) element('span', `${missing} required input${missing === 1 ? '' : 's'} missing`, card, 'circuit-problem-badge').dataset.node = node.id;
-      const mapping = element('details', '', card, 'circuit-mapping');
+      // §8.3 / operator rule: the socket itself carries the red light; the card only a small count.
+      if (missing) {
+        const badge = element('span', String(missing), card, 'circuit-problem-badge'); badge.dataset.node = node.id;
+        badge.setAttribute('aria-label', `${missing} required input${missing === 1 ? '' : 's'} not connected`); badge.setAttribute('role', 'img');
+      }
+      // Advanced detail (ui-settings.js): hidden for beginners, so a flag change re-renders.
+      const mapping = element('details', '', card, 'circuit-mapping'); mapping.dataset.uiFlag = 'advanced';
       mapping.addEventListener('toggle', draw);
       element('summary', 'Mapping details', mapping);
       const mappingList = element('dl', '', mapping, 'circuit-mapping-list');
@@ -324,12 +350,13 @@
         element('dt', 'Mapped input contract', mappingList); element('dd', protocolMapping.output_contract.id, mappingList);
       }
       const options = value.inventory.filter(item => item.node === node.id);
-      // Required and bound inputs always show; optional unbound ones fold into one expandable row.
-      const folded = options.filter(option => !option.required && !option.bound);
+      // Required inputs and optional inputs fed by a wire always show; every other optional
+      // input (not connected, or fed by an external input) folds into one "+N optional" row.
+      const folded = options.filter(option => !option.required && option.source?.kind !== 'result' && !option.framework_supplied);
       let group = null;
       if (folded.length) {
         group = document.createElement('details'); group.className = 'circuit-optional'; group.dataset.node = node.id;
-        const summary = element('summary', `${folded.length} optional input${folded.length === 1 ? '' : 's'}`, group);
+        const summary = element('summary', `+${folded.length} optional`, group);
         summary.id = `circuit-optional-${node.id}`;
         group.open = view.expanded.has(node.id);
         group.addEventListener('toggle', () => {
@@ -338,7 +365,10 @@
         });
       }
       for (const option of options) {
-        const input = port(folded.includes(option) ? group : card, node, option.argument, false, option); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;
+        // Framework-supplied inputs (managed storage, …) get no socket; Mapping details list them.
+        if (!option.framework_supplied) {
+          const input = port(folded.includes(option) ? group : card, node, option.argument, false, option); input.id = `circuit-input-${node.id}-${option.argument || 'request'}`;
+        }
         element('dt', option.argument || 'Request', mappingList);
         element('dd', option.source ? (option.source.kind === 'external' ? `external:${option.source.binding}` : `${option.source.node}.${option.source.port}`) : 'unbound', mappingList);
       }
@@ -379,6 +409,7 @@
       target.setAttribute('aria-disabled', String(!enabled)); target.setAttribute('tabindex', enabled ? '0' : '-1');
     }
     for (const heading of host.querySelectorAll('.editor-node')) heading.setAttribute('aria-disabled', String(!selectable));
+    const tidy = host.querySelector('#circuit-tidy'); if (tidy) tidy.disabled = !enabled || !projection.document || projection.allowMove === false;
     if (!enabled) { cancel(); selectedWire = null; highlight(); }
   }
   document.addEventListener('keydown', event => {
@@ -388,21 +419,39 @@
   });
   // Drag-to-connect: a press on an output released over an input clicks that input.
   document.addEventListener('pointerup', event => {
+    if (document.body.classList.contains('circuit-gesture')) gesture(false);
     if (!connecting) return;
     connecting = false;
-    const input = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-input]');
-    if (pending && input && host?.contains(input)) input.click();
+    if (!pending || !host) return;
+    // The input whose own box holds the release point; a highlighted (compatible) one wins
+    // over a neighbour whose label might reach into it at small zoom.
+    const holding = [...host.querySelectorAll('[data-input]')].filter(element => {
+      const box = element.getBoundingClientRect();
+      return element.getClientRects().length && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
+    });
+    const input = holding.find(element => element.classList.contains('compatible')) || holding[0] ||
+      document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-input]');
+    if (!input || !host.contains(input)) return;
+    input.click();
+    // The release ends the drag: the browser's own click that follows (on the common ancestor
+    // of press and release) must not act on the canvas again.
+    const swallow = click => { click.stopPropagation(); click.preventDefault(); };
+    document.addEventListener('click', swallow, {capture: true, once: true});
+    setTimeout(() => document.removeEventListener('click', swallow, {capture: true}), 0);
   });
+  document.addEventListener('pointercancel', () => { if (document.body.classList.contains('circuit-gesture')) gesture(false); });
   document.addEventListener('contextmenu', event => { if (pending && host?.contains(event.target)) { event.preventDefault(); cancel(); say('Connection selection cancelled.'); } });
   document.addEventListener('pointermove', event => {
     if (!pending || !host?.contains(event.target)) return;
-    const output = host.querySelector(`#circuit-output-${CSS.escape(pending.node)}`), svg = host.querySelector('svg');
+    const output = host.querySelector(`#circuit-output-${CSS.escape(pending.node)}`), svg = wireLayer();
     const start = point(output), end = toWorld(event.clientX, event.clientY);
     svg.querySelector('.circuit-pending')?.remove();
     const path = document.createElementNS(svg.namespaceURI, 'path'); path.classList.add('circuit-pending');
     path.setAttribute('d', geometry.path([start, {x: (start.x + end.x) / 2, y: start.y}, {x: (start.x + end.x) / 2, y: end.y}, end])); svg.append(path);
   });
   new ResizeObserver(() => { if (projection?.document) draw(); }).observe(document.body);
+  // Settings flags change card content (mapping details, chips): re-place the cards.
+  window.addEventListener('ui-settings-change', () => { if (host && projection) render(host, projection, actions); });
   // A canvas rendered while hidden (zero width) fits once it is first laid out.
   const viewObserver = new ResizeObserver(() => {
     if (!projection?.document) return;

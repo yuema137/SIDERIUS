@@ -337,6 +337,43 @@ def test_crlf_source_round_trips_byte_identically():
     assert back[0] == source
 
 
+def test_palette_guide_covers_every_capability_and_matches_protocol_edges():
+    """Fails if a catalog capability lacks a palette description (the catalog route
+    would raise), or if connects_from/connects_to, an argument's produced_by, or the
+    stage order disagree with the catalog protocols the server actually offers."""
+    from tools.workflow_authoring.capability_guide import CAPABILITY_DESCRIPTIONS
+    from tools.workflow_authoring.options import node_catalog
+    from workflows.definition.catalog import CAPABILITIES, PROTOCOLS
+
+    assert set(CAPABILITY_DESCRIPTIONS) == set(CAPABILITIES)
+    catalog = node_catalog()
+    guide = {item.capability: item for item in catalog.guide.capabilities}
+    assert set(guide) == set(CAPABILITIES)
+    assert all(item.description.strip() for item in guide.values())
+    # Independent derivation: a -> b when some protocol producing b's input reads a's output.
+    edges = {
+        (source, target)
+        for target, consumer in CAPABILITIES.items()
+        for protocol in PROTOCOLS.values()
+        if protocol.output == consumer.input
+        for argument in protocol.arguments
+        for source, producer in CAPABILITIES.items()
+        if producer.output == argument.contract and source != target
+    }
+    for name, item in guide.items():
+        assert set(item.connects_from) == {a for a, b in edges if b == name}, name
+        assert set(item.connects_to) == {b for a, b in edges if a == name}, name
+    for a, b in edges:
+        assert guide[a].stage < guide[b].stage, (a, b)
+    for entry in catalog.entries:
+        for argument in entry.arguments:
+            expected = {n for n, c in CAPABILITIES.items() if c.output == argument.contract.id}
+            assert set(argument.produced_by) == expected, (entry.protocol, argument.name)
+    # Current catalog: feeders add context; the build chain starts at proposal.
+    assert catalog.guide.context == ("interpretation", "literature")
+    assert catalog.guide.chain == ("proposal", "implementation", "validation", "tuning")
+
+
 def test_remove_refuses_a_route_source_instead_of_returning_dangling_source():
     """Fails if removing a node only a route reads (no ResultSource consumer) returns source
     whose route still names it: the removal must be refused with the validator's reason."""

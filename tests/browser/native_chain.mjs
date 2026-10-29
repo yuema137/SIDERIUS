@@ -8,6 +8,7 @@ import {mkdir, readFile, writeFile, unlink, readdir} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[key], `Set ${key}`);
 const evidence = resolve(process.env.CONSOLE_EVIDENCE_DIR);
@@ -48,6 +49,7 @@ try {
   const metadata = await startServer();
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const context = await browser.newContext(); const page = await context.newPage(), faults = [], calls = [];
   page.on('pageerror', e => faults.push(e.message));
   page.on('request', r => {if (new URL(r.url()).pathname.startsWith('/api/')) calls.push({method: r.method(), path: new URL(r.url()).pathname});});
@@ -171,7 +173,7 @@ async function projections(context, metadata, realStatus) {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     const reply = json => route.fulfill({json});
-    // Read-only shell lists (recorded examples, Slow control operation list) are outside this witness.
+    // Read-only shell lists (recorded examples, Monitor operation list) are outside this witness.
     if (path === '/api/choices' || path === '/api/recorded-examples') return reply([]);
     if (path === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     if (path === '/api/native-chain/choices') return reply([{choice_id: 'one', label: 'One'}, {choice_id: 'two', label: 'Two'}]);
@@ -194,17 +196,17 @@ async function projections(context, metadata, realStatus) {
   await connect(page, metadata.token); releaseReview(); await new Promise(r => setTimeout(r, 150));
   assert.equal(reviewRequestCount, 1); assert.equal(await page.locator('#native-chain-launch').isEnabled(), false);
   assert.equal(await page.locator('#native-chain-details').textContent(), '');
-  await page.goto(metadata.origin + '/#slow-control/' + candidate); await connect(page, metadata.token);
+  await page.goto(metadata.origin + '/#monitor/' + candidate); await connect(page, metadata.token);
   await until(() => tokenReply);
-  await page.evaluate(id => {location.hash = 'slow-control/' + id;}, realStatus.operation_id);
+  await page.evaluate(id => {location.hash = 'monitor/' + id;}, realStatus.operation_id);
   releaseTokens(); await page.locator('#native-chain-observation').waitFor();
   await page.locator('#tokens-status').filter({hasText: 'Whole-run cumulative usage.'}).waitFor({state: 'attached'});
   assert.equal(await page.locator('#token-rows').textContent(), '', 'Late candidate token rows must not render for the native chain');
   assert.doesNotMatch(await page.locator('#tokens-times').textContent(), /\bold\b/);
   holdStatus = true;
-  await page.evaluate(id => {location.hash = 'slow-control/' + id;}, candidate);
+  await page.evaluate(id => {location.hash = 'monitor/' + id;}, candidate);
   await until(() => statusWaiting);
-  await page.evaluate(id => {location.hash = 'slow-control/' + id;}, realStatus.operation_id);
+  await page.evaluate(id => {location.hash = 'monitor/' + id;}, realStatus.operation_id);
   releaseStatus();
   await page.locator('#native-chain-observation').waitFor();
   assert.doesNotMatch(await page.locator('#monitor-status').textContent(), /STALE_STATUS/);

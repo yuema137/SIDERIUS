@@ -283,6 +283,7 @@ def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
 
     from tools.workflow_authoring.models import NativeContract
     from workflows.definition.catalog import CONTRACTS, PROTOCOLS
+    from workflows.definition.contract_names import contract_name
 
     ports = {(item.node, item.argument): item for item in view.port_inventory}
     optional_context = ports[("validate", "constraint_context")]
@@ -315,9 +316,13 @@ def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
     assert serialized_optional["required"] is False
     assert serialized_optional["bound"] is False
     assert serialized_optional["source"] is None
+    # Presentation travels with the id on every projected contract (additive fields).
     assert serialized_optional["socket_contract"] == {
         "id": "optional.constraint-context",
         "native_type": CONTRACTS["optional.constraint-context"],
+        "name": "Run constraints",
+        "description": contract_name("optional.constraint-context").description,
+        "kind": "setting",
     }
     assert serialized_optional["protocol_mapping"]["id"] == "implementation-to-validation"
     reviewed_base = editor.review(

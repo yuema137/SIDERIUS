@@ -20,6 +20,7 @@ import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -49,6 +50,7 @@ async function waitUntil(predicate, label = 'Browser condition') {
 try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage({viewport: {width: 1440, height: 900}});
   const faults = [], posts = [];
   page.on('pageerror', error => faults.push(error.message));
@@ -95,6 +97,20 @@ try {
     assert.equal(result.outside, '0', `${label}: the canvas reports cards outside the view`);
     assert.match(await page.locator('.circuit-view-note').textContent(), /All 5 capabilities are in view/);
   };
+  // Fit never zooms below 75% (cards stay legible); a graph larger than the canvas at 75%
+  // scrolls inside the viewport, and the canvas says so.
+  const assertFitted = async label => {
+    const zoom = await scale(), outside = await page.locator('.circuit-viewport').getAttribute('data-outside-cards');
+    assert.ok(zoom >= 0.75 - 1e-9, `${label}: fit keeps text legible (zoom ${zoom})`);
+    if (outside === '0') { await assertAllInView(label); return; }
+    assert.equal(zoom, 0.75, `${label}: only the 75% floor leaves cards outside the view`);
+    assert.match(await page.locator('.circuit-view-note').textContent(), /outside the view\. Scroll the canvas/);
+    const reachable = await page.evaluate(() => {
+      const viewport = document.querySelector('.circuit-viewport');
+      return [...viewport.querySelectorAll('.circuit-card')].every(card => (card.offsetLeft + card.offsetWidth) * 0.75 <= viewport.scrollWidth + 1 && (card.offsetTop + card.offsetHeight) * 0.75 <= viewport.scrollHeight + 1);
+    });
+    assert.ok(reachable, `${label}: every card can be scrolled into view`);
+  };
   const assertDisjoint = async label => {
     const values = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => {
       const box = card.getBoundingClientRect();
@@ -117,16 +133,16 @@ try {
   const fiveBytes = await readFile(metadata.five_node_source, 'utf8');
   await open('five_node');
   posts.length = 0;
-  await waitUntil(async () => (await page.locator('.circuit-viewport').getAttribute('data-outside-cards')) === '0', 'fit on open');
+  await waitUntil(async () => (await page.locator('.circuit-viewport').getAttribute('data-outside-cards')) !== null, 'fit on open');
   assert.ok(await scale() < 1, 'The five-node row is wider than the canvas, so it opens zoomed out');
-  await assertAllInView('five_node after fit on open');
+  await assertFitted('five_node after fit on open');
   await page.screenshot({path: join(evidence, 'five-node-fit-1440x900.png')});
   await page.locator('#circuit-zoom-reset').click();
   assert.equal(await page.locator('.circuit-zoom').textContent(), '100 %');
   assert.match(await page.locator('.circuit-view-note').textContent(), /outside the view/, 'At 100 % the visible cue names the hidden cards');
   await page.locator('#circuit-zoom-out').click();
   await page.locator('#circuit-fit').click();
-  await assertAllInView('five_node after Fit to view');
+  await assertFitted('five_node after Fit to view');
   assert.deepEqual(posts, [], 'Viewing sends no request');
   assert.equal(await dirty(), false, 'Viewing is not an edit');
   assert.equal(await readFile(metadata.five_node_source, 'utf8'), fiveBytes, 'Viewing never changes saved bytes');
@@ -135,13 +151,14 @@ try {
   const card = page.locator('.circuit-card[data-node="hypothesis"]');
   const summary = card.locator('.circuit-optional > summary');
   assert.equal(await summary.count(), 1);
-  const count = Number(/^(\d+) optional inputs?$/.exec(await summary.textContent())?.[1]);
+  const count = Number(/^\+(\d+) optional$/.exec(await summary.textContent())?.[1]);
   assert.ok(count >= 1, 'The summary states how many optional inputs are folded');
   const folded = card.locator('.circuit-optional [data-input]');
   assert.equal(await folded.count(), count);
   for (const port of await folded.all()) {
     assert.equal(await port.getAttribute('data-required'), 'false');
-    assert.ok(await port.evaluate(element => element.classList.contains('is-unbound')));
+    // Folded: not connected, or fed by an external input; never the target of a drawn wire.
+    assert.equal(await page.locator(`.circuit-wire-target[data-to="hypothesis"][data-argument="${await port.getAttribute('data-argument')}"]`).count(), 0);
     assert.equal(await port.isVisible(), false, 'Folded inputs take no row until expanded');
   }
   assert.equal(await card.locator(':scope > [data-input].is-unbound[data-required="false"]').count(), 0, 'No optional unbound input is drawn as its own row');
@@ -182,10 +199,10 @@ try {
   // 4. Interpretation fixture: complete disjoint saved layout, every wire routed, all in view.
   const interpretationBytes = await readFile(metadata.interpretation_source, 'utf8');
   await open('interpretation');
-  await waitUntil(async () => (await page.locator('.circuit-viewport').getAttribute('data-outside-cards')) === '0', 'interpretation fit');
+  await waitUntil(async () => (await page.locator('.circuit-viewport').getAttribute('data-outside-cards')) !== null, 'interpretation fit');
   await assertDisjoint('interpretation saved layout');
   await assertWired('interpretation saved layout');
-  await assertAllInView('interpretation after fit on open');
+  await assertFitted('interpretation after fit on open');
   await page.screenshot({path: join(evidence, 'interpretation-fit-1440x900.png')});
   assert.equal(await readFile(metadata.interpretation_source, 'utf8'), interpretationBytes);
 

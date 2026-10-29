@@ -127,24 +127,33 @@ even when using the default models.
    Open `http://127.0.0.1:8740`. If the local forwarding port differs, configure
    `browser_origin` to that exact local address before starting the server.
 5. Open **Home**, paste the console token, and select **Connect**. The connection
-   stays available while you switch between Home, Workflow Editor, Run and Slow control,
+   stays available while you switch between Home, Workflow Editor, Run and Monitor,
    and the connect card shrinks to a **Connected** line with **Change token** and
    **Disconnect console**. Reloading or opening a new tab requires Connect again;
    the password field clears immediately and the token stays only in this
-   document's memory. Home's main path is **Open workflow**: edit and review the
-   workflow, prepare a new run, then launch and monitor it.
+   document's memory. Home offers three starting points: **Start from a template**
+   (opens Workflow with a short guided tour), **Open a workflow** and **Monitor runs**.
+   **Help** in the header reopens the tour at any time.
+   Tools a first-time user does not need stay hidden until you turn them on in
+   **Settings** (header): **Show advanced tools** adds the source editor,
+   references, version history, Refresh from disk, protocol mapping details and
+   raw contract ids on the canvas and in Selection, the model-hyperparameter
+   owner, native chains, configured-task
+   preparation, the operation-UUID form and recorded examples; **Show developer
+   details** adds operation facts, raw token tables, captured resources and save
+   internals. The browser remembers both choices.
 6. To generate a candidate from the server's configured task, expand **Prepare
-   configured task** on Home. Select a task, fill the run name and optional advice,
+   configured task** on Home (Settings › Show advanced tools). Select a task, fill the run name and optional advice,
    and expand **Configured paths** to inspect the inputs and output parents.
    **Prepare request** creates separate UUID child paths. Review the resolved
    workspace, task, models, credential blockers and resource policy before
    **Launch candidate**, which starts code execution and may call paid APIs.
    Native Prepare generates its configured candidate independently of the declaration
    selected in Workflow Editor. Preparation never launches automatically.
-7. To observe an existing operation, choose **Slow control** and select it under
+7. To observe an existing operation, choose **Monitor** and select it under
    **Recent operations** (operations this console admitted, newest first), or
-   enter its complete operation UUID. You can also open a link such as
-   `http://127.0.0.1:8740/#slow-control/22222222-2222-4222-8222-222222222222`
+   enter its complete operation UUID (Settings › Show advanced tools). You can also open a link such as
+   `http://127.0.0.1:8740/#monitor/22222222-2222-4222-8222-222222222222`
    (replace the example UUID), then Connect. No task or editor project selection
    is needed. The optional remembered ID is labelled **Last opened on this browser**;
    it is separate from the Recent operations list. Expand Operation facts, Reported
@@ -165,7 +174,7 @@ even when using the default models.
    `cancelled`, then "Run stopped." If the console loses contact with the server,
    the line starts with "Last observed:". The Run page shows the same button for
    a retained candidate whose last checked status is active.
-   Configured **Recorded examples** appear in Slow control. They show verified
+   Configured **Recorded examples** appear in Monitor. They show verified
    proposal, implementation, validation and reported-token evidence only; they
    are not live operations, training results, scientific scores or billing
    records. Configure `recorded_examples` only for fixed canonical workspaces
@@ -173,8 +182,9 @@ even when using the default models.
    The view has no operation import or execution controls, and a missing saved
    source is shown as unavailable.
 8. To author a configured declaration, choose **Workflow Editor**. Select a node
-   to inspect its supported bindings; expand **References** for task and external
-   locations, or **Advanced source** for exact Python bytes. Review opens the
+   to inspect its supported bindings. With **Show advanced tools** on, expand
+   **References** for task and external locations, or **Advanced source** for
+   exact Python bytes. Review opens the
    exact diff; Save writes those reviewed bytes. Connections, card moves and
    inspector edits collect in one set of pending edits that you review and save
    together. **Undo**/**Redo** (Ctrl+Z / Ctrl+Shift+Z) step through them;
@@ -185,14 +195,16 @@ even when using the default models.
    unsaved-change guard. Saving does not run the declaration.
    The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
-   Until a workflow is open, the page shows **Start from a task example**: select a
-   task, edit, save, run. Save behavior and concurrent-writer notes are under
-   **Details**. After a successful save, **Next: prepare a run** opens the **Run**
-   page; it stays disabled, with the reason beside it, while edits are unsaved or
+   Until the canvas has a module, it says what to do next and offers **Start from a
+   template**; the 4-step tour is a link below it and under **Help**.
+   Save behavior and concurrent-writer notes are under **Details** (Settings ›
+   Show developer details). After a successful save, **Next: Run** opens the **Run**
+   page; it stays disabled, with the reason in its tooltip, while edits are unsaved or
    the project is not enabled for runs.
    A step line (Task › Workflow › Run › Results) shows where you are.
 
-The entry URLs are `/#home`, `/#workflow`, `/#run` and `/#slow-control`. An old
+The entry URLs are `/#home`, `/#workflow`, `/#run` and `/#monitor`. Old
+`/#slow-control` links (the page's former name) open Monitor, and an old
 `/editor.html` link redirects to `/#workflow` before asking for credentials.
 Connection sharing applies within one document; separate tabs/windows connect
 independently.
@@ -284,31 +296,49 @@ the workspace folders.
 ## Edit existing circuit connections
 
 In Workflow builder, select a node to open its inspector. To change a connection,
-select a **result** output socket, then a highlighted named input. Press Escape
+select an output socket (right side of a card), then a highlighted input. Sockets are
+labelled with the kind of data they carry, for example *Model plan*; hover one to see
+what it connects with. Press Escape
 or right-click to cancel. The inspector offers the same binding choices, including
 external inputs such as storage. Only existing inputs can be rewired here.
 
-A large workflow opens zoomed out so every node is visible; **Fit to view**, the
-zoom buttons and **Actual size** change only the view. Optional inputs that are
-not connected are folded into an "N optional inputs" row on each card; expand it
-to connect one. If saved cards overlap, **Arrange view** shows a non-overlapping
+A large workflow opens zoomed out (never below 75%, so text stays readable; scroll the
+canvas for the rest). The controls at the bottom right of the canvas (zoom, **Actual
+size**, **Fit to view**) change only the view. Optional inputs that no wire feeds are
+folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, **Arrange view** shows a non-overlapping
 layout without changing the file.
 
 Drag a node heading to move it, or focus the heading and use Alt + arrow keys.
-These edits stay local until **Review changes** and **Save reviewed source**.
+These edits stay local until you press **Save** (it checks the workflow) and then
+**Save version** in the row that opens. **Tidy up** (bottom-right of the canvas) lines
+the cards up left to right; it is one edit you can undo.
 For a bound workflow, choose its matching configured task version and acknowledge
 the findings. Prepare a new run on the Run page to check its supported execution profile.
-New nodes and optional input changes still use Advanced source.
+
+To add nodes, click or drag entries from **Add capability**, or hover a card and
+press the **+** beside an output that is not connected yet: pick a module and it is
+added to the right, already connected. You can add several nodes, move any card and
+wire them in any order. A node with a missing required input shows it in red, the
+**N problems** chip in the bar above lists every missing input (click a row to jump to
+it), and **Save** stays disabled with the reason beside it until all are connected.
+
+When a required input such as `storage` has nothing to connect, select the node.
+Under that input, Selection explains what the input is. Open **Create external
+input…**, keep or change the suggested id, and type the project-relative path of
+the JSON file that will hold the value, for example `inputs/build_store.json`.
+Reusable workflows can choose **Managed by the run** instead. Then click
+**Create and connect**. Undo, Redo and Discard cover all of these edits.
 
 ## Bind a task version
 
-The **Task package and version** panel always states which task package and
+The task chip in the Workflow page bar shows the task package and version; click it
+to open the **Task package and version** card below the canvas. That card always states which task package and
 version the open workflow uses. Versions are offered only for configured tasks
 that declare `task_revision`; otherwise the panel says that none are configured.
 
 In Workflow builder, explicitly choose a configured task package/version and
 **Update workflow references**. Inspect the Python diff and task findings, confirm
-them and **Save reviewed source**. An unbound reusable workflow requires a separate
+them and **Save version**. An unbound reusable workflow requires a separate
 confirmation to adopt its currently observed snapshot; save that binding before
 editing its scientific settings.
 
@@ -323,7 +353,7 @@ unsupported forms explain why the switch is blocked. Existing runs stay unchange
 See the [exact support boundary](../workflow_authoring/authoring-contract.md#changed-task-versions-for-fresh-candidates).
 
 Save pending source or inspector edits before Update. For bound edits, select the
-matching configured choice and use ordinary **Review changes** and Save first.
+matching configured choice and use the ordinary **Save** first.
 Choosing a version alone never changes source. Both Professional and Assistant
 collaboration use this flow. Saving affects future captures; preparation and launch
 remain separate, and existing runs keep their captured binding.
@@ -340,7 +370,7 @@ See the [reusable configuration contract](console-contract.md#reusable-capture-c
 
 1. Connect and open **Workflow Editor**. Review and **Save** your source edits.
    An already saved supported reusable declaration needs no extra Save. Resolve
-   any source conflict before continuing. Select **Next: prepare a run**; the
+   any source conflict before continuing. Select **Next: Run**; the
    **Run** page states which saved version it will use.
 2. On the Run page, in **New run**, explicitly choose the configured task and resources, enter a
    run name, and select **Review preparation**. Check the source, dataset, model
@@ -389,20 +419,21 @@ The browser launches that configured recipe independently of the editor.
    credential names there. The [configuration contract](console-contract.md#configured-native-chains)
    specifies these fields. For a native-only console, omit `tasks` and
    `editor_projects`; no dummy candidate task is needed.
-2. Check and start the console with the commands above, then Connect. On Home,
+2. Check and start the console with the commands above, then Connect. Turn on
+   **Settings › Show advanced tools**. On Home,
    choose the capture under **Run a configured native chain** and select
    **Review native capture**. Inspect its run name, final iteration, workspace,
    input identities, resource policy and credential readiness. Consult the
    original capture for complete scientific settings.
 3. Select **Launch native chain** explicitly. The operation UUID appears before
-   submission. Follow **Open native Slow control** to see process state, shell
+   submission. Follow **Open native monitor** to see process state, shell
    outcome, cleanup and each checkpoint's native status and integrity separately.
    A completed process does not establish scientific success; `no_records`,
    unavailable evidence and invalid evidence remain visible. The reported-token
    table covers the whole native run, including continuations.
 4. If the response is lost, keep the displayed UUID. Reconnect to check it, or
    use **Retry same native launch** while admission remains unconfirmed. Neither
-   navigation nor reconnect launches automatically. Reload the UUID's Slow control
+   navigation nor reconnect launches automatically. Reload the UUID's Monitor
    link to monitor it without selecting a task or editor project. After admission
    is confirmed, **Review another native capture** clears the form for another
    configured destination; it does not stop the previous run.

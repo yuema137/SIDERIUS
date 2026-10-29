@@ -144,6 +144,18 @@ read-only projection of the native catalog: one `CatalogEntry` per capability pe
 protocol whose output is that capability's input (with owner and ordered
 `CatalogArgument` name/contract/required), plus one external-request route
 (`protocol=null`) per capability. The browser palette lists only these entries.
+Each `CatalogArgument.produced_by` names the capabilities whose output carries its
+contract (empty: an external input). `NodeCatalog.guide` (`CatalogGuide`, owner
+`capability_guide.py`) carries palette guidance derived only from `CAPABILITIES` and
+`PROTOCOLS`: per capability (`CapabilityGuide`) its stable topological `stage`,
+`connects_from`/`connects_to` (a -> b when some protocol producing b's input reads a's
+output), and a one-line `description` from `CAPABILITY_DESCRIPTIONS`, the single
+owner of that presentation text (no prompt or execution path reads it); plus
+`context` (capabilities without an upstream capability that feed one: currently
+interpretation, literature) and `chain` (the remaining stage order, the suggested
+build order: proposal, implementation, validation, tuning). A capability missing a
+description fails the catalog route; `tests/unit/tools/test_workflow_node_edits.py`
+binds the table and edges to the catalog.
 
 `AddNodeProposal(kind="add_node", source, node, capability, protocol, binding,
 arguments, x, y)` and `RemoveNodeProposal(kind="remove_node", source, nodes)` are
@@ -171,7 +183,9 @@ is then re-parsed and validated before it is returned: a removal that leaves ano
 reference dangling (a route source or target, a `SelectedSource` merge candidate, an
 adaptor input) is refused as `node_dependants` with the validator's diagnostics
 ("Cannot remove <ids>: ..."), never returned as source. Those consumers are not yet
-named individually like ResultSource readers are.
+named individually like ResultSource readers are. The browser editor no
+longer sends `remove_node`: it deletes through `NodeDraftsProposal.removed` (below),
+where deletion always succeeds as a draft and these cases become located problems.
 
 A node with unbound required inputs is a draft-only state. `POST
 /api/editor/{project_id}/node-draft` accepts `NodeDraftRequest(expected_sha256,
@@ -182,6 +196,54 @@ document's contract-matching externals and node results). It checks the saved
 digest, renders nothing for publication and writes no recovery copy; a stale base
 is a conflict. Only a complete add can be reviewed, so a saved document is always
 valid. Constructor imports added by an insertion are kept by a later removal.
+
+### Multi-node drafts and new external inputs
+
+The browser editor uses `NodeDraftsProposal(kind="node_drafts", source, nodes,
+externals, document=None, bindings=(), removed=())` (`models.py`, applied by
+`node_edits.apply_node_drafts`) for any number of pending additions in one review.
+`nodes` are `PendingNode` values (the `AddNodeProposal` fields without `kind` and
+`source`; `AddNodeProposal` subclasses it). `externals` are new
+`ExternalBinding(id, contract, location)` or `ManagedCandidateBinding(id, contract)`
+values that pending nodes and saved sockets may read. Pending nodes may read each
+other's results, new externals and saved results. The schema requires at least one
+node or external and unique new ids. Review refuses with 409 `node_edit` (an id
+already in the base document, or a source shape `insert_external`/`insert_node`
+cannot edit), `draft_incomplete` (every unbound required input of every pending
+node), or `draft_invalid` (a pending binding the projected choices do not offer, or
+a combined document the validator refuses).
+
+When `document` is null and `bindings` is empty, the result is a set of targeted
+insertions: `source_edits.insert_external` appends each new external to the literal
+`externals` tuple, then `insert_node` appends each node and its position. Every
+anchor byte, including comments, is kept and the result is re-parsed. A `document`
+(edits of saved content: moves, inspector, loop) or `bindings` (`BindingPatch` on
+saved sockets, which may read pending results) renders the combined document
+canonically through `inspect_draft` and `render_workflow_source`, exactly like a
+`DocumentProposal`/`DraftProposal`. So only a draft whose saved content is unedited
+keeps author comments. The browser omits `document` when it equals the anchor, and
+moving only pending cards does not edit saved positions.
+
+`POST /api/editor/{project_id}/nodes-draft` accepts `NodeDraftsRequest(expected_sha256,
+proposal)` and returns `NodeDraftsView(status, diagnostics, problems, ports)`. It
+checks the saved digest and writes nothing. `ports` cover every projected node:
+saved sockets show the `document` (or anchor) source *without* `bindings`, which the
+browser projects. Their choices, and those of pending sockets, include pending
+results and new externals of the matching contract (`binding_projection(...,
+choices_from=)` over an unvalidated `model_construct` projection used only for
+choices). `problems` locate each unbound input (`DraftProblem` node and field).
+Saved documents stay valid because only a `complete` draft can be reviewed.
+
+`GET /api/editor/external-inputs` returns `ExternalInputCatalog`
+(`external_inputs.external_input_catalog`): one `ExternalInputKind(contract,
+managed, summary, example)` per catalog contract that no capability produces as
+a result. `managed` derives from `ManagedCandidateBinding.contract`, minus
+`literature.input` (which also needs `literature_settings`). It applies only to
+reusable (schema 2) documents; a managed binding in a schema 1 document is
+`invalid`. `summary` is one plain sentence and `example` is a placeholder file name.
+No location is ever proposed. Task packages declare none of these inputs, so the
+author types a project-relative path to a JSON file holding the contract's
+`native_type` value. The path is read only when a run is prepared.
 
 ## Native training inspector
 
@@ -246,6 +308,47 @@ condition-free loop keeps its bytes and add-then-remove restores them. The edito
 does not know the task's declared metric: `metric_id` is a validated text field,
 and a mismatch with the run metric fails the loop at execution (the worker
 contract), not at Review.
+
+## Workflow templates and advice targets
+
+Owner: `templates.py` (the only template catalog) and `advice_targets.py`.
+Routes (`tools/candidate_console/template_routes.py`, authenticated):
+`GET /api/editor/templates` -> `TemplateCatalog` (`id`, `title`, one-line
+`description`, `preview` = nodes with capability/position, result edges, loop
+endpoints and `final_iteration`, all derived from the template document);
+`POST /api/editor/{project_id}/template` with `TemplateImportRequest`
+(`template_id`, `expected_sha256`) -> `TemplateImportView` (`template_id`,
+unsaved `source`); `GET /api/editor/advice-targets` -> `AdviceTargets`.
+
+Templates are reusable v2 shapes with no task, data, advice, output-type or
+training values (`training_settings={}`: native launch defaults apply):
+
+| id | Shape | Profile |
+| --- | --- | --- |
+| `single-research-loop` | interpret -> propose -> implement -> validate -> train, feedback train -> interpret, `final_iteration=1` | `native-interpretation-candidate/v1` |
+| `single-loop-with-advice` | same, proposal `human_advice` -> managed `advice`, `expert_context` -> managed `findings` | same |
+| `single-step` | propose -> implement -> validate -> train, no loop | plain candidate |
+
+Every external is a `ManagedCandidateBinding` routed as `check_candidate_roles`
+admits. Import is write-free: it reads the current source, refuses a stale
+`expected_sha256` (409 `conflict`) or an unparsed source (409 `unsupported`),
+copies the project's own task references (v1: `manifest`/`data_root`; v2: the
+references and accepted `task_binding`) and renders canonical source. The
+browser reviews it as an ordinary `source` proposal; a bound source therefore
+still requires explicit task selection, and only Save publishes. No template
+contains Literature: no catalogued protocol joins `literature.output` into an
+interpretation-fed proposal, and N reviews -> one proposal needs the B6
+aggregation work (B6-1/B6-3/B6-4).
+
+Advice targets name where each agent reads free-text advice:
+`preparation_options.proposal_advice` / `implementation_advice` /
+`validation_advice` and `training_settings.launch.human_advice_tune`
+(tuning). `advice_targets()` fails closed if a field leaves its owning model.
+The proposal target carries `socket` (`interpretation-to-proposal`,
+`human_advice`): under that protocol the proposal agent reads the advice only
+through the bound socket. No loop-wide advice field exists
+(`human_advice_mindset` is an inactive launch field), so advice is per agent.
+Unit owner: `tests/unit/tools/candidate_console/test_templates.py`.
 
 ## Bound-source publication boundary
 
@@ -386,3 +489,20 @@ candidate may use a changed target objective after explicit review when the
 structured interfaces remain supported. Migrating a trained model or objective
 state, combining execution profiles with training, and I/O adaptation remain
 outside this slice.
+
+### Draft deletion (`NodeDraftsProposal.removed`)
+
+`removed` lists anchor node ids deleted in the draft (unique; an unknown id is
+`node_edit`; a draft must add or delete at least one node or input). Choices never
+offer a deleted node's result. Every remaining socket that reads a deleted result is
+disconnected unless the proposal patches it explicitly (`bindings` win), so a required
+reader reports `required_unbound` (node, field). Deleting a research-loop feedback
+endpoint adds `DraftProblem(code="loop_feedback_missing")` and deleting every node with
+no pending addition adds `DraftProblem(code="workflow_empty")` (both without node).
+Inspection reports these as `incomplete` with `problems`; Review refuses
+`draft_incomplete` until none remain, so a saved document is always valid. Without
+reader patches, `document` edits or problems, deletions are targeted byte removals
+(`source_edits.remove_nodes`) followed by the targeted insertions; otherwise the
+combined document (patched, then without the deleted nodes and positions) is validated
+and rendered canonically. `NodeEditSummary.removed` lists the deleted ids. Tests:
+`tests/unit/tools/test_workflow_node_drafts.py`.

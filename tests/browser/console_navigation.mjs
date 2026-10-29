@@ -8,6 +8,7 @@ import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
@@ -27,6 +28,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const context = await browser.newContext();
   await context.addInitScript(id => {
     localStorage.setItem('siderius.operation_id', id);
@@ -68,15 +70,18 @@ try {
     await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
     assert.equal(await page.locator('#token').inputValue(), '');
   };
+  // The former Slow control route is a bookmark-compatible alias: it is rewritten to Monitor.
   await page.goto(metadata.origin + '/#slow-control/' + operation);
+  assert.equal(new URL(page.url()).hash, '#monitor/' + operation, 'Old #slow-control/<UUID> redirects to #monitor/<UUID>');
+  assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Monitor');
   assert.equal(await page.locator('#operation-id').inputValue(), operation);
   assert.equal(await page.locator('#editor-source').isVisible(), false);
   assert.equal(requests.length, 0, 'Fresh routes do not request before Connect');
-  await page.locator('nav a[href="#slow-control"]').focus();
+  await page.locator('nav a[href="#monitor"]').focus();
   for (let step = 0; step < 20; step++) {
     await page.keyboard.press('Tab');
     const focusedView = await page.evaluate(() => document.activeElement.closest('[data-view]')?.dataset.view);
-    assert.ok(!focusedView || focusedView === 'slow-control', 'Inactive views cannot receive keyboard focus');
+    assert.ok(!focusedView || focusedView === 'monitor', 'Inactive views cannot receive keyboard focus');
   }
   await connect();
   assert.equal(requests.some(item => item.path.startsWith('/api/editor') || item.path === '/api/choices'), false);
@@ -99,7 +104,7 @@ try {
   const routeOffset = offsets.length;
   await page.locator('nav a[href="#home"]').click();
   await page.goBack(); // Return to explicit operation route without resetting its cursor.
-  await page.locator('#view-slow-control').waitFor();
+  await page.locator('#view-monitor').waitFor();
   await page.goForward();
   await page.locator('#view-home').waitFor();
   await page.locator('nav a[href="#workflow"]').click();
@@ -110,14 +115,14 @@ try {
   assert.equal(await page.locator('#view-workflow').isHidden(), true);
   assert.equal(await page.locator('#view-run').isVisible(), true);
   assert.equal(await page.locator('#workflow-next-run').isDisabled(), true);
-  await page.locator('nav a[href="#slow-control"]').click();
+  await page.locator('nav a[href="#monitor"]').click();
   await waitUntil(() => offsets.length > routeOffset);
   assert.ok(offsets.slice(routeOffset).every(value => value === 73), 'Same UUID/back-forward must retain log cursor');
   assert.equal(await page.locator('#log-kind').inputValue(), 'operation');
   assert.equal(await page.locator('#log').textContent(), 'operation stream\n');
   assert.equal(await page.evaluate(() => window.documentId), documentId);
   assert.equal(await page.evaluate(() => window.pollTimers), 1);
-  assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Slow control');
+  assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Monitor');
   assert.equal(await page.locator('#view-workflow').isHidden(), true);
   assert.equal(await page.evaluate(secret => document.body.textContent.includes(secret) || location.href.includes(secret) || JSON.stringify({...localStorage, ...sessionStorage}).includes(secret), metadata.token), false);
   // A later 401 disables effectful controls; reconnect preserves the selected ID.
@@ -125,7 +130,7 @@ try {
   await page.locator('#access-status').filter({hasText: 'Connection unavailable'}).waitFor();
   assert.equal(await page.locator('#prepare-button').isDisabled(), true);
   unauthorized = false;
-  await page.evaluate(id => {location.hash = 'slow-control/' + id;}, operation);
+  await page.evaluate(id => {location.hash = 'monitor/' + id;}, operation);
   await connect();
   assert.equal(await page.locator('#operation-id').inputValue(), operation);
   assert.equal(await page.locator('#log-kind').inputValue(), 'operation');
@@ -133,7 +138,7 @@ try {
   await page.reload();
   assert.equal(await page.locator('#token').inputValue(), '');
   assert.equal(await page.locator('#monitor-button').isDisabled(), true);
-  await page.goto(metadata.origin + '/#slow-control/not-a-uuid');
+  await page.goto(metadata.origin + '/#monitor/not-a-uuid');
   const beforeInvalid = requests.length;
   await page.locator('#route-status').filter({hasText: 'Invalid console route'}).waitFor();
   await connect();
@@ -142,7 +147,7 @@ try {
   await page.locator('#operation-id').fill(operation);
   await page.locator('#monitor-button').click();
   await page.locator('#monitor-status').filter({hasText: 'State: running'}).waitFor();
-  assert.equal(new URL(page.url()).hash, '#slow-control/' + operation, 'Valid form repairs an invalid route');
+  assert.equal(new URL(page.url()).hash, '#monitor/' + operation, 'Valid form repairs an invalid route');
   // Initial editor project list in flight across reconnect: old 401 cannot revoke
   // the new session, and the new connection must load without another view change.
   await page.goto(metadata.origin + '/#workflow');

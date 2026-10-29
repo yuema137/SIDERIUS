@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SIDERIUS · Candidate console</title>
   <script src="/theme.js"></script>
+  <script src="/ui-settings.js"></script>
   <link rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/editor.css">
@@ -13,8 +14,14 @@
   <link rel="stylesheet" href="/page-guidance.css">
   <link rel="stylesheet" href="/editor-draft.css">
   <link rel="stylesheet" href="/editor-palette.css">
+  <link rel="stylesheet" href="/editor-external-inputs.css">
+  <link rel="stylesheet" href="/editor-templates.css">
+  <link rel="stylesheet" href="/onboarding.css">
+  <link rel="stylesheet" href="/editor-page-bar.css">
+  <link rel="stylesheet" href="/editor-canvas-ui.css">
   <script src="/number-format.js" defer></script>
   <script src="/session.js" defer></script>
+  <script src="/icons.js" defer></script>
   <script src="/token-presenter.js" defer></script>
   <script src="/native-chain-monitor.js" defer></script>
   <script src="/graph-results-monitor.js" defer></script>
@@ -28,49 +35,70 @@
   <script src="/editor-contract-presentation.js" defer></script>
   <script src="/editor-circuit-geometry.js" defer></script>
   <script src="/editor-circuit.js" defer></script>
+  <script src="/editor-circuit-tooltip.js" defer></script>
+  <script src="/editor-inspector-rows.js" defer></script>
   <script src="/editor-problems.js" defer></script>
   <script src="/editor-node-parameters.js" defer></script>
   <script src="/editor-versions.js" defer></script>
   <script src="/editor-draft.js" defer></script>
+  <script src="/editor-node-drafts.js" defer></script>
+  <script src="/editor-managed-inputs.js" defer></script>
+  <script src="/editor-external-inputs.js" defer></script>
+  <script src="/editor-palette-guidance.js" defer></script>
   <script src="/editor-palette.js" defer></script>
+  <script src="/editor-advice.js" defer></script>
   <script src="/editor.js" defer></script>
+  <script src="/editor-templates.js" defer></script>
   <script src="/navigation.js" defer></script>
   <script src="/recorded-example.js" defer></script>
   <script src="/reusable-intents.js" defer></script>
   <script src="/reusable-run.js" defer></script>
   <script src="/new-run.js" defer></script>
   <script src="/native-chain.js" defer></script>
+  <script src="/onboarding.js" defer></script>
   <script src="/page-guidance.js" defer></script>
+  <script src="/editor-page-bar.js" defer></script>
+  <script src="/editor-canvas-add.js" defer></script>
   <script src="/settings.js" defer></script>
 </head>
 <body>
-<header class="console-header"><div class="brand">SIDERIUS <span>Local candidate console</span></div><details class="console-intro"><summary>About this console</summary><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></details>
-  <div class="theme-control"><label for="theme-preference">Color theme</label><select id="theme-preference"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
-</header>
-<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#slow-control">Slow control</a><a href="#settings">Settings</a></nav>
-<main>
-<p id="route-status" role="status"></p>
-  <section class="card" id="access-section" aria-labelledby="access-heading">
+<header class="console-header"><div class="brand"><img data-brand-logo class="logo logo-light" src="/siderius-logo-light.svg" alt="SIDERIUS" width="1180" height="425"><img data-brand-logo class="logo logo-dark" src="/siderius-logo-dark.svg" alt="SIDERIUS" width="1180" height="425"><span>Local candidate console</span></div><details class="console-intro"><summary>About this console</summary><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></details>
+  <section class="access-section" id="access-section" aria-labelledby="access-heading">
     <h1 id="access-heading">Connect to the console</h1>
     <details class="access-help" id="access-help"><summary>About the console token</summary><p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p></details>
     <form id="access-form" class="actions"><div class="grow"><label for="token">Console token</label><input id="token" type="password" autocomplete="off" required></div><button type="submit">Connect</button></form>
-    <p id="access-status" role="status">Not connected.</p>
+    <p id="access-status" role="status" title="Observations refresh every 2 seconds while this page is visible.">Not connected.</p>
     <div id="access-connected" class="access-connected" hidden><button id="access-change" type="button" class="secondary">Change token</button><button id="access-disconnect" type="button" class="secondary">Disconnect console</button></div>
   </section>
+  <div class="theme-control"><label for="theme-preference">Color theme</label><select id="theme-preference"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
+  <button id="onboarding-help" type="button" class="secondary help-button" aria-describedby="onboarding-help-note"><span class="help-mark" aria-hidden="true">?</span>Help</button><span id="onboarding-help-note" hidden>Opens the 4-step workflow tour.</span>
+  <button id="settings-toggle" type="button" class="secondary settings-button" aria-expanded="false" aria-controls="settings-panel"><span aria-hidden="true">⚙</span>Settings</button>
+  <section id="settings-panel" class="settings-panel" aria-label="Settings" hidden>
+    <h2>Settings</h2>
+    <label class="setting"><input type="checkbox" data-ui-setting="advanced"><span><strong>Show advanced tools</strong><span>Source editor, references, version history, mapping details and contract ids, native chains and recorded examples.</span></span></label>
+    <label class="setting"><input type="checkbox" data-ui-setting="developer"><span><strong>Show developer details</strong><span>Operation facts, raw token tables, captured resources and save internals.</span></span></label>
+  </section>
+</header>
+<nav class="actions" aria-label="Console views"><a href="#home">Home</a><a href="#workflow">Workflow Editor</a><a href="#run">Run</a><a href="#monitor">Monitor</a><a href="#settings">Settings</a></nav>
+<main>
+<p id="route-status" role="status"></p>
   <div class="step-indicator" id="step-indicator" role="navigation" aria-label="Workflow steps" hidden><ol>
-    <li data-step="task"><a href="#workflow">Task</a></li><li data-step="workflow"><a href="#workflow">Workflow</a></li><li data-step="run"><a href="#run">Run</a></li><li data-step="results"><a href="#slow-control">Results</a></li>
+    <li data-step="task"><a href="#workflow">Task</a></li><li data-step="workflow"><a href="#workflow">Workflow</a></li><li data-step="run"><a href="#run">Run</a></li><li data-step="results"><a href="#monitor">Results</a></li>
   </ol></div>
   <section id="view-home" data-view="home"><h1 tabindex="-1">Home</h1>
-<section class="card journey" aria-labelledby="journey-heading">
-  <p class="eyebrow">Main path</p><h2 id="journey-heading">Run a workflow</h2>
-  <ol class="journey-steps">
-    <li><strong>Open the workflow</strong> and choose a configured project.</li>
-    <li><strong>Edit and review</strong> the workflow on the canvas, then save the reviewed source.</li>
-    <li><strong>Prepare a new run</strong> on the Run page from the saved version and review its inputs and limits.</li>
-    <li><strong>Launch and monitor</strong> the run; follow it in Slow control.</li>
-  </ol>
-  <div class="actions"><a class="button-link" href="#workflow">Open workflow</a><a href="#slow-control">See recent operations</a></div>
+<section class="home-intro" aria-label="About SIDERIUS">
+  <img data-brand-logo class="logo logo-light home-logo" src="/siderius-logo-light.svg" alt="SIDERIUS" width="1180" height="425"><img data-brand-logo class="logo logo-dark home-logo" src="/siderius-logo-dark.svg" alt="SIDERIUS" width="1180" height="425">
+  <p>SIDERIUS turns your dataset and research question into a repeated machine-learning experiment: it proposes a model, writes and trains it, checks the result and uses it to plan the next try.</p>
 </section>
+<section class="home-entries" aria-labelledby="journey-heading">
+  <h2 id="journey-heading">Where to start</h2>
+  <ul class="entry-cards">
+    <li class="card entry-card"><h3>Start from a template</h3><p>Pick a ready-made research loop, then add your advice.</p><a class="button-link" id="home-start-template" href="#workflow">Start from a template</a></li>
+    <li class="card entry-card"><h3>Open a workflow</h3><p>Edit, save and run a workflow you already have.</p><a class="button-link" href="#workflow">Open a workflow</a></li>
+    <li class="card entry-card"><h3>Monitor runs</h3><p>Follow a running experiment and read its results.</p><a class="button-link" href="#monitor">Monitor runs</a></li>
+  </ul>
+</section>
+<div class="home-advanced" data-ui-flag="advanced">
 <h2 class="section-heading">Advanced</h2>
 <section class="card" aria-labelledby="native-chain-heading">
 <h2 id="native-chain-heading">Run a configured native chain</h2>
@@ -81,9 +109,9 @@
 <details><summary>Reviewed run, input identities and execution policy</summary><div id="native-chain-details"></div></details>
 <button id="native-chain-launch" disabled>Launch native chain</button>
 <section id="native-chain-intent" hidden><p id="native-chain-operation-id" class="mono"></p>
-<div class="actions"><button id="native-chain-check" disabled>Check native admission</button><button id="native-chain-retry" disabled>Retry same native launch</button><a id="native-chain-monitor">Open native Slow control</a><button id="native-chain-new" disabled>Review another native capture</button></div></section>
+<div class="actions"><button id="native-chain-check" disabled>Check native admission</button><button id="native-chain-retry" disabled>Retry same native launch</button><a id="native-chain-monitor">Open native monitor</a><button id="native-chain-new" disabled>Review another native capture</button></div></section>
 </section>
-<details id="configured-task"><summary>Prepare configured task</summary><p>Native Prepare generates its configured candidate. It does not run the selected editor declaration.</p>
+<details class="card" id="configured-task"><summary>Prepare configured task</summary><p>Native Prepare generates its configured candidate. It does not run the selected editor declaration.</p>
   <div class="columns">
     <section class="card" aria-labelledby="prepare-heading">
       <p class="eyebrow">1 · Prepare</p><h2 id="prepare-heading">Configured task</h2>
@@ -113,78 +141,84 @@
       <button id="launch-button" type="button" disabled>Launch candidate</button><p id="launch-status" role="status">No candidate launch submitted.</p><p id="candidate-id" class="mono"></p>
     </section>
   </div>
-  </details></section>
-<section id="view-workflow" data-view="workflow" hidden><h1 tabindex="-1">Workflow</h1>
-  <div class="workflow-controls">
-  <section class="card workflow-project">
-    <label for="editor-project">Project</label><select id="editor-project" disabled></select>
-    <button id="editor-inspect" type="button" hidden>Inspect source</button><p id="editor-status" role="status">Connect to open a configured project.</p>
-  </section>
-  <section class="card workflow-task-details" aria-label="Task package and version">
-    <section class="editor-task-controls" id="editor-task-controls" aria-label="Task package and version"><h2>Task package and version</h2><p id="editor-task-state">Connect to see which task package and version this workflow uses.</p></section>
-  </section>
-  </div>
-  <section class="card start-guide" id="workflow-start-guide" aria-labelledby="start-guide-heading" hidden>
-    <p class="eyebrow">First run</p><h2 id="start-guide-heading">Start from a task example</h2>
-    <ol class="journey-steps">
-      <li><strong>Select a task</strong>: choose a configured project in <strong>Project</strong> above, then its task package and version.</li>
-      <li><strong>Edit</strong> connections and settings on the workflow canvas.</li>
-      <li><strong>Save</strong>: <strong>Review changes</strong>, then <strong>Save reviewed source</strong>. Each save is a new saved version.</li>
-      <li><strong>Run</strong>: choose <strong>Next: prepare a run</strong> to prepare and launch that saved version.</li>
-    </ol>
-    <p id="workflow-start-state" class="muted"></p>
-  </section>
-  <section class="card workflow-actions">
+  </details></div></section>
+<section id="view-workflow" data-view="workflow" hidden>
+  <div class="page-bar workflow-actions" aria-label="Workflow actions">
+    <h1 tabindex="-1">Workflow</h1>
+    <div class="page-bar-project">
+      <label for="editor-project" class="sr-only">Workflow project</label><select id="editor-project" disabled title="Workflow project"></select>
+      <button id="editor-task-chip" type="button" class="status-chip" aria-controls="editor-task-panel" data-icon="flask-conical"><span class="chip-label">Task</span></button>
+      <button id="editor-inspect" type="button" class="secondary" hidden>Inspect source</button>
+    </div>
+    <button id="problems-chip" type="button" class="secondary problems-chip" hidden aria-controls="editor-problems" aria-expanded="false"></button>
+    <section id="editor-problems" class="problems-popover" aria-label="Problems" aria-live="polite" hidden></section>
     <div class="actions">
-      <button id="editor-refresh" class="secondary" disabled>Refresh from disk</button>
-      <button id="editor-review" class="secondary" disabled>Review changes</button>
-      <label for="editor-version-name">Version name</label><input id="editor-version-name" type="text" maxlength="64" spellcheck="false" aria-describedby="editor-version-help">
-      <button id="editor-save" disabled>Save reviewed source</button>
+      <div id="editor-edit-actions" class="edit-actions" role="group" aria-label="Undo and redo"></div>
+      <button id="editor-refresh" class="secondary" data-ui-flag="advanced" disabled>Refresh from disk</button>
+      <span id="editor-save-reason" class="action-reason" role="status"></span>
+      <button id="editor-review" disabled data-icon="save">Save</button>
     </div>
-    <p id="editor-version-help" class="muted">Each Save records this name, the time and the file's SHA-256 beside the source. Leave the suggested name or type your own.</p>
-    <p id="editor-pending">No pending edits.</p>
-    <section id="editor-problems" aria-label="Problems" aria-live="polite" hidden></section>
-    <div id="editor-conflict" hidden>
-      <h2>Source changed on disk</h2>
-      <p>Inspect current source and its difference from your proposal. Your pending edits are preserved.</p>
-      <details open><summary>Current source and conflict diff</summary><pre id="editor-current"></pre>
-      <pre id="editor-conflict-diff"></pre></details>
-      <button id="editor-discard">Discard my edits and reload</button>
-      <button id="editor-rebase">Edit my proposal against current source</button>
-    </div>
-    <div class="workflow-next"><button id="workflow-next-run" type="button" disabled>Next: prepare a run</button><p id="workflow-next-state" role="status">Save the reviewed workflow first. Run is enabled only for a saved version.</p></div>
+    <div class="workflow-next"><span id="workflow-next-reason" class="action-reason"></span><button id="workflow-next-run" type="button" class="secondary" disabled data-icon="play" aria-describedby="workflow-next-state">Next: Run</button></div>
+  </div>
+  <section id="editor-save-confirm" class="save-confirm" aria-labelledby="editor-save-confirm-heading" hidden>
+    <h2 id="editor-save-confirm-heading">Save this version</h2>
+    <p id="editor-save-summary" class="save-confirm-summary">The workflow is checked. Save writes exactly the checked file.</p>
+    <label for="editor-version-name">Version name</label><input id="editor-version-name" type="text" maxlength="64" spellcheck="false" aria-describedby="editor-version-help">
+    <button id="editor-save-cancel" type="button" class="secondary">Cancel</button>
+    <button id="editor-save" disabled data-icon="save">Save version</button>
+    <p id="editor-version-help" class="muted">Each save records this name, the time and the file's SHA-256 beside the source.</p>
+    <details id="editor-review-disclosure" data-ui-flag="advanced"><summary>Exact Python changes</summary>
+      <pre id="editor-diff"></pre>
+      <p class="muted">Every edit invalidates the check. Save writes exactly these bytes.</p>
+    </details>
   </section>
+  <div class="page-status">
+    <p id="editor-status" role="status">Connect to open a configured project.</p>
+    <p id="editor-pending">No pending edits.</p>
+    <p id="workflow-next-state" class="sr-only" role="status">Save the workflow first. Run is enabled only for a saved version.</p>
+  </div>
+  <div id="editor-conflict" class="card" hidden>
+    <h2>Source changed on disk</h2>
+    <p>Inspect current source and its difference from your proposal. Your pending edits are preserved.</p>
+    <details open><summary>Current source and conflict diff</summary><pre id="editor-current"></pre>
+    <pre id="editor-conflict-diff"></pre></details>
+    <button id="editor-discard">Discard my edits and reload</button>
+    <button id="editor-rebase">Edit my proposal against current source</button>
+  </div>
   <div class="editor-workspace">
-    <section class="card workflow-canvas-panel">
-      <h2>Workflow canvas</h2>
-      <details class="canvas-help"><summary>Canvas controls</summary><p>Select a capability to inspect its request. Select an output (or drag from it) and then a highlighted input to rebind it; hovering an output previews which inputs accept it. Port colour and shape name the contract (see Port types); a refused connection names both contracts. The Mapping chip on a card expands the protocol mapping from each source to its argument. Drag a capability heading to move it; Alt + arrow keys also move the selected capability. Optional inputs that are not connected are folded into an "optional inputs" row on each card; expand it to connect one. Fit to view, zoom and Arrange view change only what you see: saved positions change only when you move a card, review and save. Add a capability from the palette by clicking it or dragging it onto the canvas; remove the selected capability with Delete, its context menu or Remove capability in Selection.</p></details>
-      <div class="editor-canvas-layout">
-        <section id="editor-palette" class="editor-palette" aria-label="Add capability"></section>
-        <div id="editor-graph"></div>
-      </div>
-      <details class="connection-list"><summary>Connection mappings</summary><ul id="editor-edges"></ul></details>
+    <section id="editor-palette" class="dock-panel editor-palette" aria-label="Add capability"></section>
+    <section class="dock-panel workflow-canvas-panel" aria-label="Workflow canvas">
+      <h2><span>Workflow canvas</span><span class="canvas-header-actions"><button id="editor-template-open" type="button" class="secondary" data-icon="layout-template">Templates</button></span></h2>
+      <details class="canvas-help" data-ui-flag="advanced"><summary>Canvas controls</summary><p>Select a capability to inspect its request. Select an output (or drag from it) and then a highlighted input to rebind it; hovering an output previews which inputs accept it. The + beside an unconnected output adds a module that accepts it, already connected. Port colour and shape name the contract (see Port types); a refused connection names both contracts. The Mapping chip on a card expands the protocol mapping from each source to its argument. Drag a capability heading to move it; Alt + arrow keys also move the selected capability. Optional inputs that are not connected are folded into an "optional inputs" row on each card; expand it to connect one. Fit to view, zoom and Arrange view change only what you see. Tidy up moves the cards into left-to-right columns as one undoable edit. Saved positions change only when you move cards or tidy up, then save. Add a capability from the palette by clicking it or dragging it onto the canvas; remove the selected capability with Delete, its context menu or Remove capability in Selection.</p></details>
+      <section class="empty-state start-guide" id="workflow-start-guide" aria-labelledby="start-guide-heading">
+        <h2 id="start-guide-heading">Build your research loop</h2>
+        <p id="workflow-start-state"></p>
+        <button id="workflow-start-template" type="button" data-icon="layout-template">Start from a template</button>
+        <button id="onboarding-start" type="button" class="link-button">Take the 4-step tour</button>
+      </section>
+      <div id="editor-graph"></div>
+      <details class="connection-list" data-ui-flag="advanced"><summary>Connection mappings</summary><ul id="editor-edges"></ul></details>
     </section>
-    <section class="card workflow-inspector-panel">
+    <section class="dock-panel workflow-inspector-panel" aria-label="Selection">
       <h2>Selection</h2>
       <div id="editor-inspector"></div>
-
+      <p class="empty-state inspector-empty">Select a module on the canvas to see its inputs and settings here.</p>
+      <section class="workflow-loop-panel inspector-section" id="editor-loop" aria-label="Research loop"></section>
     </section>
   </div>
-  <section class="card workflow-loop-panel" id="editor-loop" aria-label="Research loop"></section>
-  <details class="card"><summary>References</summary><div id="editor-references"></div></details>
-  <details class="card" id="editor-advanced"><summary>Advanced source</summary>
+  <details class="card workflow-task-details" id="editor-task-panel"><summary>Task package and version</summary>
+    <section class="editor-task-controls" id="editor-task-controls" aria-label="Task package and version"><h2>Task package and version</h2><p id="editor-task-state">Connect to see which task package and version this workflow uses.</p></section>
+  </details>
+  <details class="card" data-ui-flag="advanced"><summary>References</summary><div id="editor-references"></div></details>
+  <details class="card" id="editor-advanced" data-ui-flag="advanced"><summary>Advanced source</summary>
     <p id="editor-path" class="mono"></p><p id="editor-revision" class="mono"></p>
     <h2>Python source</h2>
-    <p>Source edits may add supported nodes. Review validates and projects the graph. After inspector edits, review first to update this panel before typing source changes. Inspector edits use canonical Python rendering; inspect formatting and comment changes in the diff.</p>
+    <p>Source edits may add supported nodes. Save checks, validates and projects the graph. After inspector edits, press Save (then Cancel) to update this panel before typing source changes. Inspector edits use canonical Python rendering; inspect formatting and comment changes in the diff.</p>
     <textarea id="editor-source" rows="18" spellcheck="false" disabled aria-label="Python source"></textarea>
     <pre id="editor-diagnostics" role="status"></pre>
   </details>
-  <details class="card" id="editor-review-disclosure"><summary>Review exact Python changes</summary>
-    <pre id="editor-diff"></pre>
-    <p>Every edit invalidates review. Save writes exactly the reviewed bytes.</p>
-  </details>
-  <details class="card" id="editor-history"><summary>Version history</summary></details>
-  <details class="card" id="workflow-details"><summary>Details</summary>
+  <details class="card" id="editor-history" data-ui-flag="advanced"><summary>Version history</summary></details>
+  <details class="card" id="workflow-details" data-ui-flag="developer"><summary>Details</summary>
     <h2>Save behavior</h2><p class="muted">Saving updates source for future New run captures. It does not launch a run or change existing captures. Task-bound publication checks the explicitly selected native task identity.</p>
     <h2>Concurrent writers</h2><p class="muted">Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</p>
   </details>
@@ -220,7 +254,7 @@
     <p id="capture-source"></p>
     <button id="capture-review" class="secondary" disabled>Review capture</button>
     <div id="capture-summary"></div>
-    <details><summary>Captured resources and version</summary><pre id="capture-details"></pre></details>
+    <details data-ui-flag="developer"><summary>Captured resources and version</summary><pre id="capture-details"></pre></details>
     <button id="capture-launch" disabled>Launch captured run</button>
     <section id="capture-intent" hidden aria-label="Retained candidate operation">
       <p id="capture-operation-status" role="status"></p><p id="capture-operation-id" class="mono"></p>
@@ -229,8 +263,8 @@
     </section>
   </section>
 </section>
-<section id="view-slow-control" data-view="slow-control" hidden><h1 tabindex="-1">Slow control</h1>
-<div class="slow-control-layout">
+<section id="view-monitor" data-view="monitor" hidden><h1 tabindex="-1">Monitor</h1>
+<div class="monitor-layout">
   <section class="card operations-panel" aria-labelledby="operations-heading">
     <p class="eyebrow">This console's operations</p><h2 id="operations-heading">Recent operations</h2>
     <div class="actions operations-actions"><button id="operations-refresh" type="button" class="secondary" disabled>Refresh list</button></div>
@@ -239,9 +273,9 @@
   </section>
   <section class="card" aria-labelledby="monitor-heading">
     <p class="eyebrow">Observe an operation</p><h2 id="monitor-heading">Status and logs</h2>
-    <p class="muted">Choose an operation from the list, or enter its UUID. Reading an operation never launches or restarts it. Closing the page does not stop an admitted operation.</p>
-    <form id="monitor-form" class="actions manual-operation"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" class="secondary" disabled>Read operation</button></form>
-    <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="operation-observed" class="muted"></p><details><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
+    <p class="muted">Choose an operation from the list. Reading it never launches, restarts or stops it; closing the page does not stop an admitted operation.</p>
+    <form id="monitor-form" class="actions manual-operation" data-ui-flag="advanced"><div class="grow"><label for="operation-id">Operation UUID</label><input id="operation-id" required autocomplete="off" spellcheck="false"></div><button id="monitor-button" type="submit" class="secondary" disabled>Read operation</button></form>
+    <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="operation-observed" class="muted"></p><details data-ui-flag="developer"><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
     <div id="operation-stop-group" class="actions" hidden><button id="operation-stop-button" type="button">Stop run</button><p class="muted">Ends the run now, including any model call in progress. It cannot be resumed and produces no candidate result; files written so far stay in the run folder.</p></div>
     <p id="operation-stop-status" role="status"></p>
     <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p>
@@ -256,7 +290,7 @@
     <h3 id="tokens-heading">Reported LLM tokens</h3>
     <p id="tokens-status" role="status">No operation selected.</p>
     <p id="tokens-times" class="muted"></p>
-    <details><summary>Reported token table</summary><p id="tokens-provenance" class="muted"></p><div id="tokens-table" class="token-table" role="region" aria-labelledby="tokens-heading" tabindex="0" hidden>
+    <details data-ui-flag="developer"><summary>Reported token table</summary><p id="tokens-provenance" class="muted"></p><div id="tokens-table" class="token-table" role="region" aria-labelledby="tokens-heading" tabindex="0" hidden>
       <table><thead><tr><th scope="col">Provider</th><th scope="col">Requested model</th><th scope="col">Served model</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Total</th><th scope="col">Responses</th></tr></thead><tbody id="token-rows"></tbody></table>
     </div>
     </details><p class="muted">Observed provider reports; missing or unrecorded usage may exist.</p>
@@ -264,7 +298,7 @@
     <p id="log-status" class="muted">Logs are private operator output and may contain sensitive information.</p><pre id="log" tabindex="0" aria-label="Operation log"></pre></details>
   </section>
 </div>
-  <section class="card" aria-labelledby="recorded-example-heading">
+  <section class="card" aria-labelledby="recorded-example-heading" data-ui-flag="advanced">
     <p class="eyebrow">Read-only evidence</p><h2 id="recorded-example-heading">Recorded example</h2>
     <p>Candidate validation evidence only. This view does not represent a live operation, training run, score, or billing record.</p>
     <div class="actions"><div class="grow"><label for="recorded-example-choice">Configured example</label><select id="recorded-example-choice" disabled><option value="">Connect to load recorded examples</option></select></div><button id="recorded-example-open" disabled>Read example</button></div>
@@ -318,6 +352,5 @@
   </section>
 </section>
 </main>
-<footer>Candidate generation and validation, with native training when declared. Inspect native outputs for scientific results.</footer>
 </body>
 </html>

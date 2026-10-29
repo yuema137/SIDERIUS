@@ -61,7 +61,7 @@
     if (!intent) return;
     $('operation-id').textContent = intent.payload.candidate_operation_id;
     $('operation-status').textContent = 'Retained launch intent. Check status or explicitly retry this same operation.';
-    $('monitor').href = '#slow-control/' + intent.payload.candidate_operation_id;
+    $('monitor').href = '#monitor/' + intent.payload.candidate_operation_id;
   }
   try {
     intent = coordinator.read('candidate')?.value || null;

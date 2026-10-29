@@ -1,0 +1,95 @@
+/* Canvas, socket, problems and narrow-desktop presentation (ui-design-spec.md §1.2, §5 K7,
+ * §6.3, §9; tour review 2026-10-28 batch 1). Tokens: theme.css. */
+
+/* Socket label = connector (schema) name in 12px label style (K7), never a separate pill. */
+.circuit-port .circuit-port-contract { display: inline-block; max-width: calc(100% - 96px); margin: 0; padding: 0 2px; border: 1px solid transparent; border-radius: var(--radius-1);
+  color: var(--text); font-size: var(--font-label); font-weight: 600; line-height: 16px; vertical-align: middle; }
+.circuit-port[data-contract-shape] .circuit-port-contract { border-color: transparent; }
+.circuit-port.incompatible .circuit-port-contract { border-color: var(--contract-colour, var(--control-border)); border-style: dashed; }
+.circuit-port .circuit-port-requirement { color: var(--muted); font-size: var(--font-label); font-weight: 500; line-height: 16px; }
+.circuit-port-tooltip { display: none !important; }
+
+/* Shared socket / control tooltip (editor-circuit-tooltip.js), spec §6.2: 280px, elev-2. */
+.circuit-tooltip { position: fixed; z-index: 40; max-width: 280px; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-2);
+  background: var(--panel); color: var(--text); box-shadow: var(--elev-2); font-size: var(--font-label); line-height: 16px; pointer-events: none; }
+.circuit-tooltip p { margin: 0; }
+.circuit-tooltip p + p { margin-top: var(--space-1); }
+.circuit-tooltip-name { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; }
+.circuit-tooltip-help { color: var(--muted); }
+.circuit-tooltip-required { color: var(--error); font-weight: 600; }
+
+/* Inspector input rows: "[swatch] Connector name · Required" (§8.2); field name advanced. */
+.inspector-input { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-1) var(--space-2); font-size: var(--font-label); }
+.inspector-input > select { grid-column: 1 / -1; }
+.inspector-input-name { font-weight: 600; }
+.inspector-input-field { color: var(--muted); font-size: var(--font-label); }
+
+/* Canvas controls: one icon cluster bottom-right (canvas-study V2). */
+.circuit-toolbar { gap: var(--space-1); flex-wrap: nowrap; }
+.circuit-toolbar .icon-button { width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; }
+.circuit-toolbar .icon-button .icon { margin: 0; }
+.circuit-toolbar .circuit-zoom { min-width: 44px; font-size: var(--font-label); }
+
+/* Connector legend: a bottom-left chip; opened, a popover above it (K14, review #16). */
+#editor-graph > .circuit-contract-legend { position: relative; margin: var(--space-2) 0 0; max-height: none !important; overflow: visible !important; }
+.circuit-contract-legend > summary { display: inline-flex; align-items: center; min-height: 28px; padding: 0 var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--panel); white-space: nowrap; }
+.circuit-contract-legend-popover { position: absolute; z-index: 15; left: 0; bottom: calc(100% + var(--space-1)); width: min(360px, 60vw); max-height: 320px; overflow: auto;
+  padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); box-shadow: var(--elev-2); }
+.circuit-contract-legend-list { display: grid; gap: var(--space-1); }
+
+/* Problems: page-bar chip + popover (spec §9), never a card in the page flow. */
+.problems-chip { display: inline-flex; align-items: center; gap: var(--space-1); background: var(--panel); }
+.problems-popover { position: absolute; z-index: 25; top: calc(100% + var(--space-1)); width: 320px; max-height: 360px; overflow: auto;
+  padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); box-shadow: var(--elev-2); }
+.problems-popover:not(.open) { display: none; }
+.problems-popover h2 { margin: 0 0 var(--space-2); padding: 0 var(--space-1); font-size: var(--font-heading); }
+.problems-popover ul { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.problems-popover .editor-problem { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: var(--space-1) var(--space-2); width: 100%; min-height: 32px;
+  padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-1); background: var(--panel); color: var(--text); font-weight: 500; text-align: left; }
+.problems-popover .editor-problem:not(:disabled):hover { background: var(--bg); }
+.problems-popover .editor-problem .icon { color: var(--error); margin-top: 1px; }
+.problems-popover .editor-problem-raw { grid-column: 2; color: var(--muted); font-size: var(--font-label); overflow-wrap: anywhere; }
+
+/* Disabled Save / Next: Run say why, inline (spec §9; not a tooltip). */
+.action-reason { color: var(--muted); font-size: var(--font-help); white-space: nowrap; }
+.action-reason:empty { display: none; }
+
+/* 900-1279px: the module rail collapses to a 48px icon column; its button opens the full
+ * rail as an overlay over the canvas (spec §1.2, §4.3). */
+@media (min-width: 900px) and (max-width: 1279px) {
+  :root { --rail-width: 48px; }
+  .editor-workspace { position: relative; }
+  .editor-workspace > .editor-palette { padding: 0; overflow: hidden; }
+  .editor-workspace > .editor-palette > h3 { margin: 0; padding: 0; font-size: 0; justify-content: center; }
+  .editor-workspace > .editor-palette .palette-toggle { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; min-height: 48px; padding: 0; border: 0; border-radius: 0;
+    background: var(--panel); color: var(--text); font-size: 0; }
+  .editor-workspace > .editor-palette:not(.open) .palette-body { display: none; }
+  .editor-workspace > .editor-palette.open { position: absolute; z-index: 12; left: 0; top: 0; bottom: 0; width: 272px; overflow: auto; padding: 0 var(--space-4) var(--space-4);
+    border-right: 1px solid var(--border); box-shadow: var(--elev-2); }
+  .editor-workspace > .editor-palette.open > h3 { font-size: var(--font-heading); margin: 0 calc(-1 * var(--space-4)) var(--space-3); padding: 0 var(--space-4); justify-content: flex-start; }
+  .editor-workspace > .editor-palette.open .palette-toggle { position: absolute; top: 0; right: 0; }
+  .editor-workspace > .editor-palette.open + .workflow-canvas-panel { margin-left: 0; }
+  /* Page bar: labels drop to icons at this width (spec §1.2); names stay accessible. */
+  .page-bar .workflow-next > #workflow-next-run, .page-bar .actions > #editor-review { padding: 0 var(--space-2); }
+}
+
+/* No text selection while a wire or card is dragged (editor-circuit.js gesture()). */
+body.circuit-gesture, body.circuit-gesture * { user-select: none; -webkit-user-select: none; }
+.circuit-viewport { user-select: none; -webkit-user-select: none; }
+
+/* Unconnected required input: a small "red light" on the socket itself (operator rule
+ * 2026-10-28, §8.3); the card keeps its normal outline and carries only a count badge. */
+.circuit-card.has-required-unbound { border: 1px solid var(--control-border); box-shadow: none; }
+.circuit-port.is-unbound[data-required="true"] .circuit-socket { border-color: var(--error); box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 28%, transparent); }
+.circuit-port.is-unbound[data-required="true"] .circuit-port-requirement { color: var(--error); }
+.circuit-problem-badge { position: absolute; top: 6px; right: 6px; display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin: 0; padding: 0 4px;
+  border-radius: var(--radius-pill); background: var(--error); color: var(--panel); font-size: var(--font-label); font-weight: 700; line-height: 1; }
+
+/* Connector names fit the card: the label wraps, the requirement sits on its own line. */
+.circuit-port .circuit-port-contract { max-width: 100%; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.circuit-port .circuit-port-requirement { display: block; float: none; margin-top: 1px; }
+.circuit-output { text-align: right; }
+
+/* Card header: the icon keeps clear of the card edge; instance ids are advanced detail. */
+.circuit-card .editor-node { padding: var(--space-3) var(--space-3) var(--space-2); }
+:root:not([data-ui-advanced="on"]) .circuit-card .capability-instance { display: none; }

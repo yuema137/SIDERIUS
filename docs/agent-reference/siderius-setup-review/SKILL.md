@@ -219,7 +219,7 @@ UUID or resubmitting the identical saved payload; never rebuild it with a new ID
 
 For GUI use, prepare the same native capture and operation request externally,
 then configure `native_chain_choices` using the [console contract](../../../src/tools/candidate_console/console-contract.md#configured-native-chains).
-Follow [Review native capture → Launch native chain → Slow control](../../../src/tools/candidate_console/README.md#run-a-configured-native-chain).
+Follow [Review native capture → Launch native chain → Monitor](../../../src/tools/candidate_console/README.md#run-a-configured-native-chain).
 The console uses the same operation owner independently of the editor. Preserve
 the displayed operation UUID; navigation, reconnect and monitoring never launch.
 Retry only the retained pending launch. Each new destination needs its own fresh

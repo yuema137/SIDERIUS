@@ -6,6 +6,7 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {tmpdir} from 'node:os';
+import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -28,6 +29,7 @@ try {
   });
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
+  showAllConsoleSections(browser);
   const page = await browser.newPage(), requests = [], faults = [];
   page.on('pageerror', error => faults.push(error.message));
   const headline = (score, id) => ({best_exp_id: id, best_score: score, best_formal_score: score, best_valid_exp_id: id, best_valid_score: score, best_valid_formal_score: score});
@@ -38,7 +40,7 @@ try {
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
     const reply = json => route.fulfill({status: 200, json});
     if (url.pathname === '/api/choices' || url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
-    // Slow control lists this console's operations once per connection, also on UUID routes.
+    // Monitor lists this console's operations once per connection, also on UUID routes.
     if (url.pathname === '/api/operations') return reply({operations: [], unreadable: 0, examined: 0, incomplete: false});
     assert.ok(url.pathname.startsWith(`/api/operations/${operation}`));
     if (url.pathname.endsWith('/tokens')) return reply({reason: 'usage_unavailable', quality: {partial: false}, observed_at: 'fixture', groups: []});
@@ -54,7 +56,7 @@ try {
       process: {status: 'exited', reason: 'observed'}, finishing: false, receipt_available: true, native_status: 'completed',
       native_id: 'fixture-run', validation_passed: true, reason: 'native_terminal'});
   });
-  await page.goto(`${metadata.origin}/#slow-control/${operation}`);
+  await page.goto(`${metadata.origin}/#monitor/${operation}`);
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
@@ -68,7 +70,7 @@ try {
   assert.ok(await panel.getByText('body-1', {exact: true}).count());
   assert.ok(await panel.getByText('body-2', {exact: true}).count());
   assert.ok(await panel.getByText('Best score').count());
-  assert.equal(await panel.getByText('TRAIN & TUNE state', {exact: true}).count(), 2, 'stage uses the paper capability label');
+  assert.equal(await panel.getByText('Train & tune state', {exact: true}).count(), 2, 'stage uses the paper capability label');
   assert.equal(await panel.locator('.graph-result-body').count(), 2, 'per-body summaries remain separate');
   assert.equal(requests.filter(item => item.path.endsWith('/graph-results')).length, 1, 'results are read once after terminal status');
   assert.equal(await panel.locator('.graph-result-skipped').count(), 1, 'only the routed body lists skipped nodes');

@@ -57,7 +57,7 @@
       try { await request(selected ? 'operations/' + selected : 'choices'); }
       catch (error) { if (!selected || ![404, 409].includes(error.status)) throw error; }
       if (version !== revision) return;
-      connected = true; changing = false; status('Connected. Observations refresh every 2 seconds while this page is visible.'); publish();
+      connected = true; changing = false; status('Connected.'); publish();
     } catch (error) { if (version === revision && !error.stale) status('Connection failed: ' + error.message); }
   });
   document.getElementById('access-change').addEventListener('click', () => {

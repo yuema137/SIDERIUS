@@ -1,0 +1,126 @@
+/* Header connection chip, Workflow page bar, save confirmation step, canvas frame
+ * (editor-page-bar.js, ui-design-spec.md §1.2 L5/L6, canvas-study M1/V2). Tokens: theme.css. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.icon { flex: none; vertical-align: -3px; }
+[data-icon] { display: inline-flex; align-items: center; gap: var(--space-2); }
+button[data-icon] { justify-content: center; }
+.link-button { min-height: 32px; padding: 0 var(--space-2); border-color: var(--panel); background: var(--panel); color: var(--primary); font-weight: 600; text-decoration: underline; }
+.link-button:not(:disabled):hover { background: var(--bg); color: var(--primary); }
+
+/* Connection (L6): a full-width banner under the header items until connected, then one chip. */
+.access-section { order: 99; flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); }
+.access-section #access-heading { margin: 0; font-size: var(--font-heading); white-space: nowrap; }
+.access-section .access-help { margin: 0; font-size: var(--font-label); }
+.access-section #access-form { flex: 1 1 420px; margin: 0; align-items: center; }
+.access-section #access-form label { margin: 0; font-size: var(--font-label); }
+.access-section #access-status { flex: 1 1 220px; margin: 0; font-size: var(--font-help); }
+#access-section.access-collapsed { order: 0; flex: 0 1 auto; margin-left: auto; padding: 0 0 0 var(--space-3); gap: var(--space-2); border-radius: var(--radius-pill); }
+#access-section.access-collapsed #access-status { flex: none; color: var(--text); font-weight: 600; white-space: nowrap; }
+#access-section.access-collapsed #access-status::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: var(--space-2); border-radius: 50%; background: var(--success, #2e7d32); }
+#access-section.access-collapsed .access-connected button { min-height: 28px; padding: 0 var(--space-2); font-size: var(--font-label); border-radius: var(--radius-pill); }
+
+/* Page bar: title, project + task chip, problems, then undo/redo, Save, Next: Run and ⋯. */
+.page-bar { position: relative; }
+.page-bar-project { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.page-bar-project select { width: auto; max-width: 240px; min-height: 32px; padding-block: 0; }
+.status-chip { min-height: 28px; max-width: 280px; padding: 0 var(--space-3); border-color: var(--border); border-radius: var(--radius-pill); background: var(--bg); color: var(--text); font-size: var(--font-label); font-weight: 600; }
+.status-chip .chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A long package id truncates instead of widening the page (min-content would keep its full text). */
+.page-bar-project > *, .status-chip { min-width: 0; }
+.status-chip.needs-attention { border-color: var(--warning); color: var(--text); background: var(--warning-bg); }
+.status-chip:not(:disabled):hover { background: var(--panel); border-color: var(--control-border); }
+.status-chip.needs-attention:not(:disabled):hover { background: var(--warning-bg); border-color: var(--warning); }
+.page-bar .actions { justify-content: flex-end; }
+.edit-actions { display: flex; gap: var(--space-1); margin-right: auto; }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; }
+.page-bar .workflow-next { gap: var(--space-2); margin-left: 0; }
+.page-bar .actions > button, .page-bar .workflow-next > button { min-height: 32px; padding: 0 var(--space-3); }
+.overflow-menu { position: relative; margin: 0; }
+.overflow-menu > summary { list-style: none; border: 1px solid var(--control-border); border-radius: var(--radius-1); background: var(--panel); color: var(--text); }
+.overflow-menu > summary::-webkit-details-marker { display: none; }
+.overflow-list { position: absolute; z-index: 20; right: 0; top: calc(100% + var(--space-1)); display: grid; min-width: 220px; padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); box-shadow: var(--elev-2); }
+.overflow-list button { justify-content: flex-start; min-height: 32px; border: 0; text-align: left; font-weight: 500; }
+
+/* Save confirmation step: one in-flow row under the page bar (never covers the canvas). */
+.save-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--primary); border-radius: var(--radius-2); background: var(--panel); }
+.save-confirm h2 { margin: 0; font-size: var(--font-heading); }
+.save-confirm p { margin: 0; }
+.save-confirm-summary { flex: 1 1 320px; font-size: var(--font-help); }
+.save-confirm label { margin: 0; font-size: var(--font-label); }
+.save-confirm #editor-version-name { width: 14rem; min-height: 32px; }
+.save-confirm button { min-height: 32px; padding: 0 var(--space-3); }
+.save-confirm #editor-version-help { flex: 1 0 100%; font-size: var(--font-help); }
+.save-confirm details { flex: 1 0 100%; margin: 0; font-size: var(--font-help); }
+
+.page-status { align-items: baseline; }
+#editor-status { color: var(--text); }
+
+/* The wire layer never takes pointer hits itself: only wire strokes (.circuit-wire-target,
+ * pointer-events: stroke) do, so cards and ports above or beside it stay hoverable. */
+.circuit-world > svg { pointer-events: none; }
+.workflow-canvas-panel > h2 { gap: var(--space-2); }
+.canvas-header-actions { margin-left: auto; }
+.canvas-header-actions button { min-height: 32px; padding: 0 var(--space-3); font-size: var(--font-label); }
+.workflow-canvas-panel:has(.circuit-card) > .start-guide { display: none; }
+.start-guide { display: grid; justify-items: center; gap: var(--space-2); }
+.start-guide #onboarding-start { font-size: var(--font-help); }
+/* Desktop only (>= 900px): the docked frame fills the window below the page bar
+ * (editor-page-bar.js measures --workspace-height). The canvas panel never scrolls
+ * (overflow: clip, so not even scrollIntoView can scroll it): its header and the
+ * canvas chrome keep their natural height, and #editor-graph takes the rest with a
+ * definite height (flex-basis 0), so the 1fr row bounds .circuit-viewport; panning and
+ * zoom happen inside the viewport. Open disclosures in the panel scroll internally.
+ * Below 900px the panels keep their natural height. */
+@media (min-width: 900px) {
+  .editor-workspace { height: var(--workspace-height, calc(100vh - 96px)); }
+  .editor-workspace > .workflow-canvas-panel { display: flex; flex-direction: column; overflow: clip; }
+  .editor-workspace > .workflow-canvas-panel > * { flex: none; }
+  .editor-workspace > .workflow-canvas-panel > h2 { position: static; }
+  .workflow-canvas-panel > #editor-graph { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto; column-gap: var(--space-3); }
+  /* The rows above the viewport never change height while you work: a status message is
+   * always two lines (longer text is clipped; the full text stays in the DOM for assistive
+   * tech), and Disconnect shares that row. Otherwise a new message would move every port
+   * under the pointer in the middle of a drag. */
+  #editor-graph > .circuit-message { grid-column: 1 / -1; grid-row: 1; box-sizing: content-box; height: 2.8em; margin: 0 0 var(--space-2); line-height: 1.4; overflow: hidden;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  #editor-graph > .circuit-disconnect { grid-column: 1 / -1; grid-row: 1; justify-self: end; align-self: start; margin: 0; min-height: 32px; padding: 0 var(--space-3); }
+  #editor-graph:has(> .circuit-disconnect:not([hidden])) > .circuit-message { padding-right: 260px; }
+  #editor-graph > .circuit-viewport { grid-column: 1 / -1; grid-row: 3; height: auto; min-height: 0; max-height: none; }
+  /* Canvas controls bottom-right, the connector legend bottom-left (canvas-study V2, K14). */
+  #editor-graph > .circuit-contract-legend { grid-column: 1; grid-row: 4; margin: var(--space-2) 0 0; min-width: 0; }
+  #editor-graph > .circuit-contract-legend[open] { max-height: 120px; overflow: auto; }
+  #editor-graph > .circuit-toolbar { grid-column: 2; grid-row: 4; justify-self: end; align-self: start; margin: var(--space-2) 0 0; }
+  #editor-graph > .circuit-view-note { grid-column: 1 / -1; grid-row: 5; margin: var(--space-1) 0 0; }
+  .workflow-canvas-panel > .canvas-help[open] > p, .workflow-canvas-panel > .connection-list[open] > ul { max-height: 120px; overflow: auto; }
+}
+/* Research loop: a section of the Selection panel (L5), separated by a divider. */
+.workflow-inspector-panel .inspector-section { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.workflow-inspector-panel .inspector-section > h2 { margin: 0 0 var(--space-3); font-size: var(--font-heading); }
+.workflow-task-details .editor-task-controls > h2 { display: none; }
+
+@media (max-width: 899px) {
+  .page-bar-project { flex-wrap: wrap; }
+  .page-bar-project select { max-width: 160px; }
+  .status-chip { max-width: 100%; }
+}
+
+/* `+` add-handle on an unconnected output (editor-canvas-add.js, canvas-study V5): shown
+ * while the card is hovered, focused or selected; 8px outside the card's right edge. */
+.circuit-add-next { position: absolute; z-index: 4; right: -28px; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; min-height: 20px; padding: 0; border-radius: 50%; border-color: var(--primary); background: var(--panel); color: var(--primary); }
+.circuit-card:hover > .circuit-add-next, .circuit-card:focus-within > .circuit-add-next, .circuit-card:has(.editor-node[aria-pressed="true"]) > .circuit-add-next, .circuit-add-next:focus-visible { display: inline-flex; }
+.circuit-card:has(.circuit-output:disabled) > .circuit-add-next { display: none; }
+.circuit-add-next:not(:disabled):hover { background: var(--primary); color: var(--on-primary); }
+.canvas-add-popover { position: fixed; z-index: 30; display: grid; gap: var(--space-2); width: 280px; max-height: 312px; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--panel); box-shadow: var(--elev-2); }
+.canvas-add-search { min-height: 32px; }
+.canvas-add-list { display: grid; gap: var(--space-1); overflow: auto; }
+.canvas-add-list p { margin: 0; }
+.canvas-add-option { display: flex; min-height: 36px; padding: 0 var(--space-2); border-color: transparent; background: var(--panel); color: var(--text); text-align: left; font-weight: 500; }
+.canvas-add-option:not(:disabled):hover { background: var(--bg); }
+.canvas-add-heading { grid-template-columns: 20px minmax(0, 1fr); }
+.canvas-add-heading svg { width: 20px; height: 20px; }
+.circuit-view-button .icon { margin-right: var(--space-1); }
+
+/* A port's contract pill never reaches past its own port box (min zoom included). */
+.circuit-port-contract { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
