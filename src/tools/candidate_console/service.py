@@ -215,7 +215,9 @@ class CandidateConsole:
         return PreparedReview(
             credential_readiness=credential_readiness(request, self.config.credential_file),
             prepare_operation_id=prepared.prepare_operation_id,
-            prepared_digest=prepared.request_sha256,
+            prepared_digest=selection.bound_digest(prepared.request_sha256),
+            resources=selection.resources,
+            parallel=selection.parallel,
             task_id=task.task_id,
             task_label=task.label,
             run_name=saved.run_name,
@@ -247,7 +249,7 @@ class CandidateConsole:
         prepared, _ = self.resolve_prepared_context(
             PreparedSelection(prepare_operation_id=selection.prepare_operation_id)
         )
-        if selection.expected_prepared_digest != prepared.request_sha256:
+        if selection.expected_prepared_digest != selection.bound_digest(prepared.request_sha256):
             raise OperationFailure(
                 "stale_review", "prepared request changed; prepare and review again"
             )

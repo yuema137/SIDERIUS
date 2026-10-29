@@ -19,11 +19,13 @@ class ReusableCaptureChoice(PreviewModel):
     run_id: UUID
 
 
-class ReusableCaptureSelection(ReusableCaptureChoice):
+class ReusableCaptureSelection(ReusableCaptureChoice, RunResourcesSelection):
+    """The reviewed capture plus the operator's scheduling inputs (B3-4c)."""
+
     preparation: ReusablePreparedSelection
 
 
-class ReusableCaptureLaunch(RunResourcesSelection):
+class ReusableCaptureLaunch(PreviewModel):
     selection: ReusableCaptureSelection
     expected_request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     candidate_operation_id: UUID

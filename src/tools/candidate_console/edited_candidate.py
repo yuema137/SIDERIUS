@@ -35,7 +35,7 @@ class EditedRunSelection(PreparedSelection):
     expected_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class EditedRunLaunch(EditedRunSelection, RunResourcesSelection):
+class EditedRunLaunch(EditedRunSelection):
     expected_review_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     candidate_operation_id: UUID
 
@@ -74,6 +74,11 @@ class EditedRunReview(PreviewModel):
     envelope: ReviewedEnvelope = Field(exclude=True)
     effects: EditedRunEffects
     boundary: str = "Bindings reviewed; native validation at launch. No training or iteration."
+
+
+def _bound(prior: CandidateOperation) -> RunResourcesSelection:
+    """The scheduling inputs a submitted operation carries, as they were reviewed."""
+    return RunResourcesSelection(resources=prior.resources, parallel=prior.request.parallel)
 
 
 class EditedCandidate:
@@ -187,7 +192,7 @@ class EditedCandidate:
             selection=selection,
             source_origin=source.source_path,
             reviewed_context=context,
-            review_digest=envelope.digest(),
+            review_digest=selection.bound_digest(envelope.digest()),
             envelope=envelope,
             effects=EditedRunEffects(
                 nodes=tuple((node.id, node.capability) for node in definition.nodes),
@@ -237,7 +242,11 @@ class EditedCandidate:
                 or context.project_id != project_id
                 or context.prepare_operation_id != selection.prepare_operation_id
                 or capture.sha256 != selection.expected_source_sha256
-                or ReviewedEnvelope(context=context, request=prior.request).digest()
+                or _bound(prior).bound_digest(
+                    ReviewedEnvelope(
+                        context=context, request=prior.request.model_copy(update={"parallel": None})
+                    ).digest()
+                )
                 != selection.expected_review_digest
             ):
                 raise OperationFailure(
@@ -249,6 +258,8 @@ class EditedCandidate:
             EditedRunSelection(
                 prepare_operation_id=selection.prepare_operation_id,
                 expected_source_sha256=selection.expected_source_sha256,
+                resources=selection.resources,
+                parallel=selection.parallel,
             ),
         )
         if review.review_digest != selection.expected_review_digest:

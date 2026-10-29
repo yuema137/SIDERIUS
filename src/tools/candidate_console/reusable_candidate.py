@@ -134,6 +134,7 @@ class ReusableCandidate:
     def review(self, project_id: str, selection: ReusableCaptureSelection) -> ReusableCaptureReview:
         selection = ReusableCaptureSelection.model_validate_json(selection.model_dump_json())
         task, inspected, operation = self._operation(project_id, selection, uuid4())
+        operation = with_run_resources(operation, selection)
         binding, request = inspected.binding, operation.request
         saved = binding.request
         plan, _ = captured_plan(Path(binding.envelope), binding, CapturedBytes())
@@ -222,6 +223,8 @@ class ReusableCandidate:
             _, _, operation = self._operation(
                 project_id, launch.selection, launch.candidate_operation_id
             )
+            # Bound before the digest check: the review digested the same operation.
+            operation = with_run_resources(operation, launch.selection)
             if operation_request_digest(operation) != launch.expected_request_digest:
                 raise OperationFailure("stale_review", "captured request changed; review again")
             environment = credentials(
@@ -229,6 +232,4 @@ class ReusableCandidate:
             )
         except OperationFailure as error:
             raise ReusableAdmissionNotAttempted(error.detail.code, error.detail.message) from error
-        return self.console.submit(
-            with_run_resources(operation, launch), launch_environment=environment
-        )
+        return self.console.submit(operation, launch_environment=environment)

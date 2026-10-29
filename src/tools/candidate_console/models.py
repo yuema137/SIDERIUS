@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -81,6 +83,19 @@ class RunResourcesSelection(PreviewModel):
         default=None, exclude_if=lambda value: value is None
     )
     parallel: ParallelDispatch | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    def bound_digest(self, base: str) -> str:
+        """The reviewed digest with these inputs folded in; ``base`` when there are none.
+
+        A review returns it and its launch must echo it, so the reservation and the
+        parallel opt-in cannot change after review; existing clients that send
+        neither keep their digest.
+        """
+        if self.resources is None and self.parallel is None:
+            return base
+        payload = {"base": base, **self.model_dump(mode="json", include={"resources", "parallel"})}
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 class ConsoleConfig(PreviewModel):
@@ -181,11 +196,13 @@ class PrepareSelection(PreviewModel):
         return CandidatePreparationRequest.safe_name(value)
 
 
-class PreparedSelection(PreviewModel):
+class PreparedSelection(RunResourcesSelection):
+    """The reviewed preparation plus the operator's scheduling inputs (B3-4c)."""
+
     prepare_operation_id: UUID
 
 
-class LaunchSelection(PreparedSelection, RunResourcesSelection):
+class LaunchSelection(PreparedSelection):
     candidate_operation_id: UUID
     expected_prepared_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -209,7 +226,9 @@ class RouteView(PreviewModel):
     model: str | None
 
 
-class PreparedReview(PreviewModel):
+class PreparedReview(RunResourcesSelection):
+    """``prepared_digest`` binds the request and the echoed ``resources``/``parallel``."""
+
     credential_readiness: CredentialReadiness
     prepare_operation_id: UUID
     prepared_digest: str

@@ -79,15 +79,26 @@ other kind: preparations and native chains are never reserved and always run
 serially (the UI states this; it is not an omission). A replayed request ID
 returns before the ledger is consulted (operations contract).
 
-Run resources. The three candidate launch selections (`LaunchSelection`,
-`EditedRunLaunch`, `ReusableCaptureLaunch`) include `RunResourcesSelection`:
+Run resources. The three reviewed selections (`PreparedSelection` and so
+`LaunchSelection`, `EditedRunSelection` and so `EditedRunLaunch`, and
+`ReusableCaptureSelection` inside `ReusableCaptureLaunch`) include
+`RunResourcesSelection`:
 optional `resources` (`OperationResources`, the run's reservation; required by
 the ledger, refused `resources_required` without it) and `parallel`
 (`ParallelDispatch`, the per-capability table; see the worker contract,
-"Parallel dispatch"). Both are omitted when absent. `with_run_resources`
-attaches them after the reviewed request's digest check, revalidating through
-the operation and request owners; without them the reviewed operation is
-submitted byte for byte. Under the ledger, `parallel.budget` is refused
+"Parallel dispatch"). Both are omitted when absent. They are part of what the
+operator reviews: the review endpoint accepts them, echoes them in its view
+(`PreparedReview.resources`/`parallel`, `EditedRunReview.selection`,
+`ReusableCaptureReview`'s request digest) and folds them into the digest the
+launch must echo (`RunResourcesSelection.bound_digest` over `prepared_digest` or
+`review_digest`, which is the unchanged base digest when neither is set; the
+store digest of the bound operation on the reusable path). A launch with
+different values therefore refuses `stale_review`, and a retried launch replays
+idempotently: the replay check recomputes the same bound digest from the stored
+operation. `with_run_resources` attaches them, revalidating through the
+operation and request owners; without them the reviewed operation is submitted
+byte for byte. Until the UI PR, these inputs are reachable through the HTTP API
+only; the console README documents `host_ledger` with that PR. Under the ledger, `parallel.budget` is refused
 `parallel_budget`; without a configured ledger a `parallel` launch without its
 own budget is refused `parallel_budget_required`. A loop resume inherits its
 root's `resources` and `parallel`. Every refusal reaches the browser as the

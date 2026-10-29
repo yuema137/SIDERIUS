@@ -296,3 +296,32 @@ def test_reusable_saved_source_refuses_legacy_launch_before_preview(edited, monk
         adapter.review(project.project_id, selected)
     assert error.value.detail.code == "unsupported"
     assert "reusable declarations" in str(error.value)
+
+
+def test_reviewed_resources_bind_the_launch_and_replay_idempotently(edited):
+    """B3-4c: the reservation is reviewed. A retried launch carrying it replays as the
+    same operation; a launch that changes it after review is stale."""
+    from tools.candidate_operations.models import OperationResources
+
+    adapter, project, selection = edited
+    resources = OperationResources(
+        gpu_count=0, host_memory_gib=2.0, cpu_slots=1, time_budgeted=False
+    )
+    plain = adapter.review(project.project_id, selection)
+    review = adapter.review(
+        project.project_id, selection.model_copy(update={"resources": resources})
+    )
+    assert review.selection.resources == resources
+    assert review.review_digest != plain.review_digest
+    launch = launch_selection(review)
+    first = adapter.launch(project.project_id, launch)
+    replay = adapter.launch(project.project_id, launch)
+    assert replay.observation == "existing" and replay.request_digest == first.request_digest
+    changed = launch.model_copy(
+        update={
+            "candidate_operation_id": uuid4(),
+            "resources": resources.model_copy(update={"cpu_slots": 2}),
+        }
+    )
+    with pytest.raises(OperationFailure, match="review again"):
+        adapter.launch(project.project_id, changed)

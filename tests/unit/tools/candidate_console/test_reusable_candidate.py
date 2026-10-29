@@ -402,3 +402,33 @@ def test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops(loope
             {"kind": "no_improvement", "completed_bodies": 2},
         ],
     }
+
+
+def test_reviewed_resources_bind_the_reusable_launch_and_replay_idempotently(captured):
+    """B3-4c: the reservation is part of the reviewed request digest."""
+    from tools.candidate_operations.models import OperationResources
+
+    adapter, project, choice, _ = captured
+    resources = OperationResources(
+        gpu_count=0, host_memory_gib=2.0, cpu_slots=1, time_budgeted=False
+    )
+    selection = adapter.select(project.project_id, choice).model_copy(
+        update={"resources": resources}
+    )
+    plain = adapter.review(project.project_id, adapter.select(project.project_id, choice))
+    review = adapter.review(project.project_id, selection)
+    assert review.request_digest != plain.request_digest
+    launch = launch_payload(review)
+    first = adapter.launch(project.project_id, launch)
+    replay = adapter.launch(project.project_id, launch)
+    assert replay.observation == "existing" and replay.request_digest == first.request_digest
+    changed = launch.model_copy(
+        update={
+            "candidate_operation_id": uuid4(),
+            "selection": selection.model_copy(
+                update={"resources": resources.model_copy(update={"cpu_slots": 2})}
+            ),
+        }
+    )
+    with pytest.raises(OperationFailure, match="review again"):
+        adapter.launch(project.project_id, changed)
