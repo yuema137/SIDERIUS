@@ -283,6 +283,14 @@ null; the rule is the tuner schema's `OperatorTimeBudgetMinutes`, applied by
 `run_config.validate_launch_admission` on this ingress and on the standard CLI,
 direct workflow and setup-preview paths alike (issue #828). Null disables a
 budget; zero, negative and non-finite values are refused before model work.
+The same function checks every launch value against its owner's annotation
+(issue #1045): the same-named `HyperparamTuningInput` field, or for the two
+launch-only floats `ResearchPolicy.minimum_boldness` and
+`run_config.FiniteTargetScore`. Timeouts, safety factors, thresholds and
+`degenerate_penalty_score` therefore refuse inf/NaN identically on every path.
+`None` is skipped as "omitted"; when an owner admits `None`, the refusal says
+so. The standard CLI runs this check in `run_one_iteration.main` on the
+builder-projected launch, before workspace binding (exit 2).
 
 Known native scalar, schedule, formal-policy, scope, order and deadline checks
 run before proposer construction. Runtime-verifier identity, measurement
