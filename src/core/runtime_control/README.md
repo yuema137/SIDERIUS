@@ -43,17 +43,13 @@ setting from another machine. For example, a caller ceiling of 24 GiB on an
 80 GiB device still becomes 20 GiB if the host quota is 20 GiB. See
 [GPU ceiling configuration](gpu-ceilings.md) for precedence, units and errors.
 
-Ordinary `GpuAdmissionPolicy.enforcement` still determines whether a refusal
-stops execution or is recorded as an observation. Namespace-limited execution uses
-that same policy only for missing authoritative phase requirements, when a valid
-declaration and a current typed snapshot provide
-available telemetry, a device UUID, no sampling error, and complete, coherent
-accounting. Authoritative demand above the ceiling stops even in `observe_only`
-with `insufficient_headroom`. Missing or invalid accounting, missing GPU identity, and policy
-exceptions still stop regardless of observation posture. With coherent accounting
-but no authoritative phase requirement, trial proceeds without a safety claim;
-formal records `would_refuse` under `observe_only` and stops under `enforce`.
-These are environment decisions; they do not justify shrinking the model.
+Inside a sandbox that hides other GPU processes, admission needs trustworthy
+memory accounting before it can use the usual trial or formal policy for a
+missing measurement. A measured demand that exceeds the ceiling, or evidence
+that cannot establish headroom, stops execution even in `observe_only`; repair
+the environment rather than shrinking the model on that basis. See the
+[GPU admission contract](gpu-ceilings.md#apis-and-errors) for the evidence checks
+and how trial, formal and observation modes differ.
 The measured demand is an empirical estimate, not a bound on every later input.
 This check does not add runtime GPU monitoring or supply missing trial/inference
 measurements. Historical unlabelled requirements remain readable but cannot
@@ -128,18 +124,13 @@ retain the existing time requirement and detector behavior. Re-arming still
 discards the old plateau's evidence. The wall bound also includes local verifier
 processing.
 Exhausted or unstable traces never become verified by relaxing evidence floors.
-Slow observations count toward refusal only when their observation wall time
-reaches `pathological_min_unit_ms` (default 100 ms) and their normalized unit
-rate exceeds `pathological_factor` times the prior plateau. These observations are recorded in measurement details;
-`steady.stable_windows` consecutive qualifying observations fail verification.
-This prevents tiny timing fluctuations from rejecting fast tasks. The final
-comparison of earlier and later timing blocks also requires the later median
-observation wall time to reach the floor. A batch lasting 2560 ms is therefore
-above the floor even if its normalized rate is only 40 ms/sample. Configure the floor through `RuntimeControlPolicy.verification`;
-see [slowdown policy and boundaries](../../../docs/reference/training-budget-diagnostics.md#late-stability-and-runtime-refusal-feedback).
-Explicit `max_unit_ms` still fails immediately after stabilization, independently
-of this floor. These rules do not change data selection, model size, resource
-budgets or prediction-watchdog enablement.
+The verifier ignores relative slowdowns below 100 ms of observation wall time
+by default, so tiny timing fluctuations do not reject fast tasks. Larger
+slowdowns still need sustained evidence, while an explicit `max_unit_ms` limit
+applies independently after stabilization. See the
+[slowdown policy](../../../docs/reference/training-budget-diagnostics.md#late-stability-and-runtime-refusal-feedback)
+for configuration, batch examples and the exact checks; these checks leave data
+selection, model size, resource budgets and prediction-watchdog enablement unchanged.
 
 ### Calibration across separate passes
 

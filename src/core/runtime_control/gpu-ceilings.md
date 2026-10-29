@@ -61,9 +61,20 @@ visibility declaration, available telemetry, a UUID-bound typed snapshot, no
 sampling error, and a complete coherent `OccupancyBound` uses ordinary posture
 only for missing authoritative phase requirements. Authoritative demand above
 the ceiling returns `insufficient_headroom` and stops even in `observe_only`.
-Other isolated evidence failures retain the unconditional
-`environment_headroom_unproven` refusal. Policy exceptions and missing GPU identity remain conservative; only
-explicit CPU availability bypasses the missing-identity check.
+
+With coherent accounting but no authoritative phase requirement, trial mode
+proceeds without a safety claim. Formal mode returns `policy_unavailable`:
+`observe_only` records `would_refuse` and proceeds, while `enforce` stops.
+The measured-demand `insufficient_headroom` rule takes precedence over this
+phase posture. Missing-requirement decisions preserve `process_visibility` and
+`effective_execution_conditions`; proceeding does not certify global process
+visibility. Missing or inconsistent accounting, invalid visibility declarations,
+missing GPU identity, ceiling-resolution failures and policy exceptions stop
+with `environment_headroom_unproven`, except that explicit CPU availability
+permits the missing-identity path to proceed. These are environment decisions,
+not evidence that the model or batch should shrink. Unattributed bytes do not
+establish clean visibility. Sampling immediately before phase admission is the
+only freshness guarantee; there is no additional staleness guard.
 
 ## Scope and historical compatibility
 

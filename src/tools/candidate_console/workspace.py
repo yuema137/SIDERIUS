@@ -457,7 +457,10 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
         if stat.S_IMODE(metadata.st_mode) & 0o022:
             raise WorkspaceRefused(
                 f"workspace parent {base} must not be writable by group or others; "
-                f"fix it with: chmod 700 {shlex.quote(str(base))}"
+                f"for a private parent, use: chmod 700 {shlex.quote(str(base))}; "
+                "or keep a shared parent unchanged and create a private folder: "
+                f"mkdir -m 700 {shlex.quote(str(base / 'siderius'))}; "
+                f"then use --workspace {shlex.quote(str(base / 'siderius'))}"
             )
         root = ensure_owned_directory(
             directory, WORKSPACE_DIRECTORY, str(workspace), remedy=workspace
