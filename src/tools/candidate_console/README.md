@@ -240,7 +240,8 @@ overwrites an existing `tasks/` folder.
    document's memory. Home offers three starting points: **Quick start** (choose a
    task, then create an experiment setup from the ready-made research loop or open an
    existing one; it opens in Workflow, where you set rounds, stop conditions and
-   training settings), **Open a workflow** and
+   training settings; the first round starts cold, so no earlier results are needed),
+   **Open a workflow** and
    **Monitor runs**. Before Workflow and Run open, choose a task on **Task**
    (see [Choose a task](#choose-a-task)). On **Run**, a stepper shows where you are: check the inputs and
    prepare, then review and launch; the page updates the status by itself.

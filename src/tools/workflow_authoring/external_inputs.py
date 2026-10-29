@@ -49,6 +49,13 @@ def external_input_catalog() -> ExternalInputCatalog:
                 contract=contract_info(contract),
                 managed=contract in _MANAGED,
                 summary=_SUMMARIES[contract],
+                managed_summary=(
+                    "SIDERIUS fills this for you: the first round starts cold "
+                    "(no earlier results needed); later rounds receive the previous round's "
+                    "training results."
+                    if contract == "interpretation.input" and contract in _MANAGED
+                    else None
+                ),
                 example=contract.replace(".", "_").replace("-", "_") + ".json",
             )
             for contract in CONTRACTS

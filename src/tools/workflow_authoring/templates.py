@@ -296,13 +296,15 @@ _SHAPES: tuple[tuple[TemplateId, str, str, ReusableWorkflowDocument], ...] = (
     (
         "single-research-loop",
         "Single research loop",
-        "Interpret results, propose, implement, validate, train & tune, then feed back.",
+        "Interpret results, propose, implement, validate, train & tune, then feed back. "
+        "The first round starts cold: no earlier results are needed.",
         _research_loop(with_advice=False),
     ),
     (
         "single-loop-with-advice",
         "Single loop with your own advice",
-        "The same loop; the proposal agent also reads your advice.",
+        "The same loop; the proposal agent also reads your advice. "
+        "The first round starts cold: no earlier results are needed.",
         _research_loop(with_advice=True),
     ),
     (

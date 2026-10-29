@@ -123,6 +123,7 @@ try {
         const where = `${template.id} ${width}px ${colorScheme}`;
         await gallery.locator(`.template-card[data-template="${template.id}"]`).click();
         assert.equal(await gallery.locator('#editor-template-detail h3').textContent(), template.title);
+        if (template.loop) assert.ok((await gallery.locator('#editor-template-detail').textContent()).includes('The first round starts cold: no earlier results are needed.'));
         const svg = gallery.locator('#editor-template-detail svg.template-thumbnail');
         assert.equal(await svg.getAttribute('role'), 'img');
         if (template.loop) assert.match(await svg.getAttribute('aria-label'), /repeated up to 1 time\(s\) from train back to interpret/);

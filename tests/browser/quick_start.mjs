@@ -88,6 +88,27 @@ try {
   assert.ok((await readFile(join(metadata.workspace, 'projects', 'synthetic-task-research-loop', 'workflow.py'), 'utf8')).length > 0);
   assert.deepEqual(posts.filter(path => path.endsWith('/setups')), ['/api/tasks/synthetic/setups', '/api/tasks/synthetic/setups']);
   await page.locator('#editor-loop-final-iteration').waitFor({state: 'visible'});
+  // Cold-start guidance belongs only to inputs managed by the run.
+  await page.locator('#circuit-node-interpret').click();
+  const managedHelp = page.locator('#editor-inspector .managed-input-help');
+  await managedHelp.waitFor({state: 'visible'});
+  assert.match(await managedHelp.textContent(), /first round starts cold/);
+  assert.ok((await managedHelp.textContent()).includes("previous round's training results"));
+  // Exercise the same unbound interpretation form in v1 and reusable contexts.
+  const forms = await page.evaluate(() => {
+    const option = {socket_contract: {id: 'interpretation.input'}, bound: false, choices: []};
+    return [false, true].map(reusable => {
+      const parent = document.createElement('div');
+      window.editorExternalInputs.render(parent, {option, nodeId: 'interpret', reusable,
+        taken: new Set(), enabled: true, ready: () => {}}, () => {});
+      return {help: parent.querySelector('.external-input-help').textContent,
+        pathHidden: parent.querySelector('[name="external-location"]').parentElement.hidden};
+    });
+  });
+  assert.ok(!forms[0].help.includes('cold'));
+  assert.equal(forms[0].pathHidden, false, 'v1 asks for a file without promising managed input');
+  assert.ok(forms[1].help.includes('first round starts cold'));
+  assert.equal(forms[1].pathHidden, true);
   await page.screenshot({path: join(evidence, 'quick-start-opened.png'), fullPage: true});
 
   // A second Quick start offers the existing setup and opens it without creating another.
