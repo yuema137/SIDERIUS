@@ -26,6 +26,28 @@ from .models import CandidateRunReceipt, CandidateRunRequest
 from .record_json import artifact_json
 
 
+def drop_experiment_inheritance(proposal: ProposalOutput) -> ProposalOutput:
+    """Remove experiment-source inheritance claims the worker cannot back with source.
+
+    The worker never loads an earlier experiment's plugin source as reference code,
+    so such a claim cannot be honoured. In a multi-body loop the proposer may still
+    name an earlier body's model; the implementor then builds from the proposal's
+    own specification, as the native exploration loop does when no reference source
+    is found. The removal is printed to the run log and the recorded proposal keeps
+    only the claims that remain.
+    """
+    dropped = [item for item in proposal.inherited_components if item.source_type == "experiment"]
+    if not dropped:
+        return proposal
+    names = ", ".join(f"{item.component} from {item.source_id}" for item in dropped)
+    print(
+        "    Inheritance not restored: this worker cannot load earlier experiment source "
+        f"({names}); implementing from the proposal's specification."
+    )
+    kept = [item for item in proposal.inherited_components if item.source_type != "experiment"]
+    return proposal.model_copy(update={"inherited_components": kept})
+
+
 def run_proposal(
     context: FixedInvocationContext,
     request: CandidateRunRequest,
@@ -63,8 +85,7 @@ def run_proposal(
         from workflows.model_exploration import refuse_builtin_proposal_under_isolation
 
         refuse_builtin_proposal_under_isolation(proposal, baseline_isolation=True)
-    if any(item.source_type == "experiment" for item in proposal.inherited_components):
-        raise ValueError("fresh candidate worker cannot restore inherited experiment source")
+    proposal = drop_experiment_inheritance(proposal)
     proposal_path = proposal_dir / f"proposal_{context.run_name}.json"
     capture_record(proposal_path, proposal)
     return proposal, proposal_path
