@@ -111,11 +111,13 @@ version in the zip's name.
 
    The command checks every file against `SHA256SUMS`, copies `task/` to
    `siderius_workspace/tasks/quickstart/`, adds the task to `console.json` and
-   creates the experiment setup from the template. Success looks like this:
+   creates the experiment setup from the template. With `--dry-run` it only
+   describes the bundle; the `candidate_devices` line appears when the task is
+   added. Success looks like this:
 
    ```text
-   candidate_devices: /dev/nvidia0 (NVIDIA GPU found on this machine; runs also get read-only /sys and the NVIDIA control nodes; pass --no-gpu to give runs no GPU)
    Copied the verified task package to /absolute/project/siderius_workspace/tasks/quickstart
+   candidate_devices: /dev/nvidia0 (NVIDIA GPU found on this machine; runs also get read-only /sys and the NVIDIA control nodes; pass --no-gpu to give runs no GPU)
    Added task quickstart to /absolute/project/siderius_workspace/settings/console.json:
    ...
    Created experiment setup 'quickstart-research-loop' (Quickstart research loop) from template single-loop-with-advice in /absolute/project/siderius_workspace/projects/quickstart-research-loop

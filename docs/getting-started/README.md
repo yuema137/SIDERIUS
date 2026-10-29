@@ -112,9 +112,9 @@ you own; the console workspace is created inside it) and
      --from-bundle /absolute/downloads/siderius-example-quickstart-<version>
    ```
 
-   Success: the output prints `candidate_devices: /dev/nvidia0 (NVIDIA GPU found
-   on this machine; ...)`, names the copied package
-   (`siderius_workspace/tasks/quickstart`), prints the task entry it added,
+   Success: the output names the copied package
+   (`siderius_workspace/tasks/quickstart`), prints `candidate_devices: /dev/nvidia0
+   (NVIDIA GPU found on this machine; ...)` and the task entry it added,
    reports `Created experiment setup 'quickstart-research-loop'` and ends with
    `Restart the console to load the new task.` The
    [bundle README](../../examples/console_bundle/README.md#run-the-example)

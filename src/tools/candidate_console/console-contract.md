@@ -165,7 +165,7 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
   chooses. `candidate_devices` is `--device` when given and `[]` with `--no-gpu`
   (the two are mutually exclusive); otherwise it is `add_task.host_gpu_devices()`,
   the host's `/dev/nvidia<N>` character devices (regex
-  `tools.workspace_sandbox.gpu.GPU_NODE`, symlinks excluded), sorted, with no
+  `tools.workspace_sandbox.gpu.GPU_NODE`, symlinks excluded), sorted by number, with no
   prompt on a TTY or elsewhere. Control nodes are never written, because the
   sandbox passes the present ones at launch and a written, lazily created node
   (`/dev/nvidia-uvm`) would make admission refuse the run. The command prints

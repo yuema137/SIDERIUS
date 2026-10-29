@@ -103,7 +103,7 @@ class TaskPlan:
 
 
 def host_gpu_devices() -> tuple[str, ...]:
-    """This host's GPU device nodes (``/dev/nvidia<N>`` character devices), sorted.
+    """This host's GPU device nodes (``/dev/nvidia<N>`` character devices), by number.
 
     Control nodes (``nvidiactl``, ``nvidia-uvm``, ...) are not listed: the run
     sandbox adds the ones present at launch (``tools.workspace_sandbox.gpu``), and
@@ -114,7 +114,7 @@ def host_gpu_devices() -> tuple[str, ...]:
         path = Path(name)
         if GPU_NODE.fullmatch(name) and path.is_char_device() and not path.is_symlink():
             found.append(name)
-    return tuple(found)
+    return tuple(sorted(found, key=lambda name: int(name.removeprefix("/dev/nvidia"))))
 
 
 def choose_devices(devices: tuple[str, ...] | None) -> tuple[str, ...]:

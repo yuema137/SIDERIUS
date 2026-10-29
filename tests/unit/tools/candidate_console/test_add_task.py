@@ -314,15 +314,16 @@ def test_host_gpu_nodes_are_written_without_asking_and_no_gpu_opts_out(
 def test_host_gpu_devices_lists_only_gpu_nodes(monkeypatch):
     """Defect: control nodes such as /dev/nvidia-uvm are written into candidate_devices;
     the node can be absent until first CUDA use, and admission then refuses the run.
-    Fails if anything but /dev/nvidia<N> character devices is returned."""
+    Fails if anything but /dev/nvidia<N> character devices is returned, or if they are
+    ordered as text (nvidia10 before nvidia2) instead of by GPU number."""
     from tools.candidate_console import add_task
 
-    names = ["/dev/nvidia-uvm", "/dev/nvidia0", "/dev/nvidia1", "/dev/nvidiactl"]
+    names = ["/dev/nvidia-uvm", "/dev/nvidia0", "/dev/nvidia10", "/dev/nvidia2", "/dev/nvidiactl"]
     monkeypatch.setattr(add_task.glob, "glob", lambda _: names)
     monkeypatch.setattr(add_task.Path, "is_char_device", lambda self: True)
     monkeypatch.setattr(add_task.Path, "is_symlink", lambda self: False)
     # The real function: conftest stubs add_task.host_gpu_devices for every other test.
-    assert host_gpu_devices() == ("/dev/nvidia0", "/dev/nvidia1")
+    assert host_gpu_devices() == ("/dev/nvidia0", "/dev/nvidia2", "/dev/nvidia10")
 
 
 def test_add_task_and_check_never_print_a_credential_value(workspace, monkeypatch, capsys):
