@@ -2132,7 +2132,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
 - Canvas (at least 900 px wide): the canvas header holds **Templates**; the panel is a
   flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
   `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
-  height; the viewport scrolls and zooms inside it, so Fit fits the visible viewport.
+  height; the viewport scrolls and zooms inside it. Fit frames the union of every card's
+  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin, within the visible viewport.
   Open disclosures in the panel (port-type legend, canvas help and connection
   mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
   and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
@@ -2197,8 +2198,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   connection's reason is kept as `data-refusal` on the dimmed input. Icon-only canvas
   controls get a one-line tooltip from `data-tip-label`.
 - Cards fold every optional input that is not fed by a wire (not connected, or fed by an
-  external input) into one `+N optional` row. Fit to view never zooms below 75%; a larger
-  graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
+  external input) into one `+N optional` row. Fit to view never zooms below 75% (the legibility floor, `FIT_MIN`);
+  a larger graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
   zoom out still reaches 40%.
 - Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
   in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
