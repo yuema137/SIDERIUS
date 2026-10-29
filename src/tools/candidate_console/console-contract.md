@@ -371,7 +371,7 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 
 | Method/path | Input/output |
 | --- | --- |
-| GET /api/choices | `ChoicesView` `{operations_store_id, tasks: ChoiceView[]}`; `operations_store_id` is 32 lowercase hex, a domain-separated SHA-256 prefix of the admitted `OperationStoreConfig` JSON (never a path); browsers key retained operation intents by it and the project id |
+| GET /api/choices | `ChoicesView` `{operations_store_id, tasks: ChoiceView[]}`; `operations_store_id` is 32 lowercase hex, a domain-separated SHA-256 prefix (`siderius-operation-store/v2`) of the canonical `OperationStoreConfig.state_root` only (never a path; editing the preparation/candidate output roots keeps it, so a retained unresolved launch stays visible); browsers key retained operation intents by it and the project id |
 | POST /api/preparations | PrepareSelection → OperationHandle, 202 |
 | GET /api/preparations/{UUID}/review | PreparedReview |
 | POST /api/candidates | LaunchSelection → OperationHandle, 202 |

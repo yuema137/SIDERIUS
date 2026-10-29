@@ -2,7 +2,7 @@
 
 import hashlib
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from uuid import UUID
@@ -86,7 +86,9 @@ def loop_control_requests(config: OperationStoreConfig, operation_id: UUID) -> t
     Stop is run-scoped (``candidate_run/stop.json``); Pause is scoped to this operation's
     own segment, exactly as the worker consumes them (``tools.candidate_worker.loop``).
     Before the root worker claims its workspace no request can have been recorded, so
-    both are ``False``. A marker naming another run raises ``ValueError``.
+    both are ``False``. This is a display read: a malformed, unreadable or foreign marker
+    reads as no request recorded (``False``) instead of failing the status route; the
+    worker's own consumption of the markers stays fail-closed.
     """
     from tools.candidate_worker.loop import pause_requested, stop_requested
 
@@ -98,7 +100,17 @@ def loop_control_requests(config: OperationStoreConfig, operation_id: UUID) -> t
     except FileNotFoundError:
         return False, False
     segment_id = None if record == root else record.submission.request_id
-    return stop_requested(initial), pause_requested(initial, segment_id)
+
+    def recorded(read: Callable[[], bool]) -> bool:
+        try:
+            return read()
+        except (OSError, ValueError):
+            return False
+
+    return (
+        recorded(lambda: stop_requested(initial)),
+        recorded(lambda: pause_requested(initial, segment_id)),
+    )
 
 
 def root_inputs(record: OperationRecord):

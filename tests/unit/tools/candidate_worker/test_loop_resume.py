@@ -256,6 +256,12 @@ def test_completed_pause_resumes_actual_body_in_new_process(
     assert loop_control_requests(config, next_id) == (True, True), "Stop is run-scoped"
     assert loop_status(config, second, requests=True).stop_requested
     (root / "stop.json").rename(tmp_path / "stop.json.aside")
+    # A malformed or foreign marker is not a recorded request, and never breaks the status read.
+    (root / "stop.json").write_text("{not json")
+    assert loop_control_requests(config, next_id) == (False, True), "malformed Stop"
+    (root / "stop.json").write_text(json.dumps({**stop, "run_id": "another-run"}))
+    assert loop_control_requests(config, next_id) == (False, True), "foreign Stop"
+    (root / "stop.json").rename(tmp_path / "stop.json.bad")
     console = SimpleNamespace(operation_store=config)
     paused_results = read_graph_results(console, first_id)
     resumed_results = read_graph_results(console, next_id)

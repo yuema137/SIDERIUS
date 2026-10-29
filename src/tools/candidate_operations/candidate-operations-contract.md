@@ -1143,8 +1143,10 @@ that need a typed refusal raise `UnknownOperation` (code `unknown_operation`).
 `loop_control_requests(config, operation_id) -> (stop_requested, pause_requested)` is
 read-only: it reuses the worker's `stop_requested`/`pause_requested` readers on the
 root's claimed workspace (Stop run-wide, Pause per segment), returns `(False, False)`
-for a non-loop operation or before the root worker claims its workspace, and raises
-`ValueError` for a marker naming another run.
+for a non-loop operation or before the root worker claims its workspace, and reads a
+malformed, unreadable or foreign marker (another run's identity) as no request recorded
+(`False`), so `GET /api/operations/{id}` never fails on it. The worker's own
+consumption of the markers stays fail-closed (`ValueError` on a foreign marker).
 
 ### Control an authored loop from code or the CLI
 

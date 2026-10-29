@@ -29,6 +29,7 @@ from tools.candidate_operations import (
     review_loop_resume,
     submit_operation,
 )
+from tools.candidate_operations.files import canonical
 from tools.candidate_operations.models import OperationFailure, UnknownOperation
 from tools.candidate_operations.read import lookup_operation_request
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
@@ -137,9 +138,14 @@ class CandidateConsole:
         )
 
     def operations_store_id(self) -> str:
-        """Opaque, stable digest of the admitted store configuration; never a path."""
-        encoded = self.config.operation_store.model_dump_json().encode()
-        return hashlib.sha256(b"siderius-operation-store/v1\0" + encoded).hexdigest()[:32]
+        """Opaque, stable digest of the store's canonical ``state_root``; never a path.
+
+        Only the state root identifies the store (records live there). Editing the
+        preparation/candidate output roots and restarting must keep the id, or browsers
+        would hide a retained unresolved launch and re-enable Launch.
+        """
+        state_root = str(canonical(self.config.operation_store.state_root)).encode()
+        return hashlib.sha256(b"siderius-operation-store/v2\0" + state_root).hexdigest()[:32]
 
     def choices_view(self) -> ChoicesView:
         return ChoicesView(operations_store_id=self.operations_store_id(), tasks=self.choices())

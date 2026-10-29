@@ -175,7 +175,22 @@ def test_choices_store_id_is_opaque_and_follows_store_identity(console_config, t
         update={"operation_store": store.model_copy(update={"state_root": str(tmp_path / "s2")})}
     )
     other = client(moved).get("/api/choices").json()["operations_store_id"]
-    assert first == again and first != other
+    # Output roots are not the store: editing them and restarting keeps the id, so a
+    # retained unresolved launch stays visible and Launch stays blocked.
+    (tmp_path / "p2").mkdir()
+    (tmp_path / "c2").mkdir()
+    rooted = console_config.model_copy(
+        update={
+            "operation_store": store.model_copy(
+                update={
+                    "preparation_roots": (*store.preparation_roots, str(tmp_path / "p2")),
+                    "candidate_roots": (*store.candidate_roots, str(tmp_path / "c2")),
+                }
+            )
+        }
+    )
+    kept = client(rooted).get("/api/choices").json()["operations_store_id"]
+    assert first == again == kept and first != other
     assert str(tmp_path) not in first and "/" not in first
 
 
