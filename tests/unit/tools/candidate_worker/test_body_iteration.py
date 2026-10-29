@@ -25,7 +25,8 @@ def test_native_bodies_use_independent_captures_and_parent_iteration(
 
     request = literature_request(prepared)
     project = Path(request.preview.project_root)
-    receipt = initial(request)
+    # A launched receipt always carries its admitted seed (issue #983).
+    receipt = initial(request).model_copy(update={"run_seed": 11, "run_seed_source": "generated"})
     workspace = Path(receipt.workspace)
     composition = compose_run_task_bindings(request.preview.document.definition.task.manifest)
     config = WorkflowLLMConfig.model_validate_json((project / "llm.json").read_bytes())

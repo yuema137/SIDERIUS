@@ -53,6 +53,7 @@ from nodes.ml_model_implementor.ml_model_implementor import (
     _assemble_loss_plugin,
     _dummy_tensor_validate_loss,
 )
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.helpers.step04a_fixtures import forward_contract, regressor_model_io
 
 # ---------------------------------------------------------------------------
@@ -127,6 +128,7 @@ def regressor_input(tmp_path, loss_spec):
 @pytest.fixture
 def implementor(tmp_path):
     agent = MLModelImplementor.__new__(MLModelImplementor)
+    agent._probe_seed = PROBE_SEED
     agent.bridge = MagicMock()
     agent.bridge.generate_text.return_value = FAKE_REASONING
     agent.bridge.generate.side_effect = [REGRESSOR_LOSS_CODE, REGRESSOR_MODEL_CODE]
@@ -143,7 +145,7 @@ def _validator():
         passed=True,
         notes="fixture reviewer",
     ).model_dump()
-    return MLCodeValidatorAgent(bridge_factory=lambda **_kw: bridge)
+    return MLCodeValidatorAgent(bridge_factory=lambda **_kw: bridge, probe_seed=PROBE_SEED)
 
 
 # ---------------------------------------------------------------------------

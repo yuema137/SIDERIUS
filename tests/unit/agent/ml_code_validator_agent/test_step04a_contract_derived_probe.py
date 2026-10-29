@@ -47,6 +47,7 @@ from nodes.ml_code_validator_agent import (
     MLCodeValidatorAgent,
     _check_instantiation_and_gradient,
 )
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.helpers.step04a_fixtures import (
     SHIPPED_INPUT_DTYPE,
     SHIPPED_OUTPUT_DTYPE,
@@ -148,7 +149,9 @@ def test_a_sixteen_class_candidate_validates_under_its_own_declaration(tmp_path)
         squeeze=False,
         declaration="classifier",
     )
-    verdict = _check_instantiation_and_gradient(path, tidmad_model_io(num_classes=16))
+    verdict = _check_instantiation_and_gradient(
+        path, tidmad_model_io(num_classes=16), probe_seed=PROBE_SEED
+    )
     assert verdict[:4] == (True, True, True, None)
 
 
@@ -167,7 +170,7 @@ def test_the_same_candidate_is_rejected_under_the_tidmad_declaration(tmp_path):
         declaration="classifier",
     )
     inst_ok, _grad, _otype, err, _t, _tt = _check_instantiation_and_gradient(
-        path, tidmad_model_io()
+        path, tidmad_model_io(), probe_seed=PROBE_SEED
     )
     assert inst_ok is False
     assert err is not None
@@ -194,8 +197,8 @@ def test_tidmad_contract_reproduces_the_legacy_verdict_exactly(tmp_path):
         squeeze=False,
         declaration="classifier",
     )
-    legacy = _check_instantiation_and_gradient(path)
-    derived = _check_instantiation_and_gradient(path, tidmad_model_io())
+    legacy = _check_instantiation_and_gradient(path, probe_seed=PROBE_SEED)
+    derived = _check_instantiation_and_gradient(path, tidmad_model_io(), probe_seed=PROBE_SEED)
     assert derived == legacy
 
 
@@ -213,7 +216,12 @@ def test_absent_contract_does_not_raise_and_keeps_legacy_geometry(tmp_path):
         squeeze=False,
         declaration="classifier",
     )
-    assert _check_instantiation_and_gradient(path)[:4] == (True, True, True, None)
+    assert _check_instantiation_and_gradient(path, probe_seed=PROBE_SEED)[:4] == (
+        True,
+        True,
+        True,
+        None,
+    )
 
 
 def test_continuous_contract_with_a_classifier_declaration_fails_closed(tmp_path):
@@ -234,7 +242,7 @@ def test_continuous_contract_with_a_classifier_declaration_fails_closed(tmp_path
         declaration="classifier",
     )
     inst_ok, grad_ok, otype_ok, err, _t, _tt = _check_instantiation_and_gradient(
-        path, regressor_model_io()
+        path, regressor_model_io(), probe_seed=PROBE_SEED
     )
     assert (inst_ok, grad_ok, otype_ok) == (False, False, False)
     assert err is not None
@@ -262,7 +270,12 @@ def test_a_regressor_contract_does_not_synthesize_a_class_axis(tmp_path):
         squeeze=True,
         declaration="regressor",
     )
-    assert _check_instantiation_and_gradient(path, contract)[:4] == (True, True, True, None)
+    assert _check_instantiation_and_gradient(path, contract, probe_seed=PROBE_SEED)[:4] == (
+        True,
+        True,
+        True,
+        None,
+    )
 
 
 def test_a_regressor_candidate_still_passes_under_a_categorical_task(tmp_path):
@@ -291,7 +304,12 @@ def test_a_regressor_candidate_still_passes_under_a_categorical_task(tmp_path):
         squeeze=True,
         declaration="regressor",
     )
-    assert _check_instantiation_and_gradient(path, contract)[:4] == (True, True, True, None)
+    assert _check_instantiation_and_gradient(path, contract, probe_seed=PROBE_SEED)[:4] == (
+        True,
+        True,
+        True,
+        None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +429,9 @@ class TestTheProductionPathActuallyUsesTheContract:
 
     def test_run_forwards_the_contract_so_a_16_class_candidate_passes(self, tmp_path):
         """Fails when: ``run()`` stops passing ``inp.model_io_contract``."""
-        agent = MLCodeValidatorAgent(bridge_factory=lambda **_kw: self._passing_bridge())
+        agent = MLCodeValidatorAgent(
+            bridge_factory=lambda **_kw: self._passing_bridge(), probe_seed=PROBE_SEED
+        )
         out = agent.run(self._input(tmp_path, tidmad_model_io(num_classes=16)))
 
         assert out.instantiation_passed is True, out.error_message
@@ -425,7 +445,9 @@ class TestTheProductionPathActuallyUsesTheContract:
         16-symbol embedding raises — so a green result in the test above
         genuinely required the declaration to arrive.
         """
-        agent = MLCodeValidatorAgent(bridge_factory=lambda **_kw: self._passing_bridge())
+        agent = MLCodeValidatorAgent(
+            bridge_factory=lambda **_kw: self._passing_bridge(), probe_seed=PROBE_SEED
+        )
         out = agent.run(self._input(tmp_path, None))
 
         assert out.instantiation_passed is False

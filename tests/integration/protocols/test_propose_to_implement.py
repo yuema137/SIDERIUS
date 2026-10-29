@@ -33,6 +33,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.plugin_loader import _load_plugin
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from tests.helpers.probe_seed import PROBE_SEED
 
 # Reuse the synthetic interpretation from the node integration test
 from tests.integration.nodes.test_ml_model_proposal_agent import SYNTHETIC_INTERPRETATION
@@ -128,7 +129,9 @@ class TestProposeToImplementGemini:
         # Step 3: run implementor (real API)
         impl_input.plugin_dir = str(tmp_path / "models")
         impl_input.test_dir = str(tmp_path / "tests")
-        output = MLModelImplementor(provider=provider, model_id=model_id).run(impl_input)
+        output = MLModelImplementor(
+            provider=provider, model_id=model_id, probe_seed=PROBE_SEED
+        ).run(impl_input)
 
         # Step 4: validate
         _assert_implementor_output(output)
@@ -160,7 +163,9 @@ class TestProposeToImplementOpenAI:
         impl_input = local_full_spec(proposal_output, storage)
         impl_input.plugin_dir = str(tmp_path / "models")
         impl_input.test_dir = str(tmp_path / "tests")
-        output = MLModelImplementor(provider=provider, model_id=model_id).run(impl_input)
+        output = MLModelImplementor(
+            provider=provider, model_id=model_id, probe_seed=PROBE_SEED
+        ).run(impl_input)
 
         _assert_implementor_output(output)
 

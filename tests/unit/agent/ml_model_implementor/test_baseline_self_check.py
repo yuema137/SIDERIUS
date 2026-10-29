@@ -18,6 +18,7 @@ from nodes.ml_model_implementor import (
     MLModelImplementor,
     _check_baseline_schema_compatibility,
 )
+from tests.helpers.probe_seed import PROBE_SEED
 
 # ---- Minimal plugin source fixtures ----
 # Each fixture is a complete, importable plugin file containing a
@@ -201,13 +202,13 @@ class TestValidateCodeIntegration:
 
     def test_accepting_baseline_passes_validate_code(self):
         inp = self._inp({"model_config": {"channels": 32, "refiner_kernel_size": 4}})
-        result = MLModelImplementor._validate_code(self._build_valid_code(), inp)
+        result = MLModelImplementor._validate_code(self._build_valid_code(), inp, PROBE_SEED)
         assert result is None
 
     def test_rejecting_baseline_fails_validate_code(self):
         """Baseline refiner_kernel_size=5 violates multiple_of=2 → error returned."""
         inp = self._inp({"model_config": {"refiner_kernel_size": 5}})
-        result = MLModelImplementor._validate_code(self._build_valid_code(), inp)
+        result = MLModelImplementor._validate_code(self._build_valid_code(), inp, PROBE_SEED)
         assert result is not None
         assert "Baseline self-check failed" in result
         assert "refiner_kernel_size" in result
@@ -218,7 +219,7 @@ class TestValidateCodeIntegration:
         bad_code = self._build_valid_code()
         bad_code["config_fields_code"] = "    this is = not valid python"
         inp = self._inp({"model_config": {"refiner_kernel_size": 5}})
-        result = MLModelImplementor._validate_code(bad_code, inp)
+        result = MLModelImplementor._validate_code(bad_code, inp, PROBE_SEED)
         assert result is not None
         # Syntax or consistency check, not the baseline check
         assert "Baseline self-check" not in result
@@ -226,5 +227,5 @@ class TestValidateCodeIntegration:
     def test_empty_baseline_does_not_add_error(self):
         """With no baseline values, the baseline check is a no-op."""
         inp = self._inp({})
-        result = MLModelImplementor._validate_code(self._build_valid_code(), inp)
+        result = MLModelImplementor._validate_code(self._build_valid_code(), inp, PROBE_SEED)
         assert result is None

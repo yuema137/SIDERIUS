@@ -16,7 +16,7 @@ The LLM writes only the marked sections; all plugin boilerplate is fixed.
 
 Node contract:
   run(input: ImplementorInput) -> ImplementorOutput
-  CLI: --workspace, --run_name, --provider, --model_id
+  CLI: --workspace, --run_name, --provider, --model_id, --run_seed
 """
 
 import argparse
@@ -60,6 +60,9 @@ from core.capability_registry import (
 )
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
+from core.probe_seeds import probe_process_seeds, require_probe_seed, standalone_probe_seed
+from core.run_seed_lock import run_seed_argument
+from core.training_seeds import SeedContext
 from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
 from workflows.task_config import render_forward_contract
 
@@ -150,6 +153,33 @@ def _smoke_test_plugin(
     model_io_contract: ModelIOContract | None = None,
     *,
     model_probe_context: ModelProbeContext | None = None,
+    probe_seed: SeedContext,
+) -> str | None:
+    """The self-check under this implementation's ``validation.probe`` seeds.
+
+    Issue #983: the in-process model build and forward pass run inside
+    ``seeded_scope``; a task-declared bounded probe child receives
+    ``probe_seed`` through its environment.
+    """
+    from execute_tools.process_seeding import seeded_scope  # torch stays deferred
+
+    with seeded_scope(probe_process_seeds(probe_seed)):
+        return _smoke_test_plugin_in_scope(
+            plugin_src,
+            model_name,
+            model_io_contract,
+            model_probe_context=model_probe_context,
+            probe_seed=probe_seed,
+        )
+
+
+def _smoke_test_plugin_in_scope(
+    plugin_src: str,
+    model_name: str,
+    model_io_contract: ModelIOContract | None,
+    *,
+    model_probe_context: ModelProbeContext | None,
+    probe_seed: SeedContext,
 ) -> str | None:
     """
     Dynamically load *plugin_src*, instantiate the model with default config,
@@ -191,6 +221,7 @@ def _smoke_test_plugin(
                     model_io_contract,
                     model_probe_context=model_probe_context,
                     gradients=False,
+                    seed_context=probe_seed,
                 )[3]
 
         # Load the module
@@ -1706,8 +1737,12 @@ class MLModelImplementor:
         bridge_factory=None,
         capability_index_path: str | None = None,
         max_output_tokens: int | None = None,
+        probe_seed: SeedContext | None = None,
         **kwargs,
     ):
+        # Issue #983: this implementation's ``validation.probe`` SeedContext;
+        # the self-check refuses None (MissingRunSeed).
+        self._probe_seed = probe_seed
         self._bridge_factory = bridge_factory or LLMBridge
         bridge_kwargs = node_bridge_kwargs(
             provider=provider,
@@ -1740,7 +1775,9 @@ class MLModelImplementor:
         return code
 
     @staticmethod
-    def _validate_code(code: dict, inp: ImplementorInput) -> str | None:
+    def _validate_code(
+        code: dict, inp: ImplementorInput, probe_seed: SeedContext | None
+    ) -> str | None:
         """
         Run all three pre-write checks on *code*.
 
@@ -1786,6 +1823,7 @@ class MLModelImplementor:
             inp.model_name,
             inp.forward_contract.model_io,
             **smoke_options,
+            probe_seed=require_probe_seed(probe_seed),
         )
         if smoke_error:
             return f"Smoke test failed: {smoke_error}"
@@ -2185,7 +2223,7 @@ class MLModelImplementor:
 
         # --- Validate → repair loop ---
         max_retries = inp.max_retries
-        error = self._validate_code(code, inp)
+        error = self._validate_code(code, inp, self._probe_seed)
         attempt = 0
         error_history: list[tuple[int, str]] = []
         while error is not None and attempt < max_retries:
@@ -2199,7 +2237,7 @@ class MLModelImplementor:
                 label="implementor.repair",
             )
             code = self._patch_common_mistakes(code)
-            error = self._validate_code(code, inp)
+            error = self._validate_code(code, inp, self._probe_seed)
 
         # If still failing after retries, raise with the last error
         if error is not None:
@@ -2359,6 +2397,12 @@ def main():
         "--provider", type=str, default=DEFAULT_LLM_PROVIDER, choices=["gemini", "openai"]
     )
     parser.add_argument("--model_id", type=str, default=None)
+    parser.add_argument(
+        "--run_seed",
+        type=run_seed_argument,
+        default=None,
+        help="Run seed for model probes (issue #983); generated and printed when omitted.",
+    )
     args = parser.parse_args()
 
     from core.generated_library import bind_generated_library_to_workspace
@@ -2391,7 +2435,11 @@ def main():
         ),
     )
 
-    agent = MLModelImplementor(provider=args.provider, model_id=args.model_id)
+    agent = MLModelImplementor(
+        provider=args.provider,
+        model_id=args.model_id,
+        probe_seed=standalone_probe_seed(args.run_seed),
+    )
     output = agent.run(agent_input)
 
     print(f"\n{'=' * 60}")

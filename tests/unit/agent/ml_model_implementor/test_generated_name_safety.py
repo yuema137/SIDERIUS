@@ -12,6 +12,7 @@ from nodes.ml_model_implementor.ml_model_implementor import (
     _check_baseline_schema_compatibility,
     _smoke_test_plugin,
 )
+from tests.helpers.probe_seed import PROBE_SEED
 
 
 def request(tmp_path, **updates):
@@ -51,6 +52,7 @@ def test_archival_decode_then_live_refusal_before_any_llm_or_loss_generation(tmp
         inp.baseline_config["loss_config"] = {"loss_type": "custom", "loss_name": "../escape"}
     restored = ImplementorInput.model_validate_json(inp.model_dump_json())
     agent = MLModelImplementor.__new__(MLModelImplementor)
+    agent._probe_seed = PROBE_SEED
     agent.bridge = MagicMock()
     agent._generate_loss = MagicMock()
     with pytest.raises(ValueError, match="filesystem component"):
@@ -72,6 +74,7 @@ def test_unused_legacy_loss_name_does_not_restrict_live_eligibility(tmp_path):
 def test_direct_loss_generation_refuses_before_provider_or_inventory(tmp_path):
     inp = request(tmp_path, custom_loss_spec=loss_spec("../escape"))
     agent = MLModelImplementor.__new__(MLModelImplementor)
+    agent._probe_seed = PROBE_SEED
     agent.bridge = MagicMock()
     agent._registry = MagicMock()
     with pytest.raises(ValueError, match=r"custom_loss_spec\.loss_name"):
@@ -90,7 +93,7 @@ def test_direct_probe_refuses_before_temp_creation_or_pair_provider(monkeypatch,
 
     monkeypatch.setattr(tempfile, "mkdtemp", forbidden)
     if probe == "smoke":
-        error = _smoke_test_plugin("# benign source", "../escape")
+        error = _smoke_test_plugin("# benign source", "../escape", probe_seed=PROBE_SEED)
     elif probe == "baseline":
         error = _check_baseline_schema_compatibility(
             "# benign source", "../escape", {"model_config": {"width": 4}}

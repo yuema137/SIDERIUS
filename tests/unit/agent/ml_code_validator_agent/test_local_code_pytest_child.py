@@ -11,6 +11,7 @@ from core.local_code import LocalCodeError, bind_code_package
 from ml_models.plugin_binding import bind_run_model_plugins
 from nodes import ml_code_validator_agent as validator
 from tests.helpers.local_code_model import MODEL_TYPE, make_package
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.unit.core.test_local_code_transport import bind_workspace
 from tests.unit.core.test_resume import isolated_registries
 
@@ -51,12 +52,16 @@ def test_real_validator_pytest_child_uses_capture_and_refuses_changed_helper(
         if changed:
             with pytest.raises(LocalCodeError, match="mismatch"):
                 validator._run_tests(
-                    str(test_file), test_limit=generated_pytest.PytestLimit(seconds=60.0)
+                    str(test_file),
+                    test_limit=generated_pytest.PytestLimit(seconds=60.0),
+                    probe_seed=PROBE_SEED,
                 )
             assert not marker.exists()
         else:
             passed, output = validator._run_tests(
-                str(test_file), test_limit=generated_pytest.PytestLimit(seconds=60.0)
+                str(test_file),
+                test_limit=generated_pytest.PytestLimit(seconds=60.0),
+                probe_seed=PROBE_SEED,
             )
             assert passed, output
             assert marker.exists()

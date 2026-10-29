@@ -52,6 +52,7 @@ from nodes.ml_model_implementor import (
     _class_name,
     _smoke_test_plugin,
 )
+from tests.helpers.probe_seed import PROBE_SEED
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -107,6 +108,7 @@ def inp(tmp_path, storage):
 @pytest.fixture
 def agent_with_mocks(inp):
     agent = MLModelImplementor.__new__(MLModelImplementor)
+    agent._probe_seed = PROBE_SEED
     agent.bridge = MagicMock()
     agent._registry = MagicMock()
     agent.bridge.generate_text.return_value = FAKE_REASONING
@@ -493,6 +495,7 @@ class TestConfigFieldConsistency:
             "forward_body": "        return self.emb(x).transpose(1,2)",
         }
         agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = "reasoning..."
@@ -538,12 +541,12 @@ class TestSmokeTest:
     """)
 
     def test_valid_plugin_returns_none(self):
-        assert _smoke_test_plugin(self.VALID_PLUGIN, "test_model") is None
+        assert _smoke_test_plugin(self.VALID_PLUGIN, "test_model", probe_seed=PROBE_SEED) is None
 
     def test_missing_attribute_returns_error(self):
         # Plugin with no PLUGIN_MODEL_CLASS
         bad = self.VALID_PLUGIN.replace("PLUGIN_MODEL_CLASS = TestModel", "")
-        result = _smoke_test_plugin(bad, "test_model")
+        result = _smoke_test_plugin(bad, "test_model", probe_seed=PROBE_SEED)
         assert result is not None
         assert "PLUGIN_MODEL_CLASS" in result
 
@@ -553,7 +556,7 @@ class TestSmokeTest:
             "nn.Conv1d(config.channels, 256, 1)",
             "nn.Conv1d(config.channels, 128, 1)",
         )
-        result = _smoke_test_plugin(bad, "test_model")
+        result = _smoke_test_plugin(bad, "test_model", probe_seed=PROBE_SEED)
         assert result is not None
         assert "shape mismatch" in result
 
@@ -563,7 +566,7 @@ class TestSmokeTest:
             "nn.Embedding(256, config.channels)",
             "nn.Embedding(256, config.embed_dim)",
         )
-        result = _smoke_test_plugin(bad, "test_model")
+        result = _smoke_test_plugin(bad, "test_model", probe_seed=PROBE_SEED)
         assert result is not None
         assert "embed_dim" in result
 
@@ -583,6 +586,7 @@ class TestSmokeTest:
             ),
         }
         agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = "reasoning..."
@@ -619,6 +623,8 @@ class TestSelfCorrection:
         good_code = FAKE_CODE_RESPONSE.copy()
 
         agent = MLModelImplementor.__new__(MLModelImplementor)
+
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = FAKE_REASONING
@@ -642,6 +648,8 @@ class TestSelfCorrection:
         good_code = FAKE_CODE_RESPONSE.copy()
 
         agent = MLModelImplementor.__new__(MLModelImplementor)
+
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = FAKE_REASONING
@@ -663,6 +671,7 @@ class TestSelfCorrection:
             "forward_body": "        return self.emb(x).transpose(1,2)",
         }
         agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = FAKE_REASONING
@@ -685,6 +694,8 @@ class TestSelfCorrection:
         good_code = FAKE_CODE_RESPONSE.copy()
 
         agent = MLModelImplementor.__new__(MLModelImplementor)
+
+        agent._probe_seed = PROBE_SEED
         agent.bridge = MagicMock()
         agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = FAKE_REASONING

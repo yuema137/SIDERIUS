@@ -3,8 +3,10 @@
 import pytest
 
 from agent.skills.task_model_validation import run_task_model_tests
+from core.probe_seeds import probe_seed_env
 from nodes.ml_code_validator_agent.ml_code_validator_agent import _check_instantiation_and_gradient
 from nodes.ml_model_implementor.ml_model_implementor import _assemble_test, _smoke_test_plugin
+from tests.helpers.probe_seed import PROBE_SEED
 from tests.unit.agent.test_task_model_probe import declared_task
 
 
@@ -61,23 +63,34 @@ PLUGIN_MODEL_CLASS = Model
 def test_all_consumers_preserve_fixed_candidate_geometry_and_counts(tmp_path, records):
     contract, context = composed_fixture(tmp_path)
     path, source = candidate(tmp_path, records)
-    assert _smoke_test_plugin(source, "record_model", contract, model_probe_context=context) is None
-    verdict = _check_instantiation_and_gradient(str(path), contract, model_probe_context=context)
+    assert (
+        _smoke_test_plugin(
+            source, "record_model", contract, model_probe_context=context, probe_seed=PROBE_SEED
+        )
+        is None
+    )
+    verdict = _check_instantiation_and_gradient(
+        str(path), contract, model_probe_context=context, probe_seed=PROBE_SEED
+    )
     assert all(verdict[:3]), verdict[3]
     assert verdict[4:] == (records + 10, records + 10)
     tests = tmp_path / "tests"
     tests.mkdir()
     generated = tests / "test_record_model.py"
     generated.write_text(_assemble_test("record_model", contract, model_probe_context=context))
-    passed, output = run_task_model_tests(str(generated))
+    passed, output = run_task_model_tests(str(generated), seed_env=probe_seed_env(PROBE_SEED))
     assert passed, output
 
 
 def test_missing_candidate_binding_remains_repairable_through_real_composition(tmp_path):
     contract, context = composed_fixture(tmp_path, binding="missing_field")
     path, source = candidate(tmp_path, 137)
-    error = _smoke_test_plugin(source, "record_model", contract, model_probe_context=context)
+    error = _smoke_test_plugin(
+        source, "record_model", contract, model_probe_context=context, probe_seed=PROBE_SEED
+    )
     assert "missing_field" in error
-    verdict = _check_instantiation_and_gradient(str(path), contract, model_probe_context=context)
+    verdict = _check_instantiation_and_gradient(
+        str(path), contract, model_probe_context=context, probe_seed=PROBE_SEED
+    )
     assert not verdict[0]
     assert "missing_field" in verdict[3]
