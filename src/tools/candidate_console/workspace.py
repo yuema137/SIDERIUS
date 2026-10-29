@@ -17,6 +17,7 @@ import errno
 import json
 import os
 import secrets
+import shlex
 import stat
 from collections.abc import Iterator
 from pathlib import Path
@@ -251,8 +252,10 @@ def _status(directory: int, name: str, *, owned: bool = True) -> WorkspaceStatus
     return "present"
 
 
-def ensure_owned_directory(directory: int, name: str, label: str) -> int:
-    """Create ``name`` (0700) when missing, open it no-follow and enforce ownership."""
+def ensure_owned_directory(
+    directory: int, name: str, label: str, *, remedy: Path | None = None
+) -> int:
+    """Open/create a private directory; suggest chmod only for an absolute remedy path."""
     try:
         os.mkdir(name, 0o700, dir_fd=directory)
         created = True
@@ -266,9 +269,18 @@ def ensure_owned_directory(directory: int, name: str, label: str) -> int:
         raise
     if created:
         os.fchmod(child, 0o700)
-    if not _owned(child):
+    metadata = os.fstat(child)
+    if metadata.st_uid != os.getuid():
         os.close(child)
-        raise WorkspaceRefused(f"{label} must be owned by you without group/other write")
+        raise WorkspaceRefused(
+            f"{label} is owned by uid {metadata.st_uid}, not you; choose a folder you own"
+        )
+    if stat.S_IMODE(metadata.st_mode) & 0o022:
+        os.close(child)
+        message = f"{label} must not have group/other write permissions"
+        if remedy is not None and remedy.is_absolute():
+            message += f"; fix it with: chmod 700 {shlex.quote(str(remedy))}"
+        raise WorkspaceRefused(message)
     return child
 
 
@@ -445,15 +457,17 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
         if stat.S_IMODE(metadata.st_mode) & 0o022:
             raise WorkspaceRefused(
                 f"workspace parent {base} must not be writable by group or others; "
-                f"fix it with: chmod 700 {base}"
+                f"fix it with: chmod 700 {shlex.quote(str(base))}"
             )
-        root = ensure_owned_directory(directory, WORKSPACE_DIRECTORY, WORKSPACE_DIRECTORY)
+        root = ensure_owned_directory(
+            directory, WORKSPACE_DIRECTORY, str(workspace), remedy=workspace
+        )
     opened = {"": root}
     try:
         for name in INIT_CHILDREN:
             above, _, leaf = name.rpartition("/")
             opened[name] = ensure_owned_directory(
-                opened[above], leaf, f"{WORKSPACE_DIRECTORY}/{name}"
+                opened[above], leaf, str(workspace / name), remedy=workspace / name
             )
         _create_token(opened[SETTINGS])
         profile = _default_llm_profile()
@@ -506,7 +520,8 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
                             ensure_owned_directory(
                                 opened[parent_name],
                                 task_id,
-                                f"{WORKSPACE_DIRECTORY}/{parent_name}/{task_id}",
+                                str(workspace / parent_name / task_id),
+                                remedy=workspace / parent_name / task_id,
                             )
                         )
             existing = resolved.config.credential_file

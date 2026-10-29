@@ -482,6 +482,16 @@ them; it never creates `data/<task_id>`. It finishes with the same load as `chec
 Under any umask it creates folders as 0700 and the token as 0600 (it sets umask
 077 for its own duration and `fchmod`s created folders). It never deletes, overwrites
 or follows a symlink. Refusals exit 2 and say which item failed:
+Refusals from `ensure_owned_directory` during `init` name the full offending
+path for the workspace root, fixed children and derived task output directories.
+Non-directories/symlinks are
+refused as such; foreign ownership names the owning uid and advises choosing
+a folder the caller owns. Only a group/other-write refusal suggests `chmod 700`
+on that path (parent and child paths are shell-quoted). The shared helper emits
+this command only when its optional `remedy: Path | None` keyword is an absolute
+path; `init` supplies it, while non-init callers with relative labels receive
+the diagnosis without a command. Ownership takes precedence when
+both ownership and mode fail. Existing directories are never repaired by `init`.
 `WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
 or the library default profile, when it is a symlink, unreadable or has different
 bytes); `MissingSetting` from an existing console.json names the task field; an
