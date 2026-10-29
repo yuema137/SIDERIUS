@@ -335,6 +335,7 @@ class CandidateConsole:
                     state=snapshot.state,
                     native_status=snapshot.receipt.status if snapshot.receipt else None,
                     loop=loop,
+                    reason=snapshot.reason if snapshot.state == "operation_failed" else None,
                 )
             )
         return OperationListView(

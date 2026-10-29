@@ -303,6 +303,7 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
             "editor-external-inputs.js": "text/javascript",
             "editor-external-inputs.css": "text/css",
             "reusable-run.js": "text/javascript",
+            "run-scheduling.js": "text/javascript",
             "reusable-intents.js": "text/javascript",
             "new-run.js": "text/javascript",
             "page-guidance.js": "text/javascript",

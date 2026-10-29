@@ -55,6 +55,7 @@
   const pauseRecorded = status => !!(request?.pause.acknowledged || status.loop?.pause_requested);
   function describe(status) {
     const loop = status.loop, segment = status.kind === 'candidate_loop_resume' ? 'Resumed segment. ' : '';
+    if (window.operationOutcome?.cancelledBeforeStart(status)) return segment + 'Research loop segment cancelled before start: it never ran.';
     if (status.state === 'operation_failed' && !status.receipt_available) return segment + 'Research loop outcome unavailable: the operation failed without a native receipt.';
     if (!status.receipt_available) {
       let text = segment + `Research loop: up to ${loop.final_iteration} bod${loop.final_iteration === 1 ? 'y' : 'ies'}. The body count is reported by the native receipt at a completed boundary.`;

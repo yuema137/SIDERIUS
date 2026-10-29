@@ -409,6 +409,9 @@ class OperationListItemView(PreviewModel):
     state: Literal["queued", "active", "completed", "operation_failed", "unknown"]
     native_status: str | None
     loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: The operation reason, carried only for ``operation_failed`` rows so the list can
+    #: tell "cancelled before start" from a failure (#1074); omitted otherwise.
+    reason: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class OperationListView(PreviewModel):

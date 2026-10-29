@@ -78,6 +78,21 @@ try {
   assert.equal(await page.locator('#capture-launch').isDisabled(), true);
   assert.equal(await page.locator('#capture-summary').textContent(), '');
   await page.unroute('**/reusable-captures/review'); await open(metadata.captures[0]);
+  // B3-4c: host resources are reviewed (bound into the digest) and an edit discards the review.
+  await page.evaluate(() => { document.getElementById('scheduling').open = true; });
+  await page.locator('#scheduling-declare').check(); await page.locator('#scheduling-gpu').selectOption('0');
+  await page.locator('#scheduling-memory').fill('2'); await page.locator('#scheduling-cpus').fill('1');
+  let reviewed = null;
+  await page.route('**/reusable-captures/review', async route => {reviewed = route.request().postDataJSON(); await route.continue();});
+  await page.locator('#capture-review').click(); await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
+  assert.deepEqual(reviewed.resources, {gpu_count: 0, host_memory_gib: 2, cpu_slots: 1, time_budgeted: false});
+  assert.match(await page.locator('#capture-scheduling-review').textContent(), /Reserves no GPU, 2 GiB host memory and 1 CPU slot\./);
+  await page.locator('#scheduling-cpus').fill('2');
+  await page.locator('#capture-status').filter({hasText: 'review again'}).waitFor();
+  assert.equal(await page.locator('#capture-launch').isDisabled(), true, 'An edited reservation is not launchable');
+  await page.unroute('**/reusable-captures/review');
+  await page.locator('#scheduling-declare').uncheck(); await page.locator('#scheduling-cpus').fill(''); await page.locator('#scheduling-memory').fill('');
+  await page.locator('#scheduling-gpu').selectOption(''); await open(metadata.captures[0]);
   // Explicit fresh pre-admission refusal can be dismissed, never silently retried.
   const receiptPath = join(metadata.captures[0].envelope, 'receipt.json'), receipt = await readFile(receiptPath);
   await writeFile(receiptPath, 'changed after review'); await page.locator('#capture-launch').click();
