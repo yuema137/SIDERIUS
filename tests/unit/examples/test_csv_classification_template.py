@@ -383,3 +383,31 @@ def test_inference_deliverable_metric_and_health_on_a_real_csv(
     assert recording.check_results[0].verdict is CheckVerdict.FAILED
     assert recording.action.value == "continue"
     assert all(gate.passed for gate in right.values())
+
+
+@pytest.mark.parametrize(
+    ("train_portion", "max_samples", "rows"), [(0.5, None, 30), (None, 10, 10)]
+)
+def test_guardrail_step_pricing_counts_a_sampled_template_epoch(
+    data_dir: Path, train_portion, max_samples, rows: int
+) -> None:
+    """Defect: the tuner's step guardrail materializes the training dataset
+    without an epoch seed; the template refuses that, and the guardrail's
+    non-fatal handler silently stops pricing ``max_steps_per_attempt``.
+    Requires the framework fix in PR #1170 (explicit row-count epoch seed)."""
+    from execute_tools.training_batches import optimizer_steps_for_rows
+    from execute_tools.workload_resolvers import resolve_task_scope_training_workload
+
+    with run_registration_scope():
+        composition = compose_run_task_bindings(str(MANIFEST))
+        with bind_run_task_composition(composition, physical_data_root=str(data_dir)):
+            workload = resolve_task_scope_training_workload(
+                composition.task_data_path.build_training_scope(FULL),
+                data_dir=str(data_dir),
+                batch_size=4,
+                train_portion=train_portion,
+                epochs=2,
+                max_samples=max_samples,
+            )
+    assert workload.detail["samples_per_epoch"] == rows
+    assert workload.unit_count == optimizer_steps_for_rows(rows, 4, drop_last=True) * 2
