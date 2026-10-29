@@ -264,3 +264,20 @@ def test_setup_list_reports_whether_the_browser_may_create(workspace):
     api = _client(_load(workspace))
     assert api.get("/api/tasks/synthetic/setups").json()["browser_creatable"] is False
     assert _create(api).status_code == 403
+
+
+def test_setup_project_check_names_missing_registry_source(workspace):
+    """Defect: the shared setup checker loses missing-source context outside CLI loading."""
+    from tools.candidate_console.config_errors import MissingConfigFile
+    from tools.candidate_console.setups import check_setup_project
+
+    api = _client(_load(workspace))
+    assert _create(api).status_code == 201
+    console = api.app.state.console
+    project, _, _ = configured_capture(console.setups, "my-setup", "synthetic")
+    project.source_file.rename(project.source_file.with_suffix(".saved"))
+    with pytest.raises(MissingConfigFile) as error:
+        check_setup_project(project, console.config)
+    assert str(error.value) == (
+        f"experiment setup my-setup: source file {project.source_file} is missing"
+    )

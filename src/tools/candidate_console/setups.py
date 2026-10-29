@@ -38,6 +38,7 @@ from tools.workflow_authoring.templates import TemplateId, render_shape
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import ReusableTaskReferences, TaskBinding
 
+from .config_errors import MissingConfigFile
 from .files import open_directory, private_bytes
 from .models import ConsoleConfig, TaskChoice
 from .settings_file import SettingsInvalid
@@ -418,7 +419,15 @@ def check_setup_project(project: Project, config: ConsoleConfig) -> None:
     """Authoring paths valid and recovery separate from run output roots (startup and create)."""
     from tools.workflow_authoring.service import WorkflowAuthoring
 
-    WorkflowAuthoring(project)
+    try:
+        WorkflowAuthoring(project)
+    except FileNotFoundError:
+        # Report only the configured source, not arbitrary exception text.
+        if not project.source_file.exists():
+            raise MissingConfigFile(
+                f"experiment setup {project.project_id}", "source", str(project.source_file)
+            ) from None
+        raise
     store = config.operation_store
     for output in (*store.preparation_roots, *store.candidate_roots):
         output_path = Path(output)
