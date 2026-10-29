@@ -11,6 +11,21 @@ You need a frozen SIDERIUS environment, Linux with working user namespaces, and
 it never retries without the sandbox. This is basic execution isolation, not
 the paper experiments' protected evaluation environment.
 
+## Check that bubblewrap works
+
+The browser console runs task code through this sandbox, so check it once on
+each machine. Run:
+
+```bash
+bwrap --unshare-all --ro-bind / / true
+```
+
+Success: the command prints nothing and exits with status 0 (`echo $?` shows
+`0`). It creates the same user, mount, PID and network namespaces the sandbox
+uses, with the host filesystem read-only. An error such as `No permissions to
+creating new namespace` or `bwrap: command not found` means the sandbox cannot
+start; see [If the check fails](#if-the-check-fails).
+
 ## Try it without API keys, data or a GPU
 
 Run these commands from the SIDERIUS checkout you intend to use:
