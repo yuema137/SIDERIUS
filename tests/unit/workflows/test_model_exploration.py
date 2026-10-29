@@ -767,6 +767,7 @@ class TestRunWorkflowSingleIteration:
         supplied_factory = MagicMock(side_effect=lambda **_kwargs: MagicMock())
         trace: list[str] = []
         analysis_predecessors: list[object | None] = []
+        analysis_seeds: list[object] = []
         literature_inputs: list[object] = []
 
         def run_analysis(_interpretation, **kwargs):
@@ -779,6 +780,7 @@ class TestRunWorkflowSingleIteration:
             )
             predecessor = kwargs["literature_output"]
             analysis_predecessors.append(predecessor)
+            analysis_seeds.append(kwargs["run_seed"])
             trace.append("analysis:with-literature" if predecessor is not None else "analysis:none")
             return analysis_output
 
@@ -823,6 +825,13 @@ class TestRunWorkflowSingleIteration:
         assert trace == expected_trace
         assert len(literature_inputs) == 1
         assert len(analysis_predecessors) == 1
+        # Issue #983 S7a: analysis receives the workflow lock's run seed, never
+        # None (the analysis node refuses None) and never a second seed.
+        from core.run_invariants import load_run_invariants
+
+        locked = load_run_invariants(workflow_env["workspace"])
+        assert locked is not None and isinstance(locked.run_seed, int)
+        assert analysis_seeds == [locked.run_seed]
         if order == "analysis_then_literature":
             assert literature_inputs[0].data_analysis_evidence is not None
             assert analysis_predecessors == [None]

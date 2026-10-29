@@ -61,6 +61,174 @@ Undeclared entries are ignored and never logged. Parse refusals are raised
 outside the parser's exception handler, so neither message nor chained cause
 quotes bytes or values; missing declared names are reported by name only.
 
+### Workspace layout and `init`
+
+Owners: `settings_models.py` (file schema), `workspace.py` (derivation,
+readiness, `init`), `config.load_console`, `__main__` (`check`, `serve`, `init`).
+
+**File schema.** `ConsoleFile`/`TaskEntry` are generated from `ConsoleConfig`/`TaskChoice`
+with `pydantic.create_model`; every field keeps its owner's annotation and
+constraints. Differences: `ConsoleFile` adds `workspace_root: str | None` and makes
+`operation_store`/`auth_token_file` optional; `TaskEntry` makes `data_root`,
+`preparation_root`, `candidate_root`, `reusable_runs_root` and `llm_config_file`
+optional. `ConsoleConfig` and `TaskChoice` gain no field, so native requests built
+from `TaskChoice` (`service.preparation_request`) are unchanged.
+
+**Resolution.** `resolve_console(bytes)` validates `ConsoleFile`, dumps it with
+`exclude_unset=True`, fills only keys the file omits, then validates the result as
+`ConsoleConfig`. `load_console(path) -> ResolvedConsole(config, settings)` applies
+the unchanged `validate_config`; `load_config(path)` keeps its signature and result.
+`SettingsContext` carries `workspace_root` and the `(task_id | None, field)` pairs the
+layout filled; it is presentation/readiness input only, never native input.
+When `workspace_root` (canonical, no symlinks) is set and a field is omitted:
+
+| Field | Derived value under `<workspace_root>` |
+| --- | --- |
+| `operation_store` | `state_root=operations`, `preparation_roots=[preparations, runs]`, `candidate_roots=[candidates, runs]` |
+| `auth_token_file` | `settings/console-token` |
+| `TaskChoice.data_root` | `data/<task_id>` |
+| `TaskChoice.preparation_root` | `preparations/<task_id>` |
+| `TaskChoice.candidate_root` | `candidates/<task_id>` |
+| `TaskChoice.reusable_runs_root` | `runs/<task_id>` (an explicit `null` keeps reusable runs disabled) |
+
+`runs` is in both root lists so the derived reusable runs root satisfies the
+`validate_config` scope rule. `llm_config_file`, `task_manifest`, resources and
+credential names are content choices and are never derived. An explicit value
+always wins (parity: an explicit file resolves to exactly
+`ConsoleConfig.model_validate_json(bytes)`). A field with no source raises
+`workspace.MissingSetting`; `check`/`serve` exit 2 and print only the task ID and
+field name, for example
+`task my-task needs llm_config_file (set it in console.json or global settings)`.
+
+**`init --workspace <parent>`.** `<parent>` is explicit (no default) and must be
+an existing canonical directory. The command walks from `/` with
+`O_DIRECTORY|O_NOFOLLOW` descriptors and requires `<parent>` and every existing or
+created workspace directory to satisfy the ownership predicate: a directory,
+`st_uid == os.getuid()`, no group/other write bit. It creates only missing
+children with `mkdir(name, 0o700, dir_fd=…)` and `fchmod 0700`:
+`operations`, `preparations`, `candidates`, `runs`, `projects`, `library`,
+`library/llm`, `library/advice`, `settings`, `data` (`exported_configs` is created
+lazily by its writer). It creates `settings/console-token` with
+`O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0600, 32 random bytes URL-safe encoded;
+an existing token is left untouched and validated by `files.token`. It publishes
+`library/llm/default-<sha12>.json` write-once with the `WorkflowLLMConfig.default()`
+export expression of [LLM defaults](../../../docs/reference/llm-defaults.md)
+(bytes equal `configs/llm/default.json`; no checkout read); existing different
+bytes are refused. It writes `settings/global_settings.json` write-once only when
+absent, selecting that library profile as `llm_profile`, and `settings/console.json`
+write-once only when absent: `workspace_root`, `port` (default 8740, `--port`),
+`browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`.
+When `console.json` exists and names this workspace, `init` also creates the missing
+derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
+them; it never creates `data/<task_id>`. It finishes with the same load as `check`.
+Under any umask it creates folders as 0700 and the token as 0600 (it sets umask
+077 for its own duration and `fchmod`s created folders). It never deletes, overwrites
+or follows a symlink. Refusals exit 2 and say which item failed:
+`WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
+or the library default profile, when it is a symlink, unreadable or has different
+bytes); `MissingSetting` from an existing console.json names the task field; an
+unusable `--workspace` gets its own message. Residual race: `core.durable_io`
+publishes by path, so after the no-follow
+parent check only a same-user process, which already owns the workspace, can swap
+a parent.
+
+**`WorkspaceReadiness`** (`readiness_models.py`, beside `CredentialReadiness`) is an
+ephemeral, name-only projection: `workspace_status` and one `WorkspaceEntry(name,
+status, created_by)` per fixed child, per derived task output root and per derived
+`data/<task_id>`. `status` is `present|missing|not_directory|symlink|not_owner|unreadable`
+(`missing` only for not-found; other open/stat refusals map to `symlink`,
+`not_directory` or `unreadable`),
+computed with no-follow `stat` relative to a root descriptor opened by
+`files.open_directory` (the same no-follow walk as private reads); task data
+(`created_by="operator"`) reports presence only. `created_by="writer"` entries do
+not affect `ready`. `init_command` is set when `init` could fix a missing item. No
+`os.access` probe and no creation. `check`/`serve` print non-present entries and
+the command to stderr when a workspace is not ready, including when
+`validate_config` refuses.
+
+### Global settings
+
+Owners: `settings_models.py` (schemas), `settings_file.py` (refs, folder resolution,
+certification, protected paths), `workspace.resolve_console` (precedence),
+`config.validate_resolved` (`validate_config` + `validate_settings`).
+
+**Allowlists in console.json** (allowed with or without `workspace_root`):
+`llm_profiles: [{id, label, file}]`, `advice_files: [{id, label, file}]`,
+`data_roots: [{id, label, path}]`. IDs match `^[a-zA-Z0-9_-]{1,80}$` and are unique
+per list. The `data_roots` ID `workspace` is reserved; with `workspace_root` it is
+derived as `<workspace_root>/data`. Files are referenced in place, never copied.
+
+**Settings file.** `global_settings: {browser_writable: bool = false}` enables
+reading `<workspace_root>/settings/global_settings.json`; `global_settings` without
+`workspace_root` is refused, and without `global_settings` no settings file is read.
+`init` writes the block (`browser_writable: true`) only into a console.json it
+creates; it never rewrites an existing one, so an earlier workspace opts in by an
+operator edit. Every `data_folders` ref is resolved and exclusion-checked at
+`check`/startup even when console.json sets that task's `data_root`. A schema
+error names Pydantic `loc` paths only, never values or file text: a segment in the
+schema vocabulary (field names, `FileRef` tags, list indexes, Pydantic's constant
+`[key]` token) is shown verbatim, the segment directly under the top-level
+`data_folders` field is shown as the entry's zero-based position among the
+`data_folders` entries in the order they are written (`data_folders[1].subpath`,
+`data_folders[0].[key]` for a bad key), and any other segment not in the schema
+vocabulary is shown as `<key>`. The position is exact because
+`settings_file.parse_settings` first refuses any JSON object that repeats a key
+("repeats a key inside one JSON object"), before schema validation. `data_folders`
+keys must match the task ID pattern, so a valid but unknown task ID is named in
+the unknown-task refusal.
+Schema `GlobalSettings`: `schema_version: "siderius.console-global-settings/v1"`,
+`llm_profile: FileRef | null`, `advice: FileRef | null`,
+`data_folders: {task_id: FolderRef}`. `FileRef` is
+`{"source": "allowlist", "id"}` or `{"source": "library", "name", "sha256"}`;
+`name` matches `<slug>-<sha12>.json`, the 12 hex digits equal the start of
+`sha256`, and it resolves to `<workspace_root>/library/{llm|advice}/<name>`.
+`FolderRef` is `{root_id, subpath}`. The file holds no path; its sha256 is its
+revision. It is read with `files.private_bytes` (owner-only 0600, no-follow,
+256 KiB); an absent file means no values.
+
+**Precedence (OQ-1).** console.json > global settings > workspace layout, per
+field: the settings fill `TaskChoice.llm_config_file` (from `llm_profile`) and
+`TaskChoice.data_root` (from `data_folders[task_id]`) only when console.json omits
+them; the layout then fills remaining locations. `llm_config_file` has no layout
+value. `SettingsContext.origin(task_id, field)` reports `server_config`,
+`global_settings` or `workspace_layout` for presentation only; origins never enter
+native requests, records or digests. A task resolved through settings produces the
+same `TaskChoice`, hence the same `preparation_request`, as the equivalent explicit
+console.json (P2).
+
+**Folder resolution.** `subpath` is refused when it starts with `/`, contains NUL,
+an empty, `.` or `..` segment, or exceeds 512 bytes. The joined path must pass
+`files.canonical` (no symlink in any component, `resolve()` identity), be a
+directory and lie under the root.
+
+**Certification at `check`/`serve` (OQ-4: fail closed).** Every `llm_profiles`
+file is read with `files.config_bytes` and parsed with
+`workflows.llm_config.parse_llm_config_bytes`; every `advice_files` file is read
+with `candidate_prepare.reusable_admission.safe_bytes` and parsed with
+`workflows.advice.parse_advice_bytes` (one reader and one parser owner); every
+`data_roots` path must be a canonical directory. The settings refs must name a
+known allowlist ID, a configured task and an existing root; a library ref's bytes
+must hash to its `sha256`. Refusals raise `settings_file.SettingsInvalid`;
+`check`/`serve` exit 2 with `Console settings are invalid: <predicate>`, naming
+fields, IDs or task IDs only. The global `advice` is validated but never applied
+to a run.
+
+**Read-only exclusion.** `candidate_prepare.admission.validate_read_only_exclusion(
+inputs, protected)` refuses an input that contains or lies inside a protected
+path (`overlap`, beside `validate_destination_overlap`). `settings_file.
+protected_paths(config, workspace)` is `auth_token_file`, `credential_file`,
+`operation_store.state_root`, every preparation and candidate root, every task
+output and reusable runs root, and, with a workspace, `settings/` and `library/`.
+`validate_config(config, workspace=…)` applies it to every task `data_root` and
+`task_read_only` entry; `validate_settings` applies it to every `data_roots` entry.
+`admit(request, *, protected=())` applies it to `(data_root, *task_read_only)`; the
+console's `create_app(config, settings)` passes `protected_paths(config,
+settings.workspace_root)` to `ReusablePreparation`, which forwards it through
+`preflight_reusable_candidate` on the in-process reusable path. Limitation:
+subprocess admission does not receive the console set; its `data_root` must equal
+the startup-validated `TaskChoice.data_root`
+(`check_request_policy`).
+
 `recorded_examples` is an optional allowlist for read-only candidate-validation
 records. Each entry has a unique `example_id`, readable `label`, canonical
 `workspace` strictly below an existing `candidate_roots` directory, and the
@@ -91,6 +259,63 @@ selection, Update, findings acknowledgement and current-snapshot adoption throug
 the [task-version controls](#workflow-builder-task-versions). Python and HTTP use the same
 [authoring contract](../workflow_authoring/authoring-contract.md#explicit-task-reference-inspectionreview).
 Reusable preparation independently enforces captured native pins.
+
+### Settings page and routes
+
+Owners: `settings_service.ConsoleSettings` (view, CAS write, folder listing),
+`settings_routes.settings_router`, `settings_views` (payloads), `static/settings.js`
+(`#settings` route). `create_app(config, settings=None)` takes the startup
+`SettingsContext` (`__main__` passes `load_console(...).settings`, which records
+`console_path`); without it the page reports `enabled=false` and refuses writes.
+All routes sit behind `RequestBoundary` (bearer token, exact Origin on mutation,
+JSON ≤256 KiB). Refusals are `{"error": {code, message}}` and never echo input.
+
+| Route | Effect | Refusals |
+| --- | --- | --- |
+| `GET /api/settings` | `SettingsView`: `enabled`, `writable`, `settings_sha256` (file on disk), `pending`, `active` + `active_sha256` (startup snapshot), `restart_required = settings_sha256 != active_sha256`, `rows`, choice cards (allowlist IDs and library files whose bytes match their name), `data_roots` (ID/label), `tasks` (with the `data_root` origin), `workspace_root`, `WorkspaceReadiness`, `host` | — |
+| `PUT /api/settings` | `SettingsWrite{expected_sha256, settings}`; under one process lock: re-read the file no-follow and compare sha256 (absent matches only `null`), resolve console.json with the candidate settings, run `validate_resolved`, then publishes 0600 through the parent opened with `files.open_directory` (temp file `O_EXCL\|O_NOFOLLOW`, complete write via `files.write_all`, fsync, `os.replace` with `src_dir_fd`/`dst_dir_fd`, design §5.1; on any failure before the replace the temp file is removed and the previous file is untouched; a failed removal is added as a note to the original error and the 422 says a temporary file may remain). If the directory fsync after a successful replace fails, the save stands: 200 with the new `settings_sha256` and `SettingsView.notice` saying durability is not confirmed; returns the new view. A readable but invalid file keeps its digest, so a Save may replace it under the same CAS | 403 `read_only` (no policy, `browser_writable=false`, or no context); 409 `stale`; 422 `settings_unreadable` (not a private 0600 regular file; names the fix); 422 `settings_invalid` with the `SettingsInvalid` predicate, a generic validation message, or an unavailable/linked settings folder |
+| `POST /api/settings/library` | `LibraryUpload{kind: "llm"\|"advice", label (1..63), content}`; content bytes are validated first (`parse_llm_config_bytes` → 422 `invalid_file` "Not an LLM profile: …"; `parse_advice_bytes(label="upload")` → 422 with the owner's message), then published with `publish_bytes_write_once` (0600) to `library/<kind>/<slug>-<sha12>.json` after `canonical(dir)`; `slug` lowercases the label to `[a-z0-9-]`, ≤50; returns `LibraryRef` | 403 `read_only`; 422 `invalid_file` or empty slug; 409 `exists` when that name holds different bytes (identical bytes return the existing ref); 409 `unavailable` without a library directory |
+| `POST /api/settings/exports` | `ExportRequest{project_id, task_id, name (Id), expected_source_sha256}` (`settings_export.py`): reads the project's saved source with `WorkflowAuthoring.read` and requires its sha256 to equal the request; creates `exported_configs` (0700, ownership-checked via `workspace.ensure_owned_directory`) and `mkdir(name, 0700, dir_fd)` exclusively; writes `workflow.py` (source bytes), `llm.json` (`config_bytes(task.llm_config_file)`) and, only when non-empty, `advice.json`, each `O_CREAT\|O_EXCL\|O_NOFOLLOW` 0600 relative to that descriptor. `advice.json` maps `preparation_options.proposal_advice`/`implementation_advice`/`validation_advice` → `propose`/`implement`/`validate` and `training_settings.launch.human_advice_tune` → `tune`, omits empty values, and is validated with `parse_advice_bytes` before writing; returns `ExportResult{name, files}` | 403 `read_only` (same opt-in as PUT); 404 unknown project/task; 409 `stale`, `unavailable`, or `exists` with a free-name suggestion that is itself a valid ≤80-character name (an interrupted export's directory stays taken; nothing is deleted); 422 `invalid_workflow` (saved source does not parse, so advice cannot be read), `invalid_profile` (`parse_llm_config_bytes` refuses the task profile, as `--llm_config` would) or `invalid_advice`. Any other `OSError` while writing files is the generic 500; the partly written directory stays and its name stays taken |
+| `GET /api/settings/exports/{name}/{file}` | `file` ∈ `workflow.py`/`llm.json`/`advice.json`; opened `O_NOFOLLOW` beneath `files.open_directory(exported_configs/<name>)`, regular file ≤1 MiB; `application/octet-stream` attachment. The browser fetches it through `consoleSession.download` (bearer header) and saves a Blob | 404; 422 unknown file name |
+| `GET /api/settings/folders?root_id=&subpath=&limit=` | `FolderListing{entries, incomplete}`: direct children of an allowlisted root, walked with `files.open_directory` then `O_DIRECTORY\|O_NOFOLLOW` per segment and `os.scandir(fd)`; directories as `directory`, symlinks as `link`, files omitted; sorted; at most `limit` (1..200) of at most 4096 examined; `incomplete` when more exist | 404 unknown root or unavailable/linked folder; 422 subpath syntax (`check_subpath`) or limit |
+
+Cards (`settings_library.py`): `ProfileCard{label, ref, routes, required_names,
+problem}` projects routes with `setup_review.routes.node_llm_routes` over every
+role and names with `candidate_worker.preflight.credential_requirements` (names
+only); `AdviceCard{label, ref, present_keys, unsupported_keys, problem}` reads with
+`safe_bytes` + `parse_advice_bytes` and marks `interpret`/`analysis`/`mindset`
+(no reusable carrier yet). Library cards list only regular files whose bytes hash
+to their name; an unreadable allowlisted file shows `problem` instead of failing
+the view.
+
+Export reads the startup snapshot's configuration (the executable values), never
+settings saved but pending a restart.
+
+Not in this release: editor-inspector origin chips and the reviewed "Use global
+data folder / advice file in this workflow" edits (they need GUI batch 2), and a
+workflow `advice_path` reference (PR-6b). The new-run review appends, client-side
+from `GET /api/settings` rows, the origin of the resolved `llm_config_file` and
+`data_root` (`consoleSettings.originLines`); origins stay presentation only.
+
+`SettingsView.problem` names an unusable settings file on disk and its recovery
+(chmod 600, fix/restore, or Save over a readable invalid file); `pending` is then
+`null` and the view still returns 200. CAS limitation: the lock is per process.
+Two console processes serving one workspace can both pass the digest check before
+either replaces the file; the later replace wins. Serve one console per workspace.
+The folder listing reports `409 root_changed` when an allowlisted root is no longer
+canonical (it now contains a link or moved).
+
+`SettingRow{name, task_id, origin, label, effective}` covers `advice` (global) and,
+per task, `llm_profile`, `data_root`, `preparation_root`, `candidate_root`,
+`reusable_runs_root`; `origin` adds `not_set` for an unselected advice file; a
+settings-selected data folder is labelled `<root label> / <subpath>` from the active
+`FolderRef`; `effective` is the resolved server path of the running
+snapshot. Origins are presentation only. A saved file applies after restart
+(OQ-2): routers keep the startup snapshot. Stale safety (P4): after a profile
+change and restart, a configured-task preparation made with the old profile no
+longer matches exactly one task (`resolve_prepared_context` → `task_policy`), and
+a reusable capture fails `check_request_policy`. `session.request(path, body,
+method)` is the single bearer owner for `PUT`.
 
 ## Python policy and request binding
 
@@ -229,7 +454,7 @@ HTTP server exit and fresh known-ID reads.
 Browser gate: supply `CONSOLE_PLAYWRIGHT_MODULE` (an installed Playwright module),
 `CONSOLE_BROWSER_EXECUTABLE` (matching Chromium), `CONSOLE_TEST_ORIGIN` (free
 loopback origin) and optional `CONSOLE_SCREENSHOT_DIR`, then run
-`node tests/browser/candidate_console.mjs`. No production browser dependency or
+`node tests/browser/candidate_console.mjs`. The Settings page gate is `node tests/browser/settings_page.mjs` (also needs `EDITOR_PYTHON`). No production browser dependency or
 Node build is required. The test serves fixed assets and mocks API responses;
 it proves browser interaction, not native execution/security. Browser/process
 socket support may require a host execution context. Missing tooling is a missing
@@ -512,7 +737,9 @@ in the authoring contract); `editor-versions.js` renders the Save name field and
 Version history panel and owns no record policy. Save error `version_record`
 means nothing was written (the reviewed proposal is retained); the distinct
 `version_record_not_updated` means the source was saved but its record was not, so
-`editor.js` adopts the returned saved `current` view. The existing console
+`editor.js` adopts the returned saved `current` view. `GET /api/editor/node-catalog`
+and `POST /api/editor/{project_id}/node-draft` serve the node palette (a project
+named `node-catalog`, like `projects`, is shadowed by the fixed route). The existing console
 Bearer token, origin, host and 256 KiB wire-body admission apply to every API
 route. Browser requests select project IDs and never filesystem destinations.
 The [authoring contract](../workflow_authoring/authoring-contract.md) owns source
@@ -559,8 +786,41 @@ over an input binds exactly as output-then-input clicks do. A refused or dimmed
 input states `<input> expects <socket contract> (<name>), but <source> provides
 <output contract> (<name>)`, or that the server does not offer the source although
 both contracts match.
-External source chips remain inspector bindings. Omitted optional ports, argument
-creation/deletion and new nodes are not graphical controls in this slice.
+External source chips remain inspector bindings. Omitted optional ports and argument
+creation/deletion are not graphical controls in this slice.
+
+The node palette (`editor-palette.js`, `editor-palette.css`; presentation only,
+`editor.js` owns the draft) is a sticky side rail left of the canvas
+(`.editor-canvas-layout`; own scroll, at most the viewport height) so a drag
+source and the canvas share the screen; under 900px it collapses to a drawer opened
+by its "Add capability" toggle. Entries are focusable `div[role=button]` (click,
+Enter or Space; `aria-disabled` while inactive) carrying a prefixed `text/plain`
+drag payload. It lists
+`GET /api/editor/node-catalog` entries (fetched once per connection, only while the
+Workflow view is shown; other pages never request it) grouped by capability with a text search,
+and adds one by click (placed right of the existing cards) or by dragging an entry
+onto the canvas (dropped at that world position). It proposes an unused instance
+id (`<capability>`, `<capability>2`, ...). The pending node is the unified
+draft's `node` field (AddNodeProposal fields without `source`; `editorDraft.proposal`
+turns it into `add_node` on `anchor.source`), so it is part of the dirty flag,
+undo/redo and Discard. The canvas and Selection draw it from the proposal plus the
+server's `node-draft` ports (`editor.js` caches each inspected view by proposal, so
+undo/redo redraw without a request), its required inputs show as unbound, and
+binding them goes through the same canvas/inspector gestures, each one draft
+operation (other nodes cannot be rewired or moved, and inspector, reference and
+loop edits are disabled, until it is reviewed, cancelled, undone or discarded).
+Review is disabled until `node-draft` reports `complete`; "Cancel new node" is an
+undoable draft operation and sends no request. Adding or removing requires a draft
+with no structured edits over its anchor (Review/save or discard them first); the
+anchor may be a reviewed, unsaved Source edit or an earlier reviewed node add/remove.
+A successful `add_node`/`remove_node` review becomes the draft's new anchor (one
+undo step, like a reviewed Source edit), so several node edits can be reviewed in
+sequence and saved together.
+Removal is offered by Delete/Backspace on a focused capability heading, its
+context menu and "Remove capability" in Selection; it sends a `remove_node` review
+directly (Review is the explanation: refusal text or `node_edit.message` plus the
+exact diff). Removing several nodes at once asks for confirmation; the canvas has
+no multi-selection yet, so current gestures remove one node without a prompt.
 Required and bound inputs always render as card rows; optional unbound inputs fold
 into one `.circuit-optional` disclosure per card ("N optional inputs"), expandable
 and remembered across re-renders of the same graph. While an output is pending,
@@ -631,16 +891,17 @@ list never enables Review: Review remains disabled for an incomplete draft.
 Witness: `tests/browser/required_defaults.mjs`.
 
 Unified draft (`editor-draft.js`, `window.editorDraft`; `editor.js` delegates).
-Wiring, disconnection, layout moves, inspector, training and research-loop edits
-are operations on one draft state `{document, bindings, anchor, training,
-loopTemplate}`: `document` is the edited authored document, `bindings` are
+Wiring, disconnection, layout moves, inspector, training, research-loop edits and
+a pending palette node are operations on one draft state `{document, bindings,
+anchor, node, training, loopTemplate}`: `document` is the edited authored document, `bindings` are
 `BindingPatch` values relative to `anchor.inventory`, and `anchor` is the last
 server projection the draft starts from (`{source, document, inventory}` of the
 loaded source, or of a reviewed Source/task-reference update). There is no edit
 mode: any mix accumulates, with one dirty flag (`workflowEditor.state.dirty`,
-true while the draft identity `{document, bindings, anchor.source}` differs from
+true while the draft identity `{document, bindings, anchor.source, node}` differs from
 the loaded state, or while Source text is dirty). Review selects the existing
-typed proposal from the draft: patches present → `DraftProposal` whose
+typed proposal from the draft: a pending node → `AddNodeProposal` on
+`anchor.source` (see the node palette below); patches present → `DraftProposal` whose
 `base_document` is the edited document (layout and inspector edits travel with
 the patches); otherwise document changes outside the loop → `DocumentProposal`;
 loop-only changes → `LoopProposal` on `anchor.source`; no change →
@@ -736,6 +997,13 @@ eight-node families fixture and checks one distinct colour+shape token and reada
 pill name per contract, filled/hollow sockets, wire colour, the legend, hover
 preview (highlight/dim without selecting), the two-contract refusal, the mapping
 chip's field rows and drag-to-connect, without writing the source.
+`tests/browser/node_palette.mjs` (same variables; unit owner
+`tests/unit/tools/test_workflow_node_edits.py`) checks palette categories/search,
+click and drag add, the incomplete-draft Review gate with no disk write, binding the
+new node, review/save keeping author comments, drag source and canvas centre both
+in view before the drag, refused removal of a node others
+read (Delete key), the context menu, byte-identical inspector removal of the added
+node, Discard and Undo of a pending dragged node, and cancelling it.
 
 The browser test launches a temporary real API/project on its own ephemeral port
 and closes it; no provider, GPU or native operation runs. Existing browser
@@ -876,7 +1144,8 @@ ready to run.` or the first closing reason (not connected, no project, source no
 open, project not runnable, not a reusable declaration, conflict, saving, unsaved
 edits). Those reasons explain a closed gate and never open it. The New run and
 Prepared run controllers keep their element IDs and behavior; their task loaders run
-on Workflow or Run entry. `reusableCandidate.openPrepared` routes to `#run` instead of
+on Workflow or Run entry. For a project that is not enabled for candidate runs,
+`#capture-status` keeps that reason; a task load finishing later does not replace it. `reusableCandidate.openPrepared` routes to `#run` instead of
 opening a disclosure, and scrolls to the capture heading only after the
 `console-view` event shows the Run panel (next animation frame).
 

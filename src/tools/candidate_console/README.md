@@ -23,31 +23,100 @@ even when using the default models.
 
 ## Set up and open the console
 
-1. Create separate preparation and candidate output directories. Write an absolute
-   path configuration file using the [configuration example](console-contract.md#configuration).
-   Select the existing task manifest, data directory, LLM profile, resource policy
-   and time limits there. All resource paths must be absolute and canonical,
-   without symlinks. Create the output parents, but leave per-operation child
-   directories for the console to create. Browser users can change the native
-   run name and three advice fields.
-2. Create the access token file at the path selected by `auth_token_file`:
+1. Create the console workspace inside a directory you own, for example your
+   project directory. Pass that parent directory explicitly; there is no default:
+
+   ```bash
+   .venv/bin/python -m tools.candidate_console init --workspace /absolute/project
+   ```
+
+   This creates `/absolute/project/siderius_workspace/` with these folders, each
+   readable only by you (mode 700):
+
+   | Folder | Holds |
+   | --- | --- |
+   | `settings/` | `console.json`, the access token file `console-token` |
+   | `data/` | one folder per task, `data/<task_id>/`, that you fill with task data |
+   | `operations/`, `preparations/`, `candidates/`, `runs/` | console state and run outputs |
+   | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile as `library/llm/default-<12 hex characters>.json` |
+   | `projects/` | a conventional place for workflow editor projects |
+
+   On success it prints two lines, the configuration file and the browser
+   address with the token file:
+
+   ```text
+   Workspace configuration: /absolute/project/siderius_workspace/settings/console.json
+   Console: http://127.0.0.1:8740; access token file: /absolute/project/siderius_workspace/settings/console-token
+   ```
+
+   The token unlocks the console;
+   it is separate from any model provider API key. Follow [Credentials](#credentials)
+   below to bind provider keys before Launch.
+
+   `init` is safe to run again. It only creates what is missing; it never
+   deletes, replaces or follows a symlink. It refuses a folder that is a symlink,
+   belongs to another user, or is writable by your group or by others (for
+   example a folder someone else made in `/tmp`). It also refuses a
+   `settings/console.json` or library file that is a symlink or has unexpected
+   content. Each refusal names the folder or file, exits with status 2 and
+   changes nothing that already exists.
+2. Add your task to `siderius_workspace/settings/console.json`. A task needs its
+   `task_id`, `label`, `task_manifest`, resource policy and time limits; the
+   [configuration example](console-contract.md#configuration) shows every field.
+   You can leave out:
+
+   | Field | Used when left out |
+   | --- | --- |
+   | `llm_config_file` | the model profile selected in `settings/global_settings.json`; `init` selects the standard profile in `library/llm/` |
+   | `data_root` | the data folder selected for this task in `global_settings.json`, otherwise `data/<task_id>/` |
+   | `preparation_root`, `candidate_root`, `reusable_runs_root` | `preparations/<task_id>/`, `candidates/<task_id>/`, `runs/<task_id>/` |
+
+   Any value you write in `console.json` is used instead; the global settings
+   only fill fields that `console.json` leaves out. Then run `init` again with
+   the same `--workspace`: it creates the task's output folders, but never
+   `data/<task_id>/`. Until you put the task data there, this run ends with
+   status 2 and lists `Workspace data/<task_id>: missing`; that is expected.
+   Create `data/<task_id>/`, add the data, and run `check` (step 3). If no
+   source gives a required field, `init` names it instead, for example
+   `task my-task needs llm_config_file` when neither `console.json` nor the
+   global settings select a model profile. Browser users can change
+   the native run name and three advice fields.
+
+   `console.json` reads `settings/global_settings.json` only when it contains a
+   `global_settings` block. `init` writes `"global_settings": {"browser_writable":
+   true}` into a new `console.json`, which also lets the browser save settings.
+   `init` never rewrites an existing `console.json`, so a workspace created
+   before this block existed lacks it; add that line yourself (use `false` to
+   read the file but keep the browser from changing it) and run `check`.
+
+   To offer other model profiles, advice files or data locations, list them in
+   `console.json` under `llm_profiles`, `advice_files` and `data_roots` (see
+   [Global settings](console-contract.md#global-settings)). The settings file
+   selects among those entries by ID; it never contains a file path. A data
+   location may not contain the token, credential file, `settings/`, `library/`
+   or any output folder; `check` refuses it and names the entry.
+
+   A `console.json` without `workspace_root` still works as before: write every
+   path yourself as an absolute, canonical path without symlinks, create the
+   output parents, and create the token file at `auth_token_file`:
 
    ```bash
    .venv/bin/python -c 'import os,secrets; p=input("Token file absolute path: "); fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600); os.write(fd,secrets.token_urlsafe(32).encode()); os.close(fd)'
    ```
-
-   This token unlocks the console; it is separate from any model provider API key.
-   Follow [Credentials](#credentials) below to bind provider keys before Launch.
 3. Check the configuration, then start the server in a persistent terminal/session:
 
    ```bash
-   .venv/bin/python -m tools.candidate_console check --config /absolute/project/console.json
-   .venv/bin/python -m tools.candidate_console serve --config /absolute/project/console.json
+   .venv/bin/python -m tools.candidate_console check --config /absolute/project/siderius_workspace/settings/console.json
+   .venv/bin/python -m tools.candidate_console serve --config /absolute/project/siderius_workspace/settings/console.json
    ```
 
    A successful check prints the browser address and token file location. It
    checks configuration paths, file shape and permissions, without proving task
    composition, required key presence, sandbox availability or provider access.
+   When a required field has no value, the check names it, for example
+   `task my-task needs llm_config_file`. When a workspace folder is missing or
+   unusable, it lists the folder (for example `data/my-task: missing`) and, if
+   `init` can create it, prints the `init` command to run.
    Only `127.0.0.1` binding is supported.
 4. For a remote host, keep the server session running and open an SSH tunnel:
 
@@ -127,6 +196,90 @@ The entry URLs are `/#home`, `/#workflow`, `/#run` and `/#slow-control`. An old
 `/editor.html` link redirects to `/#workflow` before asking for credentials.
 Connection sharing applies within one document; separate tabs/windows connect
 independently.
+
+## Choose shared settings in the browser
+
+The **Settings** page chooses, for every task at once, the model profile, an
+advice file and each task's data folder. It only offers what the operator listed
+in `console.json` (`llm_profiles`, `advice_files`, `data_roots`) or saved in the
+workspace library, so the browser never types a server path.
+
+1. Open **Settings** and connect. The page says which server holds the folders:
+   paths are on the machine running the console, not on your computer.
+2. Under **Models**, pick a profile. Tasks whose `console.json` entry sets
+   `llm_config_file` keep their own; the page only fills values that
+   `console.json` leaves out. A workflow's own values are used for that workflow.
+   Each profile lists the provider key names it needs (never their values);
+   **Show routes** lists which provider and model each step uses. To add a
+   profile, choose **Import from this computer…** and pick a JSON profile; the
+   console checks it first and refuses a misspelled key without saving anything.
+3. Under **Advice**, pick a file or **None**. The choice is only saved for
+   now: no run uses it, and each workflow keeps the advice written in it.
+   **Import from this computer…** accepts an advice file in the command-line
+   format, including one you exported earlier. Each file lists which steps it
+   advises; keys that workflows cannot use yet (`interpret`, `analysis`,
+   `mindset`) are marked.
+4. Under **Data folder**, choose a data root for a task, open subfolders, and
+   select **Use <folder>**. Links are shown but cannot be selected. A task whose
+   `console.json` sets `data_root` shows "Set in console.json" instead.
+5. Select **Save settings**. Success reads "Saved; active after server
+   restart". Restart the `serve` command to use the new values; until then the
+   page lists what is saved but not yet active. **Values in effect** shows each
+   value the running console uses, where it comes from and its server path.
+
+Saving and importing need `"global_settings": {"browser_writable": true}` in
+`console.json` (`init` writes it); otherwise the page is read-only. Imported
+files are copied to `library/llm/` or `library/advice/` on the server under a
+name that ends in the first 12 hex characters of their SHA-256. Importing the
+same file again reuses that copy; library files are never replaced or deleted.
+If someone else saved in the meantime, the page says so; select **Reload** and
+choose again. A choice that would fail `check`, such as a folder that no longer
+exists, is refused with the reason and nothing is written. If
+`settings/global_settings.json` itself becomes unusable, the page says why: run
+`chmod 600` on it if its permissions changed, or fix or restore it; when it is
+readable but invalid, you can also choose values and **Save** to replace it.
+**Workspace** lists missing workspace folders and, when `init` can create them,
+the command to run on the server.
+
+### Copy a workflow's model profile and advice to files
+
+On **Settings**, **Export a workflow** copies three plain files into
+`siderius_workspace/exported_configs/<export name>/` on the server:
+
+| File | What it is | What reads it |
+| --- | --- | --- |
+| `llm.json` | the model profile the selected task uses | the command-line `--llm_config` |
+| `advice.json` | the advice written in the workflow itself (proposal, implementation, validation and tuning advice), in the command-line advice format | the command-line `--advice` |
+| `workflow.py` | the workflow exactly as last saved in Workflow Editor | no command-line flag; keep it as a record or copy it into an editor project |
+
+A workflow without advice of its own gets no `advice.json`. Credentials, the
+console token and the credential file path are never exported. The export uses
+the values the running console uses; settings saved since the last restart are
+not included.
+
+1. Choose the project, the task and an export name, then select **Export**.
+2. Success reads "Exported to exported_configs/<name> on the server", followed by
+   one **Download** button per file. Downloads save the files to this computer.
+3. On the server, pass the files to a command-line run in place of your own
+   paths, for example (the other flags are those of
+   [your first run](../../../docs/getting-started/first-run.md)):
+
+   ```bash
+   bash scripts/launch/run_chain.sh \
+       --llm_config /absolute/project/siderius_workspace/exported_configs/my-export/llm.json \
+       --advice /absolute/project/siderius_workspace/exported_configs/my-export/advice.json \
+       ...
+   ```
+
+An export name that is already used is refused with a free name to try; exports
+are never overwritten. The export is also refused when the saved workflow
+changed on disk while you exported, when it does not parse, or when the task's
+model profile would be refused by `--llm_config`; the message says which.
+Exporting needs the same `browser_writable` setting as saving.
+
+When you review a new run on the **Run** page, the details also say where the
+model profile and data folder come from: `console.json`, this Settings page, or
+the workspace folders.
 
 ## Edit existing circuit connections
 
@@ -321,7 +474,7 @@ binding. Downstream dotenv loading is
 legacy compatibility, not a setup step or a reliable credential source.
 Preparation is offline and does not need provider keys.
 
-Restart the server after changing `console.json`, including task paths, model
+Restart the server after changing `console.json` or saving **Settings**, including task paths, model
 profile selection, resource policy, allowed names or private-file paths. Such
 changes can require a fresh Prepare. Updating values at the same credential-file
 path takes effect on the next Launch without restart; the file must still pass

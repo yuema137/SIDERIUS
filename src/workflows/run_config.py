@@ -47,8 +47,11 @@ from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Literal
 
+from pydantic import TypeAdapter, ValidationError
+
 from agent.schemas.hyperparam_tuning import (
     HealthGateMode,
+    HyperparamTuningInput,
     ResultAuthority,
     TimeAdmissionSource,
     validate_trial_override_schedule,
@@ -332,6 +335,37 @@ def validate_launch_trial_overrides(launch: WorkflowLaunchConfig) -> None:
         force_formal_round=launch.force_formal_round,
         formal_training_scope_source=launch.formal_training_scope_source,
     )
+
+
+#: Operator wall-time budgets whose rule the tuner schema owns
+#: (``OperatorTimeBudgetMinutes``). Issue #828: every launch entry path
+#: checks them here, before model execution, so forecast and measured
+#: admission never receive a malformed budget to reinterpret.
+OPERATOR_TIME_BUDGET_FIELDS: tuple[str, ...] = (
+    "trial_time_budget_minutes",
+    "formal_time_budget_minutes",
+    "bypass_formal_time_budget_minutes",
+)
+
+
+def validate_launch_time_budgets(launch: WorkflowLaunchConfig) -> None:
+    """Apply the tuner-owned budget annotation to each configured budget."""
+    for name in OPERATOR_TIME_BUDGET_FIELDS:
+        annotation = HyperparamTuningInput.model_fields[name].rebuild_annotation()
+        value = getattr(launch, name)
+        try:
+            TypeAdapter(annotation).validate_python(value)
+        except ValidationError as exc:
+            raise ValueError(
+                f"{name} must be a finite positive number of minutes, or omitted "
+                f"(None) to disable that budget; got {value!r}"
+            ) from exc
+
+
+def validate_launch_admission(launch: WorkflowLaunchConfig) -> None:
+    """The launch-value checks every entry path runs before workflow effects."""
+    validate_launch_trial_overrides(launch)
+    validate_launch_time_budgets(launch)
 
 
 def bind_runtime_verifier_launch(launch: WorkflowLaunchConfig) -> WorkflowLaunchConfig:

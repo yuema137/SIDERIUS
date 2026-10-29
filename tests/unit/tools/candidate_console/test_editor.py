@@ -694,3 +694,37 @@ def test_http_version_routes(editor_config):
         assert detail.status_code == 200 and detail.json()["source"] == SOURCE
         stale = client.get(f"/api/editor/example/versions/0?sha256={'0' * 64}", headers=headers)
         assert stale.status_code == 409 and stale.json()["error"]["code"] == "conflict"
+
+
+def test_node_palette_catalog_and_node_draft_routes(editor_config):
+    """Fails if the palette catalog omits a catalog route or node-draft is not schema-gated."""
+    from workflows.definition.catalog import CAPABILITIES, PROTOCOLS
+
+    headers = {
+        "Authorization": "Bearer " + open(editor_config.auth_token_file).read(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        catalog = client.get("/api/editor/node-catalog", headers=headers).json()["entries"]
+        assert {entry["capability"] for entry in catalog} == set(CAPABILITIES)
+        assert {entry["protocol"] for entry in catalog} - {None} == set(PROTOCOLS)
+        base = client.get("/api/editor/example", headers=headers).json()
+        proposal = {
+            "kind": "add_node",
+            "source": base["source"],
+            "node": "implement",
+            "capability": "implementation",
+            "protocol": "proposal-to-implementation",
+            "x": 300,
+            "y": 0,
+        }
+        body = {"expected_sha256": base["sha256"], "proposal": proposal}
+        drafted = client.post("/api/editor/example/node-draft", headers=headers, json=body)
+        assert drafted.status_code == 200, drafted.text
+        assert drafted.json()["status"] == "incomplete"
+        output = next(port for port in drafted.json()["ports"] if port["argument"] == "output")
+        assert [choice["label"] for choice in output["choices"]] == ["p.result"]
+        proposal["capability"] = "teleport"
+        refused = client.post("/api/editor/example/node-draft", headers=headers, json=body)
+        assert refused.status_code == 422
+        assert editor_config.editor_projects[0].source_file.read_text() == base["source"]

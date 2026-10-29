@@ -13,12 +13,17 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from core.iteration_manifest import verify_iteration_manifest
 from core.native_observation import EvidenceReadBytes, ObservationPolicy, observation_policy
 from core.record_role import IterationFormalEvidence, formal_evidence_of
+from core.run_invariants import RUN_INVARIANTS_BASENAME, parse_run_invariants
+from core.seeding import RunSeed, SeedSource
 from tools.native_chain.review import read_bytes
 from tools.native_chain.token_identity import parse_token_identity
 from tools.workflow_preview.models import PreviewModel
 
 CURRENT_OBSERVATION_POLICY: ObservationPolicy = 3
 _POLICY_ADAPTER = TypeAdapter(ObservationPolicy)
+#: The run-invariants lock is a small control file read under its own fixed
+#: bound, never through the evidence budget.
+LOCK_READ_MAX_BYTES = 65536
 
 
 class NativeChainCheckpointObservation(PreviewModel):
@@ -56,6 +61,61 @@ class ObservationLimit(ValueError):
     pass
 
 
+def _require_canonical(path: Path) -> None:
+    if path != path.resolve() or any(p.is_symlink() for p in (path, *path.parents)):
+        raise ValueError("noncanonical evidence path")
+
+
+class LockedRunSeed(PreviewModel):
+    """A chain's run seed read back from its run-invariants lock (issue #983).
+
+    Both fields are absent before iteration 1 locks the seed and for a
+    pre-seed workspace; ``run_seed_source`` is the lock's own provenance.
+    ``run_seed_anomaly`` replaces both when the lock contradicts the reviewed
+    declaration (see :func:`checked_against_declaration`).
+    """
+
+    run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
+    run_seed_source: SeedSource | None = Field(default=None, exclude_if=lambda value: value is None)
+    run_seed_anomaly: Literal["lock_contradicts_declaration"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    def checked_against_declaration(self, declared: int | None) -> "LockedRunSeed":
+        """Show the lock's seed only if the reviewed declaration explains it.
+
+        ``declared`` is the declaration's ``run.run_seed``. A declared seed must
+        be locked as that value with source ``operator``; a seedless
+        declaration's seed must be locked with source ``generated``. Anything
+        else (a forged, rewritten or source-less lock) is reported as an
+        anomaly instead of a value.
+        """
+        if self.run_seed is None:
+            return self
+        expected = "generated" if declared is None else "operator"
+        if self.run_seed_source != expected or declared not in (None, self.run_seed):
+            return LockedRunSeed(run_seed_anomaly="lock_contradicts_declaration")
+        return self
+
+
+def read_locked_seed(workspace: Path, file_limit: int) -> LockedRunSeed:
+    """No-follow, bounded readback of the lock's seed; never controls execution.
+
+    Display only: an absent, aliased, oversized or invalid lock reads as no
+    seed (shown as unrecorded) and never makes the operation unreadable. The
+    native startup, not this reader, refuses such a lock for continuation.
+    """
+    path = workspace / RUN_INVARIANTS_BASENAME
+    try:
+        _require_canonical(path)
+        lock = parse_run_invariants(
+            read_bytes(path, min(file_limit, LOCK_READ_MAX_BYTES)), str(workspace)
+        )
+    except (OSError, ValueError):
+        return LockedRunSeed()
+    return LockedRunSeed(run_seed=lock.run_seed, run_seed_source=lock.run_seed_source)
+
+
 class _Budget:
     def __init__(self, bounds: ObservationBounds, policy: ObservationPolicy):
         if (policy == 3) != (bounds.max_evidence_read_bytes is not None):
@@ -65,8 +125,7 @@ class _Budget:
         self.file_limit = bounds.input_max_bytes
 
     def read(self, path: Path) -> bytes:
-        if path != path.resolve() or any(p.is_symlink() for p in (path, *path.parents)):
-            raise ValueError("noncanonical evidence path")
+        _require_canonical(path)
         limit = min(self.file_limit, self.remaining)
         if limit <= 0:
             raise ObservationLimit()

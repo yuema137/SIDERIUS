@@ -43,6 +43,7 @@ def render_proposal_parameter_rules(
 def resolve_proposal_baseline_config(
     baseline_config: object,
     *,
+    proposed_model_type: str | None = None,
     composition_ref: TaskCompositionRef | None,
     workflow_rules: ParameterRules | None,
 ) -> object:
@@ -52,6 +53,11 @@ def resolve_proposal_baseline_config(
     validate baseline fields that the Proposer actually supplied; fields left
     for the tuner remain subject to the tuner's strict effective-plan gate.
     With no declared rules, the raw baseline and legacy behavior are unchanged.
+    ``model_config`` rules are judged against the proposed model, never a
+    template base ``model_type`` named by the baseline. Its config class does
+    not exist before implementation, so target and boolean-value checks defer
+    to the tuner. ``proposed_model_type=None`` means the proposed model is not
+    known yet: those checks are deferred the same way.
     """
     task_rules = composition_ref.parameter_rules if composition_ref is not None else None
     if not (task_rules and task_rules.rules) and not (workflow_rules and workflow_rules.rules):
@@ -72,9 +78,18 @@ def resolve_proposal_baseline_config(
             if rule.kind == "exact":
                 baseline.setdefault(path.split(".", 1)[0], {})
 
-    return resolve_parameter_rule_document(
+    # The resolver falls back to a document's top-level ``model_type`` when no
+    # executed model is given; here that key is only a template base, so it is
+    # hidden from the resolver and restored unchanged.
+    template_model_type = baseline.pop("model_type", None)
+    resolved = resolve_parameter_rule_document(
         baseline,
         task_rules=task_rules,
         workflow_rules=workflow_rules,
         defer_missing_non_exact=True,
+        defer_unknown_model=True,
+        executed_model_type=proposed_model_type,
     )
+    if "model_type" in baseline_config:
+        resolved["model_type"] = template_model_type
+    return resolved

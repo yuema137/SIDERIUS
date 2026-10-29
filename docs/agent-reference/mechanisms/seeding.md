@@ -25,6 +25,10 @@ calls bind it before their first receipt; candidate training admission only
 adopts the launch receipt's seed
 ([operations](../../../src/tools/candidate_operations/candidate-operations-contract.md#run-seed-issue-983),
 [worker](../../../src/tools/candidate_worker/candidate-worker-contract.md#run-seed-and-tuner-coordinates-issue-983)).
+A captured native chain carries an explicit seed as its declaration's
+`run.run_seed`, rendered into the reviewed shell vector as `--run_seed N`;
+otherwise iteration 1's startup generates it
+([native chain](../../../src/tools/native_chain/native-chain-contract.md#run-seed-issue-983)).
 The tuner derives every attempt seed from the locked seed
 ([Tuner attempt seeds](#tuner-attempt-seeds)) and hands the trainer a
 `SeedContext`, so a tuner-driven trainer never generates its own seed. The
@@ -309,10 +313,25 @@ bytes are unaffected.
 | bitwise-identical metrics on rerun | yes, same library versions and thread count | no: needs the separate kernel-determinism mode |
 | identical LLM decisions | no | no |
 
+## Data-analysis sampling
+
+Owner: `agent.data_analysis.sampling_seed`; node behavior and records:
+[data analysis agent](../../../src/nodes/data_analysis_agent/data_analysis_agent.md#sampling-seed-issue-983).
+The executed analysis sampling seed is the operator-declared
+`AnalysisResourceEnvelope.sampling_policy.seed` when the policy file sets it,
+else `derive_seed(run_seed, "data_analysis.sampling", SeedCoordinates())`
+(run-level: no iteration, no node id). The LLM plan never decides
+explicitness: a declared seed must equal the plan's, and a derived one
+replaces it. Only a declared seed is ever rendered into a prompt. The fixed
+workflow passes its lock's `run_seed` to `DataAnalysisAgent(run_seed=...)`,
+which raises `MissingRunSeed` for `None`. Data analysis runs only in the native
+workflow (`model_exploration` → `run_optional_data_analysis`), not in candidate
+preparation.
+
 ## Not yet provided
 
 These belong to later #983 PRs:
 
-- The native-chain operation declaration seed (S5) and console display (S6).
-- Data-analysis sampling from the run seed (S7).
+- Console seed input and display (S6).
+- Validation-probe and generated-program seeding, and the generated-seed scan (S7b).
 - The RNG census guard (S8).
