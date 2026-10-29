@@ -90,7 +90,7 @@
   function describe(status) {
     const loop = status.loop, segment = status.kind === 'candidate_loop_resume' ? 'Resumed segment. ' : '';
     if (status.reason === 'loop_process_exiting') return segment + 'The worker exited, but its remaining processes are not confirmed stopped. The result is still unresolved; ending the loop and starting new work remain blocked.';
-    if (status.reason === 'loop_process_exited') return segment + 'The worker exited without a result. No final body count is available for this segment. ' + (segment
+    if (status.reason === 'loop_process_exited') return segment + 'The worker exited without a result. No final iteration count is available for this segment. ' + (segment
       ? 'Open the paused predecessor to end the loop once its worker processes have stopped; Resume again is unavailable.'
       : 'This run cannot be resumed. New work can start once its worker processes have stopped.');
     if (window.operationOutcome?.cancelledBeforeStart(status)) return segment + 'Research loop segment cancelled before start: it never ran.';
@@ -113,7 +113,9 @@
   function outcome(status, loop) {
     const ended = endedSentence(status);
     if (ended) return ended + ' Completed results are kept; this run cannot be resumed.';
-    if (status.reason === 'loop_successor_failed') return counted(loop, 'Research loop paused at a completed body boundary') + ' The resumed segment was interrupted without a result. End loop here to keep completed results and close the run. Resume again is unavailable.';
+    if (status.reason === 'loop_successor_failed') return (loop.attempted_iterations == null
+      ? 'Research loop paused; the iteration count is unavailable.'
+      : `Research loop paused after iteration ${loop.attempted_iterations} of ${loop.final_iteration}.`) + ' The resumed segment was interrupted without a result. End loop here to keep completed results and close the run. Resume again is unavailable.';
     if (status.native_status === 'cancelled') return 'Research loop stopped by you before it finished. Files written so far stay in the run folder; this run cannot be resumed.';
     if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
     if (status.native_status === 'paused' && loop.input_request) {

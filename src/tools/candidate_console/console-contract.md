@@ -991,7 +991,7 @@ not classify it as terminal/failed.
 
 For an authored-loop root or resume operation with `state="operation_failed"` and
 `reason="loop_process_exited"`, Monitor says the worker was interrupted without a
-result and that no final body count is available. A resumed segment directs the
+result and that no final iteration count is available. A resumed segment directs the
 operator to the paused predecessor to end the loop once worker processes have
 stopped; a root explains that new work may start once those processes stop. It does
 not promise a future receipt or offer Resume again. The operations owner projects

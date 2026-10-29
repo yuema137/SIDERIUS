@@ -31,6 +31,8 @@ assert.equal(element('loop-resume-review').hidden, true, 'Reservation cannot be 
 assert.equal(element('loop-resume').hidden, true);
 assert.equal(element('loop-successor').href, '#monitor/successor');
 assert.match(element('loop-state').textContent, /interrupted without a result/);
+assert.match(element('loop-state').textContent, /after iteration 1 of 3/);
+assert.doesNotMatch(element('loop-state').textContent, /\bbod(?:y|ies)\b/);
 element('loop-end').listeners.click();
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(posts.length, 1);
@@ -46,7 +48,7 @@ const dead = {
 };
 window.renderLoopControl(dead);
 assert.match(window.operationOutcome.sentence(dead), /was interrupted/);
-assert.match(element('loop-state').textContent, /No final body count is available/);
+assert.match(element('loop-state').textContent, /No final iteration count is available/);
 assert.doesNotMatch(element('loop-state').textContent, /count is reported by the native receipt/);
 const exiting = {...dead, state: 'unknown', reason: 'loop_process_exiting'};
 window.renderLoopControl(exiting);
