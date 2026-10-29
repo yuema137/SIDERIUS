@@ -49,6 +49,9 @@ class HostReservation(PreviewModel):
     state_root: str
     placement: Placement
     process: ProcessIdentity | None = None
+    #: The submitting process that wrote this entry (B3-5b review): evidence for
+    #: releasing an entry whose submitter died before any child was bound.
+    submitter: ProcessIdentity | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def bound_identity(self):
@@ -59,7 +62,7 @@ class HostReservation(PreviewModel):
 
     def evidence(self) -> ReservationEvidence:
         return reservation_evidence(
-            self.state_root, self.operation_id, self.request_digest, self.process
+            self.state_root, self.operation_id, self.request_digest, self.process, self.submitter
         )
 
 
@@ -71,6 +74,9 @@ class QueuedOperation(PreviewModel):
     state_root: str
     placement: Placement
     process: ProcessIdentity | None = None
+    #: The submitting process that wrote this entry (B3-5b review): evidence for
+    #: releasing an entry whose submitter died before any child was bound.
+    submitter: ProcessIdentity | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def bound_identity(self):
@@ -86,16 +92,17 @@ class QueuedOperation(PreviewModel):
         ``sandbox.json`` is read when published, which a waiting child never does.
         """
         return reservation_evidence(
-            self.state_root, self.operation_id, self.request_digest, self.process
+            self.state_root, self.operation_id, self.request_digest, self.process, self.submitter
         )
 
 
 def _require_own_process(entry: HostReservation | QueuedOperation) -> None:
-    process = entry.process
-    if process is not None and (
-        process.operation_id != entry.operation_id or process.request_digest != entry.request_digest
-    ):
-        raise ValueError("reservation process identity names another operation")
+    for process in (entry.process, entry.submitter):
+        if process is not None and (
+            process.operation_id != entry.operation_id
+            or process.request_digest != entry.request_digest
+        ):
+            raise ValueError("reservation process identity names another operation")
 
 
 LedgerEntry = HostReservation | QueuedOperation
@@ -191,6 +198,9 @@ def _acquire(lock: int) -> None:
 def read_state(root: Path) -> HostLedgerState:
     """The ledger, or a typed ``ledger_format`` refusal for one this revision cannot read.
 
+    That covers a ledger written by an earlier or a newer revision and a corrupt
+    or truncated file alike: none of them is parsed, guessed or repaired.
+
     Every reader (admission, the sweep, the release command) goes through here,
     so an unreadable ledger is refused the same way everywhere and never rewritten.
     """
@@ -202,8 +212,9 @@ def read_state(root: Path) -> HostLedgerState:
     except ValidationError as error:
         raise OperationFailure(
             "ledger_format",
-            f"this host ledger was written by an earlier SIDERIUS revision; once its runs "
-            f"have ended, move {path} aside and retry",
+            f"this host ledger is unreadable by this SIDERIUS revision (written by another "
+            f"revision, or corrupt); once the runs it lists have ended, move {path} aside "
+            "and retry",
         ) from error
 
 
@@ -260,6 +271,7 @@ def promote(state: HostLedgerState, budget: HostBudget) -> HostLedgerState:
             state_root=entry.state_root,
             placement=placed[str(entry.operation_id)],
             process=entry.process,
+            submitter=entry.submitter,
         )
         if str(entry.operation_id) in placed
         else entry

@@ -153,19 +153,21 @@ def envelope_request(
 ) -> ResourceRequest:
     """The one reservation a parallel run takes: its peak, clamped to the host's capacity.
 
-    Each quantity is the peak concurrent demand of the declared units, at least
-    ``serial`` when a node is undeclared (such a unit runs alone under it), then
-    clamped to what the budget can hold (VRAM to the largest slot's effective
-    ceiling, memory, CPU slots and unit slots to the budget totals) but never
-    below the largest single unit. Units that do not fit together then wait in
+    Each quantity is the peak concurrent demand of the declared units, clamped
+    to what the budget can hold (VRAM to the largest slot's effective ceiling,
+    memory, CPU slots and unit slots to the budget totals), but never below the
+    largest single unit nor below ``serial``, the run's own declaration (the
+    run never reserves less than it declared; undeclared units run alone under
+    it). Units that do not fit together then wait in
     FIFO order inside the grant: concurrency degrades, admission does not fail.
     Identity, wall time and the time-budget flag come from ``serial``. The GPU
     part is one slot (multi-GPU envelopes are later work).
     """
     require_units_fit(request, budget)
     units = declared_units(request)
-    alone = len(units) < len(request.preview.document.definition.nodes)
-    floor = serial if alone else None
+    # Never below the run's own declaration: a reservation smaller than what the
+    # run is declared to use would undercount it beside other runs.
+    floor = serial
     shape = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     )

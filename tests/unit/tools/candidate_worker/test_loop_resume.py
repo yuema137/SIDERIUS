@@ -33,6 +33,17 @@ from .test_native import native_runner as native_runner
 from .test_training import training_runner as training_runner
 
 
+#: Names the offline fixtures bind in the test process that a real launcher would
+#: provide some other way; every other inherited name is dropped like Popen(env=...).
+FIXTURE_ENVIRONMENT = (
+    "HOME",
+    "TMPDIR",
+    "SIDERIUS_GENERATED_LIBRARY_DIR",
+    "SIDERIUS_CHAIN_WORKSPACE",
+    "PYTHONPATH",
+)
+
+
 @pytest.fixture
 def process_segments(monkeypatch):
     """Fork retains only SDK doubles; each native segment runs in a separate process."""
@@ -44,6 +55,11 @@ def process_segments(monkeypatch):
     operations = []
 
     def observed(profile, argv, *, cancel_requested=None, **_supervision):
+        from tools.workspace_sandbox.command import child_environment
+
+        # The real sandbox owner: a declared name missing from the operation child's
+        # environment (e.g. an unset placed device selector) refuses the launch.
+        child_environment(profile, os.environ)
         # Like the runner, poll a supplied probe first: a fired probe ends the segment as
         # cancelled before any body runs. Without a recorded intent the probe is False.
         if cancel_requested is not None and cancel_requested():
@@ -88,10 +104,13 @@ def process_segments(monkeypatch):
                         os.close(int(descriptor.name))
                 except FileNotFoundError:
                     pass
-            # Like Popen(env=...): the declared names (e.g. a placed device selector)
-            # reach the child; the interpreter basics stay this test's.
-            base = {"PATH", "LANG", "LC_ALL", "PYTHONNOUSERSITE", "PYTHONDONTWRITEBYTECODE"}
-            os.environ.update({key: value for key, value in env.items() if key not in base})
+            # Like Popen(env=..., start_new_session=True): the child's environment is
+            # replaced by the spawn environment, plus only the names this test's
+            # fixtures bind in place of a real launcher, and it leads its own session.
+            os.setsid()
+            fixture = {key: os.environ[key] for key in FIXTURE_ENVIRONMENT if key in os.environ}
+            os.environ.clear()
+            os.environ.update({**fixture, **env})
             try:
                 code = operation(path)
             except BaseException:

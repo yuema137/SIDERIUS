@@ -1624,9 +1624,9 @@ clamped to the budget:
   the maximum-weight antichain of the declared units
   (`max_weight_antichain`: weighted Dilworth via exact-rational max-flow). Each
   peak is reachable, though not necessarily in the same instant as the others;
-- `serial` (the operation's own `resources` declaration) joins the peak only
-  when some node is undeclared, since such a unit runs alone under it. Unit id,
-  ordinal, wall time and `time_budgeted` always come from it;
+- `serial` (the operation's own `resources` declaration) is the floor of every
+  quantity: the run never reserves less than it declared (undeclared units run
+  alone under it). Unit id, ordinal, wall time and `time_budgeted` come from it;
 - the GPU part is one slot (`gpu_count=1`, `vram_source="configured_cap"`);
 - clamp (B3-4d): each quantity is `max(min(peak, capacity), largest single
   unit)`, where capacity is the largest slot's `effective_gib` for VRAM and the
@@ -1640,7 +1640,7 @@ clamped to the budget:
   `ParallelUnitTooLarge`, naming the unit, its capability, the largest slot (or
   budget total) and the remedy. Host admission refuses it
   `parallel_unit_exceeds_capacity` before any claim. The operation's own
-  `resources` (the floor for undeclared units) are admitted like any serial run;
+  `resources` (the floor of every quantity) are admitted like any serial run;
 - `unit_slots` is the clamped peak unit count, counted against the host's
   `max_concurrent_units`.
 Multi-GPU envelopes (one run's units spread over several slots under the ledger)
@@ -1678,8 +1678,11 @@ node of a declared capability: `gpu_count`, `vram_gib`
 (`vram_source="configured_cap"`), `host_memory_gib`, `cpu_slots` from the table,
 `wall_seconds` = the request's `timeout_seconds` (carried, not admitted). The
 tuning unit is `time_budgeted` exactly when `trial_time_budget_minutes` or
-`formal_time_budget_minutes` is set, and a GPU tuning declaration must cover the
-run's `active_vram_budget_gb` (refused when that budget is unset). Every request
+`formal_time_budget_minutes` is set. A GPU tuning declaration must cover the
+run's `active_vram_budget_gb` (refused when that budget is unset), and a
+`gpu: false` tuning declaration is refused when the run has an active VRAM
+budget or a GPU hardware context (`device_available`): its CPU placement would
+hide every GPU and silently train on CPU. Every request
 is checked against the idle budget; any refusal raises `ParallelRefused`
 (`resource_refused: …`) and the body fails before any unit runs.
 
@@ -1692,16 +1695,21 @@ them. For the first ready node:
   environment, alone;
 - a declared unit is planned with `plan_dispatch((request,), running, budget,
   on_refusal="halt")`. Placed: its invocation (`NodeInvocation.parallel=True`) is
-  published and `start_unit` spawns the unit child in its own session with
+  published and `unit_processes.start_unit` spawns the unit child in its own
+  session, through the same code-package owner as a serial unit
+  (`core.local_code.child.prepare_child`; at collection
+  `ChildInvocation.check` raises a package refusal before any other outcome), with
   `subprocess_env(cuda_visible_devices=placement.cuda_visible_devices)` (slot
   UUID, or `""` for a CPU unit, which hides every GPU) and
   `PYTEST_ADDOPTS` gaining `-p no:cacheprovider` (concurrent validators share no
   `.pytest_cache`; serial pytest commands are unchanged). Queued: the loop waits
   for a running unit to finish. Strict FIFO: nothing overtakes the first ready
   unit (decision B3-Q4).
-Completed units are collected in dispatch order among those finished
-(`POLL_SECONDS` = 0.05 s); the result is read, classified and routed exactly as
-in the serial loop. A nonzero unit exit is `failed`/`native_failure`. The trace
+Before each readiness step the loop collects every unit that has already exited,
+in dispatch order, so a failure that already ended stops new dispatch; when no
+node is ready it waits for one (`POLL_SECONDS` = 0.05 s). A queued unit's
+`queued_event` is the last event before it queued and consumes no event of its
+own. The result is read, classified and routed exactly as in the serial loop. A nonzero unit exit is `failed`/`native_failure`. The trace
 stays declaration-ordered; nothing is aggregated by completion time.
 
 Drain (decision B3-Q2). A failure (a failed unit or adaptor, or a tuning
@@ -1714,23 +1722,37 @@ Receipts. Each dispatched entry (unit or adaptor) publishes write-once
 `units/<node_id>/placement.json` (`UnitReceipt`: `placement` or `None` for an
 adaptor or undeclared unit, `queued_event`, `started_event`, `ended_event` from
 one body-wide parent sequence, wall `started_at`/`ended_at`, `exit` ∈
-`returned`/`raised`/`process_failed`/`exited`/`interrupted`). The body's budget is
+`returned`/`raised`/`process_failed`/`exited`/`interrupted`/`terminated`;
+`terminated` is published, best effort, for a unit killed by the cleanup below,
+in a body that produces no trace). The body's budget is
 published write-once as `parallel_budget.json` in its control directory.
 
-Trace v2 verifier (`parallel_evidence.verify_drain`, called by
-`verify_graph_trace`). `scheduling="parallel-v1"` must equal `request.parallel`
-being set. Every dispatched entry needs a receipt naming it; a placement must
-name the published budget's digest; no receipt may belong to a node readiness
-closed as `blocked`; and no entry may start after the first failed entry ended.
+Trace v2 verifier (`parallel_evidence.drained_entries`, the one parallel-v1
+check `verify_graph_trace` calls). `scheduling="parallel-v1"` must equal
+`request.parallel` being set; a serial trace returns no drained entries. For a
+parallel trace: (e) `parallel_budget.json` must have the digest of the run's
+admitted budget (`parallel.budget`, or the `run_budget()` of the host grant of
+the segment that ran the iteration); (d) a receipt exists exactly for every
+dispatched entry (a unit with an outcome; an adaptor readiness did not block)
+and names it; (b) a placement exists exactly for a declared unit, names it and
+the budget, and an undeclared unit overlapped no other unit; (c) the exit agrees
+with the state (`returned` for an outcome with a record, `raised` or
+`process_failed` for a failure without one; adaptors `raised` iff failed);
+(a) start and end events are one permutation of 1..2n, and a queue mark precedes
+its start; (f) each placement, re-planned with `plan_dispatch` beside the
+placements running when it started, is placed on the slot it recorded; and no
+entry starts after the first failed entry ended.
 `replay_readiness(..., drained=...)` then accepts a dispatched node where the
 serial replay would close it as blocked only if its own sources permit it.
 Serial traces verify exactly as before.
 
 Cancellation. SIGTERM during parallel dispatch raises `UnitTerminated` in the
-worker. Any exit from the loop with units running (that signal, an exception,
-`SystemExit`/`KeyboardInterrupt` re-raised from a unit) terminates every running
-unit's process group (`terminate_observed_group`, TERM, 1 s grace, KILL) before
-propagating. An outer timeout or operator cancel kills the sandbox; every unit
+worker (`unit_processes.TermGate`). Any exit from the loop with units running
+(that signal, an exception, `SystemExit`/`KeyboardInterrupt` re-raised from a
+unit) terminates every running unit's process group (`terminate_observed_group`,
+TERM, 1 s grace, KILL) before propagating. SIGTERM is held, then delivered,
+around the spawn-and-register of a unit (so a signal cannot orphan a unit not
+yet registered) and during that cleanup (so a second signal cannot abort it). An outer timeout or operator cancel kills the sandbox; every unit
 is in its PID namespace and ends with it. Stop and Pause keep body-boundary
 meaning: the active body, including queued units, finishes (decision B3-Q5).
 

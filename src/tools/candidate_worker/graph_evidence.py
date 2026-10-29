@@ -230,8 +230,6 @@ def verify_graph_trace(
     expected_adaptor = expected_adaptors(request, initial, iteration=iteration)
     if len(trace.nodes) != len(expected) or len(trace.adaptors) != len(expected_adaptor):
         raise ValueError("graph trace membership mismatch")
-    if (trace.scheduling == "parallel-v1") != (request.parallel is not None):
-        raise ValueError("graph trace scheduling disagrees with the request")
     shape = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     )
@@ -301,11 +299,9 @@ def verify_graph_trace(
     )
     # Index skips come from the recomputed outcomes, so the replay refuses a node
     # that ran on a non-emitted adaptor output (or was skipped despite one).
-    drained = frozenset()
-    if trace.scheduling == "parallel-v1":
-        from .parallel_evidence import verify_drain
+    from .parallel_evidence import drained_entries
 
-        drained = verify_drain(request, initial, trace, iteration=iteration)
+    drained = drained_entries(request, initial, trace, iteration=iteration)
     replay_readiness(
         (*trace.nodes, *trace.adaptors),
         decisions=decisions,
