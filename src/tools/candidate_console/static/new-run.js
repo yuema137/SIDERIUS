@@ -165,6 +165,9 @@
         `Read-only paths: ${value.read_only.join(', ') || 'none'}`,
       ].join('\n');
       status('Preparation reviewed. Prepare creates captured inputs; credentials are checked later at candidate review.');
+      void window.consoleSettings?.originLines(selection.task_id, {llm_profile: value.llm_config_file, data_root: value.data_root}).then(lines => {
+        if (lines.length && review === value) $('details').textContent += '\n' + lines.join('\n');
+      });
     } catch (error) { if (!error.stale && current(version, revision, project)) status(error.message); }
     controls();
   });
