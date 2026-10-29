@@ -409,8 +409,9 @@ because it never invokes `run_judge_call`.
   projector. It lands with the `tuning.output` projector (B6-9/B3), choosing the
   primary with `MetricOrder` over Health-valid formal results.
 
-- Reachable only under `native-literature-judged/v1` (B6-8a); the proposer-N
-  shape (LLM rank over `proposal.output` feeding branches) is B6-8b, and an adaptor
-  before tuning inside a loop body (B6-8c) depends on B6-9.
+- Reachable only under `native-literature-judged/v1` (B6-8a) and
+  `native-proposal-judged/v1` (B6-8b, LLM COMBINE over `proposal.output` feeding
+  branches); an adaptor before tuning inside a loop body (B6-8c, #1088) depends on
+  B6-9.
 - `tuning.output` and `validation.output` have no projector, so rubric ranking of
   trained candidates is refused (B6-9/B3 multi-tuning).

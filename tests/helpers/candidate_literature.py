@@ -294,3 +294,104 @@ def literature_judged_request(
     config_path.write_text(json.dumps(config))
     raw["execution_profile"] = "native-literature-judged/v1"
     return _previewed(request, raw, project)
+
+
+def proposal_judged_request(
+    request, *, combine, select, distribute, proposals=3, max_judge_calls=50
+):
+    """B6-8b: ``proposals`` external proposals -> LLM adaptor ``rank`` -> one branch per output.
+
+    Built from the families fixture: branch ``j`` (``j < outputs``) reads adaptor output
+    ``j`` (no index for ``single/v1``); surplus branches are dropped.
+    """
+    count = 1 if distribute["kind"] == "single/v1" else distribute["count"]
+    request = families_request(request, proposals)
+    project = Path(request.preview.project_root)
+    raw = request.preview.model_dump(mode="json")
+    definition = raw["document"]["definition"]
+    nodes = definition["nodes"]
+    proposal_ids = [node["id"] for node in nodes if node["capability"] == "proposal"]
+    implementations = sorted(
+        (node for node in nodes if node["capability"] == "implementation"),
+        key=lambda node: node["id"],
+    )
+    kept: set[str] = set()
+    for index, node in enumerate(implementations[:count]):
+        kept.add(node["id"])
+        source = {"kind": "adaptor", "adaptor": "rank"}
+        if distribute["kind"] != "single/v1":
+            source["index"] = index
+        for arg in node["request"]["arguments"]:
+            if arg["name"] == "output":
+                arg["source"] = source
+    validators = {
+        node["id"]: next(
+            arg["source"].get("node")
+            for arg in node["request"]["arguments"]
+            if arg["name"] in ("output", "implementation")
+        )
+        for node in nodes
+        if node["capability"] == "validation"
+    }
+    sources = {
+        node["id"]: next(
+            arg["source"] for arg in node["request"]["arguments"] if arg["name"] == "output"
+        )
+        for node in implementations[:count]
+    }
+    for node in nodes:
+        if validators.get(node["id"]) in kept:
+            for arg in node["request"]["arguments"]:
+                if arg["name"] == "proposal":
+                    arg["source"] = sources[validators[node["id"]]]
+    definition["nodes"] = [
+        node
+        for node in nodes
+        if node["capability"] == "proposal"
+        or node["id"] in kept
+        or validators.get(node["id"]) in kept
+    ]
+    referenced = {
+        source["binding"]
+        for node in definition["nodes"]
+        for source in (
+            [node["request"]]
+            if node["request"]["kind"] == "external"
+            else [arg["source"] for arg in node["request"]["arguments"]]
+        )
+        if source.get("kind") == "external" or "binding" in source
+    }
+    definition["externals"] = [item for item in definition["externals"] if item["id"] in referenced]
+    definition["adaptor_format"] = "siderius.adaptors/v1"
+    definition["adaptors"] = [
+        {
+            "id": "rank",
+            "inputs": [
+                {
+                    "name": "proposals",
+                    "contract": "proposal.output",
+                    "cardinality": "many",
+                    "max_items": len(proposal_ids),
+                }
+            ],
+            "bindings": [
+                {
+                    "port": "proposals",
+                    "sources": [{"kind": "result", "node": node} for node in sorted(proposal_ids)],
+                }
+            ],
+            "combine": combine,
+            "select": select,
+            "distribute": distribute,
+        }
+    ]
+    config_path = project / "llm.json"
+    config = json.loads(config_path.read_bytes())
+    config["judge"] = {
+        "aggregate": JUDGE_ROUTE,
+        "debate": JUDGE_ROUTE,
+        "max_judge_calls": max_judge_calls,
+    }
+    config_path.write_text(json.dumps(config))
+    raw["execution_profile"] = "native-proposal-judged/v1"
+    return _previewed(request, raw, project)

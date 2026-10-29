@@ -101,15 +101,21 @@ LITERATURE_SPLIT_PROFILE = "native-literature-split/v1"
 # proposal per output through literature-to-proposal -> its complete branches. The
 # only profile that executes an LLM COMBINE kind.
 LITERATURE_JUDGED_PROFILE = "native-literature-judged/v1"
+# B6-8b: N external proposals -> one LLM COMBINE over proposal.output -> single/v1 or
+# per-item/v1(M) -> M branches whose implementation (and validation) consume the
+# adaptor output ``i`` instead of a proposal node result.
+PROPOSAL_JUDGED_PROFILE = "native-proposal-judged/v1"
 ADAPTOR_PROFILES = (
     SELECTION_PROFILE,
     ROUTED_PROFILE,
     LITERATURE_COLLECTION_PROFILE,
     LITERATURE_SPLIT_PROFILE,
     LITERATURE_JUDGED_PROFILE,
+    PROPOSAL_JUDGED_PROFILE,
 )
+LLM_PROFILES = (LITERATURE_JUDGED_PROFILE, PROPOSAL_JUDGED_PROFILE)
 LLM_COMBINE_NOT_ADMITTED = (
-    f"an LLM COMBINE kind executes only under the {LITERATURE_JUDGED_PROFILE} profile"
+    f"an LLM COMBINE kind executes only under the {' / '.join(LLM_PROFILES)} profiles"
 )
 
 
@@ -122,6 +128,29 @@ class AdaptorSelection:
 
 
 @dataclass(frozen=True)
+class JudgedBranch:
+    """One branch fed by adaptor output ``index`` (``None`` for ``single/v1``)."""
+
+    index: int | None
+    implementation: str
+    validation: str
+
+
+@dataclass(frozen=True)
+class ProposalSelection:
+    """B6-8b: the LLM adaptor over every proposal and the branches its outputs feed."""
+
+    adaptor: str
+    branches: tuple[JudgedBranch, ...]
+
+    def branch(self, node_id: str) -> JudgedBranch | None:
+        return next(
+            (item for item in self.branches if node_id in (item.implementation, item.validation)),
+            None,
+        )
+
+
+@dataclass(frozen=True)
 class ProposalFamilies:
     families: tuple[ProposalFanout, ...]
     predecessors: tuple[tuple[str, frozenset[str]], ...]
@@ -130,10 +159,22 @@ class ProposalFamilies:
     tuning: str | None = None
     selection: AdaptorSelection | None = None
     literature_adaptor: LiteratureAdaptorEdges | None = None
+    proposal_selection: ProposalSelection | None = None
 
     @property
     def branches(self) -> tuple[tuple[str, str], ...]:
-        return tuple(branch for family in self.families for branch in family.branches)
+        judged = () if self.proposal_selection is None else self.proposal_selection.branches
+        return tuple(branch for family in self.families for branch in family.branches) + tuple(
+            (item.implementation, item.validation) for item in judged
+        )
+
+    def judged_source(self, node_id: str) -> AdaptorSource | None:
+        """The adaptor output a judged branch node consumes as its proposal, else ``None``."""
+        selection = self.proposal_selection
+        branch = None if selection is None else selection.branch(node_id)
+        if selection is None or branch is None:
+            return None
+        return AdaptorSource(adaptor=selection.adaptor, index=branch.index)
 
     @property
     def literature_reviews(self) -> tuple[str, ...]:
@@ -170,12 +211,16 @@ def execution_families(
         admits_adaptors=profile in ADAPTOR_PROFILES,
         admits_routes=profile == ROUTED_PROFILE,
     )
-    if profile != LITERATURE_JUDGED_PROFILE and any(
+    if profile not in LLM_PROFILES and any(
         isinstance(adaptor.combine, LLM_STRATEGY_TYPES) for adaptor in definition.adaptors
     ):
         raise ValueError(LLM_COMBINE_NOT_ADMITTED)
     if profile == LITERATURE_JUDGED_PROFILE:
         return literature_judged_candidate(definition)
+    if profile == PROPOSAL_JUDGED_PROFILE:
+        from .proposal_judged import proposal_judged_candidate
+
+        return proposal_judged_candidate(definition)
     if profile == SELECTION_PROFILE:
         return selection_candidate(definition)
     if profile == LITERATURE_COLLECTION_PROFILE:
