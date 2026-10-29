@@ -214,6 +214,17 @@ publishes by path, so after the no-follow
 parent check only a same-user process, which already owns the workspace, can swap
 a parent.
 
+CLI `init`/`check`/`serve` preserve Pydantic validation failures as one stderr
+line per error: `console.json is invalid at <location> (<type>)`, exit 2.
+`config_errors.invalid_config_fields` derives its field vocabulary from
+`ConsoleFile`, `ConsoleConfig` and nested models; list positions use `[index]`.
+Mapping keys and unknown union labels are redacted; extra-field names are shown
+only when identifier-shaped and bounded to 80 characters. Input values, exception
+messages and context are never displayed. Document-level failures use `(document)`.
+`MissingConfigFile` names a missing task manifest/LLM file or editor source using
+the validated item ID and configured path (control characters escaped). Other
+filesystem/validation failures retain the generic message and readiness guidance.
+
 **`WorkspaceReadiness`** (`readiness_models.py`, beside `CredentialReadiness`) is an
 ephemeral, name-only projection: `workspace_status` and one `WorkspaceEntry(name,
 status, created_by)` per fixed child, per derived task output root and per derived

@@ -125,6 +125,14 @@ even when using the default models.
    `task my-task needs llm_config_file`. When a workspace folder is missing or
    unusable, it lists the folder (for example `data/my-task: missing`) and, if
    `init` can create it, prints the `init` command to run.
+   Schema errors name the field to fix and the error type, for example:
+
+   ```text
+   console.json is invalid at tasks[0].candidate_network (missing)
+   ```
+
+   Here `tasks[0]` is the first task in the list. Missing configured source or
+   task resource files are reported with the project/task name and file path.
    Only `127.0.0.1` binding is supported.
 4. On your own computer, open the printed console address directly in your browser.
    On a remote server, keep the server session running there and run this SSH

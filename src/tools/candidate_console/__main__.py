@@ -5,7 +5,10 @@ import contextlib
 import sys
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
+
 from .config import load_console
+from .config_errors import MissingConfigFile, invalid_config_fields
 from .files import config_bytes
 from .readiness_models import WorkspaceReadiness
 from .settings_file import MissingSetting, SettingsInvalid
@@ -40,6 +43,11 @@ def _load(path: str) -> ResolvedConsole | None:
         print(f"Console configuration is incomplete: {error}.", file=sys.stderr)
     except SettingsInvalid as error:
         print(f"Console settings are invalid: {error}.", file=sys.stderr)
+    except ValidationError as error:
+        for message in invalid_config_fields(error):
+            print(message, file=sys.stderr)
+    except MissingConfigFile as error:
+        print(error, file=sys.stderr)
     except (OSError, ValueError):
         print(INVALID, file=sys.stderr)
         # Name unusable workspace folders when the file itself resolves.
@@ -79,6 +87,10 @@ def main() -> int:
                 "Nothing was deleted.",
                 file=sys.stderr,
             )
+            return 2
+        except ValidationError as error:
+            for message in invalid_config_fields(error):
+                print(message, file=sys.stderr)
             return 2
         except (OSError, ValueError):
             print(

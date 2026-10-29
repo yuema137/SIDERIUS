@@ -269,7 +269,7 @@ def test_init_rerun_names_an_invalid_console_json(content, tmp_path, monkeypatch
     config.write_text(content)
     code, _, err = _main(monkeypatch, capsys, "init", "--workspace", str(tmp_path))
     assert code == 2
-    assert "settings/console.json is not a valid console configuration; left unchanged" in err
+    assert "console.json is invalid at " in err
     assert config.read_text() == content
 
 
