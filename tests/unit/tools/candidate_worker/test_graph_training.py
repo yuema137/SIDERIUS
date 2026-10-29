@@ -568,25 +568,46 @@ def test_nonfinite_launch_values_survive_the_graph_tuning_input(prepared, traini
     )
 
 
-def test_nonfinite_tuning_score_survives_the_captured_run_output(
+def test_native_run_output_with_nonfinite_scores_is_not_a_disagreement(
     prepared, training_runner, monkeypatch
 ):
-    """#1046: capture_record wrote the tuner output with inf -> null, so the
-    persisted run output that loop evidence rereads said ``None`` while the
-    returned output said ``-inf``."""
+    """#1046: the native writer stores run_output through the storage owner
+    (inf/NaN -> null), and capture_record then compared that record with the
+    returned output (-inf, NaN) and raised "native record disagrees", failing a
+    real graph training run. The record must keep the storage owner's strict
+    JSON, and the in-memory output must keep -inf for the next phase."""
+    from nodes.ml_hyperparameter_tune_agent.records import publish_run_output
     from tools.candidate_worker import training
+    from tools.candidate_worker.graph_evidence import read_graph_control
+    from tools.candidate_worker.unit_models import NodeUnitResult
+    from tools.candidate_worker.unit_transport import decode_transport
 
     tuner = training.HyperparamTuningAgent
     real = tuner.run
-    monkeypatch.setattr(
-        tuner,
-        "run",
-        lambda self, value: real(self, value).model_copy(
-            update={"best_denoising_score": float("-inf")}
-        ),
-    )
+
+    def native_run(self, value):
+        output = real(self, value).model_copy(
+            update={
+                "best_denoising_score": float("-inf"),
+                "best_formal_denoising_score": float("nan"),
+            }
+        )
+        local = value.storage.local
+        publish_run_output(str(Path(local.workspace) / f"run_output_{local.run_name}.json"), output)
+        return output
+
+    monkeypatch.setattr(tuner, "run", native_run)
     receipt = launch_candidate(graph_training_request(prepared))
     assert receipt.status == "completed", receipt.error
     (path,) = Path(receipt.workspace).rglob("run_output_*.json")
-    saved = training.HyperparamTuningOutput.model_validate_json(path.read_bytes())
-    assert saved.best_denoising_score == float("-inf")
+    raw = path.read_text()
+    assert "Infinity" not in raw and "NaN" not in raw
+    saved = training.HyperparamTuningOutput.model_validate_json(raw)
+    assert saved.best_denoising_score is None and saved.best_formal_denoising_score is None
+    result = decode_transport(
+        NodeUnitResult,
+        read_graph_control(Path(receipt.workspace) / "candidate_run/units/train/result.json"),
+    )
+    assert result.output is not None
+    returned = decode_transport(training.HyperparamTuningOutput, result.output.encode())
+    assert returned.best_denoising_score == float("-inf")

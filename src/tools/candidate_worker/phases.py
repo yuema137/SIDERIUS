@@ -21,7 +21,7 @@ from .inputs import NativeInputs
 from .invocation import FixedInvocationContext
 from .layout import proposal_input_path
 from .models import CandidateRunReceipt, CandidateRunRequest
-from .record_json import record_json
+from .record_json import artifact_json
 
 
 def run_proposal(
@@ -46,7 +46,7 @@ def run_proposal(
     input_path.parent.mkdir(parents=True, exist_ok=True)
     publish_bytes_write_once(
         str(input_path),
-        record_json(seed, indent=2),
+        artifact_json(seed, kind="internal", indent=2),
     )
 
     proposer = MLModelProposalAgent(**config.get("propose"))

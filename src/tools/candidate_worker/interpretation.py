@@ -34,7 +34,7 @@ from .inputs import check_constraints, require_storage
 from .invocation import FixedInvocationContext
 from .layout import graph_instance_dir, interpretation_input_path
 from .models import CandidateRunReceipt, CandidateRunRequest
-from .record_json import record_json
+from .record_json import artifact_json
 
 if TYPE_CHECKING:
     from .training_admission import TrainingAdmission
@@ -233,7 +233,7 @@ def run_interpretation(
     if output_path.exists() or output_path.is_symlink():
         raise ValueError("interpretation output already exists")
     input_path.parent.mkdir(parents=True, exist_ok=True)
-    publish_bytes_write_once(str(input_path), record_json(inputs, indent=2))
+    publish_bytes_write_once(str(input_path), artifact_json(inputs, kind="internal", indent=2))
     directory.mkdir(parents=True, exist_ok=True)
     agent = ResultInterpretationAgent(**config.get("interpret"))
     context.bind(agent)
