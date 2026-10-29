@@ -23,7 +23,18 @@
       const best = reason.incumbent == null ? 'no valid score yet' : `best ${number(reason.incumbent)} at body ${reason.last_improvement_iteration}`;
       return `${after}: no improvement for ${bodies(reason.non_improving_bodies)} (condition: ${bodies(reason.k)}; ${best})`;
     }
+    if (reason.kind === 'judge') return `${after}: the judge decided to stop`;
     return `${after}: stop condition ${reason.kind}`;
+  }
+  // Recorded JudgeStop verdicts (B2-5): each boundary's decision, with the judge's own
+  // rationale from its evidence when the call decided; an abstention says so.
+  function verdictLines(loop) {
+    return (loop.judge_verdicts || []).map(item => {
+      const decision = item.decision === null ? 'abstained (the judge call failed)'
+        : item.decision === 'stop' ? 'stop' : 'continue';
+      const why = item.rationale ? ` · ${item.rationale}${item.confidence ? ` (confidence ${item.confidence})` : ''}` : '';
+      return `Judge after body ${item.iteration}: ${decision}${why}`;
+    });
   }
   // Keyed by the operations store (SEC-4): an id retained for another console's store is
   // never reused here. Legacy per-origin keys are still read so a pending retry replays.
@@ -84,6 +95,9 @@
     }
     panel.hidden = false;
     $('loop-state').textContent = describe(status);
+    const verdicts = status.receipt_available ? verdictLines(status.loop) : [];
+    $('loop-judge').hidden = !verdicts.length;
+    $('loop-judge').replaceChildren(...verdicts.map(text => { const item = document.createElement('li'); item.textContent = text; return item; }));
     const reason = status.receipt_available ? status.loop.stop_reason : null;
     const exact = reason ? ['incumbent', 'threshold'].filter(key => typeof reason[key] === 'number').map(key => `${key} ${reason[key]}`) : [];
     if (exact.length) $('loop-state').title = 'Exact recorded values: ' + exact.join(', '); else $('loop-state').removeAttribute('title');

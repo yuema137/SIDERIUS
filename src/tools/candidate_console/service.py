@@ -4,6 +4,8 @@ import hashlib
 from pathlib import Path
 from uuid import UUID
 
+from agent.judge.evidence import read_call_evidence
+from agent.schemas.judge import StopVerdict
 from tools.candidate_operations import (
     CandidateLoopResumeOperation,
     CandidateLoopResumeRequest,
@@ -35,6 +37,7 @@ from tools.candidate_operations.read import lookup_operation_request
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
 from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
 from tools.candidate_worker import CandidateTokenSnapshot
+from tools.candidate_worker.loop_stop import JudgeBoundaryVerdict
 from tools.candidate_worker.models import CandidateRunReceipt
 
 from .config import validate_config
@@ -45,6 +48,7 @@ from .models import (
     ChoiceView,
     ConsoleConfig,
     GraphResultsView,
+    JudgeVerdictView,
     LaunchSelection,
     LoopPauseAcknowledgement,
     LoopResumeReview,
@@ -113,6 +117,35 @@ def loop_status(
         stop_reason=None if trace is None else trace.stop_reason,
         stop_requested=stop,
         pause_requested=pause,
+        judge_verdicts=()
+        if trace is None or not isinstance(receipt, CandidateRunReceipt)
+        else tuple(_judge_verdict(receipt.workspace, item) for item in trace.judge_verdicts),
+    )
+
+
+def _judge_verdict(workspace: str, verdict: JudgeBoundaryVerdict) -> JudgeVerdictView:
+    """Project one verified boundary verdict; the rationale only from its own evidence.
+
+    The evidence file is read by the judge owner's digest-checked reader under the run
+    workspace. A missing, foreign or malformed file leaves the rationale absent rather
+    than failing the status read; the verdict itself stays as the receipt recorded it.
+    """
+    rationale = confidence = None
+    root = Path(workspace)
+    path = root / verdict.evidence_path
+    try:
+        # An abstention (decision None) records a failed call: there is no rationale to show.
+        if verdict.decision is not None and path.resolve().is_relative_to(root.resolve()):
+            evidence = read_call_evidence(path, expected_sha256=verdict.evidence_sha256)
+            if isinstance(evidence.payload, StopVerdict):
+                rationale, confidence = evidence.payload.rationale, evidence.payload.confidence
+    except (OSError, ValueError):
+        pass
+    return JudgeVerdictView(
+        iteration=verdict.iteration,
+        decision=verdict.decision,
+        rationale=rationale,
+        confidence=confidence,
     )
 
 

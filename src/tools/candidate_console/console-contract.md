@@ -572,8 +572,16 @@ exists; counts are cumulative over the run). `stop_reason` is the receipt's
 verified `loop_trace.stop_reason`, present only when a declared stop condition
 completed the loop early; Monitor renders it in plain words ("Research loop
 stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
-higher is better; best at body 3)", or "… no improvement for 2 bodies …") from
-the existing status poll, with recorded values unrounded. The receipt's body
+higher is better; best at body 3)", "… no improvement for 2 bodies …", or "… the judge
+decided to stop") from the existing status poll, with recorded values unrounded.
+`judge_verdicts` (B2-5, read-only; omitted when empty) lists the receipt's verified
+`loop_trace.judge_verdicts` in boundary order as `JudgeVerdictView{iteration, decision,
+rationale, confidence}`: `decision` is `stop`/`continue`, or `null` for a recorded
+abstention; `rationale`/`confidence` are copied from that verdict's judge evidence file,
+read by `agent.judge.evidence.read_call_evidence` (digest-checked, inside the run
+workspace) and left `null` for an abstention or an unreadable/foreign file, which never
+fails the status read. Monitor lists them under the loop state (`#loop-judge`) as
+"Judge after body N: stop · <rationale> (confidence …)". The receipt's body
 numbers (`attempted_iterations`, `stop_reason.iteration` and its incumbent
 iterations) are whole-run indices, so a resumed segment's line says "Body numbers
 count the whole run, including earlier segments." The console never
@@ -940,8 +948,13 @@ from `editorCapabilityPresentation.label`, read-only endpoints). Remove deletes 
 loop. Loop-only edits review as `LoopProposal` on the draft's anchor source; with
 other draft edits pending, the document or draft proposal carries them. A third
 fieldset, Stop conditions, adds/removes at most one `metric_threshold` (metric id
-text plus threshold; the editor does not know the task metric) and one
-`no_improvement` (completed bodies); `judge` is never offered. All stop-condition
+text plus threshold; the editor does not know the task metric), one
+`no_improvement` (completed bodies) and one `judge` (B2-5: `criterion` text,
+`min_completed_bodies`, `on_failure` fail/continue; exactly `JudgeStop`'s declared
+fields). The judge route and `max_judge_calls` are operator-owned
+(`WorkflowLLMConfig.judge`) and are not authored here; the row says so. The capture
+review summary states a judge as "a language-model judge decides to stop ("…"), first
+after N completed bodies; a failed judge call …". All stop-condition
 UI logic lives in `editor-loop-controls.js`, mutating the draft loop through one
 `edit` action from `editor.js`. Empty, padded, non-finite or non-integer values
 stay local in the loop draft state (`loopDrafts`, separate from training drafts)

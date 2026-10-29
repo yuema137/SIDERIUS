@@ -355,6 +355,15 @@ def test_launch_review_refuses_a_request_loop_absent_from_the_capture(captured, 
         adapter.review(project.project_id, selected)
 
 
+# B2-5: a JudgeStop authored in the editor reaches the launch review as declared.
+JUDGE = {
+    "kind": "judge",
+    "criterion": "Stop once a body adds no new insight.",
+    "min_completed_bodies": 2,
+    "on_failure": "continue",
+}
+
+
 @pytest.fixture
 def looped_capture(reusable, direct_child, console_config, monkeypatch):
     """A real five-node interpretation source with an authored loop and stop conditions,
@@ -372,6 +381,7 @@ def looped_capture(reusable, direct_child, console_config, monkeypatch):
     raw["definition"]["loop"]["stop_conditions"] = [
         {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85},
         {"kind": "no_improvement", "completed_bodies": 2},
+        JUDGE,
     ]
     source = Path(reusable.source_path)
     source.write_text(render_workflow_source(type(document).model_validate_json(json.dumps(raw))))
@@ -402,5 +412,6 @@ def test_launch_review_of_a_real_looped_capture_states_its_bound_and_stops(loope
         "stop_conditions": [
             {"kind": "metric_threshold", "metric_id": "accuracy", "threshold": 0.85},
             {"kind": "no_improvement", "completed_bodies": 2},
+            JUDGE,
         ],
     }
