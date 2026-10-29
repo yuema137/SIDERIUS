@@ -60,18 +60,18 @@ try {
   await page.goto(metadata.origin + '/editor.html');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   const status = page.locator('#editor-status');
   const reopen = async () => {
     await page.locator('#editor-refresh').click();
-    await waitUntil(async () => (await status.textContent()).includes('Opened supported'));
+    await waitUntil(async () => (await status.textContent()).includes('Opened '));
   };
   const reviewAndSave = async () => {
     await page.locator('#editor-review').click();
     await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
     const diff = await page.locator('#editor-diff').textContent();
     await page.locator('#editor-save').click();
-    await waitUntil(async () => (await status.textContent()).includes('Saved reviewed'));
+    await waitUntil(async () => (await status.textContent()).includes('Saved as "'));
     return diff;
   };
   await page.locator('#editor-project').selectOption('interpretation');

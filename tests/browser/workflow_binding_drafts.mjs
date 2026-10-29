@@ -41,7 +41,7 @@ try {
   await page.goto(metadata.origin + '/#workflow');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   const original = await readFile(metadata.source, 'utf8');
   const wire = page.locator('path.circuit-wire-target[data-from="propose"][data-to="implement"][data-argument="output"]');
   const output = page.locator('#circuit-output-propose'), input = page.locator('#circuit-input-implement-output');
@@ -94,7 +94,7 @@ try {
   assert.equal(await page.locator('#editor-review').isDisabled(), true);
   assert.equal(await page.locator('#editor-save').isDisabled(), true);
   assert.equal(await page.locator('#editor-rebase').isDisabled(), true);
-  assert.match(await page.locator('#editor-conflict-diff').textContent(), /Disconnect implement.output/);
+  assert.match(await page.locator('#editor-conflict-proposal').textContent(), /Disconnect implement.output/);
   await page.locator('#editor-discard').click();
   await waitUntil(async () => !(await page.locator('#editor-pending').textContent()).includes('Pending binding draft'));
   assert.match(await page.locator('#editor-source').inputValue(), /external edit/);
@@ -119,10 +119,10 @@ try {
   assert.match(await page.locator('#editor-diff').textContent(), /llm_provider/);
   assert.equal(await readFile(metadata.source, 'utf8'), original + '\n# external edit\n', 'Review has no disk side effect');
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   assert.doesNotMatch(await readFile(metadata.source, 'utf8'), /llm_provider/);
   await page.locator('#editor-refresh').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   assert.match(await page.locator('#editor-inspector .inspector-input', {has: page.locator('code', {hasText: /^llm_provider$/})}).textContent(), /Optional · Not connected/);
   assert.deepEqual(faults, []);
   console.log('PASS SVG pointer selection/button disconnect, keyboard Delete, required incomplete gate, stale-base refusal/discard, optional disconnect, valid review/save and disk reload.');

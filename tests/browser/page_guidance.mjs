@@ -75,7 +75,7 @@ try {
   assert.equal(await page.locator('#editor-save-confirm').isHidden(), true, 'The save confirmation step opens only after Save');
 
   await page.locator('#token').fill(metadata.token); await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   assert.equal(await page.locator('#workflow-start-guide').isHidden(), true, 'The empty-canvas start state yields to the workflow');
   assert.equal(await current(), 'Workflow');
   assert.match(await page.locator('#step-indicator li[data-step="task"]').getAttribute('class') || '', /done/);
@@ -89,7 +89,7 @@ try {
   await waitUntil(async () => !(await next.isDisabled()));
   assert.equal(await page.evaluate(() => window.newRunGate.ready), true, 'Next follows the New run gate');
   const saved = await page.evaluate(() => window.workflowEditor.state.savedSha256);
-  assert.match(await page.locator('#workflow-next-state').textContent(), new RegExp(`Saved version ${saved.slice(0, 12)} of reusable is ready to run`));
+  assert.match(await page.locator('#workflow-next-state').textContent(), new RegExp(`The current file of project reusable \\(version ${saved.slice(0, 12)}\\) is ready to run`));
   await next.click(); await page.locator('#view-run').waitFor();
   assert.equal(new URL(page.url()).hash, '#run');
   assert.equal(await page.title(), 'SIDERIUS · Run');

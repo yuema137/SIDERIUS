@@ -11,6 +11,16 @@ named-version history only reads them.
 existing 0700 recovery directory. Source/recovery are strict descendants of the
 root. Source is current-user-owned, regular, single-link, UTF-8 and at most
 32 KiB. Ordinary permission bits (0000–0777) are preserved; special bits refuse.
+Save refuses a source without the owner-write bit as typed `read_only`
+("This file is read-only on disk: <path>") before any recovery copy, record or
+source write, so temp + rename never replaces a file its owner protected.
+Opening refuses with the reason and the configured path: `not_found`
+("Workflow file not found: <path>"), `not_readable` ("Workflow file is not
+readable: <path>") and `limit` ("Workflow file is larger than the 32 KiB editor
+limit: <path>"). Any other `OSError` is the route's `filesystem` refusal: a read
+says the file or its project folder is unavailable on disk and never mentions a
+proposal; a Save says "Not saved: the project folder or its recovery copies could
+not be written".
 The current caller must have access sufficient for read/save. Observed symlink
 components and unsafe file types refuse. Trusted local directories are required;
 malicious same-user swaps are excluded.
@@ -30,7 +40,13 @@ externally. Review accepts an expected base SHA-256 plus a discriminated
 source/document proposal. It reads and validates the base, renders documents
 with the existing renderer, refuses source/rendered output above 32 KiB and
 returns exact proposed bytes/hash/diff.
-Rendering may lose comments and formatting; that change appears in the diff.
+Rendering may lose comments and formatting; that change appears in the diff, and
+`ReviewView.removed_comments` lists every comment of the current file that the
+exact proposed bytes no longer contain (tokenizer `COMMENT` texts, stripped;
+repeated texts count separately; a file that does not tokenize falls back to `#`
+lines). The value is computed from the bytes Save would write, against the base
+the review read, so it also covers a proposal rebuilt on a newer disk version.
+The browser's Save step names these comments; it never computes them itself.
 
 Save revalidates its typed request and exact proposal SHA-256. Under the stable
 adjacent `.SOURCE.authoring.lock` advisory lock, it captures and validates base
@@ -71,7 +87,12 @@ validated by `VersionRecord` (`schema_id="siderius.workflow-versions/v1"`,
 exact source bytes, `name`, timezone-aware `recorded_at` and `origin`: `saved` (a
 named Save) or `observed` (unnamed base bytes first seen at a later Save: a
 pre-record workflow or an external edit). Names are 1-64 characters without
-control characters or surrounding whitespace and unique within the record. No Git
+control characters or surrounding whitespace and unique within the record. A new
+name (`SaveRequest.version_name`, type `NewVersionName`) additionally refuses any
+character of Unicode category Cc, Cf, Cs, Co, Cn, Zl or Zp (zero-width, bidi and
+other format controls, separators, private-use and unassigned code points), so two
+history rows never look identical; records written before this rule keep loading
+through the unchanged `VersionName`. No other naming rule exists. No Git
 dependency exists. Names are presentation metadata only: they never enter source
 bytes, declaration digests, preparation requests or run identity; the source
 SHA-256 remains the version identity, and A → B → A records a third row with A's SHA.

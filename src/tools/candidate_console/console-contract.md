@@ -734,10 +734,22 @@ returns configured IDs. `GET /api/editor/{project_id}` returns `SourceView`.
 `/api/editor/{project_id}/versions` returns `VersionList` and GET
 `/versions/{index}?sha256=` returns read-only `VersionDetail` (see named versions
 in the authoring contract); `editor-versions.js` renders the Save name field and
-Version history panel and owns no record policy. Save error `version_record`
-means nothing was written (the reviewed proposal is retained); the distinct
-`version_record_not_updated` means the source was saved but its record was not, so
-`editor.js` adopts the returned saved `current` view. `GET /api/editor/node-catalog`
+Version history panel and owns no record policy. History is a beginner surface
+(`⋯` › Version history, red-team A-3): rows show name, time and Current; SHA-256,
+the record path and the whole saved Python are advanced detail. **View** opens a row;
+**Restore this version as a draft** (`#editor-history-restore`, not offered for the
+current row or a row without kept bytes) hands its bytes to
+`workflowEditor.restoreVersion`, an ordinary `source` review folded into the draft as
+one undoable step: nothing is written until **Save version**, and Undo brings back the
+replaced edits. It refuses, with a status sentence, while an invalid field draft,
+typed Python text or a conflict is pending. A file without a console-saved row is
+"Current file (not saved in the console yet)", never a saved version. The name field
+refuses, as typed, invisible characters (the categories `NewVersionName` refuses) and
+a name already in the loaded history (`#editor-version-problem`, Save disabled); no
+other naming rule. Save error `version_record` means nothing was written (the
+reviewed proposal is retained); the distinct `version_record_not_updated` means the
+source was saved but its record was not, so `editor.js` adopts the returned saved
+`current` view. `GET /api/editor/node-catalog`
 and `POST /api/editor/{project_id}/nodes-draft` serve the node palette, and
 `GET /api/editor/external-inputs` serves the inspector's input creation (projects
 named `node-catalog` or `external-inputs`, like `projects`, are shadowed by the
@@ -749,7 +761,11 @@ limits, exact-byte review/save, mode preservation, recovery and race boundaries.
 Domain conflicts return bounded current source/diagnostics and, on a stale
 Review, the rendered pending proposal/diff. Unsupported-source and parser
 failures do not execute selected Python. Unexpected filesystem failures report
-an unavailable resource without forwarding exception text.
+an unavailable resource without forwarding exception text: on a read, "The
+workflow file or its project folder is unavailable on disk"; on Save, "Not saved:
+the project folder or its recovery copies could not be written". Typed open
+refusals (`not_found`, `not_readable`, `limit`) and the Save refusal `read_only`
+name the configured path (authoring contract).
 
 Editor task/external fields and existing request/protocol argument choices use
 the native declaration document and a typed projection of the existing catalog.
@@ -990,19 +1006,21 @@ coalesces, limit 200). **Undo**/**Redo** buttons and Ctrl/Cmd+Z,
 Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y (outside text controls, Workflow view only, and never
 while a `dialog[open]` exists or a `[role=dialog]` / `[popover]` element holds focus,
 red-team A-4) restore
-earlier states and invalidate any review. **Discard changes** restores the loaded
+earlier states and invalidate any review. **Revert to saved** (`#editor-discard-draft`,
+visible label beside its icon, red-team A-5) restores the loaded
 state without reading disk and is itself undoable, including dirty Source text:
 the discard step carries the typed text (`sourceText`) and Undo restores it as
 dirty Source text (invalid training/loop field text is not kept). While typed Source
 text (dirty, or checked from typed text) is pending and advanced tools are off,
 `#editor-hidden-source` says "You have unsaved Python edits from advanced mode" with
-Show (turns advanced tools on and focuses the source) and Discard, and the Save step
-says it writes the typed Python text (red-team A-2). **Refresh from
-disk** re-reads and asks first when dirty. Undo/Redo are disabled while Source
+Show (turns advanced tools on and focuses the source) and Revert to saved, and the Save step
+says it writes the typed Python text (red-team A-2). **Reload from
+disk** (`#editor-refresh`, advanced; and `#editor-discard` on the conflict card) is the
+only action that re-reads the file; the toolbar one asks first when dirty. Undo/Redo are disabled while Source
 text is dirty or an invalid training/loop field draft is pending (Ctrl/Cmd+Z
 then reports why and keeps the typed text); Undo/Redo/Discard are disabled
 during Save and while a conflict is shown (the conflict panel's own
-Discard/Rebase apply). Rebase stays disabled while binding patches are pending;
+**Reload from disk** / **Reapply my changes onto latest** apply). Rebase stays disabled while binding patches are pending;
 it makes the current disk version Discard's target and restarts history there.
 Structured edits are re-applied onto the disk projection by a three-way merge
 (`editorDraft.reapply`, ancestor = the previous base document; arrays merge by
@@ -1043,8 +1061,35 @@ loading; reconnect retains pending drafts and reviewed bytes. Failed loads canno
 adopt an old project conflict.
 Async replies are fenced by selected project and local edit generation; Save sends exact reviewed bytes/hash.
 Conflict handling preserves the pending proposal and requires explicit discard
-or new-base selection followed by review. A connection failure retains proposal
-and reports unconfirmed save. Source/labels/diffs render as text.
+or new-base selection followed by review. The conflict card (red-team S-5) states
+in one sentence that the workflow was saved from another tab or changed on disk
+(with the time noticed) and that unsaved changes are kept; **What changed on disk**
+is a unified line diff (`editor-save-outcome.js` `lineDiff`, three context lines)
+from the version the page opened to the file now; **Your unsaved changes** lists
+binding/node drafts or a line diff of the proposal; the whole current file is
+advanced detail.
+
+Save outcomes (`editor-save-outcome.js`, red-team S-2..S-4) are one plain
+sentence each. A 4xx refusal wrote nothing: "Not saved: …" with the refusal's own
+reason (busy, read-only file, version name, filesystem, task sources …), and the
+checked proposal and open Save step stay ready for another try (a `proposal` hash
+refusal drops the check). A 5xx, an unreadable reply or no reply leaves the outcome
+unknown: the editor re-reads the file and reports "Saved (confirmed from disk)" when
+it holds the checked bytes, "Not saved: … The file on disk is unchanged" when it
+holds the base, and the conflict card otherwise. A save whose follow-up reload
+fails reports "Saved as "<name>". Reloading the file afterwards failed: …" and
+adopts the checked review projection as the saved state, so the next save is no
+false conflict; a save conflict whose disk bytes equal the checked bytes is adopted
+as already saved. When the review's `removed_comments` is non-empty, the Save step
+(`#editor-save-comments`, beginner view) says "Saving rewrites the file: N comment(s)
+will be removed (…)", also after **Reapply my changes onto latest** (red-team S-1).
+A server check of a binding or node draft that fails (e.g. a non-JSON 5xx) puts
+that draft state in `check failed` with **Check again** (`#editor-check-again`)
+instead of "checking" forever; the failed state is not re-sent automatically, and
+any edit (a new draft key) is checked as usual (red-team E-5). Status sentences are
+plain: "Opened <project>.", "Checked. Name the version, then save.", "Saved as
+"<name>".", "Reverted to the saved version. Undo brings your changes back.", and
+"Can't open <project>: <reason and path>." Source/labels/diffs render as text.
 
 The editor source owner only reviews/saves files. The adjacent New run controller
 uses the saved-source preparation adapter described below; declaration saves
@@ -1247,7 +1292,7 @@ It infers neither scientific success nor complete billing.
 | Route | Primary content and action | Secondary content (Settings-gated unless noted) |
 | --- | --- | --- |
 | `#home` | Hero (theme-matched logo + one sentence); entry cards **Start from a template** (opens the template gallery on Workflow), **Open a workflow**, **Monitor runs** | **Advanced**: native chain card; collapsed **Prepare configured task** |
-| `#workflow` | Page bar (title + dirty badge, project select, task chip, problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Task package and version (collapsed card below the frame); Exact Python changes, References, Advanced source, Version history, Refresh, canvas help, connection mappings (advanced); Details (developer) |
+| `#workflow` | Page bar (title + dirty badge, project select, task chip, problems chip, Undo/Redo/Revert icons, **Save**, **Next: Run**, `⋯`); save confirmation step (version name, **Save version**); one status line; docked rail, canvas (Templates, bottom-right controls incl. **Tidy up**) and Selection (incl. Research loop) | Task package and version, Version history (collapsed cards below the frame); Exact Python changes, References, Advanced source, Reload from disk, canvas help, connection mappings (advanced); Details (developer) |
 | `#run` | Saved-version state; **1 · Prepare** New run (**Prepare saved source**); **2 · Review and launch** Prepared run (**Launch captured run**) | Back to workflow; captured resources (developer) |
 | `#monitor` | Recent operations; Status and logs; loop controls; results; token summary | Operation UUID form, Recorded example (advanced); operation facts, token table (developer) |
 
@@ -1257,8 +1302,11 @@ single Run gate: it exports `newRunGate.ready` (its existing `ready()` predicate
 dispatches `new-run-gate` from its `controls()`. **Next: Run** is enabled
 exactly when that gate is open and only sets `location.hash = 'run'`; its tooltip, the
 visually hidden `#workflow-next-state` (its `aria-describedby`) and
-the Run page's `#run-source-state` show `Saved version <sha256[:12]> of <project> is
-ready to run.` or the first closing reason (not connected, no project, source not
+the Run page's `#run-source-state` show `Saved version "<name>" of project <project> is
+ready to run.` when a console Save recorded the open bytes (`editorVersions.nameFor`),
+otherwise `The current file of project <project> (version <sha256[:12]>) is ready to
+run.` (a never-saved file is never called a saved version, red-team A-6/A-7), or the
+first closing reason (not connected, no project, source not
 open, project not runnable, not a reusable declaration, conflict, saving, unsaved
 edits). Those reasons explain a closed gate and never open it. The New run and
 Prepared run controllers keep their element IDs and behavior; their task loaders run
@@ -1350,11 +1398,15 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   version or task findings are pending; click opens `#editor-task-panel`, a collapsed
   `details.card` below the frame holding the unchanged `editor-task-controls.js` panel,
   open by default when advanced tools are on); `#problems-chip`; `#editor-edit-actions`
-  (Undo `undo-2`, Redo `redo-2`, Revert `rotate-ccw` icon buttons created by
-  `editor-draft.js`; names via `aria-label`, labels in tooltips); Refresh (advanced);
+  (Undo `undo-2`, Redo `redo-2` icon buttons created by `editor-draft.js`, names via
+  `aria-label`; **Revert to saved** keeps a visible label beside its `rotate-ccw` icon so
+  it never reads as a second Undo, red-team A-5); Reload from disk (advanced);
+  `#editor-version-tag` beside the project select (tour #18): the version name of the
+  open bytes, or "Not saved here yet" for a file without a console-saved row, plus a
+  dirty dot while edits are unsaved;
   primary **Save** (`#editor-review`); **Next: Run** (`#workflow-next-run`); `⋯`
   (`details.overflow-menu`: New from template…, Take the tour, Task package and version,
-  Version history and Advanced source (advanced only), Settings…).
+  Version history, Advanced source (advanced only), Settings…).
 - Save step: **Save** is the ordinary editor Review (unchanged request and gating).
   When a check succeeds (`state.reviewed` turns true) the in-flow
   `#editor-save-confirm` row opens under the page bar with `#editor-version-name`,
@@ -1538,12 +1590,13 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Home | Entry cards: Start from a template, Open a workflow, Monitor runs | Beginner | shown | The three first actions |
 | Home | Run a configured native chain | Advanced | gated | Externally reviewed captures; not a first-use path |
 | Home | Prepare configured task (native Prepare / Launch candidate) | Advanced | gated | Server-configured route independent of the editor |
-| Workflow | Page bar: title, project select, task chip, problems chip, Undo/Redo/Revert icons, Save, Next: Run, `⋯` | Beginner | shown | Edit → save → run loop |
+| Workflow | Page bar: title, project select, version tag + dirty dot, task chip, problems chip, Undo/Redo icons, Revert to saved, Save, Next: Run, `⋯` | Beginner | shown | Edit → save → run loop |
+| Workflow | Version history (View, Restore this version as a draft) | Beginner | collapsed card; `⋯` › Version history | Go back to an earlier saved version |
 | Workflow | Save step: version name, Save version | Beginner | shown after Save | Confirms a named version of the checked bytes |
-| Workflow | Refresh from disk | Advanced | gated | Only for external edits to the source file |
+| Workflow | Reload from disk (toolbar) | Advanced | gated | Only for external edits to the source file |
 | Workflow | Status line (editor status, pending edits); Run gate reason as the Next: Run tooltip | Beginner | shown | Explains what happened and why Run is closed |
 | Workflow | Problems list (`#editor-problems`) | Beginner | shown | Required inputs to fix before saving |
-| Workflow | Source conflict tools (discard / rebase) | Advanced | shown when a conflict exists | Must stay reachable to resolve a conflict safely |
+| Workflow | Source conflict card (Reload from disk / Reapply my changes onto latest; whole current file advanced) | Beginner | shown when a conflict exists | Must stay reachable to resolve a conflict safely |
 | Workflow | Workflow project select and task chip (page bar) | Beginner | shown | Choose a task |
 | Workflow | Task package and version details (choose version, update references, findings) | Beginner | collapsed card below the frame; open by default with advanced tools | Opened from the task chip when a version must be chosen |
 | Workflow | Module rail (palette) | Beginner | shown | Add modules |
@@ -1562,7 +1615,7 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Workflow | References (task / external locations) | Advanced | gated | Paths owned by the task configuration |
 | Workflow | Advanced source (Python editor) | Advanced | gated | Direct source editing |
 | Workflow | Exact Python changes (in the save step) | Advanced | gated | Byte-level review of what Save writes |
-| Workflow | Version history | Advanced | gated | Restore / inspect earlier versions |
+| Workflow | Version history SHA-256, record path, whole saved Python | Advanced | gated | Byte-level identity of each version |
 | Workflow | Details (save behavior, concurrent writers) | Developer | gated | Implementation notes |
 | Run | Saved-version state, New run (task, name, Review preparation, Prepare saved source) | Beginner | shown | Prepare the run |
 | Run | Selected source, inputs and resource limits | Beginner | shown | What will run |

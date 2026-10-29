@@ -64,10 +64,10 @@ try {
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
   const status = () => page.locator('#editor-status').textContent();
-  await waitUntil(async () => (await status()).includes('Opened supported'), 'first project');
+  await waitUntil(async () => (await status()).includes('Opened '), 'first project');
   const open = async project => {
     await page.locator('#editor-project').selectOption(project);
-    await waitUntil(async () => (await page.locator('.circuit-card').count()) === 5 && (await status()).includes('Opened supported'), `open ${project}`);
+    await waitUntil(async () => (await page.locator('.circuit-card').count()) === 5 && (await status()).includes('Opened '), `open ${project}`);
   };
   const dirty = () => page.evaluate(() => window.workflowEditor.state.dirty);
   const scale = () => page.evaluate(() => {

@@ -46,7 +46,7 @@ try {
   await page.goto(metadata.origin + '/editor.html');
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
   await page.locator('#editor-project').selectOption('interpretation');
   const source = page.locator('#editor-source');
   await waitUntil(async () => (await source.inputValue()).includes('native-interpretation-candidate/v1'));
@@ -65,9 +65,9 @@ try {
   await page.locator('#editor-review').click();
   await waitUntil(async () => !(await page.locator('#editor-save').isDisabled()));
   await page.locator('#editor-save').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved reviewed'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Saved as "'));
   await page.locator('#editor-refresh').click();
-  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened supported'));
+  await waitUntil(async () => (await page.locator('#editor-status').textContent()).includes('Opened '));
 
   const saved = JSON.parse(execFileSync(
     process.env.EDITOR_PYTHON,

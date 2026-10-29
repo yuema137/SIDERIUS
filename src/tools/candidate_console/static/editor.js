@@ -14,6 +14,11 @@
   let inventory = [], selected = null, sourceDirty = false, reviewed = null, conflict = null, saving = false;
   // One unified draft (editor-draft.js): document edits, binding patches over their anchor, history.
   let draft = null, bindings = [], anchor = null, inspection = null, inspecting = null;
+  // Red-team E-5: the last server check that failed ({key, message}); its draft state shows
+  // "check failed" and a Check again action instead of waiting forever, and is not re-sent
+  // automatically. Any edit changes the key, so the new state is checked as usual.
+  let inspectFailure = null;
+  const Outcome = window.editorSaveOutcome;
   // Pending palette nodes and new inputs (draft `nodes`/`externals`, editor-node-drafts.js); `graph` stays the
   // edited document, `display` adds them. Server nodes-draft views are cached by key; the last one is reused while checking.
   let pendingNodes = [], newExternals = [], removedNodes = [], display = null, lastNodeView = null, inspectingNode = null; const nodeViews = new Map();
@@ -43,6 +48,8 @@
     sourceAvailable, reusableSource: base?.document?.definition?.schema_version === 2, saving, conflict: !!conflict,
     // Page-bar presentation (editor-page-bar.js): checked proposal, task chip and pending task findings.
     reviewed: !!reviewed, reviewedTypedSource: !!reviewed?.typed, taskReview: !!taskReview(), taskSelected: !!taskSelection,
+    // Comments of the file on disk that the checked bytes drop (server-computed, red-team S-1).
+    removedComments: reviewed?.view?.removed_comments || [], inspectionFailed: failedNow(),
     // Every node id the draft knows (saved, pending, deleted): new instance ids avoid all of them.
     nodeIds: [...new Set([...(anchor?.document?.definition.nodes || []).map(n => n.id), ...(graph?.definition.nodes || []).map(n => n.id), ...pendingNodes.map(n => n.node)])],
     taskBinding: base?.document?.task_binding ? {package_id: base.document.task_binding.package_id, revision: base.document.task_binding.revision} : null});
@@ -52,6 +59,17 @@
     if (sourceDirty) { status('Save or revert your typed Python text first, then use a template.'); return Promise.resolve(false); }
     return reviewProposal({kind: 'source', source}, label);
   },
+    // Version history (editor-versions.js): an older version's bytes become an ordinary
+    // checked source proposal; Undo brings back the edits it replaced; nothing is written.
+    restoreVersion: (source, label) => {
+      if (draftsPending()) { status('Correct or reset the invalid field first, then restore the version.'); return Promise.resolve(false); }
+      if (conflict) { status('Resolve the change on disk first, then restore the version.'); return Promise.resolve(false); }
+      if (sourceDirty) { status('Save or revert your typed Python text first, then restore the version.'); return Promise.resolve(false); }
+      return reviewProposal({kind: 'source', source}, `Restore version ${label}`).then(done => {
+        if (done) status(`Version "${label}" is restored as unsaved changes. Save to keep it, or Undo to go back.`);
+        return !!done;
+      });
+    },
     // "Blank workflow": delete every module in the draft (undoable); the empty state shows.
     clearAll: () => { const ids = (display?.definition.nodes || []).map(n => n.id); if (ids.length) removeNodes(ids); return ids.length; }});
   const bindingEqual = (a, b) => !!a && !!b && ['schema_version', 'package_id', 'revision', 'semantic_fingerprint', 'task_data_path_id'].every(key => a[key] === b[key]);
@@ -137,7 +155,8 @@
       (hasNodeDraft() && nodeView()?.status !== 'complete');
     $('review').disabled = !connected || saving || !graph || invalidTraining || draftIncomplete || bindingConflict() || (!!(base?.document?.task_binding || graph?.task_binding) && !taskSelection);
     $('refresh').disabled = !connected || !project;
-    $('save').disabled = !connected || saving || !reviewed || reviewed.source !== $('source').value || invalidTraining || bindingConflict() || !taskAccepted();
+    $('save').disabled = !connected || saving || !reviewed || reviewed.source !== $('source').value || invalidTraining || bindingConflict() || !taskAccepted() ||
+      !!window.editorVersions?.nameProblem();
     // Unreviewed structured edits are not yet Python; Review renders them before source typing.
     $('source').disabled = !graph || (!sourceDirty && !reviewed && Draft.proposal(draftState()).kind !== 'source');
     const operable = draftOperable();
@@ -148,14 +167,26 @@
     window.editorLoopControls?.setEnabled($('loop'), canEditLoop());
     window.editorNodePalette?.setState({enabled: canEditNodes(), pendingNode: pendingNodes.at(-1)?.node || null});
   }
+  // Key of the server check the current draft state needs (null: nothing to check).
+  const checkKey = () => sourceDirty ? null : hasNodeDraft() ? 'nodes:' + nodeKey() : hasBindings() ? 'bindings:' + bindingKey() : null;
+  function failedNow() { return !!inspectFailure && inspectFailure.key === checkKey(); }
+  const checking = () => failedNow() ? 'check failed' : 'checking';
   const pendingText = () => sourceDirty ? 'Pending source edits · not saved'
-    : hasNodeDraft() ? `Pending ${NodeDrafts.summary(draftState())} · ${nodeView()?.status || 'checking'}`
-    : hasBindings() ? `Pending binding draft · ${inspection?.key === bindingKey() ? inspection.status : 'checking'}`
-    : draft?.dirty ? 'Pending edits · Review changes to update Python source before editing it.' : 'No pending edits.';
+    : hasNodeDraft() ? `Pending ${NodeDrafts.summary(draftState())} · ${nodeView()?.status || checking()}`
+    : hasBindings() ? `Pending binding draft · ${inspection?.key === bindingKey() ? inspection.status : checking()}`
+    : draft?.dirty ? 'Pending edits · not saved' : 'No pending edits.';
   function invalidate() {
     generation++; reviewed = null; taskAcknowledged = false; taskAdopted = false; controls(); $('diff').textContent = '';
-    $('pending').textContent = pendingText();
+    $('pending').textContent = pendingText(); $('check-again').hidden = !failedNow();
   }
+  // A failed request's reason in one sentence: a refusal's own message, otherwise what failed.
+  const problem = error => Number(error?.status) >= 400 && Number(error.status) < 500 ? Outcome.sentence(error.message) : Outcome.failure(error).reason + '.';
+  function checkFailed(key, error) {
+    inspectFailure = {key, message: problem(error)};
+    $('pending').textContent = pendingText(); $('check-again').hidden = false; controls();
+    status(`Couldn't check your changes: ${inspectFailure.message} They are kept. Press Check again.`);
+  }
+  $('check-again').addEventListener('click', () => { inspectFailure = null; $('check-again').hidden = true; $('pending').textContent = pendingText(); controls(); inspectIfNeeded(); });
   // Every structured edit mutates the live draft document, then records one history operation.
   function changed(label = 'Edit', coalesce = null) {
     if (draft && !sourceDirty) draft.record(draftState(), label, coalesce);
@@ -182,16 +213,20 @@
     return {module: item ? window.editorCapabilityPresentation.label(item.capability) : null,
       connector: option ? window.editorContractPresentation.describe(option.socket_contract).name : null};
   };
+  // Red-team S-5: a plain sentence, then what changed on disk since the version this page
+  // opened (a real line diff), then the unsaved changes; whole files only in advanced detail.
   function showConflict(value) {
     conflict = value; reviewed = null; controls();
     $('conflict').hidden = false; $('rebase').disabled = bindingConflict() || !value.document;
     $('current').textContent = value.source;
-    const proposal = hasNodeDraft() && !sourceDirty ? `Draft: ${NodeDrafts.summary(draftState())}`
+    const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+    $('conflict-summary').textContent = `This workflow was saved from another tab or changed on disk (noticed at ${time}). Your unsaved changes are kept.`;
+    $('conflict-diff').textContent = Outcome.lineDiff(base?.source ?? '', value.source, ['version you opened', 'on disk now']) || '(The text is the same; only the file version changed.)';
+    $('conflict-proposal').textContent = hasNodeDraft() && !sourceDirty ? `Draft: ${NodeDrafts.summary(draftState())}`
       : hasBindings() && !sourceDirty
       ? bindings.map(item => `${item.source ? 'Bind' : 'Disconnect'} ${item.node}.${item.argument ?? 'request'}`).join('\n')
-      : $('source').value;
-    $('conflict-diff').textContent = `Current disk file version: ${value.sha256.slice(0, 12)}\n--- Current disk source\n${value.source.split('\n').map(line => '- ' + line).join('\n')}\n+++ Pending proposal\n${proposal.split('\n').map(line => '+ ' + line).join('\n')}`;
-    status('Source changed. Pending proposal preserved; inspect current source before choosing a new base.');
+      : Outcome.lineDiff(base?.source ?? '', $('source').value, ['version you opened', 'your changes']) || '(Layout or settings changes only.)';
+    status('This workflow changed on disk. Your unsaved changes are kept; choose how to continue below.');
   }
   function showTaskRefusal(proposal, selection) {
     $('source').value = proposal.source; sourceDirty = false;
@@ -225,7 +260,7 @@
     $('path').textContent = value.source_path;
     $('revision').textContent = 'File version: ' + value.sha256.slice(0, 12);
     $('inspect').hidden = !!graph;
-    status(graph ? 'Opened supported declaration. References remain literal.' : 'Unsupported source is read-only. Repair externally, then refresh.');
+    status(graph ? `Opened ${value.project_id}.` : `${value.project_id} can't be edited here: it is not a supported workflow file. Fix it in a text editor, then reload.`);
   }
   // A reviewed source, task-reference or node add/remove becomes the draft's new anchor (one undoable step).
   const foldLabel = proposal => ({source: 'Source edits', task_references: 'Task reference update',
@@ -271,6 +306,7 @@
     if (!applyBinding(nodeId, argument, {kind: 'external', binding: external.id}, `Create input ${external.id} for ${nodeId}.${argument ?? 'request'}`)) newExternals = before;
   }
   function inspectIfNeeded() {
+    if (failedNow()) return;
     if (hasBindings() && !hasNodeDraft() && !sourceDirty && inspection?.key !== bindingKey() && inspecting !== bindingKey()) void inspectBindingDraft();
     if (hasNodeDraft() && !sourceDirty && !nodeView() && inspectingNode !== nodeKey()) void inspectNode();
   }
@@ -292,7 +328,7 @@
     } catch (error) {
       if (error.stale || !live()) return;
       if (hasSourceConflict(error) && error.value?.current) showConflict(error.value.current);
-      else status(error.message + ' The connection draft remains local and unchanged.');
+      else checkFailed('bindings:' + key, error);
     } finally { if (inspecting === key) inspecting = null; }
   }
   function adoptDraftState(state, message) {
@@ -317,8 +353,8 @@
   function discardChanges() {
     if (!draft || saving || conflict || !pending()) return;
     const typed = sourceDirty ? $('source').value : null, invalid = draftsPending();
-    adoptDraftState(draft.discard(typed), `Changes ${typed === null ? '' : 'and typed source text '}discarded; showing the workflow as loaded. ` +
-      `Undo restores them${invalid ? ' (invalid field text is not kept)' : ''}. Disk was not re-read.`);
+    adoptDraftState(draft.discard(typed), `Reverted to the saved version${typed === null ? '' : ', typed Python text included'}. ` +
+      `Undo brings your changes back${invalid ? ' (except invalid field text)' : ''}.`);
   }
   // Node add/remove (editor-palette.js proposes): any number of nodes stay pending beside other edits;
   // saved-node removal reviews a remove_node proposal on an unedited draft. The server reviews exact bytes.
@@ -342,7 +378,7 @@
       diagnostic(value.problems.length ? value.problems : value.diagnostics.map(message => ({code: value.status, message}))); status(NodeDrafts.message(value));
     } catch (error) {
       if (error.stale || project !== id || nodeKey() !== key) return;
-      if (hasSourceConflict(error) && error.value?.current) showConflict(error.value.current); else status(error.message + ' The new node draft remains local.');
+      if (hasSourceConflict(error) && error.value?.current) showConflict(error.value.current); else checkFailed('nodes:' + key, error);
     } finally { if (inspectingNode === key) inspectingNode = null; }
   }
   function cancelNodes(ids) {
@@ -557,7 +593,11 @@
     if (pending() && ask && !window.confirm('Discard pending edits and refresh from disk?')) return;
     const id = project; invalidate(); const version = generation;
     try { const value = await api(encodeURIComponent(id)); if (current(id, version)) adopt(value); }
-    catch (error) { if (error.stale) return; if (current(id, version)) { sourceAvailable = false; controls(); status(error.message + ' Pending state retained.'); } }
+    catch (error) {
+      if (error.stale) return;
+      // Red-team E-4: the server names the reason and the path (not found, not readable, too large).
+      if (current(id, version)) { sourceAvailable = false; controls(); status(`Can't open ${id}: ${problem(error)}${pending() ? ' Your unsaved changes are kept.' : ''}`); }
+    }
   }
   let projectsLoaded = false, loadingRevision = null;
   async function openProjects() {
@@ -584,6 +624,8 @@
   }
   window.consoleSession.subscribe(connection);
   window.addEventListener('console-view', event => { if (['workflow', 'run'].includes(event.detail.view)) void openProjects(); });
+  // The version name field (editor-versions.js) refuses invisible characters and used names as typed.
+  window.addEventListener('editor-version-name', () => controls());
   window.addEventListener('beforeunload', event => { if (pending()) { event.preventDefault(); event.returnValue = ''; } });
   $('inspect').addEventListener('click', () => { $('advanced').open = true; $('source').focus(); });
   $('project').addEventListener('change', () => {
@@ -612,12 +654,12 @@
       if (foldLabel(proposal)) fold(value, label || foldLabel(proposal));
       else training = value.training;
       $('source').value = value.source; sourceDirty = false;
-      reviewed = {source: value.source, sha256: value.sha256, base: base.sha256, taskReview: value.task_reference_update, typed,
+      reviewed = {source: value.source, sha256: value.sha256, base: base.sha256, taskReview: value.task_reference_update, typed, view: value,
         taskSelection: value.task_reference_update ? (proposal.kind === 'task_references' ? clone(proposal) : selection) : null};
       $('review-disclosure').open = true;
       $('diff').textContent = value.diff || '(No source changes)'; diagnostic(); render();
-      $('pending').textContent = value.source !== base.source ? 'Pending reviewed source · not saved' : 'No source changes; review acceptance may still be required.';
-      status(value.node_edit ? value.node_edit.message + ' Inspect the exact Python diff, then save.' : value.task_reference_update ? 'Inspect the Python diff and task findings. Confirm supported findings before saving.' : 'Declaration validated. Inspect the exact Python diff, then save.');
+      $('pending').textContent = value.source !== base.source ? 'Pending changes · checked, not saved yet' : 'No changes to the file; the task findings may still need confirming.';
+      status(value.node_edit ? value.node_edit.message + ' Name the version, then save.' : value.task_reference_update ? 'Checked. Confirm the task findings, then save.' : 'Checked. Name the version, then save.');
       return true;
     } catch (error) {
       if (error.stale) return;
@@ -648,27 +690,64 @@
       acknowledged_findings: exact.taskReview.findings.map(({code, reference}) => ({code, reference})), adopt_current_snapshot: taskAdopted};
     saving = true; controls();
     try {
-      const saved = await api(`${encodeURIComponent(id)}/save`, body);
-      if (!current(id, version)) return;
-      const value = await api(encodeURIComponent(id)); if (!current(id, version)) return;
-      if (value.sha256 !== saved.sha256) { showConflict(value); status('Save completed, then source changed again. Pending reviewed bytes retained.'); return; }
-      adopt(value); status(saved.unchanged ? 'Source unchanged; confirmed from disk. No new version recorded.' : `Saved reviewed bytes as version "${saved.version_name}" and reloaded from disk. Recovery copies preserved.`);
-    } catch (error) {
-      if (error.stale) return;
-      if (!current(id, version)) return;
-      // Source bytes were published; only the version record write failed.
-      if (error.code === 'version_record_not_updated' && error.value?.current) { adopt(error.value.current); status(error.message); return; }
-      if (error.code === 'version_record') { status(error.message + ' Save refused before writing; reviewed proposal retained.'); return; }
-      if (hasSourceConflict(error) && error.value?.current) { showConflict(error.value.current); reviewed = null; }
-      else if (error.value?.proposal?.task_reference_update) {
-        showTaskRefusal(error.value.proposal, exact.taskSelection);
-        status(error.message + ' Task reference save refused; pending proposal retained. Correct the task sources and review again.');
+      let saved;
+      try { saved = await api(`${encodeURIComponent(id)}/save`, body); } catch (error) {
+        if (!error.stale && current(id, version)) await saveFailed(error, exact, id, version);
         return;
-      } else reviewed = null;
-      status(error.message + ' Save is unconfirmed; pending proposal retained. Refresh to inspect disk.');
+      }
+      if (!current(id, version)) return;
+      const done = saved.unchanged ? 'Nothing to save: the file on disk already matches.' : `Saved as "${saved.version_name}".`;
+      let value;
+      try { value = await api(encodeURIComponent(id)); } catch (error) {
+        if (error.stale || !current(id, version)) return;
+        // Red-team S-2: the save itself succeeded. The checked bytes are the saved version,
+        // so the next save starts from them instead of reporting the user's own save as a conflict.
+        adoptSaved(exact, saved.sha256);
+        status(`${done} Reloading the file afterwards failed: ${problem(error)} Reload the page to see it from disk.`); return;
+      }
+      if (!current(id, version)) return;
+      if (value.sha256 !== saved.sha256) {
+        adoptSaved(exact, saved.sha256); showConflict(value);
+        status(`${done} The file then changed on disk again; choose how to continue below.`); return;
+      }
+      adopt(value); status(done);
     } finally { saving = false; controls(); }
   });
-  $('discard').addEventListener('click', () => { if (conflict) adopt(conflict); });
+  // The saved state from the checked review when the file could not be re-read (S-2). A
+  // retained task refusal carries no review projection: its base then stays, and a later
+  // Save reports the saved bytes on disk as already saved (saveFailed), never a conflict.
+  function adoptSaved(exact, sha256) {
+    if (exact.view) adopt({...exact.view, sha256, project_id: project, source_path: base.source_path, diagnostics: []});
+    else reviewed = null;
+  }
+  // One plain sentence per outcome (editor-save-outcome.js). A refusal (4xx) wrote nothing,
+  // so the checked proposal and the open Save step stay ready for another try (S-4).
+  async function saveFailed(error, exact, id, version) {
+    // Source bytes were published; only the version record write failed.
+    if (error.code === 'version_record_not_updated' && error.value?.current) { adopt(error.value.current); status(Outcome.sentence(error.message)); return; }
+    if (hasSourceConflict(error) && error.value?.current) {
+      // The file on disk already holds exactly these checked bytes: that is this save, not a conflict.
+      if (error.value.current.sha256 === exact.sha256) { adopt(error.value.current); status('Saved: the file on disk already has your checked changes.'); return; }
+      showConflict(error.value.current); return;
+    }
+    if (error.value?.proposal?.task_reference_update) {
+      showTaskRefusal(error.value.proposal, exact.taskSelection);
+      status(`Not saved. ${Outcome.sentence(error.message)} Correct the task sources, then save again.`); return;
+    }
+    const outcome = Outcome.failure(error);
+    if (outcome.known) { if (error.code === 'proposal') reviewed = null; status(outcome.message); return; }
+    // 5xx, an unreadable reply or no reply: read the file to learn whether the save happened.
+    let value;
+    try { value = await api(encodeURIComponent(id)); } catch (readError) {
+      if (readError.stale || !current(id, version)) return;
+      status(`${outcome.reason}, and the file could not be re-read, so it is unknown whether it saved. Your changes are kept; reload the page to check.`); return;
+    }
+    if (!current(id, version)) return;
+    if (value.sha256 === exact.sha256) { adopt(value); status(`Saved (confirmed from disk). ${outcome.reason}, so the version name may not be recorded.`); }
+    else if (value.sha256 === exact.base) status(`Not saved: ${outcome.reason.toLowerCase()}. The file on disk is unchanged and your changes are kept; press Save version to try again.`);
+    else showConflict(value);
+  }
+  $('discard').addEventListener('click', () => { if (conflict) { const value = conflict; adopt(value); status(`Reloaded ${value.project_id} from disk. Your unsaved changes were dropped.`); } });
   $('rebase').addEventListener('click', () => {
     if (!conflict || bindingConflict()) return;
     // Structured edits are re-applied onto the disk projection, so later proposals keep the
@@ -678,15 +757,15 @@
     const rebased = draft && !text ? Draft.reapply(base.document || anchor.document, draftState(), loaded) : null;
     base = conflict; conflict = null; $('conflict').hidden = true;
     $('revision').textContent = 'File version: ' + base.sha256.slice(0, 12);
-    if (!draft) { invalidate(); status('Current disk source chosen as base. Reconcile your proposal, then review again.'); return; }
+    if (!draft) { invalidate(); status('The latest version is now the base. Reconcile your changes, then press Save to check them.'); return; }
     if (text) {
       draft.rebase(loaded, draftState(), 'Keep pending source on the current disk version'); invalidate();
-      status('Current disk source chosen as base. Your pending Source text still replaces the whole file and does not include the disk change; reconcile it, or Discard to the disk version, before review.');
+      status('The latest version is now the base. Your typed Python text still replaces the whole file and does not include the change on disk; merge it by hand, or Revert to saved.');
       return;
     }
     draft.rebase(loaded, rebased.state, 'Re-apply edits on the current disk version');
     restore(rebased.state); $('source').value = anchor.source; invalidate(); render();
-    status('Current disk source chosen as base; your edits were re-applied onto it and history restarts here.' +
-      (rebased.conflicts.length ? ` Both changed ${rebased.conflicts.join(', ')}; your value was kept.` : '') + ' Review again before saving.');
+    status('Your changes are reapplied onto the latest version.' +
+      (rebased.conflicts.length ? ` Both changed ${rebased.conflicts.join(', ')}; your value was kept.` : '') + ' Press Save to check them; the Save step lists any comment that saving would remove.');
   });
 })();
