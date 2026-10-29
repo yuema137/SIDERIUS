@@ -43,8 +43,8 @@ There are two document formats:
 
 | Format | Class | Task references | Externals | Run route |
 | --- | --- | --- | --- | --- |
-| Reusable (v2, recommended) | `ReusableWorkflowDocument(definition=ReusableWorkflowDefinition(...))` | `ReusableTaskReferences(manifest, data_root)`; no workspace | Mostly `ManagedCandidateBinding`: the preparation step generates the values | `python -m tools.candidate_prepare --reusable-request` then `tools.candidate_operations submit` |
-| Concrete (v1) | `WorkflowDocument(definition=WorkflowDefinition(...))` | `TaskReferences(manifest, data_root, workspace)` | `ExternalBinding(id, contract, location)`: you supply every JSON input file | `tools.workflow_preview` then a `CandidateRunRequest` for `tools.candidate_worker` or `tools.candidate_operations submit` |
+| Reusable (v2, recommended) | `ReusableWorkflowDocument(definition=ReusableWorkflowDefinition(...))` | `ReusableTaskReferences(manifest, data_root)`; no workspace | Mostly `ManagedCandidateBinding`: the preparation step generates the values | `.venv/bin/python -m tools.candidate_prepare --reusable-request` then `.venv/bin/python -m tools.candidate_operations submit` |
+| Concrete (v1) | `WorkflowDocument(definition=WorkflowDefinition(...))` | `TaskReferences(manifest, data_root, workspace)` | `ExternalBinding(id, contract, location)`: you supply every JSON input file | `tools.workflow_preview` (Python) then a `CandidateRunRequest` for `.venv/bin/python -m tools.candidate_worker` or `.venv/bin/python -m tools.candidate_operations submit` |
 
 Use the reusable format unless you need a profile that only the concrete
 format runs (see the [profile matrix](#8-execution-profiles-what-combines)).
@@ -68,8 +68,6 @@ Starting points in [`examples/workflow_declarations/`](../../examples/workflow_d
 | `reusable_training.py` | Propose → Implement → Validate → Train & tune, reusable |
 | `reusable_candidate.py` | Reusable shape with a literal external; authoring and resolution only, not a preparation starting point |
 | `native_training.py` | Script that writes a concrete (v1) four-stage document and its JSON inputs; never launches |
-| `research_loop_request_input.py` | Interpreted research loop that pauses and asks you when a stop condition is met (added by a parallel PR) |
-| `literature_debate_judged.py` | Several literature reviews aggregated by a debate judge before proposals (added by a parallel PR) |
 
 ## 2. Externals
 
@@ -94,13 +92,22 @@ concrete (v1) format's mechanism.
 `interpretation-to-proposal` takes `output`, `storage`, and the optional
 `data_dir`, `task_composition_ref`, `human_advice`, `expert_context`,
 `constraint_context` and `workflow_parameter_rules`
-(`src/workflows/definition/catalog.py`). In
-`native-interpretation-candidate/v1` these are framework-managed: preparation
-fills `human_advice` from `preparation_options.proposal_advice` and always sets
-`expert_context` to `null` (`src/tools/candidate_prepare/reusable_interpretation.py`).
-There is no supported way to supply your own `expert_context` in v1.1.0; carry
-outside findings as proposal advice instead (see
-[section 9](#9-two-step-scenario-literature-findings-then-a-loop)).
+(`src/workflows/definition/catalog.py`). How they are supplied in
+`native-interpretation-candidate/v1` depends on the format:
+
+- Reusable (v2): framework-managed. Preparation fills `human_advice` from
+  `preparation_options.proposal_advice` and always sets `expert_context` to
+  `null` (`src/tools/candidate_prepare/reusable_interpretation.py`), so a
+  reusable document cannot supply its own `expert_context`.
+- Concrete (v1): each optional argument is a literal external you supply. An
+  `ExternalBinding(id="findings", contract="optional.expert-context",
+  location="expert_context.json")` bound to `expert_context` accepts a JSON list
+  of `ExpertContextItem` (`agent.schemas.proposal`: `source`, `kind`,
+  `content`). This route exists in the catalog and the worker, but no test
+  exercises it.
+
+To pass outside findings to the proposer, prefer proposal advice, the tested
+path (see [section 9](#9-two-step-scenario-literature-findings-then-a-loop)).
 
 ## 3. LLM configuration
 
@@ -125,9 +132,9 @@ LLM judge:
 }
 ```
 
-- Each route (`JudgeRouteConfig`) requires `provider`, `model_id` and
-  `max_output_tokens`; `max_retries` is a finite count of total transport
-  attempts; `reasoning_effort` is optional (OpenAI only). No central default
+- Each route (`JudgeRouteConfig`) requires `provider`, `model_id`,
+  `max_output_tokens` and `max_retries` (a finite count of total transport
+  attempts; 0 and 1 both allow only the initial call); `reasoning_effort` is optional (OpenAI only). No central default
   is substituted for a judge model.
 - `stop` serves `JudgeStop`; `aggregate` serves `rubric-rank/v1`,
   `judge-merge/v1` and `primary-advisors-llm/v1`; `debate` serves
@@ -310,8 +317,11 @@ COMBINE strategies (`workflows.definition.llm_strategies`; common fields
 | `debate-judge/v1` | `rounds` 1..4, `critic`, `judge_output` `rank`/`synthesize`, `synthesize_count` iff synthesize | ranking or merged review(s) | rounds × (N + critic) + 1 |
 | `primary-advisors-llm/v1` | `primary`, `primary_item`, `advice` | one revised review | see the judge strategies contract |
 
-N is the number of reviews; a strategy lists every review in one call, so
-N ≤ 16. `max_calls` must be at least the static bound.
+N is the item capacity of the adaptor's input port (`max_items`), not the
+number of reviews that happen to succeed. Every kind except `rubric-rank/v1`
+with `scoring="per_item"` lists all items in one call, so for those kinds
+N ≤ 16; `per_item` scoring sends one item per call and avoids that cap.
+`max_calls` must be at least the static bound.
 
 SELECT and DISTRIBUTE:
 
@@ -349,6 +359,8 @@ branch). In a loop: `final_iteration` × the per-iteration calls and GPU time,
 | `native-literature-collection/v1`, `native-literature-split/v1` | concrete | no | no | several / one | deterministic only |
 | `native-literature-judged/v1` | concrete | no | no | several | yes |
 | `native-proposal-judged/v1` | concrete | no | no | no | yes, over proposals |
+| `native-proposal-fanout-selection/v1` | concrete | yes: one tuner after the first passing validator (deterministic `pass/v1` + `first-admissible/v1` + `single/v1` adaptor) | no | no | no |
+| `native-routed-candidate/v1` | concrete | yes (the fanout-selection node set) | no | no | no; the only profile that admits declared routes (implementation/validation arms only) |
 
 In v1.1.0 a loop and literature-judged aggregation cannot run in one
 declaration. Use the two-step scenario below.
@@ -359,17 +371,14 @@ declaration. Use the two-step scenario below.
    `execution_profile="native-literature-judged/v1"`, several reviews that
    differ by `root_papers` and `dynamic_search`, and a synthesizing judge
    (`debate-judge/v1` with `judge_output="synthesize", synthesize_count=1`, or
-   `judge-merge/v1`), `all/v1`, `single/v1`. The example
-   `examples/workflow_declarations/literature_debate_judged.py` shows this shape.
-   Preview it, build the `CandidateRunRequest`
+   `judge-merge/v1`), `all/v1`, `single/v1`. Preview it, build the `CandidateRunRequest`
    ([worker README](../../src/tools/candidate_worker/README.md)), and submit it
    as a `candidate` operation. The merged review is recorded in the adaptor
    record of the run's graph trace.
 2. **Carry the findings forward.** Read the merged review's findings from run
    A's adaptor record and write them as plain text.
-3. **Run B: the loop.** Use an interpretation-profile loop
-   (`examples/workflow_declarations/research_loop_request_input.py` shows the
-   loop with `on_met="request_input"`). Put the findings text in
+3. **Run B: the loop.** Use a reusable interpretation-profile loop (section 6),
+   for example with `NoImprovementStop(..., on_met="request_input")`. Put the findings text in
    `preparation_options.proposal_advice` of run B's `workflow.py`; it reaches the
    proposer of every iteration through `interpretation-to-proposal`'s
    `human_advice` argument, which the declaration binds to a managed
@@ -386,7 +395,7 @@ An integrated literature + loop profile is planned for v1.2.
 Add an `editor_projects` entry (`project_id`, `project_root`, `source_file`,
 `recovery_directory`) to the console configuration and restart it; see
 [workflow authoring](../../src/tools/workflow_authoring/README.md) steps 3-4.
-The Workflow Editor then shows the file, including its research loop and stop
+The console's Workflow tab then shows the file, including its research loop and stop
 conditions, and can save edits back to it (it rewrites the file in canonical
 form; re-read `workflow.py` afterwards). Adaptors and LLM judges are not drawn,
 and the console lists no literature-judged profile. The file, not the screen,
@@ -401,5 +410,5 @@ is the authority for what runs.
   `final_iteration`.
 - A loop and literature-judged aggregation cannot be combined; integrated
   literature + loop is planned for v1.2.
-- No supported input path for your own `expert_context` in the interpretation profile; use proposal advice.
+- Reusable documents cannot supply their own `expert_context`; the concrete literal route is untested. Use proposal advice.
 - Advice for the interpretation step has no field in the reusable format.

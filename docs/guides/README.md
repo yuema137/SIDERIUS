@@ -15,8 +15,9 @@ the declarations, source owners and validation needed for that operation.
 | Continue earlier work | [Workspaces and resume](workspaces-and-resume.md) |
 | Diagnose a refusal | [Troubleshooting](troubleshooting.md) |
 
-In SIDERIUS 1.1 an experiment is a Python workflow file (`workflow.py`) that
-you write with your coding agent. [Workflow declarations](workflow-declarations.md)
+In SIDERIUS 1.1 you declare an experiment's research steps, advice and
+budgets in a Python workflow file (`workflow.py`) that you write with your
+coding agent. [Workflow declarations](workflow-declarations.md)
 lists what you can set in it, the commands that prepare and run it, how to
 stop, pause and resume a research loop, and which features can be combined.
 The browser console can show the same file but is experimental.
