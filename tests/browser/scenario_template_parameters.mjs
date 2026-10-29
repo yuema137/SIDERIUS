@@ -80,6 +80,25 @@ try {
     await page.locator('#editor-save').click();
     await waitUntil(async () => (await status.textContent()).includes('Saved reviewed'));
   };
+  // Typed Advanced source is not a draft state: a template import is refused (it would be
+  // lost beyond Undo), the typed text survives, and Discard (undoable) clears the way.
+  await page.locator('#settings-toggle').click();
+  await page.locator('#settings-panel input[data-ui-setting="advanced"]').check();
+  await page.keyboard.press('Escape');
+  await page.locator('#editor-advanced').evaluate(el => {el.open = true;});
+  const typed = (await page.locator('#editor-source').inputValue()) + '\n# typed by the author\n';
+  await page.locator('#editor-source').fill(typed);
+  await page.locator('#editor-template-open').click();
+  await page.locator('#editor-template-gallery').locator('.template-card[data-template="single-research-loop"]').click();
+  assert.equal(await page.locator('#editor-template-import').isDisabled(), true, 'Import is refused while typed source is unsaved');
+  assert.match(await page.locator('#editor-template-status').textContent(), /typed Python text/);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#editor-source').inputValue(), typed, 'Typed source survives the refused import');
+  await page.locator('#editor-discard-draft').click();
+  await waitUntil(async () => !(await page.locator('#editor-source').inputValue()).includes('# typed by the author'));
+  await page.locator('#settings-toggle').click();
+  await page.locator('#settings-panel input[data-ui-setting="advanced"]').uncheck();
+  await page.keyboard.press('Escape');
   // Scenario (a): import the single research loop, change a training parameter, review, save.
   await importTemplate('single-research-loop', 'Single research loop');
   for (const id of ['interpret', 'propose', 'implement', 'validate', 'train']) await page.locator(`#circuit-node-${id}`).waitFor();
