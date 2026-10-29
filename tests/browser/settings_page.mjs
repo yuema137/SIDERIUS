@@ -138,6 +138,15 @@ try {
   await page.locator('#settings-status').filter({hasText: 'changed elsewhere'}).waitFor();
   assert.equal(puts.at(-1).expected_sha256, 'b'.repeat(64));
 
+  // A save whose folder sync the server could not confirm says so instead of a plain success.
+  const notice = 'Saved, but the server could not confirm the save is on disk; save again or check the disk before restarting.';
+  const withAdvice = {...saved, advice: {source: 'allowlist', id: 'notes'}};
+  putReply = () => ({json: {...settingsView({settings: withAdvice, sha: 'd'.repeat(64)}), notice}});
+  await page.locator('#settings-save').click();
+  await page.locator('#settings-status').filter({hasText: 'could not confirm'}).waitFor();
+  assert.equal(await page.locator('#settings-status').textContent(), notice);
+  assert.deepEqual(puts.at(-1), {expected_sha256: 'b'.repeat(64), settings: withAdvice});
+
   // Read-only consoles disable every control.
   view = settingsView({writable: false});
   await page.locator('#settings-reload').click();
@@ -153,5 +162,5 @@ try {
   await page.setViewportSize({width: 390, height: 844});
   if (process.env.CONSOLE_SCREENSHOT_DIR) await page.screenshot({path: join(process.env.CONSOLE_SCREENSHOT_DIR, 'settings-mobile.png'), fullPage: true});
   assert.deepEqual(faults, []);
-  console.log('PASS: settings view, profile/advice cards, advice import, export and bearer download, allowlist choice, no-follow folder picking, CAS PUT with refs only, restart notice, stale refusal and read-only mode.');
+  console.log('PASS: settings view, profile/advice cards, advice import, export and bearer download, allowlist choice, no-follow folder picking, CAS PUT with refs only, restart notice, stale refusal, unconfirmed-durability notice and read-only mode.');
 } finally { if (browser) await browser.close(); server.kill('SIGTERM'); lines.close(); }

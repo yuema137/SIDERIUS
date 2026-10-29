@@ -127,7 +127,8 @@ or follows a symlink. Refusals exit 2 and say which item failed:
 `WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
 or the library default profile, when it is a symlink, unreadable or has different
 bytes); `MissingSetting` from an existing console.json names the task field; an
-unusable `--workspace` gets its own message. Residual race: `core.durable_io` publishes by path, so after the no-follow
+unusable `--workspace` gets its own message. Residual race: `core.durable_io`
+publishes by path, so after the no-follow
 parent check only a same-user process, which already owns the workspace, can swap
 a parent.
 
@@ -166,10 +167,15 @@ operator edit. Every `data_folders` ref is resolved and exclusion-checked at
 `check`/startup even when console.json sets that task's `data_root`. A schema
 error names Pydantic `loc` paths only, never values or file text: a segment in the
 schema vocabulary (field names, `FileRef` tags, list indexes, Pydantic's constant
-`[key]` token) is shown verbatim, a `data_folders` entry is shown by its position
-in the file (`data_folders[1].subpath`, `data_folders[0].[key]` for a bad key), and
-a segment not in the schema vocabulary is shown as `<key>`. `data_folders` keys must match the task ID pattern, so a valid but unknown
-task ID is named in the unknown-task refusal.
+`[key]` token) is shown verbatim, the segment directly under the top-level
+`data_folders` field is shown as the entry's zero-based position among the
+`data_folders` entries in the order they are written (`data_folders[1].subpath`,
+`data_folders[0].[key]` for a bad key), and any other segment not in the schema
+vocabulary is shown as `<key>`. The position is exact because
+`settings_file.parse_settings` first refuses any JSON object that repeats a key
+("repeats a key inside one JSON object"), before schema validation. `data_folders`
+keys must match the task ID pattern, so a valid but unknown task ID is named in
+the unknown-task refusal.
 Schema `GlobalSettings`: `schema_version: "siderius.console-global-settings/v1"`,
 `llm_profile: FileRef | null`, `advice: FileRef | null`,
 `data_folders: {task_id: FolderRef}`. `FileRef` is
@@ -219,7 +225,8 @@ output and reusable runs root, and, with a workspace, `settings/` and `library/`
 console's `create_app(config, settings)` passes `protected_paths(config,
 settings.workspace_root)` to `ReusablePreparation`, which forwards it through
 `preflight_reusable_candidate` on the in-process reusable path. Limitation:
-subprocess admission does not receive the console set; its `data_root` must equal the startup-validated `TaskChoice.data_root`
+subprocess admission does not receive the console set; its `data_root` must equal
+the startup-validated `TaskChoice.data_root`
 (`check_request_policy`).
 
 `recorded_examples` is an optional allowlist for read-only candidate-validation

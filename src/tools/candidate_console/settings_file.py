@@ -64,13 +64,47 @@ def read_settings(path: Path) -> tuple[GlobalSettings | None, str | None]:
         raise SettingsInvalid(
             "global settings file must be a private regular file (mode 600)"
         ) from error
+    return parse_settings(payload), hashlib.sha256(payload).hexdigest()
+
+
+class _DuplicateKey(ValueError):
+    pass
+
+
+def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    keys = [key for key, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise _DuplicateKey
+    return dict(pairs)
+
+
+def parse_settings(payload: bytes) -> GlobalSettings:
+    """Validate settings bytes; a repeated key in any JSON object is refused first.
+
+    JSON parsers keep one of two same-named keys silently, so a repeated key is
+    ambiguous and would also make entry positions in error messages wrong.
+    Messages name locations only, never file text.
+    """
+    import json
+
     try:
-        settings = GlobalSettings.model_validate_json(payload)
+        json.loads(payload, object_pairs_hook=_unique_pairs)
+    except _DuplicateKey:
+        raise SettingsInvalid(
+            "global settings file repeats a key inside one JSON object; each key may appear "
+            "only once"
+        ) from None
+    except (ValueError, RecursionError):
+        # RecursionError: nesting too deep for json.loads; refuse like any
+        # other unusable document instead of escaping as a 500.
+        raise SettingsInvalid(f"global settings file is not valid {SETTINGS_SCHEMA} JSON") from None
+    try:
+        return GlobalSettings.model_validate_json(payload)
     except ValidationError as error:
         raise SettingsInvalid(
-            f"global settings file is not valid {SETTINGS_SCHEMA} JSON at {invalid_fields(error, payload)}"
+            f"global settings file is not valid {SETTINGS_SCHEMA} JSON at "
+            f"{invalid_fields(error, payload)}"
         ) from None
-    return settings, hashlib.sha256(payload).hexdigest()
 
 
 def _schema_names() -> frozenset[str]:
@@ -84,7 +118,11 @@ MAPPING_FIELDS = frozenset({"data_folders"})  # values keyed by file-supplied ta
 
 
 def _entry_index(payload: bytes | None, field: str, key: object) -> str:
-    """Position of a mapping entry in the file, so several entries are told apart."""
+    """Position of a mapping entry in the file, so several entries are told apart.
+
+    Exact because ``parse_settings`` refuses repeated keys before any schema error
+    is rendered, so dict order equals the order the entries are written in.
+    """
     import json
 
     if payload is None:
@@ -106,16 +144,17 @@ def invalid_fields(error: ValidationError, payload: bytes | None = None) -> str:
     known = _schema_names()
     locations: set[str] = set()
     for item in error.errors():
-        text, previous = "", None
-        for part in item["loc"]:
-            if previous in MAPPING_FIELDS:
-                text += _entry_index(payload, previous, part)
+        text, loc = "", item["loc"]
+        for depth, part in enumerate(loc):
+            # Mapping fields exist only at the document's top level; a task key that
+            # happens to equal a field name is still a key, not the field.
+            if depth == 1 and loc[0] in MAPPING_FIELDS:
+                text += _entry_index(payload, str(loc[0]), part)
             elif isinstance(part, int):
                 text += f"[{part}]"
             else:
                 segment = part if part in known or part == "[key]" else "<key>"
                 text += ("." if text else "") + segment
-            previous = part
         locations.add(text or "(document)")
     return ", ".join(sorted(locations)[:5])
 
