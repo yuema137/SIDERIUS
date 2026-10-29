@@ -51,7 +51,12 @@ try {
   assert.equal(await page.locator('#view-workflow #new-run-task, #view-workflow #capture-run').count(), 0, 'Workflow page carries no run preparation');
   assert.equal(await page.locator('#view-run #new-run-task').count(), 1);
   assert.equal(await page.locator('#view-run #capture-launch').count(), 1);
-  assert.deepEqual(await page.locator('nav.actions a').allTextContents(), ['Home', 'Workflow Editor', 'Run', 'Monitor']);
+  assert.deepEqual(await page.locator('nav.actions a').allTextContents(), ['Home', 'Workflow Editor', 'Run', 'Monitor', 'Settings']);
+  // The global Settings page is not a journey step: the step indicator hides there.
+  await nav('settings');
+  assert.equal(await page.locator('nav a[aria-current="page"]').textContent(), 'Settings');
+  assert.equal(await page.locator('#step-indicator').isHidden(), true, 'No journey step on Settings');
+  await nav('workflow');
 
   // First run, before Connect: the task-example guide and the Task step lead.
   assert.equal(await page.locator('#workflow-start-guide').isVisible(), true);
