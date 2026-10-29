@@ -43,24 +43,24 @@ def _prepared(tmp_path, monkeypatch, manifest: Path):
 
     with run_registration_scope():
         yield _prepare_request(
-            manifest,
             project,
             workspace,
             compose_run_task_bindings,
             build_task_composition_ref,
             ProposalInput,
             ProposerInterpretationEvidence,
+            manifest=manifest,
         )
 
 
 def _prepare_request(
-    manifest,
     project,
     workspace,
     compose_run_task_bindings,
     build_task_composition_ref,
     ProposalInput,
     ProposerInterpretationEvidence,
+    manifest: Path = QUICKSTART,
 ):
     composition = compose_run_task_bindings(str(manifest))
     seed = ProposalInput(
