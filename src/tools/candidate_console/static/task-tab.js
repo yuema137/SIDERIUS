@@ -212,7 +212,9 @@
     if (pkg.objective_source === 'planner_chooses' || !pkg.objective) { note(box, 'Not fixed by the task: the planner chooses the training objective.'); return; }
     facts(box, Object.entries(pkg.objective).filter(([, value]) => value !== null).map(([name, value]) => [human(name), json(value)]));
   }
-  const direction = value => ({higher: 'Higher is better', lower: 'Lower is better'})[value] || value;
+  // Built from the declared direction, never a fixed claim (presentation ordering census).
+  const direction = value => (value === 'higher' || value === 'lower')
+    ? `${value.charAt(0).toUpperCase()}${value.slice(1)} is better` : value;
   function mainScore(parent, pkg) {
     const box = section(parent, 'Main score', 'task-main-score'), score = pkg.main_score;
     facts(box, [['Metric', mono(score.metric_id)], ['Direction', direction(score.direction)], ['Aggregation', mono(score.aggregation)]]);
