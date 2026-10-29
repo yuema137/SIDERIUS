@@ -170,9 +170,16 @@ def _admit_new(
         try:
             observed = fresh_preview(submission.request)
         except (OSError, ValueError) as error:
-            raise OperationFailure(
-                "candidate_preflight", "candidate inputs or routes changed; review again"
-            ) from error
+            message = "candidate inputs or routes changed; review again"
+            if (
+                isinstance(error, ValueError)
+                and submission.request.preview.document.definition.loop is not None
+                and submission.request.preview.execution_profile
+                != "native-interpretation-candidate/v1"
+            ):
+                # Use validated fields, never exception text that may contain raw inputs.
+                message = "research loops require the native-interpretation-candidate profile"
+            raise OperationFailure("candidate_preflight", message) from error
         try:
             require_credentials(
                 observed.selected_constructor_routes,

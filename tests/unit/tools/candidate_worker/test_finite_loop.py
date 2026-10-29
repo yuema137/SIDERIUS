@@ -571,6 +571,7 @@ def test_loop_on_unsupported_profile_is_refused_before_record_and_dispatch(
     proves the same loop and credentials dispatch on the supported profile.
     ``admit_loop`` and each profile's shape check in ``preview_workflow`` refuse these
     declarations independently, so removing only one of them stays green.
+    The message assertion catches #966: a profile refusal must not blame changed inputs.
     """
     from unittest.mock import Mock
     from uuid import uuid4
@@ -600,7 +601,26 @@ def test_loop_on_unsupported_profile_is_refused_before_record_and_dispatch(
             config, submission, launch_environment={"OPENAI_API_KEY": "offline-test-key"}
         )
     assert refused.value.detail.code == "candidate_preflight"
-    assert refused.value.detail.message == "candidate inputs or routes changed; review again"
+    assert refused.value.detail.message == (
+        "research loops require the native-interpretation-candidate profile"
+    )
+    # Exception payloads may include secrets or arbitrarily long raw input. Neither
+    # the profile-specific refusal nor the generic I/O refusal may forward them.
+    for error_type, message in (
+        (ValueError, "research loops require the native-interpretation-candidate profile"),
+        (OSError, "candidate inputs or routes changed; review again"),
+    ):
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                "tools.candidate_operations.submit.fresh_preview",
+                Mock(side_effect=error_type("secret-sentinel-" * 1000)),
+            )
+            with pytest.raises(OperationFailure) as payload_refusal:
+                submit_operation(
+                    config, submission, launch_environment={"OPENAI_API_KEY": "offline-test-key"}
+                )
+            assert payload_refusal.value.detail.code == "candidate_preflight"
+            assert payload_refusal.value.detail.message == message
     state = Path(config.state_root)
     assert not (state / "operations" / str(submission.request_id)).exists()
     assert not (state / "active.json").exists()

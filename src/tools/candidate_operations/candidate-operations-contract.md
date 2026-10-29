@@ -102,6 +102,13 @@ when inputs change or credentials disappear. Store lock/directories may already
 exist on refusal; no new operation record, worker or native workspace is claimed.
 The existing environment filter remains the forwarding authority.
 
+Fresh-preview refusals retain code `candidate_preflight`. For a `ValueError` on
+an authored loop whose execution profile is not `native-interpretation-candidate/v1`,
+the message is `research loops require the native-interpretation-candidate profile`.
+This fixed message is selected from validated request fields, never exception text
+or raw input. `OSError` and other `ValueError` refusals retain
+`candidate inputs or routes changed; review again`.
+
 ## Run seed (issue #983)
 
 Every `prepare`, `prepare_reusable` and `candidate` operation runs under exactly
