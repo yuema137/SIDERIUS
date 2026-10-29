@@ -17,6 +17,7 @@ import errno
 import json
 import os
 import secrets
+import shlex
 import stat
 from collections.abc import Iterator
 from pathlib import Path
@@ -266,9 +267,21 @@ def ensure_owned_directory(directory: int, name: str, label: str) -> int:
         raise
     if created:
         os.fchmod(child, 0o700)
-    if not _owned(child):
+    metadata = os.fstat(child)
+    if not stat.S_ISDIR(metadata.st_mode):
         os.close(child)
-        raise WorkspaceRefused(f"{label} must be owned by you without group/other write")
+        raise WorkspaceRefused(f"{label} is not a directory")
+    if metadata.st_uid != os.getuid():
+        os.close(child)
+        raise WorkspaceRefused(
+            f"{label} is owned by uid {metadata.st_uid}, not you; choose a folder you own"
+        )
+    if stat.S_IMODE(metadata.st_mode) & 0o022:
+        os.close(child)
+        raise WorkspaceRefused(
+            f"{label} must not have group/other write permissions; "
+            f"fix it with: chmod 700 {shlex.quote(label)}"
+        )
     return child
 
 
@@ -447,14 +460,12 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
                 f"workspace parent {base} must not be writable by group or others; "
                 f"fix it with: chmod 700 {base}"
             )
-        root = ensure_owned_directory(directory, WORKSPACE_DIRECTORY, WORKSPACE_DIRECTORY)
+        root = ensure_owned_directory(directory, WORKSPACE_DIRECTORY, str(workspace))
     opened = {"": root}
     try:
         for name in INIT_CHILDREN:
             above, _, leaf = name.rpartition("/")
-            opened[name] = ensure_owned_directory(
-                opened[above], leaf, f"{WORKSPACE_DIRECTORY}/{name}"
-            )
+            opened[name] = ensure_owned_directory(opened[above], leaf, str(workspace / name))
         _create_token(opened[SETTINGS])
         profile = _default_llm_profile()
         digest = hashlib.sha256(profile).hexdigest()[:12]
@@ -506,7 +517,7 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
                             ensure_owned_directory(
                                 opened[parent_name],
                                 task_id,
-                                f"{WORKSPACE_DIRECTORY}/{parent_name}/{task_id}",
+                                str(workspace / parent_name / task_id),
                             )
                         )
             existing = resolved.config.credential_file

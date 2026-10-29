@@ -209,7 +209,7 @@ def test_fetch_data_refuses_a_group_writable_data_folder(bundle, workspace):
     (root / "data").chmod(0o770)
     result = _fetch(bundle, root)
     assert result.returncode == 2
-    assert "data must be owned by you without group/other write" in result.stderr
+    assert "data must not have group/other write permissions" in result.stderr
     assert not (root / "data" / "quickstart").exists()
 
 

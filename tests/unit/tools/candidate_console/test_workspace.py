@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import stat
 import sys
 from pathlib import Path
@@ -337,6 +338,74 @@ def test_init_refuses_a_group_writable_parent_with_the_chmod_fix(tmp_path):
     assert f"workspace parent {parent.resolve()} must not be writable" in str(refusal.value)
     assert f"chmod 700 {parent.resolve()}" in str(refusal.value)
     assert not (parent / "siderius_workspace").exists()
+
+
+@pytest.mark.parametrize("name", ["", "runs", "library/llm"])
+@pytest.mark.parametrize("mode", [0o770, 0o707])
+def test_init_child_mode_refusal_names_path_and_fix(name, mode, tmp_path):
+    """Defect #1181: child mode refusal omits the full path or usable chmod command."""
+    parent = tmp_path / "parent with spaces"
+    parent.mkdir(mode=0o700)
+    config = init_workspace(str(parent))
+    child = config.parent.parent / name
+    child.chmod(mode)
+    before = config.read_bytes()
+    with pytest.raises(WorkspaceRefused) as refusal:
+        init_workspace(str(parent))
+    message = str(refusal.value)
+    assert str(child) in message
+    assert "group/other write" in message
+    assert f"chmod 700 {shlex.quote(str(child))}" in message
+    assert _mode(child) == mode
+    assert config.read_bytes() == before
+
+
+@pytest.mark.parametrize("mode", [0o700, 0o770])
+def test_init_child_owner_refusal_names_path_without_chmod(mode, tmp_path, monkeypatch):
+    """Defect #1181: foreign child ownership is misdiagnosed as fixable with chmod."""
+    config = init_workspace(str(tmp_path))
+    child = config.parent.parent / "runs"
+    child.chmod(mode)
+    identity = child.stat()
+    real_fstat = os.fstat
+    foreign_uid = os.getuid() + 1
+
+    def foreign_child(descriptor):
+        metadata = real_fstat(descriptor)
+        if (metadata.st_dev, metadata.st_ino) == (identity.st_dev, identity.st_ino):
+            fields = list(metadata)
+            fields[4] = foreign_uid
+            return os.stat_result(fields)
+        return metadata
+
+    monkeypatch.setattr(os, "fstat", foreign_child)
+    with pytest.raises(WorkspaceRefused) as refusal:
+        init_workspace(str(tmp_path))
+    message = str(refusal.value)
+    assert str(child) in message
+    assert f"owned by uid {foreign_uid}" in message
+    assert "choose a folder you own" in message
+    assert "chmod" not in message
+    assert _mode(child) == mode
+
+
+@pytest.mark.parametrize("kind", ["file", "symlink"])
+def test_init_child_type_refusal_names_path_without_chmod(kind, tmp_path):
+    """Defect #1181: a non-directory child refusal lacks its full location."""
+    root = tmp_path / "siderius_workspace"
+    root.mkdir(mode=0o700)
+    child = root / "runs"
+    if kind == "file":
+        child.write_text("preserve me")
+    else:
+        child.symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(WorkspaceRefused) as refusal:
+        init_workspace(str(tmp_path))
+    message = str(refusal.value)
+    assert str(child) in message
+    assert "not a symlink or file" in message
+    assert "chmod" not in message
+    assert child.is_symlink() if kind == "symlink" else child.read_text() == "preserve me"
 
 
 def test_init_never_follows_a_symlinked_child(tmp_path):
