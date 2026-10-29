@@ -402,10 +402,13 @@ class CandidateConsole:
         request_cancel(self.config.operation_store, operation_id)
         return OperationCancelAcknowledgement(operation_id=operation_id)
 
-    def operations(self, limit: int = 50) -> OperationListView:
-        """Read-only list of this store's verified records; receipts and paths stay out."""
+    def operations(self, limit: int = 50, project_id: str | None = None) -> OperationListView:
+        """Read-only list of this store's verified records; receipts and paths stay out.
+
+        ``project_id`` keeps only runs attributed to that experiment setup.
+        """
         store = self.config.operation_store
-        listing = list_operations(store, limit)
+        listing = list_operations(store, limit, project_id)
         items = []
         for entry in listing.entries:
             snapshot = entry.snapshot

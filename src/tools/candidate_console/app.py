@@ -193,8 +193,11 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
         return await run_in_threadpool(service.launch, selection)
 
     @app.get("/api/operations")
-    def operations(limit: int = Query(50, gt=0, le=200)):
-        return service.operations(limit)
+    def operations(
+        limit: int = Query(50, gt=0, le=200),
+        project_id: str | None = Query(None, pattern=r"^[a-zA-Z0-9_-]{1,80}$"),
+    ):
+        return service.operations(limit, project_id)
 
     @app.get("/api/operations/{operation_id}")
     def status(operation_id: UUID):
