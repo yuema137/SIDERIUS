@@ -389,9 +389,9 @@ def test_review_refuses_single_file_mode_for_a_task_without_tidmad_topology(tmp_
 
     quickstart, _ = copy_quickstart_package(tmp_path / "task")
     with pytest.raises(OperationFailure, match="is_trial to true") as raised:
-        check_trainable_launch(_training_document(), task_manifest=str(quickstart))
+        check_trainable_launch(_training_document(is_trial=False), task_manifest=str(quickstart))
     assert raised.value.detail.code == "launch_policy"
     check_trainable_launch(_training_document(is_trial=True), task_manifest=str(quickstart))
     # A TIDMAD-topology profile keeps its single-file path: is_trial false stays admitted.
     tidmad = _tidmad_topology_manifest(tmp_path)
-    check_trainable_launch(_training_document(), task_manifest=tidmad)
+    check_trainable_launch(_training_document(is_trial=False), task_manifest=tidmad)
