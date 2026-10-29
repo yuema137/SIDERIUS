@@ -36,8 +36,9 @@ if TYPE_CHECKING:
 #: sampling (a run's formal/trial portions and seeds select a subset of this).
 FULL_PORTION = 1.0
 BASIS = (
-    "full task split, before any run-level sampling: snapshot strategy, training "
-    "and evaluation portion 1.0, no sampling seed and no planner-chosen task parameters"
+    "Full task split, before any run-level sampling: every partition of the training "
+    "and evaluation split is used (portion 1.0), no sampling seed is set, and the "
+    "planner chooses no task parameters"
 )
 
 

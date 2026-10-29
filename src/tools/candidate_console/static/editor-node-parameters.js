@@ -73,6 +73,7 @@
     group.id = 'editor-training-settings';
     group.addEventListener('toggle', () => { trainingOpen = group.open; });
     const summary = node('summary', '', group);
+    node('p', 'Trial is a short screening training of each candidate. Formal is the full training of the chosen candidate, and its score is the one that counts (the best valid Formal score).', group, 'muted').id = 'editor-training-trial-formal-help';
     for (const text of ['Epochs are ceilings; native planning resolves epochs. Task-owned rules may further constrain this run.',
       `Preparation output restriction: ${show(training.allowed_output_types)}`]) node('p', text, group, 'muted').dataset.uiFlag = 'advanced';
     const rows = [];

@@ -200,11 +200,22 @@
       note(result, `Samples could not be counted: ${message}`, 'warning');
     }
   }
-  const IO_LABELS = {input_shape: 'Input shape', input_description: 'Input', output_shape: 'Output shape', output_description: 'Output'};
+  // The task's forward contract (ForwardContract fields). A shape is shown as monospace
+  // text followed by its one-line meaning; notes are shown as plain text.
+  const IO_NOTES = {embedding_note: 'Input encoding', output_head_note: 'Output head'};
+  function ioCell(shape, meaning) {
+    const cell = el('span', '', null);
+    if (shape) cell.append(mono(shape));
+    if (meaning) cell.append(document.createTextNode(shape ? ` — ${meaning}` : meaning));
+    return cell;
+  }
   function modelIo(parent, pkg) {
-    const box = section(parent, 'Model input and output', 'task-model-io');
-    const rows = Object.entries(pkg.model_io || {}).filter(([, value]) => value !== '' && value !== null && value !== 0)
-      .map(([name, value]) => [IO_LABELS[name] || human(name), typeof value === 'string' && name.endsWith('_shape') ? mono(value) : json(value)]);
+    const box = section(parent, 'Model input and output', 'task-model-io'), io = pkg.model_io || {};
+    const rows = [];
+    if (io.input_shape || io.input_description) rows.push(['Input', ioCell(io.input_shape, io.input_description)]);
+    if (io.output_shape || io.output_description) rows.push(['Output', ioCell(io.output_shape, io.output_description)]);
+    if (io.num_classes) rows.push(['Classes', count(io.num_classes)]);
+    for (const [name, label] of Object.entries(IO_NOTES)) if (typeof io[name] === 'string' && io[name]) rows.push([label, io[name]]);
     if (rows.length) facts(box, rows); else note(box, 'Not declared by this task.');
   }
   function objective(parent, pkg) {
