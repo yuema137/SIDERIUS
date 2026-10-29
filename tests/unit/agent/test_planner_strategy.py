@@ -194,11 +194,15 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # native planner record this identity in run_invariants_lock.json and refuse
 # resume when it changes, so an edit to any fingerprinted planner/bridge source
 # must be a deliberate, reviewed identity change that updates this pin.
+# Deliberately moved by B3-4b (#1078): llm_bridge.py stamps each token row with
+# the bound parallel unit (agent.token_unit). Serial rows are byte-identical, but
+# the bridge source is part of the planner assembly, so workspace resume across
+# this change is refused (previous assembly 7bc6513b...).
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
     "content_sha256": "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562",
-    "assembly_sha256": "7bc6513b764ac32606ec7240d11259cf4a74e5d77900f83d47c8453f5ba5a2b4",
+    "assembly_sha256": "535247aae36ff96838bf652f16e4e422c12013acb7fec365b0db3d2c3eb75d55",
 }
 
 

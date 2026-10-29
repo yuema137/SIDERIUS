@@ -57,6 +57,7 @@ from workflows.judge_strategies import (
     run_llm_strategy,
     strategy_items,
 )
+from workflows.judge_strategies.models import StrategyEvidence
 
 _SRC = Path(__file__).resolve().parents[3] / "src"
 ROUTE = JudgeRoute(
@@ -467,6 +468,70 @@ def test_run_refuses_before_any_call(tmp_path):
     with pytest.raises(StrategyError, match="never reused"):
         run(stale, bridge, tmp_path)
     assert bridge.calls == []
+
+
+@pytest.mark.parametrize(
+    ("status", "failure_code", "fields"),
+    [
+        ("failed", "prompt_too_large", fields)
+        for fields in ({}, {"unsent_prompt_chars": 400001}, {"unsent_prompt_sha256": "b" * 64})
+    ]
+    + [
+        (status, failure_code, fields)
+        for status, failure_code in [
+            ("decided", None),
+            ("skipped", None),
+            *[
+                (status, code)
+                for status in ("failed", "fallback")
+                for code in (
+                    "insufficient_items",
+                    "primary_unavailable",
+                    "cardinality_mismatch",
+                    "provider_error",
+                    "invalid_payload",
+                    "inadmissible_choice",
+                    "deadline",
+                )
+            ],
+        ]
+        for fields in (
+            {"unsent_prompt_chars": 400001},
+            {"unsent_prompt_sha256": "b" * 64},
+            {"unsent_prompt_chars": 400001, "unsent_prompt_sha256": "b" * 64},
+        )
+    ],
+)
+def test_unsent_prompt_fields_are_required_exactly_for_prompt_too_large(
+    status, failure_code, fields
+):
+    """Defect: incomplete unsent measurements or measurements on other outcomes pass.
+
+    Removing the cross-field validator must make the expected refusal fail;
+    all other evidence invariants are satisfied independently.
+    """
+    no_calls = status == "skipped" or failure_code in {
+        "insufficient_items",
+        "primary_unavailable",
+    }
+    record = {
+        "invocation_sha256": "a" * 64,
+        "strategy_kind": "debate-judge/v1",
+        "static_call_bound": 1,
+        "calls": () if no_calls else ("c" * 64,),
+        "outcome": {
+            "status": status,
+            "ranking": {"order": ("reviews:0",)} if status in {"decided", "skipped"} else None,
+            "failure_code": failure_code,
+            "fallback_combine": "pass/v1" if status == "fallback" else None,
+        },
+        **fields,
+    }
+    with pytest.raises(
+        ValidationError,
+        match="unsent prompt size and digest are required exactly for prompt_too_large",
+    ):
+        StrategyEvidence.model_validate(record)
 
 
 def test_invocation_refuses_a_rubric_or_guidance_it_does_not_reference(tmp_path):
