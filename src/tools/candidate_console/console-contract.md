@@ -2247,3 +2247,84 @@ metadata without replacing drafts, retaining a selection only while choice ID an
 full binding still match. Changed native identity uses the authoring owner’s
 [fresh-candidate and native-profile checks](../workflow_authoring/authoring-contract.md#changed-task-versions-for-fresh-candidates);
 `execution_ready` remains false. No existing run/capture is rewritten.
+
+## Task summary (read-only Task panel)
+
+Owners: `task_summary.py` (`TaskSummaries`, `TaskSummaryView`, `walk_data_root`),
+`task_summary_routes.py`; package facts come from the sandboxed composition child
+(`tools/setup_review/package_facts.py`). Task code never runs in the console process.
+
+Routes (authenticated, `RequestBoundary`):
+
+- `GET /api/tasks` -> `{tasks: [{task_id, label}]}` from configured `TaskChoice`s.
+  Experiment-setup counts are omitted until a setup registry exists.
+- `GET /api/tasks/{task_id}/summary[?refresh=1][&count_samples=1]` ->
+  `TaskSummaryView` (`schema_version: siderius.console-task-summary/v1`); 404 for an
+  unknown task. Prerequisite and observation failures are states, never HTTP 500.
+
+States: `observing` (child running; poll the same URL), `ready`, `failed`
+(`failure: {stage, message}`; `stage` is a `CheckFailure` stage such as
+`composition`, `planner_strategy`, `package_facts`, `sandbox`, `transport`,
+`stale_manifest`, or `console` for an unexpected console-side error) and
+`unavailable` (`unavailable: {reason, hint}`; `reason` is `sandbox_missing`,
+`data_root_missing`, `manifest_missing` or `llm_config_unreadable`). The model
+profile is read because the child resolves its planner strategy exactly as the
+editor's task observation does.
+
+Observation: the request thread reads the manifest digest and model profile, then
+builds `CompositionJob(summary=TaskSummaryRequest(data_root, count_samples))` with
+the task's `preparation_timeout_seconds`. A background thread walks `data_root`
+and runs `observe_composition` under `preparation_root/<uuid4>` with the task's
+`task_read_only` sources; `data_root` is mounted read-only only for summary jobs.
+`SandboxUnavailable` from the sandbox owner maps to `unavailable/sandbox_missing`.
+Cache: in memory, keyed by `(task_id, manifest sha256, digest of the job with an
+empty scratch)`; a changed manifest yields a new key and drops that task's old
+entries; `refresh=1` re-observes unless an observation is in flight. Sample counts
+are a separate key and run only when `count_samples=1` is requested.
+Only the manifest bytes enter the key: after editing any other package file
+(plugins, declarations, Health config, task code) the operator must Refresh
+(`refresh=1`) to see the change.
+
+View fields:
+
+- `data_root`, `run_policy` (`TaskChoice` timeouts, network, devices,
+  `candidate_environment_names` as names only, `allowed_output_types`). No credential
+  file is read; no secret value can appear.
+- `data_volume`: `{files, bytes, complete, entry_cap}` from a no-follow walk
+  (`os.scandir`, symlinks counted as entries and never followed), capped at
+  100 000 entries; `complete=false` when the cap was reached.
+- `package` (only when `ready`): `identity` (`semantic_fingerprint`,
+  `task_data_path_id`, configured `task_revision`, `revision_matches`),
+  `description` and `model_io` (the composed `task_description` and
+  `forward_contract`), `partition_count`, `main_score` (primary metric `id`,
+  `direction`, `aggregation` from the metric declaration),
+  `observational_metrics` (secondary metrics), `locked_parameters`
+  (`ParameterRules` path -> its single serialized kind `exact`/`range`/`allowed`/`predicate` and value; `{"exact": null}` is a lock of null),
+  `objective` (`LossConfig` dump) with `objective_source` `task` or
+  `planner_chooses`, `deliverable` (`DeliverableNaming` dump or `null` when not
+  declared), `health` (`project_health_roster`: `declaration` and per gate
+  `gate_id`, `checks`, declared `role` `blocking`/`observational`), `plugins`
+  (`configured_ref`, `symbol`, `roles`), `model_types`, `scopes`, `sample_counts`.
+- Plugin `roles` come only from exact file identity: the source files of the
+  resolved task data path and metric implementations, the model-plugin binding's
+  plugin paths, and `source_paths` keys whose value equals the plugin path;
+  otherwise `["unrecorded"]`. Names are never interpreted.
+- `scopes` (`DataScopeFacts`): the task's full declared split, before any
+  run-level sampling: built by `task_data_path.build_full_declared_split` (`formal`,
+  `snapshot`, portion 1.0, a declared frozen training pool's parent pool), no sampling
+  seed and no planner task parameters (`basis` states this). A run's own portions and seeds
+  select a subset of it. `declared` carries per-leg
+  `{file_count, expected_on_disk_bytes}` from the task's `storage_read_scope`;
+  `not_declared` (no scope capability or no `storage_read_scope`) carries no
+  volumes, never 0; `failed` carries the task's message. There is no test-split
+  concept: only training and evaluation scopes are shown.
+- `sample_counts` (`SampleCountFacts`, only with `count_samples=1`): `len()` of the
+  task's `training_dataset` (`train_portion=1.0`) and
+  `validation_dataset` over those scopes; `not_countable` when the task builds no
+  scopes or its datasets have no length. Counting may read the data; it runs in the
+  same sandbox and timeout.
+
+`CompositionJob.summary` and `CompositionResult.package` are excluded when absent,
+so existing check/editor job digests and observations are byte-identical. The
+transport refuses a passed result whose `package`/`sample_counts` presence does not
+match the request.
