@@ -47,7 +47,11 @@
     nodeIds: [...new Set([...(anchor?.document?.definition.nodes || []).map(n => n.id), ...(graph?.definition.nodes || []).map(n => n.id), ...pendingNodes.map(n => n.node)])],
     taskBinding: base?.document?.task_binding ? {package_id: base.document.task_binding.package_id, revision: base.document.task_binding.revision} : null});
   // importSource: a template's unsaved source enters the ordinary source Review (editor-templates.js).
-  window.workflowEditor = Object.freeze({get state() { return projection(); }, importSource: (source, label) => reviewProposal({kind: 'source', source}, label),
+  window.workflowEditor = Object.freeze({get state() { return projection(); }, importSource: (source, label) => {
+    // Typed Python is not a draft state; folding the import would drop it beyond Undo.
+    if (sourceDirty) { status('Save or revert your typed Python text first, then use a template.'); return Promise.resolve(false); }
+    return reviewProposal({kind: 'source', source}, label);
+  },
     // "Blank workflow": delete every module in the draft (undoable); the empty state shows.
     clearAll: () => { const ids = (display?.definition.nodes || []).map(n => n.id); if (ids.length) removeNodes(ids); return ids.length; }});
   const bindingEqual = (a, b) => !!a && !!b && ['schema_version', 'package_id', 'revision', 'semantic_fingerprint', 'task_data_path_id'].every(key => a[key] === b[key]);
