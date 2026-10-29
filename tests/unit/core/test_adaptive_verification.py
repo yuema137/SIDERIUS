@@ -365,7 +365,7 @@ def test_fast_heterogeneous_batches_verify_without_500ms_wall_time(batch_size, m
 
 def test_submillisecond_count_path_still_rejects_sustained_pathological_slowdown():
     """Issue #565's permissive fast path must retain the slowdown fail-closed gate."""
-    cfg = AdaptiveVerificationConfig(fast_phase_min_observations=100)
+    cfg = AdaptiveVerificationConfig(fast_phase_min_observations=100, pathological_min_unit_ms=0.0)
     verifier = AdaptiveUnitVerification("validation_sample", cfg)
     for _ in range(30):
         verifier.feed(0.005, elapsed_ms=0.32)
@@ -453,7 +453,11 @@ def test_fast_stable_phases_collect_the_same_evidence_time(unit_ms, batch):
 @pytest.mark.parametrize("unit_ms", [0.05, 2.0, 80.0])
 def test_isolated_relative_delay_is_recorded_without_failure(unit_ms):
     """A single scheduling/I/O spike cannot establish persistent pathological speed."""
-    cfg = _config(min_timed_ms=unit_ms * 200, max_wall_ms=unit_ms * 1000)
+    cfg = _config(
+        min_timed_ms=unit_ms * 200,
+        max_wall_ms=unit_ms * 1000,
+        pathological_min_unit_ms=0.0,
+    )
     verifier = AdaptiveUnitVerification("sample", cfg)
     for _ in range(20):
         verifier.feed(unit_ms)
@@ -477,7 +481,7 @@ def test_fast_phase_extension_still_obeys_time_cap():
 
 def test_pending_slow_observation_explains_rejection_with_satisfied_minimums():
     """2026-09-19 V4: count/time passed, but the diagnostic reported unmet:none."""
-    cfg = _config(min_timed_ms=40, max_steps=21)
+    cfg = _config(min_timed_ms=40, max_steps=21, pathological_min_unit_ms=0.0)
     verifier = AdaptiveUnitVerification("sample", cfg)
     for _ in range(20):
         assert not verifier.is_terminal

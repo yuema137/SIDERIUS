@@ -126,6 +126,16 @@ class AdaptiveVerificationConfig(BaseModel):
             "also uses this factor without treating recurring expensive units as drift."
         ),
     )
+    pathological_min_unit_ms: float = Field(
+        default=100.0,
+        ge=0.0,
+        allow_inf_nan=False,
+        description=(
+            "Minimum observation wall time / later-block median wall time for relative slowdown refusal. "
+            "Below this floor, timing jitter cannot count as pathological; rates stay normalized. "
+            "Environment-scopeable via runtime policy; zero restores relative-only checks."
+        ),
+    )
     max_unit_ms: float | None = Field(
         default=None,
         gt=0.0,
@@ -293,8 +303,10 @@ class AdaptiveUnitVerification:
         """Do not let an accepted suffix hide a distinct earlier rate regime."""
         shift = find_distribution_shift(
             self._all_times_ms,
+            elapsed_ms=self._elapsed_times_ms,
             steady=self.config.steady,
             pathological_factor=self.config.pathological_factor,
+            pathological_min_unit_ms=self.config.pathological_min_unit_ms,
         )
         if shift is not None:
             self._failure_reason = (
@@ -388,7 +400,10 @@ class AdaptiveUnitVerification:
         if reference is None and self._detector.detected and prior_steady:
             reference = statistics.median(prior_steady)
         if reference is not None:
-            if unit_ms > self.config.pathological_factor * reference:
+            if (
+                self._elapsed_times_ms[-1] >= self.config.pathological_min_unit_ms
+                and unit_ms > self.config.pathological_factor * reference
+            ):
                 self._slow_reference_ms = reference
                 self._slow_streak += 1
                 self._slow_observations.append(len(self._all_times_ms) - 1)
