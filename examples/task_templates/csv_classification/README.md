@@ -52,7 +52,7 @@ scored and when a result is invalid. The folder holds no data.
 | `declared/task_health.yaml` | The two Health checks, their thresholds and the number of classes. | yes |
 | `declared/dataset_profile.json` | The two data partitions (0 = training file, 1 = validation file) and a one-line data source note. | the note only |
 | `declared/metric_balanced_accuracy.json` | The main score's name and direction (higher is better). | no |
-| `plugins/_csv_task.py` | Reads the CSV files and writes each model's predictions. | no |
+| `plugins/_csv_task.py` | Reads the CSV files and writes each model's predictions. Holds one optional `EDIT HERE` constant, `TASK_DATA_PATH_ID`. | one constant |
 | `plugins/_csv_metrics.py` | Computes balanced accuracy. | no |
 | `plugins/_csv_health_views.py` | Hands the predicted classes to the Health checks. | no |
 | `plugins/csv_reference_mlp.py` | A small reference model the run must be able to build. | two numbers |
@@ -87,6 +87,7 @@ SIDERIUS checkout's root folder.
    | `declared/task_health.yaml` | `symbol_cardinality`: the number of classes. `max_dominant_fraction`: a value above your largest class's share of `validation.csv` (for example 0.8 when the largest class is 60% of rows). |
    | `declared/dataset_profile.json` | `source`: one sentence on where the data comes from and how you split it. |
    | `plugins/csv_reference_mlp.py` | `FEATURE_COUNT` and `CLASS_COUNT`. |
+   | `plugins/_csv_task.py` | `TASK_DATA_PATH_ID` (optional): a short identifier for this task's data path, recorded in run identity. Give each task its own value, so two tasks loaded in one process do not share it. Leave the default if you load only this task. |
 
    Features are passed to models as the numbers in the file. If their scales
    differ by orders of magnitude, standardize them with training-file
@@ -101,8 +102,12 @@ SIDERIUS checkout's root folder.
      --label "Iris species"
    ```
 
-   `add-task` passes this machine's NVIDIA GPUs (`/dev/nvidia<N>`) to runs and
-   prints them as `candidate_devices: ...`; add `--no-gpu` for a CPU-only task.
+   You do not need `--device`. `add-task` finds this machine's NVIDIA GPUs
+   (`/dev/nvidia<N>`), passes them to runs and prints them as
+   `candidate_devices: ...`. Add `--no-gpu` for a CPU-only task, or
+   `--device PATH [PATH ...]` to pass exactly the device paths you name. To change
+   the devices later, edit the `candidate_devices` list in this task's entry in
+   `siderius_workspace/settings/console.json`, then restart the console.
    Success: it prints the entry it added and ends with
    `Restart the console to load the new task.` `add-task` checks the console
    entry and folders; it does not read your CSV files. The next step does.

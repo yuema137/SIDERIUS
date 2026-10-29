@@ -89,6 +89,9 @@ you own; the console workspace is created inside it) and
    own with mode `600`, and never prints its contents.
    [Credentials](../../src/tools/candidate_console/README.md#credentials) explains
    the file formats and what happens when `console.json` already exists.
+   The workspace's parent folder (`/absolute/project` above) must be owned by you
+   and not writable by group or others, or `init` refuses it; `mkdir -p` under a
+   umask of 002 creates such folders, so fix one with `chmod 700 /absolute/project`.
 
 4. **Write the example data into the workspace.**
 
