@@ -125,7 +125,7 @@ overwrites an existing `tasks/` folder.
    | `task_read_only` | the package folder, so the run sandbox can read the plugins and declarations beside the manifest |
    | `preparation_timeout_seconds`, `candidate_timeout_seconds` | starting values 300 and 3600 seconds; change them with `--prepare-timeout` and `--candidate-timeout` |
    | `candidate_network` | `true`; use `--no-network` to run candidates offline |
-   | `candidate_devices` | the devices you pass with `--device`, for example `--device /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm`. Without `--device` in a terminal, it lists the machine's `/dev/nvidia*` devices and asks whether to pass them; in a script it passes none and says so |
+   | `candidate_devices` | this machine's NVIDIA GPU nodes (`/dev/nvidia0`, `/dev/nvidia1`, ...), found without asking and printed as `candidate_devices: ...`; none when the machine has no NVIDIA GPU. `--no-gpu` writes none; `--device PATH ...` writes exactly the paths you give. Control nodes such as `/dev/nvidia-uvm` are not written: the run sandbox adds the ones present at launch |
    | `candidate_environment_names` | the API key names your selected model profile needs (for example `OPENAI_API_KEY`), plus names you add with `--env` |
 
    Read the printed entry and edit `console.json` if a starting value does not

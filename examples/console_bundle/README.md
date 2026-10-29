@@ -99,14 +99,14 @@ version in the zip's name.
    import with `--task-id NAME` in step 4, run this step with the same
    `--task-id NAME`, because the data folder is then `data/NAME/`.
 
-4. Import the task and its experiment setup. Pass the GPU device files that runs
-   may use (these are the usual ones; list yours with `ls /dev/nvidia*`):
+4. Import the task and its experiment setup.
+   `add-task` finds this machine's NVIDIA GPUs (`/dev/nvidia<N>`) and passes
+   them to runs; add `--no-gpu` for a CPU-only task:
 
    ```bash
    .venv/bin/python -m tools.candidate_console add-task \
      --config /absolute/project/siderius_workspace/settings/console.json \
-     --from-bundle /absolute/downloads/siderius-example-quickstart-<version> \
-     --device /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm
+     --from-bundle /absolute/downloads/siderius-example-quickstart-<version>
    ```
 
    The command checks every file against `SHA256SUMS`, copies `task/` to
@@ -114,6 +114,7 @@ version in the zip's name.
    creates the experiment setup from the template. Success looks like this:
 
    ```text
+   candidate_devices: /dev/nvidia0 (NVIDIA GPU found on this machine; runs also get read-only /sys and the NVIDIA control nodes; pass --no-gpu to give runs no GPU)
    Copied the verified task package to /absolute/project/siderius_workspace/tasks/quickstart
    Added task quickstart to /absolute/project/siderius_workspace/settings/console.json:
    ...

@@ -136,7 +136,7 @@ otherwise 2. `--gpu`/`--task` are refused for `serve`/`init`; `--task` needs `--
 
 Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
 <console.json> (--manifest <path> | --from-bundle DIR) [--task-id ID] [--label TEXT]
-[--env NAME ...] [--network|--no-network] [--device PATH ...] [--prepare-timeout S]
+[--env NAME ...] [--network|--no-network] [--device PATH ... | --no-gpu] [--prepare-timeout S]
 [--candidate-timeout S] [--external] [--dry-run]`. Exactly one of `--manifest` and
 `--from-bundle` is required; `--from-bundle` is specified in the next section.
 
@@ -162,11 +162,16 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
   `candidate_timeout_seconds=3600.0` and `candidate_network=true` unless
   `--prepare-timeout`, `--candidate-timeout` or `--no-network` is given; they are
   starting values for the operator to review, not resource limits the framework
-  chooses. `candidate_devices` is `--device` when given; otherwise, when stdin is a
-  TTY and `/dev/nvidia*` character devices exist, the command lists them and asks
-  whether to pass them (no answer, EOF or Ctrl-C refuses with exit 2); else it is
-  `[]` and the command prints
-  `candidate_devices: none (...)`. `candidate_environment_names` is
+  chooses. `candidate_devices` is `--device` when given and `[]` with `--no-gpu`
+  (the two are mutually exclusive); otherwise it is `add_task.host_gpu_devices()`,
+  the host's `/dev/nvidia<N>` character devices (regex
+  `tools.workspace_sandbox.gpu.GPU_NODE`, symlinks excluded), sorted, with no
+  prompt on a TTY or elsewhere. Control nodes are never written, because the
+  sandbox passes the present ones at launch and a written, lazily created node
+  (`/dev/nvidia-uvm`) would make admission refuse the run. The command prints
+  `candidate_devices: <paths> (NVIDIA GPU found on this machine; ...)`,
+  `candidate_devices: none (no NVIDIA GPU device node on this machine)`, or the
+  explicit choice. `candidate_environment_names` is
   `credential_requirements(routes, ()).required_names` (the worker preflight owner)
   for every route of the task's resolved LLM profile
   (`setup_review.routes.standard_llm_routes` with literature and analysis enabled,

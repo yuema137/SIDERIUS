@@ -9,7 +9,13 @@ from pathlib import Path
 import pytest
 
 from tests.unit.tools.candidate_console.conftest import copy_quickstart_package
-from tools.candidate_console.add_task import AddTaskRefused, AddTaskRequest, plan_task, publish_task
+from tools.candidate_console.add_task import (
+    AddTaskRefused,
+    AddTaskRequest,
+    host_gpu_devices,
+    plan_task,
+    publish_task,
+)
 from tools.candidate_console.settings_models import SETTINGS_SCHEMA, GlobalSettings, LibraryRef
 from tools.candidate_console.workspace import init_workspace
 
@@ -58,7 +64,7 @@ def test_add_task_writes_starter_fields_and_package_mount_and_check_passes(
     )
     assert code == 0, err
     assert "Restart the console to load the new task." in out
-    assert "candidate_devices: none" in out  # non-interactive default is printed
+    assert "candidate_devices: none (no NVIDIA GPU" in out  # the detection is printed
     (entry,) = _tasks(config)
     assert entry == {
         "task_id": "quickstart",
@@ -276,17 +282,47 @@ def test_add_task_refuses_and_check_warns_about_a_device_the_sandbox_cannot_pass
     assert "/dev/null" not in err
 
 
-def test_interactive_prompt_passes_the_listed_nvidia_nodes(workspace, monkeypatch, capsys):
-    """Defect: without --device on a TTY, the listed host GPU nodes are not offered or not used."""
+def test_host_gpu_nodes_are_written_without_asking_and_no_gpu_opts_out(
+    workspace, monkeypatch, capsys
+):
+    """Defect: on a GPU host add-task asks (or, without a TTY, silently writes no
+    device), so the first GPU run is refused; or --no-gpu/--device do not override
+    the detection. Fails if detection prompts, the detected nodes are not written and
+    printed, --no-gpu writes a device, or --device is replaced by the detection."""
     _, config, manifest = workspace
-    nodes = ("/dev/nvidia0", "/dev/nvidiactl")
+    nodes = ("/dev/nvidia0", "/dev/nvidia1")
     monkeypatch.setattr("tools.candidate_console.add_task.host_gpu_devices", lambda: nodes)
     monkeypatch.setattr("tools.candidate_console.package_mounts.device_problem", lambda _: None)
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
-    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("add-task must not ask"))
     plan = plan_task(AddTaskRequest(config=str(config), manifest=str(manifest)))
     assert plan.entry["candidate_devices"] == list(nodes)
-    assert "/dev/nvidia0, /dev/nvidiactl" in capsys.readouterr().out
+    assert "candidate_devices: /dev/nvidia0, /dev/nvidia1 (NVIDIA GPU found" in (
+        capsys.readouterr().out
+    )
+    argv = ("add-task", "--dry-run", "--config", str(config), "--manifest", str(manifest))
+    code, out, err = _main(monkeypatch, capsys, *argv, "--no-gpu")
+    assert code == 0, err
+    assert '"candidate_devices": []' in out
+    code, out, err = _main(monkeypatch, capsys, *argv, "--device", "/dev/nvidia1")
+    assert code == 0, err
+    assert '"candidate_devices": [\n' in out and '"/dev/nvidia0"' not in out
+    with pytest.raises(SystemExit):
+        _main(monkeypatch, capsys, *argv, "--no-gpu", "--device", "/dev/nvidia1")
+
+
+def test_host_gpu_devices_lists_only_gpu_nodes(monkeypatch):
+    """Defect: control nodes such as /dev/nvidia-uvm are written into candidate_devices;
+    the node can be absent until first CUDA use, and admission then refuses the run.
+    Fails if anything but /dev/nvidia<N> character devices is returned."""
+    from tools.candidate_console import add_task
+
+    names = ["/dev/nvidia-uvm", "/dev/nvidia0", "/dev/nvidia1", "/dev/nvidiactl"]
+    monkeypatch.setattr(add_task.glob, "glob", lambda _: names)
+    monkeypatch.setattr(add_task.Path, "is_char_device", lambda self: True)
+    monkeypatch.setattr(add_task.Path, "is_symlink", lambda self: False)
+    # The real function: conftest stubs add_task.host_gpu_devices for every other test.
+    assert host_gpu_devices() == ("/dev/nvidia0", "/dev/nvidia1")
 
 
 def test_add_task_and_check_never_print_a_credential_value(workspace, monkeypatch, capsys):
@@ -387,25 +423,9 @@ def test_external_refuses_mounting_home_or_console_private_folders(
     assert _tasks(config) == []
 
 
-def test_device_prompt_without_an_answer_and_relative_paths_refuse_plainly(
-    workspace, monkeypatch, capsys
-):
-    """Defect: EOF at the device prompt crashes with a traceback, or a relative
-    --manifest gets an unexplained 'canonical' refusal."""
-    _, config, manifest = workspace
-    monkeypatch.setattr(
-        "tools.candidate_console.add_task.host_gpu_devices", lambda: ("/dev/nvidia0",)
-    )
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
-
-    def no_answer(prompt):
-        raise EOFError
-
-    monkeypatch.setattr("builtins.input", no_answer)
-    code, _, err = _main(
-        monkeypatch, capsys, "add-task", "--config", str(config), "--manifest", str(manifest)
-    )
-    assert code == 2 and "no answer to the device question" in err
+def test_relative_manifest_refuses_plainly(workspace, monkeypatch, capsys):
+    """Defect: a relative --manifest gets an unexplained 'canonical' refusal."""
+    _, config, _ = workspace
     code, _, err = _main(
         monkeypatch, capsys, "add-task", "--config", str(config), "--manifest", "tasks/q.yaml"
     )
