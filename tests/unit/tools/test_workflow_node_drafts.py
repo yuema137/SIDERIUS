@@ -184,6 +184,10 @@ def test_external_input_catalog_explains_every_socket_contract():
     results = {item.output for item in CAPABILITIES.values()} | set(COLLECTION_CONTRACTS.values())
     assert sockets - results <= entries.keys() and not results & entries.keys()
     assert all(entry.summary for entry in entries.values())
+    assert entries["interpretation.input"].summary == (
+        "Evidence the interpretation step reads. On the first round SIDERIUS fills it with "
+        "a cold start (no earlier results needed); later rounds receive the previous round's analysis."
+    )
     assert entries["storage"].managed and not entries["literature.input"].managed
     assert not entries["llm-provider"].managed
 

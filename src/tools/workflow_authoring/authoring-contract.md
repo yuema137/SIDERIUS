@@ -261,7 +261,7 @@ managed, summary, example)` per catalog contract that no capability produces as
 a result. `managed` derives from `ManagedCandidateBinding.contract`, minus
 `literature.input` (which also needs `literature_settings`). It applies only to
 reusable (schema 2) documents; a managed binding in a schema 1 document is
-`invalid`. `summary` is one plain sentence and `example` is a placeholder file name.
+`invalid`. `summary` is a short plain-language explanation and `example` is a placeholder file name.
 No location is ever proposed. Task packages declare none of these inputs, so the
 author types a project-relative path to a JSON file holding the contract's
 `native_type` value. The path is read only when a run is prepared.

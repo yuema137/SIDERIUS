@@ -76,6 +76,11 @@ try {
   await page.locator('#editor-loop-final-iteration').waitFor({state: 'visible'});
   assert.equal(await page.locator('#editor-loop-final-iteration').inputValue(), '1');
   await page.locator('#editor-loop-stop-conditions').waitFor({state: 'visible'});
+  // Propose's evidence tooltip must not imply the first round needs earlier results.
+  await page.locator('#circuit-input-propose-output').hover();
+  await page.locator('#circuit-tooltip').waitFor({state: 'visible'});
+  assert.match(await page.locator('#circuit-tooltip').textContent(), /cold start on the first round \(no earlier results needed\)/);
+  assert.ok((await page.locator('#circuit-tooltip').textContent()).includes("previous round's analysis"));
   // Training settings are on the Train & tune module.
   await page.locator('#circuit-node-train').click();
   // The author's choice wins over Quick start's bounded advice re-focus (L-6): the clicked

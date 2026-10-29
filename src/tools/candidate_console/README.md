@@ -134,7 +134,8 @@ even when using the default models.
    document's memory. Home offers three starting points: **Quick start** (choose a
    task; its ready-made research loop opens in Workflow as an unsaved draft where you
    set rounds, stop conditions and training settings), **Open a workflow** and
-   **Monitor runs**. On **Run**, a stepper shows where you are: check the inputs and
+   **Monitor runs**. The first round starts cold: no earlier results are needed.
+   On **Run**, a stepper shows where you are: check the inputs and
    prepare, then review and launch; the page updates the status by itself.
    **Help** in the header reopens the tour at any time.
    Tools a first-time user does not need stay hidden until you turn them on in

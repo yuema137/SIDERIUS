@@ -16,7 +16,10 @@ from .models import ExternalInputCatalog, ExternalInputKind
 from .options import contract_info
 
 _SUMMARIES = {
-    "interpretation.input": "Evidence the interpretation step reads to start a research round.",
+    "interpretation.input": (
+        "Evidence the interpretation step reads. On the first round SIDERIUS fills it with "
+        "a cold start (no earlier results needed); later rounds receive the previous round's analysis."
+    ),
     "optional.text": "An optional text value, such as a data directory.",
     "optional.expert-advice": "Optional expert advice given to the tuning or proposal step.",
     "optional.expert-context": "Optional list of expert context items for a proposal.",
