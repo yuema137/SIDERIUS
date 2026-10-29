@@ -43,7 +43,11 @@ def test_noisy_early_rate_cannot_be_forgotten_by_a_slow_stable_suffix(seed, scal
     verifier = finish(
         AdaptiveUnitVerification(
             "unit",
-            AdaptiveVerificationConfig(min_timed_ms=500 * scale, max_wall_ms=60000 * scale),
+            AdaptiveVerificationConfig(
+                min_timed_ms=500 * scale,
+                max_wall_ms=60000 * scale,
+                pathological_min_unit_ms=0.0,
+            ),
         ),
         rates,
     )
@@ -103,6 +107,9 @@ def test_distribution_shift_survives_warmup_without_a_short_window_minimum(warmu
     rates += [15 * rng.uniform(0.4, 1.6) for _ in range(250)]
     if warmup is not None:
         rates.insert(0, warmup)
-    verifier = finish(AdaptiveUnitVerification("unit"), rates)
+    verifier = finish(
+        AdaptiveUnitVerification("unit", AdaptiveVerificationConfig(pathological_min_unit_ms=0.0)),
+        rates,
+    )
     assert verifier.state == "failed_pathological_unit"
     assert "disjoint observed rate blocks" in verifier.failure_reason
