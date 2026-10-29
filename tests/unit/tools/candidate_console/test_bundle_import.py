@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 import stat
 import subprocess
@@ -215,6 +216,59 @@ def test_fetch_data_refuses_a_group_writable_data_folder(bundle, workspace):
     assert not (root / "data" / "quickstart").exists()
 
 
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "changed_generator",
+        "changed_manifest",
+        "missing_sums",
+        "unlisted_generator",
+        "unlisted_manifest",
+        "symlink_generator",
+    ],
+)
+def test_fetch_verifies_the_bundle_before_executing_task_code(bundle, workspace, damage):
+    """Defect: fetch executes task code before verifying its bundle.
+
+    The import-time marker must stay absent for every integrity refusal, and
+    no data may be written. The marker is initially checksum-listed so damage
+    to other entries proves verification of the entire bundle precedes exec.
+    """
+    from tools.candidate_console.example_bundle import format_sums, parse_sums
+
+    root, _ = workspace
+    marker = root / "generator-executed"
+    generator_name = "task/plugins/_quickstart_task.py"
+    manifest_name = "task/declared/data_manifest.json"
+    plugin = bundle / generator_name
+    plugin.write_text(plugin.read_text() + f"\nPath({str(marker)!r}).write_text('executed')\n")
+    sums = bundle / "SHA256SUMS"
+    files = {name: (bundle / name).read_bytes() for name in parse_sums(sums.read_bytes())}
+    sums.write_bytes(format_sums(files))
+    if damage == "changed_generator":
+        plugin.write_text(plugin.read_text() + "\n# changed\n")
+    elif damage == "changed_manifest":
+        manifest = bundle / manifest_name
+        manifest.write_bytes(manifest.read_bytes() + b"\n")
+    elif damage == "missing_sums":
+        sums.unlink()
+    elif damage.startswith("unlisted_"):
+        del files[generator_name if damage == "unlisted_generator" else manifest_name]
+        sums.write_bytes(format_sums(files))
+    else:
+        outside = root / "generator.py"
+        plugin.rename(outside)
+        plugin.symlink_to(outside)
+
+    result = _fetch(bundle, root)
+
+    assert not marker.exists(), "unverified task code executed"
+    assert result.returncode == 2, result.stderr
+    assert "fetch_data refused:" in result.stderr
+    assert "SHA256SUMS" in result.stderr or "symlink" in result.stderr
+    assert not (root / "data" / "quickstart").exists()
+
+
 def test_read_bundle_accepts_the_trailing_slash_tab_completion_adds(bundle):
     """Defect: ``--from-bundle DIR/`` (as tab completion types it) is refused."""
     from tools.candidate_console.example_bundle import BundleRefused, read_bundle
@@ -222,3 +276,67 @@ def test_read_bundle_accepts_the_trailing_slash_tab_completion_adds(bundle):
     assert read_bundle(f"{bundle}/").root == bundle
     with pytest.raises(BundleRefused, match=re.escape("without '..'")):
         read_bundle(f"{bundle}/../{bundle.name}/")
+
+
+@pytest.mark.parametrize("module", ["tools", "argparse"])
+def test_fetch_excludes_unlisted_bundle_root_modules_from_imports(bundle, workspace, module):
+    """Defect: an unlisted root module executes before checksum verification.
+
+    The import-time marker must stay absent and the genuine verifier must
+    refuse damaged checksums, even with the bundle as the working directory.
+    """
+    root, _ = workspace
+    marker = root / "shadow-executed"
+    shadow = bundle / f"{module}.py"
+    if module == "tools":
+        (bundle / "tools").mkdir()
+        shadow = bundle / "tools" / "__init__.py"
+    shadow.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n")
+    (bundle / "SHA256SUMS").unlink()
+    result = subprocess.run(
+        [sys.executable, str(bundle / "fetch_data.py"), "--workspace", str(root)],
+        cwd=bundle,
+        env={**os.environ, "PYTHONPATH": str(bundle)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert not marker.exists(), "bundle-root module executed before verification"
+    assert result.returncode == 2, result.stderr
+    assert "SHA256SUMS" in result.stderr
+    assert not (root / "data" / "quickstart").exists()
+
+
+def test_fetch_uses_the_selected_verified_bundle_task_id(bundle, workspace, tmp_path):
+    """Defect: --package selects data from one bundle but task ID from the script's.
+
+    Only the selected bundle's ID may determine the output directory.
+    """
+    from tools.candidate_console.example_bundle import format_sums, parse_sums
+
+    root, _ = workspace
+    script = tmp_path / "fetch_data.py"
+    script.write_bytes((bundle / "fetch_data.py").read_bytes())
+    (tmp_path / "console-task.json").write_text('{"task_id": "unverified"}')
+    fragment = bundle / "console-task.json"
+    document = json.loads(fragment.read_bytes())
+    document["task_id"] = "selected"
+    fragment.write_text(json.dumps(document))
+    sums = bundle / "SHA256SUMS"
+    files = {name: (bundle / name).read_bytes() for name in parse_sums(sums.read_bytes())}
+    sums.write_bytes(format_sums(files))
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--workspace",
+            str(root),
+            "--package",
+            str(bundle / "task"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert sorted(path.name for path in (root / "data").iterdir()) == ["selected"]
