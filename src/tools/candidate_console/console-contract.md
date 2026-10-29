@@ -899,6 +899,11 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
   `route_not_selected`). A skipped node is not run and is never shown as a failure;
   a skipped tuner has `tuning_state="skipped"` and `result=null`. The field is
   omitted when empty, so unrouted projections keep their bytes.
+- `outcome` (only with a `result`): `graph_results.tuner_outcome(result)`, one plain
+  sentence from the tuner record's status, termination reason, completed rounds and
+  attempts. `completed_rounds == 0` always reads "No training round completed: …"
+  whatever the status; the word "Completed" is used only for tuner status
+  `completed` with at least one round. `tuning_state` reports node execution only.
 - `GraphRunSummary` is the path-free subset of `RunView`: run name, model type,
   status, termination reason, times, completed rounds, total attempts, `metric`,
   `metric_source`, `ranking_refusal`, declared secondary metric identities, the
@@ -916,7 +921,8 @@ selected operation inside the existing poll, only for `kind == "candidate"` and
 clears the section. 404/409 are final for that selection; other failures retry on
 the next existing poll. Each body is its own section (`Iteration N` for several
 bodies) whose stage label comes from `editorCapabilityPresentation.label("tuning")`
-(`Train & tune`). A body with `skipped` nodes adds one muted line
+(`Train & tune`): the facts list shows `Train & tune node execution` (the
+`tuning_state`) and, when present, `Train & tune outcome` (the `outcome`). A body with `skipped` nodes adds one muted line
 "Skipped, not run: <node> (<reason>), ...". No cross-body score or ordering is
 computed or displayed; route decision details (observable values, case) are
 B1-PR6 monitor work.
@@ -2515,6 +2521,17 @@ forwarded verbatim) a workflow whose authored training settings omit
 calls `execute_tools.health_checks.launch_policy.validate_declared_policy` (refusals
 1-3 of `validate_formal_launch`) on the same sparse payload preparation captures
 (`settings_payload`). Config-dependent refusals 4-6 still run at training admission.
+Review then calls `check_trainable_launch`: when the payload resolves `is_trial`
+false, it reads the task manifest's dataset profile
+(`workflows.task_composition.compose_dataset_profile_from_manifest`: manifest YAML
+and profile JSON only, no task imports) and refuses (409 `launch_policy`) with
+`execute_tools.dataset_config.single_file_mode_refusal`'s path-free message when the
+profile declares no TIDMAD topology, because every round would be `single_file` and
+could not train. An unreadable profile is `stale_review`. Training admission
+(`candidate_worker.training_admission.refuse_untrainable_launch`, after
+`run_launch_self_test`) and tuner startup (`validate_training_mode_startup`, composed
+runs only) ask the same owner again. Templates declare `is_trial: true`,
+`healthgate_mode: blocking` and `result_authority: scientific` (`templates.DECLARED_LAUNCH_POLICY`).
 Prepare reuses the same review, so the refusal there carries
 `admission_not_attempted`. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the

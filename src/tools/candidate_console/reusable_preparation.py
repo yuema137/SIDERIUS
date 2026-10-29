@@ -106,6 +106,33 @@ def check_declared_launch_policy(document: ReusableWorkflowDocument) -> None:
         raise OperationFailure("launch_policy", str(error)) from error
 
 
+def check_trainable_launch(document: ReusableWorkflowDocument, *, task_manifest: str) -> None:
+    """Refuse at review a training launch that could start but never train.
+
+    With ``is_trial`` false every tuning round is ``single_file``, which loads one
+    TIDMAD training file and acquires no task-owned scopes, so a task whose dataset
+    profile has no TIDMAD topology could never train (``single_file_mode_refusal``).
+    Launch admission and tuner startup ask the same owner again. A workflow without
+    authored training settings is not checked.
+    """
+    from execute_tools.dataset_config import single_file_mode_refusal
+    from tools.candidate_prepare.reusable_training import settings_payload
+    from workflows.candidate_training_settings import parse_training_settings
+    from workflows.task_composition import compose_dataset_profile_from_manifest
+
+    payload = settings_payload(document)
+    if payload is None:
+        return
+    launch = parse_training_settings(payload).launch
+    if launch.is_trial:
+        return
+    reason = single_file_mode_refusal(
+        compose_dataset_profile_from_manifest(task_manifest), is_trial=launch.is_trial
+    )
+    if reason is not None:
+        raise OperationFailure("launch_policy", reason)
+
+
 class ReusablePreparation:
     def __init__(self, console: CandidateConsole, *, protected: tuple[Path, ...] | None = None):
         """``protected``: paths no read-only input may overlap at admission; by default
@@ -142,6 +169,7 @@ class ReusablePreparation:
             plan = preflight_reusable_candidate(request, protected=self.protected)
             check_request_policy(task, plan.binding.request)
             check_declared_launch_policy(plan.document)
+            check_trainable_launch(plan.document, task_manifest=plan.binding.request.task_manifest)
         except OperationFailure:
             raise
         except (ValueError, OSError) as error:

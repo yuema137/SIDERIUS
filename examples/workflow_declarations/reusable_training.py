@@ -75,6 +75,7 @@ document = ReusableWorkflowDocument(
             "formal_time_budget_minutes": 5.0,
             "healthgate_mode": "observe_only",
             "result_authority": "diagnostic",
+            "is_trial": True,
         },
     },
     preparation_options=CandidatePreparationOptions(

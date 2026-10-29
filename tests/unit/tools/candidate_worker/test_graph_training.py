@@ -41,7 +41,7 @@ from .test_native import native_runner as native_runner
 from .test_training import training_runner as training_runner
 
 
-def graph_training_request(prepared):
+def graph_training_request(prepared, *, is_trial: bool = True):
     request = interpretation_request(prepared)
     root = Path(request.preview.project_root)
     document = request.preview.document.model_dump(mode="json")
@@ -77,6 +77,7 @@ def graph_training_request(prepared):
                 "launch": {
                     "healthgate_mode": "observe_only",
                     "result_authority": "diagnostic",
+                    "is_trial": is_trial,
                     "allowed_output_types": ["classifier"],
                     "trial_time_budget_minutes": 7,
                     "formal_time_budget_minutes": 19,
@@ -215,6 +216,17 @@ def test_five_node_native_training_and_parent_evidence(prepared, training_runner
     proposal_path.write_text(seed.model_copy(update={"expert_context": []}).model_dump_json())
     with pytest.raises(ValueError, match="declared interpretation edge"):
         verify_graph_trace(request, parent, receipt)
+
+
+def test_admission_refuses_single_file_mode_for_a_non_tidmad_task(prepared, training_runner):
+    """Defect: a launch whose settings resolve is_trial false (the console route's native
+    default) reaches single_file rounds that can never train a non-TIDMAD task; training
+    admission must refuse before any tuning node runs (fails if admit_training does not
+    call refuse_untrainable_launch)."""
+    receipt = launch_candidate(graph_training_request(prepared, is_trial=False))
+    assert receipt.status == "failed"
+    assert "declares no TIDMAD topology" in (receipt.error or "")
+    assert not [name for name, _ in training_runner if name == "tuner"]
 
 
 @pytest.mark.parametrize("forged", ["run_seed", "seed_coordinates"])

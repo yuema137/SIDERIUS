@@ -22,6 +22,7 @@ const rejected = '56565656-5656-4656-8656-565656565656';
 const running = '78787878-7878-4878-8878-787878787878';
 const unknown = '9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a';
 const crashed = 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc';
+const paused = 'dededede-dede-4ede-8ede-dededededede';
 const delay = ms => new Promise(done => setTimeout(done, ms));
 let browser;
 try {
@@ -79,6 +80,7 @@ try {
     if (id === unknown) return reply({error: {code: 'unknown_operation', message: 'this operation store has no operation with this ID'}}, 404);
     if (id === rejected) return reply(base(rejected, {}));
     if (id === crashed) return reply(base(crashed, {native_status: 'failed', validation_passed: null, loop: {final_iteration: 1, attempted_iterations: 1}}));
+    if (id === paused) return reply(base(paused, {native_status: 'paused', validation_passed: null, loop: {final_iteration: 3, attempted_iterations: 1}}));
     if (id === running) return reply(base(running, {state: 'active', process: {status: 'alive', reason: 'observed'}, receipt_available: false, native_status: null, validation_passed: null}));
     throw new Error('unexpected path ' + url.pathname);
   });
@@ -135,6 +137,12 @@ try {
   const kept = shown.slice(0, -1);
   assert.ok(refusal.startsWith(kept) && refusal[kept.length] === ' ', `cut inside a word: ${JSON.stringify(shown)}`);
   assert.match(shown, /CUDA error 304/);
+
+  // A paused loop is settled for this read but may be resumed: never "Final status".
+  await page.evaluate(id => { location.hash = 'monitor/' + id; }, paused);
+  await page.locator('#monitor-status').filter({hasText: 'Paused at a completed body boundary.'}).waitFor();
+  await page.locator('#operation-observed').filter({hasText: /^Current status · observed /}).waitFor();
+  assert.ok(!(await page.locator('#operation-observed').textContent()).includes('Final status'), 'A paused loop does not read as final');
 
   // M-3: a typed unknown_operation says so and stops polling.
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, unknown);

@@ -17,7 +17,7 @@ from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.scheduling import HostBudget
 from core.seeding import MissingRunSeed
-from execute_tools.dataset_config import DataScope
+from execute_tools.dataset_config import DataScope, single_file_mode_refusal
 from execute_tools.evaluation_execution import candidate_evaluation_executor
 from execute_tools.health_checks.launch_policy import validate_formal_launch
 from execute_tools.model_output_retention import require_local_output_inventory
@@ -31,7 +31,11 @@ from workflows.constraint_disclosure import workflow_constraint_context
 from workflows.definition import ExternalSource, ProtocolRequest
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.run_bindings import WorkflowRunBindings
-from workflows.run_config import active_vram_budget, bind_runtime_verifier_launch
+from workflows.run_config import (
+    WorkflowLaunchConfig,
+    active_vram_budget,
+    bind_runtime_verifier_launch,
+)
 from workflows.task_composition import RunTaskComposition, resolve_composed_measurement_capability
 from workflows.training_startup import prepare_training_run
 
@@ -126,6 +130,19 @@ def reconcile_proposal(seed: ProposalInput, admitted: TrainingAdmission) -> Prop
     return ProposalInput.model_validate(seed.model_dump() | values)
 
 
+def refuse_untrainable_launch(
+    launch: WorkflowLaunchConfig, composition: RunTaskComposition
+) -> None:
+    """Launch backstop for the Run review refusal, before any candidate node exists.
+
+    Raises ``ValueError`` when ``is_trial`` is false for a dataset profile without
+    TIDMAD topology: every round would be ``single_file`` and none could train.
+    """
+    reason = single_file_mode_refusal(composition.dataset_profile, is_trial=launch.is_trial)
+    if reason is not None:
+        raise ValueError(reason)
+
+
 def admit_training(
     request: CandidateRunRequest,
     initial: CandidateRunReceipt,
@@ -211,6 +228,7 @@ def admit_training(
     )
     capability = resolve_composed_measurement_capability(composition, dataset_root=root)
     run_launch_self_test(require_probe_runner=launch.require_probe_runner, capability=capability)
+    refuse_untrainable_launch(launch, composition)
     ensure_run_invariants(initial.workspace, preparation.invariants)
     hardware = get_hardware_context(Path(initial.workspace), initial.run_name)
     bindings = admitted_run_bindings(

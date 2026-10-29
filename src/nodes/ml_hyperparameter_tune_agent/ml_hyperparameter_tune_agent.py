@@ -229,6 +229,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _time_skip_memory_extra,
     _vram_skip_memory_extra,
     is_evidence_refusal,
+    validate_training_mode_startup,
     validate_watchdog_startup,
 )
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
@@ -799,6 +800,9 @@ class HyperparamTuningAgent:
         # it has no failure mode of its own and no phase moved to accommodate
         # it.
         run_profile = resolve_dataset_profile()
+        # Before any planner call: a composed non-TIDMAD run with is_trial false
+        # could only reach single_file rounds, which cannot train it.
+        validate_training_mode_startup(agent_input, run_profile)
 
         # --- The run's ONE Model-I/O declaration (Step 05b) ---
         # Bound here, once, for exactly the same reason the profile above is:

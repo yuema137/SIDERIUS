@@ -1338,6 +1338,23 @@ def _build_admission_policy(agent_input, *, is_trial: bool, device_identity: Any
     )
 
 
+def validate_training_mode_startup(agent_input: HyperparamTuningInput, run_profile: Any) -> None:
+    """Refuse a composed run that can only reach ``single_file`` rounds on a non-TIDMAD task.
+
+    With ``is_trial`` false every round resolves to ``single_file`` (``planning.py``),
+    which acquires no task-owned scopes and trains on one TIDMAD file. For a composed
+    profile without TIDMAD topology no attempt could train, so startup refuses before
+    any planner call. Un-composed runs and TIDMAD-topology profiles are unchanged.
+    """
+    if agent_input.task_composition_ref is None:
+        return
+    from execute_tools.dataset_config import single_file_mode_refusal
+
+    reason = single_file_mode_refusal(run_profile, is_trial=agent_input.is_trial)
+    if reason is not None:
+        raise ValueError(reason)
+
+
 def validate_watchdog_startup(agent_input: HyperparamTuningInput) -> None:
     """Refuse missing native ceilings before setup or any candidate attempt.
 
