@@ -162,7 +162,9 @@ try {
   // R-5: the name-only credential precheck is shown before Prepare, read by the server.
   assert.equal(await page.locator('#new-run-credentials').isVisible(), true);
   assert.match(await page.locator('#new-run-credentials').textContent(), /Credentials|No credentials/);
-  // The review names where its resolved model profile and data folder come from.
+  // The review names where its resolved model profile and data folder come from. The run
+  // lane keeps these review details collapsed (step 2 of the stepper); open them as a user would.
+  await page.locator('#new-run-details').evaluate(pre => { pre.closest('details').open = true; });
   await page.locator('#new-run-details').filter({hasText: 'Model profile source: Set in console.json'}).waitFor();
   assert.match(await page.locator('#new-run-details').textContent(), /Data folder source: Set in console\.json/);
   // An unrelated unresolved candidate survives editing and blocks preparation.
