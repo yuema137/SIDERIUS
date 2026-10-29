@@ -1,0 +1,40 @@
+# Health: checks that decide whether a trained model's predictions are usable
+# at all, separately from how well they score. Both checks below are generic
+# framework checks; this package supplies only the view they read
+# (plugins/_csv_health_views.py) and the facts and thresholds.
+
+facts:
+  # How the predictions are encoded: one class index per row.
+  encoding_family: class_index
+  # EDIT HERE: the number of classes (the length of `classes` in task.yaml).
+  symbol_cardinality: 3
+
+plugins:
+  - kind: file
+    ref: ../plugins/_csv_health_views.py
+
+providers:
+  - provider_id: csv_classification.predicted_classes
+
+roster:
+  # Blocking: a model that fails this check is not a valid result, whatever
+  # its score.
+  - gate_id: predicts_more_than_one_class
+    check: categorical_distinct_symbols
+    disposition: blocking
+    parameters:
+      min_distinct_symbols: 2
+    reason: >-
+      A classifier that predicts a single class for every validation row has
+      collapsed; its score says nothing about the features.
+  # Recording: measured and shown with each result, never blocking.
+  - gate_id: dominant_class_fraction
+    check: categorical_dominant_fraction
+    disposition: recording
+    parameters:
+      # EDIT HERE: set this above the largest class's share of the
+      # validation file, so only a model that over-predicts it is recorded.
+      max_dominant_fraction: 0.8
+    reason: >-
+      Predicting one class for most validation rows is an early sign of
+      collapse toward the majority class.

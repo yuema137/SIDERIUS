@@ -156,9 +156,11 @@ you own; the console workspace is created inside it) and
    follows the
    [setup skill](../agent-reference/siderius-setup-review/SKILL.md) and the
    [task definition guide](../guides/define-a-task.md), and asks you to agree on
-   the prediction target, splits and main score. The example's
-   `siderius_workspace/tasks/quickstart/` folder is a complete package to compare
-   with. Success: a folder holding `task.yaml` and the files it names.
+   the prediction target, splits and main score. For a classification dataset
+   in CSV files, the agent starts from the
+   [CSV classification template](../../examples/task_templates/csv_classification/README.md),
+   which you can also copy and edit yourself; its README lists every line to
+   change. Success: a folder holding `task.yaml` and the files it names.
 
 2. **Place the package and its data in the workspace.** The package belongs in
    `siderius_workspace/tasks/<id>/` (for example `tasks/wine/task.yaml`) and the

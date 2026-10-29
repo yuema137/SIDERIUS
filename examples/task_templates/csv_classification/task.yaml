@@ -1,0 +1,63 @@
+# Task package manifest. Every path below is relative to this folder, so the
+# folder can be copied anywhere (for the console: siderius_workspace/tasks/<id>/).
+# Lines marked EDIT HERE are the ones to change for your dataset; the README
+# lists them in order.
+
+task_data_path:
+  file: plugins/_csv_task.py
+  symbol: CsvClassificationTaskDataPath
+  config:
+    # EDIT HERE: file names inside the data folder (data/<task_id>/).
+    train_file: train.csv
+    validation_file: validation.csv
+    # EDIT HERE: the column holding the class label, and every label value
+    # exactly as written in the CSV. The position in the list is the class
+    # index the model predicts (first = 0).
+    label_column: label
+    classes: [setosa, versicolor, virginica]
+    # EDIT HERE: the column with a unique ID per row, or null to use the row
+    # number.
+    id_column: sample_id
+    # EDIT HERE: how many feature columns. By default every column except the
+    # label and ID columns is a feature; list them in `feature_columns:` to
+    # use only some.
+    feature_count: 4
+
+dataset_profile:
+  config: declared/dataset_profile.json
+
+metric:
+  declaration: declared/metric_balanced_accuracy.json
+  implementation:
+    file: plugins/_csv_metrics.py
+    symbol: BalancedAccuracyMetric
+
+objective:
+  config:
+    loss_type: ce
+    reduction: mean
+
+task_health:
+  config: declared/task_health.yaml
+
+interpretation_blocks:
+  none: true
+
+deliverable:
+  prefix: csv_predictions
+  extension: .json
+  index_width: 4
+
+task_config:
+  config: declared/task_config.yaml
+
+# Locked parameters: the agents cannot change these values.
+parameter_rules:
+  # EDIT HERE: lock or remove. `exact` fixes a value; `range: {min: 1, max: 50}`
+  # or `allowed: [16, 32]` limit the agents' choice instead.
+  train_config.batch_size:
+    exact: 32
+
+model_plugins:
+  dir: plugins
+  require: [csv_reference_mlp]

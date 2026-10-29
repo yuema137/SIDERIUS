@@ -104,7 +104,8 @@ def _model_plugin_paths() -> list[pathlib.Path]:
     contract, so they are excluded by what they declare rather than by name.
     """
     found = []
-    for path in sorted(EXAMPLES.glob("*/plugins/*.py")):
+    candidates = [*EXAMPLES.glob("*/plugins/*.py"), *EXAMPLES.glob("task_templates/*/plugins/*.py")]
+    for path in sorted(candidates):
         if path.name.startswith("_"):
             continue
         assigned = _module_level_assignments(path)
@@ -154,10 +155,10 @@ def test_a_mention_is_not_a_declaration(tmp_path):
 
 def test_the_census_actually_found_the_shipped_exemplars():
     """A census whose file set is empty passes vacuously. Pin that it sees
-    every current minimal pack — the shape of census blindness that has bitten this
-    repository before."""
+    every current minimal pack and task template — the shape of census
+    blindness that has bitten this repository before."""
     names = {p.parent.parent.name for p in PLUGINS}
-    assert names == {"quickstart", "synthetic_masked_regression"}, names
+    assert names == {"quickstart", "synthetic_masked_regression", "csv_classification"}, names
 
 
 @pytest.mark.parametrize("path", PLUGINS, ids=lambda p: p.parent.parent.name)

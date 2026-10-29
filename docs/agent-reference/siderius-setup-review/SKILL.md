@@ -36,8 +36,13 @@ references below. A described task is not authorization for unbounded API/GPU wo
    and any task-specific validity rules. Propose concrete choices with reasons;
    reuse choices already given instead of making the user answer them again.
 3. Author or adapt the [task package](../../reference/task-composition.md) in a
-   new external project. Inspect an existing task before reusing it; a similarly
-   named dataset does not guarantee matching labels, splits or objectives.
+   new external project. For tabular classification data in CSV files, start
+   from `examples/task_templates/csv_classification`: copy the folder and
+   change its `EDIT HERE` lines as its [README](../../../examples/task_templates/csv_classification/README.md)
+   lists. It already supplies the data path, metric, complete Health
+   declaration and a parameter lock. Inspect an existing task before reusing
+   it; a similarly named dataset does not guarantee matching labels, splits or
+   objectives.
    Implement its required adapters through the published contracts. Explain the
    resulting scientific choices without asking the user to handwrite schemas.
    For the local console, keep one package per folder under the console

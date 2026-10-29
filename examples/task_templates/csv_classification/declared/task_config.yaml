@@ -1,0 +1,34 @@
+# What the agents are told about the task, and the model's input and output.
+
+# EDIT HERE: describe your data, the prediction target and the main score in
+# plain words. The agents read this text when they propose and write models.
+task_description: |
+  Classify each row of a small tabular dataset into one of three classes from
+  four numeric features. The main score is balanced accuracy (the mean of the
+  per-class recall) on the validation file; higher is better. A separate final
+  test file is kept outside the research loop.
+
+forward_contract:
+  segmentation_applicability: not_applicable
+  model_io:
+    input:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        # EDIT HERE: the number of feature columns (`feature_count` in task.yaml).
+        - {dimension: {fixed: 4}}
+      dtype: {admissible: ["float32"]}
+    output:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        # EDIT HERE: the number of classes (the length of `classes` in task.yaml).
+        - {role: class, dimension: {fixed: 3}}
+      dtype: {admissible: ["float32"]}
+  # EDIT HERE: keep these consistent with the numbers above.
+  input_description: "a batch of 4 numeric features per row"
+  output_description: "one logit per class, in the order of `classes` in task.yaml"
+  task_type: "classification"
+  output_head_note: >-
+    Output exactly [B, 3] logits. Do not apply softmax inside the model.
+  task_note: >-
+    Small tabular data with no spatial or temporal structure; small MLPs and
+    linear models are appropriate.
