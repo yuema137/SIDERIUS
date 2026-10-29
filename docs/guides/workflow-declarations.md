@@ -94,12 +94,13 @@ concrete (v1) format's mechanism.
 `interpretation-to-proposal` takes `output`, `storage`, and the optional
 `data_dir`, `task_composition_ref`, `human_advice`, `expert_context`,
 `constraint_context` and `workflow_parameter_rules`
-(`src/workflows/definition/catalog.py`). In a reusable document, a managed
-`expert_context` is generated as `null`: reusable preparation has no field that
-carries your own expert context. To feed a file of `ExpertContextItem` entries
-(`agent.schemas.proposal`: `source`, `kind`, `content`), use a concrete (v1)
-document with `ExternalBinding(id=..., contract="optional.expert-context",
-location="expert_context.json")`. See [section 9](#9-two-step-scenario-literature-findings-then-a-loop).
+(`src/workflows/definition/catalog.py`). In
+`native-interpretation-candidate/v1` these are framework-managed: preparation
+fills `human_advice` from `preparation_options.proposal_advice` and always sets
+`expert_context` to `null` (`src/tools/candidate_prepare/reusable_interpretation.py`).
+There is no supported way to supply your own `expert_context` in v1.1.0; carry
+outside findings as proposal advice instead (see
+[section 9](#9-two-step-scenario-literature-findings-then-a-loop)).
 
 ## 3. LLM configuration
 
@@ -364,19 +365,19 @@ declaration. Use the two-step scenario below.
    ([worker README](../../src/tools/candidate_worker/README.md)), and submit it
    as a `candidate` operation. The merged review is recorded in the adaptor
    record of the run's graph trace.
-2. **Carry the findings forward.** Turn the merged review's findings into a
-   JSON list of `ExpertContextItem`, for example
-   `[{"source": "literature_run_a", "kind": "literature", "content": "..."}]`.
+2. **Carry the findings forward.** Read the merged review's findings from run
+   A's adaptor record and write them as plain text.
 3. **Run B: the loop.** Use an interpretation-profile loop
    (`examples/workflow_declarations/research_loop_request_input.py` shows the
-   loop with `on_met="request_input"`). Bind the file to
-   `interpretation-to-proposal`'s `expert_context`:
-   - concrete (v1) document: `ExternalBinding(id="findings",
-     contract="optional.expert-context", location="expert_context.json")` and
-     `ArgumentBinding(name="expert_context", source=ExternalSource(binding="findings"))`;
-   - reusable document: a managed `optional.expert-context` binding is filled
-     with `null`, so carry the findings as `proposal_advice` text instead, or
-     add them with `write-loop-resume --advice-file` at a pause.
+   loop with `on_met="request_input"`). Put the findings text in
+   `preparation_options.proposal_advice` of run B's `workflow.py`; it reaches the
+   proposer of every iteration through `interpretation-to-proposal`'s
+   `human_advice` argument, which the declaration binds to a managed
+   `optional.expert-advice` external. `proposal_advice` has no field-level length limit, but the
+   whole source is limited to 1 MiB (32 KiB when edited in the console), and
+   the text is part of the declaration digest. To add or revise findings
+   later, pause the loop and resume with `write-loop-resume --advice-file`
+   (1 to 4000 characters; replaces an earlier resume's advice).
 
 An integrated literature + loop profile is planned for v1.2.
 
@@ -400,5 +401,5 @@ is the authority for what runs.
   `final_iteration`.
 - A loop and literature-judged aggregation cannot be combined; integrated
   literature + loop is planned for v1.2.
-- Reusable preparation does not carry your own `expert_context`.
+- No supported input path for your own `expert_context` in the interpretation profile; use proposal advice.
 - Advice for the interpretation step has no field in the reusable format.
