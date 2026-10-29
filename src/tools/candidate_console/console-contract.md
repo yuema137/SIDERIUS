@@ -1097,9 +1097,15 @@ receipt is labelled "Current status", not "Final status". A continued predecesso
 never offers End, even when a descendant later records Stop.
 
 The client generates one request UUID per reviewed digest
-and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
-the POST; a retry reuses it, and the record is released once status shows the
-successor. After a review, `#loop-resume-advice` (a textarea, `maxlength=4000`) is
+and retains it in `localStorage` at
+`siderius.loop-resume.v2/<store>/<predecessor>` before the POST. `<store>` is the
+opaque operations store id; `<predecessor>` is the lowercase predecessor operation
+UUID. The JSON record contains `origin` (`location.origin`),
+`expected_receipt_digest` (the reviewed receipt digest), `request_id` (the generated
+UUID), and optional `operator_advice` (trimmed text, omitted when empty). Reuse
+requires a matching origin and receipt digest. A retry reuses the record, and the
+record is released once status shows the successor. After a review,
+`#loop-resume-advice` (a textarea, `maxlength=4000`) is
 shown. It is prefilled with the retained record's advice when one exists, otherwise
 with this paused segment's own `operator_advice`. The first Resume attempt trims the
 text and fixes it: the retained record stores the request UUID together with
