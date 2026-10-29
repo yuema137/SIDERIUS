@@ -147,9 +147,14 @@ The score needs the true label of every validation row, so the package reads
 labels from `validation.csv` at the moment a model is scored, not before. A
 run first decides which rows each step uses; that decision is made without
 access to the data folder, so it records only the file, the fraction of rows
-and a random seed. Training, prediction writing and scoring each receive the
-data folder, re-read the file and apply the same selection, so they all see
-the same rows.
+or a row limit, and the seed the run supplies. Training, prediction writing and
+scoring each receive the data folder, re-read the file and apply the same
+selection, so they all see the same rows. When a step uses only part of a
+file, it takes a random subset chosen by that seed, never the first rows, so
+the order of rows in your CSV does not matter.
+
+A validation row with no prediction counts as wrong. Predictions for IDs that
+are not in the selected validation rows are ignored.
 
 Do not copy the Quickstart example's pattern of storing labels in that
 selection: it works there only because the Quickstart regenerates its data

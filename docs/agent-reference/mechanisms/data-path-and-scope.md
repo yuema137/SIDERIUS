@@ -94,9 +94,13 @@ For data that exists only as files (the common case for a user's own dataset),
 the supported pattern is:
 
 - The scope records a **row selection rule**, not rows or labels: which file,
-  the portion, a concrete seed and the sample ceiling. When `request.seed` is
-  `None` and the selection samples, the builder draws a seed and stores it, so
-  every later stage resolves the same subset.
+  the portion, a concrete seed and the sample ceiling. A sampled scope
+  (portion below 1 or a `max_samples` ceiling) requires `request.seed`; the
+  framework always supplies one, and the builder refuses `None` with
+  `core.seeding.MissingRunSeed` rather than generating a seed (only entry
+  boundaries generate seeds). The stored seed makes every later stage resolve
+  the same subset, and a ceiling keeps a seeded random subset, never the first
+  rows in file order.
 - Every stage above resolves rows with one task-owned function from the scope
   and the file, so the training child, inference child and scoring child agree
   on membership and order.

@@ -467,8 +467,8 @@ bash scripts/launch/run_chain.sh \
 `--mode` selects the execution backend: `lilab` runs each iteration as a
 foreground subprocess on the current machine (the name is historical; it works
 on any Linux host), and `sdsc` submits Slurm jobs. `--llm_config` is your saved
-[LLM profile](../../configs/llm/README.md); for a first process check, copy the
-Luna test profile it describes.
+[LLM profile](../../configs/llm/README.md); for a first run, copy
+`configs/llm/default.json` into your project and pass that copy's path.
 
 Start with `--dry-run` to see the exact child commands before spending anything.
 

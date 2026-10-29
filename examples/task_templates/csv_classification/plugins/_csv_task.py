@@ -28,7 +28,6 @@ import csv
 import json
 import math
 import os
-import secrets
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +36,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.seeding import MissingRunSeed
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     EpochSamplingParams,
@@ -68,9 +68,11 @@ SCOPE_KIND = "csv_classification_rows"
 class CsvRowSelection(BaseModel):
     """A scope: which CSV file to read and how to sample its rows.
 
-    ``seed`` is always concrete. When the framework asks for a sampled scope
-    without a seed, the builder draws one, so every later stage resolves the
-    identical row subset.
+    ``seed`` is always concrete, so every later stage resolves the identical
+    row subset. A sampled scope (``portion < 1`` or a ``max_samples``
+    ceiling) takes the framework's ``request.seed``; the builder refuses a
+    sampled request without one rather than inventing a seed. An unsampled
+    scope reads every row and stores ``seed=0``, which no stage uses.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -209,16 +211,29 @@ class CsvClassificationTaskDataPath:
         return columns
 
     @staticmethod
-    def _select(row_count: int, scope: CsvRowSelection) -> list[int]:
+    def _subsample(
+        count: int, portion: float | None, max_samples: int | None, seed: int | None
+    ) -> list[int]:
+        """Indices ``0..count-1`` kept by a portion and a ceiling, in file order.
+
+        The kept rows are a seeded random subset, never the first rows of the
+        file, so a ceiling on a label-sorted CSV still sees every class.
+        """
+        keep = count
+        if portion is not None and portion < 1.0:
+            keep = max(1, math.floor(count * portion))
+        if max_samples is not None:
+            keep = min(keep, max_samples)
+        if keep >= count:
+            return list(range(count))
+        if seed is None:
+            raise MissingRunSeed("subsampling CSV rows needs a seed; none was supplied")
+        drawn = np.random.default_rng(seed).permutation(count)[:keep]
+        return sorted(int(index) for index in drawn)
+
+    def _select(self, row_count: int, scope: CsvRowSelection) -> list[int]:
         """Row positions a scope selects; the single sampling rule every stage uses."""
-        positions = list(range(row_count))
-        if scope.portion < 1.0:
-            keep = max(1, math.floor(row_count * scope.portion))
-            drawn = np.random.default_rng(scope.seed).choice(row_count, size=keep, replace=False)
-            positions = sorted(int(position) for position in drawn)
-        if scope.max_samples is not None:
-            positions = positions[: scope.max_samples]
-        return positions
+        return self._subsample(row_count, scope.portion, scope.max_samples, scope.seed)
 
     def _rows(self, scope: object, data_dir: str) -> tuple[CsvTable, list[int]]:
         selection = self._require_scope(scope)
@@ -241,14 +256,10 @@ class CsvClassificationTaskDataPath:
 
     def training_dataset(self, scope: object, params: EpochSamplingParams) -> Dataset[Any]:
         table, positions = self._rows(scope, params.data_dir)
-        if params.train_portion is not None and params.train_portion < 1.0:
-            keep = max(1, math.floor(len(positions) * params.train_portion))
-            drawn = np.random.default_rng(params.epoch_seed).choice(
-                len(positions), size=keep, replace=False
-            )
-            positions = [positions[int(i)] for i in sorted(drawn)]
-        if params.max_samples is not None:
-            positions = positions[: params.max_samples]
+        kept = self._subsample(
+            len(positions), params.train_portion, params.max_samples, params.epoch_seed
+        )
+        positions = [positions[index] for index in kept]
         return self._dataset(table.features[positions], table.labels[positions])
 
     def validation_dataset(self, scope: object, params: EvalMaterializationParams) -> Dataset[Any]:
@@ -351,8 +362,11 @@ class CsvClassificationTaskDataPath:
             raise ValueError(f"{TASK_DATA_PATH_ID} has no data subsets; got {request.subset_ref!r}")
         seed = request.seed
         if seed is None:
-            # A sampled scope must select the same rows in every later stage.
-            seed = 0 if request.portion == 1.0 else secrets.randbits(32)
+            if request.portion < 1.0 or request.max_samples is not None:
+                raise MissingRunSeed(
+                    "a sampled CSV scope (portion < 1 or max_samples) requires request.seed"
+                )
+            seed = 0  # every row is read; the seed is never used
         return CsvRowSelection(
             file=file, portion=request.portion, seed=seed, max_samples=request.max_samples
         )
@@ -390,16 +404,20 @@ class CsvClassificationTaskDataPath:
     def validate_health_coverage(self, request: HealthCoverageRequest) -> HealthCoverageResult:
         """Health reads the predictions for the validation file; confirm the scope is it."""
         scope = self._require_scope(request.evaluation_scope)
-        covered = scope.file == self._validation_file
-        return HealthCoverageResult(
-            applicable=True,
-            covered=covered,
-            reason=(
-                f"Health checks read the predictions for {scope.file}"
-                if covered
-                else f"evaluation scope reads {scope.file}, not {self._validation_file}"
-            ),
-        )
+        override = request.health_gate_files
+        if override is not None and tuple(override) != (VALIDATION_PARTITION,):
+            reason = (
+                f"Health reads only partition {VALIDATION_PARTITION} (the validation "
+                f"file); a health_gate_files override of {list(override)} is not supported"
+            )
+            covered = False
+        elif scope.file != self._validation_file:
+            reason = f"evaluation scope reads {scope.file}, not {self._validation_file}"
+            covered = False
+        else:
+            reason = f"Health checks read the predictions for {scope.file}"
+            covered = True
+        return HealthCoverageResult(applicable=True, covered=covered, reason=reason)
 
 
 def _deliverable_name(*, model_type: str, run_name: str, exp_id: str) -> str:

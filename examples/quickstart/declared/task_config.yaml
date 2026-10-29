@@ -17,8 +17,8 @@ task_description: |
   perfect score is impossible by construction. The golden metric is accuracy
   over the held-out evaluation rows and HIGHER is better. The dataset is
   256 rows in 4 shards, regenerated bit-identically from a pinned seed —
-  this task exists to demonstrate the SIDERIUS workflow mechanics on a problem
-  small enough to train in seconds, not to be a benchmark.
+  this task exists to demonstrate the SIDERIUS workflow mechanics on a CPU
+  in seconds, not to be a benchmark.
 
 forward_contract:
   segmentation_applicability: not_applicable

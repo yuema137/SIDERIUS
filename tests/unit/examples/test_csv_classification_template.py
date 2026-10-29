@@ -145,16 +145,21 @@ def test_scopes_read_only_their_own_file_and_count_every_row(data_dir: Path) -> 
         )
 
 
-def test_a_sampled_scope_without_a_seed_selects_the_same_rows_after_transport(
+def test_a_sampled_scope_selects_the_same_rows_after_transport_and_needs_a_seed(
     data_dir: Path,
 ) -> None:
-    """Defect: a scope records only "half of validation.csv" without a fixed
+    """Defect: a scope records only "half of validation.csv" without the run's
     seed, so the inference child and the scoring child each draw a different
-    half and the metric scores predictions against the wrong rows. The
-    scope crosses a process boundary as its serialized bytes."""
+    half and the metric scores predictions against the wrong rows; or the
+    builder invents a seed instead of refusing (only entry boundaries may
+    generate seeds). The scope crosses a process boundary as its bytes."""
+    from core.seeding import MissingRunSeed
+
     with run_registration_scope():
         path = compose_run_task_bindings(str(MANIFEST)).task_data_path
-        request = ScopeBuildRequest(round_kind="trial", selection_strategy="snapshot", portion=0.5)
+        request = ScopeBuildRequest(
+            round_kind="trial", selection_strategy="snapshot", portion=0.5, seed=7
+        )
         scope = path.build_eval_scope(request)
         transported = path.deserialize_scope(path.serialize_scope(scope))
         assert path.serialize_scope(transported) == path.serialize_scope(scope)
@@ -164,6 +169,43 @@ def test_a_sampled_scope_without_a_seed_selects_the_same_rows_after_transport(
         assert list(first) == list(again)
         with pytest.raises(ValueError):
             path.deserialize_scope('{"kind": "another_task_rows", "rows": []}')
+        for seedless in (
+            ScopeBuildRequest(round_kind="trial", selection_strategy="snapshot", portion=0.5),
+            ScopeBuildRequest(
+                round_kind="trial", selection_strategy="snapshot", portion=1.0, max_samples=5
+            ),
+        ):
+            with pytest.raises(MissingRunSeed):
+                path.build_eval_scope(seedless)
+
+
+def test_a_row_limit_on_a_label_sorted_file_keeps_every_class(data_dir: Path) -> None:
+    """Defect: ``max_samples`` keeps the first rows in file order, so a CSV
+    sorted by label yields a one-class subset (scope ceiling and per-epoch
+    ceiling alike). The training file is rewritten sorted by label."""
+    train = data_dir / "train.csv"
+    header, *rows = train.read_text().splitlines()
+    rows.sort(key=lambda line: line.rsplit(",", 1)[1])
+    train.write_text("\n".join([header, *rows]) + "\n")
+    with run_registration_scope():
+        path = compose_run_task_bindings(str(MANIFEST)).task_data_path
+        limited = path.build_training_scope(
+            ScopeBuildRequest(
+                round_kind="trial",
+                selection_strategy="snapshot",
+                portion=1.0,
+                seed=3,
+                max_samples=12,
+            )
+        )
+        labels = path.labels_by_sample_id(limited, str(data_dir))
+        assert len(labels) == 12 and set(labels.values()) == {0, 1, 2}
+        full = path.build_training_scope(FULL)
+        epoch = path.training_dataset(
+            full, EpochSamplingParams(data_dir=str(data_dir), epoch_seed=5, max_samples=12)
+        )
+        assert len(epoch) == 12
+        assert {int(epoch[index][1]) for index in range(len(epoch))} == {0, 1, 2}
 
 
 def _relabel_one_row(lines: list[str]) -> list[str]:
@@ -194,6 +236,33 @@ def test_a_csv_that_does_not_match_the_config_is_refused_by_name(
             )
 
 
+def test_metric_counts_a_missing_prediction_wrong_and_ignores_an_unknown_id(
+    data_dir: Path,
+) -> None:
+    """Defect: the metric's denominator follows the predictions instead of the
+    validation rows, so dropping a hard row raises the score, or a stray ID
+    changes it. Ten rows per class: one missing class-0 row gives recall 0.9."""
+    with run_registration_scope():
+        composition = compose_run_task_bindings(str(MANIFEST))
+        path = composition.task_data_path
+        with bind_run_task_composition(composition, physical_data_root=str(data_dir)):
+            scope = path.build_eval_scope(FULL)
+            truth = path.labels_by_sample_id(scope, str(data_dir))
+            dropped = next(sample for sample, label in truth.items() if label == 0)
+
+            def score(payload: dict[str, int]) -> float:
+                return composition.metric.evaluate(
+                    {0: str(data_dir / "validation.csv")},
+                    evaluation_payload=payload,
+                    task_scope=scope,
+                    data_dir=str(data_dir),
+                ).scalar
+
+            missing = {k: v for k, v in truth.items() if k != dropped}
+            assert score(missing) == pytest.approx((0.9 + 1.0 + 1.0) / 3)
+            assert score({**truth, "not_a_validation_row": 2}) == pytest.approx(1.0)
+
+
 def test_inference_deliverable_metric_and_health_on_a_real_csv(
     data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -214,6 +283,7 @@ def test_inference_deliverable_metric_and_health_on_a_real_csv(
     from execute_tools.health_checks import runner
     from execute_tools.health_checks.config import load_composed_health_config
     from execute_tools.health_checks.schemas import CheckVerdict, HealthCheckContext
+    from execute_tools.task_data_path import TaskHealthCoverageError
     from nodes.ml_hyperparameter_tune_agent.health_coverage import (
         validate_attempt_health_coverage,
     )
@@ -247,6 +317,22 @@ def test_inference_deliverable_metric_and_health_on_a_real_csv(
                 health_enabled=True,
             )
             assert coverage is not None and coverage.covered
+
+            def coverage_with(files: tuple[int, ...]):
+                return validate_attempt_health_coverage(
+                    data_path=path,
+                    evaluation_scope=scope,
+                    round_kind="formal",
+                    health_binding=composition.task_health_binding,
+                    health_gate_files=files,
+                    composed=True,
+                    health_enabled=True,
+                )
+
+            assert coverage_with((1,)).covered
+            for unsupported in ((0,), (0, 1)):
+                with pytest.raises(TaskHealthCoverageError, match="health_gate_files"):
+                    coverage_with(unsupported)
 
             def run(model: torch.nn.Module, exp_id: str):
                 identity = {"exp_id": exp_id, "run_name": "template", "model_type": "control"}

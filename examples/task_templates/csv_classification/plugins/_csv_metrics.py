@@ -27,8 +27,9 @@ from execute_tools.task_data_path import require_bound_task_data_path
 class BalancedAccuracyMetric(EvaluationMetric):
     """Mean over classes of (correct predictions in the class / rows in the class).
 
-    A row with no prediction counts as wrong. Classes absent from the
-    validation file are left out of the mean.
+    The selected validation rows define the denominator: a row with no
+    prediction counts as wrong, and a prediction for an ID outside those rows
+    is ignored. Classes absent from the selected rows are left out of the mean.
     """
 
     IMPLEMENTS: ClassVar[tuple[str, ...]] = ("balanced_accuracy",)
@@ -49,7 +50,9 @@ class BalancedAccuracyMetric(EvaluationMetric):
         labels_by_sample_id = getattr(require_bound_task_data_path(), "labels_by_sample_id", None)
         if not callable(labels_by_sample_id):
             raise TypeError("the bound task data path does not provide labels_by_sample_id")
-        truth: dict[str, int] = labels_by_sample_id(task_scope, data_dir)
+        truth = labels_by_sample_id(task_scope, data_dir)
+        if not isinstance(truth, dict):
+            raise TypeError("labels_by_sample_id must return a {sample_id: class} mapping")
         if not truth:
             raise ValueError("balanced_accuracy needs at least one validation row")
         recalls = []
