@@ -21,6 +21,7 @@ from tools.candidate_operations import (
     list_operations,
     loop_control_requests,
     loop_root_operation,
+    loop_segment_advice,
     operation_admitted,
     read_operation,
     read_operation_log,
@@ -134,6 +135,11 @@ def loop_status(
         if requests
         else (False, False)
     )
+    advice = (
+        loop_segment_advice(operation_store, snapshot.operation_id)
+        if snapshot.kind == "candidate_loop_resume"
+        else None
+    )
     return LoopStatusView(
         final_iteration=loop.final_iteration,
         attempted_iterations=None if trace is None else trace.attempted_iterations,
@@ -141,6 +147,7 @@ def loop_status(
         input_request=None if trace is None else trace.input_request,
         stop_requested=stop,
         pause_requested=pause,
+        operator_advice=advice,
         judge_verdicts=()
         if trace is None or not isinstance(receipt, CandidateRunReceipt)
         else tuple(_judge_verdict(receipt.workspace, item) for item in trace.judge_verdicts),
@@ -473,6 +480,7 @@ class CandidateConsole:
             request=CandidateLoopResumeRequest(
                 predecessor_operation_id=selection.predecessor_operation_id,
                 expected_receipt_digest=selection.expected_receipt_digest,
+                operator_advice=selection.operator_advice,
             ),
         )
         environment: dict[str, str] = {}

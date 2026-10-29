@@ -41,16 +41,23 @@ even when using the default models.
    | `library/llm/`, `library/advice/` | saved model profiles and advice files; `init` saves the standard model profile as `library/llm/default-<12 hex characters>.json` |
    | `projects/` | a conventional place for workflow editor projects |
 
-   On success it prints two lines, the configuration file and the browser
-   address with the token file:
+   On success it prints the configuration file, browser address, token file
+   and connection instructions:
 
    ```text
    Workspace configuration: /absolute/project/siderius_workspace/settings/console.json
-   Console: http://127.0.0.1:8740; access token file: /absolute/project/siderius_workspace/settings/console-token
+   Console address: http://127.0.0.1:8740
+   Access token file: /absolute/project/siderius_workspace/settings/console-token
+     The console asks for this token when you connect, on this machine or remotely.
+     Show it with: cat /absolute/project/siderius_workspace/settings/console-token
+     On this machine: open the console address in your browser.
+     On a remote server: first run on your own computer
+       ssh -N -L 127.0.0.1:8740:127.0.0.1:8740 YOUR_HOST
+     then open the console address there.
    ```
 
-   The token unlocks the console;
-   it is separate from any model provider API key. Follow [Credentials](#credentials)
+   The token locks the console against other users and programs on the machine;
+   it is not a model provider API key. Follow [Credentials](#credentials)
    below to bind provider keys before Launch.
 
    `init` is safe to run again. It only creates what is missing; it never
@@ -110,24 +117,37 @@ even when using the default models.
    .venv/bin/python -m tools.candidate_console serve --config /absolute/project/siderius_workspace/settings/console.json
    ```
 
-   A successful check prints the browser address and token file location. It
-   checks configuration paths, file shape and permissions, without proving task
+   A successful check and `serve` print the same access instructions as step 1,
+   starting with `Console address:` and `Access token file:`. The check
+   validates configuration paths, file shape and permissions, without proving task
    composition, required key presence, sandbox availability or provider access.
    When a required field has no value, the check names it, for example
    `task my-task needs llm_config_file`. When a workspace folder is missing or
    unusable, it lists the folder (for example `data/my-task: missing`) and, if
    `init` can create it, prints the `init` command to run.
    Only `127.0.0.1` binding is supported.
-4. For a remote host, keep the server session running and open an SSH tunnel:
+4. On your own computer, open the printed console address directly in your browser.
+   On a remote server, keep the server session running there and run this SSH
+   tunnel command on your own computer first:
 
    ```bash
    ssh -N -L 127.0.0.1:8740:127.0.0.1:8740 YOUR_HOST
    ```
 
-   Open `http://127.0.0.1:8740`. If the local forwarding port differs, configure
-   `browser_origin` to that exact local address before starting the server.
-5. Open **Home**, paste the console token, and select **Connect**. The connection
-   stays available while you switch between Home, Workflow Editor, Run and Monitor,
+   Then open `http://127.0.0.1:8740` on your own computer. The first port is the
+   one your browser uses (`browser_origin`); the last is the server's `port` on the
+   remote machine. If you forward a different local port, set `browser_origin` to that
+   exact local address before starting the server; `check` and `serve` print the
+   matching tunnel command.
+5. On the machine running the console, view the token with:
+
+   ```bash
+   cat /absolute/project/siderius_workspace/settings/console-token
+   ```
+
+   Open **Home**, paste the console token, and select **Connect**. The token is
+   required whether you connect on the same machine or through an SSH tunnel.
+   The connection stays available while you switch between Home, Workflow Editor, Run and Monitor,
    and the connect card shrinks to a **Connected** line with **Change token** and
    **Disconnect console**. Reloading or opening a new tab requires Connect again;
    the password field clears immediately and the token stays only in this
@@ -166,13 +186,18 @@ even when using the default models.
    A running authored research loop shows **Stop at next boundary**: the current
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
-   resumed as a new segment of the same run, which shows its own results.
+   resumed, optionally with your advice, as a new segment of the same run, which
+   shows its own results.
    A loop ended early by a declared stop condition says why, in plain words.
    A condition set to **Pause and ask me** pauses the loop instead and reads
    "Waiting for your input", followed by what was met, for example "No improvement
    for 3 bodies (best 0.81 at body 4, higher is better). Paused after body 7 of 12."
    Check the per-iteration results, then choose **Review resume** and **Resume loop**
-   to continue with the next body. If you pressed Stop while it was waiting, the run
+   to continue with the next body. After **Review resume** you can type advice for
+   the next bodies (up to 4000 characters). Their proposal step receives it, and it
+   replaces any advice an earlier resume gave. The box starts with this segment's
+   advice. It locks once you select **Resume loop**, so a retry sends the same text.
+   The resumed segment then shows "Resumed with your advice: …". If you pressed Stop while it was waiting, the run
    cannot continue and no Resume is offered.
    A loop with a judge stop condition lists each judge decision under it, with
    the judge's own reason when the call decided.

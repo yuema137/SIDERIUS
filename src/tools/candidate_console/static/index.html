@@ -74,7 +74,13 @@
 <header class="console-header"><div class="brand"><img data-brand-logo class="logo logo-light" src="/siderius-logo-light.svg" alt="SIDERIUS" width="1180" height="425"><img data-brand-logo class="logo logo-dark" src="/siderius-logo-dark.svg" alt="SIDERIUS" width="1180" height="425"><span>Local candidate console</span></div><details class="console-intro"><summary>About this console</summary><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p></details>
   <section class="access-section" id="access-section" aria-labelledby="access-heading">
     <h1 id="access-heading">Connect to the console</h1>
-    <details class="access-help" id="access-help"><summary>About the console token</summary><p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p></details>
+    <details class="access-help" id="access-help"><summary>About the console token</summary>
+      <ul>
+        <li><strong>What it is:</strong> a secret created by init that locks this console, so other users and programs on the same machine cannot start runs or read your data. It is not a model provider API key.</li>
+        <li><strong>Where to find it:</strong> in the console-token file printed by init, check and serve (<code>siderius_workspace/settings/console-token</code>). Show it with <code>cat</code> on the machine that runs the console, then paste it here.</li>
+        <li><strong>Local or remote:</strong> on your own computer, open the printed address directly. On a remote server, keep the server running there and open an SSH tunnel from your computer first (<code>ssh -N -L 127.0.0.1:PORT:127.0.0.1:PORT YOUR_HOST</code>), then open the same address locally.</li>
+      </ul>
+      <p>Enter the console token again after reopening this page. It is kept only in this page’s memory.</p></details>
     <form id="access-form" class="actions"><div class="grow"><label for="token">Console token</label><input id="token" type="password" autocomplete="off" required></div><button type="submit">Connect</button></form>
     <p id="access-status" role="status" title="Observations refresh every 2 seconds while this page is visible.">Not connected.</p>
     <div id="access-connected" class="access-connected" hidden><button id="access-change" type="button" class="secondary">Change token</button><button id="access-disconnect" type="button" class="secondary">Disconnect console</button></div>
@@ -330,13 +336,17 @@
     <p id="remembered-operation" class="muted"></p><p id="monitor-status" role="status">No operation selected.</p><p id="monitor-cause" class="monitor-cause" hidden></p><p id="operation-observed" class="muted"></p><details data-ui-flag="developer"><summary>Operation facts</summary><dl id="operation-facts" class="facts"></dl></details>
     <div id="operation-stop-group" class="actions" hidden><button id="operation-stop-button" type="button">Stop run</button><p class="muted">Ends the run now, including any model call in progress. It cannot be resumed and produces no candidate result; files written so far stay in the run folder.</p></div>
     <p id="operation-stop-status" role="status"></p>
-    <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p><ul id="loop-judge" class="loop-judge" aria-label="Judge verdicts" hidden></ul>
+    <section id="loop-control" hidden aria-labelledby="loop-heading"><h3 id="loop-heading">Research loop</h3><p id="loop-state" role="status"></p><p id="loop-advice" class="muted" hidden></p><ul id="loop-judge" class="loop-judge" aria-label="Judge verdicts" hidden></ul>
       <div id="loop-stop-group" class="actions" hidden><button id="loop-stop" type="button">Stop at next boundary</button><p class="muted">The current body completes; no partial body is kept as a result.</p></div>
       <div id="loop-pause-group" class="actions" hidden><button id="loop-pause" type="button">Pause at next boundary</button><p class="muted">The current body completes; this run can then be reviewed and resumed from the next body.</p></div>
       <p id="loop-stop-status" role="status"></p>
       <p id="loop-continued" hidden>Continued by <a id="loop-successor"></a></p>
       <div id="loop-resume-group" hidden><div class="actions"><button id="loop-resume-review" type="button">Review resume</button><button id="loop-resume" type="button" hidden>Resume loop</button></div>
-        <p id="loop-resume-summary" class="muted"></p><p id="loop-resume-status" role="status"></p></div></section>
+        <p id="loop-resume-summary" class="muted"></p>
+        <div id="loop-resume-advice-group" hidden><label for="loop-resume-advice">Your advice for the next bodies (optional)</label>
+          <textarea id="loop-resume-advice" rows="4" maxlength="4000"></textarea>
+          <p class="muted">Plain text, up to 4000 characters. It is given to the proposal step of every body this resume runs and replaces any earlier advice. It is fixed once you select Resume loop.</p></div>
+        <p id="loop-resume-status" role="status"></p></div></section>
     <section id="native-chain-observation" hidden></section>
     <section id="graph-results-observation" hidden aria-live="polite"></section>
     <h3 id="tokens-heading">Reported LLM tokens</h3>

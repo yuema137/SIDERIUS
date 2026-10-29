@@ -1,9 +1,10 @@
 """Bounded finite-loop receipt and operation-bound graceful Stop marker."""
 
-from typing import TYPE_CHECKING, Self
+import unicodedata
+from typing import TYPE_CHECKING, Annotated, Self
 from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import AfterValidator, Field, model_validator
 
 if TYPE_CHECKING:
     from .models import CandidateRunRequest
@@ -50,6 +51,31 @@ class LoopTrace(PreviewModel):
         return self
 
 
+MAX_OPERATOR_ADVICE_CHARS = 4000
+
+
+def _operator_advice(value: str) -> str:
+    text = value.strip()
+    if not 1 <= len(text) <= MAX_OPERATOR_ADVICE_CHARS:
+        raise ValueError(f"operator advice must be 1 to {MAX_OPERATOR_ADVICE_CHARS} characters")
+    # Cc covers C0, DEL and C1 (e.g. CSI \x9b); Cf covers bidi overrides and the BOM.
+    if any(unicodedata.category(char) in ("Cc", "Cf") and char not in "\n\t" for char in text):
+        raise ValueError("operator advice may not contain control or format characters")
+    return text
+
+
+# Untrusted operator text given at Resume; surrounding whitespace is removed, so a
+# retried request with the same text is byte-identical. Only newline and tab are kept.
+OperatorAdvice = Annotated[str, AfterValidator(_operator_advice)]
+
+
+class ResumeAdvice(PreviewModel):
+    """Operator advice in force for one segment's bodies: given after body ``after_body``."""
+
+    after_body: int = Field(gt=0)
+    text: OperatorAdvice
+
+
 class LoopStop(PreviewModel):
     run_id: str
     declaration_digest: str
@@ -66,6 +92,17 @@ class LoopContinuation(LoopStop):
     predecessor_segment: UUID | None
     predecessor_receipt_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     completed_iterations: int = Field(gt=0)
+    # Advice given at this Resume; it reaches this segment's proposals only. Omitted when
+    # absent, so bindings of advice-free resumes keep their bytes.
+    operator_advice: OperatorAdvice | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    def resume_advice(self) -> ResumeAdvice | None:
+        """The advice this segment's bodies receive, anchored to its checkpoint."""
+        if self.operator_advice is None:
+            return None
+        return ResumeAdvice(after_body=self.completed_iterations, text=self.operator_advice)
 
 
 def admit_loop(request: "CandidateRunRequest") -> None:
