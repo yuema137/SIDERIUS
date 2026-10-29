@@ -314,10 +314,9 @@ and nested dataclasses, which inherit the setting; a nested `BaseModel` uses its
 own config, so a launch float there must refuse inf/NaN or carry the same
 setting (guarded by
 `test_candidate_settings_nonfinite_floats_inherit_the_string_encoding`).
-Not yet covered, pending the `parameter_rules.py` follow-up: the `Any`-typed
-`ParameterRule.exact` / `allowed` (reaching `constraint_context.task_rules`) and
-the `NumericRange.min` / `max` bounds still serialize inf/NaN as `null`. The
-graph tuning input that `graph_evidence` rereads is written with the same string
+Parameter-rule bounds and `ParameterRule.exact` / `allowed` values refuse
+non-finite numbers at their owners (`NumericRange`, `ParameterRule`), so no such
+value reaches transport. The graph tuning input that `graph_evidence` rereads is written with the same string
 encoding. Ingress may write such a value as a string (for example `"-inf"`).
 Whether a value may be nonfinite stays with its owner (issue #1012).
 
