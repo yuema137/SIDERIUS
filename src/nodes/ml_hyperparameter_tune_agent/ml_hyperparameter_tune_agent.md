@@ -1315,8 +1315,8 @@ is interpreted. Every golden-metric ORDERING decision asks it:
 | Decision | Member used |
 |---|---|
 | trial winner (`_best_trial_winner`) | `best` (ties → first, as `max()` did) |
-| skip gate + its disabled sentinel | `is_better`, `worst_sentinel` |
-| bypass gate + its disabled sentinel | `is_at_least`, `best_sentinel` |
+| skip gate + its inert (worst-value) threshold | `is_better`, `worst_sentinel` |
+| bypass gate + its inert (best-value) threshold | `is_at_least`, `best_sentinel` |
 | bootstrap reference | `worst_sentinel` |
 | resolved skip / bypass thresholds | `toward_better(reference, declared_delta)` |
 | planner score-table incumbent | `best` |
@@ -1336,7 +1336,7 @@ direction and asserts these two do not move.
 |---|---|---|
 | `skip_formal_min_delta`, `bypass_formal_time_budget_min_delta` | DECLARED by the operator, in the golden metric's units | a COORDINATE on the better-direction axis: negative loosens, positive tightens, under both directions. The documented disable values (`-inf` skip, `+inf` bypass) still resolve to that metric's worst / best sentinel, so there is no second convention to learn |
 | `bypass_formal_time_budget_minutes` | `float \| None`, default `None`; finite and positive (`OperatorTimeBudgetMinutes`, issue #828) | **Lane F3 / F-BYPASS-WD-1**: the ELEVATED wall-time ceiling (minutes) a score-QUALIFIED bypass formal attempt may use. ONE resolved value feeds BOTH consumers — admission RE-EVALUATES the forecast against it (a forecast past even this ceiling is REFUSED under bypass; the flag is never forced), and the same value becomes the attempt's `chosen_time_budget`, so the runtime watchdog's `operator_budget_seconds` moves WITH the admission verdict. `None` (default) = a qualified bypass grants NO extension — the elevated ceiling must be explicitly typed at launch (campaign: 200; normal formal: `formal_time_budget_minutes` 120), so it can never become a global raise through a schema default. The watchdog is never disabled by this value. Fresh-chain note: with `enable_chain_incumbent_formal_gates` ON and no incumbent, the −inf bootstrap makes the SCORE side unconditional (V20 §16.C) — the reachable unqualified state is the absence of a HealthGate-valid trial winner. |
-| bootstrap and disabled sentinels | generic ORDER facts | `worst_sentinel` / `best_sentinel` |
+| worst-value bootstrap and inert-threshold sentinels (defensive; not an operator setting) | generic ORDER facts | `worst_sentinel` / `best_sentinel` |
 | the efficiency band | generic, metric-independent by definition | ONE named `EFFICIENCY_BAND_FRACTION` (0.05), applied to the run's OBSERVED score range and moved toward worse — never a raw `best − 0.05` |
 | `degenerate_penalty_score` | DECLARED, and INAPPLICABLE under a minimised metric | a finite float is **REFUSED at startup** with a recorded reason. It is not negated and not reinterpreted: the "large negative, strictly below any healthy success" convention describes a maximised metric, and under a minimised one the same number is the run's best score. `None` (the default) is direction-free and always accepted |
 
@@ -1569,7 +1569,7 @@ enable_chain_incumbent_formal_gates=True, budgets unset
 Surfaced by 07b's Gate 1, which worked around it by temporarily enabling both
 budgets. The coupling predates 07b. Everything else at the formal boundary is
 unchanged: candidate-validity filtering, `MetricOrder`, the skip/bypass
-threshold mathematics and their disabled sentinels, the no-winner-still-skips
+threshold mathematics and their inert sentinel thresholds, the no-winner-still-skips
 rule (a genuinely empty or all-invalid trial stage still skips formal), and
 all retry / round / attempt semantics.
 

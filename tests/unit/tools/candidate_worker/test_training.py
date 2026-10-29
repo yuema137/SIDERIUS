@@ -714,3 +714,111 @@ def test_four_stage_reusable_requires_source_owned_settings(training_request):
     reusable = ReusableWorkflowDefinition.model_validate_json(json.dumps(payload))
     with pytest.raises(ValueError, match="source-owned training_settings"):
         ReusableWorkflowDocument(definition=reusable)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("degenerate_penalty_score", float("-inf")),
+        ("degenerate_penalty_score", float("inf")),
+    ],
+)
+def test_admitted_nonfinite_launch_value_reaches_tuner_unchanged(
+    training_request, training_runner, field, value
+):
+    """#1012: admission's settings JSON round trip wrote inf as null, so an
+    accepted infinite optional value silently became None at the tuner."""
+    path = Path(training_request.preview.project_root) / "training.json"
+    settings = json.loads(path.read_text())
+    settings["launch"][field] = "-inf" if value < 0 else "+inf"
+    path.write_text(json.dumps(settings))
+    receipt = launch_candidate(refresh(training_request))
+    assert receipt.status == "completed", receipt.error
+    tuned = next(item for name, item in training_runner if name == "tuner")
+    assert getattr(tuned, field) == value
+
+
+@pytest.mark.parametrize("field", ["skip_formal_min_delta", "bypass_formal_time_budget_min_delta"])
+def test_formal_delta_without_its_gates_is_refused_not_ignored(
+    training_request, training_runner, field
+):
+    """#1012: the chain-incumbent gates stay off on this ingress, so a configured
+    formal delta was accepted and silently never consumed."""
+    path = Path(training_request.preview.project_root) / "training.json"
+    settings = json.loads(path.read_text())
+    settings["launch"][field] = 0.25
+    path.write_text(json.dumps(settings))
+    receipt = launch_candidate(refresh(training_request))
+    assert receipt.status == "failed"
+    assert "unsupported fresh training controls" in (receipt.error or "")
+    assert field in (receipt.error or "")
+    assert not any(name == "tuner" for name, _ in training_runner)
+
+
+def test_candidate_settings_nonfinite_floats_inherit_the_string_encoding():
+    """#1042 review: settings losslessness rests on ``ser_json_inf_nan="strings"``
+    reaching every float. Dataclasses (``WorkflowLaunchConfig``) inherit it; a
+    nested ``BaseModel`` uses its own config, so a float there that admits inf/NaN
+    would round-trip as ``null`` again. Fails naming any such field."""
+    import dataclasses
+    import typing
+
+    from pydantic import BaseModel, TypeAdapter, ValidationError
+
+    from workflows.candidate_training_settings import CandidateTrainingSettings
+
+    def admits_inf(annotation) -> bool:
+        try:
+            TypeAdapter(annotation).validate_python(float("inf"))
+        except ValidationError:
+            return False
+        return True
+
+    def floats(annotation) -> bool:
+        return annotation is float or any(floats(arg) for arg in typing.get_args(annotation))
+
+    def owner_refuses_inf(owner, name) -> bool:
+        # The owning model's validators decide: NumericRange refuses inf in an
+        # after-validator that the field annotation cannot express. Probe the
+        # owner with a finite value (must pass) and with inf (must fail).
+        try:
+            owner.model_validate({name: 0.0})
+        except ValidationError:
+            return False
+        try:
+            owner.model_validate({name: float("inf")})
+        except ValidationError:
+            return True
+        return False
+
+    offenders, seen = [], set()
+
+    def walk(annotation, path):
+        for arg in (annotation, *typing.get_args(annotation)):
+            if isinstance(arg, type) and arg not in seen:
+                if issubclass(arg, BaseModel):
+                    seen.add(arg)
+                    inherits = arg.model_config.get("ser_json_inf_nan") == "strings"
+                    for name, info in arg.model_fields.items():
+                        annotation = info.rebuild_annotation()
+                        if (
+                            floats(info.annotation)
+                            and not inherits
+                            and admits_inf(annotation)
+                            and not owner_refuses_inf(arg, name)
+                        ):
+                            offenders.append(f"{path}.{name} ({arg.__name__})")
+                        walk(info.annotation, f"{path}.{name}")
+                elif dataclasses.is_dataclass(arg):
+                    seen.add(arg)
+                    for name, hint in typing.get_type_hints(arg).items():
+                        walk(hint, f"{path}.{name}")
+            elif arg is not annotation:
+                walk(arg, path)
+
+    for name, info in CandidateTrainingSettings.model_fields.items():
+        walk(info.annotation, name)
+    # No known gaps: NumericRange bounds and ParameterRule exact/allowed values
+    # refuse non-finite numbers at their owning models, so none reach transport.
+    # Exact equality makes any new offender fail this guard.
+    assert offenders == [], offenders
