@@ -716,26 +716,19 @@ def test_four_stage_reusable_requires_source_owned_settings(training_request):
         ReusableWorkflowDocument(definition=reusable)
 
 
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("degenerate_penalty_score", float("-inf")),
-        ("degenerate_penalty_score", float("inf")),
-    ],
-)
-def test_admitted_nonfinite_launch_value_reaches_tuner_unchanged(
-    training_request, training_runner, field, value
-):
-    """#1012: admission's settings JSON round trip wrote inf as null, so an
-    accepted infinite optional value silently became None at the tuner."""
+@pytest.mark.parametrize("token", ["-inf", "+inf"])
+def test_infinite_penalty_is_refused_before_the_tuner(training_request, training_runner, token):
+    """#1045: an infinite degenerate_penalty_score was admitted (and, before
+    #1012, silently became None). Its owner now refuses it at training
+    admission, before any tuner call."""
     path = Path(training_request.preview.project_root) / "training.json"
     settings = json.loads(path.read_text())
-    settings["launch"][field] = "-inf" if value < 0 else "+inf"
+    settings["launch"]["degenerate_penalty_score"] = token
     path.write_text(json.dumps(settings))
     receipt = launch_candidate(refresh(training_request))
-    assert receipt.status == "completed", receipt.error
-    tuned = next(item for name, item in training_runner if name == "tuner")
-    assert getattr(tuned, field) == value
+    assert receipt.status == "failed"
+    assert "degenerate_penalty_score" in (receipt.error or "")
+    assert not any(name == "tuner" for name, _ in training_runner)
 
 
 @pytest.mark.parametrize("field", ["skip_formal_min_delta", "bypass_formal_time_budget_min_delta"])
