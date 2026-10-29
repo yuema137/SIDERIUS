@@ -363,9 +363,11 @@ before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
 training controls come from the captured settings' native launch schema, including
 its defaults. No task import or current editor/settings lookup occurs. Review
 refuses missing observations or changed input bytes with `reusable_preparation`.
-At most one external may supply task rules (across `proposal.input` and
-`optional.task-composition-ref`) and at most one may supply training settings;
-duplicate sources refuse with `reusable_preparation`, even when task rules are null.
+Multiple externals may supply task rules (across `proposal.input` and
+`optional.task-composition-ref`) or training settings when their extracted review
+values are equal. This includes one proposal input per proposer in independent
+proposal families. Conflicting extracted `ParameterRules` or `TrainingReview`
+values refuse with `reusable_preparation`; null rules are compared as a value.
 These errors use bounded messages without input paths or payloads.
 The projection does not alter launch or its digest.
 `TrainingReview.max_rounds` carries the captured native integer limit (10 when

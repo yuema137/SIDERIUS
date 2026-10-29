@@ -689,10 +689,9 @@ def test_capture_review_missing_observation_is_bounded_refusal(captured, monkeyp
         ("native-training.settings", "native-training.settings"),
     ],
 )
-def test_capture_review_refuses_duplicate_fact_sources_even_when_null(
-    captured, tmp_path, contracts
-):
-    """Duplicate sources must refuse instead of overwriting facts; null is still a source."""
+@pytest.mark.parametrize("values", ["equal", "different", "both_null", "first_null", "second_null"])
+def test_capture_review_compares_repeated_fact_sources(captured, tmp_path, contracts, values):
+    """Family proposal inputs may repeat equal rules, but conflicts must never overwrite them."""
     from tools.candidate_console.capture_facts import capture_facts
     from tools.workflow_preview.models import FileObservation
 
@@ -705,16 +704,32 @@ def test_capture_review_refuses_duplicate_fact_sources_even_when_null(
         f for f in operation.request.files if f.reference == f"external.{proposal_binding.id}"
     )
     proposal = json.loads(Path(proposal_file.path).read_bytes())
-    proposal["task_composition_ref"] = None
-    payloads = {
-        "proposal.input": json.dumps(proposal).encode(),
-        "optional.task-composition-ref": b"null",
-        "native-training.settings": b"{}",
-    }
+    reference = proposal["task_composition_ref"]
+    assert reference is not None
     bindings, observations = [], []
     for index, contract in enumerate(contracts):
         binding = proposal_binding.model_copy(update={"id": f"source{index}", "contract": contract})
-        payload = payloads[contract]
+        null_rules = (
+            values == "both_null"
+            or (values == "first_null" and index == 0)
+            or (values == "second_null" and index == 1)
+        )
+        limit = 64 if values == "different" and index == 1 else 32
+        reference["parameter_rules"] = (
+            None if null_rules else {"rules": {"train_config.batch_size": {"exact": limit}}}
+        )
+        if contract == "proposal.input":
+            content = proposal
+        elif contract == "optional.task-composition-ref":
+            content = reference
+        else:
+            content = {
+                "launch": {
+                    "max_rounds": limit,
+                    "workflow_parameter_rules": reference["parameter_rules"],
+                }
+            }
+        payload = json.dumps(content).encode()
         path = tmp_path / f"source{index}.json"
         path.write_bytes(payload)
         bindings.append(binding)
@@ -733,7 +748,18 @@ def test_capture_review_refuses_duplicate_fact_sources_even_when_null(
         update={"preview": preview, "files": tuple(observations)}
     )
     field = "training" if contracts[0] == "native-training.settings" else "rules"
-    with pytest.raises(OperationFailure) as refused:
-        capture_facts(request)
-    assert refused.value.detail.code == "reusable_preparation"
-    assert refused.value.detail.message == f"duplicate captured review {field} binding"
+    if values in {"equal", "both_null"}:
+        facts = capture_facts(request)
+        rules = facts.task_parameter_rules
+        if field == "training":
+            assert facts.training is not None
+            assert facts.training.max_rounds == 32
+            rules = facts.training.workflow_parameter_rules
+        assert (None if rules is None else rules.model_dump()) == (
+            None if values == "both_null" else {"rules": {"train_config.batch_size": {"exact": 32}}}
+        )
+    else:
+        with pytest.raises(OperationFailure) as refused:
+            capture_facts(request)
+        assert refused.value.detail.code == "reusable_preparation"
+        assert refused.value.detail.message == f"conflicting captured review {field} bindings"
