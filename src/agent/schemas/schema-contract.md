@@ -87,7 +87,8 @@ no hidden contracts, no silent defaults.
   model name as `executed_model_type`) defers. `extra="allow"` configs accept
   unknown keys. `validate_model_parameter_rules` runs the full resolver once at
   tuner launch for a fixed `force_model`, on an empty model configuration with
-  only planner-chosen values deferred.
+  only planner-chosen values deferred. The same target check refuses boolean
+  `exact` / `allowed` values on a field whose type does not admit `bool`.
   See the [parameter-rule contract](../../../docs/reference/task-composition.md)
   for sampling ownership, composition conflicts and value-validation boundaries.
 

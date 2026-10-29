@@ -561,6 +561,11 @@ Notes:
   (`model_name`), not a template base the baseline names; that model has no
   config class before implementation, so its target check is left to the
   tuner.
+  The same target check refuses a boolean `exact` value, or a boolean member
+  of `allowed`, when the consuming field does not accept a boolean (for
+  example `train_config.batch_size: {exact: true}`), because Pydantic would
+  execute it as `1` or `0`. Boolean fields such as `train_config.drop_last`
+  keep boolean rules.
 - A workflow may add a second rule set through
   `--workflow_parameter_rules '<json>'`, using the same shape. Task and
   workflow rules are enforced together: the workflow may narrow a task rule
