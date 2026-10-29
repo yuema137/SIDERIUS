@@ -1,11 +1,15 @@
 """Task package mounts: every manifest-referenced file must be visible in the run sandbox.
 
-Preparation and candidate runs mount only the manifest file, the data root, the
-LLM profile, ``task_read_only`` and the serving checkout
-(``tools.candidate_prepare.launch.supervise``, ``workspace_sandbox.profile.runtime_roots``).
-A plugin or declaration beside the manifest that none of those cover fails
-inside the sandbox; :func:`check_package_mounts` refuses it at ``check`` time
-and names the file. The sandbox profile itself is unchanged.
+A manifest reference must be visible to both sandboxed stages. The paths both
+mount are the manifest file, the data root and ``task_read_only``
+(``candidate_prepare.launch.supervise`` also mounts the LLM profile, but the
+candidate run in ``candidate_prepare.bundle`` does not), plus what
+``workspace_sandbox.command`` mounts for every profile: the serving checkout
+(``runtime_roots``), ``SYSTEM_DIRECTORIES`` and ``SYSTEM_FILES``. Network files
+are left out because preparation runs offline. A plugin or declaration beside
+the manifest that none of those cover fails inside the sandbox;
+:func:`check_package_mounts` refuses it at ``check`` time and names the file.
+The sandbox profile itself is unchanged.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from tools.workspace_sandbox.profile import runtime_roots
+from tools.workspace_sandbox.profile import SYSTEM_DIRECTORIES, SYSTEM_FILES, runtime_roots
 from workflows.task_package_refs import ManifestReference, manifest_references
 
 from .models import ConsoleConfig, TaskChoice
@@ -27,13 +31,14 @@ GPU_WITHOUT_SYS = (
 
 
 def mounted_paths(task: TaskChoice) -> tuple[Path, ...]:
-    """The read-only paths a preparation or candidate run of ``task`` can see."""
+    """The read-only paths both a preparation and a candidate run of ``task`` can see."""
     return (
         Path(task.task_manifest),
         Path(task.data_root),
-        Path(task.llm_config_file),
         *map(Path, task.task_read_only),
         *runtime_roots(),
+        *SYSTEM_DIRECTORIES,
+        *SYSTEM_FILES,
     )
 
 
@@ -74,7 +79,7 @@ def check_package_mounts(task: TaskChoice) -> None:
         raise SettingsInvalid(
             f"task {task.task_id} manifest {outside.location} names {outside.path}, which is "
             "outside every mounted path (manifest, data folder, task_read_only, serving "
-            "checkout); add its package directory to task_read_only"
+            "checkout, system directories); add its package directory to task_read_only"
         )
 
 

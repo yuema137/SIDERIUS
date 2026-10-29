@@ -8,10 +8,19 @@ inside a mounted path before a sandboxed child fails to find it.
 
 Scope and limits:
 
-- Only references written in the manifest itself are listed: a string value of
-  a ``file``, ``declaration``, ``dir``, ``config`` or ``ref`` key at any depth,
-  and the ``code_package`` ``root`` plus each of its ``files``. A ``config``
-  mapping (constructor arguments) is walked, not treated as a path.
+- Only references the composition itself resolves against the manifest
+  directory are listed, by the composition's own rules:
+
+  * a string ``file`` (``_load_symbol``), ``declaration`` (metric and secondary
+    declarations) or ``dir`` (model/loss plugin directories) at any depth
+    outside a constructor ``config`` mapping;
+  * a string ``config`` (dataset profile, task config, Health, blocks, rubrics,
+    data analysis);
+  * inside a ``config`` *mapping* (task-owned constructor arguments, passed
+    unchanged by ``_validated_task_config_mapping``) only the values of exact
+    ``{ref: <str>}`` envelopes; every other key and value there belongs to the
+    task and is never read as a path, at any depth;
+  * the ``code_package`` ``root`` plus each of its ``files``.
 - References inside the referenced files (for example a Health config naming
   another file) are not followed.
 - Nothing is imported, composed, validated or digested; composition remains
@@ -27,7 +36,8 @@ from typing import Any, Literal
 
 import yaml
 
-PATH_KEYS = frozenset({"file", "declaration", "dir", "config", "ref"})
+#: Keys whose string value the composition resolves as a manifest-relative path.
+PATH_KEYS = frozenset({"file", "declaration", "dir", "config"})
 
 
 def resolve_manifest_ref(ref: str, manifest_dir: str) -> str:
@@ -48,14 +58,30 @@ class ManifestReference:
     kind: Literal["file", "directory"]
 
 
+def _reference(
+    where: str, ref: str, manifest_dir: str, kind: Literal["file", "directory"]
+) -> ManifestReference:
+    return ManifestReference(where, Path(resolve_manifest_ref(ref, manifest_dir)), kind)
+
+
+def _constructor_refs(
+    config: dict[Any, Any], location: str, manifest_dir: str, found: list[ManifestReference]
+) -> None:
+    """Only exact ``{ref: <str>}`` envelopes, as ``_validated_task_config_mapping`` resolves."""
+    for key, value in config.items():
+        if isinstance(value, dict) and set(value) == {"ref"} and isinstance(value["ref"], str):
+            found.append(_reference(f"{location}.{key}.ref", value["ref"], manifest_dir, "file"))
+
+
 def _walk(value: Any, location: str, manifest_dir: str, found: list[ManifestReference]) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             where = f"{location}.{key}"
-            if key in PATH_KEYS and isinstance(item, str) and item.strip():
-                kind: Literal["file", "directory"] = "directory" if key == "dir" else "file"
+            if key == "config" and isinstance(item, dict):
+                _constructor_refs(item, where, manifest_dir, found)
+            elif key in PATH_KEYS and isinstance(item, str) and item.strip():
                 found.append(
-                    ManifestReference(where, Path(resolve_manifest_ref(item, manifest_dir)), kind)
+                    _reference(where, item, manifest_dir, "directory" if key == "dir" else "file")
                 )
             else:
                 _walk(item, where, manifest_dir, found)

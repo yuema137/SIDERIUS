@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ from typing import Any
 from tools.candidate_operations.models import OperationFailure
 
 from .files import canonical, config_bytes
+from .models import ConsoleConfig
 from .package_mounts import check_package_mounts
 from .settings_file import SettingsInvalid
 from .settings_models import ResolvedConsole
@@ -109,7 +111,13 @@ def choose_devices(devices: tuple[str, ...] | None) -> tuple[str, ...]:
     nodes = host_gpu_devices()
     if nodes and sys.stdin.isatty():
         print("This host has NVIDIA device nodes: " + ", ".join(nodes))
-        answer = input("Pass them to candidate runs of this task? [y/N] ").strip().lower()
+        try:
+            answer = input("Pass them to candidate runs of this task? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            raise AddTaskRefused(
+                "no answer to the device question; pass --device PATH ... to choose devices"
+            ) from None
         if answer in ("y", "yes"):
             return nodes
     print("candidate_devices: none (pass --device PATH to give runs a GPU device node)")
@@ -155,6 +163,33 @@ def _external_directories(manifest: Path) -> tuple[str, ...]:
     return tuple(map(str, outermost))
 
 
+def refuse_broad_mounts(folders: tuple[str, ...], config: ConsoleConfig, workspace: Path) -> None:
+    """``--external`` mounts must not expose ``/``, the home folder or console-private paths."""
+    from .settings_file import protected_paths
+
+    home = Path.home().resolve()
+    protected = tuple(Path(path) for path in protected_paths(config, workspace))
+    for value in folders:
+        folder = Path(value)
+        reason = None
+        if folder == Path("/"):
+            reason = "is the root directory"
+        elif home.is_relative_to(folder):
+            reason = "is or contains your home folder"
+        else:
+            hit = next(
+                (p for p in protected if p.is_relative_to(folder) or folder.is_relative_to(p)),
+                None,
+            )
+            if hit is not None:
+                reason = f"overlaps the console's private path {hit}"
+        if reason is not None:
+            raise AddTaskRefused(
+                f"--external would mount {folder}, which {reason}; move the package files "
+                f"into {workspace / TASKS_DIRECTORY}/<name>/ instead"
+            )
+
+
 def profile_environment_names(llm_config_file: str) -> tuple[str, ...]:
     """Credential names every route of the profile may require; names only, no values."""
     from tools.candidate_worker.preflight import credential_requirements
@@ -186,12 +221,22 @@ def _with_entry(document: dict[str, Any], entry: dict[str, Any]) -> dict[str, An
 
 def plan_task(request: AddTaskRequest) -> TaskPlan:
     """Validate the request and build the new console.json; writes nothing."""
+    for flag, value in (("--config", request.config), ("--manifest", request.manifest)):
+        if not os.path.isabs(value) or os.path.normpath(value) != value:
+            raise AddTaskRefused(
+                f"{flag} must be an absolute path without '..' or a trailing slash, "
+                f"for example {os.path.abspath(value)}"
+            )
     try:
         config_path = canonical(request.config)
         read_bytes = config_bytes(str(config_path))
         manifest = canonical(request.manifest)
-    except (OSError, OperationFailure) as error:
-        raise AddTaskRefused(f"cannot read the given file ({error})") from None
+    except OperationFailure:
+        raise AddTaskRefused(
+            "--config and --manifest must be canonical paths without symlinks"
+        ) from None
+    except OSError as error:
+        raise AddTaskRefused(f"cannot read {error.filename or 'the given file'}") from None
     if not manifest.is_file():
         raise AddTaskRefused(f"the manifest {manifest} is not a file")
     from .settings_models import ConsoleFile
@@ -229,6 +274,8 @@ def plan_task(request: AddTaskRequest) -> TaskPlan:
     }
     try:
         draft = _resolve(_with_entry(document, entry))
+        if package is None:
+            refuse_broad_mounts(read_only, draft.config, workspace)
         task = next(t for t in draft.config.tasks if t.task_id == task_id)
         required = profile_environment_names(task.llm_config_file)
         entry["candidate_environment_names"] = list(
@@ -238,6 +285,8 @@ def plan_task(request: AddTaskRequest) -> TaskPlan:
         resolved = _resolve(updated)
         task = next(t for t in resolved.config.tasks if t.task_id == task_id)
         check_package_mounts(task)
+    except AddTaskRefused:
+        raise
     except SettingsInvalid as error:
         raise AddTaskRefused(str(error)) from None
     except (OSError, ValueError, OperationFailure) as error:

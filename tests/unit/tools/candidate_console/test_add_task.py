@@ -260,3 +260,104 @@ def test_add_task_and_check_never_print_a_credential_value(workspace, monkeypatc
     check = _main(monkeypatch, capsys, "check", "--config", str(config))
     assert check[0] == 0
     assert secret not in out + err + check[1] + check[2]
+
+
+def _set_task_data_config(manifest: Path, config: dict) -> None:
+    import yaml
+
+    document = yaml.safe_load(manifest.read_text())
+    document["task_data_path"]["config"] = config
+    manifest.write_text(yaml.safe_dump(document, sort_keys=False))
+
+
+def test_constructor_config_values_are_not_paths_but_ref_envelopes_are(
+    workspace, tmp_path, monkeypatch, capsys
+):
+    """Defect: task-owned constructor arguments named file/dir/... are checked as paths.
+
+    Composition passes a ``config`` mapping to the constructor unchanged and resolves
+    only ``{ref: ...}`` envelopes. Fails if plain ``file``/``dir``/``declaration``
+    values (at any depth) are refused, if an absolute ref under the mounted system
+    directory ``/usr`` is refused, or if an envelope outside every mount passes.
+    """
+    _, config, manifest = workspace
+    _set_task_data_config(
+        manifest,
+        {
+            "train_shards": [0, 1],
+            "file": "shard_0.csv",
+            "dir": "train",
+            "nested": {"declaration": "not/a/path.json", "config": "free text"},
+            "tool": {"ref": "/usr/bin/env"},
+        },
+    )
+    argv = ("add-task", "--config", str(config), "--manifest", str(manifest))
+    code, _, err = _main(monkeypatch, capsys, *argv, "--dry-run")
+    assert code == 0, err
+    outside = tmp_path / "outside.csv"
+    outside.write_text("")
+    _set_task_data_config(manifest, {"shard": {"ref": str(outside)}})
+    code, _, err = _main(monkeypatch, capsys, *argv, "--dry-run")
+    assert code == 2
+    assert f"task_data_path.config.shard.ref names {outside}, which is outside" in err
+
+
+@pytest.mark.parametrize("target", ["home", "console"])
+def test_external_refuses_mounting_home_or_console_private_folders(
+    target, workspace, tmp_path, monkeypatch, capsys
+):
+    """Defect: --external mounts a folder that is the home folder or holds console secrets.
+
+    Fails if a referenced file directly in $HOME, or in the folder holding the
+    workspace (and so its settings/ and token), becomes a task_read_only mount.
+    """
+    root, config, _ = workspace
+    manifest, package = copy_quickstart_package(tmp_path / "elsewhere")
+    if target == "home":
+        monkeypatch.setenv("HOME", str(package / "plugins"))
+        expected = "is or contains your home folder"
+    else:
+        stray = root.parent / "stray.json"
+        stray.write_text("{}")
+        _set_task_data_config(manifest, {"extra": {"ref": str(stray)}})
+        expected = "overlaps the console's private path"
+    code, _, err = _main(
+        monkeypatch,
+        capsys,
+        "add-task",
+        "--config",
+        str(config),
+        "--manifest",
+        str(manifest),
+        "--external",
+        "--task-id",
+        "outside",
+    )
+    assert code == 2 and expected in err and "tasks/<name>/ instead" in err
+    assert _tasks(config) == []
+
+
+def test_device_prompt_without_an_answer_and_relative_paths_refuse_plainly(
+    workspace, monkeypatch, capsys
+):
+    """Defect: EOF at the device prompt crashes with a traceback, or a relative
+    --manifest gets an unexplained 'canonical' refusal."""
+    _, config, manifest = workspace
+    monkeypatch.setattr(
+        "tools.candidate_console.add_task.host_gpu_devices", lambda: ("/dev/nvidia0",)
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+
+    def no_answer(prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", no_answer)
+    code, _, err = _main(
+        monkeypatch, capsys, "add-task", "--config", str(config), "--manifest", str(manifest)
+    )
+    assert code == 2 and "no answer to the device question" in err
+    code, _, err = _main(
+        monkeypatch, capsys, "add-task", "--config", str(config), "--manifest", "tasks/q.yaml"
+    )
+    assert code == 2 and "--manifest must be an absolute path" in err
+    assert _tasks(config) == []

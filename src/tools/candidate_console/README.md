@@ -96,7 +96,9 @@ even when using the default models.
    fit your task. Add `--dry-run` to print the entry without writing anything. A
    manifest outside `tasks/` is refused unless you add `--external`; then the
    folders holding the files the manifest names are listed in `task_read_only`
-   instead. A task ID that already exists is refused. If someone else changes
+   instead; a folder that is `/`, your home folder or one holding the console's
+   settings, token or credentials is refused, so move such files into
+   `tasks/<name>/`. A task ID that already exists is refused. If someone else changes
    `console.json` while `add-task` runs, it writes nothing and asks you to run it
    again.
 
@@ -168,8 +170,8 @@ even when using the default models.
    composition, required key presence, sandbox availability or provider access.
    When a required field has no value, the check names it, for example
    `task my-task needs llm_config_file`. When the manifest names a file the run
-   sandbox cannot read (outside the manifest, the data folder, `task_read_only`
-   and this checkout), the check names that file; add its package folder to
+   sandbox cannot read (outside the manifest, the data folder, `task_read_only`,
+   this checkout and the system folders such as `/usr`), the check names that file; add its package folder to
    `task_read_only`. When a workspace folder is missing or
    unusable, it lists the folder (for example `data/my-task: missing`) and, if
    `init` can create it, prints the `init` command to run.

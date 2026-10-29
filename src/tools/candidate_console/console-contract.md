@@ -67,19 +67,25 @@ Owners: `package_mounts.py` (console admission), `workflows/task_package_refs.py
 (manifest reference listing; `task_composition._resolve_path` delegates to its
 `resolve_manifest_ref`, so both resolve a ref against the manifest directory).
 
-Preparation and candidate runs see only the manifest file, `data_root`,
-`llm_config_file`, `task_read_only` and the serving checkout
-(`workspace_sandbox.profile.runtime_roots()`). `validate_config` (so `check`,
-`serve` and `CandidateConsole`) calls `check_package_mounts(task)` for every task:
-`manifest_references` reads the manifest as YAML without importing task code and
-lists each string under a `file`, `declaration`, `dir`, `config` or `ref` key at
-any depth, plus `code_package.root` and its `files`. Each listed path must exist
+A reference must be visible to both sandboxed stages. Both mount the manifest
+file, `data_root` and `task_read_only` (preparation also mounts `llm_config_file`;
+the candidate run in `candidate_prepare/bundle.py` does not, so it does not count),
+plus what `workspace_sandbox/command.py` binds for every profile: the serving
+checkout (`runtime_roots()`), `SYSTEM_DIRECTORIES` and `SYSTEM_FILES` (imported
+from `workspace_sandbox.profile`; network files are excluded because preparation
+is offline). `validate_config` (so `check`, `serve` and `CandidateConsole`) calls
+`check_package_mounts(task)` for every task. `manifest_references` reads the
+manifest as YAML without importing task code and lists only what the composition
+resolves: a string `file`, `declaration`, `dir` or `config` value at any depth;
+inside a `config` mapping (task-owned constructor arguments, passed unchanged by
+`_validated_task_config_mapping`) only exact `{ref: <str>}` envelope values, never
+other keys at any depth; and `code_package.root` plus its `files`. Each listed path must exist
 (a `dir` as a directory, others as files) and its real path (`Path.resolve()`)
 must equal or lie inside the real path of a mounted path. Otherwise a
 `SettingsInvalid` names the task, the manifest location and the path, for example
 `task quickstart manifest task_data_path.file names /abs/plugins/_task.py, which is
 outside every mounted path (manifest, data folder, task_read_only, serving
-checkout); add its package directory to task_read_only`. A manifest that is not a
+checkout, system directories); add its package directory to task_read_only`. A manifest that is not a
 YAML mapping is refused the same way. Limits: references inside referenced files
 (for example a Health config naming another file) are not followed; composition
 validity is still decided only by the composition child. The sandbox profile is
@@ -98,13 +104,20 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
 [--network|--no-network] [--device PATH ...] [--prepare-timeout S]
 [--candidate-timeout S] [--external] [--dry-run]`.
 
+- `--config` and `--manifest` must be absolute, normalized and canonical (no
+  symlinks); a relative path is refused with its absolute spelling as a hint.
 - Requires a `console.json` with `workspace_root` that validates as `ConsoleFile`.
 - Package location: without `--external` the canonical manifest must be inside
   `<workspace_root>/tasks/<name>/` (a manifest directly in `tasks/` is refused);
   `task_read_only` becomes `[<workspace_root>/tasks/<name>]`. With `--external` any
   canonical manifest is accepted and `task_read_only` becomes the outermost set of
   directories holding its referenced files (`dir` references count as themselves),
-  sorted; a missing referenced file is refused.
+  sorted; a missing referenced file is refused. A folder that is `/`, is or
+  contains the home folder (`Path.home()`), or overlaps a console private path
+  (`settings_file.protected_paths`: token, credential file, `settings/`,
+  `library/`, `projects/`, operation and output roots) is refused with
+  `--external would mount <folder>, which ...; move the package files into
+  <workspace>/tasks/<name>/ instead`.
 - `task_id` defaults to `<name>` (external: the manifest's directory name) and must
   match `^[a-zA-Z0-9_-]{1,80}$`; an existing `task_id` is refused. `label` defaults
   to `task_id`.
@@ -115,7 +128,8 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
   starting values for the operator to review, not resource limits the framework
   chooses. `candidate_devices` is `--device` when given; otherwise, when stdin is a
   TTY and `/dev/nvidia*` character devices exist, the command lists them and asks
-  whether to pass them; else it is `[]` and the command prints
+  whether to pass them (no answer, EOF or Ctrl-C refuses with exit 2); else it is
+  `[]` and the command prints
   `candidate_devices: none (...)`. `candidate_environment_names` is
   `credential_requirements(routes, ()).required_names` (the worker preflight owner)
   for every route of the task's resolved LLM profile
