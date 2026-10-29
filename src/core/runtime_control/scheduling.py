@@ -53,6 +53,9 @@ Sha256Hex = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 #: ``halt``: any refusal places nothing (graph-mode serial reference).
 #: ``continue``: refused units are reported; others are still planned.
 RefusalPolicy = Literal["continue", "halt"]
+#: Where a budget was declared; ``host_reservation``: derived inside a run from its
+#: host-ledger grant (B3-4). Provenance only, excluded from the digest.
+BudgetSource = Literal["caller", "file", "host_reservation"]
 
 
 class ResourceRequest(BaseModel):
@@ -133,8 +136,7 @@ class HostBudget(BaseModel):
     host_memory_gib: PositiveQuantity
     cpu_slots: PositiveCount
     max_concurrent_units: PositiveCount
-    #: ``host_reservation``: derived inside a run from its host-ledger grant (B3-4).
-    source: Literal["caller", "file", "host_reservation"]
+    source: BudgetSource
     #: Decision B3-Q6: the operator accepts that units sharing one GPU contend for
     #: wall time, so time-budgeted runs may share a slot. Omitted when false, so
     #: a budget that does not set it keeps its digest.
