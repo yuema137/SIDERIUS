@@ -36,12 +36,17 @@ def debate_rank(**overrides):
 
 @pytest.fixture
 def consumed(monkeypatch):
-    """(implementation node, candidate_id of the proposal it implemented), in run order."""
-    seen: list[tuple[str, str | None]] = []
+    """(implementation node, implemented candidate_id, seed owner), in run order.
+
+    The seed owner is read from the seed's per-proposal debug path, so a branch that
+    implements the right proposal with another proposal's task facts is visible.
+    """
+    seen: list[tuple[str, str | None, str]] = []
     original = phases.run_implementation
 
     def record(context, request, initial, inputs, config, proposal, blocks):
-        seen.append((context.node_id, proposal.candidate_id))
+        owner = Path(inputs.proposal.debug_dump_proposing_prompt_path).parent.name
+        seen.append((context.node_id, proposal.candidate_id, owner))
         return original(context, request, initial, inputs, config, proposal, blocks)
 
     monkeypatch.setattr(phases, "run_implementation", record)
@@ -77,10 +82,10 @@ def test_top2_proposals_reach_their_branches_in_the_judges_order(
     assert receipt.status == "accepted", receipt.error
     ids = candidate_ids(receipt)
     proposals = sorted(ids)
-    implementations = sorted(node for node, _ in consumed)
-    assert dict(consumed) == {
-        implementations[0]: ids[proposals[2]],
-        implementations[1]: ids[proposals[0]],
+    implementations = sorted(node for node, _, _ in consumed)
+    assert {node: (cid, owner) for node, cid, owner in consumed} == {
+        implementations[0]: (ids[proposals[2]], proposals[2]),
+        implementations[1]: (ids[proposals[0]], proposals[0]),
     }
     calls = len(bridge.calls)
     verify_graph_trace(request, parent, receipt)
