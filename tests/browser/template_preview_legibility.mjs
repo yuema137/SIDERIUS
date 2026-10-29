@@ -1,14 +1,17 @@
-/** Template gallery preview legibility: "Start from a template" -> "Single research loop".
- * Regression for the operator report that the large preview was too small to read, cropped
- * (skipping-edge arcs cut at the top, the right-most node and "Use template" cut at the right)
- * and that the dashed feedback line ran through its own "feedback · up to N iteration" label.
- * At 1920, 1280 (default) and 900 (layout breakpoint) px viewports, light and dark:
- * - the dialog never overflows horizontally and the preview, every node and "Use template" lie
- *   inside the dialog's visible box (the preview may scroll inside its own frame, never clip);
+/** Template gallery preview legibility: "Start from a template" -> every template with a preview.
+ * Regression for the operator reports that the large preview was too small to read, cropped
+ * (skipping-edge arcs cut at the top, the right-most node and "Use template" cut at the right),
+ * that the dashed feedback line ran through its own "feedback · up to N iteration" label, and
+ * that a one-row strip looked unbalanced in the dialog. At 1920, 1280 (default) and 900 px
+ * viewports, light and dark, for each template:
+ * - the dialog and the preview frame never overflow horizontally (no scrolling), and the
+ *   preview and "Use template" lie inside the dialog;
+ * - the rendered preview has a balanced aspect, 2:1 to 2.6:1 (width:height);
  * - every node rect, edge, the loop path and its label lie inside the svg viewBox;
- * - no sampled point of the dashed loop path falls inside the loop label's box;
- * - node labels and the loop label render at >= 13 CSS px.
- * Screenshots: $TMPDIR/template-preview-<width>-<theme>.png (and the evidence directory). */
+ * - no edge passes through a card other than its own two, and no sampled point of any edge or
+ *   of the dashed loop path falls inside the loop label's box;
+ * - node labels and the loop label render at >= 15 CSS px from 1280 px up and >= 13 at 900.
+ * Screenshots: $TMPDIR (else the OS temp dir)/template-preview-<template>-<width>-<theme>.png. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir} from 'node:fs/promises';
@@ -25,6 +28,11 @@ for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWS
 const evidence = process.env.CONSOLE_EVIDENCE_DIR || join(tmpdir(), 'siderius-template-preview-legibility');
 await mkdir(evidence, {recursive: true});
 const shots = process.env.TMPDIR || tmpdir();
+const templates = [
+  {id: 'single-research-loop', title: 'Single research loop', nodes: 5, loop: true},
+  {id: 'single-loop-with-advice', title: 'Single loop with your own advice', nodes: 5, loop: true},
+  {id: 'single-step', title: 'Single step (no loop)', nodes: 4, loop: false},
+];
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let serverErrors = '';
 server.stderr.on('data', chunk => { serverErrors += chunk; });
@@ -42,7 +50,7 @@ async function waitUntil(predicate, what) {
   }
 }
 
-/** Geometry of the open preview, measured in the page. */
+/** Geometry of the open preview, measured in the page (svg user units unless noted). */
 const measure = () => {
   const dialog = document.getElementById('editor-template-gallery');
   const svg = dialog.querySelector('#editor-template-detail svg.template-thumbnail');
@@ -55,23 +63,37 @@ const measure = () => {
   };
   const scale = svg.getScreenCTM().a;
   const px = text => parseFloat(getComputedStyle(text).fontSize) * scale;
-  const loop = svg.querySelector('.template-loop'), label = svg.querySelector('.template-loop-label');
-  let crossings = 0;
-  if (loop && label) {
-    const b = label.getBBox(), length = loop.getTotalLength();
-    for (let i = 0; i <= 400; i++) {
-      const p = loop.getPointAtLength(length * i / 400);
-      if (p.x >= b.x - 2 && p.x <= b.x + b.width + 2 && p.y >= b.y - 2 && p.y <= b.y + b.height + 2) crossings++;
+  const sample = path => {
+    const length = path.getTotalLength(), points = [];
+    for (let i = 0; i <= 200; i++) points.push(path.getPointAtLength(length * i / 200));
+    return points;
+  };
+  const within = (p, b, slack) => p.x >= b.x - slack && p.x <= b.x + b.width + slack && p.y >= b.y - slack && p.y <= b.y + b.height + slack;
+  const nodes = [...svg.querySelectorAll('.template-node')].map(group => ({id: group.querySelector('text').textContent, rect: group.querySelector('rect')}));
+  const label = svg.querySelector('.template-loop-label'), labelBox = label?.getBBox();
+  const edges = [...svg.querySelectorAll('.template-edge')], loop = svg.querySelector('.template-loop');
+  // Edge through a foreign card (not one of its endpoints); cards are shrunk 6 units.
+  const throughCards = [];
+  const previewNodes = [...svg.querySelectorAll('.template-node rect')].map(rect => rect.getBBox());
+  for (const edge of edges) {
+    const points = sample(edge), ends = [points[0], points.at(-1)];
+    for (const card of previewNodes) {
+      const own = ends.some(end => within(end, card, 2));
+      if (!own && points.some(point => within(point, {x: card.x + 6, y: card.y + 6, width: card.width - 12, height: card.height - 12}, 0))) {
+        throughCards.push(`${edge.dataset.source}>${edge.dataset.target}`);
+      }
     }
   }
+  const labelHits = labelBox ? [...edges, loop].filter(Boolean).filter(path => sample(path).some(point => within(point, labelBox, 2))).length : 0;
+  const rendered = svg.getBoundingClientRect();
   return {
     dialog: box(dialog), dialogScroll: dialog.scrollWidth - dialog.clientWidth,
     frame: box(frame), svg: box(svg), button: box(document.getElementById('editor-template-import')),
-    nodesInView: [...svg.querySelectorAll('.template-node rect')].map(inView),
-    edgesInView: [...svg.querySelectorAll('.template-edge, .template-loop')].map(inView),
-    labelInView: label ? inView(label) : null,
+    frameScroll: frame.scrollWidth - frame.clientWidth, aspect: rendered.width / rendered.height,
+    nodeCount: nodes.length, nodesInView: nodes.map(n => inView(n.rect)),
+    edgesInView: [...edges, loop].filter(Boolean).map(inView), labelInView: label ? inView(label) : null,
     nodeFont: [...svg.querySelectorAll('.template-node text')].map(px), labelFont: label ? px(label) : null,
-    crossings, frameScrolls: frame.scrollWidth > frame.clientWidth + 1,
+    throughCards, labelHits,
   };
 };
 const inside = (inner, outer, what) => {
@@ -97,41 +119,36 @@ try {
       await waitUntil(async () => (await page.locator('#editor-path').textContent()) === metadata.reusable_source, 'reusable source');
       await page.locator('#editor-template-open').click();
       const gallery = page.locator('#editor-template-gallery');
-      await gallery.locator('.template-card[data-template="single-research-loop"]').click();
-      assert.equal(await gallery.locator('#editor-template-detail h3').textContent(), 'Single research loop');
-      const svg = gallery.locator('#editor-template-detail svg.template-thumbnail');
-      assert.equal(await svg.getAttribute('role'), 'img');
-      assert.match(await svg.getAttribute('aria-label'), /repeated up to 1 time\(s\) from train back to interpret/);
-      await gallery.locator('#editor-template-import').scrollIntoViewIfNeeded();
-      const m = await page.evaluate(measure);
-      const where = `${width}px ${colorScheme}`;
-      const shot = join(shots, `template-preview-${width}-${colorScheme}.png`);
-      await page.screenshot({path: shot});
-      await page.screenshot({path: join(evidence, `template-preview-${width}-${colorScheme}.png`)});
-      assert.ok(m.dialogScroll <= 1, `${where}: dialog overflows horizontally by ${m.dialogScroll}px`);
-      inside(m.frame, m.dialog, `${where}: preview frame`);
-      inside(m.button, m.dialog, `${where}: Use template button`);
-      // From the default 1280 px up the whole graph fits; narrower frames scroll to the last node.
-      if (width >= 1280) assert.equal(m.frameScrolls, false, `${where}: preview needs scrolling`);
-      if (!m.frameScrolls) inside(m.svg, m.frame, `${where}: preview svg`);
-      else {
-        const last = await page.evaluate(() => {
-          const frame = document.querySelector('#editor-template-detail .template-preview');
-          frame.scrollLeft = frame.scrollWidth;
-          const r = [...frame.querySelectorAll('.template-node rect')].at(-1).getBoundingClientRect(), f = frame.getBoundingClientRect();
-          return {left: r.left, right: r.right, top: r.top, bottom: r.bottom, frame: {left: f.left, right: f.right, top: f.top, bottom: f.bottom}};
-        });
-        inside(last, last.frame, `${where}: last node after scrolling the preview`);
-        await page.screenshot({path: join(shots, `template-preview-${width}-${colorScheme}-scrolled.png`)});
+      for (const template of templates) {
+        const where = `${template.id} ${width}px ${colorScheme}`;
+        await gallery.locator(`.template-card[data-template="${template.id}"]`).click();
+        assert.equal(await gallery.locator('#editor-template-detail h3').textContent(), template.title);
+        const svg = gallery.locator('#editor-template-detail svg.template-thumbnail');
+        assert.equal(await svg.getAttribute('role'), 'img');
+        if (template.loop) assert.match(await svg.getAttribute('aria-label'), /repeated up to 1 time\(s\) from train back to interpret/);
+        await gallery.locator('#editor-template-import').scrollIntoViewIfNeeded();
+        const m = await page.evaluate(measure);
+        const shot = join(shots, `template-preview-${template.id}-${width}-${colorScheme}.png`);
+        await page.screenshot({path: shot});
+        await page.screenshot({path: join(evidence, `template-preview-${template.id}-${width}-${colorScheme}.png`)});
+        assert.ok(m.dialogScroll <= 1, `${where}: dialog overflows horizontally by ${m.dialogScroll}px`);
+        assert.ok(m.frameScroll <= 1, `${where}: preview scrolls horizontally by ${m.frameScroll}px`);
+        inside(m.frame, m.dialog, `${where}: preview frame`);
+        inside(m.svg, m.frame, `${where}: preview svg`);
+        inside(m.button, m.dialog, `${where}: Use template button`);
+        assert.ok(m.aspect >= 2 && m.aspect <= 2.6, `${where}: preview aspect ${m.aspect.toFixed(2)} outside 2..2.6`);
+        assert.equal(m.nodeCount, template.nodes);
+        assert.ok(m.nodesInView.every(Boolean), `${where}: node rect outside viewBox`);
+        assert.ok(m.edgesInView.every(Boolean), `${where}: edge outside viewBox ${JSON.stringify(m.edgesInView)}`);
+        assert.equal(m.labelInView, template.loop ? true : null, `${where}: loop label outside viewBox`);
+        assert.deepEqual(m.throughCards, [], `${where}: edges pass through cards`);
+        assert.equal(m.labelHits, 0, `${where}: an edge or the loop path crosses the loop label`);
+        const floor = width >= 1280 ? 15 : 13;
+        for (const font of m.nodeFont) assert.ok(font >= floor, `${where}: node label renders at ${font.toFixed(1)}px`);
+        if (template.loop) assert.ok(m.labelFont >= floor, `${where}: loop label renders at ${m.labelFont.toFixed(1)}px`);
+        results.push(`${where}: aspect ${m.aspect.toFixed(2)}, node ${Math.min(...m.nodeFont).toFixed(1)}px${template.loop ? `, loop label ${m.labelFont.toFixed(1)}px` : ''} -> ${shot}`);
       }
-      assert.deepEqual(m.nodesInView, [true, true, true, true, true], `${where}: node rect outside viewBox`);
-      assert.ok(m.edgesInView.every(Boolean), `${where}: edge outside viewBox ${JSON.stringify(m.edgesInView)}`);
-      assert.equal(m.labelInView, true, `${where}: loop label outside viewBox`);
-      assert.equal(m.crossings, 0, `${where}: the dashed loop path crosses its label`);
-      for (const font of m.nodeFont) assert.ok(font >= 13, `${where}: node label renders at ${font.toFixed(1)}px`);
-      assert.ok(m.labelFont >= 13, `${where}: loop label renders at ${m.labelFont.toFixed(1)}px`);
       assert.deepEqual(faults, []);
-      results.push(`${where}: node ${Math.min(...m.nodeFont).toFixed(1)}px, loop label ${m.labelFont.toFixed(1)}px, frame scrolls=${m.frameScrolls} -> ${shot}`);
       await page.close();
     }
   }
