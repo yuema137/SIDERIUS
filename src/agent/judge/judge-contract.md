@@ -11,7 +11,7 @@ call it through `workflows/judge_strategies/`
 
 | Owner | Responsibility |
 | --- | --- |
-| [`agent/schemas/judge.py`](../schemas/judge.py) | Typed records: `CallContent` (`StopJudgeRequest` kind `stop`; `RubricScoringRequest` kind `rubric_scoring` with `JudgedItem`/`ItemProjection`/`ProjectedField`; `MergeRequest` kind `merge`), `JudgeBodyFacts`, `DirectionWords`, `CallRequest`, `CallPayload` (`StopVerdict` kind `stop_decision`; `RubricVerdict` kind `rubric`; `SynthesisVerdict` kind `synthesis` with `SynthesizedDraft(parents, value)`), `PromptIdentity`, `JudgeRoute`, `JudgeCallEvidence` |
+| [`agent/schemas/judge.py`](../schemas/judge.py) | Typed records: `CallContent` (`StopJudgeRequest` kind `stop`; `RubricScoringRequest` kind `rubric_scoring` with `JudgedItem`/`ItemProjection`/`ProjectedField`; `MergeRequest` kind `merge`; `AdviceRequest` kind `advice`; `RevisionRequest` kind `revision`), `JudgeBodyFacts`, `DirectionWords`, `CallRequest`, `CallPayload` (`StopVerdict` kind `stop_decision`; `RubricVerdict` kind `rubric`; `SynthesisVerdict` kind `synthesis` with `SynthesizedDraft(parents, value)`; `AdvisoryNote` kind `advice`), `PromptIdentity`, `JudgeRoute`, `JudgeCallEvidence` |
 | [`template.py`](template.py) | `JudgeTemplate`: one versioned, framework-owned template per call role; pure rendering and `PromptIdentity` |
 | [`stop_template.py`](stop_template.py) | `STOP_TEMPLATE` (`judge.stop/v1`, usage label `judge.stop`, response model `StopVerdict`) |
 | [`rubric_template.py`](rubric_template.py) | `RUBRIC_TEMPLATE` (`judge.rubric/v1`, role `scorer`, usage label `judge.rubric-rank`, response model `RubricVerdict`, `check_payload`: exactly the listed items and rubric criteria, integers within the scale) |
@@ -46,11 +46,12 @@ incoherent facts:
 `call_role`, `call_index`, `prior_turns` and `content`. `content` is the
 discriminated union `CallContent` keyed by `kind` (`StopJudgeRequest`,
 `kind="stop"`; `RubricScoringRequest`, `kind="rubric_scoring"`; `MergeRequest`,
-`kind="merge"`); further strategy
+`kind="merge"`; `AdviceRequest`, `kind="advice"`; `RevisionRequest`,
+`kind="revision"`); further strategy
 content kinds join the union in their own changes without changing the bytes of
 existing requests. The role must be one admitted for the content kind (`stop` →
 `call_role="stop"`; `rubric_scoring` → `call_role="scorer"`; `merge` →
-`call_role="merger"`). A stop
+`call_role="merger"`; `advice` → `advisor`; `revision` → `reviser`). A stop
 call is a single call: `invocation_sha256 is None` and `call_index == 0`; every
 other content kind names its invocation. `prior_turns` must list the
 `evidence_sha256` of every earlier call of the same chain
@@ -151,11 +152,14 @@ is the file digest.
    `check_payload`, a decided payload to still pass it.
 
 The returned evidence is the call's outcome; replay equals the recorded run.
-`verify_call_chain(evidences)` requires one invocation, one content kind,
+`verify_call_chain(evidences, *, content_kinds)` requires one invocation, the
+consumer's declared content-kind sequence (one kind per call, in order),
 `call_index` equal to position and `prior_turns` covering every earlier call,
-so calls cannot be reordered, dropped or spliced. Roles may differ within a
-chain (a debate mixes advocate, critic and judge calls); a stop call is always
-a one-call chain. Any mismatch raises `JudgeEvidenceError`.
+so calls cannot be reordered, dropped, spliced or re-kinded. Kinds and roles may
+differ within a chain (`primary-advisors-llm`: `advice` … `revision`; a debate:
+`advocacy`/`critique` … `debate_verdict`); a stop call is always a one-call chain.
+`replay_llm_strategy` passes its planner's kinds. Any mismatch raises
+`JudgeEvidenceError`.
 
 ## Validation evidence
 
@@ -170,11 +174,11 @@ with a mocked client; AST guard that readback modules import no bridge.
 
 ## Limitations
 
-- Content kinds exist for `stop`, `rubric_scoring` and `merge`; the other
-  strategy roles (advocate, critic, advisor, …) gain content kinds, payload kinds
-  and templates with their strategy changes (B2-7, B2-8). The `judge.merge/v1`
-  template lives in `workflows/judge_strategies/judge_merge.py` because its payload
-  check resolves the output contract's native type.
+- Content kinds exist for `stop`, `rubric_scoring`, `merge`, `advice` and
+  `revision`; the debate roles (advocate, critic, judge) gain content kinds,
+  payload kinds and templates with B2-7. The `judge.merge/v1`, `judge.advice/v1`
+  and `judge.revision/v1` templates live in `workflows/judge_strategies/` because
+  their payload checks resolve the output contract's native type.
 - Route resolution: `workflows.llm_config.judge_route` / `locked_judge_routes`
   convert `WorkflowLLMConfig.judge` into `JudgeRoute`/`JudgeRoutes`, which the run
   lock records canonically (`RunInvariants.judge_routes`, including the run-level

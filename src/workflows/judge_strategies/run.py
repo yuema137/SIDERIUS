@@ -74,7 +74,7 @@ def run_llm_strategy(
     _require_fresh(invocation.evidence_dir)
     digest = invocation_sha256(invocation)
     calls: tuple[JudgeCallEvidence, ...] = ()
-    while (planned := next_call(kind, invocation, len(calls))) is not None:
+    while (planned := next_call(kind, invocation, calls)) is not None:
         request = call_request(digest, planned, calls)
         size = prompt_chars(planned, request)
         if size > MAX_JUDGE_PROMPT_CHARS:

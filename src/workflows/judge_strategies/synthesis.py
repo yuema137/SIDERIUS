@@ -54,13 +54,14 @@ def check_draft(
     contract: str,
     listed: Iterable[str],
     min_parents: int,
-    required_parents: tuple[str, ...] = (),
+    first_parent: str | None = None,
 ) -> str | None:
     """Why ``draft`` is inadmissible for its request, or ``None``.
 
     Parents must be distinct listed ids, at least ``min_parents`` of them, and
-    include ``required_parents``; the value must be a valid value of ``contract``
-    whose framework-owned fields are unset.
+    start with ``first_parent`` when one is given (a revision names its primary
+    first); the value must be a valid value of ``contract`` whose framework-owned
+    fields are unset.
     """
     parents = draft.parents
     if len(set(parents)) != len(parents):
@@ -70,9 +71,8 @@ def check_draft(
         return f"parents {foreign} are not listed items"
     if len(parents) < min_parents:
         return f"{len(parents)} parents cited; at least {min_parents} are required"
-    missing = [parent for parent in required_parents if parent not in parents]
-    if missing:
-        return f"parents must include {missing}"
+    if first_parent is not None and parents[0] != first_parent:
+        return f"parents must start with {first_parent!r}, not {parents[0]!r}"
     try:
         _stamped(contract, draft.value, _CHECK_LABEL)
     except ValueError as error:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from agent.judge.evidence import JudgeEvidenceError, verify_call_evidence
+from agent.judge.evidence import JudgeEvidenceError, verify_call_chain, verify_call_evidence
 from agent.schemas.data_analysis.common import canonical_json_bytes
 from agent.schemas.judge import JudgeCallEvidence, JudgeRoutes
 
@@ -80,11 +80,12 @@ def replay_llm_strategy(
     if (record.strategy_kind, record.static_call_bound) != (strategy.kind, bound):
         raise StrategyError("strategy evidence kind or call bound differs from the invocation")
     calls: tuple[JudgeCallEvidence, ...] = ()
+    kinds: tuple[str, ...] = ()  # the planner's declared content-kind sequence
     accounted = {strategy_path}
     for anchor in record.calls:
         if calls and calls[-1].status != "decided":
             raise StrategyError("strategy evidence records a call after a failed call")
-        planned = next_call(kind, invocation, len(calls))
+        planned = next_call(kind, invocation, calls)
         if planned is None:
             raise StrategyError("strategy evidence records more calls than the strategy plans")
         path = call_path(evidence_dir, len(calls), planned.role)
@@ -99,7 +100,12 @@ def replay_llm_strategy(
         except (JudgeEvidenceError, FileNotFoundError) as error:
             raise StrategyError(f"strategy call {len(calls)} is refused: {error}") from error
         calls += (evidence,)
+        kinds += (planned.content.kind,)
         accounted.add(path)
+    try:
+        verify_call_chain(calls, content_kinds=kinds)
+    except JudgeEvidenceError as error:
+        raise StrategyError(f"strategy call chain is refused: {error}") from error
     if decide(kind, invocation, calls) != record.outcome:
         raise StrategyError("re-derived strategy outcome differs from the recorded outcome")
     _require_accounted(evidence_dir, accounted)

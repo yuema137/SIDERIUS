@@ -201,13 +201,67 @@ class MergeRequest(JudgeModel):
 
 # Role content kind -> the call roles that may carry it. Further strategy content
 # kinds join the CallContent union and this table in their own changes.
+class AdviceRequest(JudgeModel):
+    """One ``primary-advisors-llm/v1`` advisor call: what ``advisor`` suggests for ``primary``."""
+
+    kind: Literal["advice"] = "advice"
+    criterion: str = Field(min_length=1, max_length=2000)
+    output_contract: str = Field(min_length=1)
+    primary: JudgedItem
+    advisor: JudgedItem
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        _distinct_items((self.primary, self.advisor))
+        return self
+
+
+class AdvisoryNote(JudgeModel):
+    """An advisor call's verdict; also carried, verbatim, into the revision request."""
+
+    kind: Literal["advice"]
+    advisor_item: str = Field(min_length=1)
+    suggestions: tuple[Annotated[str, Field(min_length=1, max_length=1000)], ...] = Field(
+        min_length=1, max_length=12
+    )
+
+
+class RevisionRequest(JudgeModel):
+    """The ``primary-advisors-llm/v1`` reviser call: revise ``primary`` using ``advisors``.
+
+    ``notes`` is empty for ``advice="single_call"`` and holds one advisor call's note
+    per advisor, in advisor order, for ``advice="per_advisor"``.
+    """
+
+    kind: Literal["revision"] = "revision"
+    criterion: str = Field(min_length=1, max_length=2000)
+    output_contract: str = Field(min_length=1)
+    primary: JudgedItem
+    # The primary and its advisors share the per-call item cap.
+    advisors: tuple[JudgedItem, ...] = Field(min_length=1, max_length=MAX_SCORED_ITEMS_PER_CALL - 1)
+    notes: tuple[AdvisoryNote, ...] = Field(max_length=MAX_SCORED_ITEMS_PER_CALL - 1)
+    guidance: JudgeTaskBlocks | None
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        _distinct_items((self.primary, *self.advisors))
+        noted = tuple(note.advisor_item for note in self.notes)
+        if noted and noted != tuple(item.item_id for item in self.advisors):
+            raise ValueError("revision notes are absent or one per advisor in advisor order")
+        return self
+
+
 CallContent = Annotated[
-    StopJudgeRequest | RubricScoringRequest | MergeRequest, Field(discriminator="kind")
+    StopJudgeRequest | RubricScoringRequest | MergeRequest | AdviceRequest | RevisionRequest,
+    Field(discriminator="kind"),
 ]
 _ROLES_BY_CONTENT: dict[str, frozenset[str]] = {
     "stop": frozenset({"stop"}),
     "rubric_scoring": frozenset({"scorer"}),
     "merge": frozenset({"merger"}),
+    "advice": frozenset({"advisor"}),
+    "revision": frozenset({"reviser"}),
 }
 
 
@@ -277,7 +331,9 @@ class SynthesisVerdict(JudgeModel):
 
 
 # Further strategy payload kinds join this union in their own changes.
-CallPayload = Annotated[StopVerdict | RubricVerdict | SynthesisVerdict, Field(discriminator="kind")]
+CallPayload = Annotated[
+    StopVerdict | RubricVerdict | SynthesisVerdict | AdvisoryNote, Field(discriminator="kind")
+]
 
 
 class PromptIdentity(JudgeModel):
