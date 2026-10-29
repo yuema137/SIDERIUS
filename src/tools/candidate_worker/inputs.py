@@ -16,7 +16,7 @@ from agent.llm_settings import default_model_for_provider
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.parameter_rules import ParameterRules
-from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposal import ProposalInput, ProposalOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.llm_settings import VALIDATE
 from workflows.attempt_storage import ImplAttemptStorage, impl_attempt_storage
@@ -40,6 +40,20 @@ class NativeInputs:
     attempt: ImplAttemptStorage
     validator_provider: Literal["gemini", "openai", "deepseek"]
     validator_model: str
+
+
+def consumed_input_sha256(seed: ProposalInput, proposal: ProposalOutput) -> str:
+    """Digest of the proposal and seed one judged-branch implementation consumes.
+
+    Stamped by the worker into ``ImplementorInput`` (echoed in the output record) and
+    recomputed by ``graph_evidence.verify_judged_branches`` from the verified adaptor
+    value and the owner's persisted seed, so it binds content, not ``candidate_id``.
+    """
+    from core.canonical_json import canonical_sha256
+
+    return canonical_sha256(
+        {"proposal": proposal.model_dump(mode="json"), "seed": seed.model_dump(mode="json")}
+    )
 
 
 def require_storage(actual: StorageConfig, expected: StorageConfig) -> None:

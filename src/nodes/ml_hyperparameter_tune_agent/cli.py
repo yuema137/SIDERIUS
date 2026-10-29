@@ -390,7 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
-        "gate on rounds where plan.is_trial=True. None → "
+        "gate on rounds where plan.is_trial=True; finite and positive. None → "
         "skill uses free×0.8 defensive limit.",
     )
     parser.add_argument(
@@ -398,7 +398,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
-        "gate on rounds where plan.is_trial=False. None → "
+        "gate on rounds where plan.is_trial=False; finite and positive. None → "
         "skill uses free×0.8 defensive limit. Sized "
         "independently from the trial budget because formal "
         "rounds often use larger batch_size / segmentation_size.",

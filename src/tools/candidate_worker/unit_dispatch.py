@@ -20,6 +20,7 @@ from workflows.definition.fanout import ProposalFamilies
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 
+from .adaptor_phase import judged_proposal
 from .budget import WorkerBudget
 from .inputs import NativeInputs
 from .literature_edges import proposal_input
@@ -83,7 +84,8 @@ def phase_unit(
             evidence = proposal_input(shape, node_id, selected.proposal, results, outcomes)
             selected = replace(selected, proposal=evidence)
         return ProposalUnit(phase="proposal", inputs=selected)
-    proposal = results[shape.proposal_for(node_id)]
+    judged = judged_proposal(shape, outcomes, node_id)
+    proposal = judged[0] if judged is not None else results[shape.proposal_for(node_id)]
     assert isinstance(proposal, ProposalOutput)
     if capability == "implementation":
         return ImplementationUnit(phase="implementation", inputs=selected, proposal=proposal)

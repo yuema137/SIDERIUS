@@ -16,7 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.generated_model_config import validate_implementation_baseline
-from agent.schemas.hyperparam_tuning import ExpertAdviceInput, TaskCompositionRef
+from agent.schemas.hyperparam_tuning import (
+    ExpertAdviceInput,
+    OperatorVramBudgetGb,
+    TaskCompositionRef,
+)
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_probe import ModelProbeContext
 from agent.schemas.output_types import OutputTypeName
@@ -238,6 +242,14 @@ class ImplementorInput(BaseModel):
     which maps ProposalOutput → ImplementorInput.
     """
 
+    consumed_input_sha256: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Worker-stamped digest of the proposal and seed a judged branch's "
+        "implementation runs on (inputs.consumed_input_sha256; native-proposal-judged/v1 only). "
+        "The node echoes it into the output record. Absent elsewhere.",
+    )
+
     constraint_context: ConstraintContext | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -320,9 +332,8 @@ class ImplementorInput(BaseModel):
         "the workflow; the capacity bullet then renders its defined "
         "magnitude-free form rather than a stale ceiling.",
     )
-    vram_budget_gb: float | None = Field(
+    vram_budget_gb: OperatorVramBudgetGb | None = Field(
         default=None,
-        ge=0.0,
         description="Active operator-defined VRAM ceiling (GB) for this "
         "iteration, threaded from the workflow exactly as for the proposer. "
         "Combined with ``hardware_context`` through "
@@ -480,6 +491,13 @@ class ImplementorOutput(BaseModel):
         description="V21 PR E — echoed verbatim from ImplementorInput. "
         "Observational join identity only (O-E-5); None = pre-PR-E or "
         "non-proposer candidate.",
+    )
+    consumed_input_sha256: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Worker-stamped digest of the proposal and seed this implementation consumed "
+        "(canonical JSON of the proposal and ProposalInput). Judged-branch replay compares it "
+        "with the adaptor-selected value and its owner seed; absent for other records.",
     )
     model_type: str = Field(
         description="The PLUGIN_MODEL_TYPE key written into the plugin file. "

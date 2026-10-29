@@ -15,15 +15,20 @@ from ml_models.plugin_binding import (
 )
 from workflows.attempt_storage import ImplAttemptStorage
 
+from .record_json import artifact_json, stored_projection
+
 
 def capture_record(path: Path, output: BaseModel) -> None:
     """Preserve a node's bytes; missing native persistence is worker-owned."""
     if path.exists():
         recorded = type(output).model_validate_json(path.read_bytes())
-        if recorded != output:
+        # Native writers store records through the storage owner (inf/NaN ->
+        # null), so compare against the output projected the same way; the
+        # caller keeps the in-memory output, -inf sentinels intact (#1046).
+        if recorded != stored_projection(output):
             raise ValueError(f"native record disagrees with returned output: {path}")
         return
-    publish_bytes_write_once(str(path), (output.model_dump_json(indent=2) + "\n").encode())
+    publish_bytes_write_once(str(path), artifact_json(output, kind="record", indent=2) + b"\n")
 
 
 def require_contained(path: str, roots: tuple[Path, ...]) -> None:

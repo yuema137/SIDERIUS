@@ -29,6 +29,12 @@ from .catalog import (
     RANKABLE_FIELDS,
     SPLITTABLE_ITEMS,
 )
+from .llm_strategies import (
+    LLM_STRATEGY_TYPES,
+    AdaptorCombine,
+    RubricRankStrategy,
+    produces_ranking,
+)
 from .models import (
     AdaptorInstance,
     AdaptorRequest,
@@ -96,7 +102,7 @@ def check_adaptor(adaptor: AdaptorInstance, resolve: Resolve) -> None:
     if len({port.contract for port in adaptor.inputs}) != 1:
         raise ValueError(f"{context}: deterministic strategies require one input contract")
     try:
-        _check_strategies(adaptor)
+        check_strategies(adaptor)
     except ValueError as error:
         raise ValueError(f"{context}: {error}") from error
 
@@ -129,21 +135,33 @@ def _capacity(adaptor: AdaptorInstance) -> int:
     return sum(len(binding.sources) for binding in adaptor.bindings)
 
 
-def _check_strategies(adaptor: AdaptorInstance) -> None:
+def _ranks(combine: AdaptorCombine) -> bool:
+    if isinstance(combine, LLM_STRATEGY_TYPES):
+        return produces_ranking(combine)
+    return isinstance(combine, MetricRankCombine | FieldRankCombine)
+
+
+def _threshold_readable(select: ThresholdSelect, combine: AdaptorCombine) -> bool:
+    """A threshold reads only the values its own ranking kind produces."""
+    if select.basis == "metric":
+        return isinstance(combine, MetricRankCombine)
+    return isinstance(combine, RubricRankStrategy)
+
+
+def check_strategies(adaptor: AdaptorInstance) -> None:
+    """The table rows that need no B2 owner; an LLM COMBINE kind's own rules
+    (``admit_llm_strategy``) run at profile and launch admission."""
     combine, select, distribute = adaptor.combine, adaptor.select, adaptor.distribute
     contract = adaptor.inputs[0].contract  # the element contract (one per adaptor)
-    if (incompatible := incompatible_pair(combine, distribute)) is not None:
-        raise ValueError(incompatible)
-    _check_combine(adaptor, contract)
+    if not isinstance(combine, LLM_STRATEGY_TYPES):
+        if (incompatible := incompatible_pair(combine, distribute)) is not None:
+            raise ValueError(incompatible)
+        _check_combine(adaptor, contract)
     if isinstance(select, FirstAdmissibleSelect) and not isinstance(combine, PassCombine):
         raise ValueError(f"first-admissible/v1 requires pass/v1, not {combine.kind}")
-    if isinstance(select, TopKSelect | ThresholdSelect) and not isinstance(
-        combine, MetricRankCombine | FieldRankCombine
-    ):
+    if isinstance(select, TopKSelect | ThresholdSelect) and not _ranks(combine):
         raise ValueError(f"{select.kind} requires a ranking combine, not {combine.kind}")
-    if isinstance(select, ThresholdSelect) and not (
-        select.basis == "metric" and isinstance(combine, MetricRankCombine)
-    ):
+    if isinstance(select, ThresholdSelect) and not _threshold_readable(select, combine):
         raise ValueError(f"threshold/v1 basis {select.basis!r} cannot read {combine.kind}")
     if isinstance(distribute, SplitItemsDistribute) and (
         SPLITTABLE_ITEMS.get(contract) != distribute.field
@@ -189,8 +207,10 @@ def _check_value_count(adaptor: AdaptorInstance, bound_max: int) -> None:
                     f"be filled by top-k/v1 k={select.k}"
                 )
         return
-    if not isinstance(adaptor.combine, PassCombine | MetricRankCombine):
-        return  # one combined value
+    combine = adaptor.combine
+    item_ranking = isinstance(combine, LLM_STRATEGY_TYPES) and produces_ranking(combine)
+    if not (isinstance(combine, PassCombine | MetricRankCombine) or item_ranking):
+        return  # one combined value, or an LLM kind's own count (admit_llm_strategy)
     accepted = derive_cardinality(AllSelect(), distribute).max
     if isinstance(select, TopKSelect) and select.k > accepted:
         raise ValueError(f"top-k/v1 k={select.k} exceeds the {accepted} {distribute.kind} accepts")

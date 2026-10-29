@@ -27,13 +27,14 @@ from .layout import candidate_proposal_dir
 from .models import RECEIPT_IDENTITY_FIELDS, CandidateRunReceipt, CandidateRunRequest
 from .parallel_models import GRANT_CONTROL_FILE, HostGrant, admitted_run_budget
 from .preflight import fresh_preview, require_credentials
+from .record_json import artifact_json
 
 
 def publish(
     path: Path, value: CandidateRunRequest | CandidateRunReceipt, *, bounded: bool = False
 ) -> None:
     payload = (
-        encode_control(value) if bounded else (value.model_dump_json(indent=2) + "\n").encode()
+        encode_control(value) if bounded else artifact_json(value, kind="record", indent=2) + b"\n"
     )
     publish_bytes_write_once(str(path), payload)
 
