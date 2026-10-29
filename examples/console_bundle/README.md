@@ -56,18 +56,19 @@ version in the zip's name.
 
 2. Create your private key file and the console workspace. The first command
    creates an empty key file that only you can read (mode `600`; its folder must
-   exist). The second creates the workspace and records that file's path:
+   exist); skip it if the file already exists. The second creates the workspace
+   and records that file's path:
 
    ```bash
-   install -m 600 /dev/null /absolute/private/credentials.json
+   (umask 077 && touch /absolute/private/credentials.json)
    .venv/bin/python -m tools.candidate_console init --workspace /absolute/project \
      --credential-file /absolute/private/credentials.json
    ```
 
    `init` creates `/absolute/project/siderius_workspace/` and prints
    `Workspace configuration: /absolute/project/siderius_workspace/settings/console.json`.
-   It refuses a key file that is not yours with mode `600`, never prints its
-   contents, and records its path as `credential_file` in the new
+   It refuses the key file unless it is a regular file you own with mode `600`,
+   never prints its contents, and records its path as `credential_file` in the new
    `console.json`. If `console.json` already exists, `init` leaves it unchanged
    and prints the one `"credential_file": ...` line to add yourself. Now open
    the key file in your editor and write `{"OPENAI_API_KEY": "your key"}`; a run
@@ -152,7 +153,8 @@ version in the zip's name.
    cat /absolute/project/siderius_workspace/settings/console-token
    ```
 
-   Open the console address in your browser and paste the token.
+   Open the console address in your browser, paste the token into **Console
+   token** at the top of the page and select **Connect**.
 
 ## What to do in the browser
 
@@ -193,6 +195,7 @@ package comes from `examples/quickstart/` and
 `README.md`, `fetch_data.py` and `setup/setup.json`:
 
 ```bash
+mkdir -p /absolute/output
 .venv/bin/python -m tools.release.build_example_bundle --output-dir /absolute/output
 ```
 

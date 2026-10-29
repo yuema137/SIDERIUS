@@ -6,7 +6,7 @@
   const $ = id => document.getElementById(id);
   const session = window.consoleSession, selection = window.consoleTask;
   const POLL_MS = 1000;
-  const EMPTY = 'No task is registered. Put your task package in siderius_workspace/tasks/<id>/ and run add-task (see the README). ';
+  const EMPTY = 'No task is registered. Put your task package in siderius_workspace/tasks/<id>/ and run add-task (see the README), then restart the console. ';
   const SETUP_GUIDE = 'https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#set-up-and-open-the-console';
   const UNAVAILABLE = {
     sandbox_missing: 'The task sandbox is not available on this machine, so the task package cannot be read.',

@@ -50,19 +50,32 @@ def _load(path: str) -> ResolvedConsole | None:
 
 
 def _print_credential_line(error: CredentialFileNotAdded) -> None:
-    """init never rewrites an existing console.json: name the one line to add or change."""
-    action = (
-        "names a different credential_file; replace that line with"
-        if error.replaces
-        else "has no credential_file; add this line right after its opening {"
-    )
+    """init never rewrites an existing console.json: name the one member to add or change."""
     print(
         "Workspace folders are ready, but settings/console.json already exists and init "
-        f"never rewrites it. It {action}:",
+        "never rewrites it.",
         file=sys.stderr,
     )
-    print(f"  {error.line}", file=sys.stderr)
-    print("Then run check with --config and restart the console if it is running.", file=sys.stderr)
+    if error.replaces:
+        print(
+            "It names a different credential_file. Replace the value on that line so it "
+            "reads as below, keeping the line's trailing comma if it has one:",
+            file=sys.stderr,
+        )
+        print(f"  {error.member}", file=sys.stderr)
+    else:
+        print(
+            "It has no credential_file. Add this line right after its opening {:",
+            file=sys.stderr,
+        )
+        print(f"  {error.member},", file=sys.stderr)
+    print(
+        "Then check the configuration (and restart the console if it is running):", file=sys.stderr
+    )
+    print(
+        f"  .venv/bin/python -m tools.candidate_console check --config {error.config_path}",
+        file=sys.stderr,
+    )
 
 
 def _report(resolved: ResolvedConsole) -> None:

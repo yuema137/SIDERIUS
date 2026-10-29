@@ -83,12 +83,14 @@ class WorkspaceRefused(ValueError):
 class CredentialFileNotAdded(WorkspaceRefused):
     """``init --credential-file`` met an existing console.json it never rewrites.
 
-    ``line`` is the exact top-level JSON member the operator adds or changes.
+    ``member`` is the exact top-level JSON member (no trailing comma) the operator
+    adds or substitutes; ``replaces`` says whether a different value exists.
     """
 
-    def __init__(self, line: str, *, replaces: bool) -> None:
+    def __init__(self, member: str, *, config_path: Path, replaces: bool) -> None:
         super().__init__("settings/console.json was left unchanged")
-        self.line = line
+        self.member = member
+        self.config_path = config_path
         self.replaces = replaces
 
 
@@ -394,8 +396,8 @@ def init_workspace(
     ``credential_file`` must be a canonical owner-only (mode 600) regular file; only
     its metadata is checked. A new console.json records it as the top-level
     ``credential_file``. An existing console.json naming another (or no) credential
-    file is never rewritten: after creating the folders, ``CredentialFileNotAdded``
-    carries the exact line to add.
+    file is never rewritten: after creating the folders (including per-task output
+    roots), ``CredentialFileNotAdded`` carries the exact member to add or substitute.
     """
     if not 1024 <= port <= 65535:
         raise WorkspaceRefused("port must be between 1024 and 65535")
@@ -404,7 +406,7 @@ def init_workspace(
             require_owner_only_file(credential_file)
         except (OSError, ValueError):  # OperationFailure is a ValueError
             raise WorkspaceRefused(
-                "--credential-file must be an existing regular file you own with mode 600 "
+                "--credential-file is refused unless it is a regular file you own with mode 600 "
                 "(chmod 600 FILE), given as an absolute path without symlinks; "
                 "its contents were not read"
             ) from None
@@ -485,12 +487,6 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
                 raise WorkspaceRefused(
                     "settings/console.json is not a valid console configuration; left unchanged"
                 ) from None
-            existing = resolved.config.credential_file
-            if credential_file is not None and existing != credential_file:
-                raise CredentialFileNotAdded(
-                    f'"credential_file": {json.dumps(credential_file)},',
-                    replaces=existing is not None,
-                )
             if resolved.settings.workspace_root == workspace:
                 for task_id, field in resolved.settings.derived_task_fields():
                     if field in TASK_OUTPUT_PARENTS:
@@ -502,6 +498,13 @@ def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -
                                 f"{WORKSPACE_DIRECTORY}/{parent_name}/{task_id}",
                             )
                         )
+            existing = resolved.config.credential_file
+            if credential_file is not None and existing != credential_file:
+                raise CredentialFileNotAdded(
+                    f'"credential_file": {json.dumps(credential_file)}',
+                    config_path=console,
+                    replaces=existing is not None,
+                )
     finally:
         for descriptor in opened.values():
             os.close(descriptor)

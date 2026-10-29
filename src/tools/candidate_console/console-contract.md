@@ -400,10 +400,14 @@ with `st_uid == os.getuid()` and mode exactly 0600. The file is never opened, so
 value is read or printed; a failed predicate exits 2 with one fixed message and
 creates nothing. A new `console.json` gets the top-level `credential_file: PATH`.
 An existing `console.json` is never rewritten: when its `credential_file` differs
-from `PATH` (or is absent), `init` still creates the missing folders, then raises
-`workspace.CredentialFileNotAdded` and exits 2 printing the exact member to add or
-replace (`"credential_file": "<PATH>",`, JSON-escaped); an equal value proceeds
-normally. The later load (same as `check`) parses the file's JSON/dotenv shape via
+from `PATH` (or is absent), `init` still creates the missing folders and the
+per-task output roots below, then raises `workspace.CredentialFileNotAdded`
+(`member` = `"credential_file": "<PATH>"`, JSON-escaped, no comma; `config_path`;
+`replaces`) and exits 2. For an absent member it prints `<member>,` to add right
+after the opening `{`; for a different value it prints `<member>` and tells the
+operator to keep the old line's trailing comma, because `init` writes
+`credential_file` last and `add-task` keeps member order. Both end with the full
+`check --config <config_path>` command. An equal value proceeds normally. The later load (same as `check`) parses the file's JSON/dotenv shape via
 `files.credential_values` without printing values.
 When `console.json` exists and names this workspace, `init` also creates the missing
 derived output roots (`preparations|candidates|runs/<task_id>`) of tasks that omit
@@ -1894,7 +1898,8 @@ on Home. **Choose a task** (`#quick-start-task`, from `consoleTask`) has four st
 `#quick-start-task-state`: "Loading tasks…" while the list is read, "Tasks could not be
 loaded: <reason>" with `#quick-start-task-retry` (`consoleTask.reload()`), "No task is
 registered. Put your task package in siderius_workspace/tasks/<id>/ and run add-task
-(see the README)." (same text as the Task tab empty state) with a link to the README setup step, or the list (#1131 items 1 and 3;
+(see the README), then restart the console." (same text as the Task tab empty state)
+with a link to the README setup step, or the list (#1131 items 1 and 3;
 never a permanent loading line). **Experiment setup** (`#quick-start-setup`, from
 `GET /api/tasks/<id>/setups`; loading/failure in `#quick-start-setup-state`, a failure with
 `#quick-start-setup-retry`) offers

@@ -102,7 +102,7 @@ try {
   assert.equal(await page.locator('nav a[href="#workflow"]').getAttribute('aria-disabled'), 'true');
   listMode = 'empty'; await page.locator('#task-list-retry').click();
   await page.locator('#task-list-empty').waitFor();
-  assert.match(await page.locator('#task-list-empty').textContent(), /No task is registered. Put your task package in siderius_workspace\/tasks\/<id>\/ and run add-task \(see the README\)/);
+  assert.match(await page.locator('#task-list-empty').textContent(), /No task is registered. Put your task package in siderius_workspace\/tasks\/<id>\/ and run add-task \(see the README\), then restart the console/);
   assert.match(await page.locator('#task-list-empty a').getAttribute('href'), /README.md#set-up-and-open-the-console$/);
   for (const link of ['nav a[href="#workflow"]', 'nav a[href="#run"]', '#step-indicator a[href="#workflow"]', '#step-indicator a[href="#run"]']) {
     assert.equal(await page.locator(link).getAttribute('aria-disabled'), 'true', link);

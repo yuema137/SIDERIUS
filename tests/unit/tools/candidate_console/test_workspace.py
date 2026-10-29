@@ -479,7 +479,7 @@ def test_init_credential_file_refuses_a_file_that_is_not_owner_only_600(
         str(credentials),
     )
     assert code == 2
-    assert "--credential-file must be an existing regular file you own with mode 600" in err
+    assert "--credential-file is refused unless it is a regular file you own with mode 600" in err
     assert secret not in out + err
     assert not (tmp_path / "siderius_workspace").exists()
 
@@ -495,7 +495,8 @@ def test_init_credential_file_never_rewrites_an_existing_console_json(
     code, _, err = _main(monkeypatch, capsys, *argv)
     assert code == 2
     line = f'"credential_file": {json.dumps(str(credentials))},'
-    assert f"  {line}\n" in err and "add this line right after its opening {" in err
+    assert f"  {line}\n" in err and "Add this line right after its opening {" in err
+    assert f"check --config {config}\n" in err
     assert config.read_bytes() == before
     # Adding exactly that line makes the same re-run succeed without touching the file.
     text = before.decode()
@@ -504,3 +505,61 @@ def test_init_credential_file_never_rewrites_an_existing_console_json(
     code, _, err = _main(monkeypatch, capsys, *argv)
     assert code == 0, err
     assert config.read_text() == edited
+
+
+def test_init_credential_file_printed_replace_line_keeps_console_json_valid(
+    tmp_path, monkeypatch, capsys
+):
+    """Defect: following the printed replace instruction yields invalid JSON.
+
+    init writes ``credential_file`` as the last member, so a replace line with a
+    trailing comma would break the file; ``check`` must pass after applying it.
+    """
+    first = _credential_file(tmp_path, 0o600, "sk-first-" + "a" * 24)
+    second = tmp_path / "private" / "second.env"
+    second.write_text("OPENAI_API_KEY=sk-second\n")
+    second.chmod(0o600)
+    config = init_workspace(str(tmp_path), credential_file=str(first))
+    text = config.read_text()
+    old = f'"credential_file": {json.dumps(str(first))}'
+    assert old in text
+    argv = ("init", "--workspace", str(tmp_path), "--credential-file", str(second))
+    code, _, err = _main(monkeypatch, capsys, *argv)
+    assert code == 2
+    member = f'"credential_file": {json.dumps(str(second))}'
+    assert f"  {member}\n" in err and "keeping the line's trailing comma" in err
+    config.write_text(text.replace(old, member))
+    assert _main(monkeypatch, capsys, "check", "--config", str(config))[0] == 0
+    assert _main(monkeypatch, capsys, *argv)[0] == 0
+
+
+def test_init_credential_file_refuses_a_symlinked_file(tmp_path, monkeypatch, capsys):
+    """Defect: a symlink to a mode-600 key file is accepted and recorded."""
+    target = _credential_file(tmp_path, 0o600, "sk-link-" + "b" * 24)
+    link = tmp_path / "private" / "link.env"
+    link.symlink_to(target)
+    parent = tmp_path / "project"
+    parent.mkdir(mode=0o700)
+    argv = ("init", "--workspace", str(parent), "--credential-file", str(link))
+    code, _, err = _main(monkeypatch, capsys, *argv)
+    assert code == 2 and "--credential-file is refused" in err
+    assert not (parent / "siderius_workspace").exists()
+
+
+@pytest.mark.parametrize("command", ["check", "serve"])
+def test_check_and_serve_reject_credential_file(command, tmp_path, monkeypatch, capsys):
+    """Defect: --credential-file is silently ignored outside init."""
+    config = init_workspace(str(tmp_path))
+    credentials = _credential_file(tmp_path, 0o600, "sk-ignored-" + "c" * 24)
+    with pytest.raises(SystemExit) as raised:
+        _main(
+            monkeypatch,
+            capsys,
+            command,
+            "--config",
+            str(config),
+            "--credential-file",
+            str(credentials),
+        )
+    assert raised.value.code == 2
+    assert "--credential-file is for init only" in capsys.readouterr().err

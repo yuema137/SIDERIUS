@@ -34,10 +34,9 @@ you own; the console workspace is created inside it) and
 - **A Linux machine with an NVIDIA GPU and CUDA** for the run itself. Every
   step before Launch works on CPU, but a launched run without a GPU stops
   instead of training. See [installation](installation.md#prerequisites).
-- **bubblewrap**, the Linux sandbox the console runs tasks in. This check must
-  finish without an error message: `bwrap --unshare-all --ro-bind / / true`.
-  If it fails, see
-  [If the check fails](../../src/tools/workspace_sandbox/README.md#if-the-check-fails).
+- **bubblewrap**, the Linux sandbox the console runs tasks in. Run the one-line
+  [bubblewrap check](../../src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works)
+  once on this machine.
 - **Python 3.12+ and [uv](https://docs.astral.sh/uv/)**, and an OpenAI API key
   (the standard model profile uses OpenAI models).
 
@@ -61,6 +60,7 @@ you own; the console workspace is created inside it) and
    release lists it. Until then, build it from your checkout:
 
    ```bash
+   mkdir -p /absolute/downloads
    .venv/bin/python -m tools.release.build_example_bundle --output-dir /absolute/downloads
    unzip /absolute/downloads/siderius-example-quickstart-<version>.zip -d /absolute/downloads
    ```
@@ -72,11 +72,11 @@ you own; the console workspace is created inside it) and
 
 3. **Create your private key file and the console workspace.** The first
    command creates an empty key file that only you can read (mode `600`; its
-   folder must exist). The second creates the workspace and records that file's
-   path:
+   folder must exist); skip it if the file already exists. The second creates
+   the workspace and records that file's path:
 
    ```bash
-   install -m 600 /dev/null /absolute/private/credentials.json
+   (umask 077 && touch /absolute/private/credentials.json)
    .venv/bin/python -m tools.candidate_console init --workspace /absolute/project \
      --credential-file /absolute/private/credentials.json
    ```
@@ -85,8 +85,8 @@ you own; the console workspace is created inside it) and
    `Workspace configuration: /absolute/project/siderius_workspace/settings/console.json`,
    then prints the console address and how to connect. Now open the key file in
    your editor and write `{"OPENAI_API_KEY": "your key"}`; a run reads it only
-   when you launch. `init` refuses a key file that is not yours with mode `600`
-   and never prints its contents.
+   when you launch. `init` refuses the key file unless it is a regular file you
+   own with mode `600`, and never prints its contents.
    [Credentials](../../src/tools/candidate_console/README.md#credentials) explains
    the file formats and what happens when `console.json` already exists.
 
@@ -134,9 +134,9 @@ you own; the console workspace is created inside it) and
    browser. On a remote server, first run the `ssh -N -L ...` command that
    `serve` printed on your own computer, then open the address there. Show the
    access token with
-   `cat /absolute/project/siderius_workspace/settings/console-token`, paste it on
-   **Home** and select **Connect**. This token only unlocks the page; it is not
-   your API key.
+   `cat /absolute/project/siderius_workspace/settings/console-token`, paste it
+   into **Console token** at the top of the page and select **Connect**. This
+   token only unlocks the page; it is not your API key.
 
 8. **Follow the tabs in order: Task, Workflow, Run, Monitor.** Select the
    quickstart task on **Task**, open its setup on **Workflow**, prepare, review
@@ -258,9 +258,10 @@ The browser console can prepare, review and launch a saved workflow, from **one
 candidate: Propose → Implement → Validate** up to an interpreted training workflow
 (Interpret → Propose → Implement → Validate → Train & Tune) repeated as a research
 loop. Use the [training inspector guide](../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
-to configure the training stage. Completion is not a scientific success verdict. Package
-your task with your coding agent first: the browser creates experiment setups,
-but it does not create or edit task packages or the console's task entries. It can also launch an
+to configure the training stage. Completion is not a scientific success verdict.
+Package your task with your coding agent first: the browser creates experiment
+setups, but it does not create or edit task packages or the console's task
+entries. It can also launch an
 externally configured native chain for multiple iterations, using the same
 backend as the CLI. Both routes are available whether you work in Professional
 or Assistant mode.

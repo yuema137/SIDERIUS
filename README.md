@@ -41,9 +41,9 @@ written out command by command, with the output to expect, in the
    `siderius_workspace/tasks/<id>/`, register it with `add-task`, restart the
    console, build a workflow for it and run it.
 
-A *task* is your scientific problem as a package (data, model input and output,
-score, Health checks); an *experiment setup* is one workflow bound to one task;
-a *run* is one execution of a setup.
+You need a Linux machine with an NVIDIA GPU and bubblewrap; the first-hour path
+lists the [prerequisites](docs/getting-started/README.md#before-you-start) and
+defines its three terms: task, experiment setup and run.
 
 <a id="start-with-your-coding-agent"></a>
 
@@ -59,9 +59,8 @@ Use this checkout's own `.venv/bin/python` after installation. Provider keys
 are needed for real model calls; offline setup checks need none.
 The command line and the browser console read them from different places; see
 [API keys](docs/getting-started/installation.md#api-keys).
-The optional browser console also needs Linux with bubblewrap:
-`bwrap --unshare-all --ro-bind / / true` must finish without an error
-([if it fails](src/tools/workspace_sandbox/README.md#if-the-check-fails)).
+The optional browser console also needs Linux with bubblewrap; run the
+[bubblewrap check](src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works).
 
 Follow [getting started](docs/getting-started/README.md) for the ordered setup,
 where to put credentials, and how to open the candidate console.

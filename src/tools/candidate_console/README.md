@@ -27,9 +27,14 @@ To see the whole console path once before you package your own task, start from
 the quickstart example bundle. It holds a small synthetic task package and a
 ready experiment setup. Download `siderius-example-quickstart-<version>.zip`
 from the [releases page](https://github.com/yuema137/SIDERIUS/releases) when the
-release lists it; until then build it from this checkout with
-`.venv/bin/python -m tools.release.build_example_bundle --output-dir /absolute/downloads`,
-which prints the path of the zip. Its [README](../../../examples/console_bundle/README.md)
+release lists it; until then build it from this checkout:
+
+```bash
+mkdir -p /absolute/downloads
+.venv/bin/python -m tools.release.build_example_bundle --output-dir /absolute/downloads
+```
+
+The build prints the path of the zip. Its [README](../../../examples/console_bundle/README.md)
 lists six commands: unpack, `init --credential-file`, write the data, import with
 `add-task --from-bundle`, `serve`, and open the console. The import checks every
 file against the bundle's `SHA256SUMS`, copies the package to
@@ -84,12 +89,13 @@ overwrites an existing `tasks/` folder.
      --credential-file /absolute/private/credentials.json
    ```
 
-   `init` refuses a file that is not a regular file you own with mode `600`,
+   `init` refuses the file unless it is a regular file you own with mode `600`,
    and never prints its contents. It writes the path into a new
    `console.json`; the closing check then reads the file only to confirm it is
-   JSON or dotenv text, so an empty file passes and you can add the key later. If `console.json` already exists, `init` does not change it:
-   it prints the exact `"credential_file": ...` line to add and exits with
-   status 2. Add that line, then run `check` (step 3).
+   JSON or dotenv text, so an empty file passes and you can add the key later.
+   If `console.json` already exists, `init` does not change it: it creates any
+   missing folders, prints the exact `"credential_file": ...` line to add or
+   substitute and the `check` command to run next, and exits with status 2.
 
    `init` is safe to run again. It only creates what is missing; it never
    deletes, replaces or follows a symlink. It refuses a folder that is a symlink,
@@ -724,10 +730,10 @@ shape (placeholder only; replace it privately with your key):
 
 Create the file privately, owned by the user running the console, with mode
 `600`, then edit it locally in your editor. This creates an empty file with that
-mode (the folder must already exist):
+mode (the folder must already exist); skip it if the file already exists:
 
 ```bash
-install -m 600 /dev/null /absolute/private/credentials.json
+(umask 077 && touch /absolute/private/credentials.json)
 ```
 
 For an existing file, set that mode with:
