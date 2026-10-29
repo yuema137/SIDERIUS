@@ -357,10 +357,31 @@ carry it (constructor arguments, never prompt input).
   pytest templates (LLM-visible prompt text with `torch.randint`) are
   unchanged and run unseeded inside their pytest child.
 
+## Generated code
+
+**Analysis programs.** Every generated analysis program runs seeded: the
+sandbox runner seeds Python `random` and legacy NumPy (low 32 bits) from the
+request's seed before `analyze` runs. A `deterministic` program keeps the seed
+it declared (kept as written); any other program gets
+`AnalysisSamplingSeeds.program_seed` =
+`derive_seed(run_seed, "data_analysis.program", SeedCoordinates())`
+(`analysis_code_sandbox.executed_program_seed`), recorded in the run's
+`sampling_seeds.json`. Program declarations and prompts are unchanged.
+
+**Hard-coded seeds (Q4).** `core.generated_seed_scan.scan_seed_calls` reads
+generated source and reports each seeding call (`manual_seed`,
+`manual_seed_all`, `seed`, `SeedSequence`, and `default_rng` / `RandomState`
+with an argument) as `GeneratedSeedCall(file, line, call)`. It never modifies,
+strips or overrides code and never reaches a prompt; unparsable source yields
+nothing. Records: `ValidatorOutput.generated_seed_calls` for the generated
+plugin (omitted when empty), and
+`generated_analysis/seed_calls/{source_sha256}.json` in the analysis run store
+for each persisted analysis program. Such a call reseeds a generator with the
+program's own constant: the one class of seed not derived from `run_seed`.
+
 ## Not yet provided
 
 These belong to later #983 PRs:
 
 - Console seed input and display (S6).
-- Generated-program seeding and the generated-seed scan (S7c).
 - The RNG census guard (S8).

@@ -121,6 +121,8 @@ def test_undeclared_seed_is_derived_replaces_the_plan_seed_and_stays_out_of_prom
     assert report.findings[0].coverage.sampling_seed == DERIVED[1]
     recorded = json.loads((root / "sampling_seeds.json").read_text())
     assert recorded["run_seed"] == 1
+    # Issue #983 S7c: the seed a nondeterministic generated program runs under.
+    assert recorded["program_seed"] == 2013549691816282667
     assert recorded["invocations"] == [
         {
             "invocation_id": "summary-invocation",

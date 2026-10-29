@@ -418,6 +418,7 @@ class DataAnalysisAgent:
                 inference_capability=self._historical_inference_capability,
                 control_root=control_root,
                 deadline_monotonic_s=deadline,
+                program_seed=sampling_seeds.program_seed,
             )
             for receipt in outcome.inference_receipts:
                 store.append_inference_receipt(receipt)

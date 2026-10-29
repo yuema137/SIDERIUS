@@ -34,6 +34,7 @@ from agent.schemas.data_analysis.generated_program import (
 from agent.schemas.data_analysis.skills import SkillInputSlot
 from core.campaign_identity import validate_path_component
 from core.durable_io import publish_bytes_write_once
+from core.generated_seed_scan import scan_seed_calls
 
 MAX_GENERATED_SOURCE_BYTES = 128 * 1024
 
@@ -136,6 +137,24 @@ def runtime_environment_identity() -> str:
     )
 
 
+def _record_seed_calls(root: Path, source: Path, text: str, source_sha256: str) -> None:
+    """Issue #983 (Q4): record the seed calls this source hard-codes, read-only.
+
+    Written content-addressed beside the source in the analysis run store
+    (``generated_analysis/seed_calls/{sha256}.json``); the source is never
+    modified and the record never reaches a prompt.
+    """
+    calls = scan_seed_calls(text, file=source.as_posix())
+    payload = canonical_json_bytes([call.model_dump(mode="json") for call in calls])
+    path = root / "generated_analysis" / "seed_calls" / f"{source_sha256}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        publish_bytes_write_once(str(path), payload)
+    except FileExistsError:
+        if path.read_bytes() != payload:
+            raise ValueError("generated seed-call record collision") from None
+
+
 def persist_generated_program(
     *,
     root: Path,
@@ -175,6 +194,7 @@ def persist_generated_program(
     except FileExistsError:
         if source_path.read_bytes() != source_bytes:
             raise ValueError("generated source content-address collision") from None
+    _record_seed_calls(root, source_relative, draft.source_code, source_sha256)
     declaration_relative = (
         Path("generated_analysis") / "programs" / program_id / f"{identity.declaration_sha256}.json"
     )

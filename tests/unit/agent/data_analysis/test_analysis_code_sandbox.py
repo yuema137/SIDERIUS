@@ -26,8 +26,13 @@ from agent.schemas.data_analysis.action_identity import (
 )
 from core.runtime_control.process_group import process_group_alive
 
+#: Seed a non-deterministic program executes under in these tests (issue #983).
+PROGRAM_SEED = 13
 
-def _persist_program(tmp_path: Path, source: str, *, keys: tuple[str, ...]):
+
+def _persist_program(
+    tmp_path: Path, source: str, *, keys: tuple[str, ...], determinism: str = "deterministic"
+):
     measurements = [
         {
             "result_key": key,
@@ -56,8 +61,8 @@ def _persist_program(tmp_path: Path, source: str, *, keys: tuple[str, ...]):
             "max_artifact_count": 0,
             "max_artifact_bytes": 0,
         },
-        determinism="deterministic",
-        seed=7,
+        determinism=determinism,
+        seed=7 if determinism == "deterministic" else None,
         rationale="Exercise the sandbox boundary.",
     )
     provenance = GeneratedProgramGenerationProvenance(
@@ -89,14 +94,18 @@ def _materialization(tmp_path: Path) -> Path:
     return path
 
 
-def _execute(tmp_path: Path, source: str, *, keys: tuple[str, ...]):
+def _execute(
+    tmp_path: Path, source: str, *, keys: tuple[str, ...], determinism: str = "deterministic"
+):
     sandbox = AnalysisCodeSandbox()
     capability = sandbox.probe()
     if not capability.available:
         if os.environ.get("REQUIRE_ANALYSIS_SANDBOX") == "1":
             pytest.fail(f"required sandbox qualification failed: {capability.reason}")
         pytest.skip(f"host cannot enforce sandbox: {capability.reason}")
-    program, _identity, source_path = _persist_program(tmp_path, source, keys=keys)
+    program, _identity, source_path = _persist_program(
+        tmp_path, source, keys=keys, determinism=determinism
+    )
     materialization = _materialization(tmp_path)
     output = tmp_path / "output"
     output.mkdir()
@@ -115,6 +124,7 @@ def _execute(tmp_path: Path, source: str, *, keys: tuple[str, ...]):
         control_directory=tmp_path / "control",
         timeout_s=2.0,
         max_host_memory_gb=1.0,
+        program_seed=PROGRAM_SEED,
     )
 
 
@@ -295,6 +305,7 @@ def analyze(inputs, parameters, output_directory):
         control_directory=tmp_path / "control",
         timeout_s=0.3,
         max_host_memory_gb=1.0,
+        program_seed=PROGRAM_SEED,
     )
 
     assert receipt.status == "timed_out"
@@ -384,6 +395,7 @@ def test_sandbox_unavailable_fails_closed_without_subprocess_fallback(
             control_directory=tmp_path / "control",
             timeout_s=1.0,
             max_host_memory_gb=1.0,
+            program_seed=PROGRAM_SEED,
         )
 
 
@@ -420,6 +432,7 @@ def test_source_mutation_after_planning_is_refused_before_execution(
             control_directory=tmp_path / "control",
             timeout_s=1.0,
             max_host_memory_gb=1.0,
+            program_seed=PROGRAM_SEED,
         )
 
 
@@ -434,3 +447,49 @@ def test_malformed_payload_cannot_be_mistaken_for_certified_evidence(tmp_path: P
     assert receipt.status == "failed"
     assert receipt.failure_type == "invalid_generated_payload"
     assert receipt.payload is None
+
+
+#: random.random() and np.random.rand() right after seeding with 13 and 7.
+SEEDED_DRAWS = {
+    13: (0.2590084917154736, 0.7777024105738202),
+    7: (0.32383276483316237, 0.07630828937395717),
+}
+
+
+@pytest.mark.allow_real_subprocess
+@pytest.mark.parametrize(("determinism", "seed"), [("nondeterministic", 13), ("deterministic", 7)])
+def test_generated_program_always_runs_seeded(tmp_path: Path, determinism, seed) -> None:
+    """Issue #983: fails if a program declared nondeterministic runs on entropy
+    instead of the run-derived program seed (13 here), or if a deterministic
+    program's own declared seed (7) is overridden."""
+    python_draw, numpy_draw = SEEDED_DRAWS[seed]
+    source = f"""import random
+import numpy as np
+
+def analyze(inputs, parameters, output_directory):
+    results = []
+    for key, value in (
+        ('python_seeded', random.random() == {python_draw!r}),
+        ('numpy_seeded', float(np.random.rand()) == {numpy_draw!r}),
+    ):
+        results.append({{
+            'result_key': key, 'value': value, 'unit': None,
+            'description': key.replace('_', ' '),
+        }})
+    return {{
+        'summary': 'Seeding checked.',
+        'quantitative_results': results,
+        'produced_artifacts': [],
+        'analysis_usage': {{'effective_count': 2, 'dropped_count': 0, 'drop_reasons': []}},
+        'warnings': [],
+    }}
+"""
+    receipt = _execute(
+        tmp_path, source, keys=("python_seeded", "numpy_seeded"), determinism=determinism
+    )
+    assert receipt.status == "completed", receipt.failure_message
+    assert receipt.payload is not None
+    assert {r.result_key: r.value for r in receipt.payload.quantitative_results} == {
+        "python_seeded": True,
+        "numpy_seeded": True,
+    }

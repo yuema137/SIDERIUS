@@ -138,7 +138,9 @@ which must not vary with the run seed. See
 For local storage, the node writes beneath
 `{workspace}/data_analysis/{run_name}/{request_id}/`: `input.json`,
 `discovery.json`, `plan.json`, `sampling_seeds.json` (each invocation's
-executed sampling seed, `AnalysisSamplingSeeds`), append-only `skill_results.jsonl`, append-only
+executed sampling seed and the run's `program_seed` for nondeterministic
+generated programs, `AnalysisSamplingSeeds`; seed calls generated source
+hard-codes go to `generated_analysis/seed_calls/`), append-only `skill_results.jsonl`, append-only
 `inference_receipts.jsonl` and `prediction_retention_receipts.jsonl` when historical inference is requested, immutable
 certified artifacts, and bounded `report.json` / `report.md`. When a capability
 gap requires custom analysis, exact generated source and its validated

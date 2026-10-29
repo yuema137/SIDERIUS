@@ -72,4 +72,8 @@ def apply_sampling_seed(
                 llm_plan_seed_ignored=planned if source == "derived" else None,
             )
         )
-    return tuple(executed), AnalysisSamplingSeeds(run_seed=run_seed, invocations=tuple(records))
+    return tuple(executed), AnalysisSamplingSeeds(
+        run_seed=run_seed,
+        invocations=tuple(records),
+        program_seed=derive_seed(run_seed, "data_analysis.program", SAMPLING_COORDINATES),
+    )

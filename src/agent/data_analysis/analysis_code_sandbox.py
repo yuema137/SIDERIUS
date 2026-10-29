@@ -178,6 +178,19 @@ def _output_tree_exceeds(
     return False
 
 
+def executed_program_seed(program: GeneratedAnalysisProgram, program_seed: int) -> int:
+    """The seed a generated program runs under (issue #983); never ``None``.
+
+    A ``deterministic`` program keeps the seed it declared (kept as written,
+    Q4); any other program gets the run-derived ``data_analysis.program`` seed.
+    """
+    if program.determinism == "deterministic":
+        if program.seed is None:
+            raise AnalysisCodeSandboxError("deterministic generated program lacks its seed")
+        return program.seed
+    return program_seed
+
+
 class AnalysisCodeSandbox:
     """Execute one validated program with only explicit read/write mounts."""
 
@@ -337,6 +350,7 @@ class AnalysisCodeSandbox:
         control_directory: Path,
         timeout_s: float,
         max_host_memory_gb: float,
+        program_seed: int,
     ) -> SandboxExecutionReceipt:
         capability = self.probe()
         if not capability.available:
@@ -384,7 +398,7 @@ class AnalysisCodeSandbox:
                     "inputs": sandbox_inputs,
                     "parameters": parameters,
                     "determinism": program.determinism,
-                    "seed": program.seed,
+                    "seed": executed_program_seed(program, program_seed),
                     "output_directory": "/output",
                 }
             ),

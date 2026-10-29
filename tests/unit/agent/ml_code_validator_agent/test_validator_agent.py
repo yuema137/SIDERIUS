@@ -1130,3 +1130,26 @@ def test_constraints_reach_validator_review(tmp_path):
     agent.bridge.generate.return_value = FAKE_LLM_REVIEW
     agent._llm_review(inp, "class Model: pass")
     assert '"train_config.lr"' in agent.bridge.generate.call_args.args[1]
+
+
+def test_validator_records_seeds_the_generated_plugin_hard_codes(tmp_path, passing_mocks):
+    """Issue #983 (Q4): fails if a generated plugin's own seed calls are not
+    recorded on ValidatorOutput, or if recording them changes the plugin."""
+    from nodes.ml_code_validator_agent import MLCodeValidatorAgent
+
+    inp = make_input(tmp_path)
+    plugin = Path(inp.model_file_path)
+    source = VALID_PLUGIN_SRC.replace("import torch\n", "import torch\ntorch.manual_seed(42)\n", 1)
+    assert source != VALID_PLUGIN_SRC
+    plugin.write_text(source)
+    out = MLCodeValidatorAgent(probe_seed=PROBE_SEED).run(inp)
+    assert [(c.line, c.call) for c in out.generated_seed_calls] == [
+        (
+            source.splitlines().index("torch.manual_seed(42)") + 1,
+            "torch.manual_seed(42)",
+        )
+    ]
+    assert plugin.read_text() == source
+    (tmp_path / "clean").mkdir()
+    clean = MLCodeValidatorAgent(probe_seed=PROBE_SEED).run(make_input(tmp_path / "clean"))
+    assert "generated_seed_calls" not in clean.model_dump(exclude_defaults=False, mode="json")

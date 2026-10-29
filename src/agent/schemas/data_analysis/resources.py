@@ -128,3 +128,7 @@ class AnalysisSamplingSeeds(FrozenModel):
     run_seed: RunSeed
     derivation: Literal["siderius-seed/v1"] = "siderius-seed/v1"
     invocations: tuple[InvocationSamplingSeed, ...]
+    #: The seed a generated program declared ``nondeterministic`` executes
+    #: under (``data_analysis.program``, run-level); a ``deterministic``
+    #: program keeps its own declared seed.
+    program_seed: int = Field(ge=0)
