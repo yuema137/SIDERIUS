@@ -644,13 +644,17 @@ def verify_judged_branches(
     nodes = {item.node_id: item for item in trace.nodes}
     for implementation, validation in shape.branches:
         source = shape.judged_source(implementation)
-        if source is None or nodes[implementation].record_path is None:
+        implementation_path = nodes[implementation].record_path
+        if source is None or implementation_path is None:
             continue
-        ranked, owner = judged_proposal(shape, outcomes, implementation)
+        selected = judged_proposal(shape, outcomes, implementation)
+        if selected is None:
+            raise ValueError(f"judged branch {implementation} has no ranked output")
+        ranked, owner = selected
         if not isinstance(ranked, ProposalOutput):
             raise ValueError(f"judged branch {implementation} ranked output is not a proposal")
         implemented = ImplementorOutput.model_validate_json(
-            read_graph_control(Path(nodes[implementation].record_path))
+            read_graph_control(Path(implementation_path))
         )
         if implemented.candidate_id != ranked.candidate_id:
             raise ValueError(
@@ -666,9 +670,10 @@ def verify_judged_branches(
                 f"judged branch {implementation} seed owner {owner} does not own "
                 f"adaptor {source.adaptor} output {source.index}"
             )
-        if nodes[validation].record_path is not None:
+        validation_path = nodes[validation].record_path
+        if validation_path is not None:
             validated = ValidatorOutput.model_validate_json(
-                read_graph_control(Path(nodes[validation].record_path))
+                read_graph_control(Path(validation_path))
             )
             if validated.candidate_id != ranked.candidate_id:
                 raise ValueError(
