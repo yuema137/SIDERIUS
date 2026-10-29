@@ -14,12 +14,12 @@
   }
   const publish = () => { if (!connected) changing = false; present(); for (const listener of listeners) listener({connected, revision}); };
   const status = message => { document.getElementById('access-status').textContent = message; };
-  async function request(path, body) {
+  async function request(path, body, method = body === undefined ? 'GET' : 'POST') {
     const version = revision;
     let response;
     try {
       response = await fetch('/api/' + path, {
-        method: body === undefined ? 'GET' : 'POST', cache: 'no-store', credentials: 'omit',
+        method, cache: 'no-store', credentials: 'omit',
         headers: {Authorization: 'Bearer ' + token, ...(body === undefined ? {} : {'Content-Type': 'application/json'})},
         ...(body === undefined ? {} : {body: JSON.stringify(body)})
       });
@@ -36,7 +36,18 @@
     }
     return value;
   }
-  window.consoleSession = Object.freeze({request, subscribe(listener) { listeners.add(listener); }, get connected() { return connected; }, get revision() { return revision; }});
+  // Downloads need the bearer header too, so a plain link cannot carry them; return a Blob.
+  async function download(path) {
+    const version = revision;
+    const response = await fetch('/api/' + path, {cache: 'no-store', credentials: 'omit', headers: {Authorization: 'Bearer ' + token}});
+    if (version !== revision) { const error = new Error('Previous connection response ignored.'); error.stale = true; throw error; }
+    if (!response.ok) {
+      const value = await response.json().catch(() => ({}));
+      const error = new Error(value.error?.message || 'The console refused this download.'); error.status = response.status; throw error;
+    }
+    return response.blob();
+  }
+  window.consoleSession = Object.freeze({request, download, subscribe(listener) { listeners.add(listener); }, get connected() { return connected; }, get revision() { return revision; }});
   document.getElementById('access-form').addEventListener('submit', async event => {
     event.preventDefault();
     token = document.getElementById('token').value.trim(); document.getElementById('token').value = '';

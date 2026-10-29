@@ -89,6 +89,17 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
         "src/workflows/task_composition.py",
         "configs/task_composition/quickstart.yaml",
     ),
+    # The fixed-model rule launch check drives HyperparamTuningAgent.run() in
+    # a subprocess script string with a forced seed plugin and workflow rules.
+    "tests/unit/agent/tune_ml_hyperparam_agent/test_fixed_model_rule_launch_check.py": (
+        "src/nodes/ml_hyperparameter_tune_agent/",
+        "src/agent/schemas/parameter_rules.py",
+        "src/agent/schemas/hyperparam_tuning.py",
+        "src/ml_models/",
+        "src/core/generated_library.py",
+        "src/workflows/task_composition.py",
+        "configs/task_composition/quickstart.yaml",
+    ),
     # The console import-isolation witness imports its subjects only inside a
     # fresh interpreter's script string, so no static import edge exists. It
     # guards that importing the console never reaches the generated-plugin

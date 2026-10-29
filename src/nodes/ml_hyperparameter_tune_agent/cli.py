@@ -286,13 +286,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--trial_time_budget_minutes",
         type=float,
         default=None,
-        help="Trial wall-time budget in minutes. None disables Trial time admission.",
+        help=(
+            "Trial wall-time budget in minutes; must be finite and positive. "
+            "Omit (None) to disable Trial time admission."
+        ),
     )
     parser.add_argument(
         "--formal_time_budget_minutes",
         type=float,
         default=None,
-        help="Formal wall-time budget in minutes. None disables Formal time admission.",
+        help=(
+            "Formal wall-time budget in minutes; must be finite and positive. "
+            "Omit (None) to disable Formal time admission."
+        ),
     )
     parser.add_argument(
         "--data_dir",

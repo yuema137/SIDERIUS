@@ -156,6 +156,9 @@ try {
   }
   const previewText = await page.locator('#new-run-details').textContent();
   assert.ok(previewText.includes('Saved source version verified'));
+  // The review names where its resolved model profile and data folder come from.
+  await page.locator('#new-run-details').filter({hasText: 'Model profile source: Set in console.json'}).waitFor();
+  assert.match(await page.locator('#new-run-details').textContent(), /Data folder source: Set in console\.json/);
   // An unrelated unresolved candidate survives editing and blocks preparation.
   const candidateKey = 'siderius.reusable-candidate.v1';
   const syntheticCandidate = {version: 1, origin, project: 'capture', payload: {

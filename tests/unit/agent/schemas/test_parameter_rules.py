@@ -1,6 +1,12 @@
 """Regression tests for the unified effective-plan parameter-rule contract."""
 
+import json
+import math
+import re
+from decimal import Decimal
+
 import pytest
+from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import (
     EpochCapResolution,
@@ -106,16 +112,16 @@ def test_exact_inserts_an_omitted_leaf_and_other_rules_preserve_agent_choice() -
         {
             "train_config.batch_size": {"exact": 1},
             "train_config.epochs": {"range": {"min": 1, "max": 5}},
-            "model_config.width": {"allowed": [64, 128]},
+            "model_config.residual_channels": {"allowed": [64, 128]},
         }
     )
-    plan.model_cfg["width"] = 128
+    plan.model_cfg["residual_channels"] = 128
 
     effective = apply_parameter_rules(plan, workflow_rules=rules)
 
     assert effective.train_cfg["batch_size"] == 1
     assert effective.train_cfg["epochs"] == 3
-    assert effective.model_cfg["width"] == 128
+    assert effective.model_cfg["residual_channels"] == 128
 
 
 def test_task_rule_cannot_be_overwritten_by_a_conflicting_workflow_lock() -> None:
@@ -205,6 +211,28 @@ def test_multiple_or_empty_rule_kind_declarations_remain_invalid() -> None:
         )
 
 
+@pytest.mark.parametrize("kind", ["range", "allowed", "predicate"])
+def test_null_non_exact_rule_is_refused_not_reinterpreted_as_exact_null(kind: str) -> None:
+    """Catches a malformed rule silently becoming a lock that disables the scheduler."""
+    path = "train_config.lr_schedule"
+    # Pydantic reports the dotted rule key, backquoted, under ``rules``.
+    expected = rf"rules\.`{re.escape(path)}`[\s\S]*{kind} rule must not be null"
+    with pytest.raises(ValueError, match=expected):
+        ParameterRules.model_validate({path: {kind: None}})
+    # Workflow CLI ingress parses JSON text.
+    with pytest.raises(ValueError, match=expected):
+        ParameterRules.model_validate_json(json.dumps({path: {kind: None}}))
+
+
+@pytest.mark.parametrize("side", ["min", "max"])
+@pytest.mark.parametrize("bound", [True, "3"])
+def test_non_numeric_range_bound_is_refused_not_coerced(side: str, bound: object) -> None:
+    """Catches ``true`` silently becoming 1.0 or ``"3"`` becoming 3.0 in a range."""
+    path = "train_config.epochs"
+    with pytest.raises(ValueError, match=rf"rules\.`{re.escape(path)}`\.range\.{side}"):
+        ParameterRules.model_validate({path: {"range": {side: bound}}})
+
+
 def test_planning_boundary_applies_the_composed_exact_lock() -> None:
     """Catches planning bypassing the validated composition-owned rule set."""
     rules = ParameterRules.model_validate({"train_config.batch_size": {"exact": 1}})
@@ -214,6 +242,7 @@ def test_planning_boundary_applies_the_composed_exact_lock() -> None:
         composition_ref=_composition_ref(rules),
         workflow_rules=None,
         epoch_cap=EpochCapResolution(cap=None, source=None),
+        executed_model_type="fcnet",
     )
 
     assert effective.train_cfg["batch_size"] == 1
@@ -231,6 +260,7 @@ def test_planning_boundary_preserves_objective_and_epoch_authorities() -> None:
             ),
             workflow_rules=None,
             epoch_cap=EpochCapResolution(cap=None, source=None),
+            executed_model_type="fcnet",
         )
 
     epoch_rules = ParameterRules.model_validate({"train_config.epochs": {"exact": 5}})
@@ -240,6 +270,7 @@ def test_planning_boundary_preserves_objective_and_epoch_authorities() -> None:
             composition_ref=_composition_ref(epoch_rules),
             workflow_rules=None,
             epoch_cap=EpochCapResolution(cap=2, source="max_epochs"),
+            executed_model_type="fcnet",
         )
 
 
@@ -257,6 +288,7 @@ def test_planning_boundary_applies_workflow_rules_beside_task_rules() -> None:
         composition_ref=_composition_ref(task_rules),
         workflow_rules=workflow_rules,
         epoch_cap=EpochCapResolution(cap=None, source=None),
+        executed_model_type="fcnet",
     )
 
     assert effective.model_cfg["segmentation_size"] == 40_000
@@ -277,4 +309,44 @@ def test_workflow_loss_rule_cannot_bypass_a_task_owned_objective() -> None:
             ),
             workflow_rules=workflow_rules,
             epoch_cap=EpochCapResolution(cap=None, source=None),
+            executed_model_type="fcnet",
         )
+
+
+@pytest.mark.parametrize(
+    ("rule", "message"),
+    [
+        ({"exact": math.inf}, "exact rule must not contain a non-finite number"),
+        ({"exact": {"window": [-math.inf]}}, "exact rule must not contain a non-finite number"),
+        ({"allowed": [1.0, math.nan]}, "allowed rule must not contain a non-finite number"),
+        ({"range": {"max": math.inf}}, "range.max must be finite"),
+    ],
+    ids=["exact-inf", "exact-nested", "allowed-nan", "range-bound"],
+)
+def test_non_finite_rule_values_are_refused_naming_the_path(rule: dict, message: str) -> None:
+    """Catches inf/NaN locks that transport later turns into "Infinity", "NaN" or null."""
+    path = "train_config.lr"
+    with pytest.raises(ValueError, match=rf"rules\.`{re.escape(path)}`[\s\S]*{message}"):
+        ParameterRules.model_validate({path: rule})
+
+
+def test_cyclic_or_unbounded_rule_values_are_validation_errors() -> None:
+    """Catches a YAML-anchor cycle escaping as RecursionError past ValidationError handlers."""
+    cyclic: list = []
+    cyclic.append(cyclic)
+    deep: list = [1.0]
+    for _ in range(5000):
+        deep = [deep]
+    for value, message in ((cyclic, "a cyclic reference"), (deep, "nesting deeper than")):
+        with pytest.raises(ValidationError, match=message):
+            ParameterRules.model_validate({"train_config.lr": {"exact": value}})
+
+
+def test_shared_finite_containers_and_non_float_reals_are_judged_by_value() -> None:
+    """Catches an id-based cycle check refusing a YAML alias reused twice, or missed Decimal inf."""
+    shared = [1.0, 2]
+    ParameterRules.model_validate({"train_config.lr": {"exact": {"a": shared, "b": shared}}})
+    with pytest.raises(ValidationError, match="non-finite"):
+        ParameterRules.model_validate({"train_config.lr": {"exact": [Decimal("Infinity")]}})
+    with pytest.raises(ValidationError, match="non-finite"):
+        ParameterRules.model_validate({"train_config.lr": {"allowed": [{math.inf: 1}]}})

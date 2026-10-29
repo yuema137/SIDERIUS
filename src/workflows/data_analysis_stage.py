@@ -123,12 +123,14 @@ def run_optional_data_analysis(
     chain_workspace: str | None = None,
     literature_output: LiteratureReviewOutput | None = None,
     generated_skill_registry: GeneratedExperimentSkillRegistryRef | None = None,
+    run_seed: int | None = None,
 ) -> WorkflowAnalysisOutput | None:
     """Run the independent capability only when the composition enables its edge.
 
     A missing brief is an explicit no-analysis disposition already recorded by
     the Interpreter's brief receipt.  This edge never invents replacement
-    questions from prose.
+    questions from prose. ``run_seed`` is the workflow lock's seed; the analysis
+    agent refuses ``None`` (issue #983).
     """
 
     if binding is None:
@@ -211,6 +213,7 @@ def run_optional_data_analysis(
         task_analysis_capability=binding.task_analysis_capability,
         historical_model_inference_capability=historical_model_inference_capability,
         bridge_factory=bridge_factory,
+        run_seed=run_seed,
         **llm_kwargs,
     ).run(analysis_input)
     relative = Path("data_analysis") / storage.local.run_name / request_id / "report.json"
