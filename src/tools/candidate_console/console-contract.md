@@ -2254,6 +2254,9 @@ Cache: in memory, keyed by `(task_id, manifest sha256, digest of the job with an
 empty scratch)`; a changed manifest yields a new key and drops that task's old
 entries; `refresh=1` re-observes unless an observation is in flight. Sample counts
 are a separate key and run only when `count_samples=1` is requested.
+Only the manifest bytes enter the key: after editing any other package file
+(plugins, declarations, Health config, task code) the operator must Refresh
+(`refresh=1`) to see the change.
 
 View fields:
 
@@ -2269,7 +2272,7 @@ View fields:
   `forward_contract`), `partition_count`, `main_score` (primary metric `id`,
   `direction`, `aggregation` from the metric declaration),
   `observational_metrics` (secondary metrics), `locked_parameters`
-  (`ParameterRules` path -> `exact`/`range`/`allowed`/`predicate` value),
+  (`ParameterRules` path -> its single serialized kind `exact`/`range`/`allowed`/`predicate` and value; `{"exact": null}` is a lock of null),
   `objective` (`LossConfig` dump) with `objective_source` `task` or
   `planner_chooses`, `deliverable` (`DeliverableNaming` dump or `null` when not
   declared), `health` (`project_health_roster`: `declaration` and per gate
@@ -2280,9 +2283,9 @@ View fields:
   plugin paths, and `source_paths` keys whose value equals the plugin path;
   otherwise `["unrecorded"]`. Names are never interpreted.
 - `scopes` (`DataScopeFacts`): the task's full declared split, before any
-  run-level sampling: built through `acquire_attempt_scopes` in `formal` mode with
-  `snapshot` strategy, training and evaluation portion 1.0, no sampling seed and no
-  planner task parameters (`basis` states this). A run's own portions and seeds
+  run-level sampling: built by `task_data_path.build_full_declared_split` (`formal`,
+  `snapshot`, portion 1.0, a declared frozen training pool's parent pool), no sampling
+  seed and no planner task parameters (`basis` states this). A run's own portions and seeds
   select a subset of it. `declared` carries per-leg
   `{file_count, expected_on_disk_bytes}` from the task's `storage_read_scope`;
   `not_declared` (no scope capability or no `storage_read_scope`) carries no

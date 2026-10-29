@@ -196,3 +196,23 @@ def test_cache_reuses_an_observation_until_the_manifest_changes_or_refresh(
     assert len(calls) == 2 and calls[0].manifest_sha256 != calls[1].manifest_sha256
     summaries.summary("synthetic", refresh=True)
     assert len(calls) == 3
+
+
+def test_locked_parameters_keep_an_exact_null_lock():
+    """Defect: ``{"exact": null}`` (a lock to null) is skipped as if no rule existed,
+    so the Task panel hides a locked parameter. Input is the owner's real dump."""
+    from agent.schemas.parameter_rules import ParameterRules
+    from tools.candidate_console.task_summary import _locked
+
+    rules = ParameterRules.model_validate(
+        {
+            "rules": {
+                "train_config.batch_size": {"exact": None},
+                "loss_config.reduction": {"allowed": ["mean"]},
+            }
+        }
+    ).model_dump(mode="json")
+    assert sorted((item.path, item.rule, item.value) for item in _locked(rules)) == [
+        ("loss_config.reduction", "allowed", ["mean"]),
+        ("train_config.batch_size", "exact", None),
+    ]

@@ -180,16 +180,17 @@ def _metric(spec: dict[str, JsonValue]) -> MetricView:
 
 
 def _locked(rules: dict[str, JsonValue]) -> tuple[LockedParameter, ...]:
-    """Owner-dumped ParameterRules: each path carries exactly one non-null rule kind."""
+    """Owner-dumped ParameterRules: each rule serializes as its ONE active kind.
+
+    The key, not the value, names the rule: ``{"exact": null}`` locks a null value.
+    """
     table = rules.get("rules")
     locked = []
     for path, rule in (table if isinstance(table, dict) else {}).items():
-        if not isinstance(rule, dict):
-            continue
-        for kind in ("exact", "range", "allowed", "predicate"):
-            if rule.get(kind) is not None:
-                locked.append(LockedParameter(path=path, rule=kind, value=rule[kind]))
-                break
+        if isinstance(rule, dict) and len(rule) == 1:
+            ((kind, value),) = rule.items()
+            if kind in ("exact", "range", "allowed", "predicate"):
+                locked.append(LockedParameter(path=path, rule=kind, value=value))
     return tuple(locked)
 
 
