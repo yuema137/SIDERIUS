@@ -8,8 +8,9 @@ from pydantic import Field, JsonValue, StringConstraints, model_validator
 
 from agent.schemas.output_types import OutputTypeName
 
-from .adaptor_strategies import DeterministicCombine, DistributeStrategy, SelectStrategy
+from .adaptor_strategies import DistributeStrategy, SelectStrategy
 from .base import DeclarationModel, Identifier, Location
+from .llm_strategies import AdaptorCombine
 
 
 class TaskReferences(DeclarationModel):
@@ -270,7 +271,7 @@ class AdaptorInstance(DeclarationModel):
     kind: Literal["adaptor"] = "adaptor"
     inputs: tuple[InputPort, ...] = Field(min_length=1)
     bindings: tuple[PortBinding, ...]
-    combine: DeterministicCombine
+    combine: AdaptorCombine  # LLM kinds run only under native-literature-judged/v1
     select: SelectStrategy
     distribute: DistributeStrategy
 

@@ -22,7 +22,7 @@ from workflows.definition.adaptor_strategies import (
 )
 from workflows.definition.catalog import SPLITTABLE_ITEMS
 
-from .combine import Ranking, Role, Unit, combine, with_list
+from .combine import Combined, Ranking, Role, Unit, combine, with_list
 from .items import (
     AdaptorInputRef,
     AdaptorItem,
@@ -33,7 +33,9 @@ from .items import (
 )
 from .select import chosen_units, select
 
-AdaptorReason = Literal["no_admissible_input", "insufficient_items", "too_many_items"]
+AdaptorReason = Literal[
+    "no_admissible_input", "insufficient_items", "too_many_items", "judge_failure"
+]
 
 
 class AdaptorOutput(AdaptorModel):
@@ -75,18 +77,44 @@ def run_deterministic_adaptor(
     """Decide one adaptor's outputs; ``items`` must already be in declared order."""
     if (incompatible := incompatible_pair(combine_strategy, distribute_strategy)) is not None:
         raise AdaptorStrategyError(incompatible)
-    bound = derive_cardinality(select_strategy, distribute_strategy)
+    admissions, admissible = admissible_items(items)
+    if not admissible:
+        return AdaptorOutcome(
+            status="rejected", reason="no_admissible_input", admissions=admissions
+        )
+    combined = combine(combine_strategy, admissible, metric)
+    return select_and_distribute(
+        combined,
+        admissions,
+        select_strategy=select_strategy,
+        distribute_strategy=distribute_strategy,
+        metric=metric,
+    )
+
+
+def admissible_items(
+    items: tuple[AdaptorItem, ...],
+) -> tuple[tuple[ItemAdmission, ...], tuple[AdaptorItem, ...]]:
+    """Every item's admission and the admissible items, in declared order."""
     admissions = admit_items(items)
     admissible = tuple(
         item
         for item, admission in zip(items, admissions, strict=True)
         if admission.admission == "admissible"
     )
-    if not admissible:
-        return AdaptorOutcome(
-            status="rejected", reason="no_admissible_input", admissions=admissions
-        )
-    combined = combine(combine_strategy, admissible, metric)
+    return admissions, admissible
+
+
+def select_and_distribute(
+    combined: Combined,
+    admissions: tuple[ItemAdmission, ...],
+    *,
+    select_strategy: SelectStrategy,
+    distribute_strategy: DistributeStrategy,
+    metric: MetricSpec | None,
+) -> AdaptorOutcome:
+    """SELECT then DISTRIBUTE one COMBINE result (deterministic or an LLM kind's)."""
+    bound = derive_cardinality(select_strategy, distribute_strategy)
     chosen = chosen_units(combined, select(select_strategy, combined, metric))
     if len(chosen) > bound.max:
         raise AdaptorStrategyError(

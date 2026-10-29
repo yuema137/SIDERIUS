@@ -43,7 +43,7 @@ valid names are preserved unchanged. Archived schemas remain readable.
 | `task_description` | `str` | No | `""` | Plain-English task description from `configs/task_config.yaml`, injected into the reasoning prompt's `{TASK_BACKGROUND}` block. |
 | `forward_contract` | `ForwardContract` | No | `ForwardContract()` | The typed forward-pass contract from `configs/task_config.yaml`. Its `model_io` field carries the normalized Step-03 `ModelIOContract`, which since Step 04a is the authority for every contract-owned fact the implementor derives: the self-check probe, the generated plugin's contract comments, the generated test's class count, and the custom-loss probe pair. `None` = the legacy prose-only path, which reproduces the shipped behaviour exactly. |
 | `hardware_context` | `HardwareContext \| None` | No | `None` | Live hardware manifest (Step 04a / OD-S4-1). Combined with `vram_budget_gb` through `HardwareContext.effective_cap_gb` to render the reasoning prompt's GPU-budget bullet. `None` (CPU-only host, test fixture, standalone invocation) renders a defined magnitude-free form — never a stale literal. |
-| `vram_budget_gb` | `float \| None` | No | `None` | Active operator VRAM ceiling (GB) for this iteration, threaded from the workflow exactly as for the proposer. A budget above the physical 80% cap does not raise it. |
+| `vram_budget_gb` | `float \| None` | No | `None` | Active operator VRAM ceiling (GB) for this iteration, threaded from the workflow exactly as for the proposer. A budget above the physical 80% cap does not raise it. Finite and positive (`OperatorVramBudgetGb`, issue #1044); zero, negative and non-finite values are refused at launch. |
 
 ## Output
 

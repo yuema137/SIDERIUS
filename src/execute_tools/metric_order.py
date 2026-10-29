@@ -223,9 +223,8 @@ class MetricOrder:
     def worst_sentinel(self) -> float:
         """The value nothing can be worse than: ``-inf`` under ``higher``.
 
-        Two distinct meanings share it, both order facts: the bootstrap
-        reference ("no incumbent yet, so anything clears it") and the
-        skip-gate's disable value.
+        The bootstrap reference ("no incumbent yet, so anything clears it");
+        a skip threshold equal to it never fires.
         """
         return float("-inf") if self._higher else float("inf")
 
@@ -233,7 +232,9 @@ class MetricOrder:
     def best_sentinel(self) -> float:
         """The value nothing can be better than: ``+inf`` under ``higher``.
 
-        The bypass gate's disable value: a threshold nothing can reach.
+        A bypass threshold equal to it can never be reached. Operator deltas
+        are finite while the formal gates are on, so this is a defensive guard,
+        not a configuration value.
         """
         return float("inf") if self._higher else float("-inf")
 
@@ -245,9 +246,7 @@ class MetricOrder:
         ``signed_delta`` is a coordinate, not a magnitude: positive moves
         toward better, negative moves toward worse — under BOTH directions. So
         an operator's declared skip margin of ``-1.0`` loosens the threshold by
-        one metric unit whether the metric is maximised or minimised, and the
-        documented ``-inf`` / ``+inf`` disable values keep meaning "disabled"
-        under both.
+        one metric unit whether the metric is maximised or minimised.
 
         The magnitude itself is never invented here; it arrives already
         declared in the golden metric's own units (design §3.3 row 1).

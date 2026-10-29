@@ -282,6 +282,27 @@ class TestNonFiniteDeltasAreRefused:
         assert "not finite" in message
         assert field in message
 
+    @pytest.mark.parametrize(
+        "parser_module",
+        ["workflows.standard_cli", "nodes.ml_hyperparameter_tune_agent.cli"],
+    )
+    def test_the_refusal_advice_names_only_real_flags(self, parser_module):
+        """#1012 review: the message advised ``--no-enable_chain_incumbent_formal_gates``,
+        which argparse rejects (the flag is ``store_true``), so the operator's
+        follow-up command exited 2. Every flag the advice names must exist, and
+        omitting the gate flag must leave the gates off as the advice says."""
+        import importlib
+        import re
+
+        with pytest.raises(FormalLaunchPolicyError) as exc:
+            _check(skip_formal_min_delta=float("-inf"))
+        flags = set(re.findall(r"--[a-z][a-z0-9_-]*", str(exc.value)))
+        assert flags, "the refusal must tell the operator which flag to change"
+        parser = importlib.import_module(parser_module).build_parser()
+        assert flags <= set(parser._option_string_actions)
+        gate = parser._option_string_actions["--enable_chain_incumbent_formal_gates"]
+        assert gate.default is False
+
     def test_nan_cannot_hide_behind_the_ordering_check(self):
         """MUTATION TARGET: ordering checked BEFORE finiteness.
 
