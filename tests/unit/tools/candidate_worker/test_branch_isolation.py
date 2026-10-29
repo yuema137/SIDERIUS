@@ -108,7 +108,6 @@ def another_prepared(tmp_path, name):
     root = tmp_path / name
     (root / "project" / "data").mkdir(parents=True)
     return _prepare_request(
-        QUICKSTART,
         root / "project",
         root / "workspace",
         compose_run_task_bindings,
