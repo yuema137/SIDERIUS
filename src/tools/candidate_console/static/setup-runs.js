@@ -45,6 +45,12 @@
       if (!error.stale && mine === sequence) { listedFor = null; say(`The runs of this setup could not be read: ${error.message}. Use Refresh to try again.`); }
     } finally { if (mine === sequence) $('setup-runs-refresh').disabled = !session.connected; }
   }
+  window.addEventListener('setup-run-observed', event => {
+    if (event.detail.project === window.experimentSetups?.current?.id) {
+      listedFor = null; if (onRun()) void load(true);
+    }
+  });
+  session.subscribe(() => { if (onRun()) void load(true); });
   const onRun = () => window.consoleNavigation?.view === 'run';
   window.addEventListener('experiment-setup', () => { if (onRun()) void load(); });
   window.addEventListener('console-view', event => { if (event.detail.view === 'run') void load(true); });

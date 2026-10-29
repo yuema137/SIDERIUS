@@ -572,3 +572,79 @@ def test_review_repeats_the_device_warnings_for_the_reviewed_request(captured, m
         "Device /dev/nvidia-uvm cannot be passed into the run sandbox (fixture reason); "
         "a run given it will be refused.",
     )
+
+
+@pytest.mark.parametrize("mode", ["observe_only", "blocking"])
+@pytest.mark.parametrize("interpretation", [False, True])
+def test_review_projects_prepared_training_and_task_locks(
+    reusable, direct_child, console_config, monkeypatch, tmp_path, mode, interpretation
+):
+    """Review lost native budgets, Health and task locks; changing the editor must
+    not replace the already prepared facts. The facts assertions fail without the fix.
+    """
+    from tests.unit.tools.candidate_prepare.test_reusable_training import SETTINGS, add_training
+    from tools.candidate_prepare import prepare_reusable_candidate, select_reusable_preparation
+    from workflows.definition import (
+        ReusableWorkflowDocument,
+        parse_workflow_source,
+        render_workflow_source,
+    )
+
+    original = Path(console_config.tasks[0].task_manifest)
+    manifest = tmp_path / "locked-task.yaml"
+    manifest.write_text(
+        original.read_text().replace("../../examples/", str(original.parents[2] / "examples") + "/")
+        + "\nparameter_rules:\n  rules:\n    train_config.batch_size: {exact: 32}\n"
+    )
+    source = Path(reusable.source_path)
+    payload = parse_workflow_source(source.read_text()).model_dump(mode="json")
+    payload["definition"]["task"]["manifest"] = str(manifest)
+    source.write_text(
+        render_workflow_source(ReusableWorkflowDocument.model_validate_json(json.dumps(payload)))
+    )
+    monkeypatch.setitem(SETTINGS["launch"], "healthgate_mode", mode)
+    request = add_training(reusable)
+    if interpretation:
+        from tests.browser.workflow_editor_server import interpretation_profile_source
+
+        template = parse_workflow_source(interpretation_profile_source()).model_dump(mode="json")
+        template["definition"]["task"] = payload["definition"]["task"]
+        template["preparation_options"] = payload["preparation_options"]
+        template["training_settings"] = SETTINGS
+        source.write_text(
+            render_workflow_source(
+                ReusableWorkflowDocument.model_validate_json(json.dumps(template))
+            )
+        )
+        request = request.model_copy(
+            update={"expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+        )
+    receipt = prepare_reusable_candidate(request)
+    assert receipt.status == "prepared", receipt.error
+    config = console_config.model_copy(
+        update={
+            "tasks": (console_config.tasks[0].model_copy(update={"task_manifest": str(manifest)}),)
+        }
+    )
+    adapter, project, choice, _ = _captured(
+        (request, Path(receipt.envelope), select_reusable_preparation(receipt.envelope)),
+        config,
+        monkeypatch,
+    )
+    source.write_text("# later editor changes are not the prepared run\n")
+    review = adapter.review(project.project_id, adapter.select(project.project_id, choice))
+    assert review.proposal_advice == "Prefer a small interpretable baseline"
+    assert review.facts.training is not None
+    assert review.facts.training.healthgate_mode == mode
+    assert review.facts.training.trial_time_budget_minutes == 7
+    assert review.facts.training.formal_time_budget_minutes == 19
+    assert review.facts.training.trial_max_epochs == 3
+    assert review.facts.training.formal_max_epochs == 8
+    assert review.facts.task_parameter_rules is not None
+    assert review.facts.task_parameter_rules.model_dump()["rules"] == {
+        "train_config.batch_size": {"exact": 32}
+    }
+    assert review.facts.training.workflow_parameter_rules is not None
+    assert review.facts.training.workflow_parameter_rules.model_dump()["rules"][
+        "train_config.lr_schedule"
+    ] == {"exact": None}
