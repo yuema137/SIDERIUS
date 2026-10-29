@@ -114,7 +114,13 @@ def test_composed_single_file_run_on_a_non_tidmad_profile_refused_before_effects
     forbidden = Mock(side_effect=AssertionError("startup reached effectful work"))
     monkeypatch.setattr(node, "_run_skill", forbidden)
     monkeypatch.setattr(node, "run_bound_model_io_contract", forbidden)
-    monkeypatch.setattr(node, "resolve_bound_task_data_path", forbidden)
+    # The output-inventory owner runs first and has its own tests; let it pass here.
+    monkeypatch.setattr(node, "resolve_bound_task_data_path", lambda: object())
+    monkeypatch.setattr(
+        import_module("execute_tools.model_output_retention"),
+        "require_local_output_inventory",
+        lambda **kwargs: None,
+    )
     ref = TaskCompositionRef(
         semantic_fingerprint="quickstart-fixture",
         task_data_path_id="quickstart_tabular",
