@@ -11,10 +11,12 @@ scored and when a result is invalid. The folder holds no data.
 
 ## Before you start
 
-- A SIDERIUS checkout installed with `uv sync --group dev --frozen`, and a
-  console workspace (`siderius_workspace/`). Stage 1 of the
+- A SIDERIUS checkout installed with `uv sync --group dev --frozen`, and, for
+  the console steps on this page, a console workspace (`siderius_workspace/`).
+  Stage 1 of the
   [first-hour path](../../../docs/getting-started/README.md#your-first-hour-from-the-example-to-your-own-task)
-  creates both.
+  creates both. The package itself does not need the console; see
+  [Use it from workflow.py](#use-it-from-workflowpy).
 - Your data as two CSV files with a header row, one row per sample:
   - `train.csv`: the rows models are trained on;
   - `validation.csv`: the rows the research loop scores every model on.
@@ -75,7 +77,7 @@ SIDERIUS checkout's root folder.
    chmod 600 /absolute/project/siderius_workspace/data/iris/*.csv
    ```
 
-2. **Edit the `EDIT HERE` lines**, in this order. Three numbers appear in more
+2. **Edit the `EDIT HERE` lines**, top to bottom in this table. Three numbers appear in more
    than one file and must agree everywhere: the class list, the number of
    classes and the number of features.
 
@@ -130,6 +132,19 @@ SIDERIUS checkout's root folder.
 Then create an experiment setup for the task on **Workflow** and run it, as in
 stage 2 of the
 [first-hour path](../../../docs/getting-started/README.md#stage-2-bring-your-own-task).
+
+### Use it from workflow.py
+
+The package also works without the console, on the recommended
+[workflow route](../../../docs/getting-started/README.md#write-and-run-a-workflow-declaration).
+Copy the folder and your two CSV files into your own project instead of a
+console workspace, make the same edits (step 2), and point `workflow.py` at
+them, for example
+`ReusableTaskReferences(manifest="tasks/iris/task.yaml", data_root="data/iris")`,
+where `data_root` is the folder holding `train.csv` and `validation.csv`.
+Steps 3 and 4 (register, **Count samples**) are console-only, so on this route
+ask your coding agent to load both files through the package and report the row
+counts before you prepare a run.
 
 ## What the two Health checks do
 

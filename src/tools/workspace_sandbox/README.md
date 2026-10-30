@@ -1,10 +1,18 @@
-# Run orchestration code in an explicit workspace sandbox
+# Workspace sandbox
 
-Use this optional Linux launcher when an orchestration caller needs to run code
-while keeping the SIDERIUS installation and selected inputs read-only. It starts
-exactly the command you supply. It does not choose agents, models, data splits,
-training order or scientific policy, and existing workflow commands do not use
-it automatically.
+SIDERIUS runs task and model code inside a Linux sandbox (bubblewrap) so that
+the code can write only to its own run folder and cannot change the SIDERIUS
+installation or your selected inputs. Preparing and running a workflow
+(`tools.candidate_prepare`, `tools.candidate_operations`) and the browser
+console use it automatically; you only need to
+[check that bubblewrap works](#check-that-bubblewrap-works) once per machine.
+
+You can also use the sandbox directly as a launcher for your own orchestration
+caller (the sections from [Try it without API keys, data or a GPU](#try-it-without-api-keys-data-or-a-gpu)
+on). It starts exactly the command you supply and does not choose agents,
+models, data splits, training order or scientific policy. The older chain
+launcher `scripts/launch/run_chain.sh` does not start its runs through this
+launcher.
 
 You need a frozen SIDERIUS environment, Linux with working user namespaces, and
 `bubblewrap` (`bwrap` on `PATH`). If isolation cannot start, the command fails;
@@ -13,8 +21,8 @@ the paper experiments' protected evaluation environment.
 
 ## Check that bubblewrap works
 
-The browser console runs task code through this sandbox, so check it once on
-each machine. Run:
+Workflow preparation, operations and the browser console run task code through
+this sandbox, so check it once on each machine. Run:
 
 ```bash
 bwrap --unshare-all --ro-bind / / true

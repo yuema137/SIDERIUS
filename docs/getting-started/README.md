@@ -82,8 +82,7 @@ a task package and an NVIDIA GPU with CUDA for the training step.
    It names `workflow.py`, the LLM profile, a runs folder, the time limits and
    the environment variable names of the provider keys (never the key values).
    The runs folder (`/absolute/runs` above) must already exist, outside your
-   task and data folders. List it in both `preparation_roots` and
-   `candidate_roots` of `store.json` (step 4) before you launch.
+   task and data folders. You will list this folder in `store.json` in step 4.
 
 3. **Prepare the run.** This step is offline: no model is called and nothing
    is trained.
@@ -97,9 +96,15 @@ a task package and an NVIDIA GPU with CUDA for the training step.
    `status: "prepared"`. `workflow.py.snapshot` there is the exact workflow that
    will run; later edits to `workflow.py` only affect future runs.
 
-4. **Launch it.** Save `store.json` and build `reusable-submission.json` with the
-   [operation recipe](../../src/tools/candidate_operations/candidate-operations-contract.md#shared-python-and-cli-recipe).
-   Review the task, steps, models and limits it shows. Then make your provider
+4. **Launch it.** First save `store.json`: it tells the operations tool where
+   prepared runs may live (list the runs folder from step 2 in both
+   `preparation_roots` and `candidate_roots`) and where to keep its own records
+   (`state_root`, a separate folder such as `/absolute/operations`). Then ask
+   your coding agent to run the short Python
+   [operation recipe](../../src/tools/candidate_operations/candidate-operations-contract.md#shared-python-and-cli-recipe),
+   which selects the prepared run folder from step 3 and writes
+   `reusable-submission.json`. Read the task, workflow steps, models, time
+   limits and advice in that file before you continue. Then make your provider
    keys available in this shell (see [API keys](installation.md#api-keys)) and
    submit. This step calls paid APIs and uses the GPU:
 
@@ -126,7 +131,7 @@ a task package and an NVIDIA GPU with CUDA for the training step.
    (with an optional `--advice-file`) act between iterations; see
    [Stop, pause or resume a research loop](../../src/tools/candidate_operations/README.md#stop-pause-or-resume-a-research-loop).
 
-[Run a candidate operation](../../src/tools/candidate_operations/README.md)
+[Read status and logs](../../src/tools/candidate_operations/README.md#read-status-and-logs)
 explains each status value. A finished run is not a scientific verdict: read
 its scores and Health results before you compare it with other runs.
 
@@ -135,13 +140,14 @@ its scores and Health results before you compare it with other runs.
 The older chain launcher `scripts/launch/run_chain.sh` remains supported. The
 [companion tutorials](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md)
 and paper tasks use it through saved launch scripts. For this route, use
-[first-run checks](first-run.md) and your external project's saved launch script. This route reads credentials from
-the launch process: use a trusted external shell-compatible credential file or
-managed injection, with the name-only check in the
-[API-key procedure](installation.md#api-keys). The browser console instead
-reads the `credential_file` named in its configuration. Have your agent show the saved settings, command
-and output directory before execution. An optional
+[first-run checks](first-run.md) and your external project's saved launch
+script. Have your agent show the saved settings, command and output directory
+before execution. An optional
 [setup review](../../src/tools/setup_review/README.md) produces an HTML report.
+
+This route reads credentials from the launch process: use a trusted external
+shell-compatible credential file or managed injection, with the name-only check
+in the [API-key procedure](installation.md#api-keys).
 
 Optionally, [capture a native chain](../../src/tools/native_chain/README.md)
 to record the settings for a fresh foreground multi-iteration CLI run before
@@ -158,8 +164,8 @@ performance. A real run, including a Quickstart research chain, needs an NVIDIA
 GPU with CUDA; the chain header and the console run review say so, and a launch
 on a machine without one stops before any model call.
 
-The optional reviewed-launch route covers a fresh standard single iteration.
-For your own caller, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
+To let an LLM orchestrator choose the research steps instead of a fixed
+`workflow.py`, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
 Choosing that execution route is separate from choosing Professional or
 Assistant collaboration. See [the documentation map](../README.md) for deeper
 references.
@@ -232,6 +238,8 @@ you own; the console workspace is created inside it) and
    `/absolute/downloads/siderius-example-quickstart-1.0.0.zip`, and `unzip`
    creates `/absolute/downloads/siderius-example-quickstart-<version>/`. The
    bundle holds a small synthetic task package and a ready experiment setup.
+   The number in the name is the package version from `pyproject.toml`; it may
+   differ from the release name.
 
 3. **Create your private key file and the console workspace.** The first
    command creates an empty key file that only you can read (mode `600`; its
@@ -371,7 +379,7 @@ edit the task's entry in `console.json` and restart the console.
 ### Other console routes
 
 The browser console can prepare, review and launch a saved workflow, from **one
-candidate: Propose → Implement → Validate** up to an interpreted training workflow
+candidate model** (Propose → Implement → Validate) up to an interpreted training workflow
 (Interpret → Propose → Implement → Validate → Train & tune) repeated as a research
 loop. Use the [training inspector guide](../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
 to configure the training stage. Completion is not a scientific success verdict.
@@ -379,12 +387,13 @@ Package your task with your coding agent first: the browser creates experiment
 setups, but it does not create or edit task packages or the console's task
 entries. It can also launch an
 externally configured native chain for multiple iterations, using the same
-backend as the CLI. Both routes are available whether you work in Professional
-or Assistant mode.
+backend as the CLI. Both routes work the same whichever way of working
+(Professional or Assistant) you chose.
 
-The [first-hour path](#your-first-hour-from-the-example-to-your-own-task) above
-sets up the console in order: `init --credential-file`, task data in
-`data/<task_id>/`, `add-task`, then `serve`. The
+Set up the console with the
+[first-hour path](#your-first-hour-from-the-example-to-your-own-task) above
+(`init --credential-file`, task data in `data/<task_id>/`, `add-task`, then
+`serve`). The
 [console setup](../../src/tools/candidate_console/README.md#set-up-and-open-the-console)
 describes every option, and the
 [configuration example](../../src/tools/candidate_console/console-contract.md#configuration)
@@ -398,8 +407,8 @@ matches your starting point:
 
 - **Configured task:** on Home, expand **Prepare configured task**, select the
   task and prepare its inputs. Review models and resources, then explicitly
-  **Launch candidate**. This route is independent of Workflow Editor edits.
-- **Saved reusable workflow:** in Workflow Editor, save your changes and select
+  **Launch candidate**. This route is independent of edits on the **Workflow** tab.
+- **Saved reusable workflow:** on the **Workflow** tab, save your changes and select
   **Next: Run**. On the Run page, use **New run** to select the
   configured task/resources, review and prepare the saved source. Open the
   prepared run, review it and explicitly launch. Each run has separate captured
@@ -414,7 +423,7 @@ matches your starting point:
   settings; this panel does not edit the chain or provide pause/resume (a saved
   workflow's research loop can be paused instead).
 
-To bind a reusable workflow in **Workflow builder**:
+To bind a reusable workflow on the **Workflow** tab:
 
 1. Choose a configured task package/version and **Update workflow references**.
 2. Press **Save**, inspect the task findings (and, with advanced tools on, the Python diff), confirm them and **Save version**.
@@ -422,8 +431,8 @@ To bind a reusable workflow in **Workflow builder**:
 
 Save pending edits before Update.
 An unbound workflow needs an explicit current-snapshot adoption confirmation.
-Bound edits need their matching configured choice for review. Professional and
-Assistant modes share this flow; see the [task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version).
+Bound edits need their matching configured choice for review. This flow is the
+same for Professional and Assistant work; see the [task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version).
 
 Follow the [saved-source recipe](../../src/tools/candidate_console/README.md#prepare-saved-source-or-open-an-existing-run)
 for the second route. Saving and preparation never launch automatically.

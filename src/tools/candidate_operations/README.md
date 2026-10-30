@@ -1,15 +1,159 @@
-# Run a candidate operation independently of your terminal command
+# Launch and follow runs in the background
 
-Submit an existing [preparation request](../candidate_prepare/README.md) or
-[candidate request](../candidate_worker/README.md), let the command exit, and
-inspect its result later. Preparation and candidate execution remain separate
-choices. Candidate execution can call providers and execute generated code.
+`python -m tools.candidate_operations` starts a prepared run as a background
+*operation*, returns at once with an operation ID, and lets you read its status
+and logs, stop it, or pause and resume a research loop later, even after you
+close the terminal. If you followed
+[getting started](../../../docs/getting-started/README.md#write-and-run-a-workflow-declaration),
+start at [Run a prepared reusable workflow](#run-a-prepared-reusable-workflow).
+The same tool also submits other [preparation](../candidate_prepare/README.md)
+and [candidate](../candidate_worker/README.md) requests
+([Submit other request kinds](#submit-other-request-kinds)). Preparation and
+candidate execution remain separate choices. Candidate execution can call
+providers and execute generated code.
 
 Use Linux, bubblewrap and this checkout's synced `.venv/bin/python`. Keep the
 operation in a persistent user session or service: detaching a process does not
 protect it from host reboot or a session manager that kills all processes on
 logout. Follow the [credential binding instructions](../../../docs/getting-started/installation.md#api-keys)
 before candidate execution.
+
+## Run a prepared reusable workflow
+
+First [prepare your reusable workflow](../candidate_prepare/README.md#prepare-several-runs-from-one-workflow).
+Each prepared run has its own directory with captured source, inputs and a future
+workspace. You can launch that capture even after editing your source for future
+runs. The operation checks that the selected capture and native inputs still agree.
+
+1. Save `store.json`. Include your runs directory in both `preparation_roots`
+   and `candidate_roots`: the prepared inputs and future workspace are siblings
+   inside each run directory. `state_root` is where the tool keeps its own
+   records: a separate, absent directory whose parent already exists. Use
+   canonical absolute paths:
+
+   ```json
+   {
+     "state_root": "/absolute/operations",
+     "preparation_roots": ["/absolute/runs"],
+     "candidate_roots": ["/absolute/runs"]
+   }
+   ```
+
+   Native output paths must be descendants of their configured roots. State
+   must be separate from inputs, outputs and framework code. New state is private;
+   existing state directories must belong to you and have mode `0700`.
+2. Use `select_reusable_preparation` and `build_reusable_operation`, following the
+   [Python construction recipe](candidate-operations-contract.md#shared-python-and-cli-recipe),
+   to select the reported prepared directory and save `reusable-submission.json`
+   outside it. Your coding assistant or integration can do this immediately after
+   preparation. Review the selected task, workspace, nodes, provider routes and
+   execution limits. These describe the captured workflow; current source edits
+   belong to later runs.
+3. Bind the chosen credentials and submit:
+
+   ```sh
+   .venv/bin/python -m tools.candidate_operations submit \
+     --store-config store.json --request reusable-submission.json
+   ```
+
+   Save the returned `operation_id`. Exit zero means the request was admitted
+   or already exists; it does not mean the run succeeded.
+
+Follow it with the [status and log commands](#read-status-and-logs) below. If the
+response is lost, resubmit the saved file unchanged: the same operation is
+returned without a second execution, even if preparation files later disappear.
+Changed preparation files refuse a new launch. Preserve run artifacts so status
+readers can continue to verify the native result.
+
+`prepared` means inputs exist; `starting` means an operation was admitted. A later
+native `accepted` means candidate validation passed and proposal, implementation
+and validation outputs are available. It does not mean training or scientific
+scoring ran. Professional and Assistant work use this same Python/CLI route; the
+browser console offers the same launch through its prepared-run selector. To
+continue a paused research loop, see
+[Stop, pause or resume a research loop](#stop-pause-or-resume-a-research-loop);
+failed, stopped or finished runs cannot be resumed.
+
+## Read status and logs
+
+Reopen the result and read a bounded log chunk:
+
+```sh
+.venv/bin/python -m tools.candidate_operations status \
+  --store-config store.json --operation-id OPERATION_UUID
+.venv/bin/python -m tools.candidate_operations log \
+  --store-config store.json --operation-id OPERATION_UUID \
+  --kind native --offset 0 --limit 65536
+```
+
+`status` reports the operation's `state`:
+
+| `state` | Meaning | What to do |
+| --- | --- | --- |
+| `queued` | Waiting for room in a [shared host ledger](#share-one-gpu-budget-across-operations) | Wait, or [`cancel`](#stop-a-running-candidate-now) |
+| `active` | Its process was observed running | Follow `log` |
+| `completed` | A validated native receipt exists; read `receipt.status` below | See the next table |
+| `operation_failed` | The operation did not reach a native receipt (for example `cancelled_while_queued`) | Read `log --kind operation` |
+| `unknown` | Evidence is insufficient; it blocks new submissions to this store and is never retried automatically | Investigate; preserve the records |
+
+When `state` is `completed`, `receipt.status` says what the native step reported:
+
+| `receipt.status` | Meaning |
+| --- | --- |
+| `prepared` | Preparation captured the inputs; nothing ran |
+| `accepted` / `rejected` | Candidate validation passed / failed; no training implied |
+| `completed` | Train & tune returned; read scores and Health before trusting results |
+| `paused` / `stopped` | A research loop paused (resumable) or stopped (final) |
+| `cancelled` | Stopped at once by `cancel` |
+| `failed` / `timed_out` / `interrupted` | The native step did not finish; read the native log |
+
+A finished run is not a scientific verdict: read its scores and Health results
+before you compare it with other runs.
+
+Only one operation may occupy a store. A new operation cannot reuse an older
+operation's receipt at the same output path. A completed operation also keeps
+its slot until its process is observed exited. A store does not queue
+submissions: a second submission to a busy store is refused with `busy`. (A
+shared host ledger queues runs across stores; see
+[Share one GPU budget across operations](#share-one-gpu-budget-across-operations).)
+To stop a running candidate, see
+[Stop a running candidate now](#stop-a-running-candidate-now). Captured native
+continuation is limited to the explicit route below.
+
+Use `--kind operation` for wrapper output. Logs and full native receipts are
+trusted local data and may contain sensitive task or plugin output. Byte cursors
+advance using `next_offset`; chunks can split UTF-8 characters. An offset beyond
+the current file size reports truncation and restarts at zero. Same-size log
+replacement cannot be detected by this cursor. The
+[technical contract](candidate-operations-contract.md) defines integrity checks,
+credential limits and deployment boundaries.
+
+For reported LLM tokens, Python callers can use the same stored operation UUID:
+
+```python
+from pathlib import Path
+from uuid import UUID
+from tools.candidate_operations import OperationStoreConfig, read_operation_tokens
+
+config = OperationStoreConfig.model_validate_json(Path("store.json").read_bytes())
+snapshot = read_operation_tokens(config, UUID("YOUR_OPERATION_UUID"))
+print(snapshot.model_dump_json(indent=2))
+```
+
+Replace the UUID with your submitted operation ID. Candidate results group the
+observed provider reports by requested and served model; preparation returns
+not applicable. Missing fields remain null, partial reads are labeled and repeated
+reads replace the snapshot. Missing or unrecorded usage may exist; these sums do
+not establish complete billing. You can also paste a code-submitted operation ID
+into the [local console](../candidate_console/README.md) to see the table, status
+and logs. No matching console task choice is needed for known-ID monitoring;
+use the same admitted operation store configuration.
+
+## Submit other request kinds
+
+Use these steps for an existing [preparation request](../candidate_prepare/README.md)
+or [candidate request](../candidate_worker/README.md) rather than a prepared
+reusable workflow.
 
 1. Create separate external directories for prepared bundles and candidate
    workspaces. Save `store.json` with their canonical absolute paths and an
@@ -23,9 +167,8 @@ before candidate execution.
    }
    ```
 
-   Native output paths must be descendants of their configured roots. State
-   must be separate from inputs, outputs and framework code. New state is private;
-   existing state directories must belong to you and have mode `0700`.
+   The root and state rules of
+   [step 1 above](#run-a-prepared-reusable-workflow) apply.
 
 2. Wrap your existing native request JSON in a submission. Choose `prepare`, `prepare_reusable` or
    `candidate` explicitly. This example reads `native-request.json` and writes
@@ -57,16 +200,7 @@ before candidate execution.
    integer from 0 to 2^53 - 1) to choose it yourself, and repeat the same value
    whenever you resubmit that file.
 
-3. Reopen the result and read a bounded log chunk:
-
-   ```sh
-   .venv/bin/python -m tools.candidate_operations status \
-     --store-config store.json --operation-id OPERATION_UUID
-   .venv/bin/python -m tools.candidate_operations log \
-     --store-config store.json --operation-id OPERATION_UUID \
-     --kind native --offset 0 --limit 65536
-   ```
-
+3. Reopen the result with the [status and log commands](#read-status-and-logs).
    For preparation and candidate kinds, `completed` means a validated native receipt exists. Read `receipt.status`:
    preparation can be `prepared`, while a candidate can be `accepted` or
    `rejected`; both can fail, time out or be interrupted. Acceptance means native
@@ -102,81 +236,6 @@ Python integrations can bind a reviewed set of source/configuration bytes using
 the [typed expectation and recovery API](candidate-operations-contract.md#detached-reusable-preparation).
 Create the preparation request through Python or the CLI; the console can monitor
 this operation UUID.
-
-## Run a prepared reusable workflow
-
-First [prepare your reusable workflow](../candidate_prepare/README.md#prepare-several-runs-from-one-workflow).
-Each prepared run has its own directory with captured source, inputs and a future
-workspace. You can launch that capture even after editing your source for future
-runs. The operation checks that the selected capture and native inputs still agree.
-
-1. In `store.json`, include your runs directory in both `preparation_roots` and
-   `candidate_roots`: the prepared inputs and future workspace are siblings inside
-   each run directory. Keep `state_root` separate.
-2. Use `select_reusable_preparation` and `build_reusable_operation`, following the
-   [Python construction recipe](candidate-operations-contract.md#shared-python-and-cli-recipe),
-   to select the reported prepared directory and save `reusable-submission.json`
-   outside it. Your coding assistant or integration can do this immediately after
-   preparation. Review the selected task, workspace, nodes, provider routes and
-   execution limits. These describe the captured workflow; current source edits
-   belong to later runs.
-3. Bind the chosen credentials and submit:
-
-   ```sh
-   .venv/bin/python -m tools.candidate_operations submit \
-     --store-config store.json --request reusable-submission.json
-   ```
-
-Use the status and log commands above with the returned operation ID. If the
-response is lost, resubmit the saved file unchanged: the same operation is
-returned without a second execution, even if preparation files later disappear.
-Changed preparation files refuse a new launch. Preserve run artifacts so status
-readers can continue to verify the native result.
-
-`prepared` means inputs exist; `starting` means an operation was admitted. A later
-native `accepted` means candidate validation passed and proposal, implementation
-and validation outputs are available. It does not mean training or scientific
-scoring ran. Professional and Assistant use this same Python/CLI route. Reusable
-capture launch uses the console’s prepared-run selector; resuming a previous run
-is not available through this route.
-
-For reported LLM tokens, Python callers can use the same stored operation UUID:
-
-```python
-from pathlib import Path
-from uuid import UUID
-from tools.candidate_operations import OperationStoreConfig, read_operation_tokens
-
-config = OperationStoreConfig.model_validate_json(Path("store.json").read_bytes())
-snapshot = read_operation_tokens(config, UUID("YOUR_OPERATION_UUID"))
-print(snapshot.model_dump_json(indent=2))
-```
-
-Replace the UUID with your submitted operation ID. Candidate results group the
-observed provider reports by requested and served model; preparation returns
-not applicable. Missing fields remain null, partial reads are labeled and repeated
-reads replace the snapshot. Missing or unrecorded usage may exist; these sums do
-not establish complete billing. You can also paste a code-submitted operation ID
-into the [local console](../candidate_console/README.md) to see the table, status
-and logs. No matching console task choice is needed for known-ID monitoring;
-use the same admitted operation store configuration.
-
-Only one operation may occupy a store. `active` means its wrapper process was
-observed alive. `unknown` means evidence is insufficient; it blocks new admission
-and is never automatically retried. A new operation cannot reuse an older
-operation's receipt at the same output path. Preserve the records for investigation.
-A completed operation also keeps its slot until its process is observed exited.
-There is no queue. To stop a running candidate, see
-[Stop a running candidate now](#stop-a-running-candidate-now). Captured native
-continuation is limited to the explicit route below.
-
-Use `--kind operation` for wrapper output. Logs and full native receipts are
-trusted local data and may contain sensitive task or plugin output. Byte cursors
-advance using `next_offset`; chunks can split UTF-8 characters. An offset beyond
-the current file size reports truncation and restarts at zero. Same-size log
-replacement cannot be detected by this cursor. The
-[technical contract](candidate-operations-contract.md) defines integrity checks,
-credential limits and deployment boundaries.
 
 ## Share one GPU budget across operations
 
