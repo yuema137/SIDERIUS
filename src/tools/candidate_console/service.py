@@ -1,8 +1,10 @@
 """Code-callable console policy; native operations remain the execution owner."""
 
 import hashlib
+from collections import OrderedDict
 from collections.abc import Mapping
 from pathlib import Path
+from threading import Lock
 from uuid import UUID
 
 from agent.judge.evidence import read_call_evidence
@@ -65,6 +67,7 @@ from .models import (
     OperationCancelAcknowledgement,
     OperationListItemView,
     OperationListView,
+    OutcomeEvidence,
     PreparedReview,
     PreparedSelection,
     PrepareSelection,
@@ -206,6 +209,8 @@ def with_run_resources(
 class CandidateConsole:
     def __init__(self, config: ConsoleConfig, setup_store: SetupStore | None = None):
         """``setup_store``: the workspace registry (``create_app``); absent, legacy only."""
+        self._outcome_cache: OrderedDict[tuple[UUID, str], OutcomeEvidence | None] = OrderedDict()
+        self._outcome_cache_lock = Lock()
         self.config = validate_config(config)
         self.host = host_scheduling(self.config)
         self.setup_store = SetupStore() if setup_store is None else setup_store
@@ -404,6 +409,23 @@ class CandidateConsole:
         request_cancel(self.config.operation_store, operation_id)
         return OperationCancelAcknowledgement(operation_id=operation_id)
 
+    def _list_outcome(self, snapshot: OperationSnapshot) -> OutcomeEvidence | None:
+        """Memoize only successful projections of verified terminal receipt identities.
+
+        The operations owner still re-verifies each snapshot on every list read.
+        Direct status reads deliberately bypass this bounded, process-local cache.
+        """
+        if snapshot.state != "completed" or snapshot.receipt_digest is None:
+            return outcome_evidence(self.config.operation_store, snapshot)
+        key = (snapshot.operation_id, snapshot.receipt_digest)
+        with self._outcome_cache_lock:
+            if key not in self._outcome_cache:
+                self._outcome_cache[key] = outcome_evidence(self.config.operation_store, snapshot)
+                if len(self._outcome_cache) > 200:
+                    self._outcome_cache.popitem(last=False)
+            self._outcome_cache.move_to_end(key)
+            return self._outcome_cache[key]
+
     def operations(self, limit: int = 50, project_id: str | None = None) -> OperationListView:
         """Read-only list of this store's verified records; receipts and paths stay out.
 
@@ -418,6 +440,12 @@ class CandidateConsole:
                 loop = loop_status(store, snapshot)
             except (OSError, ValueError):
                 loop = None
+            try:
+                outcome = self._list_outcome(snapshot)
+            except OperationFailure as error:
+                if error.detail.code != "integrity":
+                    raise
+                outcome = None
             items.append(
                 OperationListItemView(
                     operation_id=snapshot.operation_id,
@@ -428,7 +456,7 @@ class CandidateConsole:
                     state=snapshot.state,
                     native_status=snapshot.receipt.status if snapshot.receipt else None,
                     loop=loop,
-                    outcome=outcome_evidence(store, snapshot),
+                    outcome=outcome,
                     seed=seed_readback(snapshot),
                     reason=snapshot.reason if snapshot.state == "operation_failed" else None,
                 )

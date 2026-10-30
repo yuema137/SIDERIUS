@@ -27,7 +27,7 @@
     if (value.state !== 'completed') return `${what}: its status cannot be determined right now.`;
     // Typed native failures in plain words (L-2, #1145); the cause line comes from the log.
     const noun = what.toLowerCase();
-    if (native === 'failed' && value.outcome?.failed_phases?.length) return `Failed during ${value.outcome.failed_phases.join(', ')}.`;
+    if (native === 'failed' && value.outcome?.failed_phases?.length) return `Failed during ${value.outcome.failed_phases.map(window.editorCapabilityPresentation.label).join(', ')}.`;
     if (native === 'failed') return `Failed: the ${noun} stopped with an error before finishing.`;
     if (native === 'timed_out') return `Failed: the ${noun} reached its time limit and was stopped.`;
     if (native === 'interrupted') return `Failed: the ${noun} was interrupted before finishing.`;

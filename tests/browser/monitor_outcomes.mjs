@@ -62,7 +62,7 @@ try {
       lists.push(Date.now());
       return reply({operations: [
         {operation_id: running, kind: 'candidate', run_name: 'capture-20261028-0915', project_id: 'capture', admitted_at: '2026-10-28T16:15:00+00:00', state: runningState, native_status: runningState === 'completed' ? 'accepted' : null},
-        {operation_id: crashed, kind: 'candidate', run_name: 'proposal-failed', admitted_at: '2026-10-28T16:01:00+00:00', state: 'completed', native_status: 'failed', outcome: {failed_phases: ['Propose model'], completed_iterations: 1}, loop: {final_iteration: 3, attempted_iterations: 2}},
+        {operation_id: crashed, kind: 'candidate', run_name: 'proposal-failed', admitted_at: '2026-10-28T16:01:00+00:00', state: 'completed', native_status: 'failed', outcome: {failed_phases: ['proposal'], completed_iterations: 1}, loop: {final_iteration: 3, attempted_iterations: 2}},
         {operation_id: rejected, kind: 'candidate', run_name: 'capture-20261028-0901', project_id: 'capture', admitted_at: '2026-10-28T16:01:00+00:00', state: 'completed', native_status: 'rejected'},
       ], unreadable: 1, examined: 3, incomplete: false});
     }
@@ -80,7 +80,7 @@ try {
     }
     if (id === unknown) return reply({error: {code: 'unknown_operation', message: 'this operation store has no operation with this ID'}}, 404);
     if (id === rejected) return reply(base(rejected, {}));
-    if (id === crashed) return reply(base(crashed, {native_status: 'failed', validation_passed: false, outcome: {failed_phases: ['Propose model'], completed_iterations: 1}, loop: {final_iteration: 3, attempted_iterations: 2}}));
+    if (id === crashed) return reply(base(crashed, {native_status: 'failed', validation_passed: false, outcome: {failed_phases: ['proposal'], completed_iterations: 1}, loop: {final_iteration: 3, attempted_iterations: 2}}));
     if (id === paused) return reply(base(paused, {native_status: 'paused', validation_passed: null, outcome: {failed_phases: [], completed_iterations: 1}, loop: {final_iteration: 3, attempted_iterations: 1}}));
     if (id === running) return reply(base(running, {state: 'active', process: {status: 'alive', reason: 'observed'}, receipt_available: false, native_status: null, validation_passed: null}));
     throw new Error('unexpected path ' + url.pathname);
@@ -139,8 +139,9 @@ try {
     [{native_status: 'rejected'}, 'Finished: validation rejected the candidate.'],
     [{native_status: 'completed', outcome: {validation_passed: true}}, 'Finished: the candidate passed validation.'],
     [{native_status: 'completed', outcome: {validation_passed: false}}, 'Finished: validation rejected the candidate.'],
+    [{native_status: 'failed', outcome: {failed_phases: ['adaptor']}}, 'Failed during Combine/select.'],
     [{native_status: 'accepted'}, 'Finished: the candidate passed validation.'],
-    [{native_status: 'failed', outcome: {failed_phases: ['Validate', 'Implement']}}, 'Failed during Validate, Implement.'],
+    [{native_status: 'failed', outcome: {failed_phases: ['validation', 'implementation']}}, 'Failed during Validate, Implement.'],
   ]) {
     assert.equal(await page.evaluate(fields => window.operationOutcome.sentence({kind: 'candidate', state: 'completed', validation_passed: false, ...fields}), fields), expected);
   }

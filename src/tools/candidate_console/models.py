@@ -21,7 +21,7 @@ from tools.candidate_operations.models import (
 from tools.candidate_operations.native_chain_models import NativeChainObservation
 from tools.candidate_prepare.models import CandidatePreparationRequest
 from tools.candidate_worker import CandidateTokenSnapshot
-from tools.candidate_worker.graph_models import GraphReason, GraphState, GraphTrace
+from tools.candidate_worker.graph_models import GraphCapability, GraphReason, GraphState, GraphTrace
 from tools.candidate_worker.loop_models import OperatorAdvice
 from tools.candidate_worker.loop_stop import LoopInputRequest, StopReason
 from tools.candidate_worker.parallel_models import ParallelDispatch
@@ -378,7 +378,7 @@ class OutcomeEvidence(PreviewModel):
     """Receipt-derived facts shared by every operation headline."""
 
     validation_passed: bool | None = None
-    failed_phases: tuple[str, ...] = ()
+    failed_phases: tuple[GraphCapability, ...] = ()
     completed_iterations: int | None = Field(default=None, ge=0)
 
 

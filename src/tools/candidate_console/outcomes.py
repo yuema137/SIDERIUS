@@ -1,20 +1,11 @@
 """Read-only outcome facts from verified receipts, shared by status and list."""
 
 from tools.candidate_operations import OperationSnapshot, OperationStoreConfig, loop_root_operation
+from tools.candidate_worker.graph_models import GraphCapability
 from tools.candidate_worker.models import CandidateRunReceipt
 
 from .graph_results import verified_bodies
 from .models import OutcomeEvidence
-
-_PHASE_LABELS = {
-    "proposal": "Propose model",
-    "implementation": "Implement",
-    "validation": "Validate",
-    "literature": "Literature review",
-    "interpretation": "Interpret results",
-    "tuning": "Train & tune",
-    "adaptor": "Combine/select",
-}
 
 
 def outcome_evidence(
@@ -36,17 +27,15 @@ def outcome_evidence(
             return None
         bodies = verified_bodies(root, receipt)
         completed = sum(body.status == "completed" for body in bodies)
-    phases = tuple(
-        dict.fromkeys(
-            _PHASE_LABELS[node.capability]
-            for body in bodies
-            if body.graph_trace is not None
-            for node in (*body.graph_trace.nodes, *body.graph_trace.adaptors)
-            if node.state == "failed"
-        )
-    )
+    phases: dict[GraphCapability, None] = {
+        node.capability: None
+        for body in bodies
+        if body.graph_trace is not None
+        for node in (*body.graph_trace.nodes, *body.graph_trace.adaptors)
+        if node.state == "failed"
+    }
     return OutcomeEvidence(
         validation_passed=receipt.validation_passed,
-        failed_phases=phases,
+        failed_phases=tuple(phases),
         completed_iterations=completed,
     )

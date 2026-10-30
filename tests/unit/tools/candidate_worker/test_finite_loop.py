@@ -852,4 +852,4 @@ def test_console_outcome_reads_failed_proposal_iteration(
     )
     assert evidence is not None
     assert evidence.completed_iterations == 1
-    assert evidence.failed_phases == ("Propose model",)
+    assert evidence.failed_phases == ("proposal",)
