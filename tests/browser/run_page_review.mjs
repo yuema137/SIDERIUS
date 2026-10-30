@@ -77,7 +77,7 @@ try {
   });
   for (bodies of [1, 2]) {
     await page.locator('#capture-review').click();
-    const phrase = bodies === 1 ? '1 completed body passes without improvement' : '2 completed bodies pass without improvement';
+    const phrase = bodies === 1 ? '1 completed iteration passes without improvement' : '2 completed iterations pass without improvement';
     await page.locator('#capture-loop').filter({hasText: phrase}).waitFor();
     const text = await page.locator('#capture-summary').textContent();
     assert.ok(text.includes('Health mode: Block on failure'));

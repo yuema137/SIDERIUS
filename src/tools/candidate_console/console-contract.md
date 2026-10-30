@@ -371,8 +371,8 @@ values refuse with `reusable_preparation`; null rules are compared as a value.
 These errors use bounded messages without input paths or payloads.
 The projection does not alter launch or its digest.
 `TrainingReview.max_rounds` carries the captured native integer limit (10 when
-omitted), rendered as **Tuning rounds per body**. It is independent of the
-research-loop body count and cannot be replaced by a later editor draft.
+omitted), rendered as **Tuning rounds per iteration**. It is independent of the
+research-loop iteration count and cannot be replaced by a later editor draft.
 `tests/browser/tuning_rounds.mjs` witnesses the default 10, editing and saving 3,
 and preparing a run whose review facts and visible summary both show 3.
 
@@ -384,7 +384,7 @@ per-role unset caps reference the shared ceiling, without browser default resolu
 Rule JSON preserves exact null values. A workflow without training states that it
 has no training stage. Idle step 2 distinguishes disconnected, no open setup,
 runs disabled, and ready to prepare/open a run; singular no-improvement text says
-"1 completed body passes", plural says "2 completed bodies pass". The HTML declares
+"1 completed iteration passes", plural says "2 completed iterations pass". The HTML declares
 the existing same-origin logo as favicon to prevent the browser's unsupported `/favicon.ico` fetch.
 Targeted witnesses: `test_review_projects_prepared_training_and_task_locks` and
 `tests/browser/run_page_review.mjs` (real prepared review and launch/list refresh;
@@ -511,6 +511,14 @@ them; it never creates `data/<task_id>`. It finishes with the same load as `chec
 Under any umask it creates folders as 0700 and the token as 0600 (it sets umask
 077 for its own duration and `fchmod`s created folders). It never deletes, overwrites
 or follows a symlink. Refusals exit 2 and say which item failed:
+`WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
+or the library default profile, when it is a symlink, unreadable or has different
+bytes); `MissingSetting` from an existing console.json names the task field; an
+unusable `--workspace` gets its own message. Residual race: `core.durable_io`
+publishes by path, so after the no-follow
+parent check only a same-user process, which already owns the workspace, can swap
+a parent.
+
 Refusals from `ensure_owned_directory` during `init` name the full offending
 path for the workspace root, fixed children and derived task output directories.
 Non-directories/symlinks are
@@ -1000,8 +1008,8 @@ only from this segment's native receipt `loop_trace` (`null` while no receipt
 exists; counts are cumulative over the run). `stop_reason` is the receipt's
 verified `loop_trace.stop_reason`, present only when a declared stop condition
 completed the loop early; Monitor renders it in plain words ("Research loop
-stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
-higher is better; best at body 3)", "… no improvement for 2 bodies …", or "… the judge
+stopped early after iteration 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
+higher is better; best at iteration 3)", "… no improvement for 2 iterations …", or "… the judge
 decided to stop") from the existing status poll, with recorded values unrounded.
 `input_request` is the receipt's verified `loop_trace.input_request`
 (`LoopInputRequest{reason, summary}`), present only when a declared
@@ -1015,9 +1023,9 @@ abstention; `rationale`/`confidence` are copied from that verdict's judge eviden
 read by `agent.judge.evidence.read_call_evidence` (digest-checked, inside the run
 workspace) and left `null` for an abstention or an unreadable/foreign file, which never
 fails the status read. Monitor lists them under the loop state (`#loop-judge`) as
-"Judge after body N: stop · <rationale> (confidence …)". The receipt's body
+"Judge after iteration N: stop · <rationale> (confidence …)". The receipt's body
 numbers (`attempted_iterations`, `stop_reason.iteration` and its incumbent
-iterations) are whole-run indices, so a resumed segment's line says "Body numbers
+iterations) are whole-run indices, so a resumed segment's line says "Iteration numbers
 count the whole run, including earlier segments." The console never
 infers per-body progress from an active process. `stop_requested` and
 `pause_requested` (status only; `false` in the operation list) are read by
@@ -1081,8 +1089,8 @@ Monitor: `loop-control.js` owns `window.renderLoopControl` and
 segment), state `active` and no receipt. A click disables the button for the pending request, so
 one click sequence issues one POST; after acknowledgement the button is hidden and
 the state reads "Stop requested … Not yet stopped." until a receipt arrives. A
-receipt `stopped` reads "stopped at a completed body boundary after N of M
-bodies"; `completed` reads "finished after N of M bodies" (and notes that a
+receipt `stopped` reads "stopped at a completed iteration boundary after N of M
+iterations"; `completed` reads "finished after N of M iterations" (and notes that a
 requested Stop did not take effect); `paused` is described under Pause and Resume;
 other statuses read "ended (status)". The
 acknowledgement is memory-only for the selected operation: a reload or another
@@ -1126,16 +1134,16 @@ set with `textContent` only.
 
 Monitor shows **Pause at next boundary** beside Stop for an active loop
 segment with no receipt; after acknowledgement it reads "Pause requested … Not yet
-paused." A `paused` receipt reads "paused at a completed body boundary after N of M
-bodies" and is resumable, never "ended". A `paused` receipt with `loop.input_request`
+paused." A `paused` receipt reads "paused at a completed iteration boundary after N of M
+iterations" and is resumable, never "ended". A `paused` receipt with `loop.input_request`
 instead reads "Waiting for your input." followed by what was met in plain words from
-the request (for example "No improvement for 3 bodies (best 0.81 at body 4, higher
-is better). Paused after body 7 of 12."; a judge request adds the rationale of that
-boundary's `judge_verdicts` entry), then "Review and resume to continue with body
+the request (for example "No improvement for 3 iterations (best 0.81 at iteration 4, higher
+is better). Paused after iteration 7 of 12."; a judge request adds the rationale of that
+boundary's `judge_verdicts` entry), then "Review and resume to continue with iteration
 N+1." or "A resumed segment continues this run." with a successor. A recorded
 Stop without a successor instead uses the ended display below. The exact recorded
 values stay in the state's tooltip. A paused status with `stop_requested` and no successor (either pause kind)
-reads "Ended by you at the pause after body N." and offers no Resume or End:
+reads "Ended by you at the pause after iteration N." and offers no Resume or End:
 the owner refuses a stopped run. This is a terminal display derived from the
 paused receipt and durable Stop marker; the native status remains `paused`. Resuming an input
 request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
@@ -1157,7 +1165,9 @@ opaque operations store id; `<predecessor>` is the lowercase predecessor operati
 UUID. The JSON record contains `origin` (`location.origin`),
 `expected_receipt_digest` (the reviewed receipt digest), `request_id` (the generated
 UUID), and optional `operator_advice` (trimmed text, omitted when empty). Reuse
-requires a matching origin and receipt digest. A retry reuses the record, and the
+requires a matching origin and receipt digest. A legacy
+`siderius.loop-resume.v1:<UUID>` record with that origin and digest is moved on
+first use only when no store-scoped record exists. A retry reuses the record, and the
 record is released once status shows the successor. After a review,
 `#loop-resume-advice` (a textarea, `maxlength=4000`) is
 shown. It is prefilled with the retained record's advice when one exists, otherwise
@@ -1612,12 +1622,12 @@ loop. Loop-only edits review as `LoopProposal` on the draft's anchor source; wit
 other draft edits pending, the document or draft proposal carries them. A third
 fieldset, Stop conditions, adds/removes at most one `metric_threshold` (metric id
 text plus threshold; the editor does not know the task metric), one
-`no_improvement` (completed bodies) and one `judge` (B2-5: `criterion` text,
-`min_completed_bodies`, `on_failure` fail/continue; exactly `JudgeStop`'s declared
+`no_improvement` (`completed_bodies`, labeled **Completed iterations without improvement**) and one `judge` (B2-5: `criterion` text,
+`min_completed_bodies` (labeled **First judged after iterations**), `on_failure` fail/continue; exactly `JudgeStop`'s declared
 fields). The judge route and `max_judge_calls` are operator-owned
 (`WorkflowLLMConfig.judge`) and are not authored here; the row says so. The capture
 review summary states a judge as "a language-model judge decides to stop ("…"), first
-after N completed bodies; a failed judge call …". The capture launch review refuses a judge the captured
+after N completed iterations; a failed judge call …". The capture launch review refuses a judge the captured
 model settings cannot run, before any launch (409 `judge_route`, the owner's own
 message forwarded): `reusable_candidate.admit_captured_judge_route` calls the worker's
 `candidate_worker.loop_judge.admit_judge_route` with the reviewed loop and the request's
@@ -1637,7 +1647,7 @@ does not draw a back-edge or annotate cards, and it shares the source-dirty,
 conflict and saving fences of the unified draft. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
 from the captured declaration, and the launch summary states "up to N iterations"
-or "none (one workflow body)", followed by "stops early when …" for each declared
+or "none (one workflow iteration)", followed by "stops early when …" for each declared
 stop condition.
 
 The Selection inspector groups one node's parameters (`editor-node-parameters.js`,
@@ -1949,7 +1959,7 @@ mid-word) from the log text already displayed; the
 Run page reads the last 64 KiB of the native, then operation, log once
 (`operationOutcome.readCause`) and appends the same line, for a failed launch in step 2
 and for a failed preparation in step 1 (#1145; a preparation's native log is the run's
-`inputs/preparation/worker.log`, which the step-1 status line also names). Loop body counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
+`inputs/preparation/worker.log`, which the step-1 status line also names). Loop iteration counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
 Operation facts. `#operation-observed` shows local time (ISO and UUID in its title).
 After a terminal state (`completed`/`operation_failed`, process `exited`, not
 `finishing`) has been read and its log drained to `observed_size`, the operation is
@@ -2016,8 +2026,8 @@ intent are persisted. The launch intent contains only origin/project navigation
 context, retained preparation identity, request digest and operation UUID; never
 source bytes, native requests or credentials. Operation-bearing records are keyed by the
 opaque operations store id: reusable intents (`…v2/<store>/<project>`) and loop
-Resume request ids (`siderius.loop-resume.v2/<store>/<predecessor UUID>`; a legacy
-`siderius.loop-resume.v1:<UUID>` with the same receipt digest is moved on first use).
+Resume request ids (see [Pause and Resume](#pause-and-resume) for the key, record
+contents and legacy migration).
 Preferences (theme, view flags, tour) and the last-opened operation UUID stay per
 origin because they are read before connecting. Settings (advanced) **Forget this
 browser's console data** (`browser-data.js`) removes every `siderius.*` key except
@@ -2115,7 +2125,7 @@ to 20 s for the saved source (else shows the editor's status, L-3) and focuses t
 advice field (L-6) through `editorAdvice.focusSettled()`, the bounded re-focus the
 gallery's template import also uses; it stops at the author's first click or key. The
 template is the loop whose Propose model `human_advice` socket is connected (managed
-`advice`), so that advice reaches the proposal agent. Rounds, stop conditions and
+`advice`), so that advice reaches the proposal agent. Iterations, stop conditions and
 training settings are then edited in the ordinary panel. The Run page's step-1 entry is
 one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
 handoff, so another entry can replace it. When this page created a preparation, the
@@ -2134,7 +2144,7 @@ status is not `prepared`; a native `paused` research loop is `resumed` (a
 requested; this run cannot continue."), `paused_for_input` (`loop.input_request`, "The
 research loop paused and is waiting for your input. Open it in Monitor to read the
 summary, add advice and resume.") or `paused` ("The research loop is paused at a
-completed body. Open it in Monitor to resume."); `null` otherwise (running, unresolved,
+completed iteration. Open it in Monitor to resume."); `null` otherwise (running, unresolved,
 prepared, accepted, rejected, stopped). For example a failed preparation reads "The preparation
 failed. The cause and its log are named below; start over to try again." and a failed
 launch "The run failed. The cause is shown below; open it in Monitor for the full log."

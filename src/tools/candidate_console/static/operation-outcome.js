@@ -34,8 +34,8 @@
       return 'Finished: validation rejected the candidate.';
     }
     if (native === 'cancelled') return 'Stopped on request before finishing; no candidate result was produced.';
-    if (native === 'stopped') return 'Finished: stopped at a completed body boundary.';
-    if (native === 'paused') return 'Paused at a completed body boundary.';
+    if (native === 'stopped') return 'Finished: stopped at a completed iteration boundary.';
+    if (native === 'paused') return 'Paused at a completed iteration boundary.';
     if (native === 'completed') return 'Finished.';
     // Typed native failures in plain words (L-2, #1145); the cause line comes from the log.
     const noun = what.toLowerCase();

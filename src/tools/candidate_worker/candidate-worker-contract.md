@@ -1528,7 +1528,7 @@ deterministic conditions, then the judge (whose "stop" verdict takes its own
 absent (`stop_reason` keeps meaning "completed before the limit"; the model refuses
 both, and requires `input_request.reason.iteration == attempted_iterations`). Like a
 stop, it is decided before any pending Stop/Pause is read, so no operator Pause
-marker (`pause.json`) exists or is needed. The next body slot stays unused.
+marker (`pause.json`) exists or is needed. The next iteration slot stays unused.
 
 Input anchor. `input_anchor` is the last earlier boundary where a `request_input`
 decision fired (0 = none); it is derived by replay (`derive_stop`), never persisted,

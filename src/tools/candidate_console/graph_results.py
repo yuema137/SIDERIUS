@@ -73,7 +73,7 @@ def _verified_bodies(
     except OperationFailure:
         raise
     except (OSError, ValueError) as error:
-        raise OperationFailure("integrity", "verified loop bodies are unavailable") from error
+        raise OperationFailure("integrity", "verified loop iterations are unavailable") from error
 
 
 def _body_result(iteration: int, tuning: GraphNodeEvidence) -> GraphBodyResult:

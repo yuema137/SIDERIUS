@@ -163,7 +163,9 @@ def test_two_native_bodies_preserve_advice_and_verify_feedback(
     with pytest.raises(ValueError, match="capture mismatch"):
         verify_loop(request, parent, receipt)
     # The console maps a refused loop body to a typed, path-free integrity failure.
-    with pytest.raises(OperationFailure, match="verified loop bodies are unavailable") as refused:
+    with pytest.raises(
+        OperationFailure, match="verified loop iterations are unavailable"
+    ) as refused:
         graph_results.read_graph_results(SimpleNamespace(operation_store=object()), operation_id)
     assert refused.value.detail.code == "integrity"
 

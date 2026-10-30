@@ -118,7 +118,7 @@ try {
       return reply(value);
     }
     if (url.pathname === `/api/operations/${resumedStop}`) {
-      // Resumed at body 3 after a pause at body 2: every iteration in the receipt counts the whole run.
+      // Resumed at iteration 3 after a pause at iteration 2: every iteration in the receipt counts the whole run.
       const value = {...terminal(resumedStop, 'completed', 3), kind: 'candidate_loop_resume'};
       value.loop = {final_iteration: 5, attempted_iterations: 3, stop_reason: {kind: 'no_improvement', condition_index: 0, iteration: 3,
         k: 2, non_improving_bodies: 2, last_improvement_iteration: 1, incumbent: 0.75}};
@@ -164,7 +164,7 @@ try {
   await page.locator('#access-form button').click();
   await page.locator('#access-status').filter({hasText: 'Connected.'}).waitFor();
   const state = page.locator('#loop-state'), stop = page.locator('#loop-stop');
-  await state.filter({hasText: 'Research loop: up to 3 bodies.'}).waitFor();
+  await state.filter({hasText: 'Research loop: up to 3 iterations.'}).waitFor();
   await stop.waitFor({state: 'visible'});
   assert.ok(!(await state.textContent()).includes('Stop requested'));
 
@@ -189,7 +189,7 @@ try {
   assert.equal(posts.length + pausePosts.length, 1, 'no further control request after reload');
 
   runningTerminal = true;
-  await state.filter({hasText: 'Research loop stopped at a completed body boundary after 1 of 3 bodies.'}).waitFor();
+  await state.filter({hasText: 'Research loop stopped at a completed iteration boundary after 1 of 3 iterations.'}).waitFor();
   assert.ok(await stop.isHidden());
   assert.equal(posts.length, 1);
 
@@ -199,7 +199,7 @@ try {
   assert.ok(await page.locator('#loop-control').isHidden(), 'a candidate without a declared loop has no loop control');
 
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, finished);
-  await state.filter({hasText: 'Research loop finished after 3 of 3 bodies.'}).waitFor();
+  await state.filter({hasText: 'Research loop finished after 3 of 3 iterations.'}).waitFor();
   assert.ok(await stop.isHidden(), 'a finished loop has no Stop');
   assert.ok(!(await state.textContent()).includes('Stop'), 'Stop state does not leak across operations');
   assert.equal(posts.length, 1);
@@ -209,7 +209,7 @@ try {
   // Pause -> "Pause requested" -> paused receipt -> reviewed Resume -> resumed segment.
   const pause = page.locator('#loop-pause'), resumeGroup = page.locator('#loop-resume-group');
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, pausing);
-  await state.filter({hasText: 'Research loop: up to 3 bodies.'}).waitFor();
+  await state.filter({hasText: 'Research loop: up to 3 iterations.'}).waitFor();
   await pause.waitFor({state: 'visible'});
   await pause.dblclick();
   await state.filter({hasText: 'Pause requested'}).waitFor();
@@ -222,14 +222,14 @@ try {
   assert.ok(await resumeGroup.isHidden(), 'no Resume before a paused receipt');
 
   pausingTerminal = true;
-  await state.filter({hasText: 'Research loop paused at a completed body boundary after 1 of 3 bodies.'}).waitFor();
+  await state.filter({hasText: 'Research loop paused at a completed iteration boundary after 1 of 3 iterations.'}).waitFor();
   assert.ok(!(await state.textContent()).includes('ended'), 'paused is resumable, never "ended"');
   assert.ok(await pause.isHidden() && await stop.isHidden());
   await page.locator('#graph-results-observation').filter({hasText: 'Workflow training results'}).waitFor();
   await resumeGroup.waitFor({state: 'visible'});
   assert.ok(await page.locator('#loop-resume').isHidden(), 'Resume requires a review first');
   await page.locator('#loop-resume-review').click();
-  await page.locator('#loop-resume-summary').filter({hasText: 'body 2 of 3'}).waitFor();
+  await page.locator('#loop-resume-summary').filter({hasText: 'iteration 2 of 3'}).waitFor();
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-paused-review.png'), fullPage: true});
   await page.locator('#loop-resume').dblclick();
   await page.waitForFunction(id => location.hash.startsWith('#monitor/') && location.hash !== '#monitor/' + id, pausing);
@@ -241,11 +241,11 @@ try {
   assert.equal(retainedId, resumePosts[0].request_id, 'the request UUID is retained before submission');
   assert.equal(await page.evaluate(() => location.hash), '#monitor/' + resumed);
 
-  await state.filter({hasText: 'Resumed segment. Research loop: up to 3 bodies.'}).waitFor();
+  await state.filter({hasText: 'Resumed segment. Research loop: up to 3 iterations.'}).waitFor();
   await stop.waitFor({state: 'visible'});
   assert.ok(await pause.isVisible(), 'a running resumed segment can be paused again');
   resumedTerminal = true;
-  await state.filter({hasText: 'Research loop finished after 3 of 3 bodies.'}).waitFor();
+  await state.filter({hasText: 'Research loop finished after 3 of 3 iterations.'}).waitFor();
   await page.locator('#graph-results-observation h3').filter({hasText: 'Iteration 3'}).waitFor();
   assert.equal(await page.locator('#graph-results-observation .graph-result-body').count(), 3);
   assert.ok(await stop.isHidden() && await resumeGroup.isHidden());
@@ -259,34 +259,34 @@ try {
 
   // A declared stop condition completed the loop early: the receipt's reason reads in plain words.
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, thresholdStop);
-  await state.filter({hasText: 'Research loop stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85, higher is better; best at body 3).'}).waitFor();
+  await state.filter({hasText: 'Research loop stopped early after iteration 3 of up to 5: accuracy reached 0.9 (threshold 0.85, higher is better; best at iteration 3).'}).waitFor();
   assert.ok(await stop.isHidden());
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, patienceStop);
-  await state.filter({hasText: 'Research loop stopped early after body 4 of up to 6: no improvement for 2 bodies (condition: 2 bodies; best -1.25 at body 2).'}).waitFor();
+  await state.filter({hasText: 'Research loop stopped early after iteration 4 of up to 6: no improvement for 2 iterations (condition: 2 iterations; best -1.25 at iteration 2).'}).waitFor();
   assert.ok(!(await state.textContent()).includes('finished after'), 'an early stop never reads as reaching the limit');
   assert.ok(!(await state.textContent()).includes('whole run'), 'a root segment needs no whole-run note');
   await page.screenshot({path: resolve(tmpdir(), 'siderius-loop-stop-reason.png'), fullPage: true});
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, resumedStop);
-  await state.filter({hasText: 'Resumed segment. Research loop stopped early after body 3 of up to 5: no improvement for 2 bodies (condition: 2 bodies; best 0.75 at body 1). Body numbers count the whole run, including earlier segments.'}).waitFor();
+  await state.filter({hasText: 'Resumed segment. Research loop stopped early after iteration 3 of up to 5: no improvement for 2 iterations (condition: 2 iterations; best 0.75 at iteration 1). Iteration numbers count the whole run, including earlier segments.'}).waitFor();
   assert.equal(await page.locator('#loop-judge').isHidden(), true, 'no judge list without judge verdicts');
   // B2-5: a judge-stopped loop names the judge and lists each recorded verdict with its reason.
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, judgeStop);
-  await state.filter({hasText: 'Research loop stopped early after body 3 of up to 5: the judge decided to stop.'}).waitFor();
+  await state.filter({hasText: 'Research loop stopped early after iteration 3 of up to 5: the judge decided to stop.'}).waitFor();
   assert.deepEqual(await page.locator('#loop-judge li').allTextContents(), [
-    'Judge after body 1: abstained (the judge call failed)',
-    'Judge after body 2: continue · Still improving. (confidence medium)',
-    'Judge after body 3: stop · Two bodies add no new insight. (confidence high)',
+    'Judge after iteration 1: abstained (the judge call failed)',
+    'Judge after iteration 2: continue · Still improving. (confidence medium)',
+    'Judge after iteration 3: stop · Two bodies add no new insight. (confidence high)',
   ]);
   assert.equal(resumePosts.length, 1);
 
   // "Pause and ask me": a condition-paused receipt says what was met in plain words, and the
   // existing reviewed Resume continues it (no extra request fields).
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, asking);
-  await state.filter({hasText: 'Waiting for your input. No improvement for 3 bodies (best 0.81 at body 4, higher is better). Paused after body 7 of 12. Review and resume to continue with body 8.'}).waitFor();
+  await state.filter({hasText: 'Waiting for your input. No improvement for 3 iterations (best 0.81 at iteration 4, higher is better). Paused after iteration 7 of 12. Review and resume to continue with iteration 8.'}).waitFor();
   assert.equal(await state.getAttribute('title'), 'Exact recorded values: incumbent 0.81');
   await resumeGroup.waitFor({state: 'visible'});
   await page.locator('#loop-resume-review').click();
-  await page.locator('#loop-resume-summary').filter({hasText: 'body 8 of 12'}).waitFor();
+  await page.locator('#loop-resume-summary').filter({hasText: 'iteration 8 of 12'}).waitFor();
   // Untrusted advice renders as text only, and prefills the next Resume.
   assert.equal(await page.locator('#loop-advice').textContent(), 'Resumed with your advice: Earlier <b>advice</b>.');
   assert.equal(await page.locator('#loop-advice b').count(), 0, 'advice is never parsed as markup');
@@ -308,10 +308,10 @@ try {
   assert.equal(resumePosts[1].operator_advice, 'Try a smaller hidden width.');
   assert.deepEqual(resumePosts[2], resumePosts[1], 'a retry resends the same request UUID and advice');
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, judgeAsking);
-  await state.filter({hasText: 'Ended by you at the pause after body 3.'}).waitFor();
+  await state.filter({hasText: 'Ended by you at the pause after iteration 3.'}).waitFor();
   assert.ok(await resumeGroup.isHidden(), 'a recorded Stop leaves nothing to resume');
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, pausedStopped);
-  await state.filter({hasText: 'Ended by you at the pause after body 2.'}).waitFor();
+  await state.filter({hasText: 'Ended by you at the pause after iteration 2.'}).waitFor();
   assert.ok(!(await state.textContent()).includes('can be resumed'), 'a stopped paused run never offers resumption in words');
   assert.ok(await resumeGroup.isHidden(), 'an operator-paused run with a recorded Stop offers no Resume');
   // End a condition-paused tail through the existing Stop route, with confirmation.
@@ -328,15 +328,15 @@ try {
   await end.dblclick();
   await resumeGroup.waitFor({state: 'hidden'});
   releaseEndLog(); // The stale paused poll must not settle over the new Stop.
-  await state.filter({hasText: 'Ended by you at the pause after body 7.'}).waitFor();
+  await state.filter({hasText: 'Ended by you at the pause after iteration 7.'}).waitFor();
   assert.equal(endPosts.length, 1, 'confirmed double click records one Stop');
   assert.ok(await resumeGroup.isHidden(), 'ended loop offers neither Resume nor End again');
   await page.locator('#operation-observed').filter({hasText: 'Final status'}).waitFor();
-  assert.equal(await page.locator('#monitor-status').textContent(), 'Ended by you at the pause after body 7.');
+  assert.equal(await page.locator('#monitor-status').textContent(), 'Ended by you at the pause after iteration 7.');
   await page.reload();
   await page.locator('#token').fill(metadata.token);
   await page.locator('#access-form button').click();
-  await state.filter({hasText: 'Ended by you at the pause after body 7.'}).waitFor();
+  await state.filter({hasText: 'Ended by you at the pause after iteration 7.'}).waitFor();
   assert.ok(await resumeGroup.isHidden(), 'reload derives ended state from the durable Stop');
   assert.equal(endPosts.length, 1);
   assert.equal(posts.length, 1);

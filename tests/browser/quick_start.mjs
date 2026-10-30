@@ -92,8 +92,8 @@ try {
   await page.locator('#circuit-node-interpret').click();
   const managedHelp = page.locator('#editor-inspector .managed-input-help');
   await managedHelp.waitFor({state: 'visible'});
-  assert.match(await managedHelp.textContent(), /first round starts cold/);
-  assert.ok((await managedHelp.textContent()).includes("previous round's training results"));
+  assert.match(await managedHelp.textContent(), /first iteration starts cold/);
+  assert.ok((await managedHelp.textContent()).includes("previous iteration's training results"));
   // Exercise the same unbound interpretation form in v1 and reusable contexts.
   const forms = await page.evaluate(() => {
     const option = {socket_contract: {id: 'interpretation.input'}, bound: false, choices: []};
@@ -107,7 +107,7 @@ try {
   });
   assert.ok(!forms[0].help.includes('cold'));
   assert.equal(forms[0].pathHidden, false, 'v1 asks for a file without promising managed input');
-  assert.ok(forms[1].help.includes('first round starts cold'));
+  assert.ok(forms[1].help.includes('first iteration starts cold'));
   assert.equal(forms[1].pathHidden, true);
   await page.screenshot({path: join(evidence, 'quick-start-opened.png'), fullPage: true});
 
