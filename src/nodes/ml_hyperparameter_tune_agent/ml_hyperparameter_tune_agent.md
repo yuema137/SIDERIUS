@@ -1703,6 +1703,73 @@ to `composition-declared parameter rules` in execution provenance. A rule may no
 target `loss_config` when the task declares an objective, because the objective
 is the sole authority for loss semantics.
 
+### Training batch fit before resource probing
+
+`training_batch_plan.resolve_training_batch_plan` runs once in `prepare_attempt`
+after role-specific task scope acquisition and parameter-rule enforcement, before
+resource probing and construction of execution/record parameters. For a composed
+training scope it calls `workload_resolvers.resolve_task_training_rows`, the
+single dataset row-count owner. `probe_data.epoch_zero_training_sampling` builds
+the shared `EpochSamplingParams` from the resolved data root, first-epoch
+subsample seed, `TrialConfig.train_portion`, and `validation_max_train_samples`.
+Both structural preflight and GPU measurement use that same sampling helper.
+Dataset construction may eagerly read samples, including TIDMAD HDF5 data;
+counting is not a metadata-only operation. The parent constructs this dataset
+once during planning, retains only its count as
+`PreparedAttempt.resolved_training_rows`, and releases the dataset. Admission
+guardrails pass that count to `resolve_task_scope_training_workload` without
+constructing a second dataset. The count is attempt-local and already reflects
+task-owned portion/ceiling selection; it is never reused across attempts or
+subsampled again. Legacy standalone workload callers without a resolved count
+still construct through the same owner with their existing row-count seed.
+
+With `drop_last=True`, a nonempty scope smaller than the planned batch resolves
+an unlocked `train_config.batch_size` to its materialized row count: 12 rows and
+batch 32 become batch 12 for both probing and formal/trial execution. This is
+the largest batch that produces at least one full optimizer step. The same
+`optimizer_steps_for_rows` authority used by workload resolution determines
+whether the original batch produces zero steps. The same
+resolved config enters `PreparedAttempt.plan`, `active_params`, `record_params`,
+and downstream measurement identities. No reduced-batch measurement or memory
+extrapolation is introduced; existing admission and zero-step guards remain.
+
+Exact task or workflow parameter rules and an explicit operator
+`plan_overrides.train_config.batch_size` are locks. An oversized locked batch
+raises `TrainingBatchPlanError` (a `TrainingScopeError`) before probing, naming
+the lock, row count, role and batch size. Empty datasets always raise the same
+typed refusal; unsized datasets or a missing data root also refuse. Non-exact
+range/allowed/predicate rules are revalidated after clamping and retain their
+existing `ParameterRuleError` refusal if the adjusted value is disallowed.
+
+A clamp prints one `[training_batch]` line and records the authored/effective
+batch through execution provenance authority `training_scope_batch_fit`. For
+this field only, that final authority supersedes an earlier inheritance claim;
+other provenance remains unchanged. Fitting scopes (including large TIDMAD
+scopes) omit the optional `ExecutionProvenance.training_batch_fit` receipt.
+Clamped attempts retain that receipt's role, requested batch, resolved batch,
+and available sample count even if fitting restores the authored batch after
+inheritance, leaving no authored/effective disagreement event. The receipt is
+also persisted as `params.training_batch_fit` on attempt records; it is omitted
+when no adjustment occurred. Fitting scopes,
+nonempty `drop_last=False` scopes, and legacy uncomposed attempts keep
+their plan bytes unchanged and add no clamp event or log line. This resolution
+checks first-epoch geometry; the trainer still owns actual per-epoch zero-step
+refusal if a task later changes its materialized cardinality.
+
+A successful trial's persisted `params.train_config.batch_size` is its clamped
+value. Under `formal_round_strategy="full_clone"`, the existing winner
+inheritance copies that value into the formal plan. The formal role then checks
+its own scope: it retains the inherited batch if it fits, or applies this same
+lock-preserving resolution if it does not. No original oversized proposal is
+restored by inheritance.
+
+Regression evidence lives in `test_training_batch_plan.py`: real planning,
+full probe loading and a CPU optimizer step; task/workflow/operator locks;
+empty scope; sampling ceiling; tail policy; non-exact constraints; and
+byte-identical large-scope plans/measurement identities against the pre-fit path.
+The planning-to-admission regression counts dataset constructions and checks
+both probe routes' sampling against the request observed by the row-count owner.
+
 ## The reflector is told what RESOLVED, not what was proposed (Lane D / F15)
 
 `plan.hypothesis` is free prose the planner authors **before** the framework

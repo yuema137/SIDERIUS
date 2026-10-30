@@ -63,6 +63,10 @@ from nodes.ml_hyperparameter_tune_agent.timing_context import (
     build_timing_context,
     partial_scope_strategy_overrides,
 )
+from nodes.ml_hyperparameter_tune_agent.training_batch_plan import (
+    resolve_training_batch_plan,
+    training_batch_fit_record,
+)
 
 
 def _apply_declared_objective(plan: Any, composition_ref: Any) -> Any:
@@ -867,6 +871,15 @@ def prepare_attempt(
         task_parameters={"seg_size": declared_segmentation_size},
     )
 
+    plan, resolved_training_rows = resolve_training_batch_plan(
+        plan,
+        bindings=bindings,
+        trial_config=trial_config,
+        scopes=task_scopes,
+        resolution=resolution,
+        model_type=model_type,
+    )
+
     # 01B2 — a composed Health-enabled attempt may execute only after the
     # bound task confirms that THIS opaque evaluation scope covers its own
     # output-dependent Health demand. The helper is deliberately adjacent to
@@ -945,6 +958,7 @@ def prepare_attempt(
 
     # Clean params for records — exclude bulky SampleSet dicts
     record_params = {
+        **training_batch_fit_record(execution_provenance),
         "exp_id": exp_id,
         "run_name": run_name,
         "model_type": model_type,
@@ -967,6 +981,7 @@ def prepare_attempt(
         train_sample_set=train_sample_set,
         eval_sample_set=eval_sample_set,
         task_scopes=task_scopes,
+        resolved_training_rows=resolved_training_rows,
         train_psd_segments=train_psd_segments,
         eval_psd_segments=eval_psd_segments,
         ordering=ordering,

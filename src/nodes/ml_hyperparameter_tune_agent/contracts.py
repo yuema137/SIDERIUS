@@ -300,6 +300,9 @@ class PreparedAttempt:
     #: route. Transient by design: it is not attempt eligibility or record
     #: state, and ``None`` preserves builtin and uncomposed behavior.
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None
+    #: Count materialized once during batch planning; guardrails reuse it.
+    #: None denotes legacy/uncomposed preparation without a task row count.
+    resolved_training_rows: int | None = None
     # Owner-produced facts used when planning this attempt, retained for reflection.
     timing_context: PlannerTimingContext | None = None
 

@@ -27,7 +27,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.schemas.execution_provenance import ExecutionProvenance, ResolutionEvent
+from agent.schemas.execution_provenance import (
+    ExecutionProvenance,
+    ResolutionEvent,
+    TrainingBatchFit,
+)
 from agent.schemas.hyperparam_tuning import TrialConfig
 
 
@@ -124,6 +128,13 @@ class ResolutionTracker:
         #: because the first step to move a field away from the authored value
         #: is the one that made the prose wrong.
         self._claims: dict[str, str] = {}
+        self._training_batch_fit: TrainingBatchFit | None = None
+
+    def record_training_batch_fit(self, plan: Any, receipt: TrainingBatchFit) -> None:
+        """Retain the clamp even if inheritance had changed the authored batch."""
+        self._training_batch_fit = receipt
+        self.record(plan, "training_scope_batch_fit")
+        self._claims["train_cfg.batch_size"] = "training_scope_batch_fit"
 
     def record(self, plan: Any, authority: str) -> None:
         """Attribute to ``authority`` every field it moved away from authored."""
@@ -192,7 +203,9 @@ class ResolutionTracker:
                     authority=authority,
                 )
             )
-        return ExecutionProvenance(events=tuple(events))
+        return ExecutionProvenance(
+            events=tuple(events), training_batch_fit=self._training_batch_fit
+        )
 
     def finish_with_model(
         self,
@@ -262,4 +275,5 @@ class ResolutionTracker:
         return ExecutionProvenance(
             events=resolved.events,
             plan_resolution_events=checkpoint.events,
+            training_batch_fit=resolved.training_batch_fit,
         )
