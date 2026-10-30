@@ -362,7 +362,14 @@ before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
 `task_composition_ref.parameter_rules` or the separate `TaskCompositionRef.parameter_rules`;
 training controls come from the captured settings' native launch schema, including
 its defaults. No task import or current editor/settings lookup occurs. Review
-refuses changed input bytes. The projection does not alter launch or its digest.
+refuses missing observations or changed input bytes with `reusable_preparation`.
+Multiple externals may supply task rules (across `proposal.input` and
+`optional.task-composition-ref`) or training settings when their extracted review
+values are equal. This includes one proposal input per proposer in independent
+proposal families. Conflicting extracted `ParameterRules` or `TrainingReview`
+values refuse with `reusable_preparation`; null rules are compared as a value.
+These errors use bounded messages without input paths or payloads.
+The projection does not alter launch or its digest.
 `TrainingReview.max_rounds` carries the captured native integer limit (10 when
 omitted), rendered as **Tuning rounds per iteration**. It is independent of the
 research-loop iteration count and cannot be replaced by a later editor draft.
@@ -522,6 +529,16 @@ this command only when its optional `remedy: Path | None` keyword is an absolute
 path; `init` supplies it, while non-init callers with relative labels receive
 the diagnosis without a command. Ownership takes precedence when
 both ownership and mode fail. Existing directories are never repaired by `init`.
+For a writable workspace parent, the refusal also offers creating an owner-only
+subfolder with `mkdir -m 700 <base>/siderius` and selecting that folder with
+`--workspace`, preserving shared-parent permissions. Both paths are shell-quoted.
+`WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
+or the library default profile, when it is a symlink, unreadable or has different
+bytes); `MissingSetting` from an existing console.json names the task field; an
+unusable `--workspace` gets its own message. Residual race: `core.durable_io`
+publishes by path, so after the no-follow
+parent check only a same-user process, which already owns the workspace, can swap
+a parent.
 
 CLI `init`/`check`/`serve` preserve Pydantic validation failures as one stderr
 line per error: `<source> is invalid at <location> (<type>)`, exit 2.

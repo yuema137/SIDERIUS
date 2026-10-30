@@ -4,7 +4,10 @@ This bundle gives you a small ready-made task and a ready experiment setup, so
 you can run SIDERIUS once from the browser console and see each step (Task,
 Workflow, Run and Monitor) before you bring your own task. The task is
 synthetic: it classifies 256 seeded four-feature rows into two classes. It
-demonstrates the workflow, not scientific quality.
+demonstrates the workflow, not scientific quality. The browser console is
+**experimental** in SIDERIUS 1.1: its pages and settings may change between
+releases. For research runs, use the
+[coding-agent route](https://github.com/yuema137/SIDERIUS/blob/master/docs/getting-started/README.md#write-and-run-a-workflow-declaration).
 
 ## Before you start
 
@@ -30,7 +33,8 @@ The examples use `/absolute/downloads` for the folder holding the downloaded
 zip, `/absolute/project` for a folder you own where the console workspace
 will live, and `/absolute/private/credentials.json` for your private key file.
 Replace them with your own absolute paths, and replace `<version>` with the
-version in the zip's name.
+version in the zip's name. That number is the package version from
+`pyproject.toml`; it may differ from the release name.
 
 ## What the bundle contains
 
@@ -51,10 +55,10 @@ version in the zip's name.
    ```
 
    This creates `/absolute/downloads/siderius-example-quickstart-<version>/`.
-   Before running the script, run `sha256sum -c SHA256SUMS` inside this folder
-   as an independent check; every line should end in `OK`. The script cannot
-   verify itself: its code is already running when it checks the bundle.
-   Steps 3 and 4 also verify the listed files.
+   Before running `fetch_data.py` (step 3), run `sha256sum -c SHA256SUMS`
+   inside this folder as an independent check; every line should end in `OK`.
+   Steps 3 and 4 also verify the listed files, but `fetch_data.py` cannot check
+   its own code, which is already running when it checks the bundle.
 
 2. Create your private key file and the console workspace. The first command
    creates an empty key file that only you can read (mode `600`; its folder must
@@ -87,18 +91,8 @@ version in the zip's name.
      --workspace /absolute/project/siderius_workspace
    ```
 
-   Before running the task's generator, it checks the bundle's `SHA256SUMS`.
-   A missing or changed file stops the command before task code runs or data
-   is written; unpack the zip again. If you pass `--package`, it must name the
-   `task/` folder inside an unpacked bundle with its own `SHA256SUMS`.
-   The default task ID comes from that bundle's verified `console-task.json`;
-   `--task-id` overrides it.
-
-   It writes four CSV files to `siderius_workspace/data/quickstart/`, readable
-   only by you, and ends with `Data ready in .../data/quickstart`. It refuses a
-   workspace or data folder that is a symlink, belongs to another user, or that
-   your group or others can write to. Running it again keeps identical files and
-   never overwrites a different one.
+   Success: it writes four CSV files to `siderius_workspace/data/quickstart/`,
+   readable only by you, and ends with `Data ready in .../data/quickstart`.
 
    Write the data before step 4. Step 4 ends by running `check`, and `check`
    fails while `data/quickstart/` is missing. If you ran step 4 first and it
@@ -107,6 +101,16 @@ version in the zip's name.
    --config /absolute/project/siderius_workspace/settings/console.json`. If you
    import with `--task-id NAME` in step 4, run this step with the same
    `--task-id NAME`, because the data folder is then `data/NAME/`.
+
+   Before running the task's generator, it checks the bundle's `SHA256SUMS`.
+   A missing or changed file stops the command before task code runs or data
+   is written; unpack the zip again. It refuses a workspace or data folder that
+   is a symlink, belongs to another user, or that your group or others can
+   write to. Running it again keeps identical files and never overwrites a
+   different one. If you pass `--package`, it must name the `task/` folder
+   inside an unpacked bundle with its own `SHA256SUMS`. The default task ID
+   comes from that bundle's verified `console-task.json`; `--task-id`
+   overrides it.
 
 4. Import the task and its experiment setup.
    `add-task` finds this machine's NVIDIA GPUs (`/dev/nvidia<N>`) and passes

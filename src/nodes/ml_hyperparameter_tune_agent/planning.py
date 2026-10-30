@@ -63,6 +63,10 @@ from nodes.ml_hyperparameter_tune_agent.timing_context import (
     build_timing_context,
     partial_scope_strategy_overrides,
 )
+from nodes.ml_hyperparameter_tune_agent.training_batch_plan import (
+    resolve_training_batch_plan,
+    training_batch_fit_record,
+)
 
 
 def _apply_declared_objective(plan: Any, composition_ref: Any) -> Any:
@@ -282,14 +286,13 @@ def _disclosed_epoch_caps(agent_input: Any) -> tuple[int | None, int | None]:
     )
 
 
-def _no_sample_set_notice(mode: str, file_index: int | None, *, composed: bool = False) -> str:
+def _no_sample_set_notice(mode: str, file_index: int | None, *, composed: bool) -> str:
     """What to print when no SampleSet was built.
 
-    Composition presence selects the task-owned notice, independently of
-    mode or physical geometry. Only an uncomposed single-file round gets
-    the legacy file-index notice.
+    Composed trial/formal rounds use task-owned scopes. Single-file rounds
+    train by file index even when composed, so retain the legacy notice.
     """
-    if composed:
+    if composed and mode != "single_file":
         return "  Task-owned scope: no legacy SampleSet is built for a composed task"
     if mode == "single_file":
         return f"  Legacy mode: file_index={file_index}"
@@ -868,6 +871,15 @@ def prepare_attempt(
         task_parameters={"seg_size": declared_segmentation_size},
     )
 
+    plan, resolved_training_rows = resolve_training_batch_plan(
+        plan,
+        bindings=bindings,
+        trial_config=trial_config,
+        scopes=task_scopes,
+        resolution=resolution,
+        model_type=model_type,
+    )
+
     # 01B2 — a composed Health-enabled attempt may execute only after the
     # bound task confirms that THIS opaque evaluation scope covers its own
     # output-dependent Health demand. The helper is deliberately adjacent to
@@ -946,6 +958,7 @@ def prepare_attempt(
 
     # Clean params for records — exclude bulky SampleSet dicts
     record_params = {
+        **training_batch_fit_record(execution_provenance),
         "exp_id": exp_id,
         "run_name": run_name,
         "model_type": model_type,
@@ -968,6 +981,7 @@ def prepare_attempt(
         train_sample_set=train_sample_set,
         eval_sample_set=eval_sample_set,
         task_scopes=task_scopes,
+        resolved_training_rows=resolved_training_rows,
         train_psd_segments=train_psd_segments,
         eval_psd_segments=eval_psd_segments,
         ordering=ordering,

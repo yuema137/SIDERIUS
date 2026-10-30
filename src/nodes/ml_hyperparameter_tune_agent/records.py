@@ -1410,7 +1410,7 @@ def finalize_run_output(
         agent_output = HyperparamTuningOutput.model_validate(partial_dict)
 
     if termination_reason == "completed":
-        print(f"\nCompleted {completed_rounds} research rounds. Loop terminated.")
+        print(f"\nCompleted {completed_rounds} tuning rounds. Loop terminated.")
     elif termination_reason == "aborted_fail_rounds":
         print(
             f"\nAborted after {consecutive_fails} consecutive fail-rounds "

@@ -128,10 +128,14 @@ new setup behavior.
 The proposer returns its own candidate ID. The worker checks implementation-bound
 schema eligibility, output types and generated name before implementation.
 Experiment-source `inherited_components` claims are kept as the proposer wrote
-them; as in the native exploration loop they are optional reference context.
-The worker loads no earlier experiment's source, and the validator reports a
-claim the implementation does not carry as unverified, so a later loop iteration
-that names an earlier iteration's model proceeds. The existing isolation
+them. The worker's `phases.py` passes `reference_code={}` to
+`enrich_implementation_request`: it does not load earlier experiment source.
+The native exploration loop instead calls `load_model_source` for each distinct,
+nonempty experiment `source_id` and supplies any source it finds as reference
+code. Claim retention therefore does not imply source-loading parity.
+The validator reports a claim the implementation does not carry as unverified;
+naming an earlier iteration's model does not itself cause the worker to refuse
+a later iteration. The existing isolation
 policy applies when the native seed requests it. `local_full_spec` constructs
 implementation input; managed model/test/loss directories and task/advice/hardware
 context are added through existing helpers. `local_all_fields` constructs the
@@ -1524,7 +1528,7 @@ deterministic conditions, then the judge (whose "stop" verdict takes its own
 absent (`stop_reason` keeps meaning "completed before the limit"; the model refuses
 both, and requires `input_request.reason.iteration == attempted_iterations`). Like a
 stop, it is decided before any pending Stop/Pause is read, so no operator Pause
-marker (`pause.json`) exists or is needed. The next body slot stays unused.
+marker (`pause.json`) exists or is needed. The next iteration slot stays unused.
 
 Input anchor. `input_anchor` is the last earlier boundary where a `request_input`
 decision fired (0 = none); it is derived by replay (`derive_stop`), never persisted,
