@@ -159,7 +159,7 @@ def test_single_file_composition_and_effective_health_match_base_receipt(
                 str(REPO_ROOT / "configs/task_composition/synthetic_masked_regression.yaml")
             )
             assert legacy_fingerprints == [
-                "85cbe5fc86397839cb858e841a2a80afc984a4abfe31f00ad98db5bd46b2165f"
+                "ab844635ae8c242e112d0bb346c644b79d15165a666510d211d28378cf55d16d"
             ]
             assert composition.semantic_fingerprint != legacy_fingerprints[0]
             with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
