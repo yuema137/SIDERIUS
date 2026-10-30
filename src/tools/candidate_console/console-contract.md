@@ -362,7 +362,14 @@ before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
 `task_composition_ref.parameter_rules` or the separate `TaskCompositionRef.parameter_rules`;
 training controls come from the captured settings' native launch schema, including
 its defaults. No task import or current editor/settings lookup occurs. Review
-refuses changed input bytes. The projection does not alter launch or its digest.
+refuses missing observations or changed input bytes with `reusable_preparation`.
+Multiple externals may supply task rules (across `proposal.input` and
+`optional.task-composition-ref`) or training settings when their extracted review
+values are equal. This includes one proposal input per proposer in independent
+proposal families. Conflicting extracted `ParameterRules` or `TrainingReview`
+values refuse with `reusable_preparation`; null rules are compared as a value.
+These errors use bounded messages without input paths or payloads.
+The projection does not alter launch or its digest.
 `TrainingReview.max_rounds` carries the captured native integer limit (10 when
 omitted), rendered as **Tuning rounds per body**. It is independent of the
 research-loop body count and cannot be replaced by a later editor draft.
@@ -514,6 +521,9 @@ this command only when its optional `remedy: Path | None` keyword is an absolute
 path; `init` supplies it, while non-init callers with relative labels receive
 the diagnosis without a command. Ownership takes precedence when
 both ownership and mode fail. Existing directories are never repaired by `init`.
+For a writable workspace parent, the refusal also offers creating an owner-only
+subfolder with `mkdir -m 700 <base>/siderius` and selecting that folder with
+`--workspace`, preserving shared-parent permissions. Both paths are shell-quoted.
 `WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
 or the library default profile, when it is a symlink, unreadable or has different
 bytes); `MissingSetting` from an existing console.json names the task field; an
@@ -2884,9 +2894,10 @@ States: `observing` (child running; poll the same URL), `ready`, `failed`
 `unavailable` (`unavailable: {reason, hint}`; `reason` is `sandbox_missing`,
 `data_root_missing`, `manifest_missing` or `llm_config_unreadable`). The model
 profile is read because the child resolves its planner strategy exactly as the
-editor's task observation does. Console-side failure messages are truncated to
-`tools.setup_review.composition_models.FAILURE_MESSAGE_MAX_CHARS`, the same cap
-used for child failures.
+editor's task observation does. Console-side exceptions and package scope/storage/sample-count exceptions use
+`tools.setup_review.summary_errors.summary_error_message`: fixed, bounded filesystem,
+invalid-value or unexpected-error categories. Raw exception text and task-defined
+exception class names are never included by this owner.
 
 Observation: the request thread reads the manifest digest and model profile, then
 builds `CompositionJob(summary=TaskSummaryRequest(data_root, count_samples))` with
@@ -2907,13 +2918,20 @@ View fields:
 - `data_root`, `run_policy` (`TaskChoice` timeouts, network, devices,
   `candidate_environment_names` as names only, `allowed_output_types`). No credential
   file is read; no secret value can appear.
-- `data_volume`: `{files, bytes, complete, entry_cap}` from a no-follow walk
+- `data_volume`: `{files, bytes, complete, entry_cap, incomplete_reason}` from a no-follow walk
   (`os.scandir`, symlinks counted as entries and never followed), capped at
   100 000 entries and a five-second monotonic wall-time budget. Entries on a
   different `st_dev` from the data root are skipped (including mounted
   subdirectories). Entry/time caps, skipped devices and filesystem errors yield
-  `complete=false` with partial totals. The deadline is checked between filesystem
-  operations; it cannot interrupt an already-blocked kernel call.
+  `complete=false` with partial totals. `incomplete_reason` is `null` for complete
+  totals; otherwise `entry_cap`, `time_budget`, `other_device` or `unreadable`
+  (including vanished entries). A stopping cap/time budget takes precedence over
+  skipped-entry reasons; otherwise the first skip reason is retained. The Task tab
+  renders the reported reason and labels both totals as lower bounds.
+  An entry error skips only that entry; directory open/iteration errors skip the
+  remaining directory. The deadline is checked before visiting more entries or
+  directories, so completing the final entry after the deadline remains complete.
+  It cannot interrupt an already-blocked kernel call.
 - `package` (only when `ready`): `identity` (`semantic_fingerprint`,
   `task_data_path_id`, configured `task_revision`, `revision_matches`),
   `description` and `model_io` (the composed `task_description` and

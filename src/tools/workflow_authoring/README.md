@@ -1,7 +1,14 @@
-# Edit an ordinary workflow file
+# Edit your own workflow.py in the browser console (experimental)
 
-Open a dedicated `workflow.py`, edit its supported declaration in the console,
-review the Python diff, and save back to the same file used by your coding agent.
+Read on if you keep `workflow.py` in your own project folder (for example, one
+written by your coding agent) and also want to view or edit it on the console's
+**Workflow** tab.
+If you created the workflow in the console with **New setup…**, it is already
+set up; skip this page. The browser console is **experimental** in SIDERIUS
+1.1, and `workflow.py` on disk stays the authority for what runs.
+
+The console reads the file, lets you edit its supported declaration, shows the
+Python diff, and saves back to the same file your coding agent uses.
 This editor checks declaration structure. It does not execute a workflow or check
 whether referenced manifests, data or plugins exist.
 
@@ -9,8 +16,10 @@ whether referenced manifests, data or plugins exist.
    supported by [workflow definitions](../../workflows/definition/README.md).
    The source must be UTF-8, at most 32 KiB, owned by the current user and a regular
    file. Symlinks, hardlinks and special permission bits are unsupported.
-2. Create an existing owner-only recovery directory inside the same project,
-   separate from preparation and candidate output directories:
+2. Create a recovery folder that only you can read (mode `700`), inside the
+   same project but separate from your preparation and run output folders. The
+   editor keeps exact copies of the previous and saved file bytes there. The
+   folder must exist before the console starts:
 
    ```bash
    mkdir -m 700 /absolute/project/editor-recovery
@@ -65,19 +74,10 @@ Use trusted local project directories. A lost connection leaves a save unconfirm
 until you inspect disk again. See the [authoring contract](authoring-contract.md)
 for exact limits, refusals and concurrency behavior.
 
-## View a hand-written workflow.py in the experimental console
+## View a hand-written workflow.py without changing it
 
-Use this to look at a `workflow.py` your coding agent wrote, as a canvas of nodes
-and their ports. Viewing alone does not change the file, but the editor can save.
-
-1. Complete steps 1 and 2 above so the file and recovery directory exist.
-2. Add the `editor_projects` entry from step 3 to your console configuration
-   (`ConsoleConfig`, the file passed to the console). Its four keys are exactly
-   `project_id`, `project_root`, `source_file` and `recovery_directory`; all paths
-   are absolute. Restart the console so it reads the change.
-3. In the console, open the **Workflow** tab and choose the project from step 4 of
-   the list above.
-   The canvas draws the workflow's nodes and their ports.
+To only look at the file as a canvas of nodes and their ports, complete steps
+1 to 4 above and do not press **Save**; viewing never changes the file.
 
 Caveats:
 

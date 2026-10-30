@@ -1,9 +1,27 @@
 # Framework examples
 
-SIDERIUS ships two lightweight synthetic examples:
+[`workflow_declarations/`](workflow_declarations/) holds ready-made `workflow.py`
+starting points for the
+[workflow route](../docs/getting-started/README.md#write-and-run-a-workflow-declaration).
+Copy one into your project as `workflow.py`:
 
-- [`quickstart/`](quickstart/README.md) demonstrates a caller-owned task
-  composition without introducing a scientific default.
+- `reusable_training.py` runs Propose → Implement → Validate → Train & tune once.
+- `managed_reusable_candidate.py` stops after validation.
+
+The other two files are not starting points for your own run:
+`reusable_candidate.py` (which also reads a literal `context.json` input) is
+for authoring and resolution only, not for preparation, and
+`native_training.py` is a script that writes an older concrete four-stage
+document and its JSON inputs for the Quickstart data without launching a run.
+The [workflow declarations guide](../docs/guides/workflow-declarations.md)
+describes each file.
+
+SIDERIUS also ships two lightweight synthetic task examples:
+
+- [`quickstart/`](quickstart/README.md) is a two-class synthetic classification
+  task (256 rows) that checks your installation and shows how a task package
+  supplies data, a model contract and a metric. Its data preparation and
+  component checks run on CPU without API keys.
 - [`synthetic_masked_regression/`](synthetic_masked_regression/README.md)
   demonstrates masked continuous supervision, a lower-is-better primary metric,
   an observational secondary metric and task-owned Health.
