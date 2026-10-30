@@ -13,10 +13,9 @@ behind a guard that would then look like it was working. So the
 requirement carries its provenance, and in formal mode a
 non-authoritative provenance is refused rather than used.
 
-**What it deliberately does not do.** It does not obtain, validate or
-promote a measurement — that is PR C's responsibility (D-B5), and a
-second measurement authority is the shape of defect this whole document
-was opened about. It does not know what a peer is (D-B1): occupancy is
+**What it deliberately does not do.** It consumes measurements supplied
+by the measurement pipeline rather than obtaining or promoting them itself.
+It does not identify peer jobs: occupancy is
 split into ours and everything else, measured, with no cross-process
 registry. It does not retry, wait, or reschedule.
 """
@@ -604,10 +603,9 @@ def evaluate_ordinary_gpu_admission(
         if mode == "formal":
             return _refuse(
                 "policy_unavailable",
-                "device occupancy was measured, but no applicable authoritative "
-                "requirement for this candidate exists, and a predicted estimate "
-                "is not a resource fact; producing one is PR C's responsibility "
-                "(D-B5)",
+                "device occupancy was measured, but no applicable measured GPU "
+                "memory requirement is available for this phase; a predicted "
+                "estimate cannot establish the required memory",
                 source="unavailable",
                 evidence=evidence,
             )
