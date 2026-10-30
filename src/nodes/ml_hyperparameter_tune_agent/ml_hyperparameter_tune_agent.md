@@ -674,17 +674,32 @@ Training and inference admission refuse with `environment_headroom_unproven`,
 policy cannot establish a runnable environment. The shared owner
 `phase_admission.run_admitted_skill` normalizes the decision and uses core
 `AdmissionDecision.refusal_kind`: `resource`, `transient_sampling`, or `environment`.
-Only typed `measurement_unavailable` with `detail="sampler_error"` is transient;
+Only typed `detail="sampler_error"` is transient (`measurement_unavailable` for
+ordinary admission, `environment_headroom_unproven` for isolated admission);
 message text never selects recovery. It retries the same refused phase, with
 unchanged parameters and no new plan, up to the remaining attempt slots including
 the current slot (`attempts_per_round` or `attempts_per_formal_round` minus
 `attempt_in_round` plus one, minimum one). These are admission sampling tries
 inside the current scientific attempt, not new completed/failed tuning rounds.
+Retries wait 0.25, 0.5, then at most 1 second each; at most `remaining - 1`
+waits occur, with no wait after a terminal result. `run_admitted_skill(sleep=...)`
+accepts an injected sleeper for tests; production uses `time.sleep`. There is
+no new configuration knob. The accounting owner distinguishes `TimeoutExpired`
+and `CalledProcessError` as typed `GpuQueryFailure` values carried in
+`GpuAccountingSnapshot.query_failure`; neither is collapsed into persistent
+missing telemetry. Missing executables, missing GPU rows and malformed telemetry
+remain persistent evidence gaps. Isolated admission retains unconditional
+phase refusal during retries, including `observe_only`. Invalid visibility
+still wins over a transient query failure.
 Inference retries do not repeat successful training. Exhaustion or a persistent
 environment refusal emits one final refusal record and returns the decision in
 `TrainingOutcome.environment_admission_refusal` or
 `AttemptExecution.environment_admission_refusal`. The loop ends immediately:
 one attempted plan, no replans, no further attempts or failed-round increments.
+The protected native `gpu_execution_policy` path still returns
+`aborted_infrastructure` for non-resource refusals, bypassing this recovery;
+[issue #1280](https://github.com/Galileo-Sandbox/SIDERIUS/issues/1280) tracks
+unifying it while preserving phase/checkpoint/observer lifecycle and deadlines.
 Successful recovery continues the same attempt; intermediate sampling failures
 are printed, not persisted as candidate failure records.
 The existing `infrastructure_abort` termination is used, including its existing

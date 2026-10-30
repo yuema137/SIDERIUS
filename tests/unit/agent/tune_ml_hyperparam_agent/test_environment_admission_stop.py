@@ -181,14 +181,7 @@ def test_environment_refusal_stops_without_replanning(
         _refusal("insufficient_headroom"),
     ],
 )
-def test_model_failures_preserve_attempt_and_round_retries(
-    tmp_path: Path,
-    training_status: dict | list[dict],
-    *,
-    phase: str = "training",
-    max_rounds: int = 2,
-    trial_attempts: int = 3,
-):
+def test_model_failures_preserve_attempt_and_round_retries(tmp_path: Path, training_status: dict):
     output, plans, training_calls, _saved = _drive(tmp_path, training_status)
     assert output.total_attempts == training_calls == plans == 9
     assert output.consecutive_fail_rounds_at_exit == 3
@@ -309,3 +302,28 @@ def test_sampling_uses_only_remaining_attempt_allowance(tmp_path: Path, phase: s
     assert plans == output.total_attempts == 2
     assert output.termination_reason == "infrastructure_abort"
     assert output.consecutive_fail_rounds_at_exit == 0
+
+
+def test_sampling_backoff_is_bounded_and_injectable():
+    """Each retry waits, capped at one second; the terminal result adds no wait."""
+    from types import SimpleNamespace
+
+    from nodes.ml_hyperparameter_tune_agent.contracts import AttemptIdentity
+    from nodes.ml_hyperparameter_tune_agent.phase_admission import run_admitted_skill
+
+    bindings = SimpleNamespace(agent_input=SimpleNamespace(attempts_per_round=6), sandbox=object())
+    delays = []
+    with patch(
+        f"{_NODE}.runtime._run_skill",
+        side_effect=[_sampler_refusal()] * 5 + [{"status": "success"}],
+    ):
+        status, refusal = run_admitted_skill(
+            bindings,
+            SimpleNamespace(active_params={}),
+            AttemptIdentity(round_index=1, attempt_in_round=1, is_formal_round=False),
+            phase="training",
+            sleep=delays.append,
+        )
+    assert status == {"status": "success"}
+    assert refusal is None
+    assert delays == [0.25, 0.5, 1.0, 1.0, 1.0]

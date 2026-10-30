@@ -128,10 +128,23 @@ class TestEveryEmissionSitePassesTheLabel:
             n
             for n in ast.walk(tree)
             if isinstance(n, ast.Call)
-            and getattr(n.func, "id", None)
+            and (getattr(n.func, "id", None) or getattr(n.func, "attr", None))
             in {"_handle_admission_refusal", "_handle_in_subprocess_rejection"}
         ]
-        assert len(forwarded) >= 3
+        assert len(forwarded) == 2  # One shared refusal emitter, one training rejection.
+        phase_calls = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "run_admitted_skill"
+        ]
+        assert sorted(
+            kw.value.value
+            for n in phase_calls
+            for kw in n.keywords
+            if kw.arg == "phase" and isinstance(kw.value, ast.Constant)
+        ) == ["inference", "training"]
         missing = [
             c.lineno for c in forwarded if "experiment_arm" not in {k.arg for k in c.keywords}
         ]

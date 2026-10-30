@@ -1,5 +1,7 @@
 """Shared training/inference admission recovery, without candidate replanning."""
 
+import time
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
@@ -45,25 +47,36 @@ def run_admitted_skill(
     identity: AttemptIdentity,
     *,
     phase: Literal["training", "inference"],
+    sleep: Callable[[float], None] | None = None,
 ) -> tuple[dict, AdmissionDecision | None]:
     """Retry sampler failures within remaining attempt slots; record final refusal.
 
     Retrying the refused phase cannot repeat successful training when inference
     sampling fails. No worker started on a refusal. Exhaustion is an environment
     abort, never negative model evidence or a reason to request a new plan.
+    Retries back off 0.25, 0.5, then 1 second (capped), using an injectable sleeper.
     """
+    pause = sleep or time.sleep
     inputs = bindings.agent_input
     budget = (
         inputs.attempts_per_formal_round if identity.is_formal_round else inputs.attempts_per_round
     )
     remaining = max(1, budget - identity.attempt_in_round + 1)
     for sample_attempt in range(remaining):
-        status = runtime._run_skill(f"{phase}_skill", bindings.sandbox, **prepared.active_params)
+        if phase == "training":
+            status = runtime._run_skill(
+                "training_skill", bindings.sandbox, **prepared.active_params
+            )
+        else:
+            status = runtime._run_skill(
+                "inference_skill", bindings.sandbox, **prepared.active_params
+            )
         if status.get("status") != RESOURCE_ADMISSION_STATUS:
             return status, None
         refusal = normalize_phase_admission_refusal(status)
         if refusal.refusal_kind == "transient_sampling" and sample_attempt + 1 < remaining:
             print(f"  Retrying {phase} admission sampling ({sample_attempt + 1}/{remaining})")
+            pause(min(0.25 * 2 ** min(sample_attempt, 2), 1.0))
             continue
         status = {**status, "admission": refusal.model_dump(mode="json")}
         runtime._handle_admission_refusal(

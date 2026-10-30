@@ -35,6 +35,7 @@ sample as "nothing is held" would admit work onto a full device.
 from __future__ import annotations
 
 import subprocess
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -49,6 +50,13 @@ _MAX_ANCESTRY_HOPS = 24
 #: Bounds the nvidia-smi call so a hung driver query cannot delay a
 #: phase launch. The caller is on the critical path.
 _QUERY_TIMEOUT_S = 10.0
+
+
+class GpuQueryFailure(StrEnum):
+    """A query ran but failed; distinct from unavailable/unsupported telemetry."""
+
+    TIMEOUT = "timeout"
+    NONZERO_EXIT = "nonzero_exit"
 
 
 class DeviceIdentity(BaseModel):
@@ -144,6 +152,9 @@ class DeviceBaselineSnapshot(BaseModel):
     )
     device: DeviceIdentity
     telemetry_available: bool
+    query_failure: GpuQueryFailure | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     sampled_at: float = Field(ge=0.0)
 
     device_used_mib: int | None = Field(default=None, ge=0)
@@ -196,6 +207,9 @@ class GpuAccountingSnapshot(BaseModel):
     #: False when the sample could not be taken. Every quantity below is
     #: then ``None``, and the caller must not read that as "nothing".
     telemetry_available: bool
+    query_failure: GpuQueryFailure | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     device_used_mib: int | None = Field(default=None, ge=0)
     device_total_mib: int | None = Field(default=None, ge=0)
@@ -261,8 +275,10 @@ class GpuAccountingSnapshot(BaseModel):
         return self
 
 
-def _run_query(fields: str, kind: str, *, runner: Any = None) -> list[list[str]] | None:
-    """One bounded nvidia-smi query, or ``None`` if it cannot be taken."""
+def _run_query(
+    fields: str, kind: str, *, runner: Any = None
+) -> list[list[str]] | GpuQueryFailure | None:
+    """One bounded query; typed failures distinguish retryable calls from missing telemetry."""
     run = runner or subprocess.run
     try:
         completed = run(
@@ -272,6 +288,10 @@ def _run_query(fields: str, kind: str, *, runner: Any = None) -> list[list[str]]
             timeout=_QUERY_TIMEOUT_S,
             check=True,
         )
+    except subprocess.TimeoutExpired:
+        return GpuQueryFailure.TIMEOUT
+    except subprocess.CalledProcessError:
+        return GpuQueryFailure.NONZERO_EXIT
     except Exception:
         return None
     out = getattr(completed, "stdout", None)
@@ -358,6 +378,8 @@ def sample(
         GPU is worse than not answering.
     """
     gpu_rows = _run_query("index,uuid,memory.used,memory.total", "gpu", runner=runner)
+    if isinstance(gpu_rows, GpuQueryFailure):
+        return _unavailable(device).model_copy(update={"query_failure": gpu_rows})
     if gpu_rows is None:
         return _unavailable(device)
 
@@ -378,6 +400,8 @@ def sample(
         return _unavailable(device)
 
     app_rows = _run_query("pid,used_gpu_memory,gpu_uuid", "compute-apps", runner=runner)
+    if isinstance(app_rows, GpuQueryFailure):
+        return _unavailable(device).model_copy(update={"query_failure": app_rows})
     if app_rows is None:
         return _unavailable(device)
 
@@ -442,6 +466,8 @@ def sample_device_baseline(
     )
 
     gpu_rows = _run_query("index,uuid,memory.used,memory.total", "gpu", runner=runner)
+    if isinstance(gpu_rows, GpuQueryFailure):
+        return unavailable.model_copy(update={"query_failure": gpu_rows})
     if gpu_rows is None:
         return unavailable
 
@@ -457,6 +483,8 @@ def sample_device_baseline(
         return unavailable
 
     app_rows = _run_query("pid,used_gpu_memory,gpu_uuid", "compute-apps", runner=runner)
+    if isinstance(app_rows, GpuQueryFailure):
+        return unavailable.model_copy(update={"query_failure": app_rows})
     if app_rows is None:
         return unavailable
 

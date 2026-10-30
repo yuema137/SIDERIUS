@@ -53,11 +53,15 @@ and how trial, formal and observation modes differ.
 
 During tuning, a failed GPU sampling call can be retried before training or
 inference starts. The tuner keeps the same model settings and uses the remaining
-attempt allowance for that tuning round to bound these retries. If enforced admission
+attempt allowance for that tuning round to bound these retries. It waits a
+quarter second before the first retry, half a second before the second, and at
+most one second before each later retry. If enforced admission
 keeps refusing because sampling fails or environment evidence or policy is missing,
 tuning stops so you can repair the environment. An inference sampling retry keeps the
 already trained model. See the [tuner contract](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
-for classification and accounting.
+for classification and accounting. The separately selected protected native GPU
+execution path still stops on these failures; [issue #1280](https://github.com/Galileo-Sandbox/SIDERIUS/issues/1280)
+tracks recovery for that path.
 
 The measured demand is an empirical estimate, not a bound on every later input.
 This check does not add runtime GPU monitoring or supply missing trial/inference
