@@ -282,7 +282,17 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
   blocking_eligible=no, including a warning not to infer a parameter-count
   ceiling and the deciding policy identity), never a revision or rejection. A task without the
   TIDMAD topology priced by this legacy formula returns `applicable=False`;
-  the proposer records `PREFLIGHT_SKIPPED` and continues. Blocking runtime
+  the proposer records `PREFLIGHT_SKIPPED` and continues. A draft without a
+  declared temporal dimension raises `SegmentationDimensionUnavailableError`
+  in the estimator; `_run_preflight_check` records `PREFLIGHT_SKIPPED` with
+  the exception type and reason and returns `None`, allowing both legacy and
+  pipeline proposals to return with unset preflight fields. This narrow
+  advisory-boundary catch does not change estimator requirements: invalid
+  dimensions and unexpected exceptions still propagate. Memo notes are persisted
+  in `ProposalOutput` and research history, but the implementor protocol does
+  not forward them and the interpreter reads selected previous-proposal fields
+  rather than rendering the full object. The skip note adds no prompt bytes
+  through these consumers. Blocking runtime
   authority belongs to measured evidence via the shared policy (C4/C8);
   structural validation retries (`_MAX_PROPOSING_RETRIES=2`) are unchanged.
 - **Causal-reasoning minimum-boldness retry** (`_MAX_REASONING_RETRIES=1`). In pipeline mode, the causal-reasoning stage emits a `FalsifiablePrediction` with a `boldness` score. If the score falls below the configured minimum, the stage retries ONCE with a "be bolder" nudge. This is independent of the pre-flight loop.
