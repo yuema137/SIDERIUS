@@ -62,6 +62,7 @@ try {
       lists.push(Date.now());
       return reply({operations: [
         {operation_id: running, kind: 'candidate', run_name: 'capture-20261028-0915', project_id: 'capture', admitted_at: '2026-10-28T16:15:00+00:00', state: runningState, native_status: runningState === 'completed' ? 'accepted' : null},
+        {operation_id: crashed, kind: 'candidate', run_name: 'proposal-failed', admitted_at: '2026-10-28T16:01:00+00:00', state: 'completed', native_status: 'failed', outcome: {failed_phases: ['proposal'], completed_iterations: 1}, loop: {final_iteration: 3, attempted_iterations: 2}},
         {operation_id: rejected, kind: 'candidate', run_name: 'capture-20261028-0901', project_id: 'capture', admitted_at: '2026-10-28T16:01:00+00:00', state: 'completed', native_status: 'rejected'},
       ], unreadable: 1, examined: 3, incomplete: false});
     }
@@ -79,8 +80,8 @@ try {
     }
     if (id === unknown) return reply({error: {code: 'unknown_operation', message: 'this operation store has no operation with this ID'}}, 404);
     if (id === rejected) return reply(base(rejected, {}));
-    if (id === crashed) return reply(base(crashed, {native_status: 'failed', validation_passed: null, loop: {final_iteration: 1, attempted_iterations: 1}}));
-    if (id === paused) return reply(base(paused, {native_status: 'paused', validation_passed: null, loop: {final_iteration: 3, attempted_iterations: 1}}));
+    if (id === crashed) return reply(base(crashed, {native_status: 'failed', validation_passed: false, outcome: {failed_phases: ['proposal'], completed_iterations: 1}, loop: {final_iteration: 3, attempted_iterations: 2}}));
+    if (id === paused) return reply(base(paused, {native_status: 'paused', validation_passed: null, outcome: {failed_phases: [], completed_iterations: 1}, loop: {final_iteration: 3, attempted_iterations: 1}}));
     if (id === running) return reply(base(running, {state: 'active', process: {status: 'alive', reason: 'observed'}, receipt_available: false, native_status: null, validation_passed: null}));
     throw new Error('unexpected path ' + url.pathname);
   });
@@ -95,7 +96,7 @@ try {
   assert.match(await first.textContent(), /^capture · capture-20261028-0915 · /);
   assert.ok(!(await first.textContent()).includes('2026-10-28T'), 'List time is local, not ISO');
   assert.match(await first.getAttribute('title'), /admitted 2026-10-28T16:15:00/);
-  assert.match(await items.nth(1).textContent(), /Finished: validation rejected the candidate\./);
+  assert.match(await items.nth(2).textContent(), /Finished: validation rejected the candidate\./);
   assert.match(await items.nth(0).textContent(), /Run in progress\./);
   assert.equal(await page.locator('#operations-unreadable').isVisible(), true);
   // The list refreshes by itself while a listed operation is still running.
@@ -127,9 +128,23 @@ try {
 
   // L-2: a failed run says so plainly and names its cause from the log.
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, crashed);
-  await page.locator('#monitor-status').filter({hasText: 'Failed: the run stopped with an error before finishing.'}).waitFor();
+  await page.locator('#monitor-status').filter({hasText: 'Failed during Propose model.'}).waitFor();
   await page.locator('#monitor-cause').filter({hasText: 'Cause (from the log): execute_tools.health_checks.launch_policy.FormalLaunchPolicyError: a formal launch must declare'}).waitFor();
-  assert.match(await page.locator('#loop-state').textContent(), /after 1 of 1 iteration\./, 'Singular iteration');
+  assert.match(await page.locator('#loop-state').textContent(), /after 1 of 3 completed iterations\./, 'Failed proposal is not completed');
+  assert.match(await items.nth(1).textContent(), /Failed during Propose model\..*1 of 3 iterations completed/);
+  for (const [fields, expected] of [
+    [{native_status: 'failed'}, 'Failed: the run stopped with an error before finishing.'],
+    [{native_status: 'timed_out'}, 'Failed: the run reached its time limit and was stopped.'],
+    [{native_status: 'interrupted'}, 'Failed: the run was interrupted before finishing.'],
+    [{native_status: 'rejected'}, 'Finished: validation rejected the candidate.'],
+    [{native_status: 'completed', outcome: {validation_passed: true}}, 'Finished: the candidate passed validation.'],
+    [{native_status: 'completed', outcome: {validation_passed: false}}, 'Finished: validation rejected the candidate.'],
+    [{native_status: 'failed', outcome: {failed_phases: ['adaptor']}}, 'Failed during Combine/select.'],
+    [{native_status: 'accepted'}, 'Finished: the candidate passed validation.'],
+    [{native_status: 'failed', outcome: {failed_phases: ['validation', 'implementation']}}, 'Failed during Validate, Implement.'],
+  ]) {
+    assert.equal(await page.evaluate(fields => window.operationOutcome.sentence({kind: 'candidate', state: 'completed', validation_passed: false, ...fields}), fields), expected);
+  }
   // N2: a long cause (the launch guard's GPU refusal) is cut at a word boundary with an ellipsis.
   const refusal = 'core.runtime_control.launch_guard.LaunchGuardFailure: SIDERIUS real training needs an NVIDIA GPU with CUDA: NVIDIA device nodes were passed, but /sys is not mounted here, so CUDA cannot start (CUDA error 304). The console run sandbox mounts /sys read-only by itself for a task that lists a /dev/nvidia<N> device node; check that the task lists one, then run check --gpu (see GPU runs in the console README) (quickstart: not measurable — no CUDA device is visible: NVIDIA device nodes are present but /sys is not mounted).';
   const shown = await page.evaluate(text => window.operationOutcome.cause('Traceback\n' + text + '\n'), refusal);
