@@ -155,7 +155,7 @@ try {
   for (const [fields, text] of [
     [{loop: loop({input_request: {reason: {kind: 'no_improvement'}, summary: {iteration: 2}}})},
       'The research loop paused and is waiting for your input. Open it in Monitor to read the summary, add advice and resume.'],
-    [{loop: loop({})}, 'The research loop is paused at a completed body. Open it in Monitor to resume.'],
+    [{loop: loop({})}, 'The research loop is paused at a completed iteration. Open it in Monitor to resume.'],
     [{loop: loop({stop_requested: true})}, 'Stop was requested; this run cannot continue.'],
   ]) {
     observed[runId] = status(runId, 'candidate', runDigest, {native_status: 'paused', ...fields});

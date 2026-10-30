@@ -3,24 +3,31 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const session = () => window.consoleSession;
+  // Human-readable tuning stop reasons (HyperparamTuningOutput.termination_reason) for the pause summary.
+  const TUNING_STOP_LABELS = {
+    aborted_fail_rounds: 'every tuning round failed until the failure limit',
+    aborted_by_gate: 'stopped by a gate (historical record)',
+    scope_violation: 'a data scope violation',
+    infrastructure_abort: 'an infrastructure or environment check failed',
+  };
   // request: per selected operation. Recorded Stop/Pause comes from the server status
   // (loop.stop_requested/pause_requested, read from the worker's durable markers), so a
   // reload or another tab still sees it (M-1); the receipt decides what took effect.
   let request = null, last = null;
   const counted = (loop, verb) => loop.attempted_iterations == null
-    ? `${verb}; the body count is unavailable.`
-    : `${verb} after ${loop.attempted_iterations} of ${loop.final_iteration} bod${loop.final_iteration === 1 ? 'y' : 'ies'}.`;
+    ? `${verb}; the iteration count is unavailable.`
+    : `${verb} after ${loop.attempted_iterations} of ${loop.final_iteration} iteration${loop.final_iteration === 1 ? '' : 's'}.`;
   // The receipt's verified stop reason in plain words; numbers are display-rounded and the
   // exact recorded values stay available as the state's tooltip (see render).
   const number = value => window.consoleNumbers ? window.consoleNumbers.format(value) : String(value);
   function stopReason(reason, limit) {
-    const after = `stopped early after body ${reason.iteration} of up to ${limit}`;
+    const after = `stopped early after iteration ${reason.iteration} of up to ${limit}`;
     if (reason.kind === 'metric_threshold') {
-      return `${after}: ${reason.metric_id} reached ${number(reason.incumbent)} (threshold ${number(reason.threshold)}, ${reason.direction} is better; best at body ${reason.incumbent_iteration})`;
+      return `${after}: ${reason.metric_id} reached ${number(reason.incumbent)} (threshold ${number(reason.threshold)}, ${reason.direction} is better; best at iteration ${reason.incumbent_iteration})`;
     }
     if (reason.kind === 'no_improvement') {
-      const bodies = n => `${n} bod${n === 1 ? 'y' : 'ies'}`;
-      const best = reason.incumbent == null ? 'no valid score yet' : `best ${number(reason.incumbent)} at body ${reason.last_improvement_iteration}`;
+      const bodies = n => `${n} iteration${n === 1 ? '' : 's'}`;
+      const best = reason.incumbent == null ? 'no valid score yet' : `best ${number(reason.incumbent)} at iteration ${reason.last_improvement_iteration}`;
       return `${after}: no improvement for ${bodies(reason.non_improving_bodies)} (condition: ${bodies(reason.k)}; ${best})`;
     }
     if (reason.kind === 'judge') return `${after}: the judge decided to stop`;
@@ -30,10 +37,10 @@
   // from the receipt's verified input request (and the judge's own rationale, if it asked).
   function inputRequest(loop) {
     const asked = loop.input_request, reason = asked.reason, summary = asked.summary;
-    const bodies = n => `${n} bod${n === 1 ? 'y' : 'ies'}`;
-    const best = summary.incumbent == null ? 'no valid score yet' : `best ${number(summary.incumbent)} at body ${summary.incumbent_iteration}, ${summary.direction} is better`;
+    const bodies = n => `${n} iteration${n === 1 ? '' : 's'}`;
+    const best = summary.incumbent == null ? 'no valid score yet' : `best ${number(summary.incumbent)} at iteration ${summary.incumbent_iteration}, ${summary.direction} is better`;
     let met;
-    if (reason.kind === 'metric_threshold') met = `${reason.metric_id} reached ${number(reason.incumbent)} (threshold ${number(reason.threshold)}, ${reason.direction} is better; best at body ${reason.incumbent_iteration}).`;
+    if (reason.kind === 'metric_threshold') met = `${reason.metric_id} reached ${number(reason.incumbent)} (threshold ${number(reason.threshold)}, ${reason.direction} is better; best at iteration ${reason.incumbent_iteration}).`;
     else if (reason.kind === 'no_improvement') met = `No improvement for ${bodies(reason.non_improving_bodies)} (${best}).`;
     else if (reason.kind === 'judge') {
       const verdict = (loop.judge_verdicts || []).find(item => item.iteration === reason.iteration);
@@ -42,10 +49,10 @@
     const tried = (summary.what_was_tried || []).map(body => {
       const valid = body.validation_passed == null ? 'unknown' : body.validation_passed ? 'passed' : 'failed';
       const score = body.best_valid_score == null ? 'no valid score' : `${body.metric_id} ${number(body.best_valid_score)} (${body.direction} is better)`;
-      return `Iteration ${body.iteration}: ${body.model_name}; validation ${valid}; ${score}${body.stop_reason ? '; stop reason: ' + body.stop_reason : ''}.`;
+      return `Iteration ${body.iteration}: ${body.model_name}; validation ${valid}; ${score}${body.stop_reason ? '; tuning stopped: ' + (TUNING_STOP_LABELS[body.stop_reason] || body.stop_reason) : ''}.`;
     });
     const attempts = tried.length ? ` What was tried (latest ${tried.length} completed iterations in this segment): ${tried.join(' ')}` : '';
-    return `Waiting for your input. ${met} Paused after body ${summary.iteration} of ${summary.final_iteration}.${attempts}`;
+    return `Waiting for your input. ${met} Paused after iteration ${summary.iteration} of ${summary.final_iteration}.${attempts}`;
   }
   // Recorded JudgeStop verdicts (B2-5): each boundary's decision, with the judge's own
   // rationale from its evidence when the call decided; an abstention says so.
@@ -54,7 +61,7 @@
       const decision = item.decision === null ? 'abstained (the judge call failed)'
         : item.decision === 'stop' ? 'stop' : 'continue';
       const why = item.rationale ? ` · ${item.rationale}${item.confidence ? ` (confidence ${item.confidence})` : ''}` : '';
-      return `Judge after body ${item.iteration}: ${decision}${why}`;
+      return `Judge after iteration ${item.iteration}: ${decision}${why}`;
     });
   }
   // Keyed by the operations store (SEC-4): an id retained for another console's store is
@@ -95,35 +102,43 @@
   const pauseRecorded = status => !!(request?.pause.acknowledged || status.loop?.pause_requested);
   function describe(status) {
     const loop = status.loop, segment = status.kind === 'candidate_loop_resume' ? 'Resumed segment. ' : '';
+    if (status.reason === 'loop_process_exiting') return segment + 'The worker exited, but its remaining processes are not confirmed stopped. The result is still unresolved; ending the loop and starting new work remain blocked.';
+    if (status.reason === 'loop_process_exited') return segment + 'The worker exited without a result. No final iteration count is available for this segment. ' + (segment
+      ? 'Open the paused predecessor to end the loop once its worker processes have stopped; Resume again is unavailable.'
+      : 'This run cannot be resumed. New work can start once its worker processes have stopped.');
     if (window.operationOutcome?.cancelledBeforeStart(status)) return segment + 'Research loop segment cancelled before start: it never ran.';
     if (status.state === 'operation_failed' && !status.receipt_available) return segment + 'Research loop outcome unavailable: the operation failed without a native receipt.';
     if (!status.receipt_available) {
-      let text = segment + `Research loop: up to ${loop.final_iteration} bod${loop.final_iteration === 1 ? 'y' : 'ies'}. The body count is reported by the native receipt at a completed boundary.`;
-      if (stopRecorded(status)) text += ' Stop requested: the current body completes first, and the final iteration or a native failure may still end the loop. Not yet stopped.';
-      else if (pauseRecorded(status)) text += ' Pause requested: the current body completes first, and the final iteration, a Stop or a native failure may still end the loop. Not yet paused.';
+      let text = segment + `Research loop: up to ${loop.final_iteration} iteration${loop.final_iteration === 1 ? '' : 's'}. The iteration count is reported by the native receipt at a completed boundary.`;
+      if (stopRecorded(status)) text += ' Stop requested: the current iteration completes first, and the final iteration or a native failure may still end the loop. Not yet stopped.';
+      else if (pauseRecorded(status)) text += ' Pause requested: the current iteration completes first, and the final iteration, a Stop or a native failure may still end the loop. Not yet paused.';
       return text;
     }
     // Receipt body numbers (attempted, stop_reason iterations) are cumulative over the whole run,
     // so a resumed segment says so rather than reading as a segment-local count.
-    return segment + outcome(status, loop) + (segment && ' Body numbers count the whole run, including earlier segments.');
+    return segment + outcome(status, loop) + (segment && ' Iteration numbers count the whole run, including earlier segments.');
   }
   function endedSentence(status) {
-    if (status?.native_status !== 'paused' || !status.receipt_available || status.successor_operation_id || !status.loop?.stop_requested) return null;
-    return status.loop.attempted_iterations == null ? 'Ended by you at the pause.' : `Ended by you at the pause after body ${status.loop.attempted_iterations}.`;
+    if (status?.native_status !== 'paused' || !status.receipt_available || (status.successor_operation_id && status.reason !== 'loop_successor_failed') || !status.loop?.stop_requested) return null;
+    if (status.reason === 'loop_successor_failed') return 'Ended by you after the resumed segment was interrupted.';
+    return status.loop.attempted_iterations == null ? 'Ended by you at the pause.' : `Ended by you at the pause after iteration ${status.loop.attempted_iterations}.`;
   }
   function outcome(status, loop) {
     const ended = endedSentence(status);
     if (ended) return ended + ' Completed results are kept; this run cannot be resumed.';
+    if (status.reason === 'loop_successor_failed') return (loop.attempted_iterations == null
+      ? 'Research loop paused; the iteration count is unavailable.'
+      : `Research loop paused after iteration ${loop.attempted_iterations} of ${loop.final_iteration}.`) + ' The resumed segment was interrupted without a result. End loop here to keep completed results and close the run. Resume again is unavailable.';
     if (status.native_status === 'cancelled') return 'Research loop stopped by you before it finished. Files written so far stay in the run folder; this run cannot be resumed.';
-    if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed body boundary') + ' No partial body is kept as a result.';
+    if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed iteration boundary') + ' No partial iteration is kept as a result.';
     if (status.native_status === 'paused' && loop.input_request) {
       return inputRequest(loop) + (status.successor_operation_id ? ' A resumed segment continues this run.'
         : stopRecorded(status) ? ' Stop was requested; this run cannot continue.'
-          : ` Review and resume to continue with body ${loop.input_request.summary.iteration + 1}.`);
+          : ` Review and resume to continue with iteration ${loop.input_request.summary.iteration + 1}.`);
     }
-    if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed body boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.'
+    if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed iteration boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.'
       : stopRecorded(status) ? ' Stop was requested; this run cannot continue.'
-        : ' No partial body is kept; it can be resumed from the next body after review.');
+        : ' No partial iteration is kept; it can be resumed from the next iteration after review.');
     if (status.native_status === 'completed' && loop.stop_reason) return `Research loop ${stopReason(loop.stop_reason, loop.final_iteration)}.`;
     if (status.native_status === 'completed') return counted(loop, 'Research loop finished') + (stopRecorded(status) || pauseRecorded(status) ? ' The request did not take effect before the final iteration.' : '');
     return counted(loop, `Research loop ended (${status.native_status})`);
@@ -168,15 +183,17 @@
     }
     // A recorded Stop makes a paused run terminal: the owner refuses Resume, so none is offered.
     const resumable = status.native_status === 'paused' && !successor && !status.finishing && !stopRecorded(status);
+    const endable = status.native_status === 'paused' && status.reason === 'loop_successor_failed' && !status.finishing && !stopRecorded(status);
     const resume = request.resume, review = resume.review;
-    $('loop-resume-group').hidden = !resumable;
+    $('loop-resume-group').hidden = !(resumable || endable);
+    $('loop-resume-review').hidden = !resumable;
     $('loop-resume-review').disabled = resume.pending || pending || !connected;
     $('loop-end').disabled = resume.pending || pending || !connected;
-    $('loop-resume').hidden = !review;
-    $('loop-resume-advice-group').hidden = !review;
+    $('loop-resume').hidden = !resumable || !review;
+    $('loop-resume-advice-group').hidden = !resumable || !review;
     $('loop-resume-advice').readOnly = !!resume.locked;
     $('loop-resume').disabled = resume.pending || pending || !connected || !review?.credential_readiness.ready;
-    $('loop-resume-summary').textContent = !review ? '' : `Resume continues with body ${review.completed_iterations + 1} of ${review.final_iteration} in a new segment of the same run. ` +
+    $('loop-resume-summary').textContent = !review ? '' : `Resume continues with iteration ${review.completed_iterations + 1} of ${review.final_iteration} in a new segment of the same run. ` +
       (review.credential_readiness.ready ? 'Credentials: ready (names only checked).' : 'Credentials not ready; missing: ' + (review.credential_readiness.missing_names.join(', ') || 'none') + '. ' + review.credential_readiness.instructions.join(' '));
     $('loop-resume-status').textContent = !resumable ? '' : resume.pending ? 'Submitting…' : resume.error;
   }
@@ -245,7 +262,7 @@
     }
   }
   $('loop-end').addEventListener('click', () => {
-    if (!last || last.native_status !== 'paused' || last.successor_operation_id || last.finishing || stopRecorded(last) || request.stop.pending || request.resume.pending || !session().connected) return;
+    if (!last || last.native_status !== 'paused' || (last.successor_operation_id && last.reason !== 'loop_successor_failed') || last.finishing || stopRecorded(last) || request.stop.pending || request.resume.pending || !session().connected) return;
     if (window.confirm('End this research loop here? Completed results are kept. This run cannot be resumed.')) void control('stop');
   });
   window.loopEndedSentence = endedSentence;

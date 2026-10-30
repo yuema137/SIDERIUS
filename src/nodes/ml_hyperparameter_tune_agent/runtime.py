@@ -1062,6 +1062,7 @@ def _resolve_task_scope_guardrail_steps(
     train_cfg: dict,
     train_portion: float | None,
     max_samples: int | None,
+    resolved_training_rows: int | None = None,
 ) -> int | None:
     """The §5 step count for an attempt whose scope its TASK built (B7).
 
@@ -1099,6 +1100,8 @@ def _resolve_task_scope_guardrail_steps(
         train_cfg: the plan's training config.
         train_portion: the round's per-epoch subsample fraction.
         max_samples: the validation-envelope row ceiling, or ``None``.
+        resolved_training_rows: count retained by this attempt's planning;
+            reuse it without constructing the selected dataset again.
 
     Returns:
         The resolved optimizer-step count, or ``None`` when this attempt has
@@ -1131,6 +1134,7 @@ def _resolve_task_scope_guardrail_steps(
             epochs=resolve_train_field(train_cfg, "epochs", safety_margin=1),
             max_samples=max_samples,
             drop_last=resolve_training_drop_last(train_cfg),
+            resolved_rows=resolved_training_rows,
         ).unit_count
     except Exception as exc:
         from core.local_code.failure import raise_if_code_package_failure
@@ -1151,6 +1155,7 @@ def _resolve_guardrail_steps(
     *,
     task_scopes=None,
     data_dir: str | None = None,
+    resolved_training_rows: int | None = None,
 ) -> int | None:
     """Resolved step count for the §5 guardrails. Best-effort: a
     resolver failure returns None (the guardrail is defense-in-depth —
@@ -1187,6 +1192,7 @@ def _resolve_guardrail_steps(
             train_cfg=train_cfg,
             train_portion=train_portion,
             max_samples=max_samples,
+            resolved_training_rows=resolved_training_rows,
         )
     try:
         from agent.skills.training_skill.estimator import (
@@ -1526,6 +1532,11 @@ def _build_runtime_policy(
         policy["verification"] = {
             "max_wall_ms": verification_window_seconds * 1000.0,
         }
+    verification_floor_ms = getattr(
+        agent_input, "runtime_verification_pathological_min_unit_ms", None
+    )
+    if verification_floor_ms is not None:
+        policy.setdefault("verification", {})["pathological_min_unit_ms"] = verification_floor_ms
     if (
         agent_input.runtime_watchdog_enabled
         and policy["watchdog"]["deadline_policy"] == "budget-ceiling-v1"
@@ -1555,6 +1566,7 @@ def _check_and_record_guardrail_skip(
     dataset_profile,
     task_scopes=None,
     data_dir: str | None = None,
+    resolved_training_rows: int | None = None,
 ) -> bool:
     """Run the §5 guardrails; on violation save the planner-visible
     record and return True (the attempt loop `continue`s). Single call
@@ -1581,6 +1593,7 @@ def _check_and_record_guardrail_skip(
         max_samples=agent_input.validation_max_train_samples,
         task_scopes=task_scopes,
         data_dir=data_dir,
+        resolved_training_rows=resolved_training_rows,
     )
     violations = _evaluate_step_guardrails(
         n_steps=n_steps,

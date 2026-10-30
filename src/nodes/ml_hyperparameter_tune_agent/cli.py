@@ -586,6 +586,13 @@ def build_parser() -> argparse.ArgumentParser:
         "Omit to preserve the verifier default.",
     )
     parser.add_argument(
+        "--runtime_verification_pathological_min_unit_ms",
+        type=float,
+        default=None,
+        help="Slowdown floor in observation wall-time milliseconds (finite, nonnegative). "
+        "Omit to preserve 100 ms; 0 disables the absolute floor for historical reproduction.",
+    )
+    parser.add_argument(
         "--enable_chain_incumbent_formal_gates",
         action="store_true",
         help="V19 PR 1: consumption-only switch. When set, the two "
@@ -813,6 +820,9 @@ def build_agent_input(
     input_dict["runtime_formal_safety_factor"] = args.runtime_formal_safety_factor
     input_dict["runtime_watchdog_floor_seconds"] = args.runtime_watchdog_floor_seconds
     input_dict["runtime_verification_max_wall_seconds"] = args.runtime_verification_max_wall_seconds
+    input_dict["runtime_verification_pathological_min_unit_ms"] = (
+        args.runtime_verification_pathological_min_unit_ms
+    )
 
     # Step 12 / PR-12d D8a. `run_composition` is the SAME object `main()`
     # binds around `.run()` — passed in rather than re-composed here, so

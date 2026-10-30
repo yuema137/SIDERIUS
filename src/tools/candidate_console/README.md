@@ -286,8 +286,8 @@ overwrites an existing `tasks/` folder.
    the password field clears immediately and the token stays only in this
    document's memory. Home offers three starting points: **Quick start** (choose a
    task, then create an experiment setup from the ready-made research loop or open an
-   existing one; it opens in Workflow, where you set rounds, stop conditions and
-   training settings; the first round starts cold, so no earlier results are needed),
+   existing one; it opens in Workflow, where you set iterations, stop conditions and
+   training settings; the first iteration starts cold, so no earlier results are needed),
    **Open a workflow** and
    **Monitor runs**. Before Workflow and Run open, choose a task on **Task**
    (see [Choose a task](#choose-a-task)). On **Run**, a stepper shows where you are: check the inputs and
@@ -330,10 +330,10 @@ overwrites an existing `tasks/` folder.
    A loop ended early by a declared stop condition says why, in plain words.
    A condition set to **Pause and ask me** pauses the loop instead and reads
    "Waiting for your input", followed by what was met, for example "No improvement
-   for 3 bodies (best 0.81 at body 4, higher is better). Paused after body 7 of 12."
+   for 3 iterations (best 0.81 at iteration 4, higher is better). Paused after iteration 7 of 12."
    Check the per-iteration results, then choose **Review resume** and **Resume loop**
-   to continue with the next body. After **Review resume** you can type advice for
-   the next bodies (up to 4000 characters). Their proposal step receives it, and it
+   to continue with the next iteration. After **Review resume** you can type advice for
+   the next iterations (up to 4000 characters). Their proposal step receives it, and it
    replaces any advice an earlier resume gave. The box starts with this segment's
    advice. It locks once you select **Resume loop**, so a retry sends the same text.
    The resumed segment then shows "Resumed with your advice: …". If you pressed Stop while it was waiting, the run
@@ -371,8 +371,10 @@ overwrites an existing `tasks/` folder.
    unsaved-change guard. Saving does not run the declaration.
    Moving a card or editing a setting rewrites the whole Python file. If that would
    remove comments you wrote by hand, the Save step says how many and which ones
-   before you confirm. Saving into a read-only file is refused ("This file is
+   before you confirm. Saving changes into a read-only file is refused ("This file is
    read-only on disk"); make the file writable, then select **Save version** again.
+   If the content already matches the file on disk, saving shows **Nothing to save**,
+   even when the file is read-only.
    If the file changed on disk while you edited (for example, you saved it from
    another tab), the page shows **This workflow changed on disk** with what changed.
    Choose **Reapply my changes onto latest** to keep your edits, or **Reload from
@@ -380,13 +382,17 @@ overwrites an existing `tasks/` folder.
    **View** shows what changed, and **Restore this version as a draft** loads an older
    version as unsaved changes that you save like any other edit.
    The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
-   A **Judge** stop condition takes what the judge should look for, the first body it
+   An **iteration** is one pass through the research loop: Interpret results → Propose model →
+   Implement → Validate → Train & tune. A **tuning round** plans and runs one training
+   configuration inside Train & tune; **Tuning rounds per iteration** sets its limit
+   independently of **Final iteration**. A tuning round can need several attempts.
+   A **Judge** stop condition takes what the judge should look for, the first iteration it
    judges after, and what a failed judge call does; the judge model and its call limit
    come from the console operator's model settings.
    Each stop condition has **When met**: **Stop** (the default) ends the loop early;
    **Pause and ask me** pauses it and waits for you on Monitor. After you resume, the
    same condition asks again only after a new stretch counted from that pause (a
-   no-improvement condition needs its full number of bodies again; a metric threshold
+   no-improvement condition needs its full number of iterations again; a metric threshold
    asks once). Conditions set to Stop are checked first.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
    Until the canvas has a module, it says what to do next and offers **Start from a
@@ -395,7 +401,7 @@ overwrites an existing `tasks/` folder.
    Show developer details). After a successful save, **Next: Run** opens the **Run**
    page; it stays disabled, with the reason in its tooltip, while edits are unsaved or
    the project is not enabled for runs.
-   A step line (Task › Workflow › Run › Results) shows where you are.
+   A step line (Task › Workflow › Run › Monitor) shows where you are.
 
 The entry URLs are `/#home`, `/#workflow`, `/#run` and `/#monitor`. Old
 `/#slow-control` links (the page's former name) open Monitor, and an old
@@ -542,7 +548,7 @@ task first. The Task tab only shows the package; you change the package with you
 coding agent, then press **Refresh**.
 
 1. Connect, then open **Task** in the navigation bar (or the first step of the
-   Task › Workflow › Run › Results bar).
+   Task › Workflow › Run › Monitor bar).
 2. The left list shows every task in your console configuration with its version
    (`task_revision`) or **unversioned**. With exactly one task, the console selects
    it for you. Otherwise select one. The browser remembers your choice for this
@@ -895,10 +901,10 @@ budgets and diagnostic settings are demonstration choices, not scientific defaul
 Select **fit / tuning** in Workflow. The small inspector edits **Trial/formal mode**
 (`is_trial`), trial/formal budget minutes, epoch ceilings, portions and retention
 flags. Keep **Trial/formal mode** on, as the templates and the command line do: with
-it off, every round uses single-file mode, which only a task with TIDMAD topology can
+it off, every tuning round uses single-file mode, which only a task with TIDMAD topology can
 train in, so Run review refuses such a run for any other task before it calls a model.
 Templates start with **Health checks** set to Block on failure and **Result
-standing** set to Scientific: the task's blocking checks can invalidate a round, and
+standing** set to Scientific: the task's blocking checks can invalidate a tuning round, and
 Health-valid results count toward the run's best score. With Diagnostic, every
 result is excluded from that score, which suits exploring only. Open **Training
 settings** (collapsed, with the number of changed fields). **Default** removes the

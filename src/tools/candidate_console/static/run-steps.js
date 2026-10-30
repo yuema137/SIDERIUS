@@ -24,7 +24,7 @@
     not_started: 'The run did not start: its worker could not be launched. Open it in Monitor for details.',
     cancelled_before_start: 'The run was cancelled before it started: it never ran, and nothing was produced.',
     paused_for_input: 'The research loop paused and is waiting for your input. Open it in Monitor to read the summary, add advice and resume.',
-    paused: 'The research loop is paused at a completed body. Open it in Monitor to resume.',
+    paused: 'The research loop is paused at a completed iteration. Open it in Monitor to resume.',
     paused_stop_requested: 'The research loop is paused. Stop was requested; this run cannot continue.',
     resumed: 'The research loop was resumed as a new segment. Follow it in Monitor.',
   };

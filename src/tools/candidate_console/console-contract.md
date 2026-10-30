@@ -362,10 +362,17 @@ before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
 `task_composition_ref.parameter_rules` or the separate `TaskCompositionRef.parameter_rules`;
 training controls come from the captured settings' native launch schema, including
 its defaults. No task import or current editor/settings lookup occurs. Review
-refuses changed input bytes. The projection does not alter launch or its digest.
+refuses missing observations or changed input bytes with `reusable_preparation`.
+Multiple externals may supply task rules (across `proposal.input` and
+`optional.task-composition-ref`) or training settings when their extracted review
+values are equal. This includes one proposal input per proposer in independent
+proposal families. Conflicting extracted `ParameterRules` or `TrainingReview`
+values refuse with `reusable_preparation`; null rules are compared as a value.
+These errors use bounded messages without input paths or payloads.
+The projection does not alter launch or its digest.
 `TrainingReview.max_rounds` carries the captured native integer limit (10 when
-omitted), rendered as **Tuning rounds per body**. It is independent of the
-research-loop body count and cannot be replaced by a later editor draft.
+omitted), rendered as **Tuning rounds per iteration**. It is independent of the
+research-loop iteration count and cannot be replaced by a later editor draft.
 `tests/browser/tuning_rounds.mjs` witnesses the default 10, editing and saving 3,
 and preparing a run whose review facts and visible summary both show 3.
 
@@ -377,7 +384,7 @@ per-role unset caps reference the shared ceiling, without browser default resolu
 Rule JSON preserves exact null values. A workflow without training states that it
 has no training stage. Idle step 2 distinguishes disconnected, no open setup,
 runs disabled, and ready to prepare/open a run; singular no-improvement text says
-"1 completed body passes", plural says "2 completed bodies pass". The HTML declares
+"1 completed iteration passes", plural says "2 completed iterations pass". The HTML declares
 the existing same-origin logo as favicon to prevent the browser's unsupported `/favicon.ico` fetch.
 Targeted witnesses: `test_review_projects_prepared_training_and_task_locks` and
 `tests/browser/run_page_review.mjs` (real prepared review and launch/list refresh;
@@ -504,6 +511,14 @@ them; it never creates `data/<task_id>`. It finishes with the same load as `chec
 Under any umask it creates folders as 0700 and the token as 0600 (it sets umask
 077 for its own duration and `fchmod`s created folders). It never deletes, overwrites
 or follows a symlink. Refusals exit 2 and say which item failed:
+`WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
+or the library default profile, when it is a symlink, unreadable or has different
+bytes); `MissingSetting` from an existing console.json names the task field; an
+unusable `--workspace` gets its own message. Residual race: `core.durable_io`
+publishes by path, so after the no-follow
+parent check only a same-user process, which already owns the workspace, can swap
+a parent.
+
 Refusals from `ensure_owned_directory` during `init` name the full offending
 path for the workspace root, fixed children and derived task output directories.
 Non-directories/symlinks are
@@ -514,6 +529,9 @@ this command only when its optional `remedy: Path | None` keyword is an absolute
 path; `init` supplies it, while non-init callers with relative labels receive
 the diagnosis without a command. Ownership takes precedence when
 both ownership and mode fail. Existing directories are never repaired by `init`.
+For a writable workspace parent, the refusal also offers creating an owner-only
+subfolder with `mkdir -m 700 <base>/siderius` and selecting that folder with
+`--workspace`, preserving shared-parent permissions. Both paths are shell-quoted.
 `WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
 or the library default profile, when it is a symlink, unreadable or has different
 bytes); `MissingSetting` from an existing console.json names the task field; an
@@ -990,8 +1008,8 @@ only from this segment's native receipt `loop_trace` (`null` while no receipt
 exists; counts are cumulative over the run). `stop_reason` is the receipt's
 verified `loop_trace.stop_reason`, present only when a declared stop condition
 completed the loop early; Monitor renders it in plain words ("Research loop
-stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
-higher is better; best at body 3)", "… no improvement for 2 bodies …", or "… the judge
+stopped early after iteration 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
+higher is better; best at iteration 3)", "… no improvement for 2 iterations …", or "… the judge
 decided to stop") from the existing status poll, with recorded values unrounded.
 `input_request` is the receipt's verified `loop_trace.input_request`
 (`LoopInputRequest{reason, summary}`), present only when a declared
@@ -1000,7 +1018,10 @@ otherwise, so other loops' status bytes are unchanged. It is projected unchanged
 its meaning and readback belong to the worker contract ("Condition input pause").
 Monitor renders a populated `summary.what_was_tried` in the pause card as text:
 retained count, iteration number, proposed model, validation outcome, best valid
-score with metric direction, and optional tuning stop reason. Missing lists keep
+score with metric direction, and the tuning stop reason when tuning did not complete,
+as a plain label (`TUNING_STOP_LABELS` in `loop-control.js`, one entry per
+`HyperparamTuningOutput.termination_reason` other than `completed`; an unknown value
+is shown raw). Missing lists keep
 the previous display. Model names are never inserted as HTML.
 `judge_verdicts` (B2-5, read-only; omitted when empty) lists the receipt's verified
 `loop_trace.judge_verdicts` in boundary order as `JudgeVerdictView{iteration, decision,
@@ -1009,9 +1030,9 @@ abstention; `rationale`/`confidence` are copied from that verdict's judge eviden
 read by `agent.judge.evidence.read_call_evidence` (digest-checked, inside the run
 workspace) and left `null` for an abstention or an unreadable/foreign file, which never
 fails the status read. Monitor lists them under the loop state (`#loop-judge`) as
-"Judge after body N: stop · <rationale> (confidence …)". The receipt's body
+"Judge after iteration N: stop · <rationale> (confidence …)". The receipt's body
 numbers (`attempted_iterations`, `stop_reason.iteration` and its incumbent
-iterations) are whole-run indices, so a resumed segment's line says "Body numbers
+iterations) are whole-run indices, so a resumed segment's line says "Iteration numbers
 count the whole run, including earlier segments." The console never
 infers per-body progress from an active process. `stop_requested` and
 `pause_requested` (status only; `false` in the operation list) are read by
@@ -1025,6 +1046,26 @@ Stop and hides Pause once a Stop is recorded. Fixed and non-candidate
 operations omit the field. `StatusView.successor_operation_id` forwards the
 operations readback for a segment that a Resume has continued; the segment keeps
 its own receipt.
+
+An authored-loop observation with `state="unknown", reason="loop_process_exiting"`
+reports that the wrapper exited but its remaining processes are not confirmed
+stopped. Monitor keeps the outcome unresolved, offers no End or Resume, and does
+not classify it as terminal/failed.
+
+For an authored-loop root or resume operation with `state="operation_failed"` and
+`reason="loop_process_exited"`, Monitor says the worker was interrupted without a
+result and that no final iteration count is available. A resumed segment directs the
+operator to the paused predecessor to end the loop once worker processes have
+stopped; a root explains that new work may start once those processes stop. It does
+not promise a future receipt or offer Resume again. The operations owner projects
+`reason="loop_successor_failed"` on the verified paused predecessor only after
+the abandoned successor's sessions ended. Monitor preserves the successor link
+and shows **End loop here**, while hiding **Review resume** and **Resume loop**.
+The Stop endpoint rechecks recovery under the store lock. After the run-wide Stop
+is recorded, Monitor says the loop was ended after the resumed segment was
+interrupted; the historical paused receipt remains unchanged. No status schema
+or endpoint is added. `tests/browser/dead_loop_successor.mjs` executes these
+renderers with an in-memory DOM/API to check the controls, request and wording.
 
 `CandidateConsole.request_loop_stop(UUID)` delegates once to
 `candidate_operations.request_loop_stop`, which owns admission, identity checks,
@@ -1044,9 +1085,10 @@ before its running check); a 200 is therefore an idempotent acknowledgement,
 never evidence that the loop is still running.
 
 For an exited, verified paused tail, the same route records Stop after the
-operations owner checks its clean pause and absence of a successor under the
-admission lock. No receipt is rewritten and no new operation/status is invented.
-An existing successor refuses the request; a Stop recorded first blocks Resume.
+operations owner checks its clean pause and either absence of a successor or the
+verified abandoned-successor recovery above under the admission lock. No receipt
+is rewritten and no new operation/status is invented. Other existing successors
+refuse the request; a Stop recorded first blocks Resume.
 
 Monitor: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
@@ -1054,8 +1096,8 @@ Monitor: `loop-control.js` owns `window.renderLoopControl` and
 segment), state `active` and no receipt. A click disables the button for the pending request, so
 one click sequence issues one POST; after acknowledgement the button is hidden and
 the state reads "Stop requested … Not yet stopped." until a receipt arrives. A
-receipt `stopped` reads "stopped at a completed body boundary after N of M
-bodies"; `completed` reads "finished after N of M bodies" (and notes that a
+receipt `stopped` reads "stopped at a completed iteration boundary after N of M
+iterations"; `completed` reads "finished after N of M iterations" (and notes that a
 requested Stop did not take effect); `paused` is described under Pause and Resume;
 other statuses read "ended (status)". The
 acknowledgement is memory-only for the selected operation: a reload or another
@@ -1099,16 +1141,16 @@ set with `textContent` only.
 
 Monitor shows **Pause at next boundary** beside Stop for an active loop
 segment with no receipt; after acknowledgement it reads "Pause requested … Not yet
-paused." A `paused` receipt reads "paused at a completed body boundary after N of M
-bodies" and is resumable, never "ended". A `paused` receipt with `loop.input_request`
+paused." A `paused` receipt reads "paused at a completed iteration boundary after N of M
+iterations" and is resumable, never "ended". A `paused` receipt with `loop.input_request`
 instead reads "Waiting for your input." followed by what was met in plain words from
-the request (for example "No improvement for 3 bodies (best 0.81 at body 4, higher
-is better). Paused after body 7 of 12."; a judge request adds the rationale of that
-boundary's `judge_verdicts` entry), then "Review and resume to continue with body
+the request (for example "No improvement for 3 iterations (best 0.81 at iteration 4, higher
+is better). Paused after iteration 7 of 12."; a judge request adds the rationale of that
+boundary's `judge_verdicts` entry), then "Review and resume to continue with iteration
 N+1." or "A resumed segment continues this run." with a successor. A recorded
 Stop without a successor instead uses the ended display below. The exact recorded
 values stay in the state's tooltip. A paused status with `stop_requested` and no successor (either pause kind)
-reads "Ended by you at the pause after body N." and offers no Resume or End:
+reads "Ended by you at the pause after iteration N." and offers no Resume or End:
 the owner refuses a stopped run. This is a terminal display derived from the
 paused receipt and durable Stop marker; the native status remains `paused`. Resuming an input
 request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
@@ -1120,12 +1162,21 @@ Pending Stop and Resume requests disable competing actions. Success triggers a
 fresh Monitor read, including its status sentence and observation label; a
 reload derives the ended display from the durable marker. An unstopped paused
 receipt is labelled "Current status", not "Final status". A continued predecessor
-never offers End, even when a descendant later records Stop.
+offers End only for the verified abandoned-successor recovery above, never merely
+because a descendant later records Stop.
 
 The client generates one request UUID per reviewed digest
-and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
-the POST; a retry reuses it, and the record is released once status shows the
-successor. After a review, `#loop-resume-advice` (a textarea, `maxlength=4000`) is
+and retains it in `localStorage` at
+`siderius.loop-resume.v2/<store>/<predecessor>` before the POST. `<store>` is the
+opaque operations store id; `<predecessor>` is the lowercase predecessor operation
+UUID. The JSON record contains `origin` (`location.origin`),
+`expected_receipt_digest` (the reviewed receipt digest), `request_id` (the generated
+UUID), and optional `operator_advice` (trimmed text, omitted when empty). Reuse
+requires a matching origin and receipt digest. A legacy
+`siderius.loop-resume.v1:<UUID>` record with that origin and digest is moved on
+first use only when no store-scoped record exists. A retry reuses the record, and the
+record is released once status shows the successor. After a review,
+`#loop-resume-advice` (a textarea, `maxlength=4000`) is
 shown. It is prefilled with the retained record's advice when one exists, otherwise
 with this paused segment's own `operator_advice`. The first Resume attempt trims the
 text and fixes it: the retained record stores the request UUID together with
@@ -1578,12 +1629,12 @@ loop. Loop-only edits review as `LoopProposal` on the draft's anchor source; wit
 other draft edits pending, the document or draft proposal carries them. A third
 fieldset, Stop conditions, adds/removes at most one `metric_threshold` (metric id
 text plus threshold; the editor does not know the task metric), one
-`no_improvement` (completed bodies) and one `judge` (B2-5: `criterion` text,
-`min_completed_bodies`, `on_failure` fail/continue; exactly `JudgeStop`'s declared
+`no_improvement` (`completed_bodies`, labeled **Completed iterations without improvement**) and one `judge` (B2-5: `criterion` text,
+`min_completed_bodies` (labeled **First judged after iterations**), `on_failure` fail/continue; exactly `JudgeStop`'s declared
 fields). The judge route and `max_judge_calls` are operator-owned
 (`WorkflowLLMConfig.judge`) and are not authored here; the row says so. The capture
 review summary states a judge as "a language-model judge decides to stop ("…"), first
-after N completed bodies; a failed judge call …". The capture launch review refuses a judge the captured
+after N completed iterations; a failed judge call …". The capture launch review refuses a judge the captured
 model settings cannot run, before any launch (409 `judge_route`, the owner's own
 message forwarded): `reusable_candidate.admit_captured_judge_route` calls the worker's
 `candidate_worker.loop_judge.admit_judge_route` with the reviewed loop and the request's
@@ -1603,7 +1654,7 @@ does not draw a back-edge or annotate cards, and it shares the source-dirty,
 conflict and saving fences of the unified draft. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
 from the captured declaration, and the launch summary states "up to N iterations"
-or "none (one workflow body)", followed by "stops early when …" for each declared
+or "none (one workflow iteration)", followed by "stops early when …" for each declared
 stop condition.
 
 The Selection inspector groups one node's parameters (`editor-node-parameters.js`,
@@ -1915,7 +1966,7 @@ mid-word) from the log text already displayed; the
 Run page reads the last 64 KiB of the native, then operation, log once
 (`operationOutcome.readCause`) and appends the same line, for a failed launch in step 2
 and for a failed preparation in step 1 (#1145; a preparation's native log is the run's
-`inputs/preparation/worker.log`, which the step-1 status line also names). Loop body counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
+`inputs/preparation/worker.log`, which the step-1 status line also names). Loop iteration counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
 Operation facts. `#operation-observed` shows local time (ISO and UUID in its title).
 After a terminal state (`completed`/`operation_failed`, process `exited`, not
 `finishing`) has been read and its log drained to `observed_size`, the operation is
@@ -1935,7 +1986,7 @@ control sections. `navigation.js` owns `/#home`, `/#task`, `/#workflow`, `/#run`
 `#monitor` route with `history.replaceState` before routing, so old links keep working); `document.title` names Task, Workflow and
 Run. Navigation reads Home · Task · Workflow · Run · Monitor · Settings; the step bar
 `#step-indicator` reads Task (`#task`) › Workflow (`#workflow`) › Run (`#run`) ›
-Results (`#monitor`), its current step follows the view and Task is marked done
+Monitor (`#monitor`, `data-step="monitor"`), its current step follows the view and Task is marked done
 when a task is selected.
 
 Task selection (`task-selection.js`, `window.consoleTask`) is browser session state:
@@ -1982,8 +2033,8 @@ intent are persisted. The launch intent contains only origin/project navigation
 context, retained preparation identity, request digest and operation UUID; never
 source bytes, native requests or credentials. Operation-bearing records are keyed by the
 opaque operations store id: reusable intents (`…v2/<store>/<project>`) and loop
-Resume request ids (`siderius.loop-resume.v2/<store>/<predecessor UUID>`; a legacy
-`siderius.loop-resume.v1:<UUID>` with the same receipt digest is moved on first use).
+Resume request ids (see [Pause and Resume](#pause-and-resume) for the key, record
+contents and legacy migration).
 Preferences (theme, view flags, tour) and the last-opened operation UUID stay per
 origin because they are read before connecting. Settings (advanced) **Forget this
 browser's console data** (`browser-data.js`) removes every `siderius.*` key except
@@ -2081,7 +2132,7 @@ to 20 s for the saved source (else shows the editor's status, L-3) and focuses t
 advice field (L-6) through `editorAdvice.focusSettled()`, the bounded re-focus the
 gallery's template import also uses; it stops at the author's first click or key. The
 template is the loop whose Propose model `human_advice` socket is connected (managed
-`advice`), so that advice reaches the proposal agent. Rounds, stop conditions and
+`advice`), so that advice reaches the proposal agent. Iterations, stop conditions and
 training settings are then edited in the ordinary panel. The Run page's step-1 entry is
 one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
 handoff, so another entry can replace it. When this page created a preparation, the
@@ -2100,7 +2151,7 @@ status is not `prepared`; a native `paused` research loop is `resumed` (a
 requested; this run cannot continue."), `paused_for_input` (`loop.input_request`, "The
 research loop paused and is waiting for your input. Open it in Monitor to read the
 summary, add advice and resume.") or `paused` ("The research loop is paused at a
-completed body. Open it in Monitor to resume."); `null` otherwise (running, unresolved,
+completed iteration. Open it in Monitor to resume."); `null` otherwise (running, unresolved,
 prepared, accepted, rejected, stopped). For example a failed preparation reads "The preparation
 failed. The cause and its log are named below; start over to try again." and a failed
 launch "The run failed. The cause is shown below; open it in Monitor for the full log."
@@ -2123,7 +2174,7 @@ opens the gallery; disabled until connected) and the tour as a secondary link
 until `.inspector-capability-heading` exists. The page-bar `#problems-chip` mirrors the
 `.editor-problem` count that `editor-problems.js` renders (MutationObserver; hidden at 0)
 and focuses the first problem. A step line (`#step-indicator`, `role="navigation"`, not a
-`<nav>` element) shows Task › Workflow › Run › Results on Workflow (Task until a source is
+`<nav>` element) shows Task › Workflow › Run › Monitor on Workflow (Task until a source is
 open), Run and Monitor, with `aria-current="step"` and a done mark for completed steps; it
 is hidden on Home and on the global Settings page. Witness: `tests/browser/page_guidance.mjs`.
 
@@ -2400,7 +2451,7 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | --- | --- | --- | --- | --- |
 | Shell | Logo, nav, Connect / Connected line, theme, Help, Settings | Beginner | shown | Needed to reach any page and to get help |
 | Shell | About this console | Beginner | shown | One-line orientation, collapsed |
-| Shell | Step line Task › Workflow › Run › Results | Beginner | shown | Tells a new user where they are |
+| Shell | Step line Task › Workflow › Run › Monitor | Beginner | shown | Tells a new user where they are |
 | Home | Hero: logo + one sentence | Beginner | shown | Says what SIDERIUS does |
 | Home | Entry cards: Start from a template, Open a workflow, Monitor runs | Beginner | shown | The three first actions |
 | Home | Run a configured native chain | Advanced | gated | Externally reviewed captures; not a first-use path |
@@ -2860,9 +2911,10 @@ States: `observing` (child running; poll the same URL), `ready`, `failed`
 `unavailable` (`unavailable: {reason, hint}`; `reason` is `sandbox_missing`,
 `data_root_missing`, `manifest_missing` or `llm_config_unreadable`). The model
 profile is read because the child resolves its planner strategy exactly as the
-editor's task observation does. Console-side failure messages are truncated to
-`tools.setup_review.composition_models.FAILURE_MESSAGE_MAX_CHARS`, the same cap
-used for child failures.
+editor's task observation does. Console-side exceptions and package scope/storage/sample-count exceptions use
+`tools.setup_review.summary_errors.summary_error_message`: fixed, bounded filesystem,
+invalid-value or unexpected-error categories. Raw exception text and task-defined
+exception class names are never included by this owner.
 
 Observation: the request thread reads the manifest digest and model profile, then
 builds `CompositionJob(summary=TaskSummaryRequest(data_root, count_samples))` with
@@ -2883,13 +2935,20 @@ View fields:
 - `data_root`, `run_policy` (`TaskChoice` timeouts, network, devices,
   `candidate_environment_names` as names only, `allowed_output_types`). No credential
   file is read; no secret value can appear.
-- `data_volume`: `{files, bytes, complete, entry_cap}` from a no-follow walk
+- `data_volume`: `{files, bytes, complete, entry_cap, incomplete_reason}` from a no-follow walk
   (`os.scandir`, symlinks counted as entries and never followed), capped at
   100 000 entries and a five-second monotonic wall-time budget. Entries on a
   different `st_dev` from the data root are skipped (including mounted
   subdirectories). Entry/time caps, skipped devices and filesystem errors yield
-  `complete=false` with partial totals. The deadline is checked between filesystem
-  operations; it cannot interrupt an already-blocked kernel call.
+  `complete=false` with partial totals. `incomplete_reason` is `null` for complete
+  totals; otherwise `entry_cap`, `time_budget`, `other_device` or `unreadable`
+  (including vanished entries). A stopping cap/time budget takes precedence over
+  skipped-entry reasons; otherwise the first skip reason is retained. The Task tab
+  renders the reported reason and labels both totals as lower bounds.
+  An entry error skips only that entry; directory open/iteration errors skip the
+  remaining directory. The deadline is checked before visiting more entries or
+  directories, so completing the final entry after the deadline remains complete.
+  It cannot interrupt an already-blocked kernel call.
 - `package` (only when `ready`): `identity` (`semantic_fingerprint`,
   `task_data_path_id`, configured `task_revision`, `revision_matches`),
   `description` and `model_io` (the composed `task_description` and

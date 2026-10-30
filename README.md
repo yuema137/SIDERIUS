@@ -4,20 +4,20 @@
 **I**ntegrated **U**sing multi-agent **S**ystems
 
 **Turn your dataset and research question into an iterative ML experiment.**
-Work with your coding agent to define the task; SIDERIUS then helps propose
-models, implement them, train and evaluate them, and use the results to guide
-the next attempt.
+Work with your coding agent to define the task and write the experiment as a
+short Python workflow file; SIDERIUS then helps propose models, implement them,
+train and evaluate them, and use the results to guide the next iteration.
 
 ![Physics time-series results: SIDERIUS validation R² against S4D references](docs/assets/results/physics.svg)
 
 ![Cancer gene identification: best Formal test AUPRC with adaptive test feedback, against TREE references](docs/assets/results/cancer.svg)
 
-Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
+Sources: [SIDERIUS paper (arXiv:2610.14024)](https://arxiv.org/abs/2610.14024) ·
 [TREE paper](https://doi.org/10.1038/s41551-024-01312-5) ·
 [Comparison data and evaluation conditions](docs/assets/results/provenance.md).
 
 - **Run an experiment cycle:** go from a hypothesis to model code, measured results
-  and the next experiment, with a record of each attempt.
+  and the next experiment, with a record of each iteration.
 - **Evaluate more than a score:** declare task-specific validity checks alongside
   your metric, with controlled data access and reproducible evaluation rules.
 - **Choose how to explore:** start with a lightweight fixed workflow or let an
@@ -26,44 +26,28 @@ Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
 See [supported providers and models](docs/reference/model-qualification.md) for
 required model capabilities and the configurations tested so far.
 
-## Your first hour
-
-The quickest way to learn SIDERIUS is to run a small ready-made example in the
-browser console, then repeat the same steps with your own task. Both stages are
-written out command by command, with the output to expect, in the
-[first-hour path](docs/getting-started/README.md#your-first-hour-from-the-example-to-your-own-task).
-
-1. **Run the example.** Install, get the example bundle, create a console
-   workspace with `init --credential-file`, write the example data, register it
-   with `add-task --from-bundle`, start the console with `serve` and open it.
-   Then follow the tabs **Task → Workflow → Run → Monitor**.
-2. **Bring your own task.** Package your task with your coding agent, place it in
-   `siderius_workspace/tasks/<id>/`, register it with `add-task`, restart the
-   console, build a workflow for it and run it.
-
-You need a Linux machine with an NVIDIA GPU and bubblewrap; the first-hour path
-lists the [prerequisites](docs/getting-started/README.md#before-you-start) and
-defines its three terms: task, experiment setup and run.
-
 <a id="start-with-your-coding-agent"></a>
 
 ## Quick start with your coding agent
 
-Before you start, you need **Python 3.12+ and uv**, your dataset location, and a
-project directory outside this checkout for your task, settings and results.
-A real run trains models and needs an **NVIDIA GPU with CUDA** on the machine
-that runs it; there is no CPU mode. A run on a machine without one stops before
-any model call and says so. Setup checks and the synthetic Quickstart checks
-run on CPU.
-Use this checkout's own `.venv/bin/python` after installation. Provider keys
-are needed for real model calls; offline setup checks need none.
-The command line and the browser console read them from different places; see
-[API keys](docs/getting-started/installation.md#api-keys).
-The optional browser console also needs Linux with bubblewrap; run the
-[bubblewrap check](src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works).
+Before you start, you need:
+
+- **Python 3.12+ and uv.** After installation, use this checkout's own
+  `.venv/bin/python`.
+- **Your dataset location** and a **project folder outside this checkout** for
+  your task, settings and results.
+- **An NVIDIA GPU with CUDA** on the machine that runs training. There is no
+  CPU mode: a run on a machine without one stops before any model call and
+  says so. Setup checks and the synthetic Quickstart checks run on CPU.
+- **Provider API keys** for real model calls (offline setup checks need none).
+  The command line and the experimental browser console read keys from
+  different places; see [API keys](docs/getting-started/installation.md#api-keys).
+- **bubblewrap**, the Linux sandbox that preparing and running a workflow use.
+  Run the [bubblewrap check](src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works)
+  once on that machine.
 
 Follow [getting started](docs/getting-started/README.md) for the ordered setup,
-where to put credentials, and how to open the candidate console.
+where to put credentials, and the commands that prepare and run a workflow.
 
 Clone the repository and open it in your coding agent:
 
@@ -73,9 +57,10 @@ cd SIDERIUS
 uv sync --group dev --frozen
 ```
 
-**Both Professional and Assistant start with a short request.** They describe
-how you collaborate with your coding agent, not software mode switches.
-You can also prepare everything by hand.
+**Professional and Assistant are the main ways to use SIDERIUS 1.1.** Both
+start with a short request to your coding agent. They describe how you
+collaborate, not software mode switches; both produce the same files and use
+the same commands. You can also write everything by hand.
 
 | Way of working | Who leads? |
 | --- | --- |
@@ -88,13 +73,17 @@ For a lightweight fixed workflow, paste:
 
 ```text
 Use SIDERIUS in Professional style. My MNIST images and labels are in /data/mnist.
-Build a digit-classification task and a three-iteration fixed-workflow experiment
-in ~/mnist-research. Keep the test split out of search feedback; optimize validation
-accuracy. Help me set model routing and GPU/time budgets, then show me the saved
-configuration, launch script and result paths before running.
+Build a digit-classification task package in ~/mnist-research, then write the
+experiment as a workflow declaration ~/mnist-research/workflow.py: the interpreted
+training workflow as a research loop of at most three iterations. Keep the test
+split out of search feedback; optimize validation accuracy. Help me set model
+routing, training budgets and stop conditions, then show me workflow.py, the
+LLM profile, the preparation request and the result paths before preparing
+or launching anything.
 ```
 
-For orchestration, replace the execution request with:
+For orchestration, replace the words from "then write the experiment as a
+workflow declaration" through "at most three iterations." with:
 
 ```text
 Use orchestration instead of the fixed workflow. Set up the external project and
@@ -113,7 +102,8 @@ Paste:
 Use SIDERIUS in Assistant style. I have MNIST images and labels in /data/mnist;
 help me build and evaluate a digit classifier. Follow this repository's setup
 guidance, help me choose workflow or orchestration, and prepare an external
-project with the environment, task, experiment and launch script.
+project with the environment, task package, workflow declaration (workflow.py)
+and the commands to prepare and run it.
 ```
 
 Your agent follows the [setup guidance](docs/agent-reference/siderius-setup-review/SKILL.md):
@@ -128,10 +118,28 @@ missing decisions before launching. A [configuration review and HTML report](src
 is optional. See [getting started](docs/getting-started/README.md) for installation
 and detailed setup.
 
-Your agent can also save the experiment as an editable workflow file. The optional
-[browser console](src/tools/candidate_console/README.md) opens that file, can repeat
-it as a research loop that ends at an iteration limit or a stop condition you set,
-and lets you stop, pause and later resume the loop between iterations.
+### What your agent sets up
+
+With a fixed workflow, in either style, the experiment is an ordinary Python
+file in your project, so you can read every setting before anything runs:
+
+1. **Task package**: `task.yaml` and the plugins it names (data access, splits,
+   model input and output, main score, Health checks).
+2. **Workflow declaration** (`workflow.py`): which research steps run, your
+   advice to each step, training budgets and, for a research loop, its
+   iteration limit and stop conditions. Ready-made starting points are in
+   [`examples/workflow_declarations/`](examples/workflow_declarations/).
+3. **LLM profile** (`llm.json`): which model and provider serve each role.
+4. **Preparation and launch**: the agent prepares the workflow offline with
+   `python -m tools.candidate_prepare --reusable-request ...`, shows you what was
+   captured, and launches only when you say so with
+   `python -m tools.candidate_operations submit ...`. The same tool reports
+   status and logs, and stops, pauses or resumes a research loop between
+   iterations, optionally with new advice.
+
+The [workflow guide](docs/getting-started/README.md#write-and-run-a-workflow-declaration)
+lists these steps with their commands. An experimental browser console can also
+show and run the same files; see [below](#try-the-browser-console-experimental).
 
 ### Choose the execution: workflow or orchestration
 
@@ -139,20 +147,20 @@ Either collaboration style can use either execution approach:
 
 | Execution | What happens | When to choose it |
 | --- | --- | --- |
-| **Fixed workflow — lightweight starting point** | Research capabilities run in a predefined sequence, without an extra LLM deciding each next call. | Start quickly with lower coordination overhead and a predictable research loop. |
-| **Orchestration — flexible exploration** | An LLM caller chooses and combines capabilities as evidence arrives. | Explore beyond a fixed sequence, with more setup and potentially higher LLM cost. |
+| **Fixed workflow: lightweight starting point** | Research capabilities run in a predefined sequence, without an extra LLM deciding each next call. | Start quickly with lower coordination overhead and a predictable research loop. |
+| **Orchestration: flexible exploration** | An LLM (the orchestrator) chooses which research steps to call and combines them as evidence arrives. | Explore beyond a fixed sequence, with more setup and potentially higher LLM cost. |
 
 **Workflow keeps coordination lightweight; orchestration offers more room to
 adapt the research process.** In the paper's TIDMAD comparison, fixed workflows
-had the lowest estimated LLM cost, while orchestration without Data Analysis
-produced the most valid models and the best valid score. This demonstrates its
+had the lowest estimated LLM cost, while orchestration without the Data
+Analysis step (an agent that runs analysis code on your data) produced the most valid models and the best valid score. This demonstrates its
 potential, not a guarantee that orchestration wins on every task.
 
 [![Paper Figure 3: valid and non-valid TIDMAD models versus estimated LLM cost](docs/assets/paper/figure3.svg)](docs/assets/paper/figure3.svg)
 
-**Figure 3 — Exploration and LLM cost on TIDMAD.** The left panel counts valid
+**Figure 3. Exploration and LLM cost on TIDMAD.** The left panel counts valid
 models; the right counts non-valid models. Costs are estimates and exclude GPU
-training. See the [paper](https://zenodo.org/records/23071121) for the experimental
+training. See the [paper](https://arxiv.org/abs/2610.14024) for the experimental
 conditions, or the [orchestration setup guide](src/tools/orchestration_setup/README.md)
 to prepare your own caller and sandbox.
 
@@ -178,6 +186,30 @@ without changing the workflow code. See the [configuration guide](configs/llm/RE
 to copy a profile into your project and select it at launch. Model selection does
 not set a spending limit or guarantee better scores; paper replay keeps its
 [recorded experiment configurations](https://github.com/yuema137/siderius-exp).
+
+## Try the browser console (experimental)
+
+The browser console is **experimental** in SIDERIUS 1.1. It is useful for
+seeing every step once on a small example, and it can open, edit and run a
+workflow file, but its screens and settings may change between releases. Use
+the coding-agent route above for your research runs, and check the saved
+`workflow.py` rather than the screen when you need to know exactly what runs.
+
+The console path has two stages, written out command by command, with the
+output to expect, in the
+[console first-hour path](docs/getting-started/README.md#your-first-hour-from-the-example-to-your-own-task):
+
+1. **Run the example.** Install, get the example bundle, create a console
+   workspace with `init --credential-file`, write the example data, register it
+   with `add-task --from-bundle`, start the console with `serve` and open it.
+   Then follow the tabs **Task → Workflow → Run → Monitor**.
+2. **Bring your own task.** Package your task with your coding agent, place it in
+   `siderius_workspace/tasks/<id>/`, register it with `add-task`, restart the
+   console, build a workflow for it and run it.
+
+The console needs a Linux machine with an NVIDIA GPU and bubblewrap; the
+first-hour path lists the [prerequisites](docs/getting-started/README.md#before-you-start)
+and defines its three terms: task, experiment setup and run.
 
 ## Try an existing task with siderius-exp
 
@@ -207,7 +239,7 @@ and incur API charges.
 
 ## Paper and architecture
 
-Read [Beyond a Better Score: Long-Horizon Agentic ML Development and Evaluation Protocol for Physics Time Series](https://zenodo.org/records/23071121).
+Read [Beyond a Better Score: Long-Horizon Agentic ML Development and Evaluation Protocol for Physics Time Series](https://arxiv.org/abs/2610.14024).
 The paper studies scientifically valid model development on TIDMAD, TESS,
 Project8 and LIGO, combining composable research capabilities, scientific
 checks and exploration within compute budgets.
@@ -216,7 +248,7 @@ checks and exploration within compute budgets.
 
 [![Paper Figure 1: SIDERIUS infrastructure and typed capability contracts](docs/assets/paper/figure1.svg)](docs/assets/paper/figure1.svg)
 
-**Figure 1 — Infrastructure.** A human scientist, a fixed workflow, or an LLM
+**Figure 1. Infrastructure.** A human scientist, a fixed workflow, or an LLM
 orchestrator can call the same scientific capabilities through typed contracts.
 The caller chooses the calls, assembles their inputs, and owns control and
 history. Each capability owns its reasoning and tools, including executable
@@ -224,14 +256,15 @@ Data Analysis.
 
 [![Paper Figure 2: task specification and multilayer evaluation](docs/assets/paper/figure2.svg)](docs/assets/paper/figure2.svg)
 
-**Figure 2 — Evaluation.** The task package separates training objectives,
+**Figure 2. Evaluation.** The task package separates training objectives,
 validation monitoring, scientific ranking, and supporting evidence.
 Scoreability checks whether the declared metric can be computed; Health
-records applicable model/output checks and follows their configured blocking
-or observational policy. Offline behavioral review adds evidence for scientific
+records applicable model/output checks and follows their configured policy:
+**Blocking** (a failure invalidates the model) or **Recording** (the result is
+only stored). Offline behavioral review adds evidence for scientific
 acceptance without feeding its judgments back into search.
 
-These figures are exported from the [paper on Zenodo](https://zenodo.org/records/23071121).
+These figures are exported from the [paper on arXiv](https://arxiv.org/abs/2610.14024).
 Their source and export details are recorded in
 [`docs/assets/paper/README.md`](docs/assets/paper/README.md).
 
@@ -252,10 +285,13 @@ uv sync --group dev --frozen
   tests/unit/examples/test_quickstart_pack.py::test_shipped_manifest_composes_with_the_declared_values -q
 ```
 
-A real run needs a task package, external data, model/provider routing, a
-workspace for results and an NVIDIA GPU with CUDA. Preview the chosen launch command before execution;
-the chain's `--dry-run` prints child commands but does not prove that a task,
-provider account or training attempt will succeed. The
+A real run needs a task package, external data, an LLM profile, a folder for
+results and an NVIDIA GPU with CUDA. Preparing a workflow
+(`python -m tools.candidate_prepare`) is offline: it captures exactly what will
+run so you can review it, but it does not prove that your provider account
+works or that training will succeed. (The older chain launcher,
+`scripts/launch/run_chain.sh`, has its own `--dry-run` preview with the same
+limit.) The
 [getting-started guide](docs/getting-started/README.md) leads to the exact setup
 and first-run references.
 
@@ -264,15 +300,17 @@ and first-run references.
 | Choice | What it controls |
 | --- | --- |
 | Task package | Data meaning, model input/output, objective, metrics and validity checks |
-| Workflow | Which research steps run and what evidence passes between them |
-| Experiment settings | Provider/model routing, data scope, iterations, Trial/Formal rounds and resource budgets |
+| Workflow (`workflow.py`) | Which research steps run, what evidence passes between them, advice, the number of iterations and stop conditions of a research loop, tuning rounds per iteration, Trial/Formal tuning rounds and training budgets |
+| Run settings | Provider/model routing (the LLM profile, `llm.json`), plus time limits, network, devices and provider key names (the preparation request) |
 | Workspace | Where the run records its identity, generated models and results |
 
 For example, changing the metric changes the task's scientific meaning.
 Giving the same task more search time changes the experiment. Keep both choices
-explicit so recorded results can be interpreted and compared. Use a fresh
-workspace for an intentional new identity; resuming preserves the previous
-run's recorded inputs.
+explicit so recorded results can be interpreted and compared. A workspace
+records the settings that define its results (task, data scope, Health policy
+and workflow) when it starts. To change any of them on purpose, start a fresh
+workspace; resuming an existing one keeps its recorded inputs and refuses a
+changed setting.
 
 ## Find the right part
 

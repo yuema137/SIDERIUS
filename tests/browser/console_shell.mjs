@@ -149,7 +149,7 @@ try {
   await items.nth(1).waitFor();
   assert.equal(await items.count(), 2);
   assert.match(await items.nth(0).textContent(), /five_node · candidate/);
-  assert.match(await items.nth(0).textContent(), /3 of 3 bodies/);
+  assert.match(await items.nth(0).textContent(), /3 of 3 iterations/);
   assert.match(await page.locator('#operations-status').textContent(), /1 record could not be verified/);
   assert.ok(Math.abs((await left('#view-monitor .operations-panel')) - (await left('nav.actions a'))) <= 2, 'Monitor content aligns with nav');
   await items.nth(0).locator('a').click();

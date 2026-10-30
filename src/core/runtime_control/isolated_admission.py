@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from core.runtime_control.admission import AdmissionDecision
+from core.runtime_control.admission import AdmissionDecision, AdmissionExecutionConditions
 from core.runtime_control.gpu_accounting import GpuAccountingSnapshot
 from core.runtime_control.gpu_accounting import OccupancyBound as OccupancyBound
 from core.runtime_control.gpu_requirement_evidence import GpuRequirementOwnership
@@ -140,10 +140,12 @@ def evaluate_isolated_admission(
                     **evidence,
                     **decision.evidence,
                     "process_visibility": conditions.process_visibility,
-                    "effective_execution_conditions": {
-                        **conditions.model_dump(mode="json"),
-                        "refusal_enforcement": "phase_policy",
-                    },
+                    "effective_execution_conditions": AdmissionExecutionConditions.model_validate(
+                        {
+                            **conditions.model_dump(mode="json"),
+                            "refusal_enforcement": "phase_policy",
+                        }
+                    ).model_dump(mode="json"),
                 }
             }
         )

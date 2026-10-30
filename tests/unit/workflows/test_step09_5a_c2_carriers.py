@@ -149,6 +149,8 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "formal_training_scope_source": "operator",
     # Caller-configurable measurement window; None retains runtime defaults.
     "runtime_verification_max_wall_seconds": None,
+    # Optional slowdown floor; None preserves the verifier default and evidence.
+    "runtime_verification_pathological_min_unit_ms": None,
     # Data Analysis workflow integration (2026-09-15). Advice is transit-only
     # caller input and does not imply that the optional topology is enabled.
     "human_advice_analysis": None,

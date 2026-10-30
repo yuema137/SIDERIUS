@@ -19,7 +19,7 @@
   const dialog = element('dialog', '', document.body, 'quick-start'); dialog.id = 'quick-start-dialog';
   dialog.setAttribute('aria-labelledby', 'quick-start-title');
   element('h2', 'Quick start', dialog).id = 'quick-start-title';
-  element('p', 'Choose a task. A ready-made research loop is created for it as an experiment setup and opens in Workflow: set the rounds, stop conditions and training settings, add your advice, then save and run.', dialog, 'muted');
+  element('p', 'Choose a task. A ready-made research loop is created for it as an experiment setup and opens in Workflow: set the iterations, stop conditions and training settings, add your advice, then save and run.', dialog, 'muted');
   const taskLabel = element('label', 'Choose a task', dialog); taskLabel.htmlFor = 'quick-start-task';
   const taskSelect = element('select', '', dialog); taskSelect.id = 'quick-start-task';
   const taskState = element('p', '', dialog); taskState.id = 'quick-start-task-state'; taskState.setAttribute('role', 'status');

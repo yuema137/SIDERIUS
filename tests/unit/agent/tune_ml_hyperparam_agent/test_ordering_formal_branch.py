@@ -32,6 +32,7 @@ import pytest
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from examples.quickstart.plugins._quickstart_task import write_data_dir
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.scoring_stubs import stub_scoring
@@ -102,7 +103,8 @@ def formal_round(tmp_path):
         mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
         mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
         data_dir = tmp_path / "quickstart_data"
-        data_dir.mkdir(exist_ok=True)
+        # Batch-fit planning reads the composed dataset before skill dispatch.
+        write_data_dir(data_dir)
         deliverable_dir = tmp_path / "deliverables"
         deliverable_dir.mkdir(exist_ok=True)
         mock_sandbox.base_dir = str(deliverable_dir)

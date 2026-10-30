@@ -38,6 +38,7 @@ from core.runtime_control.pair_admission import (
     gib_from_mib,
     resolve_gpu_ceiling,
 )
+from core.runtime_control.process_visibility import ProcessVisibility
 
 #: How a run treats an unproven situation. Not a severity — two
 #: different postures with different obligations (§B-C4 2b).
@@ -166,6 +167,20 @@ ACCEPTED_ENFORCEMENT: frozenset[str] = frozenset(
 )
 
 
+class AdmissionExecutionConditions(BaseModel):
+    """Effective admission evidence, including delegation to ordinary phase policy.
+
+    Unlike the launch declaration in process_visibility, this record describes
+    the route actually taken after accounting and requirement checks.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    process_visibility: ProcessVisibility | None = None
+    headroom_policy: Literal["require_conservative_bound"]
+    refusal_enforcement: Literal["all_phase_modes", "phase_policy"]
+
+
 def stops_phase(
     enforcement: str, reason_code: str | None, *, evidence: Mapping[str, Any] | None = None
 ) -> bool:
@@ -194,12 +209,17 @@ def stops_phase(
     # Explicit isolation conditions precede the ordinary observation policy.
     if reason_code == "environment_headroom_unproven":
         return True
-    conditions = (evidence or {}).get("effective_execution_conditions")
+    raw_conditions = (evidence or {}).get("effective_execution_conditions")
+    conditions = (
+        AdmissionExecutionConditions.model_validate(raw_conditions)
+        if raw_conditions is not None
+        else None
+    )
     if (
         reason_code == "insufficient_headroom"
-        and isinstance(conditions, Mapping)
-        and conditions.get("process_visibility") == "namespace_limited"
-        and conditions.get("refusal_enforcement") == "all_phase_modes"
+        and conditions is not None
+        and conditions.process_visibility == "namespace_limited"
+        and conditions.refusal_enforcement == "all_phase_modes"
     ):
         return True
     if enforcement == "enforce":
