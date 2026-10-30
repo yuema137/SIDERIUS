@@ -34,6 +34,15 @@ into here one iteration at a time.
 manifest (with a **mandatory** `--data_dir`); LLM routing
 JSON; a `RestoredState` when resuming; pseudo-mode factories for $0 smokes.
 
+The run-level `is_trial` default is owned by
+`agent.schemas.hyperparam_tuning.DEFAULT_IS_TRIAL` (`True`). Launch configuration,
+standard CLI, proposer and tuner inputs/protocols, tuner metadata and authored
+templates derive from that owner.
+Omission enables trial/formal tuning; the existing forced final Formal round
+policy still applies. Explicit `False` / `--no-is_trial` retains legacy
+`single_file` behavior and is refused for composed non-TIDMAD profiles by
+`execute_tools.dataset_config.single_file_mode_refusal`.
+
 ## Outputs
 
 A list of `HyperparamTuningOutput`; the workspace record tree

@@ -380,9 +380,10 @@ DECLARED_LAUNCH_POLICY}` = `healthgate_mode="blocking"`, `result_authority="scie
 round while its recording checks only record (`observe_only` is refused at training
 admission when the task declares blocking checks); scientific standing lets
 Health-valid results form the run's authoritative score (with `diagnostic` every
-result is excluded from it). `is_trial=true` is trial/formal mode, the command line's default: the native
-default `false` is `single_file` mode, which Run review, training admission and tuner
-startup refuse for a task whose dataset profile has no TIDMAD topology
+result is excluded from it). `is_trial` derives from
+`agent.schemas.hyperparam_tuning.DEFAULT_IS_TRIAL` (true), shared with native
+launch and CLI defaults. Explicit `false` selects `single_file` mode, which Run
+review, training admission and tuner startup still refuse for a task whose dataset profile has no TIDMAD topology
 (`execute_tools.dataset_config.single_file_mode_refusal`). These values are written
 visibly in the rendered source and are editable in the Train & tune inspector
 (**Trial/formal mode** is a training control); all other launch values stay native

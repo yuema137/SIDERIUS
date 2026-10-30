@@ -20,6 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.schemas.hyperparam_tuning import DEFAULT_IS_TRIAL
 from workflows.definition import (
     ArgumentBinding,
     AuthoredLoop,
@@ -50,13 +51,11 @@ TemplateId = Literal["single-research-loop", "single-loop-with-advice", "single-
 # checks). Scientific standing lets Health-valid results count as the run's
 # authoritative score (a diagnostic run excludes every result from it); the author
 # may change both in the Train & tune inspector. Templates also
-# declare trial/formal mode (``is_trial``), the command line's default: the native
-# launch default (false) is single-file mode, which only a TIDMAD-topology task can
-# train in (``execute_tools.dataset_config.single_file_mode_refusal``).
+# declare the shared run-level trial/formal default visibly in authored source.
 DECLARED_LAUNCH_POLICY: dict[str, str | bool] = {
     "healthgate_mode": "blocking",
     "result_authority": "scientific",
-    "is_trial": True,
+    "is_trial": DEFAULT_IS_TRIAL,
 }
 # The smallest valid loop bound, as for a one-click added loop (loop.py): an
 # imported loop costs no more than one body until the author raises it.

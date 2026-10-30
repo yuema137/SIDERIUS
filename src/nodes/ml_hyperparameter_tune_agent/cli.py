@@ -18,7 +18,7 @@ import warnings
 from typing import get_args
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+from agent.schemas.hyperparam_tuning import DEFAULT_IS_TRIAL, HyperparamTuningInput
 from agent.schemas.ordering import parse_file_order_cli
 from core.run_seed_lock import run_seed_argument
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
@@ -153,8 +153,10 @@ def build_parser() -> argparse.ArgumentParser:
     # Trial mode arguments
     parser.add_argument(
         "--is_trial",
-        action="store_true",
-        help="Enable trial-explore mode with multi-file sparse sampling.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Trial/formal mode is enabled by default. Explicit --is_trial also pins trial portions; "
+        "--no-is_trial selects legacy single-file mode.",
     )
     parser.add_argument(
         "--trial_strategy",
@@ -725,7 +727,7 @@ def build_agent_input(
         "cleanup_denoised": args.cleanup_denoised,
         "retain_model_outputs": getattr(args, "retain_model_outputs", False),
         "retain_training_checkpoints": getattr(args, "retain_training_checkpoints", False),
-        "is_trial": args.is_trial,
+        "is_trial": DEFAULT_IS_TRIAL if args.is_trial is None else args.is_trial,
         # V19 PR 1 — consumption-only coupling switch (default OFF).
         "enable_chain_incumbent_formal_gates": args.enable_chain_incumbent_formal_gates,
     }
