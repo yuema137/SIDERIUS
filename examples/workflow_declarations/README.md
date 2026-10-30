@@ -23,6 +23,12 @@ cannot be parsed as a reusable `workflow.py`. Run B is the reusable v2 source in
 profiles cannot be combined into one graph. File-backed `expert_context` is not
 supported by reusable preparation; the handoff deliberately uses declared advice.
 
+Both runs spend real API money, and run B also consumes GPU time.
+For planning, allow roughly 15–25 LLM calls for run A and 20–40 for all three
+bodies of run B; these are source-based estimates, not measured totals or caps.
+Early termination reduces the count; repairs, additional loss implementations,
+interpretation history and tuning reflection can increase it.
+
 ## Prerequisites
 
 - Run commands from the selected checkout root, using its own `.venv` after
@@ -87,6 +93,12 @@ Inspect them before launch. To change the papers/search, edit `review_settings`
 in the generator and generate into fresh directories. The shipped reviews use
 separate optimization and regularization root papers, then a third review with
 one dynamic search round; there is no per-review advice field.
+
+`S2_API_KEY` is optional: without a key, Semantic Scholar paper lookup uses the
+unauthenticated pool and may be rate-limited. To use your key, add `S2_API_KEY`
+to `environment_names` in the generated `candidate_request.json` before launch
+and bind it in the launching shell alongside `OPENAI_API_KEY`; do not put the
+key value in the request. The generator passes only `OPENAI_API_KEY` by default.
 
 The `judge` adaptor uses `DebateJudgeStrategy(judge_output="synthesize",
 synthesize_count=1)`, `AllSelect` and `SingleDistribute`. It emits one merged

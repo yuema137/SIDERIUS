@@ -18,22 +18,15 @@ preparation_options.proposal_advice in run B's workflow.py BEFORE preparing B.
 Use at most 4000 characters in this example so the text also fits Resume advice.
 There is no file-backed expert_context handoff. See README.md for extraction.
 
-Run A has no authored loop and cannot pause/resume. For run B, use the operation
-store and paused segment ID produced by research_loop_request_input.py's recipe:
+S2_API_KEY is optional: without a key, Semantic Scholar paper lookup uses the
+unauthenticated pool and may be rate-limited. To use it, add "S2_API_KEY" to the
+generated candidate_request.json's environment_names before launch and bind the
+key in the launching shell; never put its value in the request. The generator
+passes only OPENAI_API_KEY by default.
 
-    .venv/bin/python -m tools.candidate_operations pause-loop \
-        --store-config "$SCENARIO/store.json" --operation-id "$SEGMENT"
-    .venv/bin/python -m tools.candidate_operations status \
-        --store-config "$SCENARIO/store.json" --operation-id "$SEGMENT"
-    .venv/bin/python -m tools.candidate_operations write-loop-resume \
-        --store-config "$SCENARIO/store.json" --operation-id "$SEGMENT" \
-        --advice-file "$SCENARIO/resume-advice.txt" --output "$SCENARIO/resume.json"
-    .venv/bin/python -m tools.candidate_operations submit \
-        --store-config "$SCENARIO/store.json" --request "$SCENARIO/resume.json"
-
-Wait for a paused receipt AND an exited wrapper before write-loop-resume. Advice
-is UTF-8 text, 1..4000 characters after trimming. Use a fresh output filename for
-each subsequent Resume. A plateau may request input automatically in run B.
+Run A has no authored loop and cannot pause/resume. For run B's preparation,
+operation ID, pause and write-loop-resume --advice-file commands, follow
+research_loop_request_input.py and the ordered recipe in README.md.
 """
 
 import argparse

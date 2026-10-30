@@ -367,6 +367,13 @@ declaration. Use the two-step scenario below.
 
 ## 9. Two-step scenario: literature findings, then a loop
 
+Runnable Quickstart examples: use
+[`literature_debate_judged.py`](../../examples/workflow_declarations/literature_debate_judged.py)
+for run A and
+[`research_loop_request_input.py`](../../examples/workflow_declarations/research_loop_request_input.py)
+for run B. The [example README](../../examples/workflow_declarations/README.md)
+gives the ordered preparation, launch, findings handoff and pause/resume commands.
+
 1. **Run A: literature, judged.** Write a concrete document with
    `execution_profile="native-literature-judged/v1"`, several reviews that
    differ by `root_papers` and `dynamic_search`, and a synthesizing judge
