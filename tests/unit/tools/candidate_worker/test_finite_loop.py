@@ -691,7 +691,7 @@ def test_candidate_llm_requests_are_seed_invariant(
 
 
 def test_met_input_request_pauses_with_summary_and_leaves_next_slot_unused(
-    prepared, loop_tuner, monkeypatch
+    prepared, loop_tuner, interpretation_provider, monkeypatch
 ):
     """Fails if a met ``request_input`` condition completes or continues the loop, records
     its pause as a stop reason, or summarizes facts other than the verified scores."""
@@ -717,7 +717,9 @@ def test_met_input_request_pauses_with_summary_and_leaves_next_slot_unused(
         last_improvement_iteration=1,
         incumbent=high,
     )
-    assert trace.input_request.summary == InputRequestSummary(
+    assert trace.input_request.summary.model_copy(
+        update={"what_was_tried": ()}
+    ) == InputRequestSummary(
         iteration=3,
         final_iteration=4,
         metric_id=metric.id,

@@ -1016,6 +1016,12 @@ decided to stop") from the existing status poll, with recorded values unrounded.
 `on_met="request_input"` condition paused the loop ("Pause and ask me"); omitted
 otherwise, so other loops' status bytes are unchanged. It is projected unchanged;
 its meaning and readback belong to the worker contract ("Condition input pause").
+Monitor renders a populated `summary.what_was_tried` in the pause card as text:
+retained count, iteration number, proposed model, validation outcome, best valid
+score with metric direction, and the tuning stop reason when tuning did not complete,
+as a plain label (`TUNING_STOP_LABELS` in `loop-control.js`, one entry per
+`HyperparamTuningOutput.termination_reason` other than `completed`; an unknown value
+is shown raw). Missing lists keep the previous display. Model names are never inserted as HTML.
 `judge_verdicts` (B2-5, read-only; omitted when empty) lists the receipt's verified
 `loop_trace.judge_verdicts` in boundary order as `JudgeVerdictView{iteration, decision,
 rationale, confidence}`: `decision` is `stop`/`continue`, or `null` for a recorded

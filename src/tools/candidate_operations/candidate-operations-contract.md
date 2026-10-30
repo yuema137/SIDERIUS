@@ -1344,6 +1344,11 @@ admission, refusals and idempotency are the owner's:
 | `review-loop-resume` | `review_loop_resume(config, operation_id)` | paused `OperationSnapshot` with `receipt_digest` |
 | `write-loop-resume ... --output FILE [--advice-file TEXT_FILE]` | review, then construct the request below | the saved `CandidateLoopResumeOperation` |
 
+For a condition input pause, `review-loop-resume` includes the worker-owned
+`receipt.loop_trace.input_request.summary.what_was_tried` when populated. Its
+bounded per-iteration projection and legacy omission behavior are defined in the
+worker contract's "Condition input pause" section; the CLI prints it unchanged.
+
 `--advice-file` reads UTF-8 operator advice into `operator_advice`. Invalid advice
 (non-UTF-8, empty after trimming, over 4000 characters, control or format
 characters; CRLF line breaks are first normalized to LF, a lone CR is refused) exits 2

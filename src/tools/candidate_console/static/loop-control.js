@@ -3,6 +3,13 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const session = () => window.consoleSession;
+  // Human-readable tuning stop reasons (HyperparamTuningOutput.termination_reason) for the pause summary.
+  const TUNING_STOP_LABELS = {
+    aborted_fail_rounds: 'consecutive tuning rounds failed until the failure limit',
+    aborted_by_gate: 'stopped by a validity gate',
+    scope_violation: 'a data scope violation',
+    infrastructure_abort: 'an infrastructure or environment check failed',
+  };
   // request: per selected operation. Recorded Stop/Pause comes from the server status
   // (loop.stop_requested/pause_requested, read from the worker's durable markers), so a
   // reload or another tab still sees it (M-1); the receipt decides what took effect.
@@ -39,7 +46,13 @@
       const verdict = (loop.judge_verdicts || []).find(item => item.iteration === reason.iteration);
       met = `The judge asked for your input${verdict?.rationale ? ': ' + verdict.rationale : ''} (${best}).`;
     } else met = `Condition ${reason.kind} was met (${best}).`;
-    return `Waiting for your input. ${met} Paused after iteration ${summary.iteration} of ${summary.final_iteration}.`;
+    const tried = (summary.what_was_tried || []).map(body => {
+      const valid = body.validation_passed == null ? 'unknown' : body.validation_passed ? 'passed' : 'failed';
+      const score = body.best_valid_score == null ? 'no valid score' : `${body.metric_id} ${number(body.best_valid_score)} (${body.direction} is better)`;
+      return `Iteration ${body.iteration}: ${body.model_name}; validation ${valid}; ${score}${body.stop_reason ? '; tuning stopped: ' + (TUNING_STOP_LABELS[body.stop_reason] || body.stop_reason) : ''}.`;
+    });
+    const attempts = tried.length ? ` What was tried (latest ${tried.length} completed ${tried.length === 1 ? 'iteration' : 'iterations'} in this segment): ${tried.join(' ')}` : '';
+    return `Waiting for your input. ${met} Paused after iteration ${summary.iteration} of ${summary.final_iteration}.${attempts}`;
   }
   // Recorded JudgeStop verdicts (B2-5): each boundary's decision, with the judge's own
   // rationale from its evidence when the call decided; an abstention says so.
