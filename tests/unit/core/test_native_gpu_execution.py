@@ -817,7 +817,9 @@ def test_inference_dispatch_binds_actual_cpu_checkpoint_and_current_batch(
         },
         expected_custom_loss_snapshot=None,
     )
-    monkeypatch.setattr(gpu, "build_task_probe_data", lambda **kw: bound_spec.task_probe_data)
+    monkeypatch.setattr(
+        gpu, "build_attempt_task_probe_data", lambda **kw: bound_spec.task_probe_data
+    )
     monkeypatch.setattr(gpu, "candidate_evaluation_executor", lambda: None)
     seen = []
 
