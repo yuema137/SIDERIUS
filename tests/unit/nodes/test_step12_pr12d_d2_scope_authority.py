@@ -279,7 +279,9 @@ class TestDifferentialOracleUnderTidmad:
     def test_the_legacy_single_file_notice_is_byte_identical(self):
         from nodes.ml_hyperparameter_tune_agent.planning import _no_sample_set_notice
 
-        assert _no_sample_set_notice("single_file", 6) == "  Legacy mode: file_index=6"
+        assert (
+            _no_sample_set_notice("single_file", 6, composed=False) == "  Legacy mode: file_index=6"
+        )
 
     def test_the_deliverable_spec_is_unchanged_for_a_tidmad_profile(self):
         from execute_tools.deliverable_spec import (
@@ -326,7 +328,7 @@ class TestDeclaredAbsence:
     def test_the_no_sample_set_notice_names_the_task_owned_scope(self):
         from nodes.ml_hyperparameter_tune_agent.planning import _no_sample_set_notice
 
-        notice = _no_sample_set_notice("formal", None)
+        notice = _no_sample_set_notice("formal", None, composed=False)
         assert "Task-owned scope" in notice
         assert "Legacy mode" not in notice
 
