@@ -68,6 +68,8 @@ Starting points in [`examples/workflow_declarations/`](../../examples/workflow_d
 | `reusable_training.py` | Propose → Implement → Validate → Train & tune, reusable |
 | `reusable_candidate.py` | Reusable shape with a literal external; authoring and resolution only, not a preparation starting point |
 | `native_training.py` | Script that writes a concrete (v1) four-stage document and its JSON inputs; never launches |
+| `literature_debate_judged.py` | Script that writes run A's concrete (v1) three-review debate/synthesis request; never launches |
+| `research_loop_request_input.py` | Run B's reusable three-iteration Quickstart loop, with declared proposal advice and plateau-triggered input requests |
 
 ## 2. Externals
 
@@ -367,6 +369,13 @@ In v1.1.0 a loop and literature-judged aggregation cannot run in one
 declaration. Use the two-step scenario below.
 
 ## 9. Two-step scenario: literature findings, then a loop
+
+Runnable Quickstart examples: use
+[`literature_debate_judged.py`](../../examples/workflow_declarations/literature_debate_judged.py)
+for run A and
+[`research_loop_request_input.py`](../../examples/workflow_declarations/research_loop_request_input.py)
+for run B. The [example README](../../examples/workflow_declarations/README.md)
+gives the ordered preparation, launch, findings handoff and pause/resume commands.
 
 1. **Run A: literature, judged.** Write a concrete document with
    `execution_profile="native-literature-judged/v1"`, several reviews that
