@@ -514,6 +514,9 @@ this command only when its optional `remedy: Path | None` keyword is an absolute
 path; `init` supplies it, while non-init callers with relative labels receive
 the diagnosis without a command. Ownership takes precedence when
 both ownership and mode fail. Existing directories are never repaired by `init`.
+For a writable workspace parent, the refusal also offers creating an owner-only
+subfolder with `mkdir -m 700 <base>/siderius` and selecting that folder with
+`--workspace`, preserving shared-parent permissions. Both paths are shell-quoted.
 `WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
 or the library default profile, when it is a symlink, unreadable or has different
 bytes); `MissingSetting` from an existing console.json names the task field; an

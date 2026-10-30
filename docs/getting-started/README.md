@@ -253,8 +253,12 @@ you own; the console workspace is created inside it) and
    [Credentials](../../src/tools/candidate_console/README.md#credentials) explains
    the file formats and what happens when `console.json` already exists.
    The workspace's parent folder (`/absolute/project` above) must be owned by you
-   and not writable by group or others, or `init` refuses it; `mkdir -p` under a
-   umask of 002 creates such folders, so fix one with `chmod 700 /absolute/project`.
+   and not writable by group or others, or `init` refuses it. For a folder meant
+   only for you, use `chmod 700 /absolute/project`. On a shared HPC filesystem,
+   keep collaborators' access to the shared folder: create a private subfolder
+   with `mkdir -m 700 /absolute/project/siderius`, then rerun `init` with
+   `--workspace /absolute/project/siderius` and use
+   `/absolute/project/siderius/siderius_workspace` in the steps below.
 
 4. **Write the example data into the workspace.**
 
