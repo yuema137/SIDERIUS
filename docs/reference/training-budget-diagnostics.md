@@ -78,6 +78,10 @@ as `elapsed_ms`; omitting it retains one-unit timing semantics. For example,
 exempt from relative-slowdown checks. Equality meets the floor; the ratio
 comparison remains strict. Sub-floor observations still contribute to stability,
 prediction and evidence requirements.
+Slow observations are recorded in measurement details. An explicit `max_unit_ms`
+limit fails immediately after stabilization, independently of the slowdown floor.
+These checks do not change data selection, model size, resource budgets or
+prediction-watchdog enablement.
 
 The default implements the verification goal of "seconds to protect against
 hours": four qualifying observations cost at least 0.4 seconds, and 100 such

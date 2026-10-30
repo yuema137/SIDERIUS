@@ -327,8 +327,8 @@ def test_init_refuses_a_directory_owned_by_another_user(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("name", ["parent", "parent with spaces"])
-def test_init_refuses_a_group_writable_parent_with_the_chmod_fix(tmp_path, name):
-    """Defect: a group/other-writable parent is refused without naming the path or the fix."""
+def test_init_refuses_a_group_writable_parent_with_private_folder_advice(tmp_path, name):
+    """Defect: chmod-only advice removes collaborators' access to a shared parent."""
     from tools.candidate_console.workspace import WorkspaceRefused
 
     parent = tmp_path / name
@@ -338,6 +338,9 @@ def test_init_refuses_a_group_writable_parent_with_the_chmod_fix(tmp_path, name)
         init_workspace(str(parent))
     assert f"workspace parent {parent.resolve()} must not be writable" in str(refusal.value)
     assert f"chmod 700 {shlex.quote(str(parent.resolve()))}" in str(refusal.value)
+    private = shlex.quote(str(parent.resolve() / "siderius"))
+    assert f"mkdir -m 700 {private}" in str(refusal.value)
+    assert f"then use --workspace {private}" in str(refusal.value)
     assert not (parent / "siderius_workspace").exists()
 
 
