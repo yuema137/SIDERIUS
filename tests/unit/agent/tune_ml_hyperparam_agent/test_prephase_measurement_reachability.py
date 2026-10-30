@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import re
 
 import pytest
 
@@ -127,9 +128,9 @@ class TestTheCallSiteExists:
         """O-7 requires stopping BEFORE formal GPU work. A measurement
         after `_run_skill('training_skill', ...)` would be a post-mortem."""
         source = tuner_lifecycle_source()
-        assert source.index("_handle_prephase_gpu_measurement(") < source.index(
-            '_run_skill("training_skill"'
-        )
+        training_call = re.search(r'_run_skill\(\s*"training_skill"', source)
+        assert training_call is not None, "the lifecycle must reach the literal training skill"
+        assert source.index("_handle_prephase_gpu_measurement(") < training_call.start()
 
 
 class TestApplicability:

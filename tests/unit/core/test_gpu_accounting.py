@@ -399,3 +399,51 @@ class TestDeviceBaseline:
         gpu = f"0, {UUID_A}, 40000, 32607\n"
         snap = sample_device_baseline(DEV_A, runner=make_runner(gpu, ""))
         assert snap.device_free_mib == 0
+
+
+@pytest.mark.parametrize("query_kind", ["gpu", "compute-apps"])
+@pytest.mark.parametrize("failure", ["timeout", "nonzero_exit"])
+@pytest.mark.parametrize("isolated", [False, True])
+def test_failed_queries_reach_admission_as_transient(monkeypatch, query_kind, failure, isolated):
+    """Real query exceptions must not collapse into persistent missing telemetry."""
+    import subprocess
+
+    from core.runtime_control.admission import evaluate_gpu_admission, stops_phase
+    from core.runtime_control.process_visibility import PROCESS_VISIBILITY_ENV
+
+    if isolated:
+        monkeypatch.setenv(PROCESS_VISIBILITY_ENV, "namespace_limited")
+    else:
+        monkeypatch.delenv(PROCESS_VISIBILITY_ENV, raising=False)
+
+    def runner(cmd, **kwargs):
+        if any(arg.startswith(f"--query-{query_kind}=") for arg in cmd):
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(cmd, 10)
+            raise subprocess.CalledProcessError(1, cmd)
+        return _Completed(GPU_ONE)
+
+    snapshot = sample(100, DEV_A, runner=runner)
+    baseline = sample_device_baseline(DEV_A, runner=runner)
+    assert not snapshot.telemetry_available
+    assert snapshot.query_failure == baseline.query_failure == failure
+    decision = evaluate_gpu_admission(
+        snapshot=snapshot, mode="formal", requirement_mib=None, requirement_provenance=None
+    )
+    assert decision.refusal_kind == "transient_sampling"
+    assert stops_phase("enforce", decision.reason_code, evidence=decision.evidence)
+    if isolated:
+        assert stops_phase("observe_only", decision.reason_code, evidence=decision.evidence)
+
+
+def test_missing_query_executable_remains_persistent():
+    from core.runtime_control.admission import evaluate_gpu_admission
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("nvidia-smi")
+
+    snapshot = sample(100, DEV_A, runner=missing)
+    decision = evaluate_gpu_admission(
+        snapshot=snapshot, mode="formal", requirement_mib=None, requirement_provenance=None
+    )
+    assert decision.refusal_kind == "environment"

@@ -101,3 +101,28 @@ a run had no environment override. Estimator source qualification changes with
 this owner; never relax historical identity validation or rewrite frozen records
 to hide it. Focused CPU tests cover resolution, finite arithmetic, both admission
 paths and CLI refusals; they do not constitute physical GPU qualification.
+
+
+## Query failure and tuner recovery
+
+`gpu_accounting._run_query` distinguishes `GpuQueryFailure.TIMEOUT` (subprocess
+`TimeoutExpired`) and `NONZERO_EXIT` (`CalledProcessError`) from unavailable
+telemetry (`None`). Both `sample` and `sample_device_baseline` preserve the typed
+failure in their snapshot `query_failure` field, with no fabricated occupancy.
+The optional field is omitted from serialized snapshots when absent.
+
+Ordinary formal admission maps these failures to `measurement_unavailable` with
+`detail="sampler_error"`; ordinary trial behavior is unchanged. Isolated admission
+first validates process visibility, then maps typed query failure to
+`environment_headroom_unproven` with the same detail. This retains unconditional
+refusal under all enforcement modes while identifying retryable sampling.
+`AdmissionDecision.refusal_kind` owns the recovery classification. The tuner
+phase owner consumes it using the bounded existing attempt allowance and short
+backoff documented in the tuner contract. Missing executable/UUID/telemetry and
+invalid visibility are not transient query failures. `process_visibility.py`
+is unchanged. Protected native execution recovery remains issue #1280.
+
+Focused evidence: `test_gpu_accounting.py` exercises timeout and nonzero exit in
+both query stages, ordinary/isolated admission, baseline transport and persistent
+missing-executable behavior. Tuner integration covers recovery, exhaustion and
+no replanning; its injected-sleeper regression checks the backoff cap.

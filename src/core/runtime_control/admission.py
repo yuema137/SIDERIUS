@@ -92,8 +92,9 @@ RESOURCE_REJECTIONS: frozenset[str] = frozenset({"insufficient_headroom"})
 #: `device_identity_mismatch` compares the requirement's measured UUID
 #: with the current occupancy UUID. Physical device indices are not identity.
 AdmissionDetail = Literal[
-    # under measurement_unavailable
+    # under measurement_unavailable or environment_headroom_unproven
     "sampler_error",
+    # under measurement_unavailable
     "telemetry_unavailable",
     "device_identity_mismatch",
     "inconsistent_accounting",
@@ -113,6 +114,7 @@ _DETAIL_FOR_REASON: dict[str, frozenset[str]] = {
         }
     ),
     "policy_unavailable": frozenset({"invalid_admission_mode"}),
+    "environment_headroom_unproven": frozenset({"sampler_error"}),
 }
 
 #: The only accepted postures. `diagnostic` is deliberately NOT accepted:
@@ -323,8 +325,8 @@ class AdmissionDecision(BaseModel):
     #: `None` exactly when admitted. Enforced, so a refusal cannot be
     #: recorded without saying what refused it.
     reason_code: AdmissionReason | None = None
-    #: Set only under `measurement_unavailable`, naming how the
-    #: measurement failed.
+    #: Names how measurement failed; sampler_error also accompanies an
+    #: isolated environment_headroom_unproven refusal.
     detail: AdmissionDetail | None = None
     #: Which tier of the §2a priority order answered — or `unavailable`
     #: when nothing did, which trial mode records rather than hides.
@@ -333,6 +335,19 @@ class AdmissionDecision(BaseModel):
     #: Every figure used, so the decision is auditable rather than
     #: asserted. Absent keys mean the quantity was unavailable.
     evidence: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def refusal_kind(self) -> Literal["resource", "transient_sampling", "environment"]:
+        """Recovery classification; enforcement still decides whether to stop a phase.
+
+        Only a failed sampler call is retryable without changing the candidate.
+        Missing telemetry, invalid accounting and missing policy require repair.
+        """
+        if self.reason_code in RESOURCE_REJECTIONS:
+            return "resource"
+        if self.detail == "sampler_error":
+            return "transient_sampling"
+        return "environment"
 
     @model_validator(mode="after")
     def _a_refusal_must_say_why(self) -> AdmissionDecision:
@@ -485,6 +500,8 @@ def evaluate_ordinary_gpu_admission(
             detail="invalid_admission_mode",
         )
 
+    if isinstance(snapshot, GpuAccountingSnapshot) and snapshot.query_failure is not None:
+        sampling_error = f"nvidia-smi query failed: {snapshot.query_failure.value}"
     if sampling_error is not None:
         # No reading was obtained. This is deliberately not a caller-side
         # `return None`: swallowing it there would make formal mode fail

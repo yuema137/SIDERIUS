@@ -414,7 +414,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `secondary_metric_errors` (per record) | `dict[str, str]` | **Step 10 / P2b** — diagnostic PROVENANCE for a declared secondary whose evaluation CRASHED: metric id → a concise one-line diagnostic, also printed. Deliberately NOT a scientific state — a crash produced no contract verdict, so recording a `NotScoreableResult` would fabricate a measurement. The interpreter projects such a secondary as `unavailable`. A `ScopeViolationError` is NEVER recorded here: it is re-raised so the existing outer handler terminates the run, because "observational" bounds ordinary secondary outcomes, not framework-integrity failures. |
 | `per_sample_evidence` (HealthGate context) | `PerSampleEvidence` | **Step 08b C6 / D18 (2026-08-18)** — whether the round's metric produces per-sample evidence at all, carried into `HealthCheckContext` beside `file_vector` rather than collapsed into it. Derived once, by `PerSampleEvidence.for_per_sample(metric_result.per_sample)`: `None` → `scalar_only`, a list (even an empty one) → `available`, and the default `undeclared` for every pre-scoring gate. Before this, a scalar-only metric presented per-file checks with `[]`, which reads as "no files" and PASSES — inapplicability recorded as health. Health consumes this CAPABILITY only and never the metric scalar. Two of the three executable tracks (Pets accuracy, DAVIS global MSE) are scalar-only; TIDMAD is not, so TIDMAD behaviour is unchanged. |
 | `consecutive_fail_rounds_at_exit` | `int` | Terminal value of the loop's consecutive-failure counter. `0` on a healthy completion; equals `max_fail_rounds` when the loop aborted on the trigger. |
-| `termination_reason` | `Literal["completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]` | Why the loop exited. `"aborted_by_gate"` is HISTORICAL (pre-F-SCANC-1 records only; the SKIP_ITER producer was retired 2026-08-26 and the member stays so old records deserialize). `"infrastructure_abort"` (C9c, 2026-07-30) means the runtime EVIDENCE CHANNEL failed or training admission could not establish environment evidence — registry, persistence, schema/protocol, probe executor, telemetry, communication, or a policy invariant. It outranks every other reason and halts the CHAIN: `run_one_iteration.py` writes the `.chain_halted` sentinel with `reason="infrastructure_abort"` and exits 3, so neither the foreground loop nor a queued SDSC `afterany` job runs another candidate on the same broken environment. A candidate-class rejection stays attempt-local. |
+| `termination_reason` | `Literal["completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]` | Why the loop exited. `"aborted_by_gate"` is HISTORICAL (pre-F-SCANC-1 records only; the SKIP_ITER producer was retired 2026-08-26 and the member stays so old records deserialize). `"infrastructure_abort"` (C9c, 2026-07-30) means the runtime EVIDENCE CHANNEL failed or training/inference admission could not establish environment evidence — registry, persistence, schema/protocol, probe executor, telemetry, communication, or a policy invariant. It outranks every other reason and halts the CHAIN: `run_one_iteration.py` writes the `.chain_halted` sentinel with `reason="infrastructure_abort"` and exits 3, so neither the foreground loop nor a queued SDSC `afterany` job runs another candidate on the same broken environment. A candidate-class rejection stays attempt-local. |
 | `started_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` entry. |
 | `finished_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` exit. |
 
@@ -667,13 +667,41 @@ half, which lives in the attempt loop's control flow and is unchanged here.
 **Accounting.** A refusal consumes the current attempt slot (planning,
 pre-flight and admission really ran, and not consuming it risks refusing
 forever while the device stays busy) but is **not** a candidate failure:
-no score, no negative planner evidence, no incumbent update, no retry.
-Training admission refuses with `environment_headroom_unproven`,
+no score, no negative planner evidence, no incumbent update. Only transient
+sampling failures receive bounded same-phase retries, as described below.
+Training and inference admission refuse with `environment_headroom_unproven`,
 `measurement_unavailable`, or `policy_unavailable` when execution evidence or
-policy cannot establish a runnable environment. `execution.run_training`
-persists the refusal record, then returns its typed `AdmissionDecision` in
-`TrainingOutcome.environment_admission_refusal`. The loop ends immediately:
+policy cannot establish a runnable environment. The shared owner
+`phase_admission.run_admitted_skill` normalizes the decision and uses core
+`AdmissionDecision.refusal_kind`: `resource`, `transient_sampling`, or `environment`.
+Only typed `detail="sampler_error"` is transient (`measurement_unavailable` for
+ordinary admission, `environment_headroom_unproven` for isolated admission);
+message text never selects recovery. It retries the same refused phase, with
+unchanged parameters and no new plan, up to the remaining attempt slots including
+the current slot (`attempts_per_round` or `attempts_per_formal_round` minus
+`attempt_in_round` plus one, minimum one). These are admission sampling tries
+inside the current scientific attempt, not new completed/failed tuning rounds.
+Retries wait 0.25, 0.5, then at most 1 second each; at most `remaining - 1`
+waits occur, with no wait after a terminal result. `run_admitted_skill(sleep=...)`
+accepts an injected sleeper for tests; production uses `time.sleep`. There is
+no new configuration knob. The accounting owner distinguishes `TimeoutExpired`
+and `CalledProcessError` as typed `GpuQueryFailure` values carried in
+`GpuAccountingSnapshot.query_failure`; neither is collapsed into persistent
+missing telemetry. Missing executables, missing GPU rows and malformed telemetry
+remain persistent evidence gaps. Isolated admission retains unconditional
+phase refusal during retries, including `observe_only`. Invalid visibility
+still wins over a transient query failure.
+Inference retries do not repeat successful training. Exhaustion or a persistent
+environment refusal emits one final refusal record and returns the decision in
+`TrainingOutcome.environment_admission_refusal` or
+`AttemptExecution.environment_admission_refusal`. The loop ends immediately:
 one attempted plan, no replans, no further attempts or failed-round increments.
+The protected native `gpu_execution_policy` path still returns
+`aborted_infrastructure` for non-resource refusals, bypassing this recovery;
+[issue #1280](https://github.com/Galileo-Sandbox/SIDERIUS/issues/1280) tracks
+unifying it while preserving phase/checkpoint/observer lifecycle and deadlines.
+Successful recovery continues the same attempt; intermediate sampling failures
+are printed, not persisted as candidate failure records.
 The existing `infrastructure_abort` termination is used, including its existing
 chain-halt behavior. `HyperparamTuningOutput.environment_admission_refusal`
 retains the original `reason_code`, plain `reason`, and evidence in both normal
@@ -681,9 +709,8 @@ and degraded persistence, so a consumer can explain the absent score. This
 optional additive field defaults to `None` for historical outputs and other exits.
 Earlier successful records, if any, remain available; the refusal adds no score.
 
-Training classifies the normalized decision against the core authority
-`admission.RESOURCE_REJECTIONS`; it does not maintain another stopping-code set.
-`runtime.normalize_training_admission_refusal` defaults a missing/empty reason
+Both phases use the same core recovery classification and shared normalizer.
+`phase_admission.normalize_phase_admission_refusal` defaults a missing/empty reason
 code to `policy_unavailable` before recording or deciding whether to stop. If
 full admission validation fails, it emits a valid refusal with
 the original message and raw payload under `evidence.invalid_admission`. A

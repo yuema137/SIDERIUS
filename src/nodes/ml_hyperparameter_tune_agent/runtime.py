@@ -22,14 +22,13 @@ from importlib import import_module as _import_module
 from pathlib import Path
 from typing import Any
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from agent.schemas.hyperparam_tuning import ExperimentPlan, HyperparamTuningInput
 from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.record_role import observed_attempt_role
-from core.runtime_control.admission import AdmissionDecision, AdmissionReason
 from core.runtime_control.records import AdmissionRecord
 from core.runtime_control.session import RuntimeControlPolicy, WatchdogConfig
 from core.sandbox_executor import TidmadSandbox
@@ -131,31 +130,6 @@ def _time_skip_memory_extra(time_check: dict, plan) -> dict:
     return extra
 
 
-def normalize_training_admission_refusal(status: dict) -> AdmissionDecision:
-    """Normalize once for both the refusal record and the training stop decision.
-
-    Preserve recognized reason codes even when the full decision cannot validate.
-    Missing/unknown codes become policy_unavailable; retain raw evidence for diagnosis.
-    """
-    raw = status.get("admission") or {}
-    admission = dict(raw) if isinstance(raw, dict) else {}
-    admission["reason_code"] = admission.get("reason_code") or "policy_unavailable"
-    try:
-        return AdmissionDecision.model_validate(admission)
-    except ValidationError:
-        try:
-            reason_code = TypeAdapter(AdmissionReason).validate_python(admission["reason_code"])
-        except ValidationError:
-            reason_code = "policy_unavailable"
-        return AdmissionDecision(
-            admitted=False,
-            reason_code=reason_code,
-            requirement_source="unavailable",
-            reason=str(status.get("message") or "The environment refused the training phase."),
-            evidence={"invalid_admission": raw},
-        )
-
-
 def _handle_admission_refusal(
     status: dict,
     *,
@@ -181,7 +155,8 @@ def _handle_admission_refusal(
     The refusal is an infrastructure condition. It consumes the attempt
     slot — planning, pre-flight and admission really ran — but it is not
     a candidate failure, produces no negative planner evidence, updates
-    no incumbent, and triggers no retry. Those five properties are
+    no incumbent. The shared phase_admission owner decides bounded sampling
+    retries before emitting the final refusal here. These properties are
     separable, and collapsing any of them is how an environment problem
     becomes a scientific conclusion about a model.
 
