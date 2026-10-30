@@ -69,7 +69,7 @@ Starting points in [`examples/workflow_declarations/`](../../examples/workflow_d
 | `reusable_candidate.py` | Reusable shape with a literal external; authoring and resolution only, not a preparation starting point |
 | `native_training.py` | Script that writes a concrete (v1) four-stage document and its JSON inputs; never launches |
 | `literature_debate_judged.py` | Script that writes run A's concrete (v1) three-review debate/synthesis request; never launches |
-| `research_loop_request_input.py` | Run B's reusable three-body Quickstart loop, with declared proposal advice and plateau-triggered input requests |
+| `research_loop_request_input.py` | Run B's reusable three-iteration Quickstart loop, with declared proposal advice and plateau-triggered input requests |
 
 ## 2. Externals
 

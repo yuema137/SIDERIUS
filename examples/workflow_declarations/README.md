@@ -13,8 +13,8 @@ The two-step scenario is:
 2. **Operator handoff:** read the merged findings and paste a concise, reviewed
    summary into run B's `proposal_advice`.
 3. **Run B:** interpretation → proposal → implementation → validation → training,
-   repeated at most three times. A completed body without improvement requests
-   input when another body remains. You can resume with advice.
+   repeated at most three times. A completed iteration without improvement requests
+   input when another iteration remains. You can resume with advice.
 
 Run A is a concrete v1 request generator in
 [`literature_debate_judged.py`](literature_debate_judged.py). Its judge strategy
@@ -25,7 +25,7 @@ supported by reusable preparation; the handoff deliberately uses declared advice
 
 Both runs spend real API money, and run B also consumes GPU time.
 For planning, allow roughly 15–25 LLM calls for run A and 20–40 for all three
-bodies of run B; these are source-based estimates, not measured totals or caps.
+iterations of run B; these are source-based estimates, not measured totals or caps.
 Early termination reduces the count; repairs, additional loss implementations,
 interpretation history and tuning reflection can increase it.
 
@@ -244,20 +244,20 @@ Set `SEGMENT` to the returned `operation_id`, then inspect progress:
 export SEGMENT="paste-operation-id-here"
 .venv/bin/python -m tools.candidate_operations status \
   --store-config "$SCENARIO/store.json" --operation-id "$SEGMENT"
-# Optional manual pause while a body is running:
+# Optional manual pause while an iteration is running:
 .venv/bin/python -m tools.candidate_operations pause-loop \
   --store-config "$SCENARIO/store.json" --operation-id "$SEGMENT"
 ```
 
-Pause waits for a body boundary. The declared
+Pause waits for an iteration boundary. The declared
 `NoImprovementStop(completed_bodies=1, on_met="request_input")` also pauses after
-one completed body without a strict incumbent improvement, if another iteration
+one completed iteration without a strict incumbent improvement, if another iteration
 remains. A first valid result establishes the incumbent; it is not automatically
 a plateau. Improvements can carry the run all the way to iteration 3 without
 requesting input. Validation/training failures can end a run earlier.
 
 Look for `receipt.status="paused"` and `process.status="exited"` before Resume.
-The receipt's `loop_trace` describes the completed bodies and stop/input decision;
+The receipt's `loop_trace` describes the completed iterations and stop/input decision;
 node outputs and training evidence are beneath the envelope's `workspace/`.
 The pause summary contains numbers, not a fresh scientific narrative. Use the
 recorded outputs to decide the next experiment. These diagnostic Quickstart
@@ -283,7 +283,7 @@ characters. Rebind credentials in this shell if needed, then:
 launches it. Follow the returned **new** operation ID. Advice augments the
 captured declaration's proposal advice for the resumed segment; changing the
 source file does not change an already prepared run. Resume preserves history
-and the three-body ceiling. Use a new output filename for each later Resume;
+and the three-iteration ceiling. Use a new output filename for each later Resume;
 retry a lost submission response using its existing request unchanged. A
 completed, stopped or failed terminal run cannot use this paused-loop route.
 
