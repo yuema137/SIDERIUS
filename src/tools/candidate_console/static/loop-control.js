@@ -5,8 +5,8 @@
   const session = () => window.consoleSession;
   // Human-readable tuning stop reasons (HyperparamTuningOutput.termination_reason) for the pause summary.
   const TUNING_STOP_LABELS = {
-    aborted_fail_rounds: 'every tuning round failed until the failure limit',
-    aborted_by_gate: 'stopped by a gate (historical record)',
+    aborted_fail_rounds: 'consecutive tuning rounds failed until the failure limit',
+    aborted_by_gate: 'stopped by a validity gate',
     scope_violation: 'a data scope violation',
     infrastructure_abort: 'an infrastructure or environment check failed',
   };
@@ -51,7 +51,7 @@
       const score = body.best_valid_score == null ? 'no valid score' : `${body.metric_id} ${number(body.best_valid_score)} (${body.direction} is better)`;
       return `Iteration ${body.iteration}: ${body.model_name}; validation ${valid}; ${score}${body.stop_reason ? '; tuning stopped: ' + (TUNING_STOP_LABELS[body.stop_reason] || body.stop_reason) : ''}.`;
     });
-    const attempts = tried.length ? ` What was tried (latest ${tried.length} completed iterations in this segment): ${tried.join(' ')}` : '';
+    const attempts = tried.length ? ` What was tried (latest ${tried.length} completed ${tried.length === 1 ? 'iteration' : 'iterations'} in this segment): ${tried.join(' ')}` : '';
     return `Waiting for your input. ${met} Paused after iteration ${summary.iteration} of ${summary.final_iteration}.${attempts}`;
   }
   // Recorded JudgeStop verdicts (B2-5): each boundary's decision, with the judge's own
