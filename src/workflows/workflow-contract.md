@@ -36,7 +36,8 @@ JSON; a `RestoredState` when resuming; pseudo-mode factories for $0 smokes.
 
 The run-level `is_trial` default is owned by
 `agent.schemas.hyperparam_tuning.DEFAULT_IS_TRIAL` (`True`). Launch configuration,
-standard CLI, tuner input/protocol and authored templates derive from that owner.
+standard CLI, proposer and tuner inputs/protocols, tuner metadata and authored
+templates derive from that owner.
 Omission enables trial/formal tuning; the existing forced final Formal round
 policy still applies. Explicit `False` / `--no-is_trial` retains legacy
 `single_file` behavior and is refused for composed non-TIDMAD profiles by

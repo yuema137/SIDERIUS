@@ -68,7 +68,7 @@ not silently restore the previous ignored-configuration behavior.
 | `agent_cards` | `list[AgentCard]` | No | `[]` | Self-descriptions of all external agents contributing context this round. Rendered as a "Contributors" section above the Expert Context block. Carries `trust_level` (`hard_limit` / `strong_prior` / `soft_prior`) for synthesis-rule routing. |
 | `mindset` | `str \| None` | No | `None` | Mindset block injected at `{# EXPLORATION_MODE_BLOCK #}` in the causal-reasoning stage prompt. Overrides the default `_explore.md` / `_exploit.md` fallback. |
 | `vocab_seed` | `list[VocabEntry]` | No | `[]` | The runtime vocabulary available to the reasoning pipeline (canonical seed + promoted candidates + active candidates). Populated by the upstream interpretation node via the protocol. |
-| `is_trial` | `bool` | No | `False` | Whether the run uses trial (sparse) sampling; this selects inputs to the static `estimate_proposal_time` advisory. |
+| `is_trial` | `bool` | No | `hyperparam_tuning.DEFAULT_IS_TRIAL` (`True`) | Whether the run uses trial (sparse) sampling; this selects inputs to the static `estimate_proposal_time` advisory. |
 | `trial_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Sampling strategy for the training scope: `snapshot` (all 20 files), `anchors` (files 0/10/19), `target` (caller-specified files). Mirrors `HyperparamTuningInput.trial_strategy`. |
 | `trial_portion` | `float` | No | `0.1` | Fraction of segments per file for the training scope. Mirrors `HyperparamTuningInput.trial_portion`. |
 | `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
