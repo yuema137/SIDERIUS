@@ -286,7 +286,8 @@ try {
   // "Pause and ask me": a condition-paused receipt says what was met in plain words, and the
   // existing reviewed Resume continues it (no extra request fields).
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, asking);
-  await state.filter({hasText: 'Waiting for your input. No improvement for 3 iterations (best 0.81 at iteration 4, higher is better). Paused after iteration 7 of 12. Review and resume to continue with iteration 8.'}).waitFor();
+  await state.filter({hasText: 'Waiting for your input. No improvement for 3 iterations (best 0.81 at iteration 4, higher is better). Paused after iteration 7 of 12.'}).waitFor();
+  assert.ok((await state.textContent()).includes('failure limit. Review and resume to continue with iteration 8.'), 'the resume action follows what was tried');
   assert.ok((await state.textContent()).includes('What was tried (latest 2 completed iterations in this segment): Iteration 6: <b>small_model</b>; validation passed; accuracy 0.79 (higher is better). Iteration 7: wide_model; validation failed; no valid score; tuning stopped: every tuning round failed until the failure limit.'));
   assert.equal(await state.locator('b').count(), 0, 'proposal names are text, never HTML');
   assert.equal(await state.getAttribute('title'), 'Exact recorded values: incumbent 0.81');
