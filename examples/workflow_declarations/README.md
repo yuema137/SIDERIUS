@@ -36,7 +36,8 @@ interpretation history and tuning reflection can increase it.
 - Use Linux with working [bubblewrap isolation](../../src/tools/workspace_sandbox/README.md).
   Preparation is offline; actual runs need provider credentials and network access.
   Run A also retrieves papers through the literature resolver.
-- Run B trains models and needs a supported NVIDIA GPU/CUDA setup. Select its
+- Run B trains models in Trial/Formal mode (`is_trial=True`) and needs a
+  supported NVIDIA GPU/CUDA setup. Select its
   device paths explicitly; the sample paths below must match your host.
 - Choose an OpenAI model available to your account. This example uses that model
   for every route and passes only `OPENAI_API_KEY` to candidate processes.

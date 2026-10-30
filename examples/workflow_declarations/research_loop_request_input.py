@@ -177,7 +177,7 @@ document = ReusableWorkflowDocument(
             "healthgate_mode": "observe_only",
             "result_authority": "diagnostic",
             "require_probe_runner": True,
-            "is_trial": False,
+            "is_trial": True,
             "max_rounds": 2,
             "trial_max_epochs": 1,
             "formal_max_epochs": 2,
