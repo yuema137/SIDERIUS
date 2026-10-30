@@ -16,6 +16,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningInput
 from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from examples.quickstart.plugins._quickstart_task import write_data_dir
 from execute_tools.evaluation_metric import (
     NotScoreableError,
     NotScoreableResult,
@@ -110,6 +111,8 @@ def run_failure(tmp_path):
             sandbox.save_record.side_effect = lambda record: saved.append(deepcopy(record))
             for name in ("configs", "data", "denoised"):
                 (tmp_path / name).mkdir(exist_ok=True)
+            # Batch-fit planning materializes the composed dataset before phase dispatch.
+            write_data_dir(tmp_path / "data")
             sandbox.dirs = {name: str(tmp_path / name) for name in ("configs", "data", "denoised")}
             sandbox.base_dir = str(tmp_path / "denoised")
             stub_scoring(sandbox, [1.75] * 4, 1.75)

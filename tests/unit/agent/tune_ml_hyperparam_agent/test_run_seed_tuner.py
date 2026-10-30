@@ -105,18 +105,35 @@ class TestPseudoIteration:
 
         from core.training_seeds import SeedContext, TrainingSeedPlan
 
-        execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
-        original = execution.build_task_probe_data
+        probe_data = importlib.import_module("nodes.ml_hyperparameter_tune_agent.probe_data")
+        original = probe_data.build_task_probe_data
         seen: list[int | None] = []
 
         def capture(**kwargs):
             seen.append(kwargs["epoch_seed"])
             return original(**kwargs)
 
-        monkeypatch.setattr(execution, "build_task_probe_data", capture)
-        _, _, _, workspace = run_bounded_pseudo_iteration(
-            tmp_path, monkeypatch, preflight_results=_preflight()
+        from examples.quickstart.plugins._quickstart_task import write_data_dir
+        from workflows.task_composition import (
+            bind_run_task_composition,
+            build_task_composition_ref,
+            compose_run_task_bindings,
         )
+
+        monkeypatch.setattr(probe_data, "build_task_probe_data", capture)
+        # Uncomposed attempts now return before constructing a task probe. Bind a
+        # real composed scope so the spy observes the actual sampling request.
+        composition = compose_run_task_bindings(
+            str(REPO_ROOT / "configs/task_composition/quickstart.yaml")
+        )
+        write_data_dir(tmp_path / "data")
+        with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
+            _, _, _, workspace = run_bounded_pseudo_iteration(
+                tmp_path,
+                monkeypatch,
+                preflight_results=_preflight(),
+                input_overrides={"task_composition_ref": build_task_composition_ref(composition)},
+            )
         expected = [
             TrainingSeedPlan(SeedContext.model_validate(c["seed_context"])).epoch(0).subsample
             for c in _trial_configs(workspace)
