@@ -66,6 +66,7 @@ SUPPORTED_LAUNCH_FIELDS = frozenset(
         "runtime_safety_factor",
         "runtime_trial_safety_factor",
         "runtime_verification_max_wall_seconds",
+        "runtime_verification_pathological_min_unit_ms",
         "runtime_verifier",
         "runtime_verifier_identity",
         "runtime_watchdog_deadline_policy",

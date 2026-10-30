@@ -195,6 +195,9 @@ class WorkflowLaunchConfig:
     runtime_watchdog_safety_factor: float | None = None
     runtime_watchdog_floor_seconds: float = 60.0
     runtime_verification_max_wall_seconds: float | None = None
+    runtime_verification_pathological_min_unit_ms: float | None = field(
+        default=None, metadata={"omit_if_none": True}
+    )
     exploration_mode: ExplorationMode = "auto"
     minimum_boldness: float = 0.05
     n_candidates: int | None = None

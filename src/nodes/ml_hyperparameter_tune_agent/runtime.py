@@ -1532,6 +1532,11 @@ def _build_runtime_policy(
         policy["verification"] = {
             "max_wall_ms": verification_window_seconds * 1000.0,
         }
+    verification_floor_ms = getattr(
+        agent_input, "runtime_verification_pathological_min_unit_ms", None
+    )
+    if verification_floor_ms is not None:
+        policy.setdefault("verification", {})["pathological_min_unit_ms"] = verification_floor_ms
     if (
         agent_input.runtime_watchdog_enabled
         and policy["watchdog"]["deadline_policy"] == "budget-ceiling-v1"

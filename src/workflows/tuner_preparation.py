@@ -165,6 +165,9 @@ def prepare_native_tuner_input(
         runtime_watchdog_safety_factor=launch.runtime_watchdog_safety_factor,
         runtime_watchdog_floor_seconds=launch.runtime_watchdog_floor_seconds,
         runtime_verification_max_wall_seconds=(launch.runtime_verification_max_wall_seconds),
+        runtime_verification_pathological_min_unit_ms=(
+            launch.runtime_verification_pathological_min_unit_ms
+        ),
         # V19 PR 1 (P1-C3) — the chain incumbent travels as a NAMED
         # protocol parameter (two-state design, design doc §3.4).
         # ``chain_formal_incumbent_reference`` is decision state:

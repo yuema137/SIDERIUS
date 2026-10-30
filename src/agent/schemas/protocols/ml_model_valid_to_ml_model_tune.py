@@ -219,6 +219,7 @@ def local_validated_model(
     runtime_watchdog_safety_factor: float | None = None,
     runtime_watchdog_floor_seconds: float = 60.0,
     runtime_verification_max_wall_seconds: float | None = None,
+    runtime_verification_pathological_min_unit_ms: float | None = None,
     *,
     constraint_context: ConstraintContext | None = None,
     max_output_tokens: int | None = None,
@@ -464,6 +465,7 @@ def local_validated_model(
         runtime_watchdog_safety_factor=runtime_watchdog_safety_factor,
         runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
         runtime_verification_max_wall_seconds=runtime_verification_max_wall_seconds,
+        runtime_verification_pathological_min_unit_ms=runtime_verification_pathological_min_unit_ms,
     )
 
 

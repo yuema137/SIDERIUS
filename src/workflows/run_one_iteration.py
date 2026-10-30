@@ -1162,6 +1162,9 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "runtime_watchdog_safety_factor": watchdog_policy.safety_factor,
         "runtime_watchdog_floor_seconds": watchdog_policy.floor_seconds,
         "runtime_verification_max_wall_seconds": (args.runtime_verification_max_wall_seconds),
+        "runtime_verification_pathological_min_unit_ms": (
+            args.runtime_verification_pathological_min_unit_ms
+        ),
         "runtime_watchdog_provenance": watchdog_policy.provenance,
         # F-H100-WD-1-PRETAG — the DECLARED requirement, recorded whether or
         # not it was made, so "no binding was declared" is an observable

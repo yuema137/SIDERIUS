@@ -133,6 +133,9 @@ def build_standard_launch_config(
         runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
         runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
         runtime_verification_max_wall_seconds=(args.runtime_verification_max_wall_seconds),
+        runtime_verification_pathological_min_unit_ms=(
+            args.runtime_verification_pathological_min_unit_ms
+        ),
         human_advice_interpret=args.human_advice_interpret,
         human_advice_analysis=args.human_advice_analysis,
         analysis_source_prompt=args.analysis_source_prompt,
