@@ -290,7 +290,7 @@ def test_admission_forwards_full_native_routes(chain, monkeypatch, route_name):
         require_credentials(actual_routes, names, env)
 
     monkeypatch.setattr("tools.candidate_operations.native_chain.require_credentials", check)
-    with pytest.raises(ValueError, match="binding refused"):
+    with pytest.raises(ValueError, match="native chain admission failed; check"):
         review_native_chain_operation(record.config, submission, launch_environment={})
     assert observed == [routes]
 

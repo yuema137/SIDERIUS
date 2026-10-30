@@ -127,8 +127,9 @@ def test_dead_successor_can_end_without_reusing_reservation(
             )
             assert not releasable(config, next_id)
             assert read_operation(config, first_id).reason == "native_terminal"
-            with pytest.raises(OperationFailure, match="already has a successor"):
+            with pytest.raises(OperationFailure, match=r"End loop.*successor") as refused:
                 request_loop_stop(config, first_id)
+            assert refused.value.detail.code == "loop_end"
 
     # An unrelated live sandbox remains a writer after the operation wrapper dies.
     sandbox = identity.model_copy(update={"pid": 2000000001})
@@ -136,8 +137,9 @@ def test_dead_successor_can_end_without_reusing_reservation(
     with monkeypatch.context() as patch:
         patch.setattr(process, "_stat", lambda pid: ("S", 100) if pid == sandbox.pid else stat(pid))
         assert not releasable(config, next_id)
-        with pytest.raises(OperationFailure, match="already has a successor"):
+        with pytest.raises(OperationFailure, match=r"End loop.*successor") as refused:
             request_loop_stop(config, first_id)
+        assert refused.value.detail.code == "loop_end"
     (identity_path.parent / "sandbox.json").unlink()
 
     # Unobservable wrapper identity remains unknown; it never authorizes recovery.
