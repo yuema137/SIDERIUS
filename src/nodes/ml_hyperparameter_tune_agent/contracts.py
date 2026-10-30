@@ -414,6 +414,7 @@ class _PhaseOutcome:
 
     signal: AttemptSignal = AttemptSignal.PROCEED
     scope_violation_reason: str | None = None
+    environment_admission_refusal: AdmissionDecision | None = None
 
     @classmethod
     def next_attempt(cls, **kw: Any):
@@ -441,7 +442,6 @@ class TrainingOutcome(_PhaseOutcome):
     train_status: Any = None
     train_time: Any = None
     training_results: Any = None
-    environment_admission_refusal: AdmissionDecision | None = None
 
 
 @dataclass(frozen=True)

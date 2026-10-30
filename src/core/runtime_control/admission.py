@@ -315,6 +315,19 @@ class AdmissionDecision(BaseModel):
     #: asserted. Absent keys mean the quantity was unavailable.
     evidence: dict[str, Any] = Field(default_factory=dict)
 
+    @property
+    def refusal_kind(self) -> Literal["resource", "transient_sampling", "environment"]:
+        """Recovery classification; enforcement still decides whether to stop a phase.
+
+        Only a failed sampler call is retryable without changing the candidate.
+        Missing telemetry, invalid accounting and missing policy require repair.
+        """
+        if self.reason_code in RESOURCE_REJECTIONS:
+            return "resource"
+        if self.reason_code == "measurement_unavailable" and self.detail == "sampler_error":
+            return "transient_sampling"
+        return "environment"
+
     @model_validator(mode="after")
     def _a_refusal_must_say_why(self) -> AdmissionDecision:
         if self.detail is not None:

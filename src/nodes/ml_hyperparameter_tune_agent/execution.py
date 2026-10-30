@@ -42,7 +42,6 @@ from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
-from core.runtime_control.admission import RESOURCE_REJECTIONS
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
@@ -77,6 +76,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
 )
 from nodes.ml_hyperparameter_tune_agent.external_evaluation import run_external_evaluation
 from nodes.ml_hyperparameter_tune_agent.output_retention import finalize_attempt_outputs
+from nodes.ml_hyperparameter_tune_agent.phase_admission import run_admitted_skill
 from nodes.ml_hyperparameter_tune_agent.policy import (
     ScoringRoute,
     _apply_degeneracy_reaction,
@@ -106,7 +106,6 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _build_admission_policy,
     _build_runtime_policy,
     _check_and_record_guardrail_skip,
-    _handle_admission_refusal,
     _handle_in_subprocess_rejection,
     _handle_prephase_gpu_measurement,
     _raise_if_evidence_channel_failure,
@@ -969,36 +968,15 @@ def run_training(
     stage.name = "training"
     print("\n[Step 1/3] Training...")
     t0 = time.time()
-    train_status = _runtime._run_skill("training_skill", sandbox, **active_params)
+    train_status, admission_refusal = run_admitted_skill(
+        bindings, prepared, identity, phase="training"
+    )
     train_time = round(time.time() - t0, 1)
     _raise_if_wall_clock_timeout(train_status, sandbox, run_name)
     _raise_if_evidence_channel_failure(train_status, sandbox, run_name)
-    admission_refusal = None
+    if admission_refusal is not None:
+        return TrainingOutcome.end_round(environment_admission_refusal=admission_refusal)
     if train_status.get("status") == _records.RESOURCE_ADMISSION_STATUS:
-        admission_refusal = _runtime.normalize_training_admission_refusal(train_status)
-        train_status = {**train_status, "admission": admission_refusal.model_dump(mode="json")}
-    if _handle_admission_refusal(
-        train_status,
-        ordering=prepared.ordering,
-        phase="training",
-        sandbox=sandbox,
-        exp_id=exp_id,
-        model_type=model_type,
-        file_index=file_index,
-        record_params=record_params,
-        expert_advice_str=expert_advice_str,
-        hypothesis=hypothesis,
-        round_index=round_index,
-        attempt_in_round=attempt_in_round,
-        candidate_id=agent_input.candidate_id,
-        experiment_arm=agent_input.experiment_arm,
-        is_trial=prepared.plan.is_trial,
-    ):
-        if (
-            admission_refusal is not None
-            and admission_refusal.reason_code not in RESOURCE_REJECTIONS
-        ):
-            return TrainingOutcome.end_round(environment_admission_refusal=admission_refusal)
         return TrainingOutcome.next_attempt()
     if _handle_in_subprocess_rejection(
         train_status,
@@ -1254,27 +1232,15 @@ def _run_local_evaluation_phase(
     stage.name = "inference"
     print("[Step 2/3] Inference...")
     t0 = time.time()
-    inf_status = _runtime._run_skill("inference_skill", sandbox, **active_params)
+    inf_status, admission_refusal = run_admitted_skill(
+        bindings, prepared, identity, phase="inference"
+    )
     inference_time = round(time.time() - t0, 1)
     _raise_if_wall_clock_timeout(inf_status, sandbox, run_name)
     _raise_if_evidence_channel_failure(inf_status, sandbox, run_name)
-    if _handle_admission_refusal(
-        inf_status,
-        ordering=prepared.ordering,
-        phase="inference",
-        sandbox=sandbox,
-        exp_id=exp_id,
-        model_type=model_type,
-        file_index=file_index,
-        record_params=record_params,
-        expert_advice_str=expert_advice_str,
-        hypothesis=hypothesis,
-        round_index=round_index,
-        attempt_in_round=attempt_in_round,
-        candidate_id=agent_input.candidate_id,
-        experiment_arm=agent_input.experiment_arm,
-        is_trial=prepared.plan.is_trial,
-    ):
+    if admission_refusal is not None:
+        return AttemptExecution.end_round(environment_admission_refusal=admission_refusal)
+    if inf_status.get("status") == _records.RESOURCE_ADMISSION_STATUS:
         return AttemptExecution.next_attempt()
     # Step 11 C2 (F-11-1) — same authority as the training branch.
     if _records.is_execution_failure(inf_status):
